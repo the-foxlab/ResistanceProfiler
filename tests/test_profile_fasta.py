@@ -294,6 +294,32 @@ class TestRemapVariants:
         assert remapped[0].allele_freq == pytest.approx(0.42)
         assert remapped[0].depth == 999
 
+    def test_snp_stores_query_ref_codon(self, gene_fwd: GeneRecord) -> None:
+        """SNP remapping stores the query codon for downstream SNP annotation."""
+        query = TINY_REF_SEQ
+        matches = match_query_to_genes(query, [gene_fwd])
+
+        variants = [
+            VariantCall(chrom='c', pos=3, ref='A', alt='G', allele_freq=0.4, depth=20),
+        ]
+        remapped, _ = remap_variants(variants, matches, query)
+
+        assert len(remapped) == 1
+        assert remapped[0].query_ref_codon == 'AAA'
+
+    def test_indel_does_not_store_query_ref_codon(self, gene_fwd: GeneRecord) -> None:
+        """Indels remain anchored to internal CDS without query codon overrides."""
+        query = TINY_REF_SEQ
+        matches = match_query_to_genes(query, [gene_fwd])
+
+        variants = [
+            VariantCall(chrom='c', pos=3, ref='A', alt='AG', allele_freq=0.4, depth=20),
+        ]
+        remapped, _ = remap_variants(variants, matches, query)
+
+        assert len(remapped) == 1
+        assert remapped[0].query_ref_codon == ''
+
 
 # ──────────────────────────────────────────────────────────────────────
 # Integration: resolve_fasta_reference

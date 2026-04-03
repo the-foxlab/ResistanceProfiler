@@ -42,6 +42,14 @@ def _make_result() -> ProfilingResult:
     )
 
 
+def _make_combined_result() -> ProfilingResult:
+    """Create a ProfilingResult containing one combined codon event."""
+    r = _make_result()
+    r.annotations[0].is_combined_codon_event = True
+    r.annotations[0].combined_member_count = 2
+    return r
+
+
 class TestProfilingResult:
     def test_summary_dict(self):
         r = _make_result()
@@ -55,6 +63,12 @@ class TestProfilingResult:
         data = json.loads(j)
         assert len(data['variants']) == 1
         assert data['variants'][0]['alt_aa'] == 'E'
+
+    def test_variants_include_combined_event_fields(self):
+        r = _make_combined_result()
+        rows = r.variants_as_dicts()
+        assert rows[0]['is_combined_codon_event'] is True
+        assert rows[0]['combined_member_count'] == 2
 
     def test_cds_annotations(self):
         r = _make_result()
@@ -96,4 +110,10 @@ class TestHtmlExport:
         html = render_html(r)
         assert 'ResistanceProfiler' in html
         assert 'K2E' in html or 'gag' in html
+
+    def test_render_html_shows_combined_event_badge(self):
+        from respro.report.html import render_html
+        r = _make_combined_result()
+        html = render_html(r)
+        assert 'combined (2 SNPs)' in html
 

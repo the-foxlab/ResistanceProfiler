@@ -113,6 +113,8 @@ class ProfilingResult:
                 'ref_aa': ann.ref_aa,
                 'alt_aa': ann.alt_aa,
                 'consequence': ann.consequence,
+                'is_combined_codon_event': ann.is_combined_codon_event,
+                'combined_member_count': ann.combined_member_count,
                 'af_bin': ann.af_bin,
                 'resistance_hit': ann.is_resistance_hit,
                 'drug_hits': ann.drug_hits_json(),

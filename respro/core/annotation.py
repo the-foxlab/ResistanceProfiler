@@ -46,6 +46,7 @@ def translate_codon(codon: str) -> str:
 def annotate_variants(
     variants: list[VariantCall],
     genes: list[GeneRecord],
+    snp_combine_af_threshold: float = 0.75,
 ) -> list[AnnotatedVariant]:
     """
     Annotate a list of variants with codon-aware amino acid consequences.
@@ -53,18 +54,24 @@ def annotate_variants(
     Handles SNPs, insertions, deletions, and frameshifts. Variants outside
     any CDS are included with empty gene_name.
 
-    SNP consequences are derived from the internal CDS sequence stored for
-    each gene. This keeps annotation and rule matching anchored to the same
-    curated reference.
+    SNP consequences can use a query codon from FASTA-based remapping when
+    available (``VariantCall.query_ref_codon``). Indels are always annotated
+    against the internal CDS sequence.
 
     :param variants: parsed variant calls (0-based positions)
     :param genes: gene annotations for the reference
-    :return: list of AnnotatedVariant, one per variant; variants outside any
-        gene are included with empty gene_name
+    Variants with no CDS hit are included with empty gene_name. If two or more
+    SNPs in the same gene codon all have AF > threshold, they are annotated as
+    one combined codon event.
+
+    :param snp_combine_af_threshold: strict AF threshold for combining SNPs
+        within one codon (must be greater than this value)
+    :return: list of AnnotatedVariant
     """
     results: list[AnnotatedVariant] = []
+    group_plan = _plan_combined_snp_groups(variants, genes, snp_combine_af_threshold)
 
-    for var in variants:
+    for var_idx, var in enumerate(variants):
         matching_genes = [g for g in genes if g.contains(var.pos)]
 
         if not matching_genes:
@@ -72,6 +79,13 @@ def annotate_variants(
             continue
 
         for gene in matching_genes:
+            codon_key = (gene.id, gene.codon_index(var.pos))
+            group = group_plan.get(codon_key)
+            if group is not None:
+                if var_idx == group[0]:
+                    members = [variants[i] for i in group]
+                    results.append(_annotate_combined_snp_codon(members, gene))
+                continue
             ann = _annotate_variant_in_gene(var, gene)
             results.append(ann)
 
@@ -91,6 +105,110 @@ def _variant_type(ref: str, alt: str) -> str:
     if len(alt) > len(ref):
         return 'INS'
     return 'DEL'
+
+
+def _plan_combined_snp_groups(
+    variants: list[VariantCall],
+    genes: list[GeneRecord],
+    threshold: float,
+) -> dict[tuple[int, int], list[int]]:
+    """
+    Return codon groups that should be annotated as one combined SNP event.
+
+    :param variants: input variant list
+    :param genes: gene records
+    :param threshold: strict AF threshold for SNP combination
+    :return: {(gene_id, codon_idx): [variant_index, ...]}
+    """
+    grouped: dict[tuple[int, int], list[int]] = {}
+    for idx, var in enumerate(variants):
+        if _variant_type(var.ref, var.alt) != 'SNP':
+            continue
+        for gene in genes:
+            if not gene.contains(var.pos):
+                continue
+            # Group SNPs per gene-codon so linked high-AF changes can be evaluated jointly.
+            key = (gene.id, gene.codon_index(var.pos))
+            grouped.setdefault(key, []).append(idx)
+
+    planned: dict[tuple[int, int], list[int]] = {}
+    for key, member_indices in grouped.items():
+        if len(member_indices) < 2:
+            continue
+        members = [variants[i] for i in member_indices]
+        # Strict threshold: only treat as one codon event when all SNPs are high-AF.
+        if not all(v.allele_freq > threshold for v in members):
+            continue
+        planned[key] = sorted(member_indices)
+    return planned
+
+
+def _annotate_combined_snp_codon(
+    variants: list[VariantCall],
+    gene: GeneRecord,
+) -> AnnotatedVariant:
+    """
+    Annotate multiple SNPs in one codon as a single codon event.
+
+    :param variants: SNPs from the same codon (same gene)
+    :param gene: gene containing the codon
+    :return: one combined annotation
+    """
+    if not variants:
+        raise ValueError('Combined SNP annotation requires at least one variant')
+
+    seq_cds = gene.nt_sequence.upper()
+    anchor = sorted(variants, key=lambda v: v.pos)[0]
+    codon_idx = gene.codon_index(anchor.pos)
+    codon_start = codon_idx * 3
+    internal_codon = seq_cds[codon_start:codon_start + 3]
+    ref_aa = translate_codon(internal_codon)
+
+    query_codons = {v.query_ref_codon.upper() for v in variants if len(v.query_ref_codon) == 3}
+    # Only use query codon when all members agree on one context; otherwise stay internal.
+    affected_codon = next(iter(query_codons)) if len(query_codons) == 1 else internal_codon
+
+    alt_codon_bases = list(affected_codon)
+    seen: dict[int, str] = {}
+    for var in sorted(variants, key=lambda v: v.pos):
+        codon_pos = gene.codon_position_in_codon(var.pos)
+        alt_base = reverse_complement(var.alt) if gene.strand == '-' else var.alt.upper()
+        # Conflicting ALTs at the same codon base indicate inconsistent input; fail fast.
+        if codon_pos in seen and seen[codon_pos] != alt_base:
+            raise ValueError(
+                f'Conflicting SNPs in same codon for gene {gene.name!r} at codon {codon_idx + 1}'
+            )
+        seen[codon_pos] = alt_base
+        alt_codon_bases[codon_pos] = alt_base
+
+    alt_codon = ''.join(alt_codon_bases)
+    alt_aa = translate_codon(alt_codon)
+    consequence = _classify_snp_consequence(ref_aa, alt_aa, codon_idx)
+
+    # Conservative combined AF: lower bound of the linked SNP set.
+    combined_var = VariantCall(
+        chrom=anchor.chrom,
+        pos=anchor.pos,
+        ref=anchor.ref,
+        alt=anchor.alt,
+        allele_freq=min(v.allele_freq for v in variants),
+        depth=anchor.depth,
+        filter_status=anchor.filter_status,
+        query_ref_codon=affected_codon if len(affected_codon) == 3 else '',
+    )
+
+    return AnnotatedVariant(
+        variant=combined_var,
+        gene_name=gene.name,
+        codon_pos=codon_idx,
+        ref_codon=affected_codon,
+        alt_codon=alt_codon,
+        ref_aa=ref_aa,
+        alt_aa=alt_aa,
+        consequence=consequence,
+        is_combined_codon_event=True,
+        combined_member_count=len(variants),
+    )
 
 
 def _annotate_variant_in_gene(
@@ -148,15 +266,16 @@ def _annotate_snp(
     """
     Annotate a single nucleotide substitution.
 
-    When the variant carries a user-provided reference codon (from FASTA
-    remapping), the alt amino acid is computed by mutating that codon.
-    The ref amino acid always comes from the internal CDS — this is the
-    baseline that resistance rules are defined against.  This prevents
-    false calls when the user reference has a silent nucleotide difference
-    that, combined with the new mutation, changes the translated amino acid.
+    The reference amino acid is always derived from the internal CDS.
+    If a valid query codon is present, the alternate amino acid is derived
+    from that codon; otherwise internal CDS codon context is used.
     """
-    affected_codon = ''.join(cds_codons[mut_codon_idx])
-    ref_aa = translate_codon(affected_codon)
+    internal_codon = ''.join(cds_codons[mut_codon_idx])
+    ref_aa = translate_codon(internal_codon)
+
+    query_codon = var.query_ref_codon.upper()
+    # Keep rule anchoring stable (internal ref) while allowing query-context AA prediction.
+    affected_codon = query_codon if len(query_codon) == 3 else internal_codon
 
     alt_codon_bases = list(affected_codon)
     alt_codon_bases[codon_pos] = mut

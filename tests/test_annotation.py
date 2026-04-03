@@ -183,6 +183,45 @@ class TestAnnotateVariantsForward:
         assert results[0].gene_name == 'gag'
         assert results[0].consequence == 'frameshift'
 
+    def test_combines_two_high_af_snps_in_same_codon(self, tiny_gene, tiny_ref_seq):
+        """Two SNPs in one codon with AF > 0.7 are annotated as one codon event."""
+        variants = [
+            VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.90, depth=100),
+            VariantCall(chrom='ref', pos=4, ref='A', alt='G', allele_freq=0.80, depth=100),
+        ]
+
+        results = annotate_variants(variants, [tiny_gene])
+
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.codon_pos == 1
+        assert ann.ref_codon == 'AAA'
+        assert ann.alt_codon == 'GGA'
+        assert ann.ref_aa == 'K'
+        assert ann.alt_aa == 'G'
+        assert ann.consequence == 'missense'
+        assert ann.variant.allele_freq == 0.80
+
+    def test_does_not_combine_when_af_is_exactly_threshold(self, tiny_gene, tiny_ref_seq):
+        """AF must be strictly greater than 0.7 for codon-level SNP combination."""
+        variants = [
+            VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.90, depth=100),
+            VariantCall(chrom='ref', pos=4, ref='A', alt='G', allele_freq=0.70, depth=100),
+        ]
+
+        results = annotate_variants(variants, [tiny_gene])
+        assert len(results) == 2
+
+    def test_does_not_combine_when_any_snp_is_low_af(self, tiny_gene, tiny_ref_seq):
+        """A single low-AF SNP keeps per-variant annotation behavior."""
+        variants = [
+            VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.90, depth=100),
+            VariantCall(chrom='ref', pos=4, ref='A', alt='G', allele_freq=0.20, depth=100),
+        ]
+
+        results = annotate_variants(variants, [tiny_gene])
+        assert len(results) == 2
+
 
 class TestAnnotateVariantsReverse:
     """Test annotation on a reverse-strand gene."""
@@ -321,12 +360,12 @@ class TestAnnotateDeletions:
 # ─── annotate_variants — divergent user reference ────────────────────
 
 class TestAnnotateDivergentReference:
-    """Annotation remains anchored to the internal CDS sequence."""
+    """SNP annotation can use query codon context while ref_aa stays internal."""
 
-    def test_internal_cds_drives_alt_aa(self):
+    def test_query_codon_changes_alt_aa_for_snp(self):
         """
-        Internal CDS codon is CGA (Arg). A C→T mutation at codon base 0 gives
-        TGA (stop), so consequence is stop_gained.
+        Internal codon CGA (R) plus SNP C->T gives TGA (*).
+        With query codon CGG (R), the same SNP gives TGG (W).
         """
         # 9-nt gene, 3 codons, forward strand.
         # Internal CDS: ATG CGA AAA → M R K
@@ -340,16 +379,17 @@ class TestAnnotateDivergentReference:
         # Variant at genomic pos 3 (first base of codon 1), C→T.
         var = VariantCall(
             chrom='ref', pos=3, ref='C', alt='T',
-            allele_freq=0.9, depth=100)
+            allele_freq=0.9, depth=100, query_ref_codon='CGG')
         results = annotate_variants([var], [gene])
 
         assert len(results) == 1
         ann = results[0]
         assert ann.gene_name == 'test_gene'
         assert ann.codon_pos == 1
-        assert ann.ref_aa == 'R'   # internal CDS: CGA -> R
-        assert ann.alt_codon == 'TGA'
-        assert ann.consequence == 'stop_gained'
+        assert ann.ref_aa == 'R'
+        assert ann.alt_codon == 'TGG'
+        assert ann.alt_aa == 'W'
+        assert ann.consequence == 'missense'
 
     def test_identical_codon_path(self):
         """Baseline SNP behavior for an internal CDS codon."""
@@ -371,8 +411,8 @@ class TestAnnotateDivergentReference:
         assert ann.alt_aa == '*'   # TGA -> stop
         assert ann.consequence == 'stop_gained'
 
-    def test_annotation_uses_internal_without_override(self):
-        """No external codon override is applied during annotation."""
+    def test_annotation_uses_internal_without_query_codon(self):
+        """Without query codon, SNP annotation stays on the internal CDS."""
         internal_seq = 'ATGCGAAAA'
         gene = GeneRecord(
             id=1, reference_id=1, name='test_gene', protein='TestP',

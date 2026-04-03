@@ -149,6 +149,7 @@ class VariantCall:
     allele_freq: float = 0.0
     depth: int = 0
     filter_status: str = 'PASS'
+    query_ref_codon: str = ''
 
 
 @dataclass
@@ -163,6 +164,8 @@ class AnnotatedVariant:
     ref_aa: str = ''
     alt_aa: str = ''
     consequence: str = ''
+    is_combined_codon_event: bool = False
+    combined_member_count: int = 1
     af_bin: str = ''
     rule_matches: list[ResistanceRule] = field(default_factory=list)
 

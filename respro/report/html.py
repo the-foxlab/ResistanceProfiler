@@ -49,6 +49,7 @@ _HTML_TEMPLATE = """\
   .badge-resistance { background: #e74c3c; color: #fff; }
   .badge-missense { background: #3498db; color: #fff; }
   .badge-synonymous { background: #95a5a6; color: #fff; }
+  .badge-combined { background: #8e44ad; color: #fff; }
   .plot-container { text-align: center; margin: 1rem 0; }
   .plot-container img { max-width: 100%; border: 1px solid #e1e4e8; border-radius: 6px; }
   footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; font-size: .8rem; color: #999; }
@@ -85,7 +86,7 @@ _HTML_TEMPLATE = """\
 <table>
 <thead><tr>
   <th>Gene</th><th>AA change</th><th>Codon pos</th>
-  <th>AF</th><th>AF bin</th><th>Drug(s)</th><th>Phenotype</th><th>Publication</th>
+  <th>AF</th><th>AF bin</th><th>Event</th><th>Drug(s)</th><th>Phenotype</th><th>Publication</th>
 </tr></thead>
 <tbody>
 {% for r in hit_rows %}
@@ -95,6 +96,13 @@ _HTML_TEMPLATE = """\
   <td>{{ r.codon_pos }}</td>
   <td>{{ '%.3f'|format(r.allele_freq) }}</td>
   <td><span class="badge badge-{{ r.af_bin }}">{{ r.af_bin }}</span></td>
+  <td>
+    {% if r.is_combined_codon_event %}
+    <span class="badge badge-combined">combined ({{ r.combined_member_count }} SNPs)</span>
+    {% else %}
+    —
+    {% endif %}
+  </td>
   <td>{{ r.drugs }}</td>
   <td>{{ r.phenotype }}</td>
   <td>{{ r.publication }}</td>
@@ -109,7 +117,7 @@ _HTML_TEMPLATE = """\
 <thead><tr>
   <th>Chrom</th><th>Pos</th><th>Ref</th><th>Alt</th>
   <th>Gene</th><th>AA change</th><th>Consequence</th>
-  <th>AF</th><th>AF bin</th><th>Depth</th><th>Resistance</th>
+  <th>AF</th><th>AF bin</th><th>Event</th><th>Depth</th><th>Resistance</th>
 </tr></thead>
 <tbody>
 {% for r in cds_rows %}
@@ -120,6 +128,13 @@ _HTML_TEMPLATE = """\
   <td><span class="badge badge-{{ r.consequence }}">{{ r.consequence }}</span></td>
   <td>{{ '%.3f'|format(r.allele_freq) }}</td>
   <td><span class="badge badge-{{ r.af_bin }}">{{ r.af_bin }}</span></td>
+  <td>
+    {% if r.is_combined_codon_event %}
+    <span class="badge badge-combined">combined ({{ r.combined_member_count }} SNPs)</span>
+    {% else %}
+    —
+    {% endif %}
+  </td>
   <td>{{ r.depth }}</td>
   <td>{{ '✓' if r.resistance_hit else '' }}</td>
 </tr>
