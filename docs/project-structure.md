@@ -134,7 +134,10 @@ Output model and rendering/export logic.
 
 - `results_model.py`: canonical profiling result structures.
 - `plots.py`: figures and plot-ready transformations.
-- `html.py`: HTML rendering.
+- `html.py`: HTML rendering and table-data assembly.
+- `templates/report.html.j2`: Jinja template for report layout and client-side table sorting.
+- `static/report.css`: report styles (inlined at render time for standalone HTML output).
+- `static/report.js`: client-side table sorting logic (inlined at render time for standalone HTML output).
 - `export.py`: export orchestration for all report artifacts, plus TSV/CSV
   tabular helpers (`write_tsv`, `to_tsv_string`).
 

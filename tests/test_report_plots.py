@@ -1,11 +1,18 @@
 """
-Tests for report plotting helpers and focused lollipop rendering.
+Tests for report plotting helpers and genome/gene panel rendering.
 """
 
 from pathlib import Path
 
+import pytest
+
 from respro.db.models import AnnotatedVariant, GeneRecord, VariantCall
-from respro.report.plots import _apply_position_jitter, _select_plot_genes, lollipop_plot
+from respro.report.plots import (
+    _apply_top_jitter,
+    _resolve_overview_bounds,
+    _select_plot_genes,
+    lollipop_plot,
+)
 from respro.report.results_model import ProfilingResult
 
 
@@ -73,21 +80,46 @@ class TestPlotSelection:
 
 
 class TestPlotJitter:
-    def test_jitter_splits_overlapping_points(self) -> None:
+    def test_top_jitter_splits_overlapping_points_with_fixed_base(self) -> None:
         annotations = _result().cds_annotations
-        jittered = _apply_position_jitter(annotations)
-        y_by_pos_150 = [y for ann, y in jittered if ann.variant.pos == 150]
+        jittered = _apply_top_jitter(annotations)
+        x_by_pos_150 = [x for ann, x in jittered if ann.variant.pos == 150]
 
-        assert len(y_by_pos_150) == 2
-        assert y_by_pos_150[0] != y_by_pos_150[1]
+        assert len(x_by_pos_150) == 2
+        assert x_by_pos_150[0] != x_by_pos_150[1]
+        assert sum(x_by_pos_150) / len(x_by_pos_150) == pytest.approx(151.0)
 
 
 class TestLollipopPlot:
     def test_lollipop_plot_writes_svg(self, tmp_path: Path) -> None:
         output = tmp_path / 'mutations.svg'
-        lollipop_plot(_result(), _genes(), output, fmt='svg', rule_gene_names={'UL23'})
+        lollipop_plot(_result(), _genes(), output, fmt='svg', rule_gene_names={'UL23', 'UL30'})
 
         assert output.exists()
         content = output.read_text(encoding='utf-8')
         assert '<svg' in content
+        assert 'Genome overview' in content
+        assert 'UL23' in content
+        assert 'UL30' in content
+
+    def test_lollipop_plot_contains_gene_specific_panels(self, tmp_path: Path) -> None:
+        output = tmp_path / 'mutations.svg'
+        lollipop_plot(_result(), _genes(), output, fmt='svg', rule_gene_names={'UL23', 'UL30'})
+
+        content = output.read_text(encoding='utf-8')
+        assert 'UL23 — 2 mutation(s), 0 database hit(s)' in content
+        assert 'UL30 — 1 mutation(s), 0 database hit(s)' in content
+
+
+class TestOverviewBounds:
+    def test_uses_full_reference_length_when_available(self) -> None:
+        start, end = _resolve_overview_bounds(_genes(), reference_length_nt=152000)
+        assert start == 1
+        assert end == 152000
+
+    def test_falls_back_to_gene_end_when_reference_length_missing(self) -> None:
+        start, end = _resolve_overview_bounds(_genes(), reference_length_nt=None)
+        assert start == 1
+        assert end == 1800
+
 

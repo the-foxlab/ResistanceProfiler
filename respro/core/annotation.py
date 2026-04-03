@@ -87,8 +87,9 @@ def annotate_variants(
                     members = [variants[i] for i in group]
                     results.append(_annotate_combined_snp_codon(members, gene))
                 continue
-            ann = _annotate_variant_in_gene(var, gene)
-            results.append(ann)
+            results.append(
+                _annotate_variant_in_gene(var, gene)
+            )
 
     logger.info(
         'Annotated %d variant(s) -> %d annotation(s) (%d in CDS)',
@@ -338,7 +339,7 @@ def _annotate_insertion(
     expanded_seq = ''.join(alt_codon_bases)
     alt_aa_seq = str(Seq(expanded_seq).translate())
 
-    consequence = 'inframe_insertion'
+    consequence = 'insertion'
     if mut_codon_idx == 0 and (not alt_aa_seq or alt_aa_seq[0] != 'M'):
         consequence = 'start_lost'
     elif ref_aa != '*' and '*' in alt_aa_seq[1:]:
@@ -402,7 +403,7 @@ def _annotate_deletion(
         remaining = affected[0][:codon_pos + 1] + affected[-1][codon_pos + 1:]
         new_aa = str(Seq(''.join(remaining)).translate()) if len(remaining) == 3 else '?'
 
-    consequence = 'inframe_deletion'
+    consequence = 'deletion'
     if mut_codon_idx == 0 and new_aa != 'M':
         consequence = 'start_lost'
     elif '*' in deletion_aa and new_aa != '*':

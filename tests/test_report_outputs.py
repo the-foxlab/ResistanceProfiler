@@ -35,7 +35,7 @@ def _make_result() -> ProfilingResult:
     )
     return ProfilingResult(
         project_name='Test', organism='test',
-        reference_name='ref', sample_name='S1',
+        reference_name='ref', reference_length_nt=12000, sample_name='S1',
         vcf_path='test.vcf',
         total_variants=1, variants_in_cds=1, resistance_hits=1,
         annotations=[ann],
@@ -56,6 +56,7 @@ class TestProfilingResult:
         d = r.summary_dict()
         assert d['project_name'] == 'Test'
         assert d['resistance_hits'] == 1
+        assert d['reference_length_nt'] == 12000
 
     def test_to_json(self):
         r = _make_result()
@@ -111,9 +112,94 @@ class TestHtmlExport:
         assert 'ResistanceProfiler' in html
         assert 'K2E' in html or 'gag' in html
 
-    def test_render_html_shows_combined_event_badge(self):
-        from respro.report.html import render_html
+    def test_render_html_shows_combined_event_in_json(self):
+        """Combined codon events are still represented in JSON output."""
         r = _make_combined_result()
-        html = render_html(r)
-        assert 'combined (2 SNPs)' in html
+        data = json.loads(r.to_json())
+        assert data['variants'][0]['is_combined_codon_event'] is True
+        assert data['variants'][0]['combined_member_count'] == 2
+
+    def test_potential_effects_excludes_snp_rule_for_indel_annotation(self):
+        from respro.report.html import _build_potential_effects_rows
+
+        var = VariantCall(chrom='ref', pos=10, ref='A', alt='AGGG', allele_freq=0.8, depth=120)
+        ann = AnnotatedVariant(
+            variant=var,
+            gene_name='gag',
+            codon_pos=2,
+            ref_aa='K',
+            alt_aa='KG',
+            consequence='insertion',
+        )
+        result = ProfilingResult(
+            project_name='Test',
+            organism='test',
+            reference_name='ref',
+            reference_length_nt=12000,
+            sample_name='S1',
+            vcf_path='test.vcf',
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=0,
+            annotations=[ann],
+        )
+
+        snp_rule = ResistanceRule(
+            id=1,
+            gene_name='gag',
+            gene_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='tiny_ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+
+        rows = _build_potential_effects_rows(result, [snp_rule])
+        assert rows == []
+
+    def test_potential_effects_keeps_indel_rule_for_indel_annotation(self):
+        from respro.report.html import _build_potential_effects_rows
+
+        var = VariantCall(chrom='ref', pos=10, ref='A', alt='AGGG', allele_freq=0.8, depth=120)
+        ann = AnnotatedVariant(
+            variant=var,
+            gene_name='gag',
+            codon_pos=2,
+            ref_aa='K',
+            alt_aa='KG',
+            consequence='insertion',
+        )
+        result = ProfilingResult(
+            project_name='Test',
+            organism='test',
+            reference_name='ref',
+            reference_length_nt=12000,
+            sample_name='S1',
+            vcf_path='test.vcf',
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=0,
+            annotations=[ann],
+        )
+
+        indel_rule = ResistanceRule(
+            id=1,
+            gene_name='gag',
+            gene_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='tiny_ref',
+            position=2,
+            reference='K',
+            mutation='K3KG',
+            phenotype='resistant',
+        )
+
+        rows = _build_potential_effects_rows(result, [indel_rule])
+        assert len(rows) == 1
+        assert rows[0]['drug'] == 'DrugA'
+        assert rows[0]['similarity'] == 'moderate'
 

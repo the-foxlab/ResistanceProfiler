@@ -125,7 +125,7 @@ class TestProfileCli:
             '--min-depth', '0',
         ])
         assert result.exit_code == 0, result.output
-        assert '1 resistance hit' in result.output
+        assert '1 database hit' in result.output
 
         data = json.loads((output_dir / 'results.json').read_text())
         hits = [v for v in data['variants'] if v['resistance_hit']]

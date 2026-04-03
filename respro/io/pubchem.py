@@ -53,7 +53,7 @@ def lookup_drug(name: str, timeout: int = 5) -> PubChemRecord | None:
         cid=cid,
         url=f'https://pubchem.ncbi.nlm.nih.gov/compound/{cid}',
         description=description,
-        structure_url=f'https://pubchem.ncbi.nlm.nih.gov/image/imgsrv.php?cid={cid}&t=l',
+        structure_url=f'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/PNG',
     )
 
 

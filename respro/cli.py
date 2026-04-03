@@ -264,19 +264,22 @@ def profile(
         # 8. Assign AF bins
         annotations = assign_af_bins(annotations)
 
-        organism_row = project_conn.execute(
-            'SELECT organism FROM reference WHERE id = ?',
+        reference_row = project_conn.execute(
+            'SELECT organism, length FROM reference WHERE id = ?',
             (ref_id,),
         ).fetchone()
         organism = ''
-        if organism_row is not None:
-            organism = organism_row['organism'] or ''
+        reference_length_nt = 0
+        if reference_row is not None:
+            organism = reference_row['organism'] or ''
+            reference_length_nt = int(reference_row['length'] or 0)
 
         # 9. Build result object
         result = ProfilingResult(
             project_name=project_row['name'],
             organism=organism,
             reference_name=ref_name,
+            reference_length_nt=reference_length_nt,
             sample_name=sample,
             vcf_path=vcf,
             total_variants=len(variants),
@@ -294,11 +297,13 @@ def profile(
             genes=genes,
             rule_gene_names=rule_gene_names,
             formats=formats,
+            project_conn=project_conn,
+            rules=rules,
         )
 
         click.echo(
             '✓ Profiling complete — '
-            f'{result.resistance_hits} resistance hit(s), '
+            f'{result.resistance_hits} database hit(s), '
             f'{len(combo_hits)} combo rule hit(s)'
         )
         for fmt, path in outputs.items():

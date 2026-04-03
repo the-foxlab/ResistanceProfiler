@@ -471,7 +471,7 @@ class TestProfileFastaCli:
         ])
 
         assert result.exit_code == 0, result.output
-        assert '1 resistance hit' in result.output
+        assert '1 database hit' in result.output
 
         data = json.loads((output_dir / 'results.json').read_text())
         hits = [v for v in data['variants'] if v['resistance_hit']]
@@ -508,7 +508,7 @@ class TestProfileFastaCli:
         ])
 
         assert result.exit_code == 0, result.output
-        assert '0 resistance hit' in result.output
+        assert '0 database hit' in result.output
 
     def test_fasta_profile_json_output_correct(
         self, fasta_db: Path, tmp_path: Path,

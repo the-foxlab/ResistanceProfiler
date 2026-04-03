@@ -1,0 +1,18 @@
+<svg width='420' height='80' viewBox='0 0 420 80' xmlns='http://www.w3.org/2000/svg'>
+  <style>
+    .text { font-family: Arial, Helvetica, sans-serif; font-size: 28px; fill: #1f2937; }
+    .accent { fill: #2563eb; }
+  </style>
+
+  <g transform='translate(10,10)'>
+    <path d='M30 0 L60 10 L60 35 C60 50 45 65 30 70 C15 65 0 50 0 35 L0 10 Z'
+          fill='#2563eb' opacity='0.15'/>
+    <path d='M18 35 L28 45 L45 25' stroke='#2563eb' stroke-width='4' fill='none' stroke-linecap='round' stroke-linejoin='round'/>
+  </g>
+
+  <text x='80' y='50' class='text'>
+    Resistance<tspan class='accent'>Profiler</tspan>
+  </text>
+</svg>
+
+

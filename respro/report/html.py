@@ -1,160 +1,269 @@
-"""
-HTML report generation using Jinja2 templates.
-"""
+"""HTML report generation using external Jinja template + CSS resources."""
 
 from __future__ import annotations
 
 import base64
 import logging
+import sqlite3
 from pathlib import Path
 
 from jinja2 import Environment, BaseLoader
 
-from respro.db.models import GeneRecord
+from respro.core.similarity import classify_similarity
+from respro.db.models import AnnotatedVariant, ComboRuleHit, GeneRecord, ResistanceRule
+from respro.report.palette import MUTATION_COLOURS
 from respro.report.results_model import ProfilingResult
 
 logger = logging.getLogger(__name__)
 
-_HTML_TEMPLATE = """\
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ResistanceProfiler — {{ summary.project_name }}</title>
-<style>
-  :root { --accent: #2c3e50; --hit: #e74c3c; --ok: #27ae60; --bg: #fafbfc; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', system-ui, sans-serif; color: #333; background: var(--bg); padding: 2rem; line-height: 1.5; }
-  h1 { color: var(--accent); margin-bottom: .5rem; }
-  h2 { margin: 1.5rem 0 .5rem; color: var(--accent); border-bottom: 2px solid #eee; padding-bottom: .3rem; }
-  .meta { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: .5rem; }
-  .meta dt { font-weight: 600; font-size: .85rem; color: #666; }
-  .meta dd { margin-bottom: .4rem; }
-  .stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
-  .stat-card { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 1rem 1.5rem; min-width: 150px; text-align: center; }
-  .stat-card .number { font-size: 2rem; font-weight: 700; }
-  .stat-card .label { font-size: .85rem; color: #666; }
-  .stat-card.hit .number { color: var(--hit); }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: .9rem; }
-  th { background: var(--accent); color: #fff; text-align: left; padding: .5rem .7rem; }
-  td { padding: .45rem .7rem; border-bottom: 1px solid #e1e4e8; }
-  tr:hover td { background: #f0f4f8; }
-  .hit-row { background: #fdf2f2; }
-  .hit-row:hover td { background: #fce8e8; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
-  .badge-high { background: #e74c3c; color: #fff; }
-  .badge-intermediate { background: #f39c12; color: #fff; }
-  .badge-low { background: #95a5a6; color: #fff; }
-  .badge-resistance { background: #e74c3c; color: #fff; }
-  .badge-missense { background: #3498db; color: #fff; }
-  .badge-synonymous { background: #95a5a6; color: #fff; }
-  .badge-combined { background: #8e44ad; color: #fff; }
-  .plot-container { text-align: center; margin: 1rem 0; }
-  .plot-container img { max-width: 100%; border: 1px solid #e1e4e8; border-radius: 6px; }
-  footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; font-size: .8rem; color: #999; }
-</style>
-</head>
-<body>
 
-<h1>🧬 ResistanceProfiler Report</h1>
+def _load_template_text() -> str:
+    """Load the HTML Jinja template text from the package template file."""
+    template_path = Path(__file__).resolve().parent / 'templates' / 'report.html.j2'
+    return template_path.read_text(encoding='utf-8')
 
-<dl class="meta">
-  <dt>Project</dt><dd>{{ summary.project_name }}</dd>
-  <dt>Organism</dt><dd>{{ summary.organism or '—' }}</dd>
-  <dt>Reference</dt><dd>{{ summary.reference }}</dd>
-  <dt>Sample</dt><dd>{{ summary.sample or '—' }}</dd>
-  <dt>VCF</dt><dd>{{ summary.vcf }}</dd>
-  <dt>Timestamp</dt><dd>{{ summary.timestamp }}</dd>
-</dl>
 
-<div class="stats">
-  <div class="stat-card"><div class="number">{{ summary.total_variants }}</div><div class="label">Total variants</div></div>
-  <div class="stat-card"><div class="number">{{ summary.variants_in_cds }}</div><div class="label">In CDS</div></div>
-  <div class="stat-card hit"><div class="number">{{ summary.resistance_hits }}</div><div class="label">Resistance hits</div></div>
-</div>
+def _load_css_text() -> str:
+    """Load report CSS text from the package static file."""
+    css_path = Path(__file__).resolve().parent / 'static' / 'report.css'
+    return css_path.read_text(encoding='utf-8')
 
-{% if plot_data %}
-<h2>Mutation overview</h2>
-<div class="plot-container">
-  <img src="data:image/svg+xml;base64,{{ plot_data }}" alt="Lollipop plot">
-</div>
-{% endif %}
 
-{% if hit_rows %}
-<h2>Resistance-associated mutations</h2>
-<table>
-<thead><tr>
-  <th>Gene</th><th>AA change</th><th>Codon pos</th>
-  <th>AF</th><th>AF bin</th><th>Event</th><th>Drug(s)</th><th>Phenotype</th><th>Publication</th>
-</tr></thead>
-<tbody>
-{% for r in hit_rows %}
-<tr class="hit-row">
-  <td>{{ r.gene }}</td>
-  <td><strong>{{ r.ref_aa }}{{ r.codon_pos }}{{ r.alt_aa }}</strong></td>
-  <td>{{ r.codon_pos }}</td>
-  <td>{{ '%.3f'|format(r.allele_freq) }}</td>
-  <td><span class="badge badge-{{ r.af_bin }}">{{ r.af_bin }}</span></td>
-  <td>
-    {% if r.is_combined_codon_event %}
-    <span class="badge badge-combined">combined ({{ r.combined_member_count }} SNPs)</span>
-    {% else %}
-    —
-    {% endif %}
-  </td>
-  <td>{{ r.drugs }}</td>
-  <td>{{ r.phenotype }}</td>
-  <td>{{ r.publication }}</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
-{% endif %}
+def _load_js_text() -> str:
+    """Load report JavaScript text from the package static file."""
+    js_path = Path(__file__).resolve().parent / 'static' / 'report.js'
+    return js_path.read_text(encoding='utf-8')
 
-<h2>All CDS variants</h2>
-<table>
-<thead><tr>
-  <th>Chrom</th><th>Pos</th><th>Ref</th><th>Alt</th>
-  <th>Gene</th><th>AA change</th><th>Consequence</th>
-  <th>AF</th><th>AF bin</th><th>Event</th><th>Depth</th><th>Resistance</th>
-</tr></thead>
-<tbody>
-{% for r in cds_rows %}
-<tr class="{{ 'hit-row' if r.resistance_hit else '' }}">
-  <td>{{ r.chrom }}</td><td>{{ r.pos }}</td><td>{{ r.ref }}</td><td>{{ r.alt }}</td>
-  <td>{{ r.gene }}</td>
-  <td>{% if r.ref_aa %}{{ r.ref_aa }}{{ r.codon_pos }}{{ r.alt_aa }}{% endif %}</td>
-  <td><span class="badge badge-{{ r.consequence }}">{{ r.consequence }}</span></td>
-  <td>{{ '%.3f'|format(r.allele_freq) }}</td>
-  <td><span class="badge badge-{{ r.af_bin }}">{{ r.af_bin }}</span></td>
-  <td>
-    {% if r.is_combined_codon_event %}
-    <span class="badge badge-combined">combined ({{ r.combined_member_count }} SNPs)</span>
-    {% else %}
-    —
-    {% endif %}
-  </td>
-  <td>{{ r.depth }}</td>
-  <td>{{ '✓' if r.resistance_hit else '' }}</td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
 
-<footer>
-  Generated by <strong>ResistanceProfiler v{{ version }}</strong> on {{ summary.timestamp }}.
-</footer>
+def _load_logo_svg_text() -> str:
+    """Load report logo SVG markup from the package static file."""
+    logo_path = Path(__file__).resolve().parent / 'static' / 'logo.svg'
+    return logo_path.read_text(encoding='utf-8')
 
-</body>
-</html>
-"""
+
+def _phenotype_badge_class(value: str) -> str:
+    """Map a phenotype string to a CSS badge class suffix."""
+    if value in ('resistant', 'intermediate', 'sensitive'):
+        return value if value != 'intermediate' else 'intermediate-p'
+    return 'unknown'
+
+
+def _build_db_hit_rows(result: ProfilingResult) -> list[dict]:
+    """
+    Build one row per drug per annotated variant that matched a resistance rule.
+
+    :param result: profiling result
+    :return: list of dicts for the database hits table
+    """
+    rows: list[dict] = []
+    for ann in result.cds_annotations:
+        if not ann.is_resistance_hit:
+            continue
+
+        aa_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+        nt_change = f'{ann.variant.ref}{ann.variant.pos + 1}{ann.variant.alt}'
+
+        # One row per drug
+        for rule in ann.rule_matches:
+            rows.append({
+                'gene': ann.gene_name,
+                'aa_change': aa_change,
+                'consequence': ann.consequence,
+                'af_bin': ann.af_bin,
+                'nt_change': nt_change,
+                'drug': rule.drug_name,
+                'ic50': rule.ic50 or '—',
+                'phenotype': rule.phenotype,
+                'clinical_phenotype': rule.clinical_phenotype,
+                'source': rule.source or '—',
+                'publication': rule.publication or '',
+            })
+    return rows
+
+
+def _build_combo_hit_rows(result: ProfilingResult) -> list[dict]:
+    """
+    Build rows for combination rule hits.
+
+    :param result: profiling result
+    :return: list of dicts for the combo hits table
+    """
+    rows: list[dict] = []
+    for combo in result.combo_hits:
+        rs = combo.rule_set
+        member_labels = ', '.join(
+            f'{m.gene_name}:{m.reference}{m.position + 1}{m.mutation}'
+            for m in rs.members
+        )
+        rows.append({
+            'group_name': rs.group_name or '—',
+            'members': member_labels,
+            'drug': rs.drug_name,
+            'ic50': rs.ic50 or '—',
+            'phenotype': rs.phenotype,
+            'clinical_phenotype': rs.clinical_phenotype,
+            'phenotype_class': _phenotype_badge_class(rs.phenotype),
+            'clinical_class': _phenotype_badge_class(rs.clinical_phenotype),
+            'publication': rs.publication or '',
+        })
+    return rows
+
+
+def _build_cds_rows(result: ProfilingResult) -> list[dict]:
+    """
+    Build rows for the all-CDS-variants table.
+
+    :param result: profiling result
+    :return: list of dicts for the variant table
+    """
+    rows: list[dict] = []
+    for ann in result.cds_annotations:
+        nt_change = f'{ann.variant.ref}{ann.variant.pos + 1}{ann.variant.alt}'
+        aa_change = ''
+        if ann.ref_aa and ann.alt_aa:
+            aa_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+
+        rows.append({
+            'gene': ann.gene_name,
+            'nt_change': nt_change,
+            'aa_change': aa_change,
+            'consequence': ann.consequence,
+            'allele_freq': ann.variant.allele_freq,
+            'af_bin': ann.af_bin,
+            'database_hit': ann.is_resistance_hit,
+        })
+    return rows
+
+
+def _build_potential_effects_rows(
+    result: ProfilingResult,
+    rules: list[ResistanceRule],
+) -> list[dict]:
+    """
+    Find detected mutations at known resistance positions with a different AA change.
+
+    For missense variants that are not direct DB hits, check if any rule exists
+    at the same gene + position and score similarity via BLOSUM62.
+    For indels, report if any indel-type rule exists at that position.
+    Frameshifts and stop gains are excluded (reported elsewhere).
+
+    :param result: profiling result with annotated variants
+    :param rules: all loaded resistance rules
+    :return: list of dicts for the potential effects table
+    """
+    if not rules:
+        return []
+
+    # Index rules by (gene_name, position) for position-based lookup
+    rules_by_pos: dict[tuple[str, int], list[ResistanceRule]] = {}
+    for rule in rules:
+        rules_by_pos.setdefault((rule.gene_name, rule.position), []).append(rule)
+
+    excluded_consequences = {'frameshift', 'stop_gained', 'synonymous'}
+    rows: list[dict] = []
+    seen: set[tuple[str, int, str, str]] = set()
+
+    for ann in result.cds_annotations:
+        # Skip direct hits, excluded consequences, and variants without AA info
+        if ann.is_resistance_hit:
+            continue
+        if ann.consequence in excluded_consequences:
+            continue
+        if not ann.gene_name or not ann.alt_aa:
+            continue
+
+        pos_key = (ann.gene_name, ann.codon_pos)
+        if pos_key not in rules_by_pos:
+            continue
+
+        ann_is_indel = ann.consequence in ('insertion', 'deletion') or len(ann.alt_aa) != 1
+
+        for rule in rules_by_pos[pos_key]:
+            # Skip wildcard rules (already matched as direct hits)
+            if rule.mutation.lower() == 'any':
+                continue
+
+            # Indel observations should only be compared to indel-like rule tokens.
+            rule_is_indel = rule.mutation.lower() == 'fsx' or any(ch.isdigit() for ch in rule.mutation)
+            if ann_is_indel and not rule_is_indel:
+                continue
+
+            # Deduplicate by (gene, position, observed_aa, drug)
+            dedup_key = (ann.gene_name, ann.codon_pos, ann.alt_aa, rule.drug_name)
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+
+            observed_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+            rule_change = f'{rule.reference}{rule.position + 1}{rule.mutation}'
+
+            # For indels: report presence without BLOSUM scoring
+            if ann_is_indel:
+                similarity = 'moderate'
+            else:
+                similarity = classify_similarity(ann.alt_aa, rule.mutation)
+
+            rows.append({
+                'gene': ann.gene_name,
+                'observed_change': observed_change,
+                'rule_change': rule_change,
+                'similarity': similarity,
+                'drug': rule.drug_name,
+                'ic50': rule.ic50 or '—',
+                'phenotype': rule.phenotype,
+                'clinical_phenotype': rule.clinical_phenotype,
+                'source': rule.source or '—',
+                'allele_freq': ann.variant.allele_freq,
+                'publication': rule.publication or '',
+            })
+
+    return rows
+
+
+def _load_drug_cards(
+    project_conn: sqlite3.Connection | None,
+    detected_drug_names: set[str] | None = None,
+) -> list[dict]:
+    """
+    Load drug metadata for drugs with detected rule hits.
+
+    Structure image URLs are pre-stored in the database and rendered as
+    external image references (not embedded as base64).
+
+    :param project_conn: open project database connection (or None)
+    :param detected_drug_names: drug names with matched rules (lowercase)
+    :return: list of drug info dicts
+    """
+    if project_conn is None or not detected_drug_names:
+        return []
+    try:
+        rows = project_conn.execute(
+            'SELECT name, pubchem_url, description, structure_url FROM drug ORDER BY name'
+        ).fetchall()
+    except Exception:
+        return []
+
+    cards: list[dict] = []
+    for r in rows:
+        # Only include drugs with detected rule hits
+        if r['name'].lower() not in detected_drug_names:
+            continue
+
+        cards.append({
+            'name': r['name'],
+            'pubchem_url': r['pubchem_url'] or '',
+            'description': r['description'] or '',
+            'structure_url': r['structure_url'] or '',
+        })
+    return cards
 
 
 def render_html(
     result: ProfilingResult,
     genes: list[GeneRecord] | None = None,
     plot_svg_path: Path | None = None,
+    project_conn: sqlite3.Connection | None = None,
+    rules: list[ResistanceRule] | None = None,
 ) -> str:
     """
     Render the profiling result to an HTML string.
@@ -162,24 +271,37 @@ def render_html(
     :param result: ProfilingResult object
     :param genes: optional list of genes for context
     :param plot_svg_path: optional path to embedded plot SVG
+    :param project_conn: optional project DB connection for drug overview
+    :param rules: optional list of resistance rules for potential effects analysis
     :return: HTML string
     """
     from respro import __version__
 
     env = Environment(loader=BaseLoader(), autoescape=True)
-    template = env.from_string(_HTML_TEMPLATE)
+    template = env.from_string(_load_template_text())
+    css_text = _load_css_text()
+    js_text = _load_js_text()
+    logo_svg = _load_logo_svg_text()
 
     summary = result.summary_dict()
-    cds_rows = [r for r in result.variants_as_dicts() if r.get('gene')]
-    hit_rows = []
-    for r in cds_rows:
-        if r.get('resistance_hit'):
-            drugs = '; '.join(d['drug'] for d in r.get('drug_hits', []))
-            phenotypes = '; '.join(set(d['phenotype'] for d in r.get('drug_hits', [])))
-            publications = '; '.join(sorted(set(d['publication'] for d in r.get('drug_hits', []) if d.get('publication'))))
-            hit_rows.append({**r, 'drugs': drugs, 'phenotype': phenotypes, 'publication': publications})
+    summary['database_hits'] = summary.pop('resistance_hits', 0)
 
-    # Embed plot as base64 if available
+    db_hit_rows = _build_db_hit_rows(result)
+    combo_hit_rows = _build_combo_hit_rows(result)
+    cds_rows = _build_cds_rows(result)
+    potential_rows = _build_potential_effects_rows(result, rules or [])
+    summary['similarity_hits'] = len(potential_rows)
+
+    # Collect drug names from detected rule hits for filtering the drug overview
+    detected_drug_names: set[str] = set()
+    for ann in result.cds_annotations:
+        for rule in ann.rule_matches:
+            detected_drug_names.add(rule.drug_name.lower())
+    for combo in result.combo_hits:
+        detected_drug_names.add(combo.rule_set.drug_name.lower())
+
+    drug_cards = _load_drug_cards(project_conn, detected_drug_names)
+
     plot_data = ''
     if plot_svg_path and Path(plot_svg_path).is_file():
         raw = Path(plot_svg_path).read_bytes()
@@ -187,9 +309,16 @@ def render_html(
 
     return template.render(
         summary=summary,
+        db_hit_rows=db_hit_rows,
+        combo_hit_rows=combo_hit_rows,
         cds_rows=cds_rows,
-        hit_rows=hit_rows,
+        potential_rows=potential_rows,
+        drug_cards=drug_cards,
         plot_data=plot_data,
+        logo_svg=logo_svg,
+        css=css_text,
+        js=js_text,
+        mutation_colours=MUTATION_COLOURS,
         version=__version__,
     )
 
@@ -199,6 +328,8 @@ def write_html(
     output_path: Path,
     genes: list[GeneRecord] | None = None,
     plot_svg_path: Path | None = None,
+    project_conn: sqlite3.Connection | None = None,
+    rules: list[ResistanceRule] | None = None,
 ) -> Path:
     """
     Render and write the HTML report to a file.
@@ -207,9 +338,14 @@ def write_html(
     :param output_path: path to write HTML file to
     :param genes: optional list of genes for context
     :param plot_svg_path: optional path to embedded plot SVG
+    :param project_conn: optional project DB connection for drug overview
+    :param rules: optional list of resistance rules for potential effects analysis
     :return: path to written HTML file
     """
-    html = render_html(result, genes=genes, plot_svg_path=plot_svg_path)
+    html = render_html(
+        result, genes=genes, plot_svg_path=plot_svg_path,
+        project_conn=project_conn, rules=rules,
+    )
     output_path = Path(output_path)
     output_path.write_text(html, encoding='utf-8')
     logger.info('HTML report written to %s', output_path)

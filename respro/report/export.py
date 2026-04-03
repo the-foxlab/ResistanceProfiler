@@ -6,22 +6,21 @@ from __future__ import annotations
 
 import csv
 import logging
+import sqlite3
 from io import StringIO
 from pathlib import Path
 
-from respro.db.models import GeneRecord
+from respro.db.models import GeneRecord, ResistanceRule
 from respro.report.html import write_html
 from respro.report.plots import lollipop_plot
 from respro.report.results_model import ProfilingResult
 
 logger = logging.getLogger(__name__)
 
-# Output column order for TSV exports — defines the report schema
+# Output column order for TSV exports
 _variant_columns = [
-    'chrom', 'pos', 'ref', 'alt', 'allele_freq', 'depth',
-    'gene', 'codon_pos', 'ref_codon', 'alt_codon',
-    'ref_aa', 'alt_aa', 'consequence', 'af_bin',
-    'resistance_hit', 'drug_hits',
+    'gene', 'nt_change', 'aa_change', 'consequence',
+    'allele_freq', 'af_bin', 'database_hit', 'drug_hits',
 ]
 
 
@@ -77,6 +76,8 @@ def export_results(
     genes: list[GeneRecord] | None = None,
     rule_gene_names: set[str] | None = None,
     formats: tuple[str, ...] = ('html', 'json'),
+    project_conn: sqlite3.Connection | None = None,
+    rules: list[ResistanceRule] | None = None,
 ) -> dict[str, Path]:
     """
     Write all requested report outputs and return format-to-path mapping.
@@ -86,6 +87,8 @@ def export_results(
     :param genes: optional list of genes for plotting
     :param rule_gene_names: optional set of rule-backed gene names for focused plotting
     :param formats: tuple of output formats to generate
+    :param project_conn: optional project DB connection for drug overview in HTML
+    :param rules: optional resistance rules for potential effects table in HTML
     :return: dict mapping format names to output file paths
     """
     output_dir = Path(output_dir)
@@ -107,7 +110,8 @@ def export_results(
 
     if 'html' in formats:
         html_path = output_dir / 'report.html'
-        write_html(result, html_path, genes=genes, plot_svg_path=svg_path)
+        write_html(result, html_path, genes=genes, plot_svg_path=svg_path,
+                   project_conn=project_conn, rules=rules)
         outputs['html'] = html_path
 
     if 'json' in formats:

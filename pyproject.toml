@@ -50,3 +50,12 @@ line-length = 100
 [tool.ruff.lint]
 select = ['E', 'F', 'W', 'I', 'N', 'UP']
 
+[tool.hatch.build]
+include = [
+    'respro/**/*.py',
+    'respro/report/templates/*.j2',
+    'respro/report/static/*.css',
+    'respro/report/static/*.js',
+    'respro/report/static/*.svg',
+]
+

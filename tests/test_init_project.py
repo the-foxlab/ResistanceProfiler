@@ -369,6 +369,63 @@ class TestComboRuleParsing:
         conn.close()
         assert set_count == 1
 
+    def test_single_rule_publication_doi_gets_https_prefix(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tdoi.org/10.1086/590668
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+
+        conn = sqlite3.connect(str(db))
+        publication = conn.execute('SELECT publication FROM resistance_rule').fetchone()[0]
+        conn.close()
+        assert publication == 'https://doi.org/10.1086/590668'
+
+    def test_single_rule_publication_already_https_is_unchanged(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\thttps://doi.org/10.1086/590668
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+
+        conn = sqlite3.connect(str(db))
+        publication = conn.execute('SELECT publication FROM resistance_rule').fetchone()[0]
+        conn.close()
+        assert publication == 'https://doi.org/10.1086/590668'
+
+    def test_single_rule_publication_pmid_is_unchanged(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tPMID:12345678
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+
+        conn = sqlite3.connect(str(db))
+        publication = conn.execute('SELECT publication FROM resistance_rule').fetchone()[0]
+        conn.close()
+        assert publication == 'PMID:12345678'
+
+    def test_combo_rule_set_publication_doi_gets_https_prefix(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tcombo_KE_PV\tdoi.org/10.1086/590668
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_KE_PV\t
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+
+        conn = sqlite3.connect(str(db))
+        publication = conn.execute('SELECT publication FROM resistance_rule_set').fetchone()[0]
+        conn.close()
+        assert publication == 'https://doi.org/10.1086/590668'
+
 
 class TestIc50ParsingAndAggregation:
     @pytest.fixture()

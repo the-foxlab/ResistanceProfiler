@@ -1,0 +1,52 @@
+:root { --accent: #2c3e50; --hit: #e74c3c; --ok: #27ae60; --bg: #fafbfc; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; color: #333; background: var(--bg); padding: 2rem; line-height: 1.5; }
+.logo-wrap { margin-bottom: 1.6rem; }
+.logo-wrap svg { width: 420px; height: auto; display: block; }
+h1 { color: var(--accent); margin-bottom: .5rem; }
+h2 { margin: 1.5rem 0 .5rem; color: var(--accent); border-bottom: 2px solid #eee; padding-bottom: .3rem; }
+.meta { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: .5rem; }
+.meta dt { font-weight: 600; font-size: .85rem; color: #666; }
+.meta dd { margin-bottom: .4rem; }
+.stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+.stat-card { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 1rem 1.5rem; min-width: 150px; text-align: center; }
+.stat-card .number { font-size: 2rem; font-weight: 700; }
+.stat-card .label { font-size: .85rem; color: #666; }
+.stat-card.hit .number { color: var(--hit); }
+.table-note { font-size: .85rem; color: #666; margin-bottom: .5rem; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: .9rem; }
+th { background: var(--accent); color: #fff; text-align: left; padding: .5rem .7rem; }
+td { padding: .45rem .7rem; border-bottom: 1px solid #e1e4e8; }
+tr:hover td { background: #f0f4f8; }
+.hit-row { background: #fdf2f2; }
+.hit-row:hover td { background: #fce8e8; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
+.badge-high { background: #e74c3c; color: #fff; }
+.badge-intermediate { background: #f39c12; color: #fff; }
+.badge-low { background: #95a5a6; color: #fff; }
+.badge-resistant { background: #e74c3c; color: #fff; }
+.badge-intermediate-p { background: #f39c12; color: #fff; }
+.badge-sensitive { background: #27ae60; color: #fff; }
+.badge-unknown { background: #bdc3c7; color: #444; }
+.badge-sim-high { background: #e74c3c; color: #fff; }
+.badge-sim-moderate { background: #f39c12; color: #fff; }
+.badge-sim-low { background: #95a5a6; color: #fff; }
+.plot-container { text-align: center; margin: 1rem 0; }
+.plot-container img { width: min(100%, 1800px); max-height: 86vh; height: auto; border: 1px solid #e1e4e8; border-radius: 6px; }
+.drug-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
+.drug-card { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 1rem; display: flex; gap: 1rem; align-items: stretch; min-height: 240px; }
+.drug-card img { width: 220px; height: 100%; max-height: 220px; object-fit: contain; border: 1px solid #eee; border-radius: 4px; background: #fff; }
+.drug-card .drug-info { flex: 1; }
+.drug-card .drug-name { font-weight: 700; font-size: 1rem; color: var(--accent); }
+.drug-card .drug-desc { font-size: .85rem; color: #555; margin-top: .3rem; }
+.drug-card a { font-size: .8rem; color: #2980b9; text-decoration: none; }
+.drug-card a:hover { text-decoration: underline; }
+.db-indicator { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; border: 1.5px solid #bdc3c7; }
+.db-yes { background: #e67e22; border-color: #e67e22; }
+.db-no { background: transparent; }
+th.sortable-col { cursor: pointer; user-select: none; position: relative; }
+th.sortable-col::after { content: ' ↕'; opacity: .6; font-weight: 400; }
+th.sortable-col[data-order='asc']::after { content: ' ↑'; opacity: 1; }
+th.sortable-col[data-order='desc']::after { content: ' ↓'; opacity: 1; }
+footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; font-size: .8rem; color: #999; }
+

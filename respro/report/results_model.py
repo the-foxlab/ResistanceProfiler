@@ -23,6 +23,7 @@ class ProfilingResult:
     project_name: str = ''
     organism: str = ''
     reference_name: str = ''
+    reference_length_nt: int = 0
     sample_name: str = ''
     vcf_path: str = ''
     run_timestamp: str = field(
@@ -82,6 +83,7 @@ class ProfilingResult:
             'project_name': self.project_name,
             'organism': self.organism,
             'reference': self.reference_name,
+            'reference_length_nt': self.reference_length_nt,
             'sample': self.sample_name,
             'vcf': self.vcf_path,
             'timestamp': self.run_timestamp,

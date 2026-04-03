@@ -383,7 +383,7 @@ def _load_resistance_rules(
                 phenotype_value,
                 clinical_phenotype_value,
                 ic50_value,
-                _get_value(row, 'publication'),
+                _normalize_publication_value(_get_value(row, 'publication')),
                 _get_value(row, 'source'),
             ),
         )
@@ -565,6 +565,20 @@ def _normalize_ic50_from_row(
         return ''
 
     return f'{ic50_numeric:g}'
+
+
+def _normalize_publication_value(raw: str) -> str:
+    """Normalize DOI publication links to absolute HTTPS URLs."""
+    value = raw.strip()
+    if not value:
+        return ''
+
+    lowered = value.lower()
+    if lowered.startswith('http://') or lowered.startswith('https://'):
+        return value
+    if lowered.startswith('doi.org/') or lowered.startswith('dx.doi.org/'):
+        return f'https://{value}'
+    return value
 
 
 def _normalize_phenotype_token(raw: str) -> str | None:
@@ -980,10 +994,10 @@ def _insert_combo_rule_sets(
 
         # publication, source: first non-empty value wins.
         publication = next((_get_value(r, 'publication') for r in rows if _get_value(r, 'publication')), '')
+        publication = _normalize_publication_value(publication)
         source = next((_get_value(r, 'source') for r in rows if _get_value(r, 'source')), '')
 
         # --- per-member validation (pre-validate before any DB write) ---
-
         valid_members: list[tuple] = []
         group_ok = True
         for row in rows:
