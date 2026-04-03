@@ -57,7 +57,7 @@ class GeneRecord:
         :param pos: 0-based genomic position
         :return: 0-based codon index
         """
-        return self.nt_offset(pos) // 3
+        return (self.nt_offset(pos) - self.codon_start) // 3
 
     def codon_position_in_codon(self, pos: int) -> int:
         """
@@ -66,7 +66,7 @@ class GeneRecord:
         :param pos: 0-based genomic position
         :return: 0-based position within codon
         """
-        return self.nt_offset(pos) % 3
+        return (self.nt_offset(pos) - self.codon_start) % 3
 
     def codon_genomic_positions(self, pos: int) -> tuple[int, int, int]:
         """
@@ -75,8 +75,10 @@ class GeneRecord:
         :param pos: 0-based genomic position
         :return: tuple of three 0-based genomic positions
         """
-        offset = self.nt_offset(pos)
-        codon_start_offset = (offset // 3) * 3
+        offset = self.nt_offset(pos) - self.codon_start
+        if offset < 0:
+            raise ValueError('Position lies before first translated codon')
+        codon_start_offset = self.codon_start + ((offset // 3) * 3)
         if self.strand == '+':
             p1 = self.start + codon_start_offset
             return (p1, p1 + 1, p1 + 2)

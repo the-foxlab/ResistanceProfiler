@@ -75,6 +75,7 @@ def export_results(
     result: ProfilingResult,
     output_dir: Path,
     genes: list[GeneRecord] | None = None,
+    rule_gene_names: set[str] | None = None,
     formats: tuple[str, ...] = ('html', 'json'),
 ) -> dict[str, Path]:
     """
@@ -83,6 +84,7 @@ def export_results(
     :param result: ProfilingResult object
     :param output_dir: directory to write outputs to
     :param genes: optional list of genes for plotting
+    :param rule_gene_names: optional set of rule-backed gene names for focused plotting
     :param formats: tuple of output formats to generate
     :return: dict mapping format names to output file paths
     """
@@ -94,13 +96,13 @@ def export_results(
     svg_path: Path | None = None
     if genes and ('svg' in formats or 'pdf' in formats or 'html' in formats):
         generated_svg_path = output_dir / 'mutations.svg'
-        lollipop_plot(result, genes, generated_svg_path, fmt='svg')
+        lollipop_plot(result, genes, generated_svg_path, fmt='svg', rule_gene_names=rule_gene_names)
         outputs['svg'] = generated_svg_path
         svg_path = generated_svg_path
 
     if 'pdf' in formats and genes:
         pdf_path = output_dir / 'mutations.pdf'
-        lollipop_plot(result, genes, pdf_path, fmt='pdf')
+        lollipop_plot(result, genes, pdf_path, fmt='pdf', rule_gene_names=rule_gene_names)
         outputs['pdf'] = pdf_path
 
     if 'html' in formats:

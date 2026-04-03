@@ -432,3 +432,27 @@ class TestAnnotateDivergentReference:
         assert ann.consequence == 'stop_gained'
 
 
+class TestCodonStartOffset:
+    def test_codon_start_shift_forward_gene(self):
+        """codon_start offset shifts codon indexing for rule-compatible positions."""
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='offset_gene',
+            protein='Offset',
+            start=0,
+            end=10,
+            strand='+',
+            codon_start=1,
+            nt_sequence='NAAAGAAAAA',
+        )
+        # Position 1 is first coding base (codon AAA), A->G => GAA (K->E)
+        var = VariantCall(chrom='ref', pos=1, ref='A', alt='G', allele_freq=0.8, depth=100)
+        ann = annotate_variants([var], [gene])[0]
+
+        assert ann.codon_pos == 0
+        assert ann.ref_aa == 'K'
+        assert ann.alt_aa == 'E'
+        assert ann.consequence == 'missense'
+
+

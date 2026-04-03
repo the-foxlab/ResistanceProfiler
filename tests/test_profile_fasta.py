@@ -18,7 +18,7 @@ from respro.core.profile import (
     remap_variants,
     resolve_fasta_reference,
 )
-from respro.core.sequence_matching import match_query_to_genes
+from respro.core.sequence_matching import GeneMatch, match_query_to_genes
 from respro.db.models import GeneRecord, VariantCall
 from respro.db.schema import create_schema, open_project_db
 
@@ -319,6 +319,40 @@ class TestRemapVariants:
 
         assert len(remapped) == 1
         assert remapped[0].query_ref_codon == ''
+
+    def test_snp_stores_query_ref_codon_for_reverse_match(self) -> None:
+        """Reverse-strand matches must reconstruct query codon in CDS orientation."""
+        gene_rev = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='rev',
+            protein='Rev',
+            start=0,
+            end=6,
+            strand='-',
+            codon_start=0,
+            nt_sequence='ATGAAA',
+        )
+        query = 'TTTCAT'  # reverse complement of ATGAAA
+        matches = [
+            GeneMatch(
+                gene=gene_rev,
+                identity=1.0,
+                coverage=1.0,
+                query_start=0,
+                query_end=6,
+                strand='-',
+                cigar='6M',
+            ),
+        ]
+
+        variants = [
+            VariantCall(chrom='c', pos=5, ref='T', alt='C', allele_freq=0.8, depth=20),
+        ]
+        remapped, _ = remap_variants(variants, matches, query)
+
+        assert len(remapped) == 1
+        assert remapped[0].query_ref_codon == 'ATG'
 
 
 # ──────────────────────────────────────────────────────────────────────

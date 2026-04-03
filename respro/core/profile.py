@@ -188,8 +188,8 @@ def remap_variants(
             query_ref_codon = ''
             if len(var.ref) == 1 and len(var.alt) == 1:
                 query_ref_codon = _extract_query_ref_codon(q2c, query_upper, cds_pos)
-                if need_comp and len(query_ref_codon) == 3:
-                    query_ref_codon = str(Seq(query_ref_codon).reverse_complement())
+                if match.strand == '-' and len(query_ref_codon) == 3:
+                    query_ref_codon = str(Seq(query_ref_codon).complement())
 
             remapped.append(VariantCall(
                 chrom=var.chrom,

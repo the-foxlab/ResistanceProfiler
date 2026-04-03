@@ -230,6 +230,10 @@ def profile(
         genes = load_genes_for_reference(project_conn, ref_id)
         rules = load_rules(project_conn, ref_id)
         rule_sets = load_rule_sets(project_conn, ref_id)
+        rule_gene_names = {rule.gene_name for rule in rules}
+        for rule_set in rule_sets:
+            for member in rule_set.members:
+                rule_gene_names.add(member.gene_name)
 
         # 4. Read and filter the VCF before coordinate remapping.
         variants = parse_vcf(Path(vcf))
@@ -284,7 +288,13 @@ def profile(
 
         # 10. Export
         output_dir = Path(output)
-        outputs = export_results(result, output_dir, genes=genes, formats=formats)
+        outputs = export_results(
+            result,
+            output_dir,
+            genes=genes,
+            rule_gene_names=rule_gene_names,
+            formats=formats,
+        )
 
         click.echo(
             '✓ Profiling complete — '

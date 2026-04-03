@@ -79,7 +79,8 @@ def annotate_variants(
             continue
 
         for gene in matching_genes:
-            codon_key = (gene.id, gene.codon_index(var.pos))
+            codon_idx = gene.codon_index(var.pos)
+            codon_key = (gene.id, codon_idx)
             group = group_plan.get(codon_key)
             if group is not None:
                 if var_idx == group[0]:
@@ -128,7 +129,10 @@ def _plan_combined_snp_groups(
             if not gene.contains(var.pos):
                 continue
             # Group SNPs per gene-codon so linked high-AF changes can be evaluated jointly.
-            key = (gene.id, gene.codon_index(var.pos))
+            codon_idx = gene.codon_index(var.pos)
+            if codon_idx < 0:
+                continue
+            key = (gene.id, codon_idx)
             grouped.setdefault(key, []).append(idx)
 
     planned: dict[tuple[int, int], list[int]] = {}
@@ -160,7 +164,7 @@ def _annotate_combined_snp_codon(
     seq_cds = gene.nt_sequence.upper()
     anchor = sorted(variants, key=lambda v: v.pos)[0]
     codon_idx = gene.codon_index(anchor.pos)
-    codon_start = codon_idx * 3
+    codon_start = gene.codon_start + (codon_idx * 3)
     internal_codon = seq_cds[codon_start:codon_start + 3]
     ref_aa = translate_codon(internal_codon)
 
@@ -237,10 +241,15 @@ def _annotate_variant_in_gene(
         ref = var.ref
         mut = var.alt
 
+    coding_variant_pos = cds_variant_pos - gene.codon_start
+    if coding_variant_pos < 0:
+        return AnnotatedVariant(variant=var, gene_name=gene.name)
+
     # Split CDS into codon triplets
-    cds_codons = [list(seq_cds[i:i + 3]) for i in range(0, len(seq_cds), 3)]
-    mut_codon_idx = cds_variant_pos // 3
-    codon_pos_in_codon = cds_variant_pos % 3
+    coding_nt = seq_cds[gene.codon_start:]
+    cds_codons = [list(coding_nt[i:i + 3]) for i in range(0, len(coding_nt), 3)]
+    mut_codon_idx = coding_variant_pos // 3
+    codon_pos_in_codon = coding_variant_pos % 3
 
     if mut_codon_idx < 0 or mut_codon_idx >= len(cds_codons):
         return AnnotatedVariant(variant=var, gene_name=gene.name)

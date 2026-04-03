@@ -34,6 +34,7 @@ def lollipop_plot(
     genes: list[GeneRecord],
     output_path: Path,
     fmt: str = 'svg',
+    rule_gene_names: set[str] | None = None,
 ) -> Path:
     """
     Create a lollipop-style mutation plot along the genome.
@@ -42,6 +43,7 @@ def lollipop_plot(
     :param genes: gene records for drawing the gene track
     :param output_path: file path for the saved figure
     :param fmt: output format (svg, pdf, png)
+    :param rule_gene_names: optional rule-backed gene names to focus the plot
     :return: path to saved figure
     """
     output_path = Path(output_path)
@@ -50,15 +52,26 @@ def lollipop_plot(
         logger.warning('No CDS variants to plot')
         return output_path
 
+    plot_genes = _select_plot_genes(genes, cds, rule_gene_names)
+    if not plot_genes:
+        logger.warning('No genes selected for plotting')
+        return output_path
+
+    selected_gene_names = {gene.name for gene in plot_genes}
+    cds = [ann for ann in cds if ann.gene_name in selected_gene_names]
+    if not cds:
+        logger.warning('No CDS variants in selected plot genes')
+        return output_path
+
     fig, (ax_lollipop, ax_gene) = plt.subplots(
-        2, 1, figsize=(14, 5), height_ratios=[3, 1],
+        2, 1, figsize=(14, max(4.5, 3.2 + 0.3 * len(plot_genes))), height_ratios=[3, 1],
         sharex=True, layout='constrained',
     )
 
     # ----- Lollipop panel -----
-    for ann in cds:
+    jittered = _apply_position_jitter(cds)
+    for ann, y in jittered:
         x = ann.variant.pos + 1
-        y = ann.variant.allele_freq
         colour = _COLOURS.get('resistance_hit' if ann.is_resistance_hit else ann.consequence, '#bdc3c7')
         ax_lollipop.vlines(x, 0, y, colors=colour, linewidth=0.8, alpha=0.7)
         ax_lollipop.scatter(x, y, color=colour, s=30, zorder=3, edgecolors='white', linewidths=0.4)
@@ -87,22 +100,29 @@ def lollipop_plot(
     ]
     ax_lollipop.legend(handles=handles, loc='upper right', fontsize=7, framealpha=0.8)
 
+    # Zoom to selected genes to keep the plot focused on rule-relevant regions.
+    x_min = min(gene.start for gene in plot_genes) + 1
+    x_max = max(gene.end for gene in plot_genes)
+    pad = max(10, int(0.02 * (x_max - x_min + 1)))
+    ax_lollipop.set_xlim(max(1, x_min - pad), x_max + pad)
+
     # ----- Gene track panel -----
-    gene_colours = plt.cm.Set2(np.linspace(0, 1, max(len(genes), 1)))
-    for i, gene in enumerate(genes):
+    gene_colours = plt.cm.Set2(np.linspace(0, 1, max(len(plot_genes), 1)))
+    for i, gene in enumerate(plot_genes):
         colour = gene_colours[i % len(gene_colours)]
         gene_left = gene.start + 1
         gene_width = gene.end - gene.start
         ax_gene.barh(
-            0, gene_width, left=gene_left,
+            i, gene_width, left=gene_left,
             height=0.5, color=colour, edgecolor='black', linewidth=0.5,
         )
         mid = gene_left + (gene_width / 2)
-        ax_gene.text(mid, 0, gene.name, ha='center', va='center', fontsize=8, fontweight='bold')
+        ax_gene.text(mid, i, gene.name, ha='center', va='center', fontsize=8, fontweight='bold')
 
-    ax_gene.set_ylim(-0.5, 0.5)
+    ax_gene.set_ylim(-0.6, len(plot_genes) - 0.4)
     ax_gene.set_xlabel('Genomic position')
-    ax_gene.set_yticks([])
+    ax_gene.set_yticks(range(len(plot_genes)))
+    ax_gene.set_yticklabels([gene.name for gene in plot_genes], fontsize=8)
     ax_gene.spines['top'].set_visible(False)
     ax_gene.spines['left'].set_visible(False)
     ax_gene.spines['right'].set_visible(False)
@@ -112,6 +132,56 @@ def lollipop_plot(
 
     logger.info('Lollipop plot saved to %s', output_path)
     return output_path
+
+
+def _select_plot_genes(
+    genes: list[GeneRecord],
+    annotations: list,
+    rule_gene_names: set[str] | None,
+) -> list[GeneRecord]:
+    """
+    Keep genes that have detected variants and resistance rules.
+
+    :param genes: all genes on the selected reference
+    :param annotations: CDS annotations from profiling result
+    :param rule_gene_names: genes with loaded resistance rules
+    :return: ordered list of genes to render in the plot
+    """
+    variant_gene_names = {ann.gene_name for ann in annotations if ann.gene_name}
+    if rule_gene_names is None:
+        selected_names = variant_gene_names
+    else:
+        selected_names = variant_gene_names & set(rule_gene_names)
+        if not selected_names:
+            selected_names = variant_gene_names
+
+    return sorted(
+        [gene for gene in genes if gene.name in selected_names],
+        key=lambda g: (g.start, g.end, g.name),
+    )
+
+
+def _apply_position_jitter(annotations: list) -> list[tuple[object, float]]:
+    """
+    Add deterministic y-jitter for variants sharing the same genomic position.
+
+    :param annotations: CDS annotations
+    :return: list of (annotation, jittered_y)
+    """
+    by_pos: dict[int, list] = {}
+    for ann in annotations:
+        by_pos.setdefault(ann.variant.pos, []).append(ann)
+
+    out: list[tuple[object, float]] = []
+    for pos in sorted(by_pos):
+        group = sorted(by_pos[pos], key=lambda a: (a.variant.allele_freq, a.gene_name, a.alt_aa))
+        n = len(group)
+        center = (n - 1) / 2.0
+        for i, ann in enumerate(group):
+            offset = 0.012 * (i - center)
+            y = min(1.0, max(0.0, ann.variant.allele_freq + offset))
+            out.append((ann, y))
+    return out
 
 
 
