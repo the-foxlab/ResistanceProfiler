@@ -38,6 +38,7 @@ class GeneMatch:
     query_end: int
     strand: str
     cigar: str
+    cds_start: int = 0  # first aligned CDS position (0-based); used to reconstruct gapped strings
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -102,6 +103,7 @@ def match_query_to_genes(
                 query_end=best.query_end,
                 strand=best.strand,
                 cigar=best.cigar,
+                cds_start=best.cds_start,
             ))
             logger.info(
                 'Gene %r matched: identity=%.1f%%, coverage=%.1f%%, strand=%s',
@@ -340,6 +342,7 @@ class _AlignResult:
     query_end: int
     strand: str
     cigar: str
+    cds_start: int = 0
 
 
 def _align_cds_to_query(cds: str, query: str, strand: str) -> _AlignResult:
@@ -363,17 +366,17 @@ def _align_cds_to_query(cds: str, query: str, strand: str) -> _AlignResult:
         best = alignments[0]
     except IndexError:
         return _AlignResult(0.0, 0.0, 0, 0, strand, '')
-    cigar, identity, cds_aligned, q_start, q_end = _alignment_to_cigar(best, query, cds)
+    cigar, identity, cds_aligned, q_start, q_end, cds_start = _alignment_to_cigar(best, query, cds)
     coverage = cds_aligned / len(cds) if cds else 0.0
 
-    return _AlignResult(identity, coverage, q_start, q_end, strand, cigar)
+    return _AlignResult(identity, coverage, q_start, q_end, strand, cigar, cds_start)
 
 
 def _alignment_to_cigar(
     alignment,
     query: str,
     cds: str,
-) -> tuple[str, float, int, int, int]:
+) -> tuple[str, float, int, int, int, int]:
     """
     Convert a Biopython Alignment object to a CIGAR string.
 
@@ -382,16 +385,17 @@ def _alignment_to_cigar(
     - ``I`` = insertion in query (bases in query not in CDS)
     - ``D`` = deletion in query (CDS bases with no query counterpart)
 
-    :return: (cigar, identity, cds_bases_aligned, query_start, query_end)
+    :return: (cigar, identity, cds_bases_aligned, query_start, query_end, cds_start)
     """
     query_blocks = alignment.aligned[0]
     cds_blocks = alignment.aligned[1]
 
     if len(query_blocks) == 0:
-        return '', 0.0, 0, 0, 0
+        return '', 0.0, 0, 0, 0, 0
 
     q_start = int(query_blocks[0][0])
     q_end = int(query_blocks[-1][1])
+    cds_start = int(cds_blocks[0][0])
 
     cigar_ops: list[str] = []
     matches = 0
@@ -425,5 +429,5 @@ def _alignment_to_cigar(
 
     cigar = ''.join(cigar_ops)
     identity = matches / total_aligned if total_aligned > 0 else 0.0
-    return cigar, identity, cds_aligned, q_start, q_end
+    return cigar, identity, cds_aligned, q_start, q_end, cds_start
 

@@ -237,7 +237,7 @@ class TestAlignerOverflowSafety:
         monkeypatch.setattr(
             sequence_matching,
             '_alignment_to_cigar',
-            lambda alignment, query, cds: ('10M', 1.0, 10, 0, 10),
+            lambda alignment, query, cds: ('10M', 1.0, 10, 0, 10, 0),
         )
 
         result = sequence_matching._align_cds_to_query('ATGATGATGA', 'ATGATGATGA', '+')

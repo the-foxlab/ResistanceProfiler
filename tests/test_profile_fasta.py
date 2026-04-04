@@ -15,7 +15,6 @@ from respro.cli import main
 from respro.core.fasta_profile import (
     _annotate_from_alignment,
     _expand_iupac_codon,
-    _global_align,
     profile_fasta_consensus,
 )
 from respro.core.profile import (
@@ -25,7 +24,9 @@ from respro.core.profile import (
     resolve_cached_query_reference,
     resolve_fasta_query,
 )
-from respro.core.sequence_matching import GeneMatch, match_query_to_genes, sequence_checksum, store_mappings
+from respro.core.sequence_matching import (
+    GeneMatch, _align_cds_to_query, match_query_to_genes, sequence_checksum, store_mappings,
+)
 from respro.db.models import GeneRecord, VariantCall
 from respro.db.schema import create_schema, open_project_db
 
@@ -726,16 +727,23 @@ def simple_gene() -> GeneRecord:
     )
 
 
-def _make_match(gene: GeneRecord, query_len: int, strand: str = '+') -> GeneMatch:
-    """Build a GeneMatch covering the full query, strand-aware."""
+def _make_match(gene: GeneRecord, query: str, strand: str = '+') -> GeneMatch:
+    """Build a GeneMatch with a real CIGAR by aligning query against the gene CDS."""
+    if not gene.nt_sequence:
+        return GeneMatch(
+            gene=gene, identity=0.0, coverage=0.0,
+            query_start=0, query_end=len(query), strand=strand, cigar='',
+        )
+    result = _align_cds_to_query(gene.nt_sequence.upper(), query.upper(), strand)
     return GeneMatch(
         gene=gene,
-        identity=1.0,
-        coverage=1.0,
-        query_start=0,
-        query_end=query_len,
+        identity=result.identity,
+        coverage=result.coverage,
+        query_start=result.query_start,
+        query_end=result.query_end,
         strand=strand,
-        cigar=f'{query_len}M',
+        cigar=result.cigar,
+        cds_start=result.cds_start,
     )
 
 
@@ -763,7 +771,7 @@ class TestIupacExpansion:
 class TestFastaConsensusProfile:
     def test_perfect_match_produces_no_annotations(self, simple_gene: GeneRecord) -> None:
         """Identical consensus emits zero annotations (all synonymous)."""
-        match = _make_match(simple_gene, 12)
+        match = _make_match(simple_gene, _SIMPLE_CDS)
         anns = profile_fasta_consensus(_SIMPLE_CDS, [match])
         assert anns == []
 
@@ -771,7 +779,7 @@ class TestFastaConsensusProfile:
         """Single K→E substitution at codon 1 → one missense annotation."""
         # ATGGAAGCTTAA: codon 1 = GAA = E (was AAA = K)
         query = 'ATGGAAGCTTAA'
-        match = _make_match(simple_gene, 12)
+        match = _make_match(simple_gene, query)
         anns = profile_fasta_consensus(query, [match])
 
         assert len(anns) == 1
@@ -787,7 +795,7 @@ class TestFastaConsensusProfile:
         """Synonymous codon change produces no annotations."""
         # AAA → AAG: both encode K
         query = 'ATGAAGGCTTAA'
-        match = _make_match(simple_gene, 12)
+        match = _make_match(simple_gene, query)
         anns = profile_fasta_consensus(query, [match])
         assert anns == []
 
@@ -795,7 +803,7 @@ class TestFastaConsensusProfile:
         """K → * at codon 1 → stop_gained annotation."""
         # ATGTAAGCTTAA: codon 1 = TAA = *
         query = 'ATGTAAGCTTAA'
-        match = _make_match(simple_gene, 12)
+        match = _make_match(simple_gene, query)
         anns = profile_fasta_consensus(query, [match])
 
         assert len(anns) == 1
@@ -806,7 +814,7 @@ class TestFastaConsensusProfile:
         """Single-base insertion → frameshift annotation; no further codons processed."""
         # Insert 'A' after codon 1 → ATGAAAAGCTTAA (13 nt): frameshift at some codon
         query = 'ATGAAAAGCTTAA'
-        match = _make_match(simple_gene, len(query))
+        match = _make_match(simple_gene, query)
         anns = profile_fasta_consensus(query, [match])
 
         assert len(anns) == 1
@@ -817,7 +825,7 @@ class TestFastaConsensusProfile:
         """Three-base insertion → insertion annotation; subsequent codons still processed."""
         # 'ATGAAAGGGGCTTAA' = ATG AAA [GGG inserted] GCT TAA (15 nt)
         query = 'ATGAAAGGGGCTTAA'
-        match = _make_match(simple_gene, len(query))
+        match = _make_match(simple_gene, query)
         anns = profile_fasta_consensus(query, [match])
 
         # One insertion at codon 2 (A→AG), no downstream frameshifts
@@ -828,7 +836,7 @@ class TestFastaConsensusProfile:
         """Single-base deletion → frameshift; subsequent codons not emitted."""
         # 'ATGAAGCTTAA' (11 nt): 1 base deleted from codon 1 → frameshift
         query = 'ATGAAGCTTAA'
-        match = _make_match(simple_gene, len(query))
+        match = _make_match(simple_gene, query)
         anns = profile_fasta_consensus(query, [match])
 
         assert len(anns) == 1
@@ -839,7 +847,7 @@ class TestFastaConsensusProfile:
         """IUPAC 'R' at codon 1 → K (ref) or E: only E emitted with af=0.5."""
         # 'ATGRAAGCTTAA': codon 1 = RAA = AAA (K) or GAA (E)
         query = 'ATGRAAGCTTAA'
-        match = _make_match(simple_gene, 12)
+        match = _make_match(simple_gene, query)
         anns = profile_fasta_consensus(query, [match])
 
         assert len(anns) == 1
@@ -852,7 +860,7 @@ class TestFastaConsensusProfile:
         """Variant pos should be the 0-based genomic NT position of the affected codon."""
         # K→E at codon 1 (codons: 0=ATG pos 0, 1=AAA pos 3, 2=GCT pos 6, 3=TAA pos 9)
         query = 'ATGGAAGCTTAA'
-        match = _make_match(simple_gene, 12)
+        match = _make_match(simple_gene, query)
         anns = profile_fasta_consensus(query, [match])
 
         assert len(anns) == 1
@@ -866,7 +874,7 @@ class TestFastaConsensusProfile:
             start=0, end=12, strand='+', codon_start=0,
             nt_sequence='',
         )
-        match = _make_match(gene_no_seq, 12)
+        match = _make_match(gene_no_seq, _SIMPLE_CDS)
         anns = profile_fasta_consensus(_SIMPLE_CDS, [match])
         assert anns == []
 

@@ -18,9 +18,9 @@ allele_freq = 1 / number_of_possible_amino_acids.
 from __future__ import annotations
 
 import logging
+import re
 from itertools import product as itertools_product
 
-from Bio.Align import PairwiseAligner
 from Bio.Seq import Seq
 
 from respro.core.annotation import translate_codon
@@ -78,6 +78,9 @@ def _profile_gene(query_seq: str, match: GeneMatch) -> list[AnnotatedVariant]:
     """
     Align query region to one gene CDS and emit amino acid differences.
 
+    Gapped alignment strings are reconstructed from the stored CIGAR instead of
+    re-running a second alignment, avoiding the O(n×m) cost of a duplicate pass.
+
     :param query_seq: full query sequence (forward strand)
     :param match: gene match from sequence alignment
     :return: annotated differences for this gene
@@ -87,90 +90,67 @@ def _profile_gene(query_seq: str, match: GeneMatch) -> list[AnnotatedVariant]:
         logger.warning('Gene %r has no stored CDS sequence — skipping', gene.name)
         return []
 
-    # Extract query region that aligns to this CDS, oriented to coding strand
+    # Extract query region oriented to coding strand
     region = query_seq[match.query_start:match.query_end].upper()
     if match.strand == '-':
         region = str(Seq(region).reverse_complement())
 
-    aligned_ref, aligned_query = _global_align(gene.nt_sequence.upper(), region)
+    aligned_ref, aligned_query = _gapped_strings_from_cigar(
+        gene.nt_sequence.upper(), region, match.cigar, match.cds_start,
+    )
     return _annotate_from_alignment(aligned_ref, aligned_query, gene)
 
 
-def _global_align(ref: str, query: str) -> tuple[str, str]:
+def _gapped_strings_from_cigar(
+    cds: str,
+    region: str,
+    cigar: str,
+    cds_start: int,
+) -> tuple[str, str]:
     """
-    Globally align two nucleotide sequences and return gapped strings.
+    Reconstruct gapped alignment strings from a CIGAR string without re-aligning.
 
-    :param ref: reference sequence (internal CDS)
-    :param query: query sequence (extracted from user FASTA)
-    :return: (aligned_ref, aligned_query) with '-' for gaps
+    Leading and trailing unaligned CDS bases (when coverage < 100%) are represented
+    as query gaps so the frame walk in ``_annotate_from_alignment`` covers the full CDS.
+
+    CIGAR operations are CDS-relative: M=match/mismatch, I=insertion in query, D=deletion in query.
+
+    :param cds: full internal CDS nucleotide sequence
+    :param region: extracted query region (query[query_start:query_end], coding strand)
+    :param cigar: CIGAR string from sequence matching
+    :param cds_start: 0-based CDS position where the alignment begins
+    :return: (aligned_ref, aligned_query) of equal length
     """
-    aligner = PairwiseAligner()
-    aligner.mode = 'global'
-    aligner.match_score = 2.0
-    aligner.mismatch_score = -1.0
-    aligner.open_gap_score = -3.0
-    aligner.extend_gap_score = -0.5
-
-    alignments = aligner.align(ref, query)
-    try:
-        best = alignments[0]
-    except (IndexError, OverflowError):
-        # Degenerate case: sequences too different to align reliably
-        logger.warning('Global alignment failed for sequences of length %d / %d', len(ref), len(query))
-        return ref, query
-
-    return _extract_gapped_strings(best, ref, query)
-
-
-def _extract_gapped_strings(alignment, ref: str, query: str) -> tuple[str, str]:
-    """
-    Reconstruct gapped aligned strings from a Biopython PairwiseAlignment.
-
-    alignment.aligned[0] = ref (target) block coordinates.
-    alignment.aligned[1] = query block coordinates.
-
-    Unaligned ref positions between blocks = deletion in query.
-    Unaligned query positions between blocks = insertion in query.
-
-    :param alignment: Biopython PairwiseAlignment object
-    :param ref: reference sequence
-    :param query: query sequence
-    :return: (gapped_ref, gapped_query) of equal length
-    """
-    ref_blocks = alignment.aligned[0]
-    query_blocks = alignment.aligned[1]
-
     aligned_ref: list[str] = []
     aligned_query: list[str] = []
-    r_prev = 0
-    q_prev = 0
 
-    for (r_s, r_e), (q_s, q_e) in zip(ref_blocks, query_blocks):
-        q_gap = q_s - q_prev  # unaligned query bases → insertion in query (gap in ref)
-        r_gap = r_s - r_prev  # unaligned ref bases → deletion in query (gap in query)
+    # Unaligned CDS bases before alignment start → gaps in query
+    if cds_start > 0:
+        aligned_ref.append(cds[:cds_start])
+        aligned_query.append('-' * cds_start)
 
-        if q_gap > 0:
-            aligned_query.append(query[q_prev:q_s])
-            aligned_ref.append('-' * q_gap)
+    ref_pos = cds_start
+    query_pos = 0
+    for n_str, op in re.findall(r'(\d+)([MID])', cigar):
+        n = int(n_str)
+        if op == 'M':
+            aligned_ref.append(cds[ref_pos:ref_pos + n])
+            aligned_query.append(region[query_pos:query_pos + n])
+            ref_pos += n
+            query_pos += n
+        elif op == 'I':  # insertion in query
+            aligned_ref.append('-' * n)
+            aligned_query.append(region[query_pos:query_pos + n])
+            query_pos += n
+        elif op == 'D':  # deletion in query
+            aligned_ref.append(cds[ref_pos:ref_pos + n])
+            aligned_query.append('-' * n)
+            ref_pos += n
 
-        if r_gap > 0:
-            aligned_ref.append(ref[r_prev:r_s])
-            aligned_query.append('-' * r_gap)
-
-        aligned_ref.append(ref[r_s:r_e])
-        aligned_query.append(query[q_s:q_e])
-
-        r_prev = r_e
-        q_prev = q_e
-
-    # Trailing unaligned positions
-    if r_prev < len(ref):
-        aligned_ref.append(ref[r_prev:])
-        aligned_query.append('-' * (len(ref) - r_prev))
-
-    if q_prev < len(query):
-        aligned_query.append(query[q_prev:])
-        aligned_ref.append('-' * (len(query) - q_prev))
+    # Trailing unaligned CDS bases → gaps in query
+    if ref_pos < len(cds):
+        aligned_ref.append(cds[ref_pos:])
+        aligned_query.append('-' * (len(cds) - ref_pos))
 
     return ''.join(aligned_ref), ''.join(aligned_query)
 

@@ -41,6 +41,135 @@ ReistanceProfiler/
 └── pyproject.toml
 ```
 
+## Tool architecture overview
+
+The diagram below shows how the two main workflows (**database initialisation** and
+**resistance profiling**) flow through the key modules.
+
+```mermaid
+flowchart TD
+    %% ── Style definitions ────────────────────────────────────────────
+    classDef inputStyle   fill:#dbeafe,stroke:#3b82f6,stroke-width:2px,color:#1e3a5f
+    classDef cliStyle     fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#2e1065
+    classDef ioStyle      fill:#fef9c3,stroke:#b45309,stroke-width:2px,color:#451a03
+    classDef coreStyle    fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#052e16
+    classDef dbStyle      fill:#fce7f3,stroke:#be185d,stroke-width:2px,color:#500724
+    classDef reportStyle  fill:#e0f2fe,stroke:#0284c7,stroke-width:2px,color:#0c4a6e
+    classDef outputStyle  fill:#f1f5f9,stroke:#475569,stroke-width:2px,color:#0f172a,font-weight:bold
+
+    %% ── Input files ──────────────────────────────────────────────────
+    subgraph IN["📥  User Inputs"]
+        i_gb["📄 GenBank file(s)"]
+        i_tsv["📋 Rules TSV"]
+        i_vcf["🧬 VCF file"]
+        i_rfasta["🔤 Reference FASTA"]
+        i_cfasta["🔤 Consensus FASTA"]
+    end
+
+    %% ── CLI layer ────────────────────────────────────────────────────
+    subgraph CLI["⌨️  CLI  ·  respro/cli.py"]
+        direction LR
+        c_init["init / init-add"]
+        c_pvcf["profile-vcf"]
+        c_pfas["profile-fasta"]
+        c_regen["regenerate"]
+    end
+
+    %% ── I/O parsers ──────────────────────────────────────────────────
+    subgraph IO["📂  I/O  ·  respro/io/"]
+        io_gb["genbank.py\nparse references & CDS slices"]
+        io_vcf["vcf.py\nparse variants + allele freq"]
+        io_pc["pubchem.py\ndrug metadata lookup"]
+    end
+
+    %% ── Core logic ───────────────────────────────────────────────────
+    subgraph CORE["⚙️  Core  ·  respro/core/"]
+        co_sm["sequence_matching.py\nalign FASTA → CDS · build CIGAR maps"]
+        co_pr["profile.py\nremap VCF variants via CIGAR"]
+        co_fp["fasta_profile.py\ncodon-walk · AA diff · IUPAC expansion"]
+        co_an["annotation.py\ncodon annotation · AF binning"]
+        co_rr["resistance_rules.py\nmatch_rules · match_rule_sets"]
+    end
+
+    %% ── Databases ────────────────────────────────────────────────────
+    subgraph DB["🗄️  Databases  ·  respro/db/"]
+        db_ip["init_project.py\nbuild / extend project DB"]
+        db_pj[("project.db\nreferences · genes · rules · drugs")]
+        db_rs[("results.db\nruns · variant results")]
+    end
+
+    %% ── Report layer ─────────────────────────────────────────────────
+    subgraph REP["📊  Report  ·  respro/report/"]
+        re_ex["export.py\norchestrate outputs"]
+        re_pl["plots.py\ngenome overview · lollipop panels"]
+        re_ht["html.py\ntable assembly · NT change highlighting"]
+    end
+
+    out_html["📄  Standalone HTML Report"]
+
+    %% ── Init pipeline ────────────────────────────────────────────────
+    i_gb & i_tsv --> c_init
+    c_init --> io_gb & io_pc
+    io_gb & io_pc --> db_ip --> db_pj
+
+    %% ── profile-vcf pipeline ─────────────────────────────────────────
+    i_vcf & i_rfasta --> c_pvcf
+    c_pvcf --> io_vcf --> co_pr
+    c_pvcf --> co_sm
+    co_sm <-->|"cache mappings"| db_pj
+    co_sm --> co_pr
+    co_pr --> co_an
+
+    %% ── profile-fasta pipeline ───────────────────────────────────────
+    i_cfasta --> c_pfas --> co_sm
+    co_sm --> co_fp --> co_an
+
+    %% ── Shared: annotation → rules → report ──────────────────────────
+    co_an --> co_rr
+    co_rr <-->|"load rules"| db_pj
+    co_rr --> re_ex
+    re_ex --> re_pl & re_ht --> out_html
+    re_ex -->|"persist run"| db_rs
+
+    %% ── Regenerate ───────────────────────────────────────────────────
+    c_regen --> db_rs & db_pj
+    c_regen --> re_ex
+
+    %% ── Apply styles ─────────────────────────────────────────────────
+    class i_gb,i_tsv,i_vcf,i_rfasta,i_cfasta inputStyle
+    class c_init,c_pvcf,c_pfas,c_regen cliStyle
+    class io_gb,io_vcf,io_pc ioStyle
+    class co_sm,co_pr,co_fp,co_an,co_rr coreStyle
+    class db_ip,db_pj,db_rs dbStyle
+    class re_ex,re_pl,re_ht reportStyle
+    class out_html outputStyle
+
+    %% ── Subgraph background colours ──────────────────────────────────
+    style IN   fill:#eff6ff,stroke:#bfdbfe,stroke-width:1px
+    style CLI  fill:#f5f3ff,stroke:#ddd6fe,stroke-width:1px
+    style IO   fill:#fefce8,stroke:#fde68a,stroke-width:1px
+    style CORE fill:#f0fdf4,stroke:#bbf7d0,stroke-width:1px
+    style DB   fill:#fdf2f8,stroke:#fbcfe8,stroke-width:1px
+    style REP  fill:#f0f9ff,stroke:#bae6fd,stroke-width:1px
+```
+
+**Init pipeline** (`respro init` / `respro init-add`): GenBank records and a rules TSV
+are parsed by `respro/io/`, optionally enriched with PubChem drug metadata, and written
+to a versioned `project.db`.
+
+**VCF pipeline** (`respro profile-vcf`): a user reference FASTA is aligned to internal
+CDS annotations via CIGAR maps (cached in `project.db`). VCF variants are remapped from
+user-reference to internal coordinates, then annotated codon-by-codon and matched against
+curated resistance rules.
+
+**FASTA pipeline** (`respro profile-fasta`): a consensus FASTA replaces VCF input.
+CIGAR maps from sequence matching are reused directly (no second alignment) to reconstruct
+gapped alignment strings, which are walked in reading frame to detect SNPs, in-frame
+INDELs, frameshifts, and IUPAC-ambiguous positions.
+
+**Regenerate** (`respro regenerate`): loads a serialised run from `results.db`, validates
+the project fingerprint, and re-exports the report without re-running profiling.
+
 ## Package responsibilities
 
 ### `respro/`
@@ -54,18 +183,19 @@ Defines the public CLI entry points:
 
 - `respro init`
 - `respro init-add`
-- `respro profile`
+- `respro profile-vcf`
+- `respro profile-fasta`
 - `respro regenerate`
 
 CLI code should coordinate the pipeline and input/output handling, but avoid embedding
 heavy biological logic directly in argument handlers. `respro init` is for fresh
 project creation, while `respro init-add` extends an existing DB with additional
-rules and optional new GenBank annotations. `respro profile` optionally accepts
-`--results-db`: if the path does not exist it is created, if it exists it is
-validated before profiling continues. `respro regenerate` reads from an existing
-results database; `--list` shows all stored runs, `--identifier` with `--project`
-and `--out` regenerates the full report for a specific run after validating that
-the project database fingerprint matches.
+rules and optional new GenBank annotations. Both `profile-vcf` and `profile-fasta`
+optionally accept `--results-db`: if the path does not exist it is created, if it
+exists it is validated before profiling continues. `respro regenerate` reads from an
+existing results database; `--list` shows all stored runs, `--identifier` with
+`--project` and `--out` regenerates the full report for a specific run after
+validating that the project database fingerprint matches.
 
 ### `respro/core/`
 
