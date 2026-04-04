@@ -184,6 +184,16 @@ a collection.
 - If user instructions conflict with roadmap priorities, follow direct user instructions
   and update the roadmap afterwards.
 
+# Code review guidelines
+
+When reviewing code, check the whole repository for:
+
+- Coding standards and conventions
+- Unused features, functions, classes, modules or imports
+- Unnecessary complexity
+- Simplify highly nested functions or methods
+- Always try to simplify and improve readability
+
 ## Testing
 
 Organize tests in classes when grouping related scenarios:

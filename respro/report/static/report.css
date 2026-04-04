@@ -21,6 +21,17 @@ tr:hover td { background: #f0f4f8; }
 .hit-row { background: #fdf2f2; }
 .hit-row:hover td { background: #fce8e8; }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
+
+/* Click-to-highlight behavior for table badges */
+.badge-interactive { cursor: pointer; transition: opacity .15s ease, transform .12s ease, box-shadow .15s ease; }
+.badge-interactive:hover { transform: translateY(-1px); }
+.badge-active { box-shadow: 0 0 0 2px #1f2937, 0 0 0 4px rgba(255, 255, 255, .85); }
+.row-badge-match td { background: #fff7cc; }
+.row-badge-match:hover td { background: #ffefad; }
+.hit-row.row-badge-match td { background: #fde7b2; }
+.hit-row.row-badge-match:hover td { background: #f8dc9a; }
+.row-badge-muted td { opacity: .42; }
+.row-badge-muted:hover td { opacity: .58; }
 .badge-high { background: #e74c3c; color: #fff; }
 .badge-intermediate { background: #f39c12; color: #fff; }
 .badge-low { background: #95a5a6; color: #fff; }
