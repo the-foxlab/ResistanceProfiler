@@ -67,8 +67,22 @@ respro init \
 respro profile \
     --project project.db \
     --vcf sample.vcf \
+    --ref-fasta sample_ref.fasta \
     --output report/
 ```
+
+For repeat runs, you can also reuse a previously cached query reference instead of
+providing the FASTA again:
+
+```bash
+respro profile \
+    --project project.db \
+    --vcf sample.vcf \
+    --query-ref-header sample_ref \
+    --output report/
+```
+
+Exactly one of `--ref-fasta` or `--query-ref-header` must be provided.
 
 ### 3. Add rules to an existing project
 

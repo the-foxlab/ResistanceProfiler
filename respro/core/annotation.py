@@ -13,6 +13,15 @@ from respro.db.models import AnnotatedVariant, GeneRecord, VariantCall
 
 logger = logging.getLogger(__name__)
 
+# Compiled patterns for normalize_mutation — module-level per Python performance convention.
+_RE_FS_ANY = re.compile(r'^(?:[A-Z*]\d+)?(?:fs|frameshift)', re.IGNORECASE)
+_RE_STOP_FULL = re.compile(r'^[A-Z*]\d+stop$', re.IGNORECASE)
+_RE_REWRITE = re.compile(r'^([A-Z*]+)(\d+)([A-Z*]+)$', re.IGNORECASE)
+_RE_HGVS_INS = re.compile(r'^([A-Z*])(\d+)(?:_[A-Z*]\d+)?ins([A-Z*]+)$', re.IGNORECASE)
+_RE_HGVS_DEL = re.compile(r'^([A-Z*])(\d+)(?:_[A-Z*]\d+)?del([A-Z*]+)?$', re.IGNORECASE)
+_RE_DEL_PREFIX = re.compile(r'^del([A-Z*]+)?(?:[A-Z*]\d+|\d+)$', re.IGNORECASE)
+_RE_BARE_AA = re.compile(r'^[A-Z]$', re.IGNORECASE)
+
 
 def reverse_complement(seq: str) -> str:
     """
@@ -58,11 +67,10 @@ def annotate_variants(
     available (``VariantCall.query_ref_codon``). Indels are always annotated
     against the internal CDS sequence.
 
-    :param variants: parsed variant calls (0-based positions)
+    :param variants: parsed variant calls (0-based positions). Variants with no CDS hit are
+        included with empty gene_name. If two or more SNPs in the same gene codon all have
+        AF > threshold, they are annotated as one combined codon event.
     :param genes: gene annotations for the reference
-    Variants with no CDS hit are included with empty gene_name. If two or more
-    SNPs in the same gene codon all have AF > threshold, they are annotated as
-    one combined codon event.
 
     :param snp_combine_af_threshold: strict AF threshold for combining SNPs
         within one codon (must be greater than this value)
@@ -466,14 +474,6 @@ def normalize_mutation(
     :return: canonical token, or None if the input cannot be recognised
     """
 
-    # ── Compiled patterns for normalize_mutation ──────────────────────────────────
-    _RE_FS_ANY = re.compile(r'^(?:[A-Z*]\d+)?(?:fs|frameshift)', re.IGNORECASE)
-    _RE_STOP_FULL = re.compile(r'^[A-Z*]\d+stop$', re.IGNORECASE)
-    _RE_REWRITE = re.compile(r'^([A-Z*]+)(\d+)([A-Z*]+)$', re.IGNORECASE)
-    _RE_HGVS_INS = re.compile(r'^([A-Z*])(\d+)(?:_[A-Z*]\d+)?ins([A-Z*]+)$', re.IGNORECASE)
-    _RE_HGVS_DEL = re.compile(r'^([A-Z*])(\d+)(?:_[A-Z*]\d+)?del([A-Z*]+)?$', re.IGNORECASE)
-    _RE_DEL_PREFIX = re.compile(r'^del([A-Z*]+)?(?:[A-Z*]\d+|\d+)$', re.IGNORECASE)
-    _RE_BARE_AA = re.compile(r'^[A-Z]$', re.IGNORECASE)
 
     s = raw.strip()
     if not s:

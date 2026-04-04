@@ -25,7 +25,6 @@ _MARKER_SHAPES = {
     'no_database_hit': 'o',
 }
 
-_COLOURS = MUTATION_COLOURS
 
 
 def lollipop_plot(
@@ -131,17 +130,17 @@ def _build_lollipop_figure(
     handles = [
         plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='white',
                    markeredgecolor='black', markersize=8, label='Database hit'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=_COLOURS['missense'],
+        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['missense'],
                    markeredgecolor='white', markersize=8, label='Missense'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=_COLOURS['synonymous'],
+        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['synonymous'],
                    markeredgecolor='white', markersize=8, label='Synonymous'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=_COLOURS['stop_gained'],
+        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['stop_gained'],
                    markeredgecolor='white', markersize=8, label='Stop gained/lost'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=_COLOURS['frameshift'],
+        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['frameshift'],
                    markeredgecolor='white', markersize=8, label='Frameshift'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=_COLOURS['insertion'],
+        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['insertion'],
                    markeredgecolor='white', markersize=8, label='Insertion'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=_COLOURS['deletion'],
+        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['deletion'],
                    markeredgecolor='white', markersize=8, label='Deletion'),
     ]
 
@@ -257,7 +256,6 @@ def _draw_genome_overview(
 
     tracks = _assign_gene_tracks(sorted_genes)
     genome_start, genome_end = _resolve_overview_bounds(sorted_genes, reference_length_nt)
-    genome_mid = genome_start + ((genome_end - genome_start) / 2)
     max_track = max(tracks.values(), default=0)
     track_height = 0.44
     track_step = track_height * 0.2
@@ -393,7 +391,7 @@ def _draw_gene_panel(ax, gene: GeneRecord, annotations: list[AnnotatedVariant], 
     for ann, x_top in jittered:
         x_base = ann.variant.pos + 1
         y_top = ann.variant.allele_freq
-        colour = _COLOURS.get(ann.consequence, _COLOURS['unknown'])
+        colour = MUTATION_COLOURS.get(ann.consequence, MUTATION_COLOURS['unknown'])
         _draw_bent_lollipop(ax, x_base, x_top, y_top, colour)
         ax.scatter(
             x_top,

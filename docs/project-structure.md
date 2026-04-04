@@ -55,14 +55,17 @@ Defines the public CLI entry points:
 - `respro init`
 - `respro init-add`
 - `respro profile`
-- `respro export`
+- `respro regenerate`
 
 CLI code should coordinate the pipeline and input/output handling, but avoid embedding
 heavy biological logic directly in argument handlers. `respro init` is for fresh
 project creation, while `respro init-add` extends an existing DB with additional
 rules and optional new GenBank annotations. `respro profile` optionally accepts
 `--results-db`: if the path does not exist it is created, if it exists it is
-validated before profiling continues.
+validated before profiling continues. `respro regenerate` reads from an existing
+results database; `--list` shows all stored runs, `--identifier` with `--project`
+and `--out` regenerates the full report for a specific run after validating that
+the project database fingerprint matches.
 
 ### `respro/core/`
 
@@ -81,11 +84,12 @@ Pure profiling logic. Changes here should usually come with focused regression t
   Only genes with resistance rules are screened by default.  Results are cached
   in the project DB (`query_reference`, `query_gene_mapping`) so repeat runs
   with the same reference skip re-alignment.
-- `profile.py`: FASTA-based profiling — resolves a user FASTA against internal
-  CDS annotations, inverts CIGAR coordinate maps to remap VCF variants from
-  user reference coordinates to internal genomic coordinates, performs sanity
-  checks (VCF REF vs FASTA base, CDS base vs query base), and transforms
-  REF/ALT bases to the internal forward strand for downstream annotation.
+- `profile.py`: FASTA-based profiling and cached-query reuse — resolves either a
+  user FASTA or a stored query header against internal CDS annotations, inverts
+  CIGAR coordinate maps to remap VCF variants from user reference coordinates
+  to internal genomic coordinates, checks VCF REF against the active query
+  sequence, and transforms REF/ALT bases to the internal forward strand for
+  downstream annotation.
 
 Use `respro/core/` for rules that should stay usable without report or storage layers.
 
@@ -98,7 +102,8 @@ SQLite schema and project/results database initialization logic.
   including future-facing combined rule-set containers.
 - `init_project.py`: project creation, validation, and curated data loading;
   enforces the rules TSV schema documented in `docs/rules-tsv-format.md`.
-- `bundle.py`: portable project packaging/export support.
+- `results.py`: profiling run persistence — `save_run`, `load_run`, `list_runs`,
+  `reconstruct_annotations`, and `project_fingerprint` for cross-DB validation.
 
 Database boundaries:
 
@@ -160,12 +165,16 @@ The test suite mirrors the major backend responsibilities.
 
 - `test_annotation.py`: codon translation and consequence behavior.
 - `test_sequence_matching.py`: CDS alignment, CIGAR coordinate mapping, and DB caching.
-- `test_profile_fasta.py`: FASTA-based profiling — coordinate remapping, sanity checks,
-  and CLI end-to-end with `--ref-fasta`.
+- `test_profile_fasta.py`: FASTA-based profiling — coordinate remapping, cached
+  query-header reuse, sanity checks, and CLI end-to-end with `--ref-fasta` or
+  `--query-ref-header`.
 - `test_reference_io.py`: reference matching and normalization expectations.
 - `test_rules.py`: resistance rule matching behavior.
 - `test_profile_cli.py`: CLI-level workflow coverage.
+- `test_regenerate_cli.py`: `respro regenerate` — listing, report regeneration, and
+  fingerprint mismatch rejection.
 - `test_report_outputs.py`: deterministic report/export behavior.
+- `test_results_db.py`: results DB schema, save/load round-trips, and fingerprint behavior.
 - `test_init_project.py`: coordinate base detection and reference AA validation.
 - `test_pubchem.py`: PubChem REST client and PubChem data loading (fully mocked, no network).
 - `conftest.py`: shared fixtures.
@@ -209,6 +218,7 @@ A typical `respro profile` run flows through the repository like this:
 4. Rule matching in `respro/core/resistance_rules.py`.
 5. Result assembly in `respro/report/results_model.py` and related report modules.
 6. Final export in `respro/report/export.py`.
+7. Optional persistence to `results.db` via `respro/db/results.py`.
 
 This separation helps keep logic testable and output generation consistent.
 

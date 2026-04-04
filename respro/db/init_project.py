@@ -8,6 +8,7 @@ import csv
 import logging
 import re
 import sqlite3
+import uuid
 from pathlib import Path
 
 from respro.core.annotation import normalize_mutation
@@ -17,6 +18,14 @@ from respro.io.genbank import ParsedGenBankGene, ParsedGenBankReference, parse_g
 from respro.utils import require_file, validate_strand
 
 logger = logging.getLogger(__name__)
+
+# Compiled patterns for NCBI protein accession detection.
+_RE_NCBI_PROTEIN_ACCESSION = re.compile(
+    r'^(?:[A-Z]{3}[0-9]{5}'       # e.g. AAA12345.1
+    r'|[A-Z]{2}_[0-9]{6,9}'       # e.g. YP_009137097.1, NP_123456.2
+    r'|[A-Z]{4}[0-9]{8,10})'      # e.g. KAFS00000001.1
+    r'\.[0-9]+$'
+)
 
 
 def init_project(
@@ -134,8 +143,8 @@ def add_to_project(
 
 def _insert_project(conn: sqlite3.Connection, name: str) -> int:
     cur = conn.execute(
-        'INSERT INTO project (name, schema_version) VALUES (?, ?)',
-        (name, PROJECT_SCHEMA_VERSION),
+        'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+        (name, PROJECT_SCHEMA_VERSION, str(uuid.uuid4())),
     )
     return cur.lastrowid  # type: ignore[return-value]
 
@@ -592,15 +601,7 @@ def _resolve_ncbi_protein_url(
 def _is_ncbi_protein_accession(value: str) -> bool:
     """Return True for common NCBI protein accession formats with version suffix."""
     token = value.strip().upper()
-    if not token:
-        return False
-
-    patterns = (
-        r'^[A-Z]{3}[0-9]{5}\.[0-9]+$',      # e.g. AAA12345.1
-        r'^[A-Z]{2}_[0-9]{6,9}\.[0-9]+$',   # e.g. YP_009137097.1, NP_123456.2
-        r'^[A-Z]{4}[0-9]{8,10}\.[0-9]+$',   # e.g. KAFS00000001.1
-    )
-    return any(re.fullmatch(pattern, token) is not None for pattern in patterns)
+    return bool(token) and _RE_NCBI_PROTEIN_ACCESSION.match(token) is not None
 
 
 def _get_value(row: dict[str, str], *keys: str) -> str:
@@ -704,17 +705,17 @@ def _normalize_phenotypes_from_row(
     phenotype_raw = _get_value(row, 'phenotype')
     clinical_raw = _get_value(row, 'clinical_phenotype')
 
-    phenotype_value = (_normalize_phenotype_token(phenotype_raw) or 'unknown') if phenotype_raw else 'unknown'
-    clinical_value = (_normalize_phenotype_token(clinical_raw) or 'unknown') if clinical_raw else 'unknown'
-
-    if phenotype_raw and _normalize_phenotype_token(phenotype_raw) is None:
+    phenotype_normalized = _normalize_phenotype_token(phenotype_raw) if phenotype_raw else 'unknown'
+    if phenotype_raw and phenotype_normalized is None:
         errors.append(f'{context}: invalid phenotype value {phenotype_raw!r}')
-        phenotype_value = 'unknown'
-    if clinical_raw and _normalize_phenotype_token(clinical_raw) is None:
-        errors.append(f'{context}: invalid clinical_phenotype value {clinical_raw!r}')
-        clinical_value = 'unknown'
+        phenotype_normalized = 'unknown'
 
-    return phenotype_value, clinical_value
+    clinical_normalized = _normalize_phenotype_token(clinical_raw) if clinical_raw else 'unknown'
+    if clinical_raw and clinical_normalized is None:
+        errors.append(f'{context}: invalid clinical_phenotype value {clinical_raw!r}')
+        clinical_normalized = 'unknown'
+
+    return phenotype_normalized, clinical_normalized
 
 
 def _is_noop_mutation(reference_aa: str, mutation: str) -> bool:
@@ -1034,13 +1035,9 @@ def _insert_combo_rule_sets(
                 errors=errors,
                 context=f'Combo rule group {group_id!r}',
             )
-            if normalized == 'unknown':
-                pass
-            else:
+            if normalized != 'unknown':
                 phenotype_values.add(normalized)
-            if normalized_clinical == 'unknown':
-                pass
-            else:
+            if normalized_clinical != 'unknown':
                 clinical_phenotype_values.add(normalized_clinical)
         if len(phenotype_values) > 1:
             errors.append(
@@ -1325,7 +1322,6 @@ def _build_gene_lookup(conn: sqlite3.Connection) -> dict[str, list[sqlite3.Row]]
         """
     ).fetchall()
 
-    # populate a dict of gene names to lists of gene rows
     genes_by_name: dict[str, list[sqlite3.Row]] = {}
     for row in gene_lookup_rows:
         genes_by_name.setdefault(row['gene_name'], []).append(row)

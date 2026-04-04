@@ -3,9 +3,10 @@ SQLite schema creation and validation for ResistanceProfiler databases.
 """
 
 import sqlite3
+import uuid
 from pathlib import Path
 
-PROJECT_SCHEMA_VERSION = 16
+PROJECT_SCHEMA_VERSION = 17
 RESULTS_SCHEMA_VERSION = 1
 
 PROJECT_SCHEMA_SQL = """\
@@ -13,6 +14,7 @@ PROJECT_SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS project (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL,
+    uuid        TEXT    NOT NULL DEFAULT '',
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     schema_version INTEGER NOT NULL DEFAULT 1
 );
@@ -140,6 +142,7 @@ CREATE TABLE IF NOT EXISTS run (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     project_name    TEXT    NOT NULL,
     project_db_path TEXT    NOT NULL,
+    project_fingerprint TEXT DEFAULT '',
     reference_name  TEXT    NOT NULL,
     sample_name     TEXT    DEFAULT '',
     vcf_path        TEXT    NOT NULL,
@@ -184,6 +187,7 @@ _REQUIRED_RESULTS_COLUMNS = {
 
 _OPTIONAL_RESULTS_COLUMN_DEFS = {
     'run': {
+        'project_fingerprint': "TEXT DEFAULT ''",
         'sample_name': "TEXT DEFAULT ''",
         'total_variants': 'INTEGER NOT NULL DEFAULT 0',
         'variants_in_cds': 'INTEGER NOT NULL DEFAULT 0',
@@ -224,6 +228,9 @@ _REQUIRED_PROJECT_COLUMNS = {
 }
 
 _OPTIONAL_PROJECT_COLUMN_DEFS = {
+    'project': {
+        'uuid': "TEXT NOT NULL DEFAULT ''",
+    },
     'reference': {
         'accession': "TEXT DEFAULT ''",
         'organism': "TEXT DEFAULT ''",
@@ -447,4 +454,15 @@ def open_project_db(db_path: Path) -> sqlite3.Connection:
     _validate_project_schema_overlap(conn, db_path)
     if _add_missing_optional_columns(conn, _OPTIONAL_PROJECT_COLUMN_DEFS):
         conn.commit()
+    _ensure_project_uuid(conn)
     return conn
+
+
+def _ensure_project_uuid(conn: sqlite3.Connection) -> None:
+    """Assign a UUID to any project row that does not yet have one (one-time migration)."""
+    rows = conn.execute("SELECT id FROM project WHERE uuid = '' OR uuid IS NULL").fetchall()
+    for row in rows:
+        conn.execute('UPDATE project SET uuid = ? WHERE id = ?', (str(uuid.uuid4()), row['id']))
+    if rows:
+        conn.commit()
+

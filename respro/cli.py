@@ -2,10 +2,10 @@
 CLI entry point for ResistanceProfiler.
 
 Commands:
-- respro init    — initialise a GenBank-backed project database
-- respro init-add — add rules and optional GenBank annotations to an existing project
-- respro profile — run the resistance profiling pipeline
-- respro export  — package a project into a portable bundle
+- respro init        — initialise a GenBank-backed project database
+- respro init-add    — add rules and optional GenBank annotations to an existing project
+- respro profile     — run the resistance profiling pipeline
+- respro regenerate  — list stored results or regenerate a report from a results database
 """
 
 from __future__ import annotations
@@ -17,20 +17,24 @@ import click
 
 from respro import __version__
 from respro.utils.logging import setup_logging
-from respro.core.annotation import assign_af_bins
-from respro.core.annotation import annotate_variants
+from respro.core.annotation import annotate_variants, assign_af_bins
 from respro.core.resistance_rules import load_rules, load_rule_sets, match_rules, match_rule_sets
 from respro.core.profile import (
     pick_best_reference_id,
     remap_variants,
+    resolve_cached_query_reference,
     resolve_fasta_reference,
     select_matches_for_reference,
 )
-from respro.db.bundle import export_bundle
-from respro.db.init_project import add_to_project
-from respro.db.init_project import init_project
-from respro.db.schema import init_results_db
-from respro.db.schema import open_project_db
+from respro.db.init_project import add_to_project, init_project
+from respro.db.results import (
+    list_runs,
+    load_run,
+    project_fingerprint as compute_project_fingerprint,
+    reconstruct_annotations,
+    save_run,
+)
+from respro.db.schema import init_results_db, open_project_db, open_results_db
 from respro.io.reference import load_genes_for_reference
 from respro.io.vcf import parse_vcf
 from respro.report.export import export_results
@@ -94,7 +98,7 @@ def init(
 
 
 @main.command('init-add')
-@click.option('--project', '-p', required=True, type=click.Path(exists=True), help='Existing project database.')
+@click.option('--project', '-p', required=True, type=click.Path(exists=True), help='Existing project SQLite database.')
 @click.option('--genbank', 'genbank_paths', required=False, multiple=True, type=click.Path(exists=True), help='Optional GenBank file(s) with additional references/genes.')
 @click.option('--rules', required=True, type=click.Path(exists=True), help='Resistance rules TSV to add.')
 @click.option('--drug-info/--no-drug-info', 'drug_info', default=True,
@@ -129,15 +133,20 @@ def init_add(
 @main.command()
 @click.option('--project', '-p', required=True, type=click.Path(exists=True), help='Project database.')
 @click.option('--vcf', required=True, type=click.Path(exists=True), help='Input VCF file.')
-@click.option('--ref-fasta', required=True, type=click.Path(exists=True),
+@click.option('--ref-fasta', required=False, type=click.Path(exists=True),
     help='Reference FASTA the VCF was called against.')
+@click.option(
+    '--query-ref-header',
+    required=False,
+    help='Reuse a previously cached query reference by its exact stored FASTA header.',
+)
 @click.option('--sample', default='sample', help='Sample name for the report. Default: sample')
 @click.option('--output', '-o', default='output', type=click.Path(), help='Output directory.')
 @click.option(
     '--results-db',
     default=None,
     type=click.Path(),
-    help='Optional results database path. Creates new DB or validates and then uses existing DB.',
+    help='Optional results database path. Creates new SQLite database or validates and then stores result in existing db.',
 )
 @click.option('--cache/--no-cache', 'use_cache', default=True,
     help='Reuse/store FASTA reference mapping cache in the project database (default: on).',
@@ -147,7 +156,8 @@ def init_add(
 def profile(
     project: str,
     vcf: str,
-    ref_fasta: str,
+    ref_fasta: str | None,
+    query_ref_header: str | None,
     sample: str,
     output: str,
     results_db: str | None,
@@ -184,12 +194,38 @@ def profile(
         if project_row is None:
             raise click.ClickException('No project found in the database')
 
-        # 2. Match the provided reference FASTA to internal rule-relevant genes.
-        query_name, query_seq, fasta_matches = resolve_fasta_reference(
-            project_conn,
-            Path(ref_fasta),
-            use_cache=use_cache,
-        )
+        # Guard: ensure the project DB is compatible with the existing results DB.
+        if results_conn is not None:
+            current_fp = compute_project_fingerprint(project_conn)
+            existing_run = results_conn.execute(
+                "SELECT project_fingerprint FROM run WHERE project_fingerprint != '' LIMIT 1"
+            ).fetchone()
+            if existing_run and existing_run['project_fingerprint'] != current_fp:
+                raise click.ClickException(
+                    'Project fingerprint mismatch: the provided --project database does not match '
+                    'the project used for existing runs in this results database.\n'
+                    'Ensure you use the same project database for all runs in this results file.'
+                )
+
+        # Exactly one query-reference source must be provided.
+        if bool(ref_fasta) == bool(query_ref_header):
+            raise click.ClickException(
+                'Provide exactly one of --ref-fasta or --query-ref-header.'
+            )
+
+        # 2. Resolve the query reference either from FASTA or from stored cache.
+        if ref_fasta is not None:
+            query_name, query_seq, fasta_matches = resolve_fasta_reference(
+                project_conn,
+                Path(ref_fasta),
+                use_cache=use_cache,
+            )
+        else:
+            query_name, query_seq, fasta_matches = resolve_cached_query_reference(
+                project_conn,
+                query_ref_header or '',
+            )
+
         ref_id = pick_best_reference_id(fasta_matches)
         fasta_matches = select_matches_for_reference(fasta_matches, ref_id)
 
@@ -299,6 +335,11 @@ def profile(
             rules=rules,
         )
 
+        # 11. Persist to results database if provided
+        if results_conn is not None:
+            run_id = save_run(results_conn, Path(project).resolve(), project_conn, result)
+            logger.info('Run saved to results database with id %d', run_id)
+
         click.echo(
             '✓ Profiling complete — '
             f'{result.resistance_hits} database hit(s), '
@@ -316,18 +357,141 @@ def profile(
 
 
 # ──────────────────────────────────────────────────────────────────────
-# export
+# regenerate
 # ──────────────────────────────────────────────────────────────────────
 
-@main.command('export')
-@click.option('--project', '-p', required=True, type=click.Path(exists=True), help='Project database.')
-@click.option('--output', '-o', required=True, type=click.Path(), help='Output ZIP path.')
-def export_cmd(project: str, output: str) -> None:
+@main.command('regenerate')
+@click.option('--result-db', required=True, type=click.Path(exists=True), help='Results database.')
+@click.option('--list', 'list_flag', is_flag=True, default=False, help='List all stored results.')
+@click.option('--identifier', 'run_id', type=int, default=None, help='Run ID to regenerate.')
+@click.option('--project', '-p', type=click.Path(exists=True), default=None,
+    help='Project database (required with --identifier).')
+@click.option('--out', '-o', type=click.Path(), default=None,
+    help='Output directory (required with --identifier).')
+def regenerate(
+    result_db: str,
+    list_flag: bool,
+    run_id: int | None,
+    project: str | None,
+    out: str | None,
+) -> None:
     """
-    Package a project into a portable bundle (ZIP).
+    List stored profiling results or regenerate a report from a results database.
+
+    Use --list to display all stored runs, or --identifier with --project and
+    --out to regenerate the full report for a specific run.
     """
-    export_bundle(Path(project), Path(output))
-    click.echo(f'✓ Bundle exported: {output}')
+    logger = logging.getLogger('respro')
+    results_conn = None
+    project_conn = None
+
+    try:
+        results_conn = open_results_db(Path(result_db))
+
+        if list_flag and run_id is not None:
+            raise click.UsageError('Use either --list or --identifier, not both.')
+
+        if not list_flag and run_id is None:
+            raise click.UsageError(
+                'Provide --list to show stored results, or --identifier to regenerate one.'
+            )
+
+        if list_flag:
+            runs = list_runs(results_conn)
+            if not runs:
+                click.echo('No stored results found.')
+                return
+            click.echo(f'{"ID":>4}  {"Sample":<16}  {"Reference":<20}  {"VCF":<30}  {"Hits":>4}  Created')
+            click.echo('─' * 95)
+            for run in runs:
+                click.echo(
+                    f'{run["id"]:>4}  {(run["sample_name"] or ""):<16}  '
+                    f'{run["reference_name"]:<20}  {Path(run["vcf_path"]).name:<30}  '
+                    f'{run["resistance_hits"]:>4}  {run["created_at"]}'
+                )
+            return
+
+        if project is None:
+            raise click.UsageError('--project is required with --identifier.')
+        if out is None:
+            raise click.UsageError('--out is required with --identifier.')
+
+        run_dict, variant_rows = load_run(results_conn, run_id)
+
+        project_conn = open_project_db(Path(project))
+
+        # Validate that the provided project DB matches the one used for this run.
+        stored_fp = run_dict.get('project_fingerprint', '')
+        if stored_fp:
+            current_fp = compute_project_fingerprint(project_conn)
+            if stored_fp != current_fp:
+                raise click.ClickException(
+                    f'Project database fingerprint mismatch for run #{run_id}.\n'
+                    'The provided --project database does not match the one used for this run.\n'
+                    'Ensure you are using the same project database that was active during profiling.'
+                )
+        else:
+            logger.warning(
+                'Run #%d has no stored fingerprint — skipping project validation.', run_id
+            )
+
+        # Load reference metadata for report context.
+        ref_row = project_conn.execute(
+            'SELECT id, organism, length FROM reference WHERE name = ?',
+            (run_dict['reference_name'],),
+        ).fetchone()
+        organism = ''
+        reference_length_nt = 0
+        ref_id = None
+        if ref_row is not None:
+            ref_id = ref_row['id']
+            organism = ref_row['organism'] or ''
+            reference_length_nt = int(ref_row['length'] or 0)
+
+        annotations = reconstruct_annotations(variant_rows)
+        result = ProfilingResult(
+            project_name=run_dict['project_name'],
+            organism=organism,
+            reference_name=run_dict['reference_name'],
+            reference_length_nt=reference_length_nt,
+            sample_name=run_dict.get('sample_name', ''),
+            vcf_name=run_dict['vcf_path'],
+            run_timestamp=run_dict.get('created_at', ''),
+            total_variants=run_dict.get('total_variants', 0),
+            variants_in_cds=run_dict.get('variants_in_cds', 0),
+            resistance_hits=run_dict.get('resistance_hits', 0),
+            annotations=annotations,
+        )
+
+        genes = []
+        rules = []
+        rule_gene_names: set[str] = set()
+        if ref_id is not None:
+            genes = load_genes_for_reference(project_conn, ref_id)
+            rules = load_rules(project_conn, ref_id)
+            rule_gene_names = {rule.gene_name for rule in rules}
+
+        output_dir = Path(out)
+        outputs = export_results(
+            result,
+            output_dir,
+            genes=genes,
+            rule_gene_names=rule_gene_names,
+            project_conn=project_conn,
+            rules=rules,
+        )
+
+        click.echo(f'✓ Regenerated run #{run_id} — {result.resistance_hits} database hit(s)')
+        for fmt, path in outputs.items():
+            click.echo(f'  {fmt}: {path}')
+
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    finally:
+        if results_conn is not None:
+            results_conn.close()
+        if project_conn is not None:
+            project_conn.close()
 
 
 if __name__ == '__main__':

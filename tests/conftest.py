@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import sqlite3
 import textwrap
+import uuid
 from pathlib import Path
 
 import pytest
@@ -73,8 +74,8 @@ def project_db(tmp_path: Path) -> Path:
 
     # Project
     conn.execute(
-        'INSERT INTO project (name, schema_version) VALUES (?, ?)',
-        ('Test Project', 6),
+        'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+        ('Test Project', 6, str(uuid.uuid4())),
     )
     # Reference
     conn.execute(

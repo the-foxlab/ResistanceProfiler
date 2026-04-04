@@ -4,12 +4,23 @@ Tests for standalone results database schema.
 
 from __future__ import annotations
 
+import json
 import sqlite3
+import uuid
 from pathlib import Path
 
 import pytest
 
+from respro.db.models import AnnotatedVariant, ResistanceRule, VariantCall
+from respro.db.results import (
+    list_runs,
+    load_run,
+    project_fingerprint,
+    reconstruct_annotations,
+    save_run,
+)
 from respro.db.schema import create_schema, init_results_db, open_project_db
+from respro.report.results_model import ProfilingResult
 
 
 class TestProjectSchemaBoundary:
@@ -294,3 +305,161 @@ class TestResultsDbSchema:
         assert migrated_variant['drug_hits'] == '[]'
 
 
+class TestResultsPersistence:
+    """Tests for save_run, list_runs, load_run, and reconstruct_annotations."""
+
+    @pytest.fixture()
+    def minimal_project_conn(self, tmp_path: Path):
+        db_path = tmp_path / 'project.db'
+        conn = create_schema(db_path)
+        conn.execute(
+            'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+            ('Test Project', 1, str(uuid.uuid4())),
+        )
+        conn.execute(
+            'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
+            (1, 'ref1', 100),
+        )
+        conn.execute(
+            'INSERT INTO gene (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
+            (1, 'gag', 0, 90, '+'),
+        )
+        conn.execute(
+            'INSERT INTO drug (project_id, name) VALUES (?, ?)',
+            (1, 'drugx'),
+        )
+        conn.execute(
+            'INSERT INTO resistance_rule (gene_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
+            (1, 1, 1, 'E'),
+        )
+        conn.commit()
+        return conn
+
+    @pytest.fixture()
+    def results_conn(self, tmp_path: Path):
+        conn = init_results_db(tmp_path / 'results.db')
+        yield conn
+        conn.close()
+
+    def _make_result(self, annotated: bool = True) -> ProfilingResult:
+        v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
+        rule = ResistanceRule(
+            id=1, gene_name='gag', gene_id=1, drug_name='drugx', drug_id=1,
+            reference_identifier='', position=1, reference='K', mutation='E',
+            phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=v,
+            gene_name='gag',
+            codon_pos=1,
+            ref_codon='AAA',
+            alt_codon='GAA',
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            af_bin='high',
+            rule_matches=[rule] if annotated else [],
+        )
+        return ProfilingResult(
+            project_name='Test Project',
+            reference_name='ref1',
+            sample_name='sample01',
+            vcf_name='sample.vcf',
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1 if annotated else 0,
+            annotations=[ann],
+        )
+
+    def test_save_run_inserts_run_row(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        result = self._make_result()
+        run_id = save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+
+        assert run_id == 1
+        row = results_conn.execute('SELECT * FROM run WHERE id = 1').fetchone()
+        assert row['project_name'] == 'Test Project'
+        assert row['reference_name'] == 'ref1'
+        assert row['sample_name'] == 'sample01'
+        assert row['resistance_hits'] == 1
+        assert row['project_fingerprint'] != ''
+
+    def test_save_run_inserts_variant_result_rows(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        result = self._make_result()
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+
+        count = results_conn.execute('SELECT COUNT(*) FROM variant_result WHERE run_id = 1').fetchone()[0]
+        assert count == 1
+
+        row = results_conn.execute('SELECT * FROM variant_result WHERE run_id = 1').fetchone()
+        assert row['gene_name'] == 'gag'
+        assert row['ref_aa'] == 'K'
+        assert row['alt_aa'] == 'E'
+        assert row['rule_match'] == 1
+        drug_hits = json.loads(row['drug_hits'])
+        assert len(drug_hits) == 1
+        assert drug_hits[0]['drug'] == 'drugx'
+
+    def test_list_runs_returns_all_runs(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, self._make_result())
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, self._make_result(annotated=False))
+
+        runs = list_runs(results_conn)
+        assert len(runs) == 2
+        assert runs[0]['id'] == 1
+        assert runs[1]['id'] == 2
+
+    def test_load_run_returns_run_and_variants(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, self._make_result())
+
+        run_dict, variant_rows = load_run(results_conn, 1)
+        assert run_dict['sample_name'] == 'sample01'
+        assert len(variant_rows) == 1
+
+    def test_load_run_raises_for_missing_id(self, results_conn) -> None:
+        with pytest.raises(ValueError, match='No run found with id 999'):
+            load_run(results_conn, 999)
+
+    def test_reconstruct_annotations_restores_rule_matches(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, self._make_result())
+        _, variant_rows = load_run(results_conn, 1)
+
+        annotations = reconstruct_annotations(variant_rows)
+        assert len(annotations) == 1
+        ann = annotations[0]
+        assert ann.gene_name == 'gag'
+        assert ann.ref_aa == 'K'
+        assert ann.is_resistance_hit
+        assert ann.rule_matches[0].drug_name == 'drugx'
+
+    def test_project_fingerprint_is_deterministic(self, minimal_project_conn) -> None:
+        fp1 = project_fingerprint(minimal_project_conn)
+        fp2 = project_fingerprint(minimal_project_conn)
+        assert fp1 == fp2
+        assert len(fp1) == 36  # UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+    def test_project_fingerprint_differs_for_different_projects(self, tmp_path: Path) -> None:
+        conn_a = create_schema(tmp_path / 'a.db')
+        conn_a.execute(
+            'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+            ('ProjectA', 1, str(uuid.uuid4())),
+        )
+        conn_a.execute('INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)', (1, 'ref_a', 50))
+        conn_a.execute('INSERT INTO gene (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)', (1, 'g', 0, 30, '+'))
+        conn_a.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'd'))
+        conn_a.execute('INSERT INTO resistance_rule (gene_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)', (1, 1, 0, 'E'))
+        conn_a.commit()
+
+        conn_b = create_schema(tmp_path / 'b.db')
+        conn_b.execute(
+            'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+            ('ProjectB', 1, str(uuid.uuid4())),
+        )
+        conn_b.execute('INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)', (1, 'ref_b', 50))
+        conn_b.execute('INSERT INTO gene (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)', (1, 'g', 0, 30, '+'))
+        conn_b.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'd'))
+        conn_b.execute('INSERT INTO resistance_rule (gene_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)', (1, 1, 0, 'E'))
+        conn_b.commit()
+
+        assert project_fingerprint(conn_a) != project_fingerprint(conn_b)
+        conn_a.close()
+        conn_b.close()

@@ -87,6 +87,67 @@ def resolve_fasta_reference(
     return query_name, query_seq, matches
 
 
+def resolve_cached_query_reference(
+    conn: sqlite3.Connection,
+    query_header: str,
+) -> tuple[str, str, list[GeneMatch]]:
+    """
+    Reuse a previously stored query reference by its header.
+
+    :param conn: project database connection
+    :param query_header: exact stored query header
+    :return: (query_name, query_sequence, gene_matches)
+    """
+    header = query_header.strip()
+    if not header:
+        raise ValueError('Query reference header must not be empty')
+
+    rows = conn.execute(
+        'SELECT id, name, sequence, checksum '
+        'FROM query_reference '
+        'WHERE name = ? '
+        'ORDER BY id DESC',
+        (header,),
+    ).fetchall()
+    if not rows:
+        available_headers = _list_cached_query_headers(conn)
+        if available_headers:
+            raise ValueError(
+                f'Stored query reference header {header!r} not found. '
+                f'Available cached headers: {", ".join(available_headers)}'
+            )
+        raise ValueError(
+            f'Stored query reference header {header!r} not found. '
+            'No cached query-reference mappings are available in this project database.'
+        )
+
+    cached_rows: list[tuple[sqlite3.Row, list[GeneMatch]]] = []
+    for row in rows:
+        matches = load_cached_mappings(conn, row['checksum'])
+        if matches:
+            cached_rows.append((row, matches))
+
+    if not cached_rows:
+        raise ValueError(
+            f'Stored query reference header {header!r} exists, but no cached gene mappings '
+            'are available for it. Re-run profiling once with --ref-fasta to create them.'
+        )
+
+    if len(cached_rows) > 1:
+        details = ', '.join(
+            f"{row['checksum'][:12]}… ({len(matches)} mapping(s))"
+            for row, matches in cached_rows
+        )
+        raise ValueError(
+            f'Stored query reference header {header!r} is ambiguous. '
+            f'Multiple cached sequences share this header: {details}. '
+            'Please profile with --ref-fasta to resolve the correct query reference.'
+        )
+
+    row, matches = cached_rows[0]
+    return row['name'], row['sequence'], matches
+
+
 def pick_best_reference_id(matches: list[GeneMatch]) -> int:
     """
     Select the most likely internal reference from FASTA gene matches.
@@ -258,6 +319,18 @@ def _load_cached_query_matches(
         return None
 
     return load_cached_mappings(conn, row['checksum'])
+
+
+def _list_cached_query_headers(conn: sqlite3.Connection) -> list[str]:
+    """Return stored query headers that already have cached gene mappings."""
+    rows = conn.execute(
+        'SELECT DISTINCT qr.name '
+        'FROM query_reference qr '
+        'JOIN query_gene_mapping qgm ON qgm.query_ref_id = qr.id '
+        'ORDER BY qr.name'
+    ).fetchall()
+    return [row['name'] for row in rows if (row['name'] or '').strip()]
+
 
 def _build_query_to_cds_map(
     cigar: str,

@@ -26,9 +26,6 @@ class GeneRecord:
     def length_nt(self) -> int:
         return self.end - self.start
 
-    @property
-    def length_aa(self) -> int:
-        return self.length_nt // 3
 
     def contains(self, pos: int) -> bool:
         """
@@ -68,22 +65,6 @@ class GeneRecord:
         """
         return (self.nt_offset(pos) - self.codon_start) % 3
 
-    def codon_genomic_positions(self, pos: int) -> tuple[int, int, int]:
-        """
-        Return the three 0-based genomic positions of the codon containing pos.
-
-        :param pos: 0-based genomic position
-        :return: tuple of three 0-based genomic positions
-        """
-        offset = self.nt_offset(pos) - self.codon_start
-        if offset < 0:
-            raise ValueError('Position lies before first translated codon')
-        codon_start_offset = self.codon_start + ((offset // 3) * 3)
-        if self.strand == '+':
-            p1 = self.start + codon_start_offset
-            return (p1, p1 + 1, p1 + 2)
-        p1 = (self.end - 1) - codon_start_offset
-        return (p1, p1 - 1, p1 - 2)
 
 
 @dataclass
@@ -173,7 +154,7 @@ class AnnotatedVariant:
 
     @property
     def is_resistance_hit(self) -> bool:
-        return len(self.rule_matches) > 0
+        return bool(self.rule_matches)
 
     def drug_hits_json(self) -> list[dict]:
         """

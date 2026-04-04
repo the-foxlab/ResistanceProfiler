@@ -15,9 +15,10 @@ from respro.core.profile import (
     _build_query_to_cds_map,
     _cds_pos_to_genomic_pos,
     remap_variants,
+    resolve_cached_query_reference,
     resolve_fasta_reference,
 )
-from respro.core.sequence_matching import GeneMatch, match_query_to_genes
+from respro.core.sequence_matching import GeneMatch, match_query_to_genes, sequence_checksum, store_mappings
 from respro.db.models import GeneRecord, VariantCall
 from respro.db.schema import create_schema, open_project_db
 
@@ -403,11 +404,117 @@ class TestResolveFastaReference:
         conn.close()
 
 
+class TestResolveCachedQueryReference:
+    def test_resolves_stored_header(self, fasta_db: Path, tmp_path: Path) -> None:
+        fasta_path = tmp_path / 'query.fasta'
+        fasta_path.write_text(f'>stored_ref\n{TINY_REF_SEQ}\n')
+
+        conn = open_project_db(fasta_db)
+        resolve_fasta_reference(conn, fasta_path)
+
+        name, seq, matches = resolve_cached_query_reference(conn, 'stored_ref')
+
+        assert name == 'stored_ref'
+        assert seq == TINY_REF_SEQ
+        assert len(matches) >= 1
+        assert matches[0].gene.name == 'gag'
+        conn.close()
+
+    def test_unknown_header_lists_available_cached_headers(self, fasta_db: Path, tmp_path: Path) -> None:
+        fasta_path = tmp_path / 'query.fasta'
+        fasta_path.write_text(f'>stored_ref\n{TINY_REF_SEQ}\n')
+
+        conn = open_project_db(fasta_db)
+        resolve_fasta_reference(conn, fasta_path)
+
+        with pytest.raises(ValueError, match='Available cached headers: stored_ref'):
+            resolve_cached_query_reference(conn, 'missing_ref')
+        conn.close()
+
+    def test_header_without_cached_mappings_raises(self, fasta_db: Path) -> None:
+        conn = open_project_db(fasta_db)
+        conn.execute(
+            'INSERT INTO query_reference (name, sequence, length, checksum) VALUES (?, ?, ?, ?)',
+            ('orphan_ref', TINY_REF_SEQ, len(TINY_REF_SEQ), 'orphan-checksum'),
+        )
+        conn.commit()
+
+        with pytest.raises(ValueError, match='no cached gene mappings'):
+            resolve_cached_query_reference(conn, 'orphan_ref')
+        conn.close()
+
+    def test_ambiguous_header_raises(self, fasta_db: Path) -> None:
+        conn = open_project_db(fasta_db)
+        genes = [
+            GeneRecord(
+                id=1,
+                reference_id=1,
+                name='gag',
+                protein='Gag',
+                start=0,
+                end=87,
+                strand='+',
+                codon_start=0,
+                nt_sequence=TINY_REF_SEQ,
+            )
+        ]
+        query_one = TINY_REF_SEQ
+        query_two = 'NNNNN' + TINY_REF_SEQ + 'NNNNN'
+        matches_one = match_query_to_genes(query_one, genes)
+        matches_two = match_query_to_genes(query_two, genes)
+        store_mappings(conn, 'dup_ref', query_one, sequence_checksum(query_one), matches_one)
+        store_mappings(conn, 'dup_ref', query_two, sequence_checksum(query_two), matches_two)
+
+        with pytest.raises(ValueError, match='ambiguous'):
+            resolve_cached_query_reference(conn, 'dup_ref')
+        conn.close()
+
+
 # ──────────────────────────────────────────────────────────────────────
 # CLI end-to-end: profile --ref-fasta
 # ──────────────────────────────────────────────────────────────────────
 
 class TestProfileFastaCli:
+    def test_profile_requires_one_query_reference_source(self, fasta_db: Path, tmp_path: Path) -> None:
+        vcf_path = tmp_path / 'sample.vcf'
+        vcf_path.write_text(
+            '##fileformat=VCFv4.2\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'user_ref\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
+        )
+
+        result = CliRunner().invoke(main, [
+            'profile',
+            '--project', str(fasta_db),
+            '--vcf', str(vcf_path),
+            '--output', str(tmp_path / 'out'),
+        ])
+
+        assert result.exit_code != 0
+        assert 'exactly one of --ref-fasta or --query-ref-header' in result.output
+
+    def test_profile_rejects_both_query_reference_sources(self, fasta_db: Path, tmp_path: Path) -> None:
+        fasta_path = tmp_path / 'user_ref.fasta'
+        fasta_path.write_text(f'>user_ref\n{TINY_REF_SEQ}\n')
+        vcf_path = tmp_path / 'sample.vcf'
+        vcf_path.write_text(
+            '##fileformat=VCFv4.2\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'user_ref\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
+        )
+
+        result = CliRunner().invoke(main, [
+            'profile',
+            '--project', str(fasta_db),
+            '--vcf', str(vcf_path),
+            '--ref-fasta', str(fasta_path),
+            '--query-ref-header', 'user_ref',
+            '--output', str(tmp_path / 'out'),
+        ])
+
+        assert result.exit_code != 0
+        assert 'exactly one of --ref-fasta or --query-ref-header' in result.output
+
     def test_fasta_profile_uses_metadata_of_matched_reference(
         self, fasta_db_multi_reference: Path, tmp_path: Path,
     ) -> None:
@@ -439,6 +546,67 @@ class TestProfileFastaCli:
         html = (output_dir / f'{vcf_path.stem}.report.html').read_text()
         assert 'refB' in html
         assert 'Organism B' in html
+
+    def test_header_only_profile_reuses_stored_query_reference(
+        self, fasta_db: Path, tmp_path: Path,
+    ) -> None:
+        fasta_path = tmp_path / 'user_ref.fasta'
+        query = 'NNNNN' + TINY_REF_SEQ + 'NNNNN'
+        fasta_path.write_text(f'>user_ref\n{query}\n')
+
+        conn = open_project_db(fasta_db)
+        resolve_fasta_reference(conn, fasta_path)
+        conn.close()
+
+        vcf_path = tmp_path / 'header_hit.vcf'
+        vcf_path.write_text(
+            '##fileformat=VCFv4.2\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'user_ref\t9\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
+        )
+
+        output_dir = tmp_path / 'header_results'
+        result = CliRunner().invoke(main, [
+            'profile',
+            '--project', str(fasta_db),
+            '--vcf', str(vcf_path),
+            '--query-ref-header', 'user_ref',
+            '--output', str(output_dir),
+            '--min-af', '0.01',
+            '--min-depth', '0',
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert '1 database hit' in result.output
+        assert (output_dir / f'{vcf_path.stem}.report.html').exists()
+
+    def test_header_only_profile_reports_available_headers(
+        self, fasta_db: Path, tmp_path: Path,
+    ) -> None:
+        fasta_path = tmp_path / 'user_ref.fasta'
+        fasta_path.write_text(f'>stored_ref\n{TINY_REF_SEQ}\n')
+
+        conn = open_project_db(fasta_db)
+        resolve_fasta_reference(conn, fasta_path)
+        conn.close()
+
+        vcf_path = tmp_path / 'missing_header.vcf'
+        vcf_path.write_text(
+            '##fileformat=VCFv4.2\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'stored_ref\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
+        )
+
+        result = CliRunner().invoke(main, [
+            'profile',
+            '--project', str(fasta_db),
+            '--vcf', str(vcf_path),
+            '--query-ref-header', 'missing_ref',
+            '--output', str(tmp_path / 'out'),
+        ])
+
+        assert result.exit_code != 0
+        assert 'Available cached headers: stored_ref' in result.output
 
     def test_fasta_profile_detects_resistance_hit(
         self, fasta_db: Path, tmp_path: Path,

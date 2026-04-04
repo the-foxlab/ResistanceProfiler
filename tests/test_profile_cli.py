@@ -2,10 +2,8 @@
 Tests for the CLI profile command — end-to-end integration.
 """
 
-import json
 import sqlite3
 from pathlib import Path
-from zipfile import ZipFile
 
 from click.testing import CliRunner
 
@@ -622,85 +620,48 @@ class TestInitCli:
         assert 'missing required field reference_identifier' in result.output
 
 
-class TestExportCli:
-    """Test the ``export`` CLI command."""
-
-    def test_export_creates_zip(self, project_db: Path, tmp_path: Path):
-        zip_path = tmp_path / 'bundle.zip'
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            'export',
+    def test_profile_with_results_db_populates_run_and_variants(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ):
+        """After profiling with --results-db, a run row and variant rows must be stored."""
+        results_db = tmp_path / 'populated.db'
+        result = CliRunner().invoke(main, [
+            'profile',
             '--project', str(project_db),
-            '--output', str(zip_path),
+            '--vcf', str(sample_vcf),
+            '--ref-fasta', str(sample_ref_fasta),
+            '--results-db', str(results_db),
+            '--output', str(tmp_path / 'out'),
+            '--min-af', '0.01',
+            '--min-depth', '0',
         ])
         assert result.exit_code == 0, result.output
-        assert zip_path.exists()
 
-        with ZipFile(zip_path) as zf:
-            manifest = json.loads(zf.read('manifest.json').decode('utf-8'))
+        conn = sqlite3.connect(results_db)
+        conn.row_factory = sqlite3.Row
+        run_row = conn.execute('SELECT * FROM run WHERE id = 1').fetchone()
+        variant_count = conn.execute('SELECT COUNT(*) FROM variant_result WHERE run_id = 1').fetchone()[0]
+        conn.close()
 
-        assert manifest['project_name'] == 'Test Project'
-        assert 'references' in manifest
-        assert 'organisms' in manifest
-        assert 'reference_metadata' in manifest
+        assert run_row is not None
+        assert run_row['project_name'] == 'Test Project'
+        assert run_row['reference_name'] == 'tiny_ref'
+        assert run_row['project_fingerprint'] != ''
+        assert variant_count > 0
 
-    def test_export_manifest_lists_multiple_organisms(self, tmp_path: Path):
-        genbank_path = write_genbank(
-            tmp_path / 'multi_pathogen.gb',
-            [
-                {
-                    'id': 'NC_HSV1',
-                    'accession': 'NC_HSV1',
-                    'organism': 'Human alphaherpesvirus 1',
-                    'taxonomy': ['Viruses', 'Herpesviridae'],
-                    'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'UL23', 'protein': 'TK', 'start': 1, 'end': 30, 'strand': '+'},
-                    ],
-                },
-                {
-                    'id': 'NC_HSV2',
-                    'accession': 'NC_HSV2',
-                    'organism': 'Human alphaherpesvirus 2',
-                    'taxonomy': ['Viruses', 'Herpesviridae'],
-                    'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'UL23', 'protein': 'TK', 'start': 1, 'end': 30, 'strand': '+'},
-                    ],
-                },
-            ],
-        )
-        rules_tsv = tmp_path / 'multi_rules.tsv'
-        rules_tsv.write_text(
-            'reference_identifier\tgene\tposition\treference\tmutation\tantiviral\n'
-            'NC_HSV1\tUL23\t2\tK\tE\tACV\n'
-            'NC_HSV2\tUL23\t2\tK\tE\tACV\n'
-        )
-        db_path = tmp_path / 'multi_pathogen.db'
-        runner = CliRunner()
-        init_result = runner.invoke(main, [
-            'init',
-            '--name', 'Herpes DB',
-            '--genbank', str(genbank_path),
-            '--rules', str(rules_tsv),
-            '--output', str(db_path),
-        ])
-        assert init_result.exit_code == 0, init_result.output
 
-        zip_path = tmp_path / 'multi_bundle.zip'
-        export_result = runner.invoke(main, [
+class TestExportCli:
+    """The ``export`` command has been removed; these tests verify it no longer exists."""
+
+    def test_export_command_no_longer_exists(self, project_db: Path, tmp_path: Path):
+        result = CliRunner().invoke(main, [
             'export',
-            '--project', str(db_path),
-            '--output', str(zip_path),
+            '--project', str(project_db),
+            '--output', str(tmp_path / 'bundle.zip'),
         ])
-        assert export_result.exit_code == 0, export_result.output
-
-        with ZipFile(zip_path) as zf:
-            manifest = json.loads(zf.read('manifest.json').decode('utf-8'))
-
-        assert manifest['organisms'] == [
-            'Human alphaherpesvirus 1',
-            'Human alphaherpesvirus 2',
-        ]
-        assert len(manifest['reference_metadata']) == 2
+        assert result.exit_code != 0
 

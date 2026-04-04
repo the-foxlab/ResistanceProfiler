@@ -5,7 +5,7 @@ It is intentionally lightweight and should be updated in small, reviewable chang
 
 ## v0.1 status (done)
 
-- CLI-first package with `respro init`, `respro profile`, `respro export`
+- CLI-first package with `respro init`, `respro profile`, `respro regenerate`
 - SQLite project model for curated references, genes, drugs, and resistance rules
 - Codon-aware amino acid consequence annotation (forward and reverse strand)
 - Rule-based resistance matching (exact and wildcard matching)
@@ -42,7 +42,11 @@ It is intentionally lightweight and should be updated in small, reviewable chang
 - Add a `docs/` user guide for input preparation and common workflows
 - Add example project data (tiny GenBank, rules TSV)
 - Derive organism/species metadata from GenBank per reference instead of requiring a single project-level pathogen
-- ✓ Separate curated `project.db` from run-scoped `results.db` initialization/validation
+    - ✓ Separate curated `project.db` from run-scoped `results.db` initialization/validation
+    - ✓ Populate `results.db` during `respro profile` with run and variant rows
+    - ✓ Add `respro regenerate` command: `--list` displays stored runs; `--identifier` with
+      `--project` and `--out` regenerates a full report with project-fingerprint validation
+    - ✓ Remove `respro export` (bundle packaging) command and `bundle.py`
 
 ### Goal 4: flexible input reference handling
 - ✓ Automatic CDS matching — align user query sequence to internal genes using
@@ -52,6 +56,9 @@ It is intentionally lightweight and should be updated in small, reviewable chang
 - ✓ Wire sequence matching into `respro profile` for FASTA-based workflows
   (`--ref-fasta` remaps VCF coordinates via inverted CIGAR maps, with
   sanity checks on reference base agreement)
+- ✓ Allow `respro profile` to reuse a previously cached query reference via its
+  stored FASTA header (`--query-ref-header`) when the FASTA sequence is not
+  provided
 
 ### Acceptance criteria for v0.2
 - New regression tests cover adjacent codon variants and overlapping-ORF scenarios

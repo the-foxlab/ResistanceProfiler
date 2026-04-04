@@ -9,6 +9,7 @@ from pathlib import Path
 
 from jinja2 import Environment, BaseLoader
 
+from respro import __version__
 from respro.core.similarity import classify_similarity
 from respro.db.models import GeneRecord, ResistanceRule
 from respro.report.palette import MUTATION_COLOURS
@@ -370,12 +371,11 @@ def render_html(
 
     :param result: ProfilingResult object
     :param genes: optional list of genes for context
-    :param plot_svg_path: optional path to embedded plot SVG
+    :param plot_svg_data: optional SVG bytes of the embedded plot
     :param project_conn: optional project DB connection for drug overview
     :param rules: optional list of resistance rules for potential effects analysis
     :return: HTML string
     """
-    from respro import __version__
 
     env = Environment(loader=BaseLoader(), autoescape=True)
     template = env.from_string(_load_template_text())
@@ -419,7 +419,7 @@ def write_html(
     :param result: ProfilingResult object
     :param output_path: path to write HTML file to
     :param genes: optional list of genes for context
-    :param plot_svg_path: optional path to embedded plot SVG
+    :param plot_svg_data: optional SVG bytes of the embedded plot
     :param project_conn: optional project DB connection for drug overview
     :param rules: optional list of resistance rules for potential effects analysis
     :return: path to written HTML file
