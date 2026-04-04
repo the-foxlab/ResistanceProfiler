@@ -139,10 +139,11 @@ Output model and rendering/export logic.
 - `static/report.css`: report styles (inlined at render time for standalone HTML output).
 - `static/report.js`: client-side table sorting logic (inlined at render time for standalone HTML output).
 - `export.py`: export orchestration for all report artifacts, plus TSV/CSV
-  tabular helpers (`write_tsv`, `to_tsv_string`).
+  tabular helpers (`write_tsv`, `to_tsv_string`). The profiling workflow exports
+  a standalone HTML report with an embedded mutation overview plot.
 
-All report backends should derive from the same result model so HTML, JSON, TSV, SVG,
-and PDF stay consistent.
+All report outputs should derive from the same result model so HTML and optional
+machine-readable outputs stay consistent.
 
 ### `respro/utils/`
 

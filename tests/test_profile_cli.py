@@ -17,14 +17,14 @@ from respro.db.schema import create_schema, init_results_db
 class TestProfileCli:
     """End-to-end tests for the ``profile`` command."""
 
-    def test_profile_produces_json(
+    def test_profile_produces_html_with_vcf_based_name(
         self,
         project_db: Path,
         sample_vcf: Path,
         sample_ref_fasta: Path,
         tmp_path: Path,
     ):
-        """Running profile with a VCF should produce a JSON output."""
+        """Running profile should produce an HTML report named after the input VCF."""
         output_dir = tmp_path / 'results'
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -33,19 +33,17 @@ class TestProfileCli:
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
             '--output', str(output_dir),
-            '--format', 'json',
             '--min-af', '0.01',
             '--min-depth', '0',
         ])
         assert result.exit_code == 0, result.output
 
-        json_path = output_dir / 'results.json'
-        assert json_path.exists()
-
-        data = json.loads(json_path.read_text())
-        assert 'variants' in data
-        assert data['project_name'] == 'Test Project'
-        assert data['reference'] == 'tiny_ref'
+        html_path = output_dir / f'{sample_vcf.stem}.report.html'
+        assert html_path.exists()
+        html = html_path.read_text()
+        assert 'ResistanceProfiler' in html
+        assert 'Test Project' in html
+        assert 'tiny_ref' in html
 
     def test_profile_produces_html(
         self,
@@ -62,42 +60,15 @@ class TestProfileCli:
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
             '--output', str(output_dir),
-            '--format', 'html',
             '--min-af', '0.01',
             '--min-depth', '0',
         ])
         assert result.exit_code == 0, result.output
 
-        html_path = output_dir / 'report.html'
+        html_path = output_dir / f'{sample_vcf.stem}.report.html'
         assert html_path.exists()
         content = html_path.read_text()
         assert 'ResistanceProfiler' in content
-
-    def test_profile_produces_tsv(
-        self,
-        project_db: Path,
-        sample_vcf: Path,
-        sample_ref_fasta: Path,
-        tmp_path: Path,
-    ):
-        output_dir = tmp_path / 'tsv_results'
-        runner = CliRunner()
-        result = runner.invoke(main, [
-            'profile',
-            '--project', str(project_db),
-            '--vcf', str(sample_vcf),
-            '--ref-fasta', str(sample_ref_fasta),
-            '--output', str(output_dir),
-            '--format', 'tsv',
-            '--min-af', '0.01',
-            '--min-depth', '0',
-        ])
-        assert result.exit_code == 0, result.output
-
-        tsv_path = output_dir / 'variants.tsv'
-        assert tsv_path.exists()
-        lines = tsv_path.read_text().strip().split('\n')
-        assert len(lines) >= 2  # header + at least 1 data row
 
     def test_profile_detects_resistance_hit(
         self,
@@ -120,18 +91,11 @@ class TestProfileCli:
             '--vcf', str(vcf_path),
             '--ref-fasta', str(sample_ref_fasta),
             '--output', str(output_dir),
-            '--format', 'json',
             '--min-af', '0.01',
             '--min-depth', '0',
         ])
         assert result.exit_code == 0, result.output
         assert '1 database hit' in result.output
-
-        data = json.loads((output_dir / 'results.json').read_text())
-        hits = [v for v in data['variants'] if v['resistance_hit']]
-        assert len(hits) == 1
-        assert hits[0]['alt_aa'] == 'E'
-        assert hits[0]['ref_aa'] == 'K'
 
     def test_profile_with_results_db_creates_new_db(
         self,
@@ -149,7 +113,6 @@ class TestProfileCli:
             '--ref-fasta', str(sample_ref_fasta),
             '--results-db', str(results_db),
             '--output', str(output_dir),
-            '--format', 'json',
             '--min-af', '0.01',
             '--min-depth', '0',
         ])
@@ -182,7 +145,6 @@ class TestProfileCli:
             '--ref-fasta', str(sample_ref_fasta),
             '--results-db', str(results_db),
             '--output', str(output_dir),
-            '--format', 'json',
             '--min-af', '0.01',
             '--min-depth', '0',
         ])
@@ -209,7 +171,6 @@ class TestProfileCli:
             '--ref-fasta', str(sample_ref_fasta),
             '--results-db', str(results_db),
             '--output', str(output_dir),
-            '--format', 'json',
             '--min-af', '0.01',
             '--min-depth', '0',
         ])
@@ -231,7 +192,6 @@ class TestProfileCli:
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(bad_fasta),
             '--output', str(tmp_path / 'bad_results'),
-            '--format', 'json',
             '--min-af', '0.01',
             '--min-depth', '0',
         ])

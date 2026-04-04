@@ -10,7 +10,7 @@ from pathlib import Path
 from jinja2 import Environment, BaseLoader
 
 from respro.core.similarity import classify_similarity
-from respro.db.models import AnnotatedVariant, ComboRuleHit, GeneRecord, ResistanceRule
+from respro.db.models import GeneRecord, ResistanceRule
 from respro.report.palette import MUTATION_COLOURS
 from respro.report.results_model import ProfilingResult
 
@@ -39,6 +39,12 @@ def _load_logo_svg_text() -> str:
     """Load report logo SVG markup from the package static file."""
     logo_path = Path(__file__).resolve().parent / 'static' / 'logo.svg'
     return logo_path.read_text(encoding='utf-8')
+
+
+def _load_favicon_svg_text() -> str:
+    """Load report favicon SVG markup from the package static file."""
+    favicon_path = Path(__file__).resolve().parent / 'static' / 'favicon.svg'
+    return favicon_path.read_text(encoding='utf-8')
 
 
 def _phenotype_badge_class(value: str) -> str:
@@ -304,10 +310,58 @@ def _load_gene_cards(
     return cards
 
 
+def build_report_context(
+    result: ProfilingResult,
+    project_conn: sqlite3.Connection | None = None,
+    rules: list[ResistanceRule] | None = None,
+) -> dict:
+    """
+    Build the shared report context used by HTML and PDF exports.
+
+    :param result: ProfilingResult object
+    :param project_conn: optional project DB connection for overview sections
+    :param rules: optional list of resistance rules for potential effects analysis
+    :return: dict with summary and section rows
+    """
+    summary = result.summary_dict()
+    summary['database_hits'] = summary.pop('resistance_hits', 0)
+
+    db_hit_rows = _build_db_hit_rows(result)
+    combo_hit_rows = _build_combo_hit_rows(result)
+    cds_rows = _build_cds_rows(result)
+    potential_rows = _build_potential_effects_rows(result, rules or [])
+    summary['similarity_hits'] = len(potential_rows)
+
+    detected_drug_names: set[str] = set()
+    for ann in result.cds_annotations:
+        for rule in ann.rule_matches:
+            detected_drug_names.add(rule.drug_name.lower())
+    for combo in result.combo_hits:
+        detected_drug_names.add(combo.rule_set.drug_name.lower())
+
+    drug_cards = _load_drug_cards(project_conn, detected_drug_names)
+    detected_gene_names = {
+        ann.gene_name
+        for ann in result.cds_annotations
+        if ann.gene_name
+    }
+    gene_cards = _load_gene_cards(project_conn, result.reference_name, detected_gene_names)
+
+    return {
+        'summary': summary,
+        'db_hit_rows': db_hit_rows,
+        'combo_hit_rows': combo_hit_rows,
+        'cds_rows': cds_rows,
+        'potential_rows': potential_rows,
+        'drug_cards': drug_cards,
+        'gene_cards': gene_cards,
+    }
+
+
 def render_html(
     result: ProfilingResult,
     genes: list[GeneRecord] | None = None,
-    plot_svg_path: Path | None = None,
+    plot_svg_data: bytes | None = None,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
 ) -> str:
@@ -328,47 +382,22 @@ def render_html(
     css_text = _load_css_text()
     js_text = _load_js_text()
     logo_svg = _load_logo_svg_text()
+    favicon_svg = _load_favicon_svg_text()
+    favicon_data_uri = 'data:image/svg+xml;base64,' + base64.b64encode(
+        favicon_svg.encode('utf-8')
+    ).decode('ascii')
 
-    summary = result.summary_dict()
-    summary['database_hits'] = summary.pop('resistance_hits', 0)
-
-    db_hit_rows = _build_db_hit_rows(result)
-    combo_hit_rows = _build_combo_hit_rows(result)
-    cds_rows = _build_cds_rows(result)
-    potential_rows = _build_potential_effects_rows(result, rules or [])
-    summary['similarity_hits'] = len(potential_rows)
-
-    # Collect drug names from detected rule hits for filtering the drug overview
-    detected_drug_names: set[str] = set()
-    for ann in result.cds_annotations:
-        for rule in ann.rule_matches:
-            detected_drug_names.add(rule.drug_name.lower())
-    for combo in result.combo_hits:
-        detected_drug_names.add(combo.rule_set.drug_name.lower())
-
-    drug_cards = _load_drug_cards(project_conn, detected_drug_names)
-    detected_gene_names = {
-        ann.gene_name
-        for ann in result.cds_annotations
-        if ann.gene_name
-    }
-    gene_cards = _load_gene_cards(project_conn, result.reference_name, detected_gene_names)
+    context = build_report_context(result, project_conn=project_conn, rules=rules)
 
     plot_data = ''
-    if plot_svg_path and Path(plot_svg_path).is_file():
-        raw = Path(plot_svg_path).read_bytes()
-        plot_data = base64.b64encode(raw).decode('ascii')
+    if plot_svg_data:
+        plot_data = base64.b64encode(plot_svg_data).decode('ascii')
 
     return template.render(
-        summary=summary,
-        db_hit_rows=db_hit_rows,
-        combo_hit_rows=combo_hit_rows,
-        cds_rows=cds_rows,
-        potential_rows=potential_rows,
-        drug_cards=drug_cards,
-        gene_cards=gene_cards,
+        **context,
         plot_data=plot_data,
         logo_svg=logo_svg,
+        favicon_data_uri=favicon_data_uri,
         css=css_text,
         js=js_text,
         mutation_colours=MUTATION_COLOURS,
@@ -380,7 +409,7 @@ def write_html(
     result: ProfilingResult,
     output_path: Path,
     genes: list[GeneRecord] | None = None,
-    plot_svg_path: Path | None = None,
+    plot_svg_data: bytes | None = None,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
 ) -> Path:
@@ -396,7 +425,7 @@ def write_html(
     :return: path to written HTML file
     """
     html = render_html(
-        result, genes=genes, plot_svg_path=plot_svg_path,
+        result, genes=genes, plot_svg_data=plot_svg_data,
         project_conn=project_conn, rules=rules,
     )
     output_path = Path(output_path)

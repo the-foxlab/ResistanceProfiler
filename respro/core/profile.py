@@ -36,14 +36,16 @@ def resolve_fasta_reference(
     *,
     min_identity: float = 0.80,
     min_coverage: float = 0.90,
+    use_cache: bool = True,
 ) -> tuple[str, str, list[GeneMatch]]:
     """
-    Read a user FASTA, align to internal CDS annotations, and cache the result.
+    Read a user FASTA and align to internal CDS annotations.
 
     :param conn: project database connection
     :param fasta_path: path to single-record user FASTA
     :param min_identity: minimum nucleotide identity
     :param min_coverage: minimum CDS coverage fraction
+    :param use_cache: if True, reuse/store mapping cache in project DB
     :return: (query_name, query_sequence, gene_matches)
     """
     seqs = read_fasta(fasta_path)
@@ -58,10 +60,11 @@ def resolve_fasta_reference(
     query_name, query_seq = next(iter(seqs.items()))
     chk = sequence_checksum(query_seq)
 
-    cached = _load_cached_query_matches(conn, query_name, query_seq, chk)
-    if cached is not None:
-        logger.info('Using cached gene mappings for %r', query_name)
-        return query_name, query_seq, cached
+    if use_cache:
+        cached = _load_cached_query_matches(conn, query_name, query_seq, chk)
+        if cached is not None:
+            logger.info('Using cached gene mappings for %r', query_name)
+            return query_name, query_seq, cached
 
     genes = load_genes_with_rules(conn)
     if not genes:
@@ -75,11 +78,12 @@ def resolve_fasta_reference(
     if not matches:
         raise ValueError(
             f'No CDS matches above thresholds '
-            f'(identity\u2265{min_identity:.0%}, coverage\u2265{min_coverage:.0%}) '
+            f'(identity>={min_identity:.0%}, coverage>={min_coverage:.0%}) '
             f'in {fasta_path.name}'
         )
 
-    store_mappings(conn, query_name, query_seq, chk, matches)
+    if use_cache:
+        store_mappings(conn, query_name, query_seq, chk, matches)
     return query_name, query_seq, matches
 
 

@@ -110,8 +110,18 @@ class TestHtmlExport:
         from respro.report.html import render_html
         r = _make_result()
         html = render_html(r)
+        assert '<title>ResistanceProfiler - test.vcf</title>' in html
         assert 'ResistanceProfiler' in html
         assert 'K2E' in html or 'gag' in html
+
+    def test_render_html_embeds_favicon(self):
+        from respro.report.html import render_html
+
+        r = _make_result()
+        html = render_html(r)
+
+        assert "rel='icon'" in html
+        assert 'data:image/svg+xml;base64,' in html
 
     def test_render_html_shows_combined_event_in_json(self):
         """Combined codon events are still represented in JSON output."""
@@ -240,3 +250,4 @@ class TestHtmlExport:
         assert cards[0]['protein_id'] == 'YP_009137097.1'
         assert cards[0]['ncbi_protein_url'] == 'https://www.ncbi.nlm.nih.gov/protein/YP_009137097.1/'
         assert cards[0]['aa_sequence'] == 'MKAFGP'
+

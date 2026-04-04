@@ -11,7 +11,7 @@ It is intentionally lightweight and should be updated in small, reviewable chang
 - Rule-based resistance matching (exact and wildcard matching)
 - Future-facing DB schema for combined/co-occurring resistance rule sets
 - Allele-frequency binning with project defaults
-- Report/export layer for HTML, JSON, TSV, SVG, and PDF outputs
+- Report/export layer for HTML plus machine-readable outputs (JSON/TSV/SVG)
 - Regression-oriented test suite for annotation, rules, reference resolution, CLI, and report exports
 
 ## Now (v0.2)

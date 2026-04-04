@@ -4,7 +4,6 @@ Tests for FASTA-based profiling — coordinate remapping and end-to-end CLI work
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -432,15 +431,14 @@ class TestProfileFastaCli:
             '--vcf', str(vcf_path),
             '--ref-fasta', str(fasta_path),
             '--output', str(output_dir),
-            '--format', 'json',
             '--min-af', '0.01',
             '--min-depth', '0',
         ])
 
         assert result.exit_code == 0, result.output
-        data = json.loads((output_dir / 'results.json').read_text())
-        assert data['reference'] == 'refB'
-        assert data['organism'] == 'Organism B'
+        html = (output_dir / f'{vcf_path.stem}.report.html').read_text()
+        assert 'refB' in html
+        assert 'Organism B' in html
 
     def test_fasta_profile_detects_resistance_hit(
         self, fasta_db: Path, tmp_path: Path,
@@ -465,19 +463,12 @@ class TestProfileFastaCli:
             '--vcf', str(vcf_path),
             '--ref-fasta', str(fasta_path),
             '--output', str(output_dir),
-            '--format', 'json',
             '--min-af', '0.01',
             '--min-depth', '0',
         ])
 
         assert result.exit_code == 0, result.output
         assert '1 database hit' in result.output
-
-        data = json.loads((output_dir / 'results.json').read_text())
-        hits = [v for v in data['variants'] if v['resistance_hit']]
-        assert len(hits) == 1
-        assert hits[0]['alt_aa'] == 'E'
-        assert hits[0]['ref_aa'] == 'K'
 
     def test_fasta_profile_excludes_non_cds_variants(
         self, fasta_db: Path, tmp_path: Path,
@@ -502,7 +493,6 @@ class TestProfileFastaCli:
             '--vcf', str(vcf_path),
             '--ref-fasta', str(fasta_path),
             '--output', str(output_dir),
-            '--format', 'json',
             '--min-af', '0.01',
             '--min-depth', '0',
         ])
@@ -510,10 +500,10 @@ class TestProfileFastaCli:
         assert result.exit_code == 0, result.output
         assert '0 database hit' in result.output
 
-    def test_fasta_profile_json_output_correct(
+    def test_fasta_profile_html_output_contains_expected_fields(
         self, fasta_db: Path, tmp_path: Path,
     ) -> None:
-        """JSON output with FASTA remapping should contain the correct fields."""
+        """HTML output with FASTA remapping should contain key fields."""
         fasta_path = tmp_path / 'user_ref.fasta'
         fasta_path.write_text(f'>user_ref\n{TINY_REF_SEQ}\n')
 
@@ -532,15 +522,11 @@ class TestProfileFastaCli:
             '--vcf', str(vcf_path),
             '--ref-fasta', str(fasta_path),
             '--output', str(output_dir),
-            '--format', 'json',
             '--min-af', '0.01',
             '--min-depth', '0',
         ])
 
         assert result.exit_code == 0, result.output
-
-        data = json.loads((output_dir / 'results.json').read_text())
-        assert data['reference'] == TINY_REF_NAME
-        assert len(data['variants']) == 1
-        assert data['variants'][0]['gene'] == 'gag'
-
+        html = (output_dir / f'{vcf_path.stem}.report.html').read_text()
+        assert TINY_REF_NAME in html
+        assert 'gag' in html

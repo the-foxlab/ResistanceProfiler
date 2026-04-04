@@ -131,7 +131,7 @@ def init_add(
 @click.option('--vcf', required=True, type=click.Path(exists=True), help='Input VCF file.')
 @click.option('--ref-fasta', required=True, type=click.Path(exists=True),
     help='Reference FASTA the VCF was called against.')
-@click.option('--sample', default='', help='Sample name for the report.')
+@click.option('--sample', default='sample', help='Sample name for the report. Default: sample')
 @click.option('--output', '-o', default='output', type=click.Path(), help='Output directory.')
 @click.option(
     '--results-db',
@@ -139,13 +139,11 @@ def init_add(
     type=click.Path(),
     help='Optional results database path. Creates new DB or validates and then uses existing DB.',
 )
-@click.option(
-    '--format', 'formats', multiple=True, default=['html', 'json'],
-    type=click.Choice(['html', 'json', 'tsv', 'svg', 'pdf']),
-    help='Output formats (can be repeated).',
+@click.option('--cache/--no-cache', 'use_cache', default=True,
+    help='Reuse/store FASTA reference mapping cache in the project database (default: on).',
 )
-@click.option('--min-af', default=0.01, type=float, help='Minimum allele frequency.')
-@click.option('--min-depth', default=10, type=int, help='Minimum read depth.')
+@click.option('--min-af', default=0.01, type=float, help='Minimum allele frequency. Default: 0.01')
+@click.option('--min-depth', default=10, type=int, help='Minimum read depth. Default: 10')
 def profile(
     project: str,
     vcf: str,
@@ -153,7 +151,7 @@ def profile(
     sample: str,
     output: str,
     results_db: str | None,
-    formats: tuple[str, ...],
+    use_cache: bool,
     min_af: float,
     min_depth: int
 ) -> None:
@@ -190,6 +188,7 @@ def profile(
         query_name, query_seq, fasta_matches = resolve_fasta_reference(
             project_conn,
             Path(ref_fasta),
+            use_cache=use_cache,
         )
         ref_id = pick_best_reference_id(fasta_matches)
         fasta_matches = select_matches_for_reference(fasta_matches, ref_id)
@@ -296,7 +295,6 @@ def profile(
             output_dir,
             genes=genes,
             rule_gene_names=rule_gene_names,
-            formats=formats,
             project_conn=project_conn,
             rules=rules,
         )

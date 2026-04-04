@@ -4,6 +4,7 @@ Publication-ready plots for genome overview and gene-level mutation tracks.
 
 from __future__ import annotations
 
+from io import BytesIO
 import logging
 from pathlib import Path
 
@@ -40,26 +41,68 @@ def lollipop_plot(
     :param result: profiling result with annotated variants
     :param genes: gene records for drawing the overview and gene panels
     :param output_path: file path for the saved figure
-    :param fmt: output format (svg, pdf, png)
+    :param fmt: output format (svg, png)
     :param rule_gene_names: optional rule-backed gene names to focus gene panels
     :return: path to saved figure
     """
     output_path = Path(output_path)
+    fig = _build_lollipop_figure(result, genes, rule_gene_names=rule_gene_names)
+    if fig is None:
+        return output_path
+
+    fig.savefig(output_path, format=fmt, dpi=150)
+    plt.close(fig)
+
+    logger.info('Lollipop plot saved to %s', output_path)
+    return output_path
+
+
+def render_lollipop_plot_bytes(
+    result: ProfilingResult,
+    genes: list[GeneRecord],
+    fmt: str = 'svg',
+    rule_gene_names: set[str] | None = None,
+) -> bytes | None:
+    """
+    Render the report plot to an in-memory byte string.
+
+    :param result: profiling result with annotated variants
+    :param genes: gene records for drawing the overview and gene panels
+    :param fmt: output format (svg, png)
+    :param rule_gene_names: optional rule-backed gene names to focus gene panels
+    :return: plot bytes or None when no plot could be generated
+    """
+    fig = _build_lollipop_figure(result, genes, rule_gene_names=rule_gene_names)
+    if fig is None:
+        return None
+
+    buf = BytesIO()
+    fig.savefig(buf, format=fmt, dpi=150)
+    plt.close(fig)
+    return buf.getvalue()
+
+
+def _build_lollipop_figure(
+    result: ProfilingResult,
+    genes: list[GeneRecord],
+    rule_gene_names: set[str] | None = None,
+):
+    """Build the matplotlib figure used by the HTML and PDF reports."""
     cds = result.cds_annotations
     if not cds:
         logger.warning('No CDS variants to plot')
-        return output_path
+        return None
 
     plot_genes = _select_plot_genes(genes, cds, rule_gene_names)
     if not plot_genes:
         logger.warning('No genes selected for plotting')
-        return output_path
+        return None
 
     selected_gene_names = {gene.name for gene in plot_genes}
     cds = [ann for ann in cds if ann.gene_name in selected_gene_names]
     if not cds:
         logger.warning('No CDS variants in selected plot genes')
-        return output_path
+        return None
 
     gene_annotations = _group_annotations_by_gene(cds, plot_genes)
 
@@ -112,11 +155,7 @@ def lollipop_plot(
 
     gene_pair_axes[0].legend(handles=handles, loc='upper right', fontsize=7, ncol=len(handles), frameon=False, bbox_to_anchor=(1, 1.15), borderaxespad=0.0)
     plt.tight_layout()
-    fig.savefig(output_path, format=fmt, dpi=150)
-    plt.close(fig)
-
-    logger.info('Lollipop plot saved to %s', output_path)
-    return output_path
+    return fig
 
 
 def _select_plot_genes(
