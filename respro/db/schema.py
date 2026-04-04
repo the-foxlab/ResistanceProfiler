@@ -5,7 +5,7 @@ SQLite schema creation and validation for ResistanceProfiler databases.
 import sqlite3
 from pathlib import Path
 
-PROJECT_SCHEMA_VERSION = 15
+PROJECT_SCHEMA_VERSION = 16
 RESULTS_SCHEMA_VERSION = 1
 
 PROJECT_SCHEMA_SQL = """\
@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS gene (
     reference_id INTEGER NOT NULL REFERENCES reference(id),
     name        TEXT    NOT NULL,
     protein     TEXT    DEFAULT '',
+    protein_id  TEXT    DEFAULT '',  -- GenBank protein_id qualifier
+    ncbi_protein_url TEXT DEFAULT '',  -- verified NCBI protein URL when reachable
+    locus_tag   TEXT    DEFAULT '',  -- GenBank locus_tag qualifier
+    note        TEXT    DEFAULT '',  -- GenBank note qualifier (short free text)
     start       INTEGER NOT NULL,  -- 0-based inclusive
     end         INTEGER NOT NULL,  -- 0-based exclusive
     strand      TEXT    NOT NULL DEFAULT '+',
@@ -227,6 +231,10 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
     },
     'gene': {
         'protein': "TEXT DEFAULT ''",
+        'protein_id': "TEXT DEFAULT ''",
+        'ncbi_protein_url': "TEXT DEFAULT ''",
+        'locus_tag': "TEXT DEFAULT ''",
+        'note': "TEXT DEFAULT ''",
         'codon_start': 'INTEGER NOT NULL DEFAULT 0',
         'nt_sequence': "TEXT NOT NULL DEFAULT ''",
         'aa_sequence': "TEXT NOT NULL DEFAULT ''",

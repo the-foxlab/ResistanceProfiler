@@ -25,7 +25,7 @@ class ProfilingResult:
     reference_name: str = ''
     reference_length_nt: int = 0
     sample_name: str = ''
-    vcf_path: str = ''
+    vcf_name: str = ''
     run_timestamp: str = field(
         default_factory=lambda: datetime.now().isoformat(timespec='seconds')
     )
@@ -85,7 +85,7 @@ class ProfilingResult:
             'reference': self.reference_name,
             'reference_length_nt': self.reference_length_nt,
             'sample': self.sample_name,
-            'vcf': self.vcf_path,
+            'vcf': self.vcf_name,
             'timestamp': self.run_timestamp,
             'total_variants': self.total_variants,
             'variants_in_cds': self.variants_in_cds,

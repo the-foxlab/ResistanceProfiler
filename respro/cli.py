@@ -137,7 +137,7 @@ def init_add(
     '--results-db',
     default=None,
     type=click.Path(),
-    help='Optional results database path. Creates new DB or validates existing DB.',
+    help='Optional results database path. Creates new DB or validates and then uses existing DB.',
 )
 @click.option(
     '--format', 'formats', multiple=True, default=['html', 'json'],
@@ -281,7 +281,7 @@ def profile(
             reference_name=ref_name,
             reference_length_nt=reference_length_nt,
             sample_name=sample,
-            vcf_path=vcf,
+            vcf_name=Path(vcf).name,
             total_variants=len(variants),
             variants_in_cds=sum(1 for a in annotations if a.gene_name),
             resistance_hits=sum(1 for a in annotations if a.is_resistance_hit),

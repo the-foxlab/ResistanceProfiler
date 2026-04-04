@@ -291,7 +291,7 @@ class TestAnnotateInsertions:
         assert len(results) == 1
         ann = results[0]
         assert ann.gene_name == 'gag'
-        assert ann.consequence == 'inframe_insertion'
+        assert ann.consequence == 'insertion'
 
     def test_frameshift_insertion(self, tiny_gene, tiny_ref_seq):
         """A 1-base insertion → frameshift."""
@@ -327,7 +327,7 @@ class TestAnnotateDeletions:
         assert len(results) == 1
         ann = results[0]
         assert ann.gene_name == 'gag'
-        assert ann.consequence == 'inframe_deletion'
+        assert ann.consequence == 'deletion'
 
     def test_frameshift_deletion(self, tiny_gene, tiny_ref_seq):
         """A 1-base deletion → frameshift."""

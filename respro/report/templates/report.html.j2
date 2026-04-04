@@ -20,11 +20,11 @@
 <div class='logo-wrap'>{{ logo_svg | safe }}</div>
 
 <dl class='meta'>
-  <dt>Project</dt><dd>{{ summary.project_name }}</dd>
+  <dt>Database</dt><dd>{{ summary.project_name }}</dd>
   <dt>Organism</dt><dd>{{ summary.organism or '-' }}</dd>
   <dt>Reference</dt><dd>{{ summary.reference }}</dd>
   <dt>Sample</dt><dd>{{ summary.sample or '-' }}</dd>
-  <dt>VCF</dt><dd>{{ summary.vcf }}</dd>
+  <dt>VCF name</dt><dd>{{ summary.vcf }}</dd>
   <dt>Timestamp</dt><dd>{{ summary.timestamp }}</dd>
 </dl>
 
@@ -44,6 +44,7 @@
 
 {% if db_hit_rows %}
 <h2>Mutations in database</h2>
+<div class='table-wrapper'>
 <table class='sortable'>
 <thead><tr>
   <th>Gene</th><th>AA change</th><th>Observed frequency</th><th>Underlying nt change</th><th>Drug</th>
@@ -72,10 +73,12 @@
 {% endfor %}
 </tbody>
 </table>
+</div>
 {% endif %}
 
 {% if combo_hit_rows %}
 <h2>Combination rule hits</h2>
+<div class='table-wrapper'>
 <table class='sortable'>
 <thead><tr>
   <th>Group</th><th>Member mutations</th><th>Drug</th><th>IC50</th><th>Phenotype</th><th>Clinical phenotype</th><th>Publication</th>
@@ -100,11 +103,13 @@
 {% endfor %}
 </tbody>
 </table>
+</div>
 {% endif %}
 
 {% if potential_rows %}
 <h2>Similarity to database entries</h2>
 <p class='table-note'>Detected mutations at positions with known resistance rules but different amino acid changes. Similarity is scored with BLOSUM62.</p>
+<div class='table-wrapper'>
 <table class='sortable'>
 <thead><tr>
   <th>Gene</th><th>Observed AA change</th><th>Known rule</th><th>Similarity</th><th>Drug</th><th>IC50</th>
@@ -134,9 +139,11 @@
 {% endfor %}
 </tbody>
 </table>
+</div>
 {% endif %}
 
 <h2>All CDS variants</h2>
+<div class='table-wrapper'>
 <table class='sortable'>
 <thead><tr>
   <th>Gene</th><th>Nt change</th><th>AA change</th><th>Consequence</th><th>Frequency</th><th>Observed frequency</th><th>In database</th>
@@ -155,6 +162,29 @@
 {% endfor %}
 </tbody>
 </table>
+</div>
+
+{% if gene_cards %}
+<h2>Gene overview</h2>
+<div class='gene-cards'>
+{% for g in gene_cards %}
+<div class='gene-card'>
+  <div class='gene-meta-block'>
+    <div class='gene-name'>{{ g.name }}</div>
+    <div><strong>Product:</strong> {{ g.protein or '-' }}</div>
+    <div><strong>Protein ID:</strong> {{ g.protein_id or '-' }}</div>
+    <div><strong>Locus tag:</strong> {{ g.locus_tag or '-' }}</div>
+    {% if g.note %}<div class='gene-note'><strong>Note:</strong> {{ g.note }}</div>{% endif %}
+    {% if g.ncbi_protein_url %}<a href='{{ g.ncbi_protein_url }}' target='_blank'>NCBI protein ↗</a>{% endif %}
+  </div>
+  <div class='gene-seq-block'>
+    <pre class='gene-seq'>{% if g.protein_id %}>{{ g.protein_id }}{% else %}>{{ g.name }}{% endif %}
+{{ g.aa_sequence or '-' }}</pre>
+  </div>
+</div>
+{% endfor %}
+</div>
+{% endif %}
 
 {% if drug_cards %}
 <h2>Drug overview</h2>

@@ -24,9 +24,12 @@ class ParsedGenBankGene:
     reference_accession: str
     gene_name: str
     protein: str
-    start: int
-    end: int
-    strand: str
+    protein_id: str = ''
+    locus_tag: str = ''
+    note: str = ''
+    start: int = 0
+    end: int = 0
+    strand: str = '+'
     codon_start: int = 0  # 0-based offset (GenBank codon_start qualifier minus 1)
     nt_sequence: str = ''  # CDS nucleotide slice in coding orientation
     aa_sequence: str = ''  # pre-translated amino acid sequence (stop codon excluded)
@@ -200,6 +203,9 @@ def _parse_cds_features(
         seen_gene_names.add(gene_name)
 
         product = _first_qualifier(feature, 'product', 'protein', default=gene_name)
+        protein_id = _first_qualifier(feature, 'protein_id', default='')
+        locus_tag = _first_qualifier(feature, 'locus_tag', default='')
+        note = _first_qualifier(feature, 'note', default='')
         codon_start = int(_first_qualifier(feature, 'codon_start', default='1')) - 1
         strand = '+' if feature.location.strand != -1 else '-'
         start = int(feature.location.start)
@@ -219,6 +225,9 @@ def _parse_cds_features(
                 reference_accession=accession,
                 gene_name=gene_name,
                 protein=product,
+                protein_id=protein_id,
+                locus_tag=locus_tag,
+                note=note,
                 start=start,
                 end=end,
                 strand=strand,
@@ -328,5 +337,4 @@ def _validate_unique_reference_identifiers(
         raise ValueError('GenBank file contains duplicate record identifiers')
     if len(accessions) != len(set(accessions)):
         raise ValueError('GenBank file contains duplicate accessions across records')
-
 

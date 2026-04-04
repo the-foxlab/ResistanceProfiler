@@ -64,7 +64,7 @@ def lollipop_plot(
     gene_annotations = _group_annotations_by_gene(cds, plot_genes)
 
     # One row for overview, then two rows per gene (track + lollipop)
-    height_ratios = [2.0, 0.6] * len(plot_genes) + [1]
+    height_ratios = [2.0, 0.5] * len(plot_genes) + [0.5]
     # Cap height so the overview typically fits a full-size 1080p browser window.
     fig_height = min(9.0, max(5.4, 2 + 2.1 * len(plot_genes)))
     fig, axes = plt.subplots(
@@ -264,15 +264,6 @@ def _draw_genome_overview(
     ax.set_ylim(lower, 0.9)
     ax.set_yticks([])
     ax.set_xlabel('Genomic position')
-    ax.text(
-        genome_mid,
-        0.56,
-        'Highlighted: resistance genes with detected mutations',
-        ha='center',
-        va='center',
-        fontsize=8,
-        color='#6b7785',
-    )
     ax.spines['top'].set_visible(False)
     ax.spines['left'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -311,7 +302,7 @@ def _draw_gene_track(ax, gene: GeneRecord) -> None:
     # Draw gene arrow/rectangle
     gene_width = gene.end - gene.start
     pad = max(10, int((gene.end - gene.start) * 0.03))
-    ax.hlines(0.5, gene.start + 1 - pad, gene.end + pad, color='black', linewidth=1.0, zorder=-10)
+    ax.hlines(0.5, gene.start + 1 - pad, gene.end + pad, color='dimgrey', linewidth=1.0, zorder=-10)
 
     rect = mpatches.Rectangle(
         (gene.start + 1, 0.3),

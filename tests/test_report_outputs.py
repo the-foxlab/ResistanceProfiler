@@ -3,6 +3,7 @@ Tests for report output generation.
 """
 
 import json
+import sqlite3
 from pathlib import Path
 
 from respro.db.models import AnnotatedVariant, ResistanceRule, VariantCall
@@ -36,7 +37,7 @@ def _make_result() -> ProfilingResult:
     return ProfilingResult(
         project_name='Test', organism='test',
         reference_name='ref', reference_length_nt=12000, sample_name='S1',
-        vcf_path='test.vcf',
+        vcf_name='test.vcf',
         total_variants=1, variants_in_cds=1, resistance_hits=1,
         annotations=[ann],
     )
@@ -137,7 +138,7 @@ class TestHtmlExport:
             reference_name='ref',
             reference_length_nt=12000,
             sample_name='S1',
-            vcf_path='test.vcf',
+            vcf_name='test.vcf',
             total_variants=1,
             variants_in_cds=1,
             resistance_hits=0,
@@ -178,7 +179,7 @@ class TestHtmlExport:
             reference_name='ref',
             reference_length_nt=12000,
             sample_name='S1',
-            vcf_path='test.vcf',
+            vcf_name='test.vcf',
             total_variants=1,
             variants_in_cds=1,
             resistance_hits=0,
@@ -203,3 +204,39 @@ class TestHtmlExport:
         assert rows[0]['drug'] == 'DrugA'
         assert rows[0]['similarity'] == 'moderate'
 
+    def test_render_html_gene_overview(self):
+        from respro.report.html import _load_gene_cards
+
+        r = _make_result()
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE reference (id INTEGER, name TEXT)')
+        conn.execute(
+            'CREATE TABLE gene ('
+            'name TEXT, protein TEXT, protein_id TEXT, ncbi_protein_url TEXT, '
+            'locus_tag TEXT, note TEXT, aa_sequence TEXT, start INTEGER, reference_id INTEGER'
+            ')'
+        )
+        conn.execute('INSERT INTO reference (id, name) VALUES (?, ?)', (1, 'ref'))
+        conn.execute(
+            'INSERT INTO gene (name, protein, protein_id, ncbi_protein_url, locus_tag, note, aa_sequence, start, reference_id) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (
+                'gag',
+                'Capsid protein',
+                'YP_009137097.1',
+                'https://www.ncbi.nlm.nih.gov/protein/YP_009137097.1/',
+                'UL23',
+                'Thymidine kinase',
+                'MKAFGP',
+                100,
+                1,
+            ),
+        )
+        conn.commit()
+
+        cards = _load_gene_cards(conn, r.reference_name, {'gag'})
+        assert len(cards) == 1
+        assert cards[0]['protein_id'] == 'YP_009137097.1'
+        assert cards[0]['ncbi_protein_url'] == 'https://www.ncbi.nlm.nih.gov/protein/YP_009137097.1/'
+        assert cards[0]['aa_sequence'] == 'MKAFGP'

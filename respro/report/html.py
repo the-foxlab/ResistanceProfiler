@@ -238,15 +238,17 @@ def _load_drug_cards(
         return []
     try:
         rows = project_conn.execute(
-            'SELECT name, pubchem_url, description, structure_url FROM drug ORDER BY name'
+            'SELECT name, pubchem_cid, pubchem_url, description, structure_url FROM drug ORDER BY name'
         ).fetchall()
     except Exception:
         return []
 
     cards: list[dict] = []
     for r in rows:
-        # Only include drugs with detected rule hits
         if r['name'].lower() not in detected_drug_names:
+            continue
+        # Show drug details only when we actually have a PubChem hit.
+        if not (r['pubchem_cid'] or '').strip():
             continue
 
         cards.append({
@@ -254,6 +256,50 @@ def _load_drug_cards(
             'pubchem_url': r['pubchem_url'] or '',
             'description': r['description'] or '',
             'structure_url': r['structure_url'] or '',
+        })
+    return cards
+
+
+def _load_gene_cards(
+    project_conn: sqlite3.Connection | None,
+    reference_name: str,
+    detected_gene_names: set[str] | None = None,
+) -> list[dict]:
+    """
+    Load gene metadata for detected genes in the active reference.
+
+    :param project_conn: open project database connection (or None)
+    :param reference_name: active reference name from profiling result
+    :param detected_gene_names: genes observed in this profiling run
+    :return: list of gene info dicts
+    """
+    if project_conn is None or not detected_gene_names:
+        return []
+
+    try:
+        rows = project_conn.execute(
+            'SELECT g.name, g.protein, g.protein_id, g.ncbi_protein_url, g.locus_tag, g.note, g.aa_sequence '
+            'FROM gene g '
+            'JOIN reference r ON r.id = g.reference_id '
+            'WHERE r.name = ? '
+            'ORDER BY g.start',
+            (reference_name,),
+        ).fetchall()
+    except Exception:
+        return []
+
+    cards: list[dict] = []
+    for row in rows:
+        if row['name'] not in detected_gene_names:
+            continue
+        cards.append({
+            'name': row['name'],
+            'protein': row['protein'] or '',
+            'protein_id': row['protein_id'] or '',
+            'ncbi_protein_url': row['ncbi_protein_url'] or '',
+            'locus_tag': row['locus_tag'] or '',
+            'note': row['note'] or '',
+            'aa_sequence': row['aa_sequence'] or '',
         })
     return cards
 
@@ -301,6 +347,12 @@ def render_html(
         detected_drug_names.add(combo.rule_set.drug_name.lower())
 
     drug_cards = _load_drug_cards(project_conn, detected_drug_names)
+    detected_gene_names = {
+        ann.gene_name
+        for ann in result.cds_annotations
+        if ann.gene_name
+    }
+    gene_cards = _load_gene_cards(project_conn, result.reference_name, detected_gene_names)
 
     plot_data = ''
     if plot_svg_path and Path(plot_svg_path).is_file():
@@ -314,6 +366,7 @@ def render_html(
         cds_rows=cds_rows,
         potential_rows=potential_rows,
         drug_cards=drug_cards,
+        gene_cards=gene_cards,
         plot_data=plot_data,
         logo_svg=logo_svg,
         css=css_text,

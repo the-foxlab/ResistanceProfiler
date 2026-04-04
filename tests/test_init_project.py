@@ -9,7 +9,11 @@ import textwrap
 
 import pytest
 
-from respro.db.init_project import _detect_coordinate_base, _validate_reference_amino_acids
+from respro.db.init_project import (
+    _detect_coordinate_base,
+    _is_ncbi_protein_accession,
+    _validate_reference_amino_acids,
+)
 from respro.db.init_project import init_project
 from respro.db.schema import create_schema
 from conftest import write_genbank, TINY_REF_SEQ
@@ -427,6 +431,22 @@ class TestComboRuleParsing:
         assert publication == 'https://doi.org/10.1086/590668'
 
 
+class TestNcbiProteinAccession:
+    def test_accepts_refseq_protein_accessions(self) -> None:
+        assert _is_ncbi_protein_accession('YP_009137097.1') is True
+        assert _is_ncbi_protein_accession('NP_123456.2') is True
+
+    def test_accepts_genbank_style_accessions(self) -> None:
+        assert _is_ncbi_protein_accession('AAA12345.1') is True
+
+    def test_rejects_missing_version_suffix(self) -> None:
+        assert _is_ncbi_protein_accession('YP_009137097') is False
+
+    def test_rejects_non_accession_tokens(self) -> None:
+        assert _is_ncbi_protein_accession('thymidine_kinase') is False
+        assert _is_ncbi_protein_accession('YP-009137097.1') is False
+
+
 class TestIc50ParsingAndAggregation:
     @pytest.fixture()
     def tiny_genbank(self, tmp_path):
@@ -721,5 +741,4 @@ class TestGenbankTranslationQuality:
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='missing required field reference'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
-
 
