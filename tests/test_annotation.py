@@ -4,12 +4,13 @@ Tests for codon-aware annotation logic.
 
 from respro.core.annotation import (
     annotate_variants,
+    assign_af_bins,
     normalize_mutation,
     reverse_complement,
     translate_codon,
     _classify_snp_consequence,
 )
-from respro.db.models import GeneRecord, VariantCall
+from respro.db.models import AnnotatedVariant, GeneRecord, VariantCall
 
 
 # ─── translate_codon ──────────────────────────────────────────────────
@@ -456,3 +457,53 @@ class TestCodonStartOffset:
         assert ann.consequence == 'missense'
 
 
+# ─── assign_af_bins ───────────────────────────────────────────────────
+
+def _make_ann(af: float) -> AnnotatedVariant:
+    var = VariantCall(chrom='c', pos=0, ref='A', alt='G', allele_freq=af, depth=100)
+    return AnnotatedVariant(variant=var)
+
+
+class TestAssignAfBins:
+    """Tests for VCF-mode and FASTA-mode AF binning."""
+
+    def test_vcf_high(self) -> None:
+        anns = assign_af_bins([_make_ann(1.0)])
+        assert anns[0].af_bin == 'high'
+
+    def test_vcf_intermediate(self) -> None:
+        anns = assign_af_bins([_make_ann(0.5)])
+        assert anns[0].af_bin == 'intermediate'
+
+    def test_vcf_low(self) -> None:
+        anns = assign_af_bins([_make_ann(0.05)])
+        assert anns[0].af_bin == 'low'
+
+    def test_vcf_unknown_below_threshold(self) -> None:
+        anns = assign_af_bins([_make_ann(0.001)])
+        assert anns[0].af_bin == 'unknown'
+
+    # FASTA-mode bins: high=1.0, intermediate=0.5, low=0.33/0.25
+    _FASTA_BINS = {
+        'high': (0.75, 1.0),
+        'intermediate': (0.35, 0.74),
+        'low': (0.01, 0.34),
+    }
+
+    def test_fasta_bins_high(self) -> None:
+        anns = assign_af_bins([_make_ann(1.0)], bins=self._FASTA_BINS)
+        assert anns[0].af_bin == 'high'
+
+    def test_fasta_bins_intermediate(self) -> None:
+        anns = assign_af_bins([_make_ann(0.5)], bins=self._FASTA_BINS)
+        assert anns[0].af_bin == 'intermediate'
+
+    def test_fasta_bins_low_one_third(self) -> None:
+        """1/3 frequency (3-way IUPAC) maps to low."""
+        anns = assign_af_bins([_make_ann(round(1 / 3, 10))], bins=self._FASTA_BINS)
+        assert anns[0].af_bin == 'low'
+
+    def test_fasta_bins_low_one_quarter(self) -> None:
+        """1/4 frequency (4-way IUPAC) maps to low."""
+        anns = assign_af_bins([_make_ann(0.25)], bins=self._FASTA_BINS)
+        assert anns[0].af_bin == 'low'

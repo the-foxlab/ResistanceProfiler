@@ -358,7 +358,7 @@ def _draw_gene_track(ax, gene: GeneRecord) -> None:
     ax.text(
         gene_x,
         0.5,
-        gene.name,
+        f'← {gene.name} ←' if gene.strand == '-' else f'→ {gene.name} →',
         ha='center',
         va='center',
         fontsize=8,

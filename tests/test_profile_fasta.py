@@ -1,5 +1,6 @@
 """
-Tests for FASTA-based profiling — coordinate remapping and end-to-end CLI workflow.
+Tests for FASTA-based profiling — coordinate remapping, FASTA consensus profiling,
+and end-to-end CLI workflow.
 """
 
 from __future__ import annotations
@@ -11,12 +12,18 @@ from click.testing import CliRunner
 
 from conftest import TINY_REF_SEQ, TINY_REF_NAME
 from respro.cli import main
+from respro.core.fasta_profile import (
+    _annotate_from_alignment,
+    _expand_iupac_codon,
+    _global_align,
+    profile_fasta_consensus,
+)
 from respro.core.profile import (
     _build_query_to_cds_map,
     _cds_pos_to_genomic_pos,
     remap_variants,
     resolve_cached_query_reference,
-    resolve_fasta_reference,
+    resolve_fasta_query,
 )
 from respro.core.sequence_matching import GeneMatch, match_query_to_genes, sequence_checksum, store_mappings
 from respro.db.models import GeneRecord, VariantCall
@@ -365,7 +372,7 @@ class TestResolveFastaReference:
         fasta_path.write_text(f'>user_ref\n{TINY_REF_SEQ}\n')
 
         conn = open_project_db(fasta_db)
-        name, seq, matches = resolve_fasta_reference(
+        name, seq, matches = resolve_fasta_query(
             conn, fasta_path,
         )
 
@@ -375,7 +382,7 @@ class TestResolveFastaReference:
         assert matches[0].gene.name == 'gag'
 
         # Second call should hit cache
-        name2, seq2, matches2 = resolve_fasta_reference(
+        name2, seq2, matches2 = resolve_fasta_query(
             conn, fasta_path,
         )
         assert len(matches2) == len(matches)
@@ -387,7 +394,7 @@ class TestResolveFastaReference:
 
         conn = open_project_db(fasta_db)
         with pytest.raises(ValueError, match='No sequences'):
-            resolve_fasta_reference(conn, fasta_path)
+            resolve_fasta_query(conn, fasta_path)
         conn.close()
 
     def test_multi_record_fasta_raises(
@@ -400,7 +407,7 @@ class TestResolveFastaReference:
 
         conn = open_project_db(fasta_db)
         with pytest.raises(ValueError, match='single-record'):
-            resolve_fasta_reference(conn, fasta_path)
+            resolve_fasta_query(conn, fasta_path)
         conn.close()
 
 
@@ -410,7 +417,7 @@ class TestResolveCachedQueryReference:
         fasta_path.write_text(f'>stored_ref\n{TINY_REF_SEQ}\n')
 
         conn = open_project_db(fasta_db)
-        resolve_fasta_reference(conn, fasta_path)
+        resolve_fasta_query(conn, fasta_path)
 
         name, seq, matches = resolve_cached_query_reference(conn, 'stored_ref')
 
@@ -425,7 +432,7 @@ class TestResolveCachedQueryReference:
         fasta_path.write_text(f'>stored_ref\n{TINY_REF_SEQ}\n')
 
         conn = open_project_db(fasta_db)
-        resolve_fasta_reference(conn, fasta_path)
+        resolve_fasta_query(conn, fasta_path)
 
         with pytest.raises(ValueError, match='Available cached headers: stored_ref'):
             resolve_cached_query_reference(conn, 'missing_ref')
@@ -484,7 +491,7 @@ class TestProfileFastaCli:
         )
 
         result = CliRunner().invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
             '--output', str(tmp_path / 'out'),
@@ -504,7 +511,7 @@ class TestProfileFastaCli:
         )
 
         result = CliRunner().invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
             '--ref-fasta', str(fasta_path),
@@ -533,7 +540,7 @@ class TestProfileFastaCli:
         output_dir = tmp_path / 'fasta_ref_b_results'
         runner = CliRunner()
         result = runner.invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(fasta_db_multi_reference),
             '--vcf', str(vcf_path),
             '--ref-fasta', str(fasta_path),
@@ -555,7 +562,7 @@ class TestProfileFastaCli:
         fasta_path.write_text(f'>user_ref\n{query}\n')
 
         conn = open_project_db(fasta_db)
-        resolve_fasta_reference(conn, fasta_path)
+        resolve_fasta_query(conn, fasta_path)
         conn.close()
 
         vcf_path = tmp_path / 'header_hit.vcf'
@@ -567,7 +574,7 @@ class TestProfileFastaCli:
 
         output_dir = tmp_path / 'header_results'
         result = CliRunner().invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
             '--query-ref-header', 'user_ref',
@@ -587,7 +594,7 @@ class TestProfileFastaCli:
         fasta_path.write_text(f'>stored_ref\n{TINY_REF_SEQ}\n')
 
         conn = open_project_db(fasta_db)
-        resolve_fasta_reference(conn, fasta_path)
+        resolve_fasta_query(conn, fasta_path)
         conn.close()
 
         vcf_path = tmp_path / 'missing_header.vcf'
@@ -598,7 +605,7 @@ class TestProfileFastaCli:
         )
 
         result = CliRunner().invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
             '--query-ref-header', 'missing_ref',
@@ -626,7 +633,7 @@ class TestProfileFastaCli:
         output_dir = tmp_path / 'fasta_results'
         runner = CliRunner()
         result = runner.invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
             '--ref-fasta', str(fasta_path),
@@ -656,7 +663,7 @@ class TestProfileFastaCli:
         output_dir = tmp_path / 'outside_results'
         runner = CliRunner()
         result = runner.invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
             '--ref-fasta', str(fasta_path),
@@ -685,7 +692,7 @@ class TestProfileFastaCli:
         output_dir = tmp_path / 'json_results'
         runner = CliRunner()
         result = runner.invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
             '--ref-fasta', str(fasta_path),
@@ -698,3 +705,212 @@ class TestProfileFastaCli:
         html = (output_dir / f'{vcf_path.stem}.report.html').read_text()
         assert TINY_REF_NAME in html
         assert 'gag' in html
+
+
+# ──────────────────────────────────────────────────────────────────────
+# FASTA consensus profiling — unit + integration tests
+# ──────────────────────────────────────────────────────────────────────
+
+# Simple 12-nt CDS: ATG AAA GCT TAA = M K A *
+_SIMPLE_CDS = 'ATGAAAGCTTAA'
+
+
+@pytest.fixture()
+def simple_gene() -> GeneRecord:
+    """Minimal 4-codon gene for FASTA consensus profiling tests."""
+    return GeneRecord(
+        id=1, reference_id=1, name='gag', protein='Gag',
+        start=0, end=12, strand='+', codon_start=0,
+        nt_sequence=_SIMPLE_CDS,
+        aa_sequence='MKA*',
+    )
+
+
+def _make_match(gene: GeneRecord, query_len: int, strand: str = '+') -> GeneMatch:
+    """Build a GeneMatch covering the full query, strand-aware."""
+    return GeneMatch(
+        gene=gene,
+        identity=1.0,
+        coverage=1.0,
+        query_start=0,
+        query_end=query_len,
+        strand=strand,
+        cigar=f'{query_len}M',
+    )
+
+
+class TestIupacExpansion:
+    def test_unambiguous_codon_returns_single_aa(self) -> None:
+        assert _expand_iupac_codon('ATG') == {'M'}
+
+    def test_r_expands_to_two_aas(self) -> None:
+        # RAA = AAA (K) or GAA (E)
+        aas = _expand_iupac_codon('RAA')
+        assert aas == {'K', 'E'}
+
+    def test_n_expands_to_all_possibilities(self) -> None:
+        # NNN covers all 64 codons; result must include at least standard AAs
+        aas = _expand_iupac_codon('NNN')
+        assert 'M' in aas
+        assert len(aas) > 5
+
+    def test_stop_codon_included(self) -> None:
+        # TAR = TAA or TAG = both stops
+        aas = _expand_iupac_codon('TAR')
+        assert aas == {'*'}
+
+
+class TestFastaConsensusProfile:
+    def test_perfect_match_produces_no_annotations(self, simple_gene: GeneRecord) -> None:
+        """Identical consensus emits zero annotations (all synonymous)."""
+        match = _make_match(simple_gene, 12)
+        anns = profile_fasta_consensus(_SIMPLE_CDS, [match])
+        assert anns == []
+
+    def test_missense_snp_detected(self, simple_gene: GeneRecord) -> None:
+        """Single K→E substitution at codon 1 → one missense annotation."""
+        # ATGGAAGCTTAA: codon 1 = GAA = E (was AAA = K)
+        query = 'ATGGAAGCTTAA'
+        match = _make_match(simple_gene, 12)
+        anns = profile_fasta_consensus(query, [match])
+
+        assert len(anns) == 1
+        ann = anns[0]
+        assert ann.gene_name == 'gag'
+        assert ann.ref_aa == 'K'
+        assert ann.alt_aa == 'E'
+        assert ann.consequence == 'missense'
+        assert ann.codon_pos == 1
+        assert ann.variant.allele_freq == pytest.approx(1.0)
+
+    def test_synonymous_change_not_emitted(self, simple_gene: GeneRecord) -> None:
+        """Synonymous codon change produces no annotations."""
+        # AAA → AAG: both encode K
+        query = 'ATGAAGGCTTAA'
+        match = _make_match(simple_gene, 12)
+        anns = profile_fasta_consensus(query, [match])
+        assert anns == []
+
+    def test_stop_gained(self, simple_gene: GeneRecord) -> None:
+        """K → * at codon 1 → stop_gained annotation."""
+        # ATGTAAGCTTAA: codon 1 = TAA = *
+        query = 'ATGTAAGCTTAA'
+        match = _make_match(simple_gene, 12)
+        anns = profile_fasta_consensus(query, [match])
+
+        assert len(anns) == 1
+        assert anns[0].alt_aa == '*'
+        assert anns[0].consequence == 'stop_gained'
+
+    def test_frameshift_insertion_stops_processing(self, simple_gene: GeneRecord) -> None:
+        """Single-base insertion → frameshift annotation; no further codons processed."""
+        # Insert 'A' after codon 1 → ATGAAAAGCTTAA (13 nt): frameshift at some codon
+        query = 'ATGAAAAGCTTAA'
+        match = _make_match(simple_gene, len(query))
+        anns = profile_fasta_consensus(query, [match])
+
+        assert len(anns) == 1
+        assert anns[0].consequence == 'frameshift'
+        assert anns[0].alt_aa == 'fsX'
+
+    def test_inframe_insertion_continues_processing(self, simple_gene: GeneRecord) -> None:
+        """Three-base insertion → insertion annotation; subsequent codons still processed."""
+        # 'ATGAAAGGGGCTTAA' = ATG AAA [GGG inserted] GCT TAA (15 nt)
+        query = 'ATGAAAGGGGCTTAA'
+        match = _make_match(simple_gene, len(query))
+        anns = profile_fasta_consensus(query, [match])
+
+        # One insertion at codon 2 (A→AG), no downstream frameshifts
+        assert any(a.consequence == 'insertion' for a in anns)
+        assert not any(a.consequence == 'frameshift' for a in anns)
+
+    def test_frameshift_deletion_stops_processing(self, simple_gene: GeneRecord) -> None:
+        """Single-base deletion → frameshift; subsequent codons not emitted."""
+        # 'ATGAAGCTTAA' (11 nt): 1 base deleted from codon 1 → frameshift
+        query = 'ATGAAGCTTAA'
+        match = _make_match(simple_gene, len(query))
+        anns = profile_fasta_consensus(query, [match])
+
+        assert len(anns) == 1
+        assert anns[0].consequence == 'frameshift'
+        assert anns[0].alt_aa == 'fsX'
+
+    def test_iupac_ambiguous_base_emits_split_frequency(self, simple_gene: GeneRecord) -> None:
+        """IUPAC 'R' at codon 1 → K (ref) or E: only E emitted with af=0.5."""
+        # 'ATGRAAGCTTAA': codon 1 = RAA = AAA (K) or GAA (E)
+        query = 'ATGRAAGCTTAA'
+        match = _make_match(simple_gene, 12)
+        anns = profile_fasta_consensus(query, [match])
+
+        assert len(anns) == 1
+        ann = anns[0]
+        assert ann.alt_aa == 'E'
+        assert ann.consequence == 'missense'
+        assert ann.variant.allele_freq == pytest.approx(0.5)
+
+    def test_position_is_0based_genomic_codon_start(self, simple_gene: GeneRecord) -> None:
+        """Variant pos should be the 0-based genomic NT position of the affected codon."""
+        # K→E at codon 1 (codons: 0=ATG pos 0, 1=AAA pos 3, 2=GCT pos 6, 3=TAA pos 9)
+        query = 'ATGGAAGCTTAA'
+        match = _make_match(simple_gene, 12)
+        anns = profile_fasta_consensus(query, [match])
+
+        assert len(anns) == 1
+        # Codon 1 starts at genomic pos 3 (0-based)
+        assert anns[0].variant.pos == 3
+
+    def test_no_nt_sequence_skips_gene(self, tmp_path: Path) -> None:
+        """Gene with empty nt_sequence should be silently skipped."""
+        gene_no_seq = GeneRecord(
+            id=1, reference_id=1, name='empty_gene', protein='',
+            start=0, end=12, strand='+', codon_start=0,
+            nt_sequence='',
+        )
+        match = _make_match(gene_no_seq, 12)
+        anns = profile_fasta_consensus(_SIMPLE_CDS, [match])
+        assert anns == []
+
+
+class TestFastaConsensusCli:
+    """End-to-end CLI test for --fasta consensus input mode."""
+
+    def test_fasta_consensus_detects_resistance_hit(
+        self, fasta_db: Path, tmp_path: Path,
+    ) -> None:
+        """Consensus FASTA with K→E at codon 1 should trigger the resistance rule."""
+        # Introduce K→E at codon 1 of TINY_REF_SEQ
+        mutant = 'ATG' + 'GAA' + TINY_REF_SEQ[6:]
+        fasta_path = tmp_path / 'consensus.fasta'
+        fasta_path.write_text(f'>consensus\n{mutant}\n')
+
+        output_dir = tmp_path / 'out'
+        result = CliRunner().invoke(main, [
+            'profile-fasta',
+            '--project', str(fasta_db),
+            '--fasta', str(fasta_path),
+            '--output', str(output_dir),
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert '1 database hit' in result.output
+
+    def test_fasta_consensus_no_change_no_hits(
+        self, fasta_db: Path, tmp_path: Path,
+    ) -> None:
+        """Identical consensus → 0 database hits."""
+        fasta_path = tmp_path / 'identical.fasta'
+        fasta_path.write_text(f'>identical\n{TINY_REF_SEQ}\n')
+
+        output_dir = tmp_path / 'out'
+        result = CliRunner().invoke(main, [
+            'profile-fasta',
+            '--project', str(fasta_db),
+            '--fasta', str(fasta_path),
+            '--output', str(output_dir),
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert '0 database hit' in result.output
+
+
+

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # Public API
 # ──────────────────────────────────────────────────────────────────────
 
-def resolve_fasta_reference(
+def resolve_fasta_query(
     conn: sqlite3.Connection,
     fasta_path: Path,
     *,

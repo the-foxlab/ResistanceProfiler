@@ -8,15 +8,78 @@ import sqlite3
 from pathlib import Path
 
 from jinja2 import Environment, BaseLoader
+from markupsafe import Markup, escape
 
 from respro import __version__
 from respro.core.similarity import classify_similarity
-from respro.db.models import GeneRecord, ResistanceRule
+from respro.db.models import AnnotatedVariant, GeneRecord, ResistanceRule
 from respro.report.palette import MUTATION_COLOURS
 from respro.report.results_model import ProfilingResult
 
 logger = logging.getLogger(__name__)
 
+
+# ──────────────────────────────────────────────────────────────────────
+# NT change formatting helpers
+# ──────────────────────────────────────────────────────────────────────
+
+def _format_nt_change(ann: AnnotatedVariant) -> Markup:
+    """
+    Format the nucleotide change for HTML display.
+
+    In FASTA mode, both ref and alt are codon-level (3 bases). Changed positions
+    within SNP codons are highlighted with bold+underline. Insertions display
+    as anchor_codon{pos}anchor_codon<u><strong>inserted</strong></u>.
+
+    :param ann: annotated variant
+    :return: Markup-safe HTML string for the NT change cell
+    """
+    ref = ann.variant.ref
+    alt = ann.variant.alt
+    pos = ann.variant.pos + 1  # 1-based for display
+
+    if not ann.is_fasta_mode:
+        return Markup(f'{escape(ref)}{pos}{escape(alt)}')
+
+    # FASTA mode — ref is always the 3-base reference codon
+    if ann.consequence == 'frameshift':
+        return Markup(f'{escape(ref)}{pos}fsX')
+
+    if ann.consequence == 'insertion':
+        # alt = ref_codon + inserted (anchor style set in fasta_profile.py)
+        anchor = str(escape(ref))
+        inserted = str(escape(alt[len(ref):] if len(alt) > len(ref) else alt))
+        return Markup(f'{anchor}{pos}{anchor}<u><strong>{inserted}</strong></u>')
+
+    if ann.consequence == 'deletion':
+        # ref = 3-base codon, alt = remaining bases after deletion
+        alt_html = str(escape(alt)) if alt and alt != '-' else '<em>del</em>'
+        return Markup(f'{escape(ref)}{pos}{alt_html}')
+
+    # SNP / synonymous / stop changes — highlight positions that differ
+    if len(ref) == 3 and len(alt) == 3:
+        ref_html = _highlight_codon_diff(ref, alt)
+        alt_html = _highlight_codon_diff(alt, ref)
+        return Markup(f'{ref_html}{pos}{alt_html}')
+
+    return Markup(f'{escape(ref)}{pos}{escape(alt)}')
+
+
+def _highlight_codon_diff(seq: str, other: str) -> str:
+    """
+    Render a 3-base codon as HTML, bold+underlining positions that differ from other.
+
+    :param seq: codon to render
+    :param other: reference codon to compare against
+    :return: HTML string (not Markup-wrapped; safe to embed in Markup context)
+    """
+    parts = []
+    for i, base in enumerate(seq):
+        if i < len(other) and base != other[i]:
+            parts.append(f'<u><strong>{escape(base)}</strong></u>')
+        else:
+            parts.append(str(escape(base)))
+    return ''.join(parts)
 
 def _load_template_text() -> str:
     """Load the HTML Jinja template text from the package template file."""
@@ -68,7 +131,7 @@ def _build_db_hit_rows(result: ProfilingResult) -> list[dict]:
             continue
 
         aa_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
-        nt_change = f'{ann.variant.ref}{ann.variant.pos + 1}{ann.variant.alt}'
+        nt_change = _format_nt_change(ann)
 
         # One row per drug
         for rule in ann.rule_matches:
@@ -125,7 +188,7 @@ def _build_cds_rows(result: ProfilingResult) -> list[dict]:
     """
     rows: list[dict] = []
     for ann in result.cds_annotations:
-        nt_change = f'{ann.variant.ref}{ann.variant.pos + 1}{ann.variant.alt}'
+        nt_change = _format_nt_change(ann)
         aa_change = ''
         if ann.ref_aa and ann.alt_aa:
             aa_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'

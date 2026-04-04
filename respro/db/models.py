@@ -150,6 +150,7 @@ class AnnotatedVariant:
     is_combined_codon_event: bool = False
     combined_member_count: int = 1
     af_bin: str = ''
+    is_fasta_mode: bool = False  # True when derived from consensus FASTA, not a VCF
     rule_matches: list[ResistanceRule] = field(default_factory=list)
 
     @property

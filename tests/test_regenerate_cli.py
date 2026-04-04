@@ -17,9 +17,9 @@ from respro.report.results_model import ProfilingResult
 
 
 def _run_profile(project_db: Path, sample_vcf: Path, sample_ref_fasta: Path, results_db: Path, tmp_path: Path) -> None:
-    """Helper: run profile with --results-db and assert success."""
+    """Helper: run profile-vcf with --results-db and assert success."""
     result = CliRunner().invoke(main, [
-        'profile',
+        'profile-vcf',
         '--project', str(project_db),
         '--vcf', str(sample_vcf),
         '--ref-fasta', str(sample_ref_fasta),

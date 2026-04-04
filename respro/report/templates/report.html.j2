@@ -26,7 +26,7 @@
   <dt>Organism</dt><dd>{{ summary.organism or '-' }}</dd>
   <dt>Reference</dt><dd>{{ summary.reference }}</dd>
   <dt>Sample</dt><dd>{{ summary.sample or '-' }}</dd>
-  <dt>VCF name</dt><dd>{{ summary.vcf }}</dd>
+  <dt>File name</dt><dd>{{ summary.vcf }}</dd>
   <dt>Timestamp</dt><dd>{{ summary.timestamp }}</dd>
 </dl>
 
@@ -49,7 +49,7 @@
 <div class='table-wrapper'>
 <table class='sortable'>
 <thead><tr>
-  <th>Gene</th><th>AA change</th><th>Observed frequency</th><th>Underlying nt change</th><th>Drug</th>
+  <th>Gene</th><th>AA change</th><th>Frequency classification</th><th>Underlying nt change</th><th>Drug</th>
   <th>IC50</th><th>Phenotype</th><th>Clinical phenotype</th><th>Source</th><th>Publication</th>
 </tr></thead>
 <tbody>
@@ -148,7 +148,7 @@
 <div class='table-wrapper'>
 <table class='sortable'>
 <thead><tr>
-  <th>Gene</th><th>Nt change</th><th>AA change</th><th>Consequence</th><th>Frequency</th><th>Observed frequency</th><th>In database</th>
+  <th>Gene</th><th>Nt change</th><th>AA change</th><th>Consequence</th><th>Frequency</th><th>Frequency classification</th><th>In database</th>
 </tr></thead>
 <tbody>
 {% for r in cds_rows %}

@@ -60,6 +60,21 @@ It is intentionally lightweight and should be updated in small, reviewable chang
   stored FASTA header (`--query-ref-header`) when the FASTA sequence is not
   provided
 
+### Goal 5: FASTA consensus sequence input
+- ✓ `respro profile --fasta consensus.fasta` — new mutually exclusive input mode
+  (no VCF required)
+- ✓ Query FASTA globally aligned to each matched internal gene CDS using
+  Biopython PairwiseAligner; alignment walks in reference reading frame
+- ✓ All variant types detected: SNPs (missense, synonymous, stop-gained,
+  start-lost), in-frame insertions, in-frame deletions, frameshifts
+- ✓ Frameshift detected when insertion or deletion length is not divisible by 3;
+  subsequent codons are not processed for the affected gene
+- ✓ IUPAC ambiguous bases expanded to all possible codons; each unique
+  non-reference amino acid emitted as a separate variant with equal probability
+  (allele_freq = 1 / number_of_possible_AAs)
+- ✓ Synthetic VariantCall records carry the 0-based genomic codon-start position
+  on the internal reference for consistent rule matching and report display
+
 ### Acceptance criteria for v0.2
 - New regression tests cover adjacent codon variants and overlapping-ORF scenarios
 - Combined-rule-set matching behavior is specified and covered by focused tests

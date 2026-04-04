@@ -1,5 +1,5 @@
 """
-Tests for the CLI profile command — end-to-end integration.
+Tests for the CLI profile-vcf command — end-to-end integration.
 """
 
 import sqlite3
@@ -13,7 +13,7 @@ from respro.db.schema import create_schema, init_results_db
 
 
 class TestProfileCli:
-    """End-to-end tests for the ``profile`` command."""
+    """End-to-end tests for the ``profile-vcf`` command."""
 
     def test_profile_produces_html_with_vcf_based_name(
         self,
@@ -26,7 +26,7 @@ class TestProfileCli:
         output_dir = tmp_path / 'results'
         runner = CliRunner()
         result = runner.invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -53,7 +53,7 @@ class TestProfileCli:
         output_dir = tmp_path / 'html_results'
         runner = CliRunner()
         result = runner.invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -84,7 +84,7 @@ class TestProfileCli:
         output_dir = tmp_path / 'hit_results'
         runner = CliRunner()
         result = runner.invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(project_db),
             '--vcf', str(vcf_path),
             '--ref-fasta', str(sample_ref_fasta),
@@ -105,7 +105,7 @@ class TestProfileCli:
         output_dir = tmp_path / 'results_with_db'
         results_db = tmp_path / 'run_results.db'
         result = CliRunner().invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -137,7 +137,7 @@ class TestProfileCli:
         conn.close()
 
         result = CliRunner().invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -163,7 +163,7 @@ class TestProfileCli:
         conn.close()
 
         result = CliRunner().invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -185,7 +185,7 @@ class TestProfileCli:
         bad_fasta.write_text('>unrelated\nGATTACAGATTACAGATTACAGATTACA\n')
 
         result = CliRunner().invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(bad_fasta),
@@ -630,7 +630,7 @@ class TestInitCli:
         """After profiling with --results-db, a run row and variant rows must be stored."""
         results_db = tmp_path / 'populated.db'
         result = CliRunner().invoke(main, [
-            'profile',
+            'profile-vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
