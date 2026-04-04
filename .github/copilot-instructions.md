@@ -17,6 +17,8 @@ Keep this file focused on how code should be written in this repository.
 - Codon-aware: resistance interpretation stays amino-acid-centered.
 - Lightweight storage: do not embed large external files in SQLite; store paths or metadata.
 - VCF plus reference FASTA are required profiling inputs.
+- No functions in `__init__.py`: package init files must only contain a module docstring.
+  Place functions in named submodules (e.g. `respro/utils/files.py`) and import from there.
 
 ## Code style
 

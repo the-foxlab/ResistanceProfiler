@@ -6,7 +6,9 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-PROJECT_SCHEMA_VERSION = 17
+from respro.utils.files import require_file
+
+PROJECT_SCHEMA_VERSION = 1
 RESULTS_SCHEMA_VERSION = 1
 
 PROJECT_SCHEMA_SQL = """\
@@ -338,9 +340,7 @@ def open_results_db(db_path: Path) -> sqlite3.Connection:
     :param db_path: path to existing results database
     :return: open SQLite connection
     """
-    if not db_path.is_file():
-        raise FileNotFoundError(f'Results database not found: {db_path}')
-
+    require_file(db_path, 'Results database')
     conn = sqlite3.connect(str(db_path))
     _configure_connection(conn)
     _validate_results_schema_overlap(conn, db_path)
@@ -447,8 +447,7 @@ def open_project_db(db_path: Path) -> sqlite3.Connection:
     :param db_path: path to project database
     :return: SQLite connection object
     """
-    if not db_path.is_file():
-        raise FileNotFoundError(f'Project database not found: {db_path}')
+    require_file(db_path, 'Project database')
     conn = sqlite3.connect(str(db_path))
     _configure_connection(conn)
     _validate_project_schema_overlap(conn, db_path)

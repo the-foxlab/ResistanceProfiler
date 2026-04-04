@@ -15,7 +15,8 @@ from respro.core.annotation import normalize_mutation
 from respro.db.schema import PROJECT_SCHEMA_VERSION, create_schema
 from respro.db.schema import open_project_db
 from respro.io.genbank import ParsedGenBankGene, ParsedGenBankReference, parse_genbank_sources
-from respro.utils import require_file, validate_strand
+from respro.io.genbank import validate_strand
+from respro.utils.files import require_file
 
 logger = logging.getLogger(__name__)
 

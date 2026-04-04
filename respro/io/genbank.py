@@ -16,6 +16,21 @@ from Bio.SeqRecord import SeqRecord
 logger = logging.getLogger(__name__)
 
 
+def validate_strand(strand: str) -> str:
+    """
+    Normalise a GenBank strand value to '+' or '-'.
+
+    :param strand: raw strand value from a feature record
+    :return: '+' or '-'
+    :raises ValueError: if the value is not a recognised strand token
+    """
+    if strand in ('+', '1', 'plus', 'forward'):
+        return '+'
+    if strand in ('-', '-1', 'minus', 'reverse'):
+        return '-'
+    raise ValueError(f'Invalid strand value: {strand!r}')
+
+
 @dataclass(frozen=True)
 class ParsedGenBankGene:
     """A CDS/gene extracted from a GenBank record."""

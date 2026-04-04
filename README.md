@@ -1,7 +1,7 @@
 # ResistanceProfiler
 
 A pathogen-agnostic framework for curated, codon-aware antiviral resistance profiling
-from NGS-derived variants, with optional later support for model training and prediction.
+from Fasta sequence or NGS-derived variants.
 
 ## Installation
 

@@ -483,26 +483,19 @@ def adjust_array_min_distance(
     if n == 1:
         return values_arr.tolist()
 
-    sorted_indices = np.argsort(values_arr)
-    original_values = values_arr.copy()
-
     for _ in range(max_iterations):
+        # Re-sort each iteration: value mutations from previous passes change the ordering.
+        sorted_indices = np.argsort(values_arr, kind='stable')
         max_adjustment = 0.0
         for i in range(1, n):
             idx1 = sorted_indices[i - 1]
             idx2 = sorted_indices[i]
-            current_distance = values_arr[idx2] - values_arr[idx1]
-            if current_distance < min_distance:
-                adjustment = (min_distance - current_distance) / 2.0
-
-                values_arr[idx1] -= adjustment
-                values_arr[idx2] += adjustment
-
-                values_arr[idx1] = max(values_arr[idx1], original_values[idx1] - adjustment)
-                values_arr[idx2] = min(values_arr[idx2], original_values[idx2] + adjustment)
-
-                if adjustment > max_adjustment:
-                    max_adjustment = adjustment
+            gap = values_arr[idx2] - values_arr[idx1]
+            if gap < min_distance:
+                push = (min_distance - gap) / 2.0
+                values_arr[idx1] -= push
+                values_arr[idx2] += push
+                max_adjustment = max(max_adjustment, push)
 
         if max_adjustment < tolerance:
             break
