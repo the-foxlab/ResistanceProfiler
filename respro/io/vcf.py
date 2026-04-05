@@ -131,7 +131,8 @@ def _extract_af(
             except (ValueError, IndexError):
                 pass
 
-    return 0.0
+    # A called variant with no extractable AF is assumed fully present
+    return 1.0
 
 
 def _extract_depth(info: dict[str, str], parts: list[str]) -> int:

@@ -23,7 +23,7 @@ from itertools import product as itertools_product
 
 from Bio.Seq import Seq
 
-from respro.core.annotation import translate_codon
+from respro.core.vcf_annotation import translate_codon
 from respro.core.sequence_matching import GeneMatch
 from respro.db.models import AnnotatedVariant, GeneRecord, VariantCall
 

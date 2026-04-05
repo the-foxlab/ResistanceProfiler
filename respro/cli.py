@@ -18,7 +18,7 @@ from pathlib import Path
 import click
 
 from respro import __version__
-from respro.core.annotation import annotate_variants, assign_af_bins
+from respro.core.vcf_annotation import annotate_variants, assign_af_bins
 from respro.core.fasta_profile import profile_fasta_consensus
 from respro.core.profile import (
     pick_best_reference_id,

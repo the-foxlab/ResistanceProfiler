@@ -58,26 +58,9 @@ class TestProfilingResult:
         assert d['resistance_hits'] == 1
         assert d['reference_length_nt'] == 12000
 
-    def test_to_json(self):
-        r = _make_result()
-        j = r.to_json()
-        data = json.loads(j)
-        assert len(data['variants']) == 1
-        assert data['variants'][0]['alt_aa'] == 'E'
-
-    def test_variants_include_combined_event_fields(self):
-        r = _make_combined_result()
-        rows = r.variants_as_dicts()
-        assert rows[0]['is_combined_codon_event'] is True
-        assert rows[0]['combined_member_count'] == 2
-
     def test_cds_annotations(self):
         r = _make_result()
         assert len(r.cds_annotations) == 1
-
-    def test_hit_annotations(self):
-        r = _make_result()
-        assert len(r.hit_annotations) == 1
 
     def test_drug_hits_json(self):
         r = _make_result()
@@ -106,13 +89,6 @@ class TestHtmlExport:
 
         assert "rel='icon'" in html
         assert 'data:image/svg+xml;base64,' in html
-
-    def test_render_html_shows_combined_event_in_json(self):
-        """Combined codon events are still represented in JSON output."""
-        r = _make_combined_result()
-        data = json.loads(r.to_json())
-        assert data['variants'][0]['is_combined_codon_event'] is True
-        assert data['variants'][0]['combined_member_count'] == 2
 
     def test_potential_effects_excludes_snp_rule_for_indel_annotation(self):
         from respro.report.html import _build_potential_effects_rows

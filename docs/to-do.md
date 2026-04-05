@@ -94,6 +94,9 @@ Mark items done and update priorities after each completed milestone.
 - [x] Pandas removed as dependency — stdlib `csv` used throughout
 - [x] No ML references in codebase or documentation
 - [x] Ruff clean — fixed F841 (unused variable in `plots.py`), W292 (missing newline in `profile.py`), I001 (import ordering); E501 excluded from CI enforcement (enforced by editor convention)
+- [x] VCF AF fallback corrected — `_extract_af` now returns `1.0` (not `0.0`) when no AF field is
+  present; prevents silent variant loss for germline, Sanger-derived, and simple-caller VCFs that
+  carry no `AF`/`VAF`/`FREQ`/`AD` information
 
 ---
 
@@ -117,7 +120,13 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   codebase; a type checker run in CI would catch drift and wrong annotations before they reach tests
 - 🟢 Increase test coverage for `respro/io/vcf.py` (currently 57%) — custom VCF parser handles
   edge cases that are not yet exercised; add tests for multi-sample columns, malformed INFO fields,
-  and missing AF/DP tags before switching to pysam
+  and missing AF/DP tags before switching to pysam; specifically add a regression test confirming
+  that a VCF with no AF field produces variants with `allele_freq = 1.0`
+- 🟡 VCF depth fallback — `_extract_depth` returns `0` when no `DP`/`FORMAT:DP` field is found;
+  with the default `--min-depth 10` filter this silently drops all variants from depth-unaware VCFs;
+  fix: use a sentinel (e.g. `depth = -1`) to mark "no depth information" and skip depth filtering
+  for those variants; alternatively document that users should pass `--min-depth 0` with
+  depth-free VCFs
 
 ### Reference matching for partial sequences
 
@@ -155,6 +164,15 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   a `coverage_gap` table (or JSON column on the run row) storing the list of gene positions below
   `--min-depth` or spanned by N-runs; `save_run` writes this data and `reconstruct_annotations`
   restores it so regenerated reports show the same unassessable-position warnings as the original
+- 🟢 Within-codon quasi-species phasing via BAM — once BAM support is in place, for codons that
+  carry two or three VCF-called SNPs check whether those mutations co-occur on the same reads
+  using `pysam.AlignmentFile.fetch()` over the codon window (≤3 nt, always on a single read);
+  mark multi-SNP codon events as "co-occurring confirmed" when read evidence supports all
+  substitutions simultaneously, or "possibly separate haplotypes" when reads show the mutations
+  in mutually exclusive sets; do not attempt long-range phasing beyond codon boundaries —
+  complexity grows unbounded and the within-codon case already covers the clinically relevant
+  combined-codon-effect scenario; the existing AF-based combined codon annotation must remain
+  the default and BAM phasing is applied only when `--bam` is provided
 
 ### Traceability
 

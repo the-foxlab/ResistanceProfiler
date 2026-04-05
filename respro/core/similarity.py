@@ -4,27 +4,10 @@ Amino acid substitution similarity scoring using BLOSUM62.
 
 from __future__ import annotations
 
+import logging
 from Bio.Align.substitution_matrices import load as _load_matrix
 
-# Load BLOSUM62 once at module level (standard bioinformatics convention).
-_BLOSUM62 = _load_matrix('BLOSUM62')
-
-
-def blosum62_score(aa1: str, aa2: str) -> float:
-    """
-    Return the BLOSUM62 substitution score between two amino acids.
-
-    Returns 0.0 for unknown or non-standard residues.
-
-    :param aa1: single-letter amino acid
-    :param aa2: single-letter amino acid
-    :return: BLOSUM62 score
-    """
-    try:
-        return float(_BLOSUM62[aa1.upper(), aa2.upper()])
-    except (KeyError, IndexError):
-        return 0.0
-
+logger = logging.getLogger(__name__)
 
 def classify_similarity(observed_aa: str, rule_aa: str) -> str:
     """
@@ -39,7 +22,11 @@ def classify_similarity(observed_aa: str, rule_aa: str) -> str:
     :param rule_aa: amino acid from the resistance rule
     :return: similarity class string
     """
-    score = blosum62_score(observed_aa, rule_aa)
+    try:
+        score = _load_matrix('BLOSUM62')[observed_aa.upper(), rule_aa.upper()]
+    except (KeyError, IndexError):
+        logger.warning('BLOSUM62 matrix does not contain %s/%s', observed_aa, rule_aa)
+
     if score >= 1:
         return 'high'
     if score >= 0:

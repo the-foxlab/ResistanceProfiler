@@ -9,8 +9,6 @@ from io import BytesIO
 from pathlib import Path
 
 import matplotlib
-
-matplotlib.use('Agg')
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,13 +17,8 @@ from respro.db.models import AnnotatedVariant, GeneRecord
 from respro.report.palette import MUTATION_COLOURS
 from respro.report.results_model import ProfilingResult
 
+matplotlib.use('Agg')
 logger = logging.getLogger(__name__)
-
-_MARKER_SHAPES = {
-    'database_hit': 's',
-    'no_database_hit': 'o',
-}
-
 
 
 def lollipop_plot(
@@ -109,7 +102,7 @@ def _build_lollipop_figure(
     # One row for overview, then two rows per gene (track + lollipop)
     height_ratios = [2.0, 0.5] * len(plot_genes) + [0.5]
     # Cap height so the overview typically fits a full-size 1080p browser window.
-    fig_height = min(9.0, max(5.4, 2 + 2.1 * len(plot_genes)))
+    fig_height = 2 + 3.4 * len(plot_genes)
     fig, axes = plt.subplots(
         len(height_ratios),
         1,
@@ -127,7 +120,7 @@ def _build_lollipop_figure(
         highlighted_gene_names,
         reference_length_nt=result.reference_length_nt,
     )
-
+    # Legend handles
     handles = [
         plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='white',
                    markeredgecolor='black', markersize=8, label='Database hit'),
@@ -144,7 +137,6 @@ def _build_lollipop_figure(
         plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['deletion'],
                    markeredgecolor='white', markersize=8, label='Deletion'),
     ]
-
 
     for i, gene in enumerate(plot_genes):
         lollipop_ax = gene_pair_axes[2 * i]
@@ -260,7 +252,7 @@ def _draw_genome_overview(
     max_track = max(tracks.values(), default=0)
     track_height = 0.44
     track_step = track_height * 0.2
-
+    # Baseline beneath the tracks
     ax.hlines(0.0, genome_start, genome_end, color='dimgrey', linewidth=1.0, zorder=1)
 
     for gene in sorted_genes:
@@ -389,6 +381,12 @@ def _draw_gene_panel(
     :param annotations: annotations belonging to the gene
     :param shared_track_ax: optional track axis to share x-limits with
     """
+
+    marker_shapes = {
+        'database_hit': 's',
+        'no_database_hit': 'o',
+    }
+
     jittered = _apply_top_jitter(annotations)
 
     for ann, x_top in jittered:
@@ -401,8 +399,8 @@ def _draw_gene_panel(
             y_top,
             color=colour,
             marker=(
-                _MARKER_SHAPES['database_hit'] if ann.is_resistance_hit
-                else _MARKER_SHAPES['no_database_hit']
+                marker_shapes['database_hit'] if ann.is_resistance_hit
+                else marker_shapes['no_database_hit']
             ),
             s=50 if ann.is_resistance_hit else 40,
             zorder=4,

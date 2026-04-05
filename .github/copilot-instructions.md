@@ -19,6 +19,8 @@ Keep this file focused on how code should be written in this repository.
 - VCF plus reference FASTA are required profiling inputs.
 - No functions in `__init__.py`: package init files must only contain a module docstring.
   Place functions in named submodules (e.g. `respro/utils/files.py`) and import from there.
+- If any feature is removed from the codebase, remove all related tests.
+- If a feature is only loaded by tests remove it from the codebase.
 
 ## Code style
 
@@ -68,7 +70,7 @@ from Bio import SeqIO
 
 # local package
 from respro import config
-from respro.core.annotation import annotate_variants
+from respro.core.vcf_annotation import annotate_variants
 ```
 
 ## Docstrings
@@ -199,6 +201,7 @@ The file has three sections:
 2. When a group of items is marked "introduce together", implement them in one change.
 3. If user instructions conflict with to-do priorities, follow the user and update the to-do
    afterwards.
+4. If only 🟡 items are present, reevaluate the priorities for all tasks.
 
 ### How to mark work done
 
@@ -241,16 +244,16 @@ Organize tests in classes when grouping related scenarios:
 
 ```python
 import pytest
-from respro.core.annotation import annotate_codon
+from respro.core.vcf_annotation import annotate_codon
 
 
 class TestCodonAnnotation:
-    def test_single_snp_changes_amino_acid(self) -> None:
-        result = annotate_codon(...)
-        assert result.alt == 'V'
+  def test_single_snp_changes_amino_acid(self) -> None:
+    result = annotate_codon(...)
+    assert result.alt == 'V'
 
-    def test_synonymous_change_detected(self) -> None:
-        ...
+  def test_synonymous_change_detected(self) -> None:
+    ...
 ```
 
 Use fixtures for reusable setup:

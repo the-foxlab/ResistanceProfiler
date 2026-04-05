@@ -426,7 +426,6 @@ def build_report_context(
 
 def render_html(
     result: ProfilingResult,
-    genes: list[GeneRecord] | None = None,
     plot_svg_data: bytes | None = None,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
@@ -435,7 +434,6 @@ def render_html(
     Render the profiling result to an HTML string.
 
     :param result: ProfilingResult object
-    :param genes: optional list of genes for context
     :param plot_svg_data: optional SVG bytes of the embedded plot
     :param project_conn: optional project DB connection for drug overview
     :param rules: optional list of resistance rules for potential effects analysis
@@ -490,7 +488,7 @@ def write_html(
     :return: path to written HTML file
     """
     html = render_html(
-        result, genes=genes, plot_svg_data=plot_svg_data,
+        result, plot_svg_data=plot_svg_data,
         project_conn=project_conn, rules=rules,
     )
     output_path = Path(output_path)

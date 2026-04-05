@@ -1,7 +1,7 @@
 :root { --accent: #2c3e50; --hit: #e74c3c; --ok: #27ae60; --bg: #fafbfc; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: Arial, sans-serif; color: #333; background: var(--bg); padding: 2rem; line-height: 1.5; }
-.logo-wrap { margin-bottom: 1.6rem; }
+.report-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.6rem; }
 .logo-wrap svg { width: 420px; height: auto; display: block; }
 h1 { color: var(--accent); margin-bottom: .5rem; }
 h2 { margin: 1.5rem 0 .5rem; color: var(--accent); border-bottom: 2px solid #eee; padding-bottom: .3rem; }
@@ -154,6 +154,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
 
 @media (max-width: 480px) {
   body { padding: .8rem; }
+  .report-header { flex-wrap: wrap; gap: .8rem; }
   .logo-wrap svg { width: 250px; }
   .stats { gap: 0.5rem; }
   .stat-card { min-width: 70px; padding: .6rem .8rem; }

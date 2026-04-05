@@ -58,12 +58,12 @@ flowchart TD
     classDef outputStyle  fill:#f1f5f9,stroke:#475569,stroke-width:2px,color:#0f172a,font-weight:bold
 
     %% ── Input files ──────────────────────────────────────────────────
-    subgraph IN["📥  User Inputs"]
-        i_gb["📄 GenBank file(s)"]
-        i_tsv["📋 Rules TSV"]
-        i_vcf["🧬 VCF file"]
-        i_rfasta["🔤 Reference FASTA"]
-        i_cfasta["🔤 Consensus FASTA"]
+    subgraph IN["User Inputs"]
+        i_gb["GenBank file(s)"]
+        i_tsv["Rules TSV"]
+        i_vcf["VCF file"]
+        i_rfasta["Reference FASTA"]
+        i_cfasta["Consensus FASTA"]
     end
 
     %% ── CLI layer ────────────────────────────────────────────────────
@@ -76,14 +76,14 @@ flowchart TD
     end
 
     %% ── I/O parsers ──────────────────────────────────────────────────
-    subgraph IO["📂  I/O  ·  respro/io/"]
+    subgraph IO["I/O  ·  respro/io/"]
         io_gb["genbank.py\nparse references & CDS slices"]
         io_vcf["vcf.py\nparse variants + allele freq"]
         io_pc["pubchem.py\ndrug metadata lookup"]
     end
 
     %% ── Core logic ───────────────────────────────────────────────────
-    subgraph CORE["⚙️  Core  ·  respro/core/"]
+    subgraph CORE["Core  ·  respro/core/"]
         co_sm["sequence_matching.py\nalign FASTA → CDS · build CIGAR maps"]
         co_pr["profile.py\nremap VCF variants via CIGAR"]
         co_fp["fasta_profile.py\ncodon-walk · AA diff · IUPAC expansion"]
@@ -99,12 +99,12 @@ flowchart TD
     end
 
     %% ── Report layer ─────────────────────────────────────────────────
-    subgraph REP["📊  Report  ·  respro/report/"]
+    subgraph REP["Report  ·  respro/report/"]
         re_pl["plots.py\ngenome overview · lollipop panels"]
         re_ht["html.py\ntable assembly · NT change highlighting · export orchestration"]
     end
 
-    out_html["📄  Standalone HTML Report"]
+    out_html["Standalone HTML Report"]
 
     %% ── Init pipeline ────────────────────────────────────────────────
     i_gb & i_tsv --> c_init
@@ -200,7 +200,7 @@ validating that the project database fingerprint matches.
 
 Pure profiling logic. Changes here should usually come with focused regression tests.
 
-- `annotation.py`: codon-aware consequence annotation, translation logic,
+- `vcf_annotation.py`: codon-aware consequence annotation, translation logic,
   coordinate helpers (`normalize_position`), mutation token normalization
   (`normalize_mutation`), and allele-frequency binning (`assign_af_bins`).
 - `resistance_rules.py`: load resistance rules from DB and match amino acid

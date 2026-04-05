@@ -66,7 +66,6 @@ class GeneRecord:
         return (self.nt_offset(pos) - self.codon_start) % 3
 
 
-
 @dataclass
 class ResistanceRule:
     """A single resistance rule loaded from the database."""

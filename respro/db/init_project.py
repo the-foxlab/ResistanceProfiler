@@ -11,7 +11,7 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-from respro.core.annotation import normalize_mutation
+from respro.core.vcf_annotation import normalize_mutation
 from respro.db.schema import PROJECT_SCHEMA_VERSION, create_schema, open_project_db
 from respro.io.genbank import (
     ParsedGenBankGene,
