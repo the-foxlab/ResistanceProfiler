@@ -7,7 +7,13 @@ from __future__ import annotations
 import logging
 import sqlite3
 
-from respro.db.models import AnnotatedVariant, ComboRuleHit, ResistanceRule, ResistanceRuleSet, ResistanceRuleSetMember
+from respro.db.models import (
+    AnnotatedVariant,
+    ComboRuleHit,
+    ResistanceRule,
+    ResistanceRuleSet,
+    ResistanceRuleSetMember,
+)
 
 logger = logging.getLogger(__name__)
 

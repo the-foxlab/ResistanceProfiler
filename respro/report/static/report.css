@@ -1,12 +1,8 @@
 :root { --accent: #2c3e50; --hit: #e74c3c; --ok: #27ae60; --bg: #fafbfc; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: Arial, sans-serif; color: #333; background: var(--bg); padding: 2rem; line-height: 1.5; }
-.report-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.6rem; }
-.logo-wrap { flex: 0 0 auto; }
+.logo-wrap { margin-bottom: 1.6rem; }
 .logo-wrap svg { width: 420px; height: auto; display: block; }
-.github-links { display: flex; align-items: center; gap: .6rem; flex-shrink: 0; }
-.github-icon-link { color: #1f2937; display: flex; align-items: center; transition: color .15s; }
-.github-icon-link:hover { color: #4f6eff; }
 h1 { color: var(--accent); margin-bottom: .5rem; }
 h2 { margin: 1.5rem 0 .5rem; color: var(--accent); border-bottom: 2px solid #eee; padding-bottom: .3rem; }
 .meta { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .5rem; }

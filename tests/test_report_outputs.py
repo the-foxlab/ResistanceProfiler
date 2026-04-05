@@ -8,7 +8,6 @@ from pathlib import Path
 
 from respro.db.models import AnnotatedVariant, ResistanceRule, VariantCall
 from respro.report.results_model import ProfilingResult
-from respro.report.export import to_tsv_string, write_tsv
 
 
 def _make_result() -> ProfilingResult:
@@ -88,21 +87,6 @@ class TestProfilingResult:
         assert hits[0]['reference_identifier'] == 'tiny_ref'
         assert hits[0]['ic50'] == '>10x'
 
-
-class TestTsvExport:
-    def test_tsv_string(self):
-        r = _make_result()
-        tsv = to_tsv_string(r)
-        lines = tsv.strip().split('\n')
-        assert len(lines) == 2  # header + 1 row
-        assert 'gag' in lines[1]
-
-    def test_write_tsv_file(self, tmp_path: Path):
-        r = _make_result()
-        out = write_tsv(r, tmp_path / 'test.tsv')
-        assert out.exists()
-        content = out.read_text()
-        assert 'missense' in content
 
 
 class TestHtmlExport:

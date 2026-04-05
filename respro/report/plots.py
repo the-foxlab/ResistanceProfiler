@@ -4,14 +4,15 @@ Publication-ready plots for genome overview and gene-level mutation tracks.
 
 from __future__ import annotations
 
-from io import BytesIO
 import logging
+from io import BytesIO
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
 import numpy as np
 
 from respro.db.models import AnnotatedVariant, GeneRecord
@@ -377,7 +378,9 @@ def _draw_gene_track(ax, gene: GeneRecord) -> None:
     ax.set_ylabel('')
 
 
-def _draw_gene_panel(ax, gene: GeneRecord, annotations: list[AnnotatedVariant], shared_track_ax=None) -> None:
+def _draw_gene_panel(
+    ax, gene: GeneRecord, annotations: list[AnnotatedVariant], shared_track_ax=None
+) -> None:
     """
     Draw one gene-focused bent lollipop panel.
 
@@ -397,7 +400,10 @@ def _draw_gene_panel(ax, gene: GeneRecord, annotations: list[AnnotatedVariant], 
             x_top,
             y_top,
             color=colour,
-            marker=_MARKER_SHAPES['database_hit'] if ann.is_resistance_hit else _MARKER_SHAPES['no_database_hit'],
+            marker=(
+                _MARKER_SHAPES['database_hit'] if ann.is_resistance_hit
+                else _MARKER_SHAPES['no_database_hit']
+            ),
             s=50 if ann.is_resistance_hit else 40,
             zorder=4,
             edgecolors='black' if ann.is_resistance_hit else  'white',
@@ -417,7 +423,6 @@ def _draw_gene_panel(ax, gene: GeneRecord, annotations: list[AnnotatedVariant], 
             )
 
     pad = max(10, int((gene.end - gene.start) * 0.03))
-    hit_count = sum(1 for ann in annotations if ann.is_resistance_hit)
     ax.hlines(0.0, gene.start + 1 - pad, gene.end + pad, color='black', linewidth=1.0, zorder=1, linestyle='--')
     ax.set_xlim(max(1, gene.start + 1 - pad), gene.end + pad)
     ax.set_ylim(-0.19, 1.05)
@@ -522,6 +527,9 @@ def _draw_bent_lollipop(ax, x_base: float, x_top: float, y_top: float, colour: s
     y_segment1_end = -0.1
     y_segment2_end = 0
 
-    ax.plot([x_base, x_base], [y_start, y_segment1_end], color=colour, linewidth=1.0, alpha=0.85, zorder=2)
-    ax.plot([x_base, x_top], [y_segment1_end, y_segment2_end], color=colour, linewidth=1.0, alpha=0.85, zorder=2)
-    ax.plot([x_top, x_top], [y_segment2_end, y_top], color=colour, linewidth=1.0, alpha=0.85, zorder=2)
+    ax.plot([x_base, x_base], [y_start, y_segment1_end],
+            color=colour, linewidth=1.0, alpha=0.85, zorder=2)
+    ax.plot([x_base, x_top], [y_segment1_end, y_segment2_end],
+            color=colour, linewidth=1.0, alpha=0.85, zorder=2)
+    ax.plot([x_top, x_top], [y_segment2_end, y_top],
+            color=colour, linewidth=1.0, alpha=0.85, zorder=2)

@@ -285,7 +285,9 @@ def _translate_cds(
     return _sanitize_and_validate_translation(translated, reference_name, gene_name)
 
 
-def _sanitize_and_validate_translation(raw_translation: str, reference_name: str, gene_name: str) -> str:
+def _sanitize_and_validate_translation(
+    raw_translation: str, reference_name: str, gene_name: str
+) -> str:
     """Normalize translation text and reject CDS entries with internal stop codons."""
     aa = ''.join(raw_translation.strip().split()).upper()
     if not aa:

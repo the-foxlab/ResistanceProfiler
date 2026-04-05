@@ -268,9 +268,13 @@ def _annotate_variant_in_gene(
     if vtype == 'SNP':
         return _annotate_snp(var, gene, cds_codons, mut_codon_idx, codon_pos_in_codon, mut)
     elif vtype == 'INS':
-        return _annotate_insertion(var, gene, cds_codons, mut_codon_idx, codon_pos_in_codon, ref, mut)
+        return _annotate_insertion(
+            var, gene, cds_codons, mut_codon_idx, codon_pos_in_codon, ref, mut
+        )
     else:
-        return _annotate_deletion(var, gene, cds_codons, mut_codon_idx, codon_pos_in_codon, ref, mut)
+        return _annotate_deletion(
+            var, gene, cds_codons, mut_codon_idx, codon_pos_in_codon, ref, mut
+        )
 
 
 def _annotate_snp(

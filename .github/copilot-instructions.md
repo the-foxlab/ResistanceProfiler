@@ -3,7 +3,7 @@
 ## Primary references
 
 - Repository structure and module responsibilities: `docs/project-structure.md`
-- Planning source of truth and current priorities: `docs/roadmap.md`
+- Planning source of truth and current priorities: `docs/to-do.md`
 - Rules TSV formatting, allowed column values, and mutation notation: `docs/rules-tsv-format.md`
 - Public project overview and usage examples: `README.md`
 
@@ -165,12 +165,10 @@ a collection.
   and validation branches that could be misread.
 - Keep comments concise (one to two lines when possible) and colocated with the code block.
 - Remove or update outdated comments in the same change; comments must stay accurate.
-- Avoid TODO-style placeholders unless a concrete follow-up is tracked in `docs/roadmap.md`.
 
 ## Editing guidance
 
-- Before substantial changes, review `docs/roadmap.md` and align with the current `Now`
-  priorities unless direct user instructions say otherwise.
+- Align implementation with `docs/to-do.md` priorities unless direct user instructions say otherwise.
 - When changing repository layout or module responsibilities, update
   `docs/project-structure.md` in the same change.
 - Put format-specific parsing in `respro/io/`, domain interpretation in `respro/core/`,
@@ -180,11 +178,52 @@ a collection.
 
 ## Planning source of truth
 
-- Track achieved goals and next goals in `docs/roadmap.md`.
-- Before substantial changes, review `docs/roadmap.md` and align implementation with
-  the current `Now` priorities.
-- If user instructions conflict with roadmap priorities, follow direct user instructions
-  and update the roadmap afterwards.
+`docs/to-do.md` is the single planning source of truth. Review it before any substantial change.
+
+### Structure
+
+The file has three sections:
+
+- **Done** — completed work, grouped by theme, marked `[x]`. Do not remove entries; they serve as
+  a project history.
+- **Next** — open work, grouped by theme, each item prefixed with a priority emoji:
+  - 🔴 high — tackle first; blockers or foundational work
+  - 🟡 medium — important but not urgent
+  - 🟢 low — nice-to-have or dependent on higher-priority work
+- **Deferred** (subsection of Next) — items that are explicitly postponed; keep them visible but
+  do not pick them up unless the user requests it.
+
+### How to select work
+
+1. Prefer 🔴 items in **Next** unless the user specifies otherwise.
+2. When a group of items is marked "introduce together", implement them in one change.
+3. If user instructions conflict with to-do priorities, follow the user and update the to-do
+   afterwards.
+
+### How to mark work done
+
+When a feature is fully implemented:
+
+1. Move its entry from **Next** to the matching theme group in **Done**, or create a new group if
+   none fits.
+2. Change `- 🔴/🟡/🟢` to `- [x]` and drop the priority emoji.
+3. Keep the description concise — one line that summarises what was built.
+4. Update the to-do in the same commit/change as the implementation.
+
+### How to add new items
+
+1. Choose the correct theme group in **Next**, or add a new group if none fits.
+2. Assign a priority emoji based on urgency and dependency order.
+3. Write a single-sentence description that includes the affected module(s) and the observable
+   behaviour change.
+4. If the item is intentionally deferred, place it in the **Deferred** subsection with a brief
+   rationale.
+
+### What not to do
+
+- Do not remove **Done** entries — they are project history.
+- Do not invent a "Now" section; the priority emoji replaces it.
+- Do not leave the to-do stale after a change — accuracy matters more than brevity.
 
 # Code review guidelines
 

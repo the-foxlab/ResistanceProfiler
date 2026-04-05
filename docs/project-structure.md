@@ -100,9 +100,8 @@ flowchart TD
 
     %% ── Report layer ─────────────────────────────────────────────────
     subgraph REP["📊  Report  ·  respro/report/"]
-        re_ex["export.py\norchestrate outputs"]
         re_pl["plots.py\ngenome overview · lollipop panels"]
-        re_ht["html.py\ntable assembly · NT change highlighting"]
+        re_ht["html.py\ntable assembly · NT change highlighting · export orchestration"]
     end
 
     out_html["📄  Standalone HTML Report"]
@@ -269,13 +268,11 @@ Output model and rendering/export logic.
 
 - `results_model.py`: canonical profiling result structures.
 - `plots.py`: figures and plot-ready transformations.
-- `html.py`: HTML rendering and table-data assembly.
+- `html.py`: HTML rendering, table-data assembly, and export orchestration (`export_results`,
+  `write_html`, `render_html`).
 - `templates/report.html.j2`: Jinja template for report layout and client-side table sorting.
 - `static/report.css`: report styles (inlined at render time for standalone HTML output).
 - `static/report.js`: client-side table sorting logic (inlined at render time for standalone HTML output).
-- `export.py`: export orchestration for all report artifacts, plus TSV/CSV
-  tabular helpers (`write_tsv`, `to_tsv_string`). The profiling workflow exports
-  a standalone HTML report with an embedded mutation overview plot.
 
 All report outputs should derive from the same result model so HTML and optional
 machine-readable outputs stay consistent.
@@ -347,7 +344,7 @@ A typical `respro profile` run flows through the repository like this:
 3. Reference resolution and variant processing in `respro/core/`.
 4. Rule matching in `respro/core/resistance_rules.py`.
 5. Result assembly in `respro/report/results_model.py` and related report modules.
-6. Final export in `respro/report/export.py`.
+6. Final export in `respro/report/html.py` (`export_results`).
 7. Optional persistence to `results.db` via `respro/db/results.py`.
 
 This separation helps keep logic testable and output generation consistent.

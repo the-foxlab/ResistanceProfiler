@@ -18,9 +18,7 @@ from pathlib import Path
 import click
 
 from respro import __version__
-from respro.utils.logging import setup_logging
 from respro.core.annotation import annotate_variants, assign_af_bins
-from respro.core.resistance_rules import load_rules, load_rule_sets, match_rules, match_rule_sets
 from respro.core.fasta_profile import profile_fasta_consensus
 from respro.core.profile import (
     pick_best_reference_id,
@@ -29,19 +27,23 @@ from respro.core.profile import (
     resolve_fasta_query,
     select_matches_for_reference,
 )
+from respro.core.resistance_rules import load_rule_sets, load_rules, match_rule_sets, match_rules
 from respro.db.init_project import add_to_project, init_project
 from respro.db.results import (
     list_runs,
     load_run,
-    project_fingerprint as compute_project_fingerprint,
     reconstruct_annotations,
     save_run,
+)
+from respro.db.results import (
+    project_fingerprint as compute_project_fingerprint,
 )
 from respro.db.schema import init_results_db, open_project_db, open_results_db
 from respro.io.reference import load_genes_for_reference
 from respro.io.vcf import parse_vcf
-from respro.report.export import export_results
+from respro.report.html import export_results
 from respro.report.results_model import ProfilingResult
+from respro.utils.logging import setup_logging
 
 
 @click.group()

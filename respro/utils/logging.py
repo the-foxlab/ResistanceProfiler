@@ -5,7 +5,6 @@ Structured logging setup for ResistanceProfiler.
 import logging
 import sys
 
-
 # ANSI escape codes — only applied when writing to a real terminal
 _RESET = '\033[0m'
 _COLOURS = {
