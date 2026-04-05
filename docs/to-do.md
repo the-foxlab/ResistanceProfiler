@@ -8,6 +8,7 @@ Mark items done and update priorities after each completed milestone.
 ## Done
 
 ### Core infrastructure
+
 - [x] SQLite-backed project database (`project.db`) with versioned schema (`PROJECT_SCHEMA_VERSION`)
 - [x] SQLite-backed results database (`results.db`) for persisting runs and regenerating reports
 - [x] Project fingerprint (UUID) for cross-database run validation
@@ -18,6 +19,7 @@ Mark items done and update priorities after each completed milestone.
 - [x] Strand validation moved into `respro/io/genbank.py`
 
 ### Project initialisation
+
 - [x] GenBank parsing — multi-record files, multiple files via repeated `--genbank`
 - [x] CDS extraction — gene/protein name, coordinates, strand, `codon_start`, NT slice, AA translation
 - [x] Organism and taxonomy metadata stored per reference
@@ -32,6 +34,7 @@ Mark items done and update priorities after each completed milestone.
 - [x] PubChem integration — best-effort drug CID, canonical URL, short description; fully non-fatal
 
 ### Profiling — VCF mode
+
 - [x] VCF ingestion — allele frequency, read depth, filter status
 - [x] Allele-frequency and depth filtering (`--min-af`, `--min-depth`)
 - [x] Reference FASTA alignment via Biopython `PairwiseAligner` with CIGAR maps
@@ -42,23 +45,27 @@ Mark items done and update priorities after each completed milestone.
 - [x] REF allele verification against active query sequence during remap
 
 ### Profiling — FASTA mode
+
 - [x] Consensus FASTA profiling — codon-walk, amino acid diff, no VCF required
 - [x] IUPAC ambiguity expansion — all possible codons enumerated; fractional `allele_freq`
 - [x] SNP, in-frame insertion, in-frame deletion, and frameshift detection from FASTA
 - [x] FASTA-mode AF bins — adjusted thresholds for discrete IUPAC-derived frequencies
 
 ### Codon-aware annotation
+
 - [x] Consequence classification — synonymous, missense, stop-gained, stop-loss, start-lost, frameshift, insertion, deletion, unknown
 - [x] Strand-aware annotation — forward and reverse CDS handled correctly
 - [x] Combined SNP codon events — multiple high-AF SNPs in the same codon annotated as one event
 - [x] Allele-frequency binning — high / intermediate / low; customizable thresholds
 
 ### Resistance rule matching
+
 - [x] Single-mutation rule matching — exact and wildcard (`any`) per-position matching
 - [x] Combination rule matching (`match_rule_sets`) — all members must co-occur to fire
 - [x] BLOSUM62 similarity scoring for matched substitutions (`core/similarity.py`)
 
 ### Reporting and export
+
 - [x] Standalone HTML report — Jinja2 template with inlined CSS and JS; no external assets required
 - [x] Genome-overview + gene-level lollipop plot — matplotlib SVG/PNG, embedded in HTML
 - [x] Mutation colour palette — consequence-typed, reused across plot and table
@@ -72,6 +79,7 @@ Mark items done and update priorities after each completed milestone.
 - [x] Deterministic output filenames — safe stem derived from input VCF/FASTA name
 
 ### Results database and regeneration
+
 - [x] `save_run` — persist a full profiling result to `results.db`
 - [x] `load_run` — reconstruct a run from `results.db`
 - [x] `list_runs` — tabular CLI listing of all stored runs
@@ -79,6 +87,7 @@ Mark items done and update priorities after each completed milestone.
 - [x] `respro regenerate` — re-export report from stored run with project-fingerprint validation
 
 ### Code quality and testing
+
 - [x] Full type hints on all public APIs; `from __future__ import annotations` where needed
 - [x] Frozen dataclasses for immutable result containers
 - [x] Focused test suite: annotation, sequence matching, FASTA profiling, reference IO, rules, CLI, results DB, regenerate, report outputs, PubChem (fully mocked), init project
@@ -142,6 +151,10 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🔴 Switch VCF parsing to `pysam.VariantFile` once pysam is a dependency — removes our own
   edge-case handling and delegates to a well-maintained library; do this in the same change as
   the BAM coverage work to avoid adding pysam twice
+- 🔴 Persist non-covered regions to `results.db` — coverage gaps must survive `regenerate`; add
+  a `coverage_gap` table (or JSON column on the run row) storing the list of gene positions below
+  `--min-depth` or spanned by N-runs; `save_run` writes this data and `reconstruct_annotations`
+  restores it so regenerated reports show the same unassessable-position warnings as the original
 
 ### Traceability
 
@@ -183,6 +196,11 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   in the rules TSV to raise an error; without `--strict`, emit a warning and skip unmatched
   rules instead of aborting; keeps the fail-fast default for fresh projects while allowing
   shared rule files that span multiple references
+- 🟢 Sanger AB1 input — add `respro profile-ab1` that reads an AB1 trace file directly via
+  Biopython `SeqIO.read(..., 'abi')`, extracts the called sequence and per-base quality scores,
+  filters low-quality positions as non-covered, then routes the result through the existing FASTA
+  profiling pipeline; the main complexity is IUPAC ambiguity from overlapping forward/reverse
+  traces and quality-based N-masking at the codon level
 - 🟢 Summary / batch report — aggregate results across multiple runs stored in one `results.db`
 
 ### Public release
@@ -200,13 +218,25 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 Add `CHANGELOG.md` — document version history with a Keep-a-Changelog format entry for each
   release; required for PyPI credibility and for users tracking what changed between database
   snapshots
-- 🟡 Companion database repository — separate public GitHub repo with automated bots that scrape
-  known public resistance databases (e.g. HerpesdrG, HIVDB) and format them as ready-to-use TSV
-  files for `respro init`; keep versioned releases so users can pin to a specific database snapshot
 - 🟢 README header badges — add coverage, Python version, license, PyPI version, and
   Bioconda/conda version badges to the README header; coverage badge requires a codecov or
   coveralls integration in CI; PyPI and Bioconda badges are available once packages are published
 - 🟢 PyPI release — changelog, version bump, and hatch-based build after CI and docs are in place
+
+### Databases
+
+- 🟡 Companion database repository — separate public GitHub repo with automated bots that scrape
+  known public resistance databases (e.g. HerpesdrG, HIVDB) and format them as ready-to-use .tsv files. 
+  Also format them to .db files for the use with the respro databses CLI command.
+- 🟡 Add `respro databases` CLI command — new command group that talks to the companion database
+  repository via the GitHub Releases API; implement three options:
+  `--list` (print available databases with version and description),
+  `--download <identifier>` (fetch the TSV for a named database release to disk),
+  `--path <dir>` (destination directory for the download, default: current directory);
+  implement in a new `respro/io/databases.py` module using stdlib `urllib.request` to avoid new
+  heavy dependencies; the companion repo must publish versioned GitHub releases with one
+  structured TSV asset per pathogen/database; depends on the companion database repository
+  existing and following a consistent asset naming convention
 
 ### Deferred
 
