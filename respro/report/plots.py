@@ -424,7 +424,7 @@ def _draw_gene_panel(
     ax.hlines(0.0, gene.start + 1 - pad, gene.end + pad, color='black', linewidth=1.0, zorder=1, linestyle='--')
     ax.set_xlim(max(1, gene.start + 1 - pad), gene.end + pad)
     ax.set_ylim(-0.19, 1.05)
-    ax.set_ylabel('Variant frequency')
+    ax.set_ylabel('variant frequency')
     ax.set_title(
         f'{gene.name} variants',
         fontsize=9,

@@ -99,6 +99,7 @@ Mark items done and update priorities after each completed milestone.
   carry no `AF`/`VAF`/`FREQ`/`AD` information
 - [x] Split `respro/db/init_project.py` into `respro/db/project/` subpackage — `core.py` (orchestration), `genes.py` (GenBank loading), `drugs.py` (drug resolution + PubChem), `rules.py` (TSV parsing, validation, combo rules)
 - [x] Move shared profiling orchestration helpers out of `respro/cli.py` into `respro/cli_helpers.py` — `_init_results_db_connection`, `_resolve_reference`, `_load_reference_data`, and `_finalize_and_export`; behavior unchanged
+- [x] Split `respro/core/profile.py` — shared helpers (CIGAR inversion, query-sequence resolution) moved to `respro/core/profile_helpers.py`; VCF-specific remapping kept in `respro/core/vcf_profile.py`
 
 ---
 
@@ -109,9 +110,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Code quality and maintainability
 
-- 🟡 Split `respro/core/profile.py` — extract shared helpers (CIGAR inversion, query-sequence
-  resolution) used by both VCF and FASTA pipelines into `respro/core/profile_helpers.py`; keep
-  VCF-specific remapping and rename to `vcf_profile.py`
 - 🟡 Split FASTA annotation logic into `respro/core/fasta_annotation.py` — keep orchestration in
   `respro/core/fasta_profile.py` and extract codon/indel consequence annotation helpers to a
   dedicated module; preserve current FASTA semantics (IUPAC AF splitting and

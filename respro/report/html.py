@@ -48,7 +48,7 @@ def _format_nt_change(ann: AnnotatedVariant) -> Markup:
         return Markup(f'{escape(ref)}{pos}fsX')
 
     if ann.consequence == 'insertion':
-        # alt = ref_codon + inserted (anchor style set in fasta_profile.py)
+        # alt = ref_codon + inserted (anchor style set in profile_fasta.py)
         anchor = str(escape(ref))
         inserted = str(escape(alt[len(ref):] if len(alt) > len(ref) else alt))
         return Markup(f'{anchor}{pos}{anchor}<u><strong>{inserted}</strong></u>')

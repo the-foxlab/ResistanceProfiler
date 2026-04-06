@@ -1,6 +1,7 @@
 """
-FASTA-based profiling — remap VCF variants from a user-provided reference
-to internal CDS coordinates for amino acid annotation.
+Shared profiling helpers — query-sequence resolution and CIGAR coordinate inversion.
+
+Used by both the VCF and FASTA profiling pipelines.
 """
 
 from __future__ import annotations
@@ -8,8 +9,6 @@ from __future__ import annotations
 import logging
 import sqlite3
 from pathlib import Path
-
-from Bio.Seq import Seq
 
 from respro.core.sequence_matching import (
     GeneMatch,
@@ -20,15 +19,11 @@ from respro.core.sequence_matching import (
     sequence_checksum,
     store_mappings,
 )
-from respro.db.models import GeneRecord, VariantCall
+from respro.db.models import GeneRecord
 from respro.io.reference import read_fasta
 
 logger = logging.getLogger(__name__)
 
-
-# ──────────────────────────────────────────────────────────────────────
-# Public API
-# ──────────────────────────────────────────────────────────────────────
 
 def resolve_fasta_query(
     conn: sqlite3.Connection,
@@ -182,109 +177,61 @@ def select_matches_for_reference(
     return selected
 
 
-def remap_variants(
-    variants: list[VariantCall],
-    matches: list[GeneMatch],
-    query_sequence: str,
-) -> tuple[list[VariantCall], list[str]]:
+def _build_query_to_cds_map(
+    cigar: str,
+    query_start: int,
+    query_end: int,
+    strand: str,
+    query_len: int,
+) -> dict[int, int]:
     """
-    Filter and remap VCF variants from user query to internal reference coordinates.
+    Invert a CIGAR-based coordinate map to query-position → CDS-position.
 
-    For each variant the function:
+    For '-' strand matches the CIGAR was built against the reverse-complement
+    query, so positions are first converted back to forward-strand coordinates.
 
-    1. Excludes positions outside any matched CDS region in the query.
-    2. Maps the query position to a CDS position via the inverted CIGAR.
-    3. Sanity-checks that the VCF REF base agrees with the query FASTA.
-    4. For SNPs, stores query codon context for downstream annotation.
-    5. Converts the CDS position to an internal genomic position and transforms
-       REF/ALT bases to the internal forward strand.
-
-    :param variants: parsed VCF variants (0-based on user reference)
-    :param matches: gene matches from FASTA alignment
-    :param query_sequence: user query nucleotide sequence
-    :return: (remapped_variants, warnings)
+    :param cigar: CIGAR string from alignment
+    :param query_start: 0-based forward-strand start (from GeneMatch)
+    :param query_end: 0-based forward-strand end (from GeneMatch)
+    :param strand: alignment strand ('+' or '-')
+    :param query_len: total query sequence length
+    :return: mapping {forward_query_pos: cds_pos}
     """
-    query_len = len(query_sequence)
-    query_upper = query_sequence.upper()
+    if strand == '+':
+        cds_to_query = cigar_to_coordinate_map(cigar, query_start)
+    else:
+        # Recover RC-space start from the stored forward-strand end
+        rc_start = query_len - query_end
+        cds_to_query_rc = cigar_to_coordinate_map(cigar, rc_start)
+        cds_to_query: dict[int, int | None] = {}
+        for cds_pos, rc_pos in cds_to_query_rc.items():
+            if rc_pos is not None:
+                cds_to_query[cds_pos] = query_len - 1 - rc_pos
+            else:
+                cds_to_query[cds_pos] = None
 
-    # Pre-build inverted coordinate maps for each match
-    match_maps: list[tuple[GeneMatch, dict[int, int]]] = []
-    for match in matches:
-        q2c = _build_query_to_cds_map(
-            match.cigar, match.query_start, match.query_end,
-            match.strand, query_len,
-        )
-        match_maps.append((match, q2c))
+    # Invert: query_pos → cds_pos; skip deletions (None values)
+    query_to_cds: dict[int, int] = {}
+    for cds_pos, qpos in cds_to_query.items():
+        if qpos is not None:
+            query_to_cds[qpos] = cds_pos
 
-    remapped: list[VariantCall] = []
-    warnings: list[str] = []
-    for var in variants:
-
-        hit = False
-        for match, q2c in match_maps:
-            if var.pos not in q2c:
-                continue
-
-            cds_pos = q2c[var.pos]
-            gene = match.gene
-
-            # VCF position must be within query sequence
-            if not (0 <= var.pos < query_len):
-                continue
-
-            # Sanity check: VCF REF must agree with query FASTA
-            query_base = query_upper[var.pos]
-            if query_base != var.ref.upper():
-                warnings.append(
-                    f'pos {var.pos + 1}: VCF REF {var.ref!r} \u2260 FASTA '
-                    f'{query_base!r}'
-                )
-                continue
-
-            # Convert CDS position to internal genomic position.
-            genomic_pos = _cds_pos_to_genomic_pos(gene, cds_pos)
-
-            # Transform REF/ALT to internal reference forward strand.
-            # Complement is needed when alignment strand and gene strand differ.
-            need_comp = (match.strand != gene.strand)
-            ref_base = _complement_base(var.ref) if need_comp else var.ref
-            alt_base = _complement_base(var.alt) if need_comp else var.alt
-
-            query_ref_codon = ''
-            if len(var.ref) == 1 and len(var.alt) == 1:
-                query_ref_codon = _extract_query_ref_codon(q2c, query_upper, cds_pos)
-                if match.strand == '-' and len(query_ref_codon) == 3:
-                    query_ref_codon = str(Seq(query_ref_codon).complement())
-
-            remapped.append(VariantCall(
-                chrom=var.chrom,
-                pos=genomic_pos,
-                ref=ref_base,
-                alt=alt_base,
-                allele_freq=var.allele_freq,
-                depth=var.depth,
-                filter_status=var.filter_status,
-                query_ref_codon=query_ref_codon,
-            ))
-            hit = True
-            break
-
-        if not hit:
-            logger.debug(
-                'Variant at query pos %d excluded (outside mapped CDS)',
-                var.pos,
-            )
-
-    logger.info(
-        'Remapped %d of %d variant(s); %d warning(s)',
-        len(remapped), len(variants), len(warnings),
-    )
-    return remapped, warnings
+    return query_to_cds
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Internal helpers
-# ──────────────────────────────────────────────────────────────────────
+def _cds_pos_to_genomic_pos(gene: GeneRecord, cds_pos: int) -> int:
+    """
+    Convert a 0-based CDS nucleotide position to a 0-based internal genomic position.
+    Inverse of ``GeneRecord.nt_offset()``.
+
+    :param gene: gene record
+    :param cds_pos: 0-based CDS nucleotide offset
+    :return: 0-based genomic position on the internal reference
+    """
+    if gene.strand == '+':
+        return gene.start + cds_pos
+    return (gene.end - 1) - cds_pos
+
 
 def _load_cached_query_matches(
     conn: sqlite3.Connection,
@@ -331,86 +278,3 @@ def _list_cached_query_headers(conn: sqlite3.Connection) -> list[str]:
     ).fetchall()
     return [row['name'] for row in rows if (row['name'] or '').strip()]
 
-
-def _build_query_to_cds_map(
-    cigar: str,
-    query_start: int,
-    query_end: int,
-    strand: str,
-    query_len: int,
-) -> dict[int, int]:
-    """
-    Invert a CIGAR-based coordinate map to query-position \u2192 CDS-position.
-
-    For '-' strand matches the CIGAR was built against the reverse-complement
-    query, so positions are first converted back to forward-strand coordinates.
-
-    :param cigar: CIGAR string from alignment
-    :param query_start: 0-based forward-strand start (from GeneMatch)
-    :param query_end: 0-based forward-strand end (from GeneMatch)
-    :param strand: alignment strand ('+' or '-')
-    :param query_len: total query sequence length
-    :return: mapping {forward_query_pos: cds_pos}
-    """
-    if strand == '+':
-        cds_to_query = cigar_to_coordinate_map(cigar, query_start)
-    else:
-        # Recover RC-space start from the stored forward-strand end
-        rc_start = query_len - query_end
-        cds_to_query_rc = cigar_to_coordinate_map(cigar, rc_start)
-        cds_to_query: dict[int, int | None] = {}
-        for cds_pos, rc_pos in cds_to_query_rc.items():
-            if rc_pos is not None:
-                cds_to_query[cds_pos] = query_len - 1 - rc_pos
-            else:
-                cds_to_query[cds_pos] = None
-
-    # Invert: query_pos → cds_pos; skip deletions (None values)
-    query_to_cds: dict[int, int] = {}
-    for cds_pos, qpos in cds_to_query.items():
-        if qpos is not None:
-            query_to_cds[qpos] = cds_pos
-
-    return query_to_cds
-
-
-def _extract_query_ref_codon(
-    query_to_cds: dict[int, int],
-    query_sequence: str,
-    cds_pos: int,
-) -> str:
-    """
-    Build the three-base query codon for one CDS nucleotide position.
-
-    :param query_to_cds: mapping of forward query position to CDS position
-    :param query_sequence: query sequence (upper-case)
-    :param cds_pos: CDS position (0-based)
-    :return: three-base codon in CDS orientation, or empty string if incomplete
-    """
-    codon_start = (cds_pos // 3) * 3
-    codon_bases: list[str] = []
-    for codon_pos in range(codon_start, codon_start + 3):
-        query_pos = next((q for q, c in query_to_cds.items() if c == codon_pos), None)
-        if query_pos is None:
-            return ''
-        codon_bases.append(query_sequence[query_pos])
-    return ''.join(codon_bases)
-
-
-def _cds_pos_to_genomic_pos(gene: GeneRecord, cds_pos: int) -> int:
-    """
-    Convert a 0-based CDS nucleotide position to a 0-based internal genomic
-    position.  Inverse of ``GeneRecord.nt_offset()``.
-
-    :param gene: gene record
-    :param cds_pos: 0-based CDS nucleotide offset
-    :return: 0-based genomic position on the internal reference
-    """
-    if gene.strand == '+':
-        return gene.start + cds_pos
-    return (gene.end - 1) - cds_pos
-
-
-def _complement_base(base: str) -> str:
-    """Return the nucleotide complement using Biopython semantics."""
-    return str(Seq(base).complement())

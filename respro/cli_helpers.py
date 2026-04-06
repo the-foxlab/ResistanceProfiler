@@ -13,7 +13,7 @@ from pathlib import Path
 
 import click
 
-from respro.core.profile import pick_best_reference_id, select_matches_for_reference
+from respro.core.profile_helpers import pick_best_reference_id, select_matches_for_reference
 from respro.core.resistance_rules import load_rule_sets, load_rules, match_rule_sets, match_rules
 from respro.core.vcf_annotation import assign_af_bins
 from respro.db.results import project_fingerprint as compute_project_fingerprint

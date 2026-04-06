@@ -23,8 +23,9 @@ from respro.cli_helpers import (
     _load_reference_data,
     _resolve_reference,
 )
-from respro.core.fasta_profile import profile_fasta_consensus
-from respro.core.profile import remap_variants, resolve_cached_query_reference, resolve_fasta_query
+from respro.core.profile_fasta import profile_fasta_consensus
+from respro.core.profile_helpers import resolve_cached_query_reference, resolve_fasta_query
+from respro.core.profile_vcf import remap_variants
 from respro.core.resistance_rules import load_rule_sets, load_rules
 from respro.core.vcf_annotation import annotate_variants
 from respro.db.project import add_to_project, init_project

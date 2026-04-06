@@ -85,8 +85,8 @@ flowchart TD
     %% ── Core logic ───────────────────────────────────────────────────
     subgraph CORE["Core  ·  respro/core/"]
         co_sm["sequence_matching.py\nalign FASTA → CDS · build CIGAR maps"]
-        co_pr["profile.py\nremap VCF variants via CIGAR"]
-        co_fp["fasta_profile.py\ncodon-walk · AA diff · IUPAC expansion"]
+        co_pr["profile_vcf.py\nremap VCF variants via CIGAR"]
+        co_fp["profile_fasta.py\ncodon-walk · AA diff · IUPAC expansion"]
         co_an["annotation.py\ncodon annotation · AF binning"]
         co_rr["resistance_rules.py\nmatch_rules · match_rule_sets"]
     end
@@ -228,12 +228,15 @@ Pure profiling logic. Changes here should usually come with focused regression t
   Only genes with resistance rules are screened by default.  Results are cached
   in the project DB (`query_reference`, `query_gene_mapping`) so repeat runs
   with the same reference skip re-alignment.
-- `profile.py`: FASTA-based profiling and cached-query reuse — resolves either a
-  user FASTA or a stored query header against internal CDS annotations, inverts
-  CIGAR coordinate maps to remap VCF variants from user reference coordinates
-  to internal genomic coordinates, checks VCF REF against the active query
-  sequence, and transforms REF/ALT bases to the internal forward strand for
-  downstream annotation.
+- `profile_helpers.py`: shared query-resolution and CIGAR coordinate-inversion
+  helpers used by both the VCF and FASTA profiling pipelines — `resolve_fasta_query`,
+  `resolve_cached_query_reference`, `pick_best_reference_id`,
+  `select_matches_for_reference`, `_build_query_to_cds_map`, and
+  `_cds_pos_to_genomic_pos`.
+- `profile_vcf.py`: VCF-specific variant remapping — inverts CIGAR coordinate maps
+  to remap variants from user-reference positions to internal CDS coordinates,
+  verifies VCF REF bases against the query FASTA, and transforms REF/ALT bases
+  to the internal forward strand (`remap_variants`).
 
 Use `respro/core/` for rules that should stay usable without report or storage layers.
 

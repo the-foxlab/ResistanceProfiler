@@ -12,18 +12,18 @@ from click.testing import CliRunner
 
 from conftest import TINY_REF_SEQ, TINY_REF_NAME
 from respro.cli import main
-from respro.core.fasta_profile import (
+from respro.core.profile_fasta import (
     _annotate_from_alignment,
     _expand_iupac_codon,
     profile_fasta_consensus,
 )
-from respro.core.profile import (
+from respro.core.profile_helpers import (
     _build_query_to_cds_map,
     _cds_pos_to_genomic_pos,
-    remap_variants,
     resolve_cached_query_reference,
     resolve_fasta_query,
 )
+from respro.core.profile_vcf import remap_variants
 from respro.core.sequence_matching import (
     GeneMatch, _align_cds_to_query, match_query_to_genes, sequence_checksum, store_mappings,
 )
