@@ -93,7 +93,7 @@ flowchart TD
 
     %% ── Databases ────────────────────────────────────────────────────
     subgraph DB["🗄️  Databases  ·  respro/db/"]
-        db_ip["init_project.py\nbuild / extend project DB"]
+        db_ip["project/\nbuild / extend project DB"]
         db_pj[("project.db\nreferences · genes · rules · drugs")]
         db_rs[("results.db\nruns · variant results")]
     end
@@ -229,8 +229,12 @@ SQLite schema and project/results database initialization logic.
 - `schema.py`: project and results schema creation plus validation helpers.
 - `models.py`: database-facing data structures and row mapping helpers,
   including future-facing combined rule-set containers.
-- `init_project.py`: project creation, validation, and curated data loading;
+- `project/`: project creation, validation, and curated data loading subpackage;
   enforces the rules TSV schema documented in `docs/rules-tsv-format.md`.
+  - `core.py`: `init_project` and `add_to_project` orchestration; project-row helpers.
+  - `genes.py`: GenBank reference and CDS gene loading; NCBI protein URL resolution.
+  - `drugs.py`: drug get-or-create, case deduplication, and PubChem enrichment.
+  - `rules.py`: TSV parsing, coordinate-base detection, AA validation, combo rule sets.
 - `results.py`: profiling run persistence — `save_run`, `load_run`, `list_runs`,
   `reconstruct_annotations`, and `project_fingerprint` for cross-DB validation.
 

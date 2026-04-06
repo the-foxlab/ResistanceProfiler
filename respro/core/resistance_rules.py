@@ -92,7 +92,7 @@ def match_rules(
         key = (rule.gene_name, rule.position, rule.mutation)
         rule_index.setdefault(key, []).append(rule)
 
-    # Also index rules with wildcard mutation
+    # Index rules with wildcard mutation
     wildcard_index: dict[tuple[str, int], list[ResistanceRule]] = {}
     for rule in rules:
         if rule.mutation.lower() in _WILDCARD_MUTATIONS:

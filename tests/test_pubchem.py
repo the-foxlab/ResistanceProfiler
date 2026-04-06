@@ -167,7 +167,7 @@ class TestAddPubchemData:
         return conn
 
     def test_adds_data_for_known_drug(self) -> None:
-        from respro.db.init_project import _get_drugs_from_pubchem
+        from respro.db.project.drugs import _get_drugs_from_pubchem
 
         conn = self._make_db()
         record = PubChemRecord(cid=135398513, url='https://pubchem.ncbi.nlm.nih.gov/compound/135398513',
@@ -182,7 +182,7 @@ class TestAddPubchemData:
         conn.close()
 
     def test_skips_drugs_with_existing_pubchem_data(self) -> None:
-        from respro.db.init_project import _get_drugs_from_pubchem
+        from respro.db.project.drugs import _get_drugs_from_pubchem
 
         conn = self._make_db()
         conn.execute(
@@ -201,7 +201,7 @@ class TestAddPubchemData:
 
     def test_logs_added_data_wording(self, caplog) -> None:
         import logging
-        from respro.db.init_project import _get_drugs_from_pubchem
+        from respro.db.project.drugs import _get_drugs_from_pubchem
 
         conn = self._make_db()
         record = PubChemRecord(
@@ -209,7 +209,7 @@ class TestAddPubchemData:
             url='https://pubchem.ncbi.nlm.nih.gov/compound/135398513',
             description='Antiviral drug.',
         )
-        with caplog.at_level(logging.INFO, logger='respro.db.init_project'):
+        with caplog.at_level(logging.INFO, logger='respro.db.project.drugs'):
             with patch('respro.io.pubchem.lookup_drug', return_value=record):
                 _get_drugs_from_pubchem(conn, project_id=1)
 
@@ -217,7 +217,7 @@ class TestAddPubchemData:
         conn.close()
 
     def test_skips_unrecognised_drug_without_failing(self) -> None:
-        from respro.db.init_project import _get_drugs_from_pubchem
+        from respro.db.project.drugs import _get_drugs_from_pubchem
 
         conn = self._make_db()
         with patch('respro.io.pubchem.lookup_drug', return_value=None):
@@ -229,7 +229,7 @@ class TestAddPubchemData:
         conn.close()
 
     def test_skips_network_error_without_failing(self) -> None:
-        from respro.db.init_project import _get_drugs_from_pubchem
+        from respro.db.project.drugs import _get_drugs_from_pubchem
 
         conn = self._make_db()
         # Re-test with lookup_drug returning None (as it would after catching OSError)
@@ -241,7 +241,7 @@ class TestAddPubchemData:
         conn.close()
 
     def test_partial_pubchem_lookup_continues_after_failure(self) -> None:
-        from respro.db.init_project import _get_drugs_from_pubchem
+        from respro.db.project.drugs import _get_drugs_from_pubchem
 
         conn = self._make_db()
         aciclovir_record = PubChemRecord(

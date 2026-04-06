@@ -9,12 +9,9 @@ import textwrap
 
 import pytest
 
-from respro.db.init_project import (
-    _detect_coordinate_base,
-    _is_ncbi_protein_accession,
-    _validate_reference_amino_acids,
-)
-from respro.db.init_project import init_project
+from respro.db.project import init_project
+from respro.db.project.genes import _is_ncbi_protein_accession
+from respro.db.project.rules import _detect_coordinate_base, _validate_reference_amino_acids
 from respro.db.schema import create_schema
 from conftest import write_genbank, TINY_REF_SEQ
 
@@ -202,7 +199,7 @@ class TestValidateReferenceAminoAcids:
         # Must warn but NOT raise — the rule is simply skipped.
         import logging
         rows = [_rule('gX', position=10, reference='M')]
-        with caplog.at_level(logging.WARNING, logger='respro.db.init_project'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
             _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
         assert any('out of range' in r.message for r in caplog.records)
 
@@ -211,7 +208,7 @@ class TestValidateReferenceAminoAcids:
         # Must warn but NOT raise.
         import logging
         rows = [_rule('gX', position=6, reference='M')]
-        with caplog.at_level(logging.WARNING, logger='respro.db.init_project'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
             _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=0)
         assert any('out of range' in r.message for r in caplog.records)
 
@@ -365,7 +362,7 @@ class TestComboRuleParsing:
         init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                      rules_tsv=tsv, drug_info=False)
         # init-add with the same TSV must not create a second copy
-        from respro.db.init_project import add_to_project
+        from respro.db.project import add_to_project
         add_to_project(db_path=db, rules_tsv=tsv, drug_info=False)
 
         conn = sqlite3.connect(str(db))
@@ -644,7 +641,7 @@ class TestPhenotypeNormalization:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.init_project'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
 
         conn = sqlite3.connect(str(db))
@@ -667,7 +664,7 @@ class TestPhenotypeNormalization:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.init_project'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
 
         conn = sqlite3.connect(str(db))

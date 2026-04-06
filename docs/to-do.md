@@ -97,6 +97,7 @@ Mark items done and update priorities after each completed milestone.
 - [x] VCF AF fallback corrected — `_extract_af` now returns `1.0` (not `0.0`) when no AF field is
   present; prevents silent variant loss for germline, Sanger-derived, and simple-caller VCFs that
   carry no `AF`/`VAF`/`FREQ`/`AD` information
+- [x] Split `respro/db/init_project.py` into `respro/db/project/` subpackage — `core.py` (orchestration), `genes.py` (GenBank loading), `drugs.py` (drug resolution + PubChem), `rules.py` (TSV parsing, validation, combo rules)
 
 ---
 
@@ -107,12 +108,18 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Code quality and maintainability
 
-- 🔴 Split `respro/db/init_project.py` into a `respro/db/project/` submodule — at ~1 400 lines the
-  file is too long for a single module; natural split points are rule loading, gene loading, drug
-  resolution, and schema validation
+- 🟡 Move shared profiling orchestration helpers out of `respro/cli.py` into a dedicated CLI module
+  (`respro/cli_helpers.py`) — `_init_results_db_connection`, `_resolve_reference`,
+  `_load_reference_data`, and `_finalize_and_export` currently clutter the command entry file;
+  keep behavior unchanged and keep these helpers in the CLI layer (not `respro/core/`) because
+  they depend on Click-facing orchestration, DB wiring, persistence, and report export
 - 🟡 Split `respro/core/profile.py` — extract shared helpers (CIGAR inversion, query-sequence
   resolution) used by both VCF and FASTA pipelines into `respro/core/profile_helpers.py`; keep
-  VCF-specific remapping in `profile.py`
+  VCF-specific remapping and rename to `vcf_profile.py`
+- 🟡 Split FASTA annotation logic into `respro/core/fasta_annotation.py` — keep orchestration in
+  `respro/core/fasta_profile.py` and extract codon/indel consequence annotation helpers to a
+  dedicated module; preserve current FASTA semantics (IUPAC AF splitting and
+  insertion/deletion/frameshift handling) and update tests/imports accordingly
 - 🟡 Add `markupsafe` as an explicit dependency in `pyproject.toml` — it is imported directly in
   `respro/report/html.py` but currently only present as a transitive Jinja2 dependency; explicit
   dependency prevents breakage if Jinja2 ever drops it
@@ -178,8 +185,29 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 - 🟡 Results database UUID — assign a stable UUID to each `results.db` at creation time
   (analogous to the project fingerprint); store it in a `results_db` metadata table
+- 🔴 Persist a per-run reproducibility manifest — store an immutable `run_manifest` in
+  `results.db` containing input checksums (VCF/FASTA and project DB), effective CLI parameters,
+  `respro` version, Python version, and a ruleset snapshot hash; surface it in report metadata and
+  `results.json` so runs are fully reproducible/auditable
+- 🟡 Prevent duplicate runs in `results.db` — deduplicate `save_run` via a stable
+  `run_fingerprint` (checksum) built from canonicalized resistance hits + `sample_name` + input
+  basename + `reference_name` + `project_fingerprint`; on fingerprint match, reuse existing
+  `run_id` instead of inserting a second identical run
 - 🟡 Show run provenance in HTML report — when a run is saved to a results DB, embed the
   results-DB UUID and run ID in the report header so the report is self-describing
+
+### Results curation and edit workflow
+
+- 🔴 Add user-curated phenotype labels to stored results — allow users to add post-hoc
+  `clinical_phenotype` and/or `phenotype` values derived from phenotypic testing for a stored run 
+  persisted in `results.db` as explicit user-added fields (`clinical_phenotype_user`, `phenotype_user`) 
+  without overwriting the original rule-derived classifications
+- 🟡 Add edit-history provenance for user curation — store editor, timestamp, and optional reason
+  for each manual classification change so curated labels are auditable and reproducible
+- 🟡 Introduce an `respro edit` command group and move regeneration under it — keep current
+  regeneration functionality but prepare a clearer UX such as `respro edit --regenerate <id>` (or
+  subcommand form `respro edit regenerate --identifier <id>`), then add options to apply curated
+  phenotype/classification updates in the same module
 
 ### Combination rules
 
@@ -210,6 +238,9 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 Multi-VCF / multi-FASTA support — accept multiple `--vcf` / `--fasta` inputs in one
   invocation; run profiling per file and write one output directory per sample; useful for
   batch runs without shell scripting
+- 🟡 Add short CLI option aliases alongside existing long options — introduce consistent short
+  flags for frequently used arguments in `respro/cli.py` (where available and conflict-free)
+  without changing current long-option names or behavior
 - 🟡 Lenient rule loading — add a `--strict` flag (default off) that causes unknown gene names
   in the rules TSV to raise an error; without `--strict`, emit a warning and skip unmatched
   rules instead of aborting; keeps the fail-fast default for fresh projects while allowing
@@ -225,6 +256,15 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 - 🔴 GitHub Actions CI — run the full test suite against all supported Python versions on every
   push to `main`; include a ruff lint check; add a PyPI publish workflow triggered by version tags
+- 🔴 Signed release artifacts and provenance — publish wheel/sdist with SHA256 checksums and
+  Sigstore attestation in GitHub Releases/PyPI release flow so users can verify artifact integrity
+  and build provenance
+- 🟡 Dependabot for dependencies and GitHub Actions — add `.github/dependabot.yml` with weekly
+  update checks for `pip` and `github-actions`, grouped PRs where sensible, and automatic security
+  update PRs enabled to reduce CVE exposure and dependency drift
+- 🟡 Reproducibility gate in CI — run the same example profiling command twice in a fresh
+  environment and assert deterministic outputs (`results.json` and report payload fields) to catch
+  accidental nondeterminism before release
 - 🔴 Professional documentation — concise README with a quick-start section; link out to separate
   Markdown pages for installation, database preparation (GenBank + TSV format), profiling (VCF and
   FASTA), regeneration, and output formats; follow the style of varVAMP

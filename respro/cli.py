@@ -28,7 +28,7 @@ from respro.core.profile import (
     select_matches_for_reference,
 )
 from respro.core.resistance_rules import load_rule_sets, load_rules, match_rule_sets, match_rules
-from respro.db.init_project import add_to_project, init_project
+from respro.db.project import add_to_project, init_project
 from respro.db.results import (
     list_runs,
     load_run,
@@ -49,17 +49,15 @@ from respro.utils.logging import setup_logging
 @click.group()
 @click.version_option(version=__version__, prog_name='respro')
 @click.option('-v', '--verbose', count=True, help='Increase verbosity (-v info, -vv debug).')
-@click.pass_context
-def main(ctx: click.Context, verbose: int) -> None:
+def main(verbose: int) -> None:
     """
     ResistanceProfiler — pathogen-agnostic antiviral resistance profiling.
     """
-    ctx.ensure_object(dict)
-    ctx.obj['logger'] = setup_logging(verbose)
+    setup_logging(verbose)
 
 
 # ──────────────────────────────────────────────────────────────────────
-# init
+# init module
 # ──────────────────────────────────────────────────────────────────────
 
 @main.command()
@@ -630,7 +628,7 @@ def regenerate(
         reference_length_nt = 0
         ref_id = None
         if ref_row is not None:
-            ref_id = ref_row['id']
+            ref_id = int(ref_row['id'])
             organism = ref_row['organism'] or ''
             reference_length_nt = int(ref_row['length'] or 0)
 

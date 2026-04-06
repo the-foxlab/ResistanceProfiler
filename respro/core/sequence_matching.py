@@ -169,9 +169,6 @@ def load_genes_with_rules(
 # CIGAR helpers
 # ──────────────────────────────────────────────────────────────────────
 
-_RE_CIGAR = re.compile(r'(\d+)([MIDNSHP=X])')
-
-
 def parse_cigar(cigar: str) -> list[tuple[int, str]]:
     """
     Parse a CIGAR string into ``(length, operation)`` tuples.
@@ -179,7 +176,7 @@ def parse_cigar(cigar: str) -> list[tuple[int, str]]:
     :param cigar: CIGAR string, e.g. ``'10M2I5M1D8M'``
     :return: list of (length, operation) pairs
     """
-    return [(int(m.group(1)), m.group(2)) for m in _RE_CIGAR.finditer(cigar)]
+    return [(int(m.group(1)), m.group(2)) for m in re.compile(r'(\d+)([MIDNSHP=X])').finditer(cigar)]
 
 
 def cigar_to_coordinate_map(cigar: str, query_start: int) -> dict[int, int | None]:
