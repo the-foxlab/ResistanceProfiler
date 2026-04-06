@@ -67,7 +67,7 @@ flowchart TD
     end
 
     %% ── CLI layer ────────────────────────────────────────────────────
-    subgraph CLI["⌨️  CLI  ·  respro/cli.py"]
+    subgraph CLI["⌨️  CLI  ·  respro/cli.py · respro/cli_helpers.py"]
         direction LR
         c_init["init / init-add"]
         c_pvcf["profile-vcf"]
@@ -195,6 +195,21 @@ exists it is validated before profiling continues. `respro regenerate` reads fro
 existing results database; `--list` shows all stored runs, `--identifier` with
 `--project` and `--out` regenerates the full report for a specific run after
 validating that the project database fingerprint matches.
+
+#### `respro/cli_helpers.py`
+
+Shared profiling orchestration helpers used by `profile-vcf`, `profile-fasta`, and
+`regenerate`. These helpers live in the CLI layer (not `respro/core/`) because they
+depend on Click, DB wiring, persistence, and report export:
+
+- `_init_results_db_connection` — open or create a results DB and validate the
+  project fingerprint before appending a new run.
+- `_resolve_reference` — pick the best matching internal reference from alignment
+  results and log matched gene names.
+- `_load_reference_data` — load genes, rules, rule sets, and the set of gene names
+  covered by any resistance rule for a resolved reference id.
+- `_finalize_and_export` — apply rule matching and AF binning, assemble the
+  `ProfilingResult`, export HTML/JSON, and optionally persist to a results DB.
 
 ### `respro/core/`
 

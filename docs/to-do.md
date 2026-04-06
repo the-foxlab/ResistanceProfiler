@@ -98,6 +98,7 @@ Mark items done and update priorities after each completed milestone.
   present; prevents silent variant loss for germline, Sanger-derived, and simple-caller VCFs that
   carry no `AF`/`VAF`/`FREQ`/`AD` information
 - [x] Split `respro/db/init_project.py` into `respro/db/project/` subpackage — `core.py` (orchestration), `genes.py` (GenBank loading), `drugs.py` (drug resolution + PubChem), `rules.py` (TSV parsing, validation, combo rules)
+- [x] Move shared profiling orchestration helpers out of `respro/cli.py` into `respro/cli_helpers.py` — `_init_results_db_connection`, `_resolve_reference`, `_load_reference_data`, and `_finalize_and_export`; behavior unchanged
 
 ---
 
@@ -108,11 +109,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Code quality and maintainability
 
-- 🟡 Move shared profiling orchestration helpers out of `respro/cli.py` into a dedicated CLI module
-  (`respro/cli_helpers.py`) — `_init_results_db_connection`, `_resolve_reference`,
-  `_load_reference_data`, and `_finalize_and_export` currently clutter the command entry file;
-  keep behavior unchanged and keep these helpers in the CLI layer (not `respro/core/`) because
-  they depend on Click-facing orchestration, DB wiring, persistence, and report export
 - 🟡 Split `respro/core/profile.py` — extract shared helpers (CIGAR inversion, query-sequence
   resolution) used by both VCF and FASTA pipelines into `respro/core/profile_helpers.py`; keep
   VCF-specific remapping and rename to `vcf_profile.py`
