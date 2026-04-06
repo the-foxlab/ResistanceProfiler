@@ -2,13 +2,13 @@
 Tests for reference resolution.
 """
 
-import sqlite3
 from pathlib import Path
-
 from respro.db.schema import open_project_db
 from respro.io.reference import (
     load_genes_for_reference,
+    read_fasta,
 )
+from respro.io.vcf import parse_vcf
 
 
 class TestLoadGenes:
@@ -23,3 +23,47 @@ class TestLoadGenes:
         assert genes[0].end == 87
 
 
+class TestReadFasta:
+    def test_rna_sequence_converted_to_dna(self, tmp_path: Path) -> None:
+        fasta = tmp_path / 'rna.fasta'
+        fasta.write_text('>seq1\nAUGAAAGCUUUUGGCCCC\n')
+        result = read_fasta(fasta)
+        assert result == {'seq1': 'ATGAAAGCTTTTGGCCCC'}
+
+    def test_dna_sequence_unchanged(self, tmp_path: Path) -> None:
+        fasta = tmp_path / 'dna.fasta'
+        fasta.write_text('>seq1\nATGAAAGCTTTTGGCCCC\n')
+        result = read_fasta(fasta)
+        assert result == {'seq1': 'ATGAAAGCTTTTGGCCCC'}
+
+    def test_lowercase_rna_normalised(self, tmp_path: Path) -> None:
+        fasta = tmp_path / 'rna_lower.fasta'
+        fasta.write_text('>seq1\nauggcuacu\n')
+        result = read_fasta(fasta)
+        assert 'U' not in result['seq1']
+        assert result['seq1'] == 'ATGGCTACT'
+
+
+class TestParseVcfRnaNormalisation:
+    def test_rna_ref_and_alt_converted(self, tmp_path: Path) -> None:
+        vcf = tmp_path / 'rna.vcf'
+        vcf.write_text(
+            '##fileformat=VCFv4.1\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'seq1\t10\t.\tU\tA\t.\tPASS\tAF=0.5\n'
+            'seq1\t20\t.\tA\tU\t.\tPASS\tAF=0.9\n'
+        )
+        variants = parse_vcf(vcf)
+        assert variants[0].ref == 'T'
+        assert variants[1].alt == 'T'
+
+    def test_dna_vcf_unchanged(self, tmp_path: Path) -> None:
+        vcf = tmp_path / 'dna.vcf'
+        vcf.write_text(
+            '##fileformat=VCFv4.1\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'seq1\t10\t.\tA\tT\t.\tPASS\tAF=0.8\n'
+        )
+        variants = parse_vcf(vcf)
+        assert variants[0].ref == 'A'
+        assert variants[0].alt == 'T'

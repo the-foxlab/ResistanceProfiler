@@ -18,12 +18,6 @@ from respro.db.models import AnnotatedVariant, GeneRecord, VariantCall
 
 logger = logging.getLogger(__name__)
 
-# IUPAC ambiguity codes → possible standard bases
-_IUPAC = {
-    'R': 'AG', 'Y': 'CT', 'S': 'GC', 'W': 'AT', 'K': 'GT', 'M': 'AC',
-    'B': 'CGT', 'D': 'AGT', 'H': 'ACT', 'V': 'ACG', 'N': 'ACGT',
-}
-
 
 def _gapped_strings_from_cigar(
     cds: str,
@@ -357,7 +351,13 @@ def _expand_iupac_codon(codon: str) -> set[str]:
     :param codon: 3-base codon (may contain IUPAC ambiguity codes)
     :return: set of possible amino acids (single-letter codes)
     """
-    bases = [_IUPAC.get(b, b) for b in codon.upper()]
+
+    iupac_code = {
+        'R': 'AG', 'Y': 'CT', 'S': 'GC', 'W': 'AT', 'K': 'GT', 'M': 'AC',
+        'B': 'CGT', 'D': 'AGT', 'H': 'ACT', 'V': 'ACG', 'N': 'ACGT',
+    }
+
+    bases = [iupac_code.get(b, b) for b in codon.upper()]
     aas: set[str] = set()
     for combo in itertools_product(*bases):
         aa = translate_codon(''.join(combo))

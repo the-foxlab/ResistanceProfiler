@@ -36,8 +36,8 @@ def parse_vcf(vcf_path: Path) -> list[VariantCall]:
 
             chrom = parts[0]
             pos = int(parts[1]) - 1
-            ref = parts[3].upper()
-            alt_field = parts[4].upper()
+            ref = parts[3].upper().replace('U', 'T')
+            alt_field = parts[4].upper().replace('U', 'T')
             filt = parts[6]
             info_str = parts[7]
 

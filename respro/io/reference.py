@@ -18,14 +18,17 @@ logger = logging.getLogger(__name__)
 
 def read_fasta(fasta_path: Path) -> dict[str, str]:
     """
-    Read a FASTA file and return a dict of sequences.
+    Read a FASTA file and return a dict of sequences, normalized to DNA.
+
+    RNA sequences (containing U) are silently converted to DNA (U→T) so that
+    downstream alignment and codon annotation always work on DNA.
 
     :param fasta_path: path to FASTA file
-    :return: dict mapping record_id to sequence string
+    :return: dict mapping record_id to upper-case DNA sequence string
     """
     seqs: dict[str, str] = {}
     for record in SeqIO.parse(str(fasta_path), 'fasta'):
-        seqs[record.id] = str(record.seq).upper()
+        seqs[record.id] = str(record.seq).upper().replace('U', 'T')
     return seqs
 
 

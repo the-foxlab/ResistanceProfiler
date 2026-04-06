@@ -225,7 +225,7 @@ def _parse_cds_features(
         strand = '+' if feature.location.strand != -1 else '-'
         start = int(feature.location.start)
         end = int(feature.location.end)
-        nt_sequence = str(feature.extract(record.seq)).upper()
+        nt_sequence = str(feature.extract(record.seq)).upper().replace('U', 'T')
         aa_sequence = _translate_cds(
             feature,
             nt_sequence=nt_sequence,
