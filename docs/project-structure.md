@@ -3,7 +3,7 @@
 This document is the source of truth for how the repository is organized and where
 new work should go.
 
-For implementation priorities, see `docs/roadmap.md`.
+For implementation priorities, see `docs/to-do.md`.
 For rules TSV formatting, allowed entries, and mutation notation, see
 `docs/rules-tsv-format.md`.
 For coding standards and Copilot-specific guidance, see
@@ -25,12 +25,12 @@ ReistanceProfiler/
 ├── .github/
 │   └── copilot-instructions.md
 ├── docs/
-│   ├── roadmap.md
 │   ├── project-structure.md
 │   ├── rules-tsv-format.md
-│   └── mutation-nomenclature.md
+│   └── to-do.md
 ├── respro/
 │   ├── cli.py
+│   ├── cli_helpers.py
 │   ├── core/
 │   ├── db/
 │   ├── io/
@@ -86,8 +86,8 @@ flowchart TD
     subgraph CORE["Core  ·  respro/core/"]
         co_sm["sequence_matching.py\nalign FASTA → CDS · build CIGAR maps"]
         co_pr["profile_vcf.py\nremap VCF variants via CIGAR"]
-        co_fp["profile_fasta.py\ncodon-walk · AA diff · IUPAC expansion"]
-        co_an["annotation.py\ncodon annotation · AF binning"]
+        co_fp["profile_fasta.py + annotate_fasta.py\ncodon-walk · AA diff · IUPAC expansion"]
+        co_an["annotate_vcf.py\ncodon annotation · AF binning"]
         co_rr["resistance_rules.py\nmatch_rules · match_rule_sets"]
     end
 
@@ -215,17 +215,17 @@ depend on Click, DB wiring, persistence, and report export:
 
 Pure profiling logic. Changes here should usually come with focused regression tests.
 
-- `vcf_annotation.py`: codon-aware consequence annotation, translation logic,
+- `annotate_vcf.py`: codon-aware consequence annotation, translation logic,
   coordinate helpers (`normalize_position`), mutation token normalization
   (`normalize_mutation`), and allele-frequency binning (`assign_af_bins`).
 - `resistance_rules.py`: load resistance rules from DB and match amino acid
-  observations against them. The current active logic covers atomic single-
-  mutation rules; future combined/co-occurring rule-set matching is prepared in
-  the schema but not yet enabled.
+  observations against them. Covers single-mutation rules and combination
+  rule-set matching (`match_rule_sets`).
+- `similarity.py`: BLOSUM62 similarity scoring for matched amino acid substitutions.
 - `sequence_matching.py`: align user-provided query sequences (FASTA) against
-  internal CDS annotations using Biopython's PairwiseAligner.  Produces CIGAR-
+  internal CDS annotations using Biopython's PairwiseAligner. Produces CIGAR-
   based coordinate mappings between query positions and internal CDS positions.
-  Only genes with resistance rules are screened by default.  Results are cached
+  Only genes with resistance rules are screened by default. Results are cached
   in the project DB (`query_reference`, `query_gene_mapping`) so repeat runs
   with the same reference skip re-alignment.
 - `profile_helpers.py`: shared query-resolution and CIGAR coordinate-inversion
@@ -237,6 +237,12 @@ Pure profiling logic. Changes here should usually come with focused regression t
   to remap variants from user-reference positions to internal CDS coordinates,
   verifies VCF REF bases against the query FASTA, and transforms REF/ALT bases
   to the internal forward strand (`remap_variants`).
+- `profile_fasta.py`: FASTA profiling orchestration — reads the query sequence,
+  delegates per-gene alignment reconstruction and annotation to `annotate_fasta.py`.
+- `annotate_fasta.py`: codon/indel consequence annotation helpers for the FASTA
+  pipeline — `_annotate_from_alignment`, `_gapped_strings_from_cigar`, IUPAC
+  expansion (`_expand_iupac_codon`), insertion/deletion/SNP annotators, and
+  consequence classification (`_snp_consequence`).
 
 Use `respro/core/` for rules that should stay usable without report or storage layers.
 
@@ -246,7 +252,7 @@ SQLite schema and project/results database initialization logic.
 
 - `schema.py`: project and results schema creation plus validation helpers.
 - `models.py`: database-facing data structures and row mapping helpers,
-  including future-facing combined rule-set containers.
+  including combined rule-set containers.
 - `project/`: project creation, validation, and curated data loading subpackage;
   enforces the rules TSV schema documented in `docs/rules-tsv-format.md`.
   - `core.py`: `init_project` and `add_to_project` orchestration; project-row helpers.
@@ -269,16 +275,16 @@ model preparation only; current profiling still evaluates single-mutation rules.
 
 Input readers, format-specific parsing, and lightweight external data clients.
 
-- `vcf.py`: VCF ingestion.
+- `vcf.py`: VCF ingestion — parses variants, extracts allele frequency (with `-1`
+  sentinel when no depth field is present) and read depth.
 - `genbank.py`: GenBank parsing for project initialization.
 - `reference.py`: reference loading from the project DB and FASTA utilities
   (`read_fasta`, `load_reference_sequence`), plus reference-resolution helpers
   and gene loading for a resolved reference.
 - `pubchem.py`: thin, stdlib-only PubChem PUG REST client. Resolves drug names
   to PubChem CIDs, canonical URLs, short descriptions, and structure-image URLs.
-  All failures
-  (network unavailable, name not recognised, unexpected API response) return
-  `None` so callers treat PubChem lookup as strictly best-effort.
+  All failures (network unavailable, name not recognised, unexpected API response)
+  return `None` so callers treat PubChem lookup as strictly best-effort.
 
 Parsing and validation should live here when they are primarily format concerns.
 Once data is normalized into domain objects, downstream logic should move into
@@ -289,12 +295,14 @@ Once data is normalized into domain objects, downstream logic should move into
 Output model and rendering/export logic.
 
 - `results_model.py`: canonical profiling result structures.
-- `plots.py`: figures and plot-ready transformations.
+- `palette.py`: consequence-typed colour palette, reused across plots and the HTML table.
+- `plots.py`: genome-overview and gene-level lollipop plot generation (matplotlib SVG).
 - `html.py`: HTML rendering, table-data assembly, and export orchestration (`export_results`,
   `write_html`, `render_html`).
-- `templates/report.html.j2`: Jinja template for report layout and client-side table sorting.
+- `templates/report.html.j2`: Jinja2 template for report layout and client-side table sorting.
 - `static/report.css`: report styles (inlined at render time for standalone HTML output).
-- `static/report.js`: client-side table sorting logic (inlined at render time for standalone HTML output).
+- `static/report.js`: client-side table sorting logic (inlined at render time).
+- `static/logo.svg`, `static/favicon.svg`: embedded branding assets.
 
 All report outputs should derive from the same result model so HTML and optional
 machine-readable outputs stay consistent.
@@ -302,6 +310,11 @@ machine-readable outputs stay consistent.
 ### `respro/utils/`
 
 Small shared helpers that do not belong to domain modules.
+
+- `files.py`: `require_file` — validates that a required input file exists and raises
+  a clear `FileNotFoundError` with context when it does not.
+- `logging.py`: `setup_logging` — configures the root `respro` logger verbosity from
+  the CLI `-v`/`-vv` flags.
 
 Keep this package narrow. Prefer putting logic close to its domain unless it is reused
 cleanly across the codebase.
@@ -312,12 +325,13 @@ cleanly across the codebase.
 
 The test suite mirrors the major backend responsibilities.
 
-- `test_annotation.py`: codon translation and consequence behavior.
+- `test_annotation.py`: codon translation and consequence behavior (`annotate_vcf.py`).
 - `test_sequence_matching.py`: CDS alignment, CIGAR coordinate mapping, and DB caching.
 - `test_profile_fasta.py`: FASTA-based profiling — coordinate remapping, cached
   query-header reuse, sanity checks, and CLI end-to-end with `--ref-fasta` or
   `--query-ref-header`.
 - `test_reference_io.py`: reference matching and normalization expectations.
+- `test_reference_resolution.py`: query-to-gene reference resolution correctness.
 - `test_rules.py`: resistance rule matching behavior.
 - `test_profile_cli.py`: CLI-level workflow coverage.
 - `test_regenerate_cli.py`: `respro regenerate` — listing, report regeneration, and
@@ -337,9 +351,9 @@ When adding behavior:
 
 ## Documentation layout
 
-### `docs/roadmap.md`
+### `docs/to-do.md`
 
-Planning source of truth for completed work, current `Now` priorities, and next goals.
+Planning source of truth for completed work, open items, and deferred tasks.
 Review this before substantial changes.
 
 ### `docs/rules-tsv-format.md`
@@ -347,10 +361,6 @@ Review this before substantial changes.
 Primary source of truth for rules TSV columns, allowed entries, mutation notation,
 phenotype normalization, IC50 handling, and combination-rule formatting.
 Update this whenever rules input behavior changes.
-
-### `docs/mutation-nomenclature.md`
-
-Short redirect page pointing readers to `docs/rules-tsv-format.md`.
 
 ### `docs/project-structure.md`
 

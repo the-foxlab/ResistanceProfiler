@@ -139,9 +139,13 @@ def _extract_depth(info: dict[str, str], parts: list[str]) -> int:
     """
     Best-effort extraction of read depth.
 
+    Returns -1 when no depth information is present in the VCF record.
+    Callers should treat -1 as "no depth data" and skip depth-based filtering
+    for those variants rather than silently discarding them.
+
     :param info: parsed INFO field
     :param parts: VCF record parts
-    :return: read depth value
+    :return: read depth value, or -1 if unavailable
     """
     for key in ('DP', 'DEPTH'):
         if key in info:
@@ -159,4 +163,5 @@ def _extract_depth(info: dict[str, str], parts: list[str]) -> int:
                 return int(fmt['DP'])
             except ValueError:
                 pass
-    return 0
+    # Sentinel: no depth information found
+    return -1

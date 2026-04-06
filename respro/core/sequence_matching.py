@@ -14,6 +14,7 @@ import logging
 import re
 import sqlite3
 from dataclasses import dataclass
+from multiprocessing import Pool
 
 from Bio.Align import PairwiseAligner
 from Bio.Seq import Seq
@@ -51,6 +52,7 @@ def match_query_to_genes(
     *,
     min_identity: float = 0.80,
     min_coverage: float = 0.90,
+    cores: int = 1,
 ) -> list[GeneMatch]:
     """
     Match a query nucleotide sequence against internal gene CDS sequences.
@@ -59,61 +61,38 @@ def match_query_to_genes(
     strands of the query.  Matches that meet the identity and coverage
     thresholds are returned, sorted by identity descending.
 
+    When ``cores > 1`` each gene is aligned in a separate worker process via
+    ``multiprocessing.Pool``, which bypasses the GIL for the C-accelerated
+    ``PairwiseAligner`` and scales well with a large gene panel.
+
     :param query_sequence: user-provided nucleotide sequence
     :param genes: gene records to screen (typically only those with rules)
     :param min_identity: minimum nucleotide identity to accept
     :param min_coverage: minimum fraction of CDS bases aligned
+    :param cores: number of worker processes (1 = serial)
     :return: accepted GeneMatch list sorted by identity descending
     """
     query_upper = query_sequence.upper()
     query_rc = str(Seq(query_upper).reverse_complement())
 
+    args = [(gene, query_upper, query_rc, min_identity, min_coverage) for gene in genes]
+
+    if cores > 1:
+        with Pool(processes=cores) as pool:
+            raw: list[GeneMatch | None] = pool.map(_align_gene_worker, args)
+    else:
+        raw = [_align_gene_worker(a) for a in args]
+
     matches: list[GeneMatch] = []
-    for gene in genes:
-        if not gene.nt_sequence:
-            logger.debug('Skipping gene %r — no nt_sequence stored', gene.name)
-            continue
-
-        cds = gene.nt_sequence.upper()
-
-        fwd = _align_cds_to_query(cds, query_upper, '+')
-        rev = _align_cds_to_query(cds, query_rc, '-')
-        best = fwd if fwd.identity >= rev.identity else rev
-
-        # For reverse-strand hits convert coordinates back to forward query
-        if best.strand == '-':
-            query_len = len(query_upper)
-            fwd_start = query_len - best.query_end
-            fwd_end = query_len - best.query_start
-            best = _AlignResult(
-                identity=best.identity,
-                coverage=best.coverage,
-                query_start=fwd_start,
-                query_end=fwd_end,
-                strand='-',
-                cigar=best.cigar,
-            )
-
-        if best.identity >= min_identity and best.coverage >= min_coverage:
-            matches.append(GeneMatch(
-                gene=gene,
-                identity=best.identity,
-                coverage=best.coverage,
-                query_start=best.query_start,
-                query_end=best.query_end,
-                strand=best.strand,
-                cigar=best.cigar,
-                cds_start=best.cds_start,
-            ))
+    for gene, result in zip(genes, raw):
+        if result is None:
+            logger.debug('Gene %r: no qualifying match', gene.name)
+        else:
             logger.info(
                 'Gene %r matched: identity=%.1f%%, coverage=%.1f%%, strand=%s',
-                gene.name, best.identity * 100, best.coverage * 100, best.strand,
+                result.gene.name, result.identity * 100, result.coverage * 100, result.strand,
             )
-        else:
-            logger.debug(
-                'Gene %r rejected: identity=%.1f%%, coverage=%.1f%%',
-                gene.name, best.identity * 100, best.coverage * 100,
-            )
+            matches.append(result)
 
     matches.sort(key=lambda m: -m.identity)
     return matches
@@ -340,6 +319,55 @@ class _AlignResult:
     strand: str
     cigar: str
     cds_start: int = 0
+
+
+def _align_gene_worker(
+    args: tuple[GeneRecord, str, str, float, float],
+) -> GeneMatch | None:
+    """
+    Align one gene against both strands of the query sequence.
+
+    Designed as a top-level picklable function for ``multiprocessing.Pool``.
+
+    :param args: (gene, query_upper, query_rc, min_identity, min_coverage)
+    :return: GeneMatch if thresholds are met, else None
+    """
+    gene, query_upper, query_rc, min_identity, min_coverage = args
+
+    if not gene.nt_sequence:
+        return None
+
+    cds = gene.nt_sequence.upper()
+    fwd = _align_cds_to_query(cds, query_upper, '+')
+    rev = _align_cds_to_query(cds, query_rc, '-')
+    best = fwd if fwd.identity >= rev.identity else rev
+
+    # For reverse-strand hits convert coordinates back to forward query
+    if best.strand == '-':
+        query_len = len(query_upper)
+        best = _AlignResult(
+            identity=best.identity,
+            coverage=best.coverage,
+            query_start=query_len - best.query_end,
+            query_end=query_len - best.query_start,
+            strand='-',
+            cigar=best.cigar,
+            cds_start=best.cds_start,
+        )
+
+    if best.identity < min_identity or best.coverage < min_coverage:
+        return None
+
+    return GeneMatch(
+        gene=gene,
+        identity=best.identity,
+        coverage=best.coverage,
+        query_start=best.query_start,
+        query_end=best.query_end,
+        strand=best.strand,
+        cigar=best.cigar,
+        cds_start=best.cds_start,
+    )
 
 
 def _align_cds_to_query(cds: str, query: str, strand: str) -> _AlignResult:

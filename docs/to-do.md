@@ -100,6 +100,10 @@ Mark items done and update priorities after each completed milestone.
 - [x] Split `respro/db/init_project.py` into `respro/db/project/` subpackage — `core.py` (orchestration), `genes.py` (GenBank loading), `drugs.py` (drug resolution + PubChem), `rules.py` (TSV parsing, validation, combo rules)
 - [x] Move shared profiling orchestration helpers out of `respro/cli.py` into `respro/cli_helpers.py` — `_init_results_db_connection`, `_resolve_reference`, `_load_reference_data`, and `_finalize_and_export`; behavior unchanged
 - [x] Split `respro/core/profile.py` — shared helpers (CIGAR inversion, query-sequence resolution) moved to `respro/core/profile_helpers.py`; VCF-specific remapping kept in `respro/core/vcf_profile.py`
+- [x] Split FASTA annotation helpers into `respro/core/annotate_fasta.py` — orchestration (`profile_fasta_consensus`, `_profile_gene`) in `profile_fasta.py`; codon/indel annotation, IUPAC expansion, and consequence helpers extracted; VCF remapping in `annotate_vcf.py`
+- [x] Add `markupsafe>=2.1` as an explicit dependency in `pyproject.toml`
+- [x] VCF depth fallback — `_extract_depth` now returns `-1` sentinel when no depth field is found; depth filter in `profile-vcf` skips depth checking for sentinel variants so depth-free VCFs are not silently discarded
+- [x] Parallel gene alignment — `match_query_to_genes` now accepts `cores` parameter; per-gene alignment extracted into picklable `_align_gene_worker`; `--cores` added to both `profile-vcf` and `profile-fasta` (default 1)
 
 ---
 
@@ -110,24 +114,9 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Code quality and maintainability
 
-- 🟡 Split FASTA annotation logic into `respro/core/fasta_annotation.py` — keep orchestration in
-  `respro/core/fasta_profile.py` and extract codon/indel consequence annotation helpers to a
-  dedicated module; preserve current FASTA semantics (IUPAC AF splitting and
-  insertion/deletion/frameshift handling) and update tests/imports accordingly
-- 🟡 Add `markupsafe` as an explicit dependency in `pyproject.toml` — it is imported directly in
-  `respro/report/html.py` but currently only present as a transitive Jinja2 dependency; explicit
-  dependency prevents breakage if Jinja2 ever drops it
 - 🟢 Add mypy or pyright to the dev toolchain — type hints are comprehensive throughout the
   codebase; a type checker run in CI would catch drift and wrong annotations before they reach tests
-- 🟢 Increase test coverage for `respro/io/vcf.py` (currently 57%) — custom VCF parser handles
-  edge cases that are not yet exercised; add tests for multi-sample columns, malformed INFO fields,
-  and missing AF/DP tags before switching to pysam; specifically add a regression test confirming
-  that a VCF with no AF field produces variants with `allele_freq = 1.0`
-- 🟡 VCF depth fallback — `_extract_depth` returns `0` when no `DP`/`FORMAT:DP` field is found;
-  with the default `--min-depth 10` filter this silently drops all variants from depth-unaware VCFs;
-  fix: use a sentinel (e.g. `depth = -1`) to mark "no depth information" and skip depth filtering
-  for those variants; alternatively document that users should pass `--min-depth 0` with
-  depth-free VCFs
+- 🟢 Increase test coverage for `respro/io/vcf.py` (currently 57%)
 
 ### Reference matching for partial sequences
 

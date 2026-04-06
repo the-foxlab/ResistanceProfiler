@@ -70,7 +70,7 @@ from Bio import SeqIO
 
 # local package
 from respro import config
-from respro.core.vcf_annotation import annotate_variants
+from respro.core.annotate_vcf import annotate_variants
 ```
 
 ## Docstrings
@@ -244,7 +244,7 @@ Organize tests in classes when grouping related scenarios:
 
 ```python
 import pytest
-from respro.core.vcf_annotation import annotate_codon
+from respro.core.annotate_vcf import annotate_codon
 
 
 class TestCodonAnnotation:

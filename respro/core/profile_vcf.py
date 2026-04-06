@@ -1,5 +1,5 @@
 """
-VCF profiling — remap variants from user-provided reference coordinates to internal CDS positions.
+VCF variant remapping — remap variants from user-provided reference coordinates to internal CDS positions.
 """
 
 from __future__ import annotations

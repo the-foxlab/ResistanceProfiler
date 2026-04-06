@@ -25,8 +25,9 @@ def classify_similarity(observed_aa: str, rule_aa: str) -> str:
     try:
         score = _load_matrix('BLOSUM62')[observed_aa.upper(), rule_aa.upper()]
     except (KeyError, IndexError):
-        logger.warning('BLOSUM62 matrix does not contain %s/%s', observed_aa, rule_aa)
-
+        # Non-standard tokens (e.g. 'fsX', '*') are not in the matrix
+        logger.debug('BLOSUM62 matrix does not contain %s/%s — defaulting to low', observed_aa, rule_aa)
+        return 'low'
     if score >= 1:
         return 'high'
     if score >= 0:

@@ -61,8 +61,8 @@ tr:hover td { background: #f0f4f8; }
 .badge-sim-high { background: #e74c3c; color: #fff; }
 .badge-sim-moderate { background: #f39c12; color: #fff; }
 .badge-sim-low { background: #95a5a6; color: #fff; }
-.plot-container { text-align: center; margin: 1rem 0; overflow-x: auto; }
-.plot-container img { width: min(100%, 1800px); max-height: 86vh; height: auto; border: 1px solid #e1e4e8; border-radius: 6px; display: block; margin: 0 auto; }
+.plot-container { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; margin: 1rem 0; padding: .75rem; }
+.plot-container img { width: 100%; height: auto; display: block; border-radius: 4px; }
 .drug-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
 .drug-card { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 1rem; display: flex; gap: 1rem; align-items: stretch; min-height: 240px; }
 .drug-card img { width: 220px; height: 100%; max-height: 220px; object-fit: contain; border: 1px solid #eee; border-radius: 4px; background: #fff; }
@@ -146,7 +146,6 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
   .drug-card .drug-info { min-width: 0; }
   .drug-card .drug-name { font-size: .95rem; }
   .drug-card .drug-desc { font-size: .8rem; }
-  .plot-container img { max-height: 60vh; }
   .gene-cards { grid-template-columns: 1fr; }
   .gene-card { grid-template-columns: 1fr; }
   .gene-seq { font-size: .72rem; }
@@ -168,7 +167,6 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
   th, td { padding: .25rem .4rem; }
   .badge { padding: 0px 4px; font-size: .6rem; }
   .table-note { font-size: .75rem; }
-  .plot-container img { max-height: 50vh; }
   .drug-card { flex-direction: column; min-height: auto; }
   .drug-card img { width: 100%; height: 120px; margin-bottom: 0.5rem; margin-right: 0; }
   footer { font-size: .7rem; }

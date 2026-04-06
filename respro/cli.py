@@ -27,7 +27,7 @@ from respro.core.profile_fasta import profile_fasta_consensus
 from respro.core.profile_helpers import resolve_cached_query_reference, resolve_fasta_query
 from respro.core.profile_vcf import remap_variants
 from respro.core.resistance_rules import load_rule_sets, load_rules
-from respro.core.vcf_annotation import annotate_variants
+from respro.core.annotate_vcf import annotate_variants
 from respro.db.project import add_to_project, init_project
 from respro.db.results import list_runs, load_run, reconstruct_annotations
 from respro.db.results import project_fingerprint as compute_project_fingerprint
@@ -151,6 +151,7 @@ def init_add(
 )
 @click.option('--min-af', default=0.01, type=float, help='Minimum allele frequency filter. Default: 0.01')
 @click.option('--min-depth', default=10, type=int, help='Minimum read depth filter. Default: 10')
+@click.option('--cores', default=1, type=int, help='Number of parallel worker processes for gene alignment. Default: 1')
 def profile_vcf(
     project: str,
     vcf: str,
@@ -162,6 +163,7 @@ def profile_vcf(
     use_cache: bool,
     min_af: float,
     min_depth: int,
+    cores: int,
 ) -> None:
     """
     Run resistance profiling on a VCF file.
@@ -187,7 +189,7 @@ def profile_vcf(
 
         if ref_fasta is not None:
             query_name, query_seq, fasta_matches = resolve_fasta_query(
-                project_conn, Path(ref_fasta), use_cache=use_cache,
+                project_conn, Path(ref_fasta), use_cache=use_cache, cores=cores,
             )
         else:
             query_name, query_seq, fasta_matches = resolve_cached_query_reference(
@@ -201,7 +203,10 @@ def profile_vcf(
 
         variants = parse_vcf(Path(vcf))
         logger.info('Parsed %d variant(s)', len(variants))
-        variants = [v for v in variants if v.allele_freq >= min_af and v.depth >= min_depth]
+        variants = [
+            v for v in variants
+            if v.allele_freq >= min_af and (v.depth < 0 or v.depth >= min_depth)
+        ]
         logger.info('%d variant(s) after AF/depth filtering', len(variants))
 
         variants, remap_warnings = remap_variants(variants, fasta_matches, query_seq)
@@ -266,12 +271,14 @@ def profile_vcf(
     type=click.Path(),
     help='Optional results database path. Creates or appends to an existing SQLite results database.',
 )
+@click.option('--cores', default=1, type=int, help='Number of parallel worker processes for gene alignment. Default: 1')
 def profile_fasta(
     project: str,
     consensus_fasta: str,
     sample: str,
     output: str,
     results_db: str | None,
+    cores: int,
 ) -> None:
     """
     Run resistance profiling on a consensus FASTA sequence.
@@ -289,7 +296,7 @@ def profile_fasta(
         results_conn = _init_results_db_connection(results_db, project_conn, logger)
 
         query_name, query_seq, fasta_matches = resolve_fasta_query(
-            project_conn, Path(consensus_fasta), use_cache=False,
+            project_conn, Path(consensus_fasta), use_cache=False, cores=cores,
         )
 
         ref_id, ref_name, fasta_matches = _resolve_reference(

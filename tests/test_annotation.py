@@ -2,7 +2,7 @@
 Tests for codon-aware annotation logic.
 """
 
-from respro.core.vcf_annotation import (
+from respro.core.annotate_vcf import (
     annotate_variants,
     assign_af_bins,
     normalize_mutation,

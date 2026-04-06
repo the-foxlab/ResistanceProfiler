@@ -12,11 +12,8 @@ from click.testing import CliRunner
 
 from conftest import TINY_REF_SEQ, TINY_REF_NAME
 from respro.cli import main
-from respro.core.profile_fasta import (
-    _annotate_from_alignment,
-    _expand_iupac_codon,
-    profile_fasta_consensus,
-)
+from respro.core.annotate_fasta import _annotate_from_alignment, _expand_iupac_codon
+from respro.core.profile_fasta import profile_fasta_consensus
 from respro.core.profile_helpers import (
     _build_query_to_cds_map,
     _cds_pos_to_genomic_pos,
