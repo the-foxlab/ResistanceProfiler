@@ -20,10 +20,11 @@ class Publication:
 
 @dataclass(frozen=True)
 class CoverageGap:
-    """A codon position that could not be assessed due to a full-codon N-stretch in FASTA mode."""
+    """A codon stretch that could not be assessed due to N-bases or missing alignment in FASTA mode."""
 
     gene_name: str
-    codon_pos: int  # 0-based codon index
+    codon_start: int  # 0-based codon index, inclusive
+    codon_end: int    # 0-based codon index, inclusive
 
 
 @dataclass

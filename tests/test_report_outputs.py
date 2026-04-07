@@ -6,7 +6,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from respro.db.models import AnnotatedVariant, Publication, ResistanceRule, VariantCall
+from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord, Publication, ResistanceRule, VariantCall
 from respro.report.results_model import ProfilingResult
 
 
@@ -215,4 +215,101 @@ class TestHtmlExport:
         assert cards[0]['protein_id'] == 'YP_009137097.1'
         assert cards[0]['ncbi_protein_url'] == 'https://www.ncbi.nlm.nih.gov/protein/YP_009137097.1/'
         assert cards[0]['aa_sequence'] == 'MKAFGP'
+
+    def test_build_report_context_tracks_unassessed_rule_positions(self):
+        from respro.report.html import build_report_context
+
+        r = _make_result()
+        r.coverage_gaps = [CoverageGap(gene_name='gag', codon_start=2, codon_end=2)]
+        rules = [
+            ResistanceRule(
+                id=2,
+                gene_name='gag',
+                gene_id=1,
+                drug_name='DrugA',
+                drug_id=1,
+                reference_identifier='tiny_ref',
+                position=2,
+                reference='K',
+                mutation='E',
+                phenotype='resistant',
+            ),
+            ResistanceRule(
+                id=3,
+                gene_name='gag',
+                gene_id=1,
+                drug_name='DrugB',
+                drug_id=2,
+                reference_identifier='tiny_ref',
+                position=5,
+                reference='A',
+                mutation='V',
+                phenotype='resistant',
+            ),
+        ]
+
+        context = build_report_context(r, rules=rules)
+        assert context['summary']['rule_positions_total'] == 2
+        assert context['summary']['unassessed_rule_positions'] == 1
+
+    def test_render_html_shows_unassessed_rule_tile_without_detail_table(self):
+        from respro.report.html import render_html
+
+        r = _make_result()
+        r.coverage_gaps = [CoverageGap(gene_name='gag', codon_start=2, codon_end=2)]
+        rules = [
+            ResistanceRule(
+                id=2,
+                gene_name='gag',
+                gene_id=1,
+                drug_name='DrugA',
+                drug_id=1,
+                reference_identifier='tiny_ref',
+                position=2,
+                reference='K',
+                mutation='E',
+                phenotype='resistant',
+            ),
+            ResistanceRule(
+                id=3,
+                gene_name='gag',
+                gene_id=1,
+                drug_name='DrugB',
+                drug_id=2,
+                reference_identifier='tiny_ref',
+                position=5,
+                reference='A',
+                mutation='V',
+                phenotype='resistant',
+            ),
+        ]
+
+        html = render_html(r, rules=rules)
+        assert 'Unassessed rule positions' in html
+        assert 'of 2 total positions (missing coverage)' in html
+        assert 'id=\'section-unassessed\'' not in html
+
+    def test_lollipop_svg_contains_non_covered_legend(self):
+        from respro.report.plots import render_lollipop_plot_bytes
+
+        r = _make_result()
+        r.coverage_gaps = [CoverageGap(gene_name='gag', codon_start=2, codon_end=2)]
+        genes = [
+            GeneRecord(
+                id=1,
+                reference_id=1,
+                name='gag',
+                protein='Gag',
+                start=0,
+                end=12,
+                strand='+',
+                codon_start=0,
+                nt_sequence='ATGAAAGCTTAA',
+            ),
+        ]
+
+        svg = render_lollipop_plot_bytes(r, genes, fmt='svg')
+        assert svg is not None
+        assert b'#6b7280' in svg
+        assert b'opacity: 0.12' in svg
 

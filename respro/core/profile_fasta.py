@@ -59,8 +59,10 @@ def profile_fasta_consensus(
         coverage_gaps.extend(gene_gaps)
 
     logger.info(
-        'FASTA consensus: %d annotation(s) from %d gene(s), %d non-covered codon(s)',
+        'FASTA consensus: %d annotation(s) from %d gene(s), %d non-covered stretch(es) '
+        '(%d codon position(s) total)',
         len(annotations), len(matches), len(coverage_gaps),
+        sum(gap.codon_end - gap.codon_start + 1 for gap in coverage_gaps),
     )
     return annotations, coverage_gaps
 

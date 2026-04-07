@@ -1,5 +1,7 @@
 # ResistanceProfiler — Copilot instructions
 
+- Attention: Your primary language to talk and think in should be english independent of the user's IDE language setting.
+
 ## Primary references
 
 - Repository structure and module responsibilities: `docs/project-structure.md`
@@ -240,6 +242,7 @@ When reviewing code, check the whole repository for:
 
 ## Testing
 
+Mimic a test-driven environment and always write test cases first. 
 Organize tests in classes when grouping related scenarios:
 
 ```python

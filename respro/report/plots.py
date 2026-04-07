@@ -13,12 +13,13 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 
-from respro.db.models import AnnotatedVariant, GeneRecord
+from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord
 from respro.report.palette import MUTATION_COLOURS
 from respro.report.results_model import ProfilingResult
 
 matplotlib.use('Agg')
 logger = logging.getLogger(__name__)
+_NON_COVERED_COLOUR = '#6b7280'
 
 
 def lollipop_plot(
@@ -82,18 +83,29 @@ def _build_lollipop_figure(
 ):
     """Build the matplotlib figure used by the HTML and PDF reports."""
     cds = result.cds_annotations
-    if not cds:
+    coverage_gaps_by_gene = _group_coverage_gaps_by_gene(result.coverage_gaps)
+    if not cds and not coverage_gaps_by_gene:
         logger.warning('No CDS variants to plot')
         return None
 
-    plot_genes = _select_plot_genes(genes, cds, rule_gene_names)
+    plot_genes = _select_plot_genes(
+        genes,
+        cds,
+        rule_gene_names,
+        coverage_gene_names=set(coverage_gaps_by_gene),
+    )
     if not plot_genes:
         logger.warning('No genes selected for plotting')
         return None
 
     selected_gene_names = {gene.name for gene in plot_genes}
     cds = [ann for ann in cds if ann.gene_name in selected_gene_names]
-    if not cds:
+    coverage_gaps_by_gene = {
+        gene_name: gaps
+        for gene_name, gaps in coverage_gaps_by_gene.items()
+        if gene_name in selected_gene_names
+    }
+    if not cds and not coverage_gaps_by_gene:
         logger.warning('No CDS variants in selected plot genes')
         return None
 
@@ -136,13 +148,20 @@ def _build_lollipop_figure(
                    markeredgecolor='white', markersize=8, label='Insertion'),
         plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['deletion'],
                    markeredgecolor='white', markersize=8, label='Deletion'),
+        mpatches.Patch(facecolor=_NON_COVERED_COLOUR, alpha=0.12, edgecolor='none', label='non covered'),
     ]
 
     for i, gene in enumerate(plot_genes):
         lollipop_ax = gene_pair_axes[2 * i]
         track_ax = gene_pair_axes[2 * i + 1]
         annotations = gene_annotations.get(gene.name, [])
-        _draw_gene_panel(lollipop_ax, gene, annotations, shared_track_ax=track_ax)
+        _draw_gene_panel(
+            lollipop_ax,
+            gene,
+            annotations,
+            coverage_gaps=coverage_gaps_by_gene.get(gene.name, []),
+            shared_track_ax=track_ax,
+        )
         _draw_gene_track(track_ax, gene)
 
     gene_pair_axes[0].legend(handles=handles, loc='upper right', fontsize=7, ncol=len(handles), frameon=False, bbox_to_anchor=(1, 1.15), borderaxespad=0.0)
@@ -154,6 +173,7 @@ def _select_plot_genes(
     genes: list[GeneRecord],
     annotations: list,
     rule_gene_names: set[str] | None,
+    coverage_gene_names: set[str] | None = None,
 ) -> list[GeneRecord]:
     """
     Keep genes that have detected variants and resistance rules.
@@ -164,12 +184,13 @@ def _select_plot_genes(
     :return: ordered list of genes to render in the plot
     """
     variant_gene_names = {ann.gene_name for ann in annotations if ann.gene_name}
+    covered_gap_gene_names = coverage_gene_names or set()
     if rule_gene_names is None:
-        selected_names = variant_gene_names
+        selected_names = variant_gene_names | covered_gap_gene_names
     else:
-        selected_names = variant_gene_names & set(rule_gene_names)
+        selected_names = (variant_gene_names | covered_gap_gene_names) & set(rule_gene_names)
         if not selected_names:
-            selected_names = variant_gene_names
+            selected_names = variant_gene_names | covered_gap_gene_names
 
     return sorted(
         [gene for gene in genes if gene.name in selected_names],
@@ -371,7 +392,11 @@ def _draw_gene_track(ax, gene: GeneRecord) -> None:
 
 
 def _draw_gene_panel(
-    ax, gene: GeneRecord, annotations: list[AnnotatedVariant], shared_track_ax=None
+    ax,
+    gene: GeneRecord,
+    annotations: list[AnnotatedVariant],
+    coverage_gaps: list[CoverageGap] | None = None,
+    shared_track_ax=None,
 ) -> None:
     """
     Draw one gene-focused bent lollipop panel.
@@ -386,6 +411,8 @@ def _draw_gene_panel(
         'database_hit': 's',
         'no_database_hit': 'o',
     }
+
+    _draw_non_covered_regions(ax, gene, coverage_gaps or [])
 
     jittered = _apply_top_jitter(annotations, gene_length=gene.end - gene.start)
 
@@ -467,6 +494,46 @@ def _apply_top_jitter(
     min_distance = gene_length / 100
     x_values_jittered = adjust_array_min_distance(x_values, min_distance=min_distance)
     return list(zip(sorted_anns, x_values_jittered))
+
+
+def _group_coverage_gaps_by_gene(coverage_gaps: list[CoverageGap]) -> dict[str, list[CoverageGap]]:
+    """Group coverage gaps by gene name ordered by codon_start."""
+    grouped: dict[str, list[CoverageGap]] = {}
+    for gap in coverage_gaps:
+        grouped.setdefault(gap.gene_name, []).append(gap)
+    for gene_name in grouped:
+        grouped[gene_name].sort(key=lambda gap: gap.codon_start)
+    return grouped
+
+
+def _draw_non_covered_regions(ax, gene: GeneRecord, coverage_gaps: list[CoverageGap]) -> None:
+    """Draw pre-merged non-covered codon stretches as a low-alpha background overlay."""
+    for gap in coverage_gaps:
+        left_start, _ = _codon_nt_span(gene, gap.codon_start)
+        _, right_end = _codon_nt_span(gene, gap.codon_end)
+        ax.axvspan(
+            left_start + 0.5,
+            right_end + 0.5,
+            ymin=0.0,
+            ymax=1.0,
+            facecolor=_NON_COVERED_COLOUR,
+            alpha=0.12,
+            linewidth=0,
+            zorder=0,
+        )
+
+
+def _codon_nt_span(gene: GeneRecord, codon_pos: int) -> tuple[int, int]:
+    """Return 0-based genomic nt interval [start, end) for one codon index."""
+    cds_nt_start = gene.codon_start + codon_pos * 3
+    if gene.strand == '+':
+        genomic_start = gene.start + cds_nt_start
+        return genomic_start, genomic_start + 3
+
+    genomic_high = (gene.end - 1) - cds_nt_start
+    genomic_start = genomic_high - 2
+    return genomic_start, genomic_high + 1
+
 
 
 def adjust_array_min_distance(

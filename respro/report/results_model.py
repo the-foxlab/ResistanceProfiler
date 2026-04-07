@@ -4,11 +4,10 @@ Structured results model — format-independent report data.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from respro.db.models import AnnotatedVariant, ComboRuleHit
+from respro.db.models import AnnotatedVariant, ComboRuleHit, CoverageGap
 
 
 @dataclass
@@ -32,6 +31,7 @@ class ProfilingResult:
     resistance_hits: int = 0
     annotations: list[AnnotatedVariant] = field(default_factory=list)
     combo_hits: list[ComboRuleHit] = field(default_factory=list)
+    coverage_gaps: list[CoverageGap] = field(default_factory=list)
 
     @property
     def cds_annotations(self) -> list[AnnotatedVariant]:

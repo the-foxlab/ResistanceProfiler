@@ -13,7 +13,7 @@ from markupsafe import Markup, escape
 
 from respro import __version__
 from respro.core.similarity import classify_similarity
-from respro.db.models import AnnotatedVariant, GeneRecord, ResistanceRule
+from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord, ResistanceRule
 from respro.report.palette import MUTATION_COLOURS
 from respro.report.plots import render_lollipop_plot_bytes
 from respro.report.results_model import ProfilingResult
@@ -300,6 +300,33 @@ def _build_potential_effects_rows(
     return rows
 
 
+def _count_unassessed_rule_positions(
+    rules: list[ResistanceRule],
+    coverage_gaps: list[CoverageGap],
+) -> tuple[int, int]:
+    """
+    Count unique rule positions and how many are not assessable due to missing coverage.
+
+    :param rules: loaded resistance rules for the active reference
+    :param coverage_gaps: non-covered codon stretches emitted by the profiler
+    :return: (total unique rule positions, unassessed unique rule positions)
+    """
+    rule_positions = {(rule.gene_name, rule.position) for rule in rules}
+    if not rule_positions:
+        return 0, 0
+
+    gene_gaps: dict[str, list[CoverageGap]] = {}
+    for gap in coverage_gaps:
+        gene_gaps.setdefault(gap.gene_name, []).append(gap)
+
+    unassessed_total = sum(
+        1 for gene, pos in rule_positions if any(
+            gap.codon_start <= pos <= gap.codon_end for gap in gene_gaps.get(gene, [])
+        )
+    )
+    return len(rule_positions), unassessed_total
+
+
 def _col_visibility(rows: list[dict], columns: list[str]) -> dict[str, bool]:
     """
     Return a visibility flag for each column — True when at least one row has a meaningful value.
@@ -456,15 +483,25 @@ def build_report_context(
     combo_hit_rows = _build_combo_hit_rows(result)
     cds_rows = _build_cds_rows(result)
     potential_rows = _build_potential_effects_rows(result, rules or [])
+    coverage_assessment_available = bool(result.coverage_gaps) or any(
+        ann.is_fasta_mode for ann in result.annotations
+    )
+    if coverage_assessment_available:
+        total_rule_positions, unassessed_rule_positions = _count_unassessed_rule_positions(
+            rules or [], result.coverage_gaps,
+        )
+    else:
+        total_rule_positions = 0
+        unassessed_rule_positions = 0
     summary['similarity_hits'] = len(potential_rows)
 
-    summary['resistant_hits'] = sum(1 for r in db_hit_rows if r['phenotype'] == 'resistant')
-    summary['intermediate_hits'] = sum(1 for r in db_hit_rows if r['phenotype'] == 'intermediate')
-    summary['sensitive_hits'] = sum(1 for r in db_hit_rows if r['phenotype'] == 'sensitive')
+    summary['resistant_hits'] = sum(1 for r in db_hit_rows if r['phenotype'] == 'resistant' or r['clinical_phenotype'] == 'resistant')
+    summary['intermediate_hits'] = sum(1 for r in db_hit_rows if r['phenotype'] == 'intermediate' or r['clinical_phenotype'] == 'intermediate')
+    summary['sensitive_hits'] = sum(1 for r in db_hit_rows if r['phenotype'] == 'sensitive' or r['clinical_phenotype'] == 'sensitive')
 
-    summary['similarity_resistant'] = sum(1 for r in potential_rows if r['phenotype'] == 'resistant')
-    summary['similarity_intermediate'] = sum(1 for r in potential_rows if r['phenotype'] == 'intermediate')
-    summary['similarity_sensitive'] = sum(1 for r in potential_rows if r['phenotype'] == 'sensitive')
+    summary['similarity_resistant'] = sum(1 for r in potential_rows if r['phenotype'] == 'resistant' or r['clinical_phenotype'] == 'resistant')
+    summary['similarity_intermediate'] = sum(1 for r in potential_rows if r['phenotype'] == 'intermediate' or r['clinical_phenotype'] == 'intermediate')
+    summary['similarity_sensitive'] = sum(1 for r in potential_rows if r['phenotype'] == 'sensitive'or r['clinical_phenotype'] == 'sensitive')
 
     _high_impact = {'frameshift', 'stop_gained', 'stop_lost', 'start_lost', 'insertion', 'deletion'}
     summary['high_impact_count'] = sum(
@@ -473,6 +510,8 @@ def build_report_context(
     summary['missense_count'] = sum(
         1 for ann in result.cds_annotations if ann.consequence == 'missense'
     )
+    summary['rule_positions_total'] = total_rule_positions
+    summary['unassessed_rule_positions'] = unassessed_rule_positions
 
     bibliography, pub_id_to_num = _build_bibliography(db_hit_rows, combo_hit_rows, potential_rows)
     for row in [*db_hit_rows, *combo_hit_rows, *potential_rows]:

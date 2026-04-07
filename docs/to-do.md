@@ -110,6 +110,9 @@ Mark items done and update priorities after each completed milestone.
 ### Coverage analysis
 
 - [x] N-stretch handling in FASTA mode — full-codon NNN treated as non-covered; emits `CoverageGap` entries instead of IUPAC-expanded variants; partial-N codons (1–2 N) remain IUPAC-expanded; processing continues past gaps; `profile_fasta_consensus` returns `(annotations, coverage_gaps)` tuple
+- [x] Unassessed rule-position reporting — cross-reference resistance-rule codon positions with FASTA `CoverageGap` entries in the HTML report summary and per-gene section; lollipop plots now shade non-covered codon spans with low alpha and include a `non covered` legend item
+- [x] Persist non-covered regions to `results.db` — `coverage_gap` table (gene_name, codon_pos per run) added to results schema; `save_run` writes gaps from `ProfilingResult.coverage_gaps`; `load_coverage_gaps` restores them; `regenerate` passes gaps into the reconstructed `ProfilingResult` so regenerated reports show the same unassessable-position warnings; existing databases are migrated automatically on open
+- [x] Codon stretches for coverage gaps — `CoverageGap` now stores `codon_start`/`codon_end` (inclusive range) instead of individual `codon_pos`; consecutive non-covered codons are merged into one stretch in `annotate_fasta.py`; DB schema updated to `codon_start`/`codon_end` columns; `_count_unassessed_rule_positions` uses range-based lookup; plot drawing simplified by removing `_merge_consecutive_positions`
 
 
 ---
@@ -133,19 +136,9 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🔴 Switch VCF parsing to `pysam.VariantFile` once pysam is a dependency — removes our own
   edge-case handling and delegates to a well-maintained library; do this in the same change as
   the BAM coverage work to avoid adding pysam twice
-- 🔴 Persist non-covered regions to `results.db` — coverage gaps must survive `regenerate`; add
-  a `coverage_gap` table (or JSON column on the run row) storing the list of gene positions below
-  `--min-depth` or spanned by N-runs; `save_run` writes this data and `reconstruct_annotations`
-  restores it so regenerated reports show the same unassessable-position warnings as the original
 - 🟡 Sequence-matching performance follow-up — after the `pysam` coverage/VCF changes land,
   benchmark end-to-end `profile-vcf` runtime on multi-reference projects and decide whether
   mappy-based reference preselection should become default instead of optional
-- 🟡 Track unassessed rule positions in the report — once per-position depth is available (from
-  BAM or N-stretch FASTA handling), cross-reference every resistance rule position against the
-  depth map for the aligned gene; a position is "not assessable" if depth < `--min-depth` or if
-  the codon spans an N-run; surface this per gene in the HTML report (e.g.
-  *"5 of 12 rule positions not assessable due to missing coverage"*) and include a count in the
-  summary header; this turns the coverage signal into actionable clinical information
 - 🟢 Within-codon quasi-species phasing via BAM — once BAM support is in place, for codons that
   carry two or three VCF-called SNPs check whether those mutations co-occur on the same reads
   using `pysam.AlignmentFile.fetch()` over the codon window (≤3 nt, always on a single read);

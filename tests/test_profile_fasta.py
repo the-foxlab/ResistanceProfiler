@@ -896,14 +896,14 @@ class TestNStretchCoverageGaps:
     """N-stretch detection in FASTA mode — full-codon NNN → CoverageGap, partial N → IUPAC."""
 
     def test_all_n_codon_produces_gap_not_annotation(self, simple_gene: GeneRecord) -> None:
-        """NNN at codon 1 yields a CoverageGap; no annotation emitted for that codon."""
+        """NNN at codon 1 yields a CoverageGap stretch; no annotation emitted for that codon."""
         # ATGNNNGCTTAA: codon 1 all-N
         query = 'ATGNNNGCTTAA'
         match = _make_match(simple_gene, query)
         anns, gaps = profile_fasta_consensus(query, [match])
 
         assert not any(a.codon_pos == 1 for a in anns)
-        assert any(g.gene_name == 'gag' and g.codon_pos == 1 for g in gaps)
+        assert any(g.gene_name == 'gag' and g.codon_start <= 1 <= g.codon_end for g in gaps)
 
     def test_partial_n_codon_produces_iupac_expansion(self, simple_gene: GeneRecord) -> None:
         """Single N in a codon stays as IUPAC expansion — no coverage gap emitted."""
@@ -914,7 +914,7 @@ class TestNStretchCoverageGaps:
 
         codon1_anns = [a for a in anns if a.codon_pos == 1]
         assert len(codon1_anns) > 0
-        assert not any(g.codon_pos == 1 for g in gaps)
+        assert not any(g.codon_start <= 1 <= g.codon_end for g in gaps)
 
     def test_processing_continues_after_n_stretch(self, simple_gene: GeneRecord) -> None:
         """Codons after an NNN gap are still annotated normally."""
@@ -928,21 +928,22 @@ class TestNStretchCoverageGaps:
             covered_cds_end=12,
         )
 
-        # Gap at codon 1
-        assert any(g.codon_pos == 1 for g in gaps)
+        # Gap covers codon 1
+        assert any(g.codon_start <= 1 <= g.codon_end for g in gaps)
         # Missense at codon 2 (A→E)
         assert any(a.codon_pos == 2 and a.ref_aa == 'A' and a.alt_aa == 'E' for a in anns)
 
-    def test_consecutive_n_codons_produce_multiple_gaps(self, simple_gene: GeneRecord) -> None:
-        """Two consecutive all-N codons each produce their own CoverageGap."""
-        # ATGNNNNNN TAA: codons 1+2 all-N, codon 3 unchanged stop
+    def test_consecutive_n_codons_merge_into_one_stretch(self, simple_gene: GeneRecord) -> None:
+        """Two consecutive all-N codons and uncovered tail merge into a single CoverageGap stretch."""
+        # ATGNNNNNN TAA: codons 1+2 all-N; aligner only reaches ATG, so codon 3 is also non-covered.
+        # All three non-covered codons (1, 2, 3) merge into one contiguous stretch.
         query = 'ATGNNNNNNTAA'
         match = _make_match(simple_gene, query)
         anns, gaps = profile_fasta_consensus(query, [match])
 
-        gap_positions = {g.codon_pos for g in gaps}
-        assert 1 in gap_positions
-        assert 2 in gap_positions
+        assert len(gaps) == 1
+        assert gaps[0].codon_start == 1
+        assert gaps[0].codon_end == 3
 
     def test_lowercase_nnn_also_treated_as_gap(self, simple_gene: GeneRecord) -> None:
         """Lower-case 'nnn' in a codon is treated as NNN (non-covered)."""
@@ -950,12 +951,12 @@ class TestNStretchCoverageGaps:
         match = _make_match(simple_gene, query)
         anns, gaps = profile_fasta_consensus(query, [match])
 
-        assert any(g.codon_pos == 1 for g in gaps)
+        assert any(g.codon_start <= 1 <= g.codon_end for g in gaps)
 
     def test_terminal_missing_sequence_and_terminal_n_are_equivalent(
         self, simple_gene: GeneRecord,
     ) -> None:
-        """Missing tail and trailing N tail produce identical uncovered codon positions."""
+        """Missing tail and trailing N tail produce identical uncovered codon stretches."""
         trimmed_query = 'ATGAAAGCT'  # last codon missing
         trailing_n_query = 'ATGAAAGCTNNN'
 
@@ -965,7 +966,7 @@ class TestNStretchCoverageGaps:
         match_n = _make_match(simple_gene, trailing_n_query)
         _, gaps_n = profile_fasta_consensus(trailing_n_query, [match_n])
 
-        assert {g.codon_pos for g in gaps_trimmed} == {g.codon_pos for g in gaps_n}
+        assert gaps_trimmed == gaps_n
 
 
 class TestFastaConsensusCli:

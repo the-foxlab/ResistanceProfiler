@@ -116,7 +116,7 @@ def _annotate_from_alignment(
 
     coding = ref_positions[frame:]  # skip leading non-coding frame offset
     annotations: list[AnnotatedVariant] = []
-    coverage_gaps: list[CoverageGap] = []
+    gap_codon_indices: list[int] = []
     codon_idx = 0
     i = 0
 
@@ -125,7 +125,7 @@ def _annotate_from_alignment(
         codon_nt_end = codon_nt_start + 3
         if covered_cds_start is not None and covered_cds_end is not None:
             if codon_nt_start < covered_cds_start or codon_nt_end > covered_cds_end:
-                coverage_gaps.append(CoverageGap(gene_name=gene.name, codon_pos=codon_idx))
+                gap_codon_indices.append(codon_idx)
                 i += 3
                 codon_idx += 1
                 continue
@@ -168,7 +168,7 @@ def _annotate_from_alignment(
                 break
         elif query_codon.upper() == 'NNN':
             # Full-codon N-stretch: no coverage → do not IUPAC-expand
-            coverage_gaps.append(CoverageGap(gene_name=gene.name, codon_pos=codon_idx))
+            gap_codon_indices.append(codon_idx)
         else:
             # No gaps — expand IUPAC ambiguity and emit non-synonymous changes
             anns = _annotate_snp_codon(ref_codon, query_codon, ref_aa, codon_idx, gene)
@@ -177,7 +177,33 @@ def _annotate_from_alignment(
         i += 3
         codon_idx += 1
 
-    return annotations, coverage_gaps
+    return annotations, _merge_codon_gaps(gene.name, gap_codon_indices)
+
+
+def _merge_codon_gaps(gene_name: str, codon_indices: list[int]) -> list[CoverageGap]:
+    """
+    Merge a list of non-covered codon indices into contiguous CoverageGap stretches.
+
+    :param gene_name: gene the indices belong to
+    :param codon_indices: unsorted list of 0-based codon indices without coverage
+    :return: list of CoverageGap objects with merged codon ranges
+    """
+    if not codon_indices:
+        return []
+
+    sorted_indices = sorted(codon_indices)
+    gaps: list[CoverageGap] = []
+    start = sorted_indices[0]
+    end = sorted_indices[0]
+    for idx in sorted_indices[1:]:
+        if idx == end + 1:
+            end = idx
+        else:
+            gaps.append(CoverageGap(gene_name=gene_name, codon_start=start, codon_end=end))
+            start = idx
+            end = idx
+    gaps.append(CoverageGap(gene_name=gene_name, codon_start=start, codon_end=end))
+    return gaps
 
 
 def _codon_genomic_pos(gene: GeneRecord, codon_idx: int) -> int:

@@ -30,6 +30,7 @@ from respro.core.resistance_rules import load_rule_sets, load_rules
 from respro.core.annotate_vcf import annotate_variants
 from respro.db.project import add_to_project, init_project
 from respro.db.results import list_runs, load_run, reconstruct_annotations
+from respro.db.results import load_coverage_gaps
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.schema import open_project_db, open_results_db
 from respro.io.reference import load_genes_for_reference
@@ -306,8 +307,11 @@ def profile_fasta(
 
         annotations, coverage_gaps = profile_fasta_consensus(query_seq, fasta_matches)
         if coverage_gaps:
+            total_non_covered = sum(gap.codon_end - gap.codon_start + 1 for gap in coverage_gaps)
             logger.warning(
-                '%d codon(s) could not be assessed due to N-stretch coverage gaps', len(coverage_gaps),
+                '%d codon position(s) could not be assessed due to missing coverage '
+                '(%d stretch(es): N-stretches and/or missing terminal sequence)',
+                total_non_covered, len(coverage_gaps),
             )
 
         # FASTA mode frequencies are discrete (1.0, 0.5, 0.33, 0.25) from IUPAC expansion.
@@ -337,6 +341,7 @@ def profile_fasta(
             project_path=Path(project),
             logger=logger,
             af_bins=fasta_af_bins,
+            coverage_gaps=coverage_gaps,
         )
 
         click.echo(
@@ -418,6 +423,7 @@ def regenerate(
             raise click.UsageError('--out is required with --identifier.')
 
         run_dict, variant_rows = load_run(results_conn, run_id)
+        coverage_gaps = load_coverage_gaps(results_conn, run_id)
 
         project_conn = open_project_db(Path(project))
 
@@ -462,6 +468,7 @@ def regenerate(
             variants_in_cds=run_dict.get('variants_in_cds', 0),
             resistance_hits=run_dict.get('resistance_hits', 0),
             annotations=annotations,
+            coverage_gaps=coverage_gaps,
         )
 
         genes = []

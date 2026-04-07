@@ -83,6 +83,13 @@
     </div>
     {% endif %}
   </a>
+  {% if summary.rule_positions_total %}
+  <div class='stat-card{{ ' warn' if summary.unassessed_rule_positions else '' }}'>
+    <div class='number'>{{ summary.unassessed_rule_positions }}</div>
+    <div class='label'>Unassessed rule positions</div>
+    <div class='stat-note'>of {{ summary.rule_positions_total }} total positions (missing coverage)</div>
+  </div>
+  {% endif %}
 </div>
 
 {% if plot_data %}

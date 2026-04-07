@@ -16,6 +16,7 @@ import click
 from respro.core.profile_helpers import pick_best_reference_id, select_matches_for_reference
 from respro.core.resistance_rules import load_rule_sets, load_rules, match_rule_sets, match_rules
 from respro.core.annotate_vcf import assign_af_bins
+from respro.db.models import CoverageGap
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.results import save_run
 from respro.db.schema import init_results_db
@@ -144,6 +145,7 @@ def _finalize_and_export(
     project_path: Path,
     logger: logging.Logger,
     af_bins: dict[str, tuple[float, float]] | None = None,
+    coverage_gaps: list[CoverageGap] | None = None,
 ) -> tuple[ProfilingResult, dict]:
     """
     Apply rule matching and AF binning, build the result object, export, and optionally persist.
@@ -166,6 +168,7 @@ def _finalize_and_export(
     :param project_path: path to the project database file
     :param logger: logger instance
     :param af_bins: optional custom AF bin thresholds; defaults to VCF-mode bins
+    :param coverage_gaps: optional list of non-covered codon positions (FASTA mode)
     :return: (ProfilingResult, export path dict)
     """
     annotations = match_rules(annotations, rules)
@@ -190,6 +193,7 @@ def _finalize_and_export(
         resistance_hits=sum(1 for a in annotations if a.is_resistance_hit),
         annotations=annotations,
         combo_hits=combo_hits,
+        coverage_gaps=coverage_gaps or [],
     )
 
     outputs = export_results(

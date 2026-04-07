@@ -8,7 +8,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from respro.db.models import AnnotatedVariant, Publication, ResistanceRule, VariantCall
+from respro.db.models import AnnotatedVariant, CoverageGap, Publication, ResistanceRule, VariantCall
 from respro.report.results_model import ProfilingResult
 
 
@@ -96,6 +96,12 @@ def save_run(
             ),
         )
 
+    for gap in result.coverage_gaps:
+        results_conn.execute(
+            'INSERT INTO coverage_gap (run_id, gene_name, codon_start, codon_end) VALUES (?, ?, ?, ?)',
+            (run_id, gap.gene_name, gap.codon_start, gap.codon_end),
+        )
+
     results_conn.commit()
     return run_id
 
@@ -138,6 +144,37 @@ def load_run(
         (run_id,),
     ).fetchall()
     return dict(run_row), [dict(row) for row in variant_rows]
+
+
+def load_coverage_gaps(
+    results_conn: sqlite3.Connection,
+    run_id: int,
+) -> list[CoverageGap]:
+    """
+    Load persisted coverage gaps for a run.
+
+    :param results_conn: open results DB connection
+    :param run_id: id of the run to load gaps for
+    :return: list of CoverageGap objects ordered by gene_name, codon_start
+    """
+    tables = {
+        row['name']
+        for row in results_conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    if 'coverage_gap' not in tables:
+        return []
+
+    rows = results_conn.execute(
+        'SELECT gene_name, codon_start, codon_end FROM coverage_gap '
+        'WHERE run_id = ? ORDER BY gene_name, codon_start',
+        (run_id,),
+    ).fetchall()
+    return [
+        CoverageGap(gene_name=row['gene_name'], codon_start=row['codon_start'], codon_end=row['codon_end'])
+        for row in rows
+    ]
 
 
 def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:

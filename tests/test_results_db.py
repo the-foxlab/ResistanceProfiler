@@ -11,9 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from respro.db.models import AnnotatedVariant, ResistanceRule, VariantCall
+from respro.db.models import AnnotatedVariant, CoverageGap, ResistanceRule, VariantCall
 from respro.db.results import (
     list_runs,
+    load_coverage_gaps,
     load_run,
     project_fingerprint,
     reconstruct_annotations,
@@ -212,6 +213,7 @@ class TestResultsDbSchema:
         assert 'results_meta' in tables
         assert 'run' in tables
         assert 'variant_result' in tables
+        assert 'coverage_gap' in tables
 
     def test_init_results_db_validates_existing_compatible_db(self, tmp_path: Path) -> None:
         db_path = tmp_path / 'results_existing.db'
@@ -468,3 +470,135 @@ class TestResultsPersistence:
         assert project_fingerprint(conn_a) != project_fingerprint(conn_b)
         conn_a.close()
         conn_b.close()
+
+
+class TestCoverageGapPersistence:
+    """Tests for coverage gap save and load."""
+
+    @pytest.fixture()
+    def minimal_project_conn(self, tmp_path: Path):
+        db_path = tmp_path / 'project.db'
+        conn = create_schema(db_path)
+        conn.execute(
+            'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+            ('Test', 1, str(uuid.uuid4())),
+        )
+        conn.execute('INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)', (1, 'ref1', 100))
+        conn.execute('INSERT INTO gene (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)', (1, 'gag', 0, 90, '+'))
+        conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'd'))
+        conn.execute('INSERT INTO resistance_rule (gene_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)', (1, 1, 1, 'E'))
+        conn.commit()
+        return conn
+
+    @pytest.fixture()
+    def results_conn(self, tmp_path: Path):
+        conn = init_results_db(tmp_path / 'results.db')
+        yield conn
+        conn.close()
+
+    def _make_result_with_gaps(self) -> ProfilingResult:
+        v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=1.0, depth=0)
+        ann = AnnotatedVariant(variant=v, gene_name='gag', codon_pos=1, consequence='missense', is_fasta_mode=True)
+        return ProfilingResult(
+            project_name='Test',
+            reference_name='ref1',
+            vcf_name='sample.fasta',
+            annotations=[ann],
+            coverage_gaps=[
+                CoverageGap(gene_name='gag', codon_start=3, codon_end=3),
+                CoverageGap(gene_name='gag', codon_start=5, codon_end=5),
+                CoverageGap(gene_name='pol', codon_start=0, codon_end=0),
+            ],
+        )
+
+    def test_save_run_persists_coverage_gaps(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        result = self._make_result_with_gaps()
+        run_id = save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+
+        rows = results_conn.execute(
+            'SELECT gene_name, codon_start, codon_end FROM coverage_gap WHERE run_id = ? ORDER BY gene_name, codon_start',
+            (run_id,),
+        ).fetchall()
+        assert len(rows) == 3
+        assert (rows[0]['gene_name'], rows[0]['codon_start'], rows[0]['codon_end']) == ('gag', 3, 3)
+        assert (rows[1]['gene_name'], rows[1]['codon_start'], rows[1]['codon_end']) == ('gag', 5, 5)
+        assert (rows[2]['gene_name'], rows[2]['codon_start'], rows[2]['codon_end']) == ('pol', 0, 0)
+
+    def test_load_coverage_gaps_restores_gaps(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        result = self._make_result_with_gaps()
+        run_id = save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+
+        gaps = load_coverage_gaps(results_conn, run_id)
+        assert len(gaps) == 3
+        assert CoverageGap(gene_name='gag', codon_start=3, codon_end=3) in gaps
+        assert CoverageGap(gene_name='pol', codon_start=0, codon_end=0) in gaps
+
+    def test_load_coverage_gaps_empty_for_run_without_gaps(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
+        result = ProfilingResult(
+            project_name='Test',
+            reference_name='ref1',
+            vcf_name='sample.vcf',
+            annotations=[AnnotatedVariant(variant=v, gene_name='gag', codon_pos=1)],
+        )
+        run_id = save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+
+        gaps = load_coverage_gaps(results_conn, run_id)
+        assert gaps == []
+
+    def test_legacy_db_without_coverage_gap_table_returns_empty(self, tmp_path: Path) -> None:
+        """A results DB that pre-dates coverage_gap returns [] gracefully."""
+        db_path = tmp_path / 'legacy_results.db'
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE results_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+        conn.execute(
+            'CREATE TABLE run (id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'project_name TEXT NOT NULL, project_db_path TEXT NOT NULL, '
+            'reference_name TEXT NOT NULL, vcf_path TEXT NOT NULL)'
+        )
+        conn.execute(
+            'CREATE TABLE variant_result (id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'run_id INTEGER NOT NULL, chrom TEXT NOT NULL, pos INTEGER NOT NULL, '
+            'ref TEXT NOT NULL, alt TEXT NOT NULL)'
+        )
+        conn.execute(
+            'INSERT INTO run (project_name, project_db_path, reference_name, vcf_path) '
+            'VALUES (?, ?, ?, ?)',
+            ('p', '/tmp/p.db', 'ref', '/tmp/s.vcf'),
+        )
+        conn.commit()
+
+        gaps = load_coverage_gaps(conn, 1)
+        assert gaps == []
+        conn.close()
+
+    def test_init_results_db_adds_coverage_gap_table_to_existing_db(self, tmp_path: Path) -> None:
+        """Existing results DB without coverage_gap gets the table added on open."""
+        db_path = tmp_path / 'old_results.db'
+        conn = sqlite3.connect(str(db_path))
+        conn.execute('CREATE TABLE results_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+        conn.execute(
+            'CREATE TABLE run (id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'project_name TEXT NOT NULL, project_db_path TEXT NOT NULL, '
+            'reference_name TEXT NOT NULL, vcf_path TEXT NOT NULL)'
+        )
+        conn.execute(
+            'CREATE TABLE variant_result (id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'run_id INTEGER NOT NULL, chrom TEXT NOT NULL, pos INTEGER NOT NULL, '
+            'ref TEXT NOT NULL, alt TEXT NOT NULL)'
+        )
+        conn.commit()
+        conn.close()
+
+        migrated = init_results_db(db_path)
+        tables = {
+            row['name']
+            for row in migrated.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        migrated.close()
+        assert 'coverage_gap' in tables
+
+

@@ -210,13 +210,35 @@ CREATE TABLE IF NOT EXISTS variant_result (
 
 CREATE INDEX IF NOT EXISTS idx_vr_run ON variant_result(run_id);
 CREATE INDEX IF NOT EXISTS idx_vr_gene ON variant_result(gene_name, codon_pos);
+
+CREATE TABLE IF NOT EXISTS coverage_gap (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES run(id),
+    gene_name   TEXT    NOT NULL,
+    codon_start INTEGER NOT NULL,
+    codon_end   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cg_run ON coverage_gap(run_id);
 """
+
 
 _REQUIRED_RESULTS_COLUMNS = {
     'results_meta': {'key', 'value'},
     'run': {'id', 'project_name', 'project_db_path', 'reference_name', 'vcf_path'},
     'variant_result': {'id', 'run_id', 'chrom', 'pos', 'ref', 'alt'},
 }
+
+_RESULTS_OPTIONAL_TABLES_SQL = """\
+CREATE TABLE IF NOT EXISTS coverage_gap (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES run(id),
+    gene_name   TEXT    NOT NULL,
+    codon_start INTEGER NOT NULL,
+    codon_end   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cg_run ON coverage_gap(run_id);
+"""
 
 _OPTIONAL_RESULTS_COLUMN_DEFS = {
     'run': {
@@ -369,6 +391,7 @@ def init_results_db(db_path: Path) -> sqlite3.Connection:
         return conn
 
     _validate_results_schema_overlap(conn, db_path)
+    conn.executescript(_RESULTS_OPTIONAL_TABLES_SQL)
     if _add_missing_optional_columns(conn, _OPTIONAL_RESULTS_COLUMN_DEFS):
         conn.commit()
     return conn
@@ -385,6 +408,7 @@ def open_results_db(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     _configure_connection(conn)
     _validate_results_schema_overlap(conn, db_path)
+    conn.executescript(_RESULTS_OPTIONAL_TABLES_SQL)
     if _add_missing_optional_columns(conn, _OPTIONAL_RESULTS_COLUMN_DEFS):
         conn.commit()
     return conn
