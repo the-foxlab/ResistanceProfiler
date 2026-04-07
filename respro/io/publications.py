@@ -1,8 +1,16 @@
 """
 Thin clients for NCBI E-utilities and CrossRef APIs.
 
-Resolves PubMed IDs to DOIs and fetches publication titles.
+Fetches publication metadata (title, DOI) from PubMed IDs and DOIs.
 All public functions return None on any failure — callers treat this as best-effort.
+
+PubMed entries are resolved via a single NCBI E-utilities esummary call that
+returns both the title and the DOI (when one exists), so no separate DOI-resolution
+step is needed.  Old publications that have no DOI are handled correctly: the
+PubMed ID is stored as the primary identifier and a PubMed link is generated at
+display time.
+
+DOI-only entries fall back to CrossRef for the title.
 """
 
 from __future__ import annotations
@@ -16,31 +24,34 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 
-def resolve_pubmed_to_doi(pmid: str, timeout: int = 5) -> str | None:
+def fetch_pubmed_metadata(pmid: str, timeout: int = 3) -> dict | None:
     """
-    Resolve a PubMed ID to a DOI via the NCBI E-utilities esummary endpoint.
+    Fetch title and DOI (when available) for a PubMed article via NCBI E-utilities.
+
+    A single esummary call returns both fields, so no separate DOI-resolution
+    step is needed.  Old publications that have no DOI return an empty ``'doi'``
+    key; callers store the PMID as the primary identifier in that case.
 
     :param pmid: numeric PubMed ID string (digits only)
     :param timeout: HTTP request timeout in seconds
-    :return: bare DOI string (e.g. ``10.1234/xyz``) or None if unresolvable
+    :return: dict with ``'title'`` (str) and ``'doi'`` (str, may be empty), or
+             ``None`` on any network / parsing failure
     """
     url = (
-        f'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi'
+        'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi'
         f'?db=pubmed&id={urllib.parse.quote(pmid)}&retmode=json'
     )
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             data = json.loads(resp.read())
-        article_ids = (
-            data.get('result', {}).get(pmid, {}).get('articleids', [])
-        )
-        for entry in article_ids:
+        result_data = data.get('result', {}).get(pmid, {})
+        title = result_data.get('title', '').strip()
+        doi = ''
+        for entry in result_data.get('articleids', []):
             if entry.get('idtype') == 'doi':
                 doi = entry.get('value', '').strip()
-                if doi:
-                    return doi
-        logger.debug('NCBI: no DOI found for PMID %s', pmid)
-        return None
+                break
+        return {'title': title, 'doi': doi}
     except urllib.error.HTTPError as exc:
         logger.debug('NCBI PMID lookup failed for %r: HTTP %s', pmid, exc.code)
         return None
@@ -52,9 +63,11 @@ def resolve_pubmed_to_doi(pmid: str, timeout: int = 5) -> str | None:
         return None
 
 
-def fetch_publication_metadata(doi: str, timeout: int = 5) -> dict | None:
+def fetch_publication_metadata(doi: str, timeout: int = 3) -> dict | None:
     """
     Fetch a publication title from the CrossRef API.
+
+    Used as a fallback for DOI-only entries that have no PubMed ID.
 
     :param doi: bare DOI string (e.g. ``10.1234/xyz``)
     :param timeout: HTTP request timeout in seconds

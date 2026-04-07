@@ -55,13 +55,13 @@ def main(verbose: int) -> None:
 # ──────────────────────────────────────────────────────────────────────
 
 @main.command()
-@click.option('--name', required=True, help='Project name.')
+@click.option('--name', '-n', required=True, help='Project name.')
 @click.option(
-    '--genbank', 'genbank_paths', required=True, multiple=True,
+    '--genbank', '-g', 'genbank_paths', required=True, multiple=True,
     type=click.Path(exists=True),
     help='One or more GenBank files. Can be repeated; each file may itself contain multiple records.',
 )
-@click.option('--rules', required=True, type=click.Path(exists=True), help='Resistance rules TSV.')
+@click.option('--rules', '-r', required=True, type=click.Path(exists=True), help='Resistance rules TSV.')
 @click.option('--output', '-o', required=True, type=click.Path(), help='Output SQLite database path.')
 @click.option('--overwrite', is_flag=True, default=False, help='Overwrite existing database.')
 @click.option('--additional-info/--no-additional-info', 'additional_info', default=True,
@@ -96,8 +96,8 @@ def init(
 
 @main.command('init-add')
 @click.option('--project', '-p', required=True, type=click.Path(exists=True), help='Existing project SQLite database.')
-@click.option('--genbank', 'genbank_paths', required=False, multiple=True, type=click.Path(exists=True), help='Optional GenBank file(s) with additional references/genes.')
-@click.option('--rules', required=True, type=click.Path(exists=True), help='Resistance rules TSV to add.')
+@click.option('--genbank', '-g', 'genbank_paths', required=False, multiple=True, type=click.Path(exists=True), help='Optional GenBank file(s) with additional references/genes.')
+@click.option('--rules', '-r', required=True, type=click.Path(exists=True), help='Resistance rules TSV to add.')
 @click.option('--additional-info/--no-additional-info', 'additional_info', default=True,
     help='Query PubChem for drug metadata and resolve publications via NCBI/CrossRef (default: on).',
 )
@@ -130,8 +130,8 @@ def init_add(
 
 @main.command('profile-vcf')
 @click.option('--project', '-p', required=True, type=click.Path(exists=True), help='Project database.')
-@click.option('--vcf', required=True, type=click.Path(exists=True), help='Input VCF file.')
-@click.option('--ref-fasta', required=False, type=click.Path(exists=True),
+@click.option('--vcf', '-f', required=True, type=click.Path(exists=True), help='Input VCF file.')
+@click.option('--ref-fasta', '-r', required=False, type=click.Path(exists=True),
     help='Reference FASTA the VCF was called against (mutually exclusive with --query-ref-header).',
 )
 @click.option(
@@ -139,10 +139,10 @@ def init_add(
     required=False,
     help='Reuse a previously cached query reference by its stored FASTA header (mutually exclusive with --ref-fasta).',
 )
-@click.option('--sample', default='sample', help='Sample name for the report. Default: sample')
+@click.option('--sample', '-s', default='sample', help='Sample name for the report. Default: sample')
 @click.option('--output', '-o', default='output', type=click.Path(), help='Output directory.')
 @click.option(
-    '--results-db',
+    '--results-db', '-d',
     default=None,
     type=click.Path(),
     help='Optional results database path. Creates or appends to an existing SQLite results database.',
@@ -152,7 +152,7 @@ def init_add(
 )
 @click.option('--min-af', default=0.01, type=float, help='Minimum allele frequency filter. Default: 0.01')
 @click.option('--min-depth', default=10, type=int, help='Minimum read depth filter. Default: 10')
-@click.option('--cores', default=1, type=int, help='Number of parallel worker processes for gene alignment. Default: 1')
+@click.option('--cores', '-c', default=1, type=int, help='Number of parallel worker processes for gene alignment. Default: 1')
 def profile_vcf(
     project: str,
     vcf: str,
@@ -261,18 +261,18 @@ def profile_vcf(
 
 @main.command('profile-fasta')
 @click.option('--project', '-p', required=True, type=click.Path(exists=True), help='Project database.')
-@click.option('--fasta', 'consensus_fasta', required=True, type=click.Path(exists=True),
+@click.option('--fasta', '-f', 'consensus_fasta', required=True, type=click.Path(exists=True),
     help='Input consensus FASTA sequence.',
 )
-@click.option('--sample', default='sample', help='Sample name for the report. Default: sample')
+@click.option('--sample', '-s', default='sample', help='Sample name for the report. Default: sample')
 @click.option('--output', '-o', default='output', type=click.Path(), help='Output directory.')
 @click.option(
-    '--results-db',
+    '--results-db', '-d',
     default=None,
     type=click.Path(),
     help='Optional results database path. Creates or appends to an existing SQLite results database.',
 )
-@click.option('--cores', default=1, type=int, help='Number of parallel worker processes for gene alignment. Default: 1')
+@click.option('--cores', '-c', default=1, type=int, help='Number of parallel worker processes for gene alignment. Default: 1')
 def profile_fasta(
     project: str,
     consensus_fasta: str,
@@ -365,9 +365,9 @@ def profile_fasta(
 # ──────────────────────────────────────────────────────────────────────
 
 @main.command('regenerate')
-@click.option('--result-db', required=True, type=click.Path(exists=True), help='Results database.')
-@click.option('--list', 'list_flag', is_flag=True, default=False, help='List all stored results.')
-@click.option('--identifier', 'run_id', type=int, default=None, help='Run ID to regenerate.')
+@click.option('--result-db', '-d', required=True, type=click.Path(exists=True), help='Results database.')
+@click.option('--list', '-l', 'list_flag', is_flag=True, default=False, help='List all stored results.')
+@click.option('--identifier', '-i', 'run_id', type=int, default=None, help='Run ID to regenerate.')
 @click.option('--project', '-p', type=click.Path(exists=True), default=None,
     help='Project database (required with --identifier).',
 )

@@ -12,9 +12,13 @@ from pathlib import Path
 
 from respro.core.annotate_vcf import normalize_mutation
 from respro.db.project.drugs import _get_or_create_drug_id
-from respro.io.publications import resolve_pubmed_to_doi
+from respro.io.publications import fetch_publication_metadata, fetch_pubmed_metadata
 
 logger = logging.getLogger(__name__)
+
+# Detects anchor-less deletion tokens emitted by companion database converters.
+# Form: one or more AA letters + position digits + "del" (case-insensitive), e.g. "Q35del", "DD676del".
+_RE_ANCHORLESS_DEL = re.compile(r'^([A-Za-z]+)\d+del$', re.IGNORECASE)
 
 
 def _normalize_publication_token(token: str) -> tuple[str, str, str]:
@@ -79,10 +83,16 @@ def _get_or_create_publication(
     """
     Return the id of an existing publication row, creating one if needed.
 
-    Dedup key: ``doi`` when non-empty; else ``raw_input``.
-    When ``additional_info`` is True and a PMID is available without a DOI,
-    NCBI E-utilities is queried to resolve the DOI. CrossRef is then queried
-    for the article title. Both lookups are best-effort and non-fatal.
+    Dedup key: ``doi`` when non-empty (including DOIs resolved from a PMID);
+    otherwise ``raw_input``.  Both the resolved key and the original
+    ``raw_input`` token are stored in the cache so that repeated references
+    to the same PMID skip the network lookup on every call after the first.
+
+    When ``additional_info`` is True:
+    - A PMID is looked up via NCBI E-utilities, which returns both the title
+      and the DOI (when available) in a single call.
+    - If no PMID is present but a DOI is, the title is fetched from CrossRef.
+    Both lookups are best-effort and non-fatal; a missing title is acceptable.
 
     :param conn: SQLite database connection
     :param doi: bare DOI string (may be empty)
@@ -92,17 +102,27 @@ def _get_or_create_publication(
     :param pub_cache: in-process cache mapping dedup key → publication id
     :return: publication row id
     """
-    if additional_info and pubmed_id and not doi:
-        resolved = resolve_pubmed_to_doi(pubmed_id)
-        if resolved:
-            doi = resolved
-            logger.debug('Resolved PMID:%s → DOI %s', pubmed_id, doi)
-        else:
-            logger.warning('Could not resolve PMID:%s to a DOI — stored without DOI', pubmed_id)
+    # Fast path: raw_input is always known before any network call; if we have
+    # already processed this exact token (e.g. the same PMID appears on many
+    # rules), return immediately without hitting the network again.
+    if raw_input in pub_cache:
+        return pub_cache[raw_input]
+
+    prefetched_title = ''
+    if additional_info and pubmed_id:
+        meta = fetch_pubmed_metadata(pubmed_id)
+        if meta:
+            if meta['doi'] and not doi:
+                doi = meta['doi']
+                logger.debug('Resolved PMID:%s → DOI %s', pubmed_id, doi)
+            prefetched_title = meta['title']
 
     cache_key = doi if doi else raw_input
 
     if cache_key in pub_cache:
+        # The resolved DOI is already cached (e.g. reached via a different raw form).
+        # Also register raw_input so future calls hit this fast path.
+        pub_cache[raw_input] = pub_cache[cache_key]
         return pub_cache[cache_key]
 
     conn.row_factory = sqlite3.Row
@@ -116,12 +136,14 @@ def _get_or_create_publication(
         ).fetchone()
 
     if row is not None:
-        pub_cache[cache_key] = int(row['id'])
-        return int(row['id'])
+        pub_id = int(row['id'])
+        pub_cache[cache_key] = pub_id
+        pub_cache[raw_input] = pub_id
+        return pub_id
 
-    title = ''
-    if additional_info and doi:
-        from respro.io.publications import fetch_publication_metadata
+    # Title: from NCBI (already prefetched), or CrossRef fallback for DOI-only entries.
+    title = prefetched_title
+    if additional_info and not title and doi:
         meta = fetch_publication_metadata(doi)
         if meta:
             title = meta.get('title', '')
@@ -132,6 +154,7 @@ def _get_or_create_publication(
     )
     pub_id = int(cur.lastrowid)  # type: ignore[arg-type]
     pub_cache[cache_key] = pub_id
+    pub_cache[raw_input] = pub_id
     return pub_id
 
 
@@ -350,6 +373,42 @@ def _get_gene_aa_sequence(
     return ''
 
 
+def _resolve_anchorless_deletion(
+    deleted_block: str,
+    position_0based: int,
+    aa_seq: str,
+) -> tuple[int, str, str] | None:
+    """
+    Resolve an anchor-less deletion token to canonical form.
+
+    The anchor residue is the AA immediately preceding the deleted block.  It is
+    fetched from the gene sequence and used to build the canonical deletion token
+    ``ANCHOR + DELETED_BLOCK + ANCHOR_POS_1BASED + ANCHOR``.
+
+    :param deleted_block: uppercase deleted AA block (e.g. ``'Q'`` or ``'DD'``)
+    :param position_0based: 0-based start index of the deletion in the gene sequence
+    :param aa_seq: amino-acid sequence of the gene
+    :return: ``(anchor_position_0based, anchor_aa, canonical_mutation)`` or ``None``
+             when the anchor cannot be resolved (position 0, or block mismatch)
+    """
+    anchor_idx = position_0based - 1
+    if anchor_idx < 0:
+        return None  # no preceding residue
+
+    end_idx = position_0based + len(deleted_block)
+    if end_idx > len(aa_seq):
+        return None  # deletion extends beyond sequence
+
+    actual_block = aa_seq[position_0based:end_idx].upper()
+    if actual_block != deleted_block.upper():
+        return None  # gene sequence does not match claimed deleted block
+
+    anchor_aa = aa_seq[anchor_idx].upper()
+    anchor_pos_1based = anchor_idx + 1
+    canonical = f'{anchor_aa}{deleted_block.upper()}{anchor_pos_1based}{anchor_aa}'
+    return anchor_idx, anchor_aa, canonical
+
+
 def _detect_coordinate_base(
     rows: list[dict],
     genes_by_name: dict[str, list[sqlite3.Row]],
@@ -431,29 +490,25 @@ def _validate_reference_amino_acids(
     rows: list[dict],
     genes_by_name: dict[str, list[sqlite3.Row]],
     coord_base: int,
-) -> None:
+) -> set[tuple[str, str, str, str]]:
     """
-    Validate that every rule's reference AA matches the gene aa_sequence.
+    Check reference AAs in the rules TSV against the stored gene aa_sequence.
 
-    Out-of-range positions are logged as warnings and skipped — they indicate
-    that a rule refers to a position beyond the end of the annotated protein
-    (e.g. a database entry for a truncated or divergent isoform) but do not
-    imply an inconsistency between the rules file and the GenBank sequence.
-
-    An actual AA mismatch (rule says ``M``, gene has ``K``) is fatal because
-    it means the rules file and the GenBank reference are genuinely inconsistent
-    and loading the rules would silently produce wrong results.
+    Out-of-range positions and reference AA mismatches are both logged as
+    warnings and collected for skipping — callers must filter out returned keys
+    before inserting rules.
 
     :param rows: all parsed rows from the rules TSV
     :param genes_by_name: gene lookup with aa_sequence from the project DB
     :param coord_base: detected coordinate base (0 or 1)
-    :raises ValueError: if any reference AA mismatches are found
+    :return: set of ``(gene_name, position_raw, reference_identifier, ref_aa)``
+             tuples for rows whose reference AA does not match the gene sequence
     """
-    mismatches: list[str] = []
+    mismatch_keys: set[tuple[str, str, str, str]] = set()
+    mismatch_details: list[str] = []
     out_of_range: list[str] = []
 
     for row in rows:
-        # Skip rows that cannot be validated against a concrete AA sequence.
         gene_name = _get_value(row, 'gene')
         ref_aa = _get_value(row, 'reference')
         position_raw = _get_value(row, 'position')
@@ -475,9 +530,10 @@ def _validate_reference_amino_acids(
         if 0 <= pos_0based < len(aa_seq):
             actual = aa_seq[pos_0based].upper()
             if actual != ref_aa.upper():
-                mismatches.append(
+                mismatch_keys.add((gene_name, position_raw, reference_identifier, ref_aa))
+                mismatch_details.append(
                     f'  gene {gene_name!r} pos {pos} ({coord_base}-based): '
-                    f'rule says {ref_aa!r}, gene sequence has {actual!r}'
+                    f'rule says {ref_aa!r}, gene sequence has {actual!r} — rule will be skipped'
                 )
         else:
             out_of_range.append(
@@ -486,7 +542,6 @@ def _validate_reference_amino_acids(
             )
 
     if out_of_range:
-        # Out-of-range is non-fatal: the row is ignored later, but init can continue.
         logger.warning(
             '%d rule(s) reference positions beyond the end of the annotated protein '
             'and will be skipped:\n%s',
@@ -494,14 +549,14 @@ def _validate_reference_amino_acids(
             '\n'.join(out_of_range),
         )
 
-    if mismatches:
-        # True AA mismatches are fatal: they indicate inconsistent biological references.
-        raise ValueError(
-            f'Rules reference AA validation failed — {len(mismatches)} mismatch(es) '
-            f'between rules TSV and GenBank gene sequences. '
-            'This must be fixed before the project can be initialised:\n'
-            + '\n'.join(mismatches)
+    if mismatch_details:
+        logger.warning(
+            '%d rule(s) have reference AA mismatches and will be skipped:\n%s',
+            len(mismatch_details),
+            '\n'.join(mismatch_details),
         )
+
+    return mismatch_keys
 
 
 def _rule_exists(
@@ -575,6 +630,7 @@ def _insert_combo_rule_sets(
     skipped_gene: list[str],
     skipped_ref: list[str],
     skipped_invalid_aa: list[str],
+    mismatch_keys: set[tuple[str, str, str, str]],
 ) -> int:
     """
     Parse combination rule rows (those with a non-empty ``rule_group`` column) and
@@ -595,6 +651,8 @@ def _insert_combo_rule_sets(
     :param skipped_gene: list accumulating skipped gene names (non-fatal)
     :param skipped_ref: list accumulating skipped reference warnings (non-fatal)
     :param skipped_invalid_aa: list accumulating skipped unsupported AA token rows
+    :param mismatch_keys: set of (gene_name, position_raw, reference_identifier, ref_aa)
+        tuples for rows with reference AA mismatches; matching members are skipped
     :return: number of combination rule sets successfully inserted
     """
     # Group rows by rule_group value (preserves insertion order in Python ≥ 3.7).
@@ -730,6 +788,34 @@ def _insert_combo_rule_sets(
                 continue
 
             reference_aa = _get_value(row, 'reference')
+            if (gene_name, position_raw, reference_identifier, reference_aa) in mismatch_keys:
+                group_ok = False
+                continue
+
+            # Resolve anchor-less deletion tokens — same logic as for single rules.
+            m_del = _RE_ANCHORLESS_DEL.match(mutation_raw)
+            if m_del:
+                deleted_block = m_del.group(1).upper()
+                aa_seq = _get_gene_aa_sequence(genes_by_name[gene_name], reference_identifier)
+                if not aa_seq:
+                    errors.append(
+                        f'Combo rule group {group_id!r}: member for gene {gene_name!r} '
+                        f'pos {position_raw!r} has no aa_sequence, cannot resolve deletion '
+                        f'anchor for {mutation_raw!r}'
+                    )
+                    group_ok = False
+                    continue
+                resolved = _resolve_anchorless_deletion(deleted_block, position_0based, aa_seq)
+                if resolved is None:
+                    errors.append(
+                        f'Combo rule group {group_id!r}: member for gene {gene_name!r} '
+                        f'pos {position_raw!r}: cannot resolve anchor for deletion '
+                        f'{mutation_raw!r}'
+                    )
+                    group_ok = False
+                    continue
+                position_0based, reference_aa, mutation_raw = resolved
+
             mutation = normalize_mutation(
                 mutation_raw,
                 reference=reference_aa,
@@ -871,7 +957,7 @@ def _load_resistance_rules(
     # Detect coordinate base once globally and use it consistently for all rows.
     coord_base = _detect_coordinate_base(all_rows, genes_by_name)
     logger.info('Detected %d-based amino acid positions in rules TSV', coord_base)
-    _validate_reference_amino_acids(all_rows, genes_by_name, coord_base)
+    mismatch_keys = _validate_reference_amino_acids(all_rows, genes_by_name, coord_base)
 
     # Split rows into single rules and combination rule members.
     single_rows = [r for r in all_rows if not _get_value(r, 'rule_group')]
@@ -925,6 +1011,31 @@ def _load_resistance_rules(
             continue
 
         reference_aa = _get_value(row, 'reference')
+        if (gene_name, position_raw, reference_identifier, reference_aa) in mismatch_keys:
+            continue
+
+        # Resolve anchor-less deletion tokens (e.g. 'Q35del', 'DD676del') emitted by
+        m_del = _RE_ANCHORLESS_DEL.match(mutation_raw)
+        if m_del:
+            deleted_block = m_del.group(1).upper()
+            aa_seq = _get_gene_aa_sequence(genes_by_name[gene_name], reference_identifier)
+            if not aa_seq:
+                errors.append(
+                    f'Rule for gene {gene_name!r} pos {position_raw!r}: '
+                    f'gene has no aa_sequence, cannot resolve deletion anchor for {mutation_raw!r}'
+                )
+                continue
+            resolved = _resolve_anchorless_deletion(deleted_block, position_0based, aa_seq)
+            if resolved is None:
+                errors.append(
+                    f'Rule for gene {gene_name!r} pos {position_raw!r}: '
+                    f'cannot resolve anchor for deletion {mutation_raw!r} — '
+                    'check that the deleted block matches the gene sequence and '
+                    'that the deletion does not start at position 1'
+                )
+                continue
+            position_0based, reference_aa, mutation_raw = resolved
+
         ic50_value = _normalize_ic50_from_row(
             row,
             errors=errors,
@@ -1011,6 +1122,7 @@ def _load_resistance_rules(
     combo_count = _insert_combo_rule_sets(
         conn, project_id, combo_rows, genes_by_name, coord_base,
         drug_cache, pub_cache, additional_info, errors, skipped_gene, skipped_ref, skipped_invalid_aa,
+        mismatch_keys,
     )
 
     if skipped_gene:

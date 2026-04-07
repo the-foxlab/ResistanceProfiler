@@ -2,12 +2,14 @@
 Tests for report output generation.
 """
 
-import json
 import sqlite3
-from pathlib import Path
 
 from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord, Publication, ResistanceRule, VariantCall
 from respro.report.results_model import ProfilingResult
+from respro.report.html import build_report_context
+from respro.report.html import _build_potential_effects_rows
+from respro.report.html import _load_gene_cards
+from respro.report.html import render_html
 
 
 def _make_result() -> ProfilingResult:
@@ -77,9 +79,53 @@ class TestProfilingResult:
 
 
 
+class TestBuildReportContext:
+    def test_db_hit_positions_and_rules_in_summary(self) -> None:
+        # _make_result has 1 annotation with 1 rule → 1 position, 1 rule
+        r = _make_result()
+        ctx = build_report_context(r)
+        assert ctx['summary']['database_hits'] == 1
+        assert ctx['summary']['db_hit_rules'] == 1
+
+    def test_multiple_rules_per_position(self) -> None:
+        # Two rules on the same variant → 1 position, 2 rules
+        var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=300)
+        rule_a = ResistanceRule(
+            id=1, gene_name='gag', gene_id=1,
+            drug_name='DrugA', drug_id=1, reference_identifier='ref',
+            position=2, reference='K', mutation='E', phenotype='resistant',
+        )
+        rule_b = ResistanceRule(
+            id=2, gene_name='gag', gene_id=1,
+            drug_name='DrugB', drug_id=2, reference_identifier='ref',
+            position=2, reference='K', mutation='E', phenotype='sensitive',
+        )
+        ann = AnnotatedVariant(
+            variant=var, gene_name='gag', codon_pos=2,
+            ref_codon='AAA', alt_codon='GAA',
+            ref_aa='K', alt_aa='E',
+            consequence='missense', af_bin='high',
+            rule_matches=[rule_a, rule_b],
+        )
+        r = ProfilingResult(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            total_variants=1, variants_in_cds=1, resistance_hits=1,
+            annotations=[ann],
+        )
+        ctx = build_report_context(r)
+        assert ctx['summary']['database_hits'] == 1    # 1 position
+        assert ctx['summary']['db_hit_rules'] == 2     # 2 rules matched
+
+    def test_stat_note_rendered_in_html(self) -> None:
+        r = _make_result()
+        html = render_html(r)
+        # Tile must show both counts
+        assert '1 position' in html
+        assert '1 rule' in html
+
+
 class TestHtmlExport:
     def test_render_html(self):
-        from respro.report.html import render_html
         r = _make_result()
         html = render_html(r)
         assert '<title>ResistanceProfiler - test.vcf</title>' in html
@@ -87,8 +133,6 @@ class TestHtmlExport:
         assert 'K2E' in html or 'gag' in html
 
     def test_render_html_embeds_favicon(self):
-        from respro.report.html import render_html
-
         r = _make_result()
         html = render_html(r)
 
@@ -96,7 +140,6 @@ class TestHtmlExport:
         assert 'data:image/svg+xml;base64,' in html
 
     def test_potential_effects_excludes_snp_rule_for_indel_annotation(self):
-        from respro.report.html import _build_potential_effects_rows
 
         var = VariantCall(chrom='ref', pos=10, ref='A', alt='AGGG', allele_freq=0.8, depth=120)
         ann = AnnotatedVariant(
@@ -137,8 +180,6 @@ class TestHtmlExport:
         assert rows == []
 
     def test_potential_effects_keeps_indel_rule_for_indel_annotation(self):
-        from respro.report.html import _build_potential_effects_rows
-
         var = VariantCall(chrom='ref', pos=10, ref='A', alt='AGGG', allele_freq=0.8, depth=120)
         ann = AnnotatedVariant(
             variant=var,
@@ -180,7 +221,6 @@ class TestHtmlExport:
         assert rows[0]['similarity'] == 'moderate'
 
     def test_render_html_gene_overview(self):
-        from respro.report.html import _load_gene_cards
 
         r = _make_result()
         conn = sqlite3.connect(':memory:')
@@ -217,8 +257,6 @@ class TestHtmlExport:
         assert cards[0]['aa_sequence'] == 'MKAFGP'
 
     def test_build_report_context_tracks_unassessed_rule_positions(self):
-        from respro.report.html import build_report_context
-
         r = _make_result()
         r.coverage_gaps = [CoverageGap(gene_name='gag', codon_start=2, codon_end=2)]
         rules = [
@@ -253,8 +291,6 @@ class TestHtmlExport:
         assert context['summary']['unassessed_rule_positions'] == 1
 
     def test_render_html_shows_unassessed_rule_tile_without_detail_table(self):
-        from respro.report.html import render_html
-
         r = _make_result()
         r.coverage_gaps = [CoverageGap(gene_name='gag', codon_start=2, codon_end=2)]
         rules = [

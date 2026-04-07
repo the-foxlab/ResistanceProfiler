@@ -8,10 +8,16 @@ import sqlite3
 import textwrap
 
 import pytest
+import logging
+from unittest.mock import patch
 
 from respro.db.project import init_project
 from respro.db.project.genes import _is_ncbi_protein_accession
-from respro.db.project.rules import _detect_coordinate_base, _validate_reference_amino_acids
+from respro.db.project.rules import (
+    _detect_coordinate_base,
+    _resolve_anchorless_deletion,
+    _validate_reference_amino_acids,
+)
 from respro.db.schema import create_schema
 from conftest import write_genbank, TINY_REF_SEQ
 
@@ -184,15 +190,16 @@ class TestValidateReferenceAminoAcids:
         ]
         _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=0)
 
-    def test_raises_on_single_ref_aa_mismatch(self) -> None:
-        # pos=1 (1-based) → aa_seq[0]='M', rule says 'K' → mismatch
+    def test_warns_and_returns_key_on_single_ref_aa_mismatch(self, caplog) -> None:
+
+        # pos=1 (1-based) → aa_seq[0]='M', rule says 'K' → mismatch; must warn, not raise
         rows = [_rule('gX', position=1, reference='K')]
-        with pytest.raises(ValueError) as exc_info:
-            _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
-        msg = str(exc_info.value)
-        assert 'mismatch' in msg.lower()
-        assert "rule says 'K'" in msg
-        assert "gene sequence has 'M'" in msg
+        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+            mismatch_keys = _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
+        assert ('gX', '1', '', 'K') in mismatch_keys
+        assert any('mismatch' in r.message.lower() for r in caplog.records)
+        assert any("rule says 'K'" in r.message for r in caplog.records)
+        assert any("gene sequence has 'M'" in r.message for r in caplog.records)
 
     def test_warns_on_out_of_range_position(self, caplog) -> None:
         # _AA_SEQ has length 6; pos=10 (1-based) → index 9 → out of range.
@@ -212,16 +219,18 @@ class TestValidateReferenceAminoAcids:
             _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=0)
         assert any('out of range' in r.message for r in caplog.records)
 
-    def test_reports_all_mismatches_in_single_error(self) -> None:
+    def test_collects_all_mismatch_keys(self, caplog) -> None:
+        import logging
+
         rows = [
             _rule('gX', position=1, reference='Z'),  # mismatch 1
             _rule('gX', position=2, reference='Z'),  # mismatch 2
             _rule('gX', position=3, reference='Z'),  # mismatch 3
         ]
-        with pytest.raises(ValueError) as exc_info:
-            _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
-        msg = str(exc_info.value)
-        assert '3 mismatch(es)' in msg
+        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+            mismatch_keys = _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
+        assert len(mismatch_keys) == 3
+        assert any('3' in r.message and 'mismatch' in r.message.lower() for r in caplog.records)
 
     def test_skips_rows_without_ref_aa(self) -> None:
         # Row has no 'reference'/'ref_aa' key — must not raise
@@ -259,17 +268,21 @@ class TestValidateReferenceAminoAcids:
         # Should pass: ACC2 gene has 'M' at position 1 (1-based)
         _validate_reference_amino_acids(rows, genes_by_name, coord_base=1)
 
-    def test_raises_for_wrong_gene_via_reference_identifier(self) -> None:
+    def test_warns_and_returns_key_for_wrong_gene_via_reference_identifier(self, caplog) -> None:
+        import logging
+
         genes_by_name = {
             'gX': [
                 _gene_row('gX', 'QQQQQQ', reference_name='ref1', reference_accession='ACC1', gene_id=1),
                 _gene_row('gX', _AA_SEQ,  reference_name='ref2', reference_accession='ACC2', gene_id=2),
             ]
         }
-        # Pointing to ACC1 which has 'Q' at pos 1, not 'M'
+        # Pointing to ACC1 which has 'Q' at pos 1, not 'M' — must warn, not raise
         rows = [_rule('gX', position=1, reference='M', reference_identifier='ACC1')]
-        with pytest.raises(ValueError, match='mismatch'):
-            _validate_reference_amino_acids(rows, genes_by_name, coord_base=1)
+        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+            mismatch_keys = _validate_reference_amino_acids(rows, genes_by_name, coord_base=1)
+        assert ('gX', '1', 'ACC1', 'M') in mismatch_keys
+        assert any('mismatch' in r.message.lower() for r in caplog.records)
 
 
 class TestSchemaCombinedRuleSets:
@@ -424,6 +437,31 @@ class TestComboRuleParsing:
         assert row is not None
         assert row[0] == '12345678'
         assert row[1] == 'PMID:12345678'
+
+    def test_pmid_network_lookup_fires_only_once_per_unique_pmid(
+        self, tmp_path, tiny_genbank
+    ) -> None:
+        # helper
+        def _fake_fetch(pmid: str, timeout: int = 3) -> dict:
+            nonlocal call_count
+            call_count += 1
+            return {'title': f'Title for {pmid}', 'doi': ''}
+        # The same PMID appears on three rules; the NCBI lookup must fire exactly once.
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tPMID:12345678
+            gag\ttiny_ref\t4\tF\tL\tDrugA\tPMID:12345678
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tPMID:12345678
+        """))
+        db = tmp_path / 'proj.db'
+        call_count = 0
+        # Patch the name as it exists in rules.py's namespace.
+        with patch('respro.db.project.rules.fetch_pubmed_metadata', side_effect=_fake_fetch):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                         rules_tsv=tsv, additional_info=True)
+
+        assert call_count == 1  # one PMID → one network call, regardless of how many rules use it
 
     def test_combo_rule_set_publication_doi_is_stored(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -644,13 +682,15 @@ class TestPhenotypeNormalization:
         assert clinical == 'sensitive'
 
     def test_rejects_ambiguous_deletion_tokens(self, tmp_path, tiny_genbank) -> None:
+        # F67del at position 2 with reference K: deleted block 'F' does not match
+        # the gene sequence at position 2 (which is 'K') — resolution must fail.
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t2\tK\tF67del\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
-        with pytest.raises(ValueError, match='unrecognised mutation'):
+        with pytest.raises(ValueError, match='cannot resolve anchor for deletion'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
     def test_rejects_noop_single_rule(self, tmp_path, tiny_genbank) -> None:
@@ -719,6 +759,97 @@ class TestPhenotypeNormalization:
         assert any('unsupported amino-acid tokens' in rec.message for rec in caplog.records)
 
 
+class TestRefAaMismatchSkip:
+    """Rules whose reference AA does not match the GenBank sequence are skipped with a warning."""
+
+    @pytest.fixture()
+    def tiny_genbank(self, tmp_path):
+        gb = tmp_path / 'tiny.gb'
+        write_genbank(gb, [
+            {
+                'id': 'tiny_ref',
+                'accession': 'tiny_ref',
+                'sequence': TINY_REF_SEQ,
+                'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+            }
+        ])
+        return gb
+
+    def test_mismatching_ref_aa_skips_rule_with_warning(
+        self, tmp_path, tiny_genbank, caplog
+    ) -> None:
+        # gag pos 2 (1-based) has ref AA 'K'; rule claims 'Z' → mismatch → skip
+        # gag pos 2 with correct ref 'K' → loads fine
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral
+            gag\ttiny_ref\t2\tZ\tE\tDrugBad
+            gag\ttiny_ref\t2\tK\tE\tDrugGood
+        """))
+        db = tmp_path / 'proj.db'
+
+        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                         rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
+        drugs = {row[0] for row in conn.execute('SELECT name FROM drug').fetchall()}
+        conn.close()
+
+        assert count == 1
+        assert 'druggood' in drugs
+        assert 'drugbad' not in drugs
+        assert any('mismatch' in r.message.lower() for r in caplog.records)
+
+    def test_mismatching_ref_aa_combo_member_skips_group(
+        self, tmp_path, tiny_genbank, caplog
+    ) -> None:
+        import logging
+
+        # pos 2 has 'K', not 'Z' → mismatch member → whole group skipped
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
+            gag\ttiny_ref\t2\tZ\tE\tDrugA\tresistant\tcombo_bad
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_bad
+        """))
+        db = tmp_path / 'proj.db'
+
+        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                         rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        set_count = conn.execute('SELECT COUNT(*) FROM resistance_rule_set').fetchone()[0]
+        conn.close()
+
+        assert set_count == 0
+        assert any('mismatch' in r.message.lower() for r in caplog.records)
+
+    def test_correct_ref_aa_loads_in_presence_of_mismatching_sibling(
+        self, tmp_path, tiny_genbank
+    ) -> None:
+        # One mismatching rule and one correct rule at the same position — only the correct one loads
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral
+            gag\ttiny_ref\t2\tZ\tE\tDrugBad
+            gag\ttiny_ref\t6\tP\tV\tDrugGood
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                     rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
+        drugs = {row[0] for row in conn.execute('SELECT name FROM drug').fetchall()}
+        conn.close()
+
+        assert count == 1
+        assert 'druggood' in drugs
+
+
 class TestGenbankTranslationQuality:
     @pytest.fixture()
     def tiny_genbank(self, tmp_path):
@@ -782,4 +913,138 @@ class TestGenbankTranslationQuality:
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='missing required field reference'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
+
+
+# ── TINY_REF_SEQ AA sequence (1-based) ────────────────────────────────────────
+# Translated from TINY_REF_SEQ (gene positions 1-87, + strand, 28 AAs + stop):
+#   pos: 1   2  3  4  5  6  7  8  9  10 11 12 13 14 15 16 17 18 19 20 ...
+#   AA:  M   K  A  F  G  P  K  F  G  P  K  A  F  G  P  K  F  G  P  K  ...
+# (repeating MKAFGP / KFGP pattern)
+
+
+class TestResolveAnchorlessDeletion:
+    """Unit tests for _resolve_anchorless_deletion."""
+
+    def test_single_aa_deletion_returns_canonical(self) -> None:
+        # pos 3 (1-based) = A; anchor at pos 2 = K → canonical KA2K
+        aa_seq = 'MKAFGP'
+        result = _resolve_anchorless_deletion('A', 2, aa_seq)  # 0-based pos 2 = 1-based 3
+        assert result is not None
+        anchor_idx, anchor_aa, canonical = result
+        assert anchor_idx == 1
+        assert anchor_aa == 'K'
+        assert canonical == 'KA2K'
+
+    def test_multi_aa_deletion_returns_canonical(self) -> None:
+        # pos 4-5 (1-based) = FG; anchor at pos 3 = A → canonical AFG3A
+        aa_seq = 'MKAFGP'
+        result = _resolve_anchorless_deletion('FG', 3, aa_seq)  # 0-based pos 3 = 1-based 4
+        assert result is not None
+        anchor_idx, anchor_aa, canonical = result
+        assert anchor_idx == 2
+        assert anchor_aa == 'A'
+        assert canonical == 'AFG3A'
+
+    def test_returns_none_at_first_position(self) -> None:
+        # No preceding residue when deleting at position 0 (0-based)
+        aa_seq = 'MKAFGP'
+        assert _resolve_anchorless_deletion('M', 0, aa_seq) is None
+
+    def test_returns_none_on_block_mismatch(self) -> None:
+        # pos 3 (0-based) = F, but we claim the deleted block is 'A'
+        aa_seq = 'MKAFGP'
+        assert _resolve_anchorless_deletion('A', 3, aa_seq) is None
+
+    def test_returns_none_when_block_overruns_sequence(self) -> None:
+        aa_seq = 'MKAFGP'
+        # Trying to delete 10 AAs starting at pos 2 (only 4 remain)
+        assert _resolve_anchorless_deletion('AFXXXXXXXXX', 2, aa_seq) is None
+
+
+class TestAnchorlessDeletion:
+    """Integration tests: anchor-less deletion tokens are resolved at init time."""
+
+    @pytest.fixture()
+    def tiny_genbank(self, tmp_path):
+        gb = tmp_path / 'tiny.gb'
+        write_genbank(gb, [
+            {
+                'id': 'tiny_ref',
+                'accession': 'tiny_ref',
+                'sequence': TINY_REF_SEQ,
+                'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+            }
+        ])
+        return gb
+
+    def test_single_aa_deletion_loads(self, tmp_path, tiny_genbank) -> None:
+        # A at pos 3 (1-based); anchor K at pos 2; canonical mutation KA2K
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            gag\ttiny_ref\t3\tA\tA3del\tDrugA\tresistant
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                     rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        row = conn.execute(
+            'SELECT position, reference, mutation FROM resistance_rule'
+        ).fetchone()
+        conn.close()
+
+        assert row is not None
+        # Stored position is the anchor's 0-based index (1-based pos 2 → 0-based 1)
+        assert row[0] == 1
+        assert row[1] == 'K'
+        assert row[2] == 'KA2K'
+
+    def test_multi_aa_deletion_loads(self, tmp_path, tiny_genbank) -> None:
+        # FG at pos 4-5 (1-based); anchor A at pos 3; canonical mutation AFG3A
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            gag\ttiny_ref\t4\tF\tFG4del\tDrugA\tresistant
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                     rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        row = conn.execute(
+            'SELECT position, reference, mutation FROM resistance_rule'
+        ).fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row[0] == 2   # anchor A at 0-based index 2
+        assert row[1] == 'A'
+        assert row[2] == 'AFG3A'
+
+    def test_block_mismatch_raises(self, tmp_path, tiny_genbank) -> None:
+        # reference=A is correct at pos 3, but mutation token claims 'Q' is deleted —
+        # Q does not match the gene sequence at pos 3 (which has A), so resolution fails.
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral
+            gag\ttiny_ref\t3\tA\tQ3del\tDrugA
+        """))
+        db = tmp_path / 'proj.db'
+        with pytest.raises(ValueError, match='cannot resolve anchor'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                         rules_tsv=tsv, additional_info=False)
+
+    def test_deletion_at_position_1_raises(self, tmp_path, tiny_genbank) -> None:
+        # Deleting M at pos 1 (1-based) — no preceding anchor, must fail
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral
+            gag\ttiny_ref\t1\tM\tM1del\tDrugA
+        """))
+        db = tmp_path / 'proj.db'
+        with pytest.raises(ValueError, match='cannot resolve anchor'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                         rules_tsv=tsv, additional_info=False)
+
 

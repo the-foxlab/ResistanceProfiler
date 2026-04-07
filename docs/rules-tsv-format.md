@@ -145,6 +145,8 @@ sequence is discarded.
 | `insGG` with `reference=F` and `position=50` | `F50FGG` |
 | `FGG50F` | `FGG50F` |
 | `F50delGG` | `FGG50F` |
+| `Q35del` with `reference=Q` and `position=35` | `KA34K` (anchor resolved from gene sequence) |
+| `FG4del` with `reference=F` and `position=4` | `AFG3A` (anchor resolved from gene sequence) |
 
 Practical examples:
 
@@ -158,10 +160,17 @@ Practical examples:
 
 Rejected deletion inputs (not allowed):
 
-- `F67del`
 - `delF67`
 - `del67`
 - `del`
+
+Anchor-less deletion notation (`Q35del`, `FG4del`):
+
+- Write `{deleted_block}{position}del` in the `mutation` column.
+- Set `reference` to the first AA of the deleted block and `position` to the deletion start.
+- `respro init` fetches the anchor AA (the residue immediately preceding the deletion) from
+  the stored GenBank sequence and converts the token to canonical `ANCHOR+BLOCK+POS+ANCHOR` form.
+- Deletion at position 1 is rejected (no preceding anchor residue).
 
 Notes:
 

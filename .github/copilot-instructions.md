@@ -242,7 +242,7 @@ When reviewing code, check the whole repository for:
 
 ## Testing
 
-Mimic a test-driven environment and always write test cases first. 
+Mimic a test-driven environment and write test cases first for non-trivial tasks. 
 Organize tests in classes when grouping related scenarios:
 
 ```python

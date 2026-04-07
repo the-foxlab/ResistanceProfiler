@@ -65,6 +65,7 @@
     <div class='number'>{{ summary.database_hits }}</div>
     <div class='label'>Database hits</div>
     {% if summary.database_hits %}
+    <div class='stat-note'>{{ summary.database_hits }} position{{ 's' if summary.database_hits != 1 }} &middot; {{ summary.db_hit_rules }} rule{{ 's' if summary.db_hit_rules != 1 }}</div>
     <div class='stat-sub'>
       <span class='stat-pill resistant{{ ' zero' if not summary.resistant_hits }}'>Resistant: {{ summary.resistant_hits }}</span>
       <span class='stat-pill intermediate{{ ' zero' if not summary.intermediate_hits }}'>Intermediate: {{ summary.intermediate_hits }}</span>

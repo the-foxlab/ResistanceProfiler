@@ -480,6 +480,7 @@ def build_report_context(
     summary['database_hits'] = summary.pop('resistance_hits', 0)
 
     db_hit_rows = _build_db_hit_rows(result)
+    summary['db_hit_rules'] = len(db_hit_rows)
     combo_hit_rows = _build_combo_hit_rows(result)
     cds_rows = _build_cds_rows(result)
     potential_rows = _build_potential_effects_rows(result, rules or [])

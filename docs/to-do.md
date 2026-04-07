@@ -114,6 +114,10 @@ Mark items done and update priorities after each completed milestone.
 - [x] Persist non-covered regions to `results.db` — `coverage_gap` table (gene_name, codon_pos per run) added to results schema; `save_run` writes gaps from `ProfilingResult.coverage_gaps`; `load_coverage_gaps` restores them; `regenerate` passes gaps into the reconstructed `ProfilingResult` so regenerated reports show the same unassessable-position warnings; existing databases are migrated automatically on open
 - [x] Codon stretches for coverage gaps — `CoverageGap` now stores `codon_start`/`codon_end` (inclusive range) instead of individual `codon_pos`; consecutive non-covered codons are merged into one stretch in `annotate_fasta.py`; DB schema updated to `codon_start`/`codon_end` columns; `_count_unassessed_rule_positions` uses range-based lookup; plot drawing simplified by removing `_merge_consecutive_positions`
 
+### Usability and workflow
+
+- [x] Add short CLI option aliases alongside existing long options — `-n`/`-g`/`-r` for `init`; `-g`/`-r` for `init-add`; `-f`/`-r`/`-s`/`-d`/`-c` for `profile-vcf`; `-f`/`-s`/`-d`/`-c` for `profile-fasta`; `-d`/`-l`/`-i` for `regenerate`; long options and behavior unchanged
+- [x] Lenient rule loading — rules whose reference AA does not match the GenBank gene sequence are skipped with a warning instead of aborting; unknown gene names are also silently skipped with a warning; applies to single rules and combination rule group members
 
 ---
 
@@ -121,12 +125,6 @@ Mark items done and update priorities after each completed milestone.
 
 Items are grouped by theme and ordered by priority within each group.
 Priority: 🔴 high · 🟡 medium · 🟢 low
-
-### Code quality and maintainability
-
-- 🟢 Add mypy or pyright to the dev toolchain — type hints are comprehensive throughout the
-  codebase; a type checker run in CI would catch drift and wrong annotations before they reach tests
-- 🟢 Increase test coverage for `respro/io/vcf.py` (currently 57%)
 
 ### Coverage analysis (introduce together)
 
@@ -151,9 +149,7 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Traceability
 
-- 🟡 Results database UUID — assign a stable UUID to each `results.db` at creation time
-  (analogous to the project fingerprint); store it in a `results_db` metadata table
-- 🔴 Per-run manifest and deduplication — store an immutable `run_manifest` JSON blob on the
+- 🟡 Per-run manifest and deduplication — store an immutable `run_manifest` JSON blob on the
   `run` row in `results.db`; the manifest captures everything needed to reproduce and deduplicate
   a run: input checksums (VCF/FASTA SHA-256, project DB SHA-256), effective CLI parameters,
   `respro` version, Python version, and a ruleset snapshot hash (SHA-256 of all canonical rule
@@ -163,30 +159,22 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   stored run (same output as a fresh run, zero re-profiling cost) instead of just returning the
   `run_id` silently; surface the manifest in `results.json` and in the HTML report metadata so
   every exported artefact is self-describing and auditable
-- 🟡 Show run provenance in HTML report — when a run is saved to a results DB, embed the
-  results-DB UUID and run ID in the report header so the report is self-describing
-
-### Results curation and edit workflow
-
-- 🔴 Add user-curated phenotype labels to stored results — allow users to add post-hoc
-  `clinical_phenotype` and/or `phenotype` values derived from phenotypic testing for a stored run 
-  persisted in `results.db` as explicit user-added fields (`clinical_phenotype_user`, `phenotype_user`) 
-  without overwriting the original rule-derived classifications
-- 🟡 Add edit-history provenance for user curation — store editor, timestamp, and optional reason
-  for each manual classification change so curated labels are auditable and reproducible
-- 🟡 Introduce an `respro edit` command group and move regeneration under it — keep current
-  regeneration functionality but prepare a clearer UX such as `respro edit --regenerate <id>` (or
-  subcommand form `respro edit regenerate --identifier <id>`), then add options to apply curated
-  phenotype/classification updates in the same module
+- 🟢 Results database UUID — assign a stable UUID to each `results.db` at creation time
+  (analogous to the project fingerprint); store it in a `results_db` metadata table; prerequisite
+  for run provenance in the HTML report
+- 🟢 Show run provenance in HTML report — embed the results-DB UUID and run ID in the report
+  header so the report is self-describing; depends on results database UUID
 
 ### Combination rules
 
-- 🟡 Persist combo rule hits to `results.db` — extend `save_run` and `reconstruct_annotations`
-  so that combination rule hits survive `regenerate`; requires a new `combo_rule_hit` table or
-  JSON column in the results schema
-- 🟡 End-to-end test for combo rules via TSV `init` path — existing tests build combo rules
+- 🔴 Persist combo rule hits to `results.db` — extend `save_run` so combination rule hits survive
+  `regenerate`; regenerated reports currently silently drop all combo hits; add a
+  `combo_rule_hit` table or JSON column in the results schema and restore hits in
+  `reconstruct_annotations`
+- 🔴 End-to-end test for combo rules via TSV `init` path — existing tests build combo rules
   manually in SQLite; add a test that runs `init_project` from a TSV with `rule_group` entries
-  and verifies the loaded rule sets match expectations
+  and verifies the loaded rule sets match expectations; required before extending combo rule
+  persistence
 - 🟢 N-of-M / OR-logic for combination rules — current AND-only semantics cannot express
   "at least 2 of these 3 mutations"; add an optional `min_members` field to the rule set so
   curators can describe partial co-occurrence resistance
@@ -194,7 +182,7 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 ### Overlapping ORFs
 
 - 🟡 VCF remap: emit one remapped variant per matching CDS for overlapping ORFs —
-  `remap_variants` in `respro/core/profile.py` currently `break`s after the first matching
+  `remap_variants` in `respro/core/profile_vcf.py` currently `break`s after the first matching
   CIGAR map; if a variant position is covered by two gene alignments the second is silently
   dropped; the fix is to collect one remapped call per matching CDS and let `annotate_variants`
   disambiguate per gene (rare in practice for resistance databases, but a correctness issue for
@@ -208,10 +196,10 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🔴 mappy-backed reference preselection — in projects with multiple references, avoid full
   per-gene alignment across every reference by first selecting likely candidate references with
   mappy/minimizer mapping, then run the existing detailed alignment only on selected candidates;
-  prioritize this directly after `pysam` integration to prevent multi-reference runtime blowups.
-  Assess also if multiprocessing is still a good idea when changing to mappy.
-- 🟡 Aligner policy after `pysam` adoption — once `pysam` is required for coverage and VCF
-  parsing, reassess C-extension footprint and packaging path (PyPI/Bioconda), and keep `--aligner`
+  prioritize this directly after `pysam` integration to prevent multi-reference runtime blowups;
+  reassess whether multiprocessing remains useful after moving to mappy
+- 🟢 Aligner policy after `pysam` adoption — once `pysam` is required for coverage and VCF
+  parsing, reassess C-extension footprint and packaging path (PyPI/Bioconda) and keep `--aligner`
   behavior explicit while transitioning toward a mappy-first default if benchmarks support it
 
 ### Usability and workflow
@@ -219,13 +207,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 Multi-VCF / multi-FASTA support — accept multiple `--vcf` / `--fasta` inputs in one
   invocation; run profiling per file and write one output directory per sample; useful for
   batch runs without shell scripting
-- 🟡 Add short CLI option aliases alongside existing long options — introduce consistent short
-  flags for frequently used arguments in `respro/cli.py` (where available and conflict-free)
-  without changing current long-option names or behavior
-- 🟡 Lenient rule loading — add a `--strict` flag (default off) that causes unknown gene names
-  in the rules TSV to raise an error; without `--strict`, emit a warning and skip unmatched
-  rules instead of aborting; keeps the fail-fast default for fresh projects while allowing
-  shared rule files that span multiple references
 - 🟢 Sanger AB1 input — add `respro profile-ab1` that reads an AB1 trace file via
   `SeqIO.read(..., 'abi')` and derives a quality-aware consensus sequence that feeds directly into
   the existing FASTA profiling pipeline; the quality model uses raw trace peak data
@@ -240,34 +221,37 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   already handle these correctly, so a two-peak overlap at 50% naturally yields AF=0.5, capturing
   clinically relevant minority variants in mixed viral populations;
   (3) **Non-covered (N)** — absolute peak height below a noise floor (e.g. 5% of read maximum)
-  regardless of ratio, or an ambiguous stretch longer than 3 positions: emit `N`; once N-stretch
-  handling in FASTA mode is implemented (🔴 Coverage analysis group), these N runs will be treated
-  as non-covered gaps rather than IUPAC-expanded;
+  regardless of ratio, or an ambiguous stretch longer than 3 positions: emit `N`; existing
+  N-stretch coverage gap handling in FASTA mode already covers these correctly;
   thresholds (noise floor, relative secondary-peak cutoff) should be configurable as CLI flags
   (`--ab1-min-signal`, `--ab1-ambiguity-cutoff`) with conservative defaults; Phred quality
   (`letter_annotations['phred_quality']`) can serve as a fast pre-filter (Phred < 20 → ambiguous)
-  before the trace-peak analysis for positions that passed Phred but still show secondary peaks;
-  **depends on N-stretch FASTA handling** (🔴 Coverage analysis) being implemented first or in
-  the same change
+  before the trace-peak analysis for positions that passed Phred but still show secondary peaks
 - 🟢 Summary / batch report — aggregate results across multiple runs stored in one `results.db`
+
+### Code quality and maintainability
+
+- 🟢 Add mypy or pyright to the dev toolchain — type hints are comprehensive throughout the
+  codebase; a type checker run in CI would catch drift and wrong annotations before they reach tests
+- 🟢 Increase test coverage for `respro/io/vcf.py` (currently 57%)
 
 ### Public release
 
 - 🔴 GitHub Actions CI — run the full test suite against all supported Python versions on every
   push to `main`; include a ruff lint check; add a PyPI publish workflow triggered by version tags
-- 🔴 Signed release artifacts and provenance — publish wheel/sdist with SHA256 checksums and
-  Sigstore attestation in GitHub Releases/PyPI release flow so users can verify artifact integrity
-  and build provenance
+- 🔴 Professional documentation — concise README with a quick-start section; link out to separate
+  Markdown pages for installation, database preparation (GenBank + TSV format), profiling (VCF and
+  FASTA), regeneration, and output formats; follow the style of varVAMP
+  (https://github.com/jonas-fuchs/varVAMP)
 - 🟡 Dependabot for dependencies and GitHub Actions — add `.github/dependabot.yml` with weekly
   update checks for `pip` and `github-actions`, grouped PRs where sensible, and automatic security
   update PRs enabled to reduce CVE exposure and dependency drift
 - 🟡 Reproducibility gate in CI — run the same example profiling command twice in a fresh
   environment and assert deterministic outputs (`results.json` and report payload fields) to catch
   accidental nondeterminism before release
-- 🔴 Professional documentation — concise README with a quick-start section; link out to separate
-  Markdown pages for installation, database preparation (GenBank + TSV format), profiling (VCF and
-  FASTA), regeneration, and output formats; follow the style of varVAMP
-  (https://github.com/jonas-fuchs/varVAMP)
+- 🟡 Signed release artifacts and provenance — publish wheel/sdist with SHA256 checksums and
+  Sigstore attestation in GitHub Releases/PyPI release flow so users can verify artifact integrity
+  and build provenance; depends on CI being in place
 - 🟡 Example data for new users — add a small, self-contained example dataset (GenBank file,
   rules TSV, and a matching VCF or consensus FASTA) to the repository so users can follow the
   quick-start guide end-to-end without sourcing their own data; keep the files small enough to
@@ -315,6 +299,10 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Deferred
 
+- 🟢 User-curated phenotype labels, edit-history provenance, and `respro edit` command group —
+  deferred together; these three items form a coherent edit workflow that should be designed as
+  a unit; not needed during core build-out and adds significant schema and UX complexity; revisit
+  once the core profiling and reporting pipeline is stable and released
 - 🟢 Web UI / app layer — deferred; must depend on stable backend APIs without moving domain
   logic out of `respro/`
 
