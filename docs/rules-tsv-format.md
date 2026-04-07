@@ -286,15 +286,15 @@ This column enables combination rules.
 
 ```tsv
 gene	reference_identifier	position	reference	mutation	antiviral	phenotype	ic50	fold_ic50	publication	source
-UL23	NC_001806	67	T	V	Aciclovir	resistant	8.0	4.0x	doi.org/10.1234/example	herpesdrg-db
+UL23	NC_001806	67	T	V	Aciclovir	resistant	8.0	4.0	doi.org/10.1234/example	herpesdrg-db
 ```
 
 ## Minimal valid combination-rule example
 
 ```tsv
 gene	reference_identifier	position	reference	mutation	antiviral	phenotype	ic50	publication	source	rule_group
-UL23	NC_001806	92	N	L	Aciclovir	resistant	8.0x	doi.org/10.1234/example	herpesdrg-db	UL23_N92L+UL30_K715I
-UL30	NC_001806	715	K	I	Aciclovir	resistant	8.0x	doi.org/10.1234/example	herpesdrg-db	UL23_N92L+UL30_K715I
+UL23	NC_001806	92	N	L	Aciclovir	resistant	8.0	doi.org/10.1234/example	herpesdrg-db	UL23_N92L+UL30_K715I
+UL30	NC_001806	715	K	I	Aciclovir	resistant	8.0	doi.org/10.1234/example	herpesdrg-db	UL23_N92L+UL30_K715I
 ```
 
 ## Practical recommendation

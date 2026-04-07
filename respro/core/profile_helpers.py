@@ -54,7 +54,10 @@ def resolve_fasta_query(
             f'{fasta_path}. Multi-record FASTA is not yet supported for profiling.'
         )
 
-    query_name, query_seq = next(iter(seqs.items()))
+    query_name, raw_query_seq = next(iter(seqs.items()))
+    query_seq = raw_query_seq
+    if not query_seq:
+        raise ValueError(f'Query sequence in {fasta_path} is empty')
     chk = sequence_checksum(query_seq)
 
     if use_cache:
@@ -280,4 +283,5 @@ def _list_cached_query_headers(conn: sqlite3.Connection) -> list[str]:
         'ORDER BY qr.name'
     ).fetchall()
     return [row['name'] for row in rows if (row['name'] or '').strip()]
+
 

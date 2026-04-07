@@ -14,7 +14,7 @@ from itertools import product as itertools_product
 from Bio.Seq import Seq
 
 from respro.core.annotate_vcf import translate_codon
-from respro.db.models import AnnotatedVariant, GeneRecord, VariantCall
+from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord, VariantCall
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ def _gapped_strings_from_cigar(
     aligned_ref: list[str] = []
     aligned_query: list[str] = []
 
-    # Unaligned CDS bases before alignment start → gaps in query
+    # Unaligned CDS bases before alignment start
     if cds_start > 0:
         aligned_ref.append(cds[:cds_start])
         aligned_query.append('-' * cds_start)
@@ -65,7 +65,7 @@ def _gapped_strings_from_cigar(
             aligned_query.append('-' * n)
             ref_pos += n
 
-    # Trailing unaligned CDS bases → gaps in query
+    # Trailing unaligned CDS bases
     if ref_pos < len(cds):
         aligned_ref.append(cds[ref_pos:])
         aligned_query.append('-' * (len(cds) - ref_pos))
@@ -77,7 +77,9 @@ def _annotate_from_alignment(
     aligned_ref: str,
     aligned_query: str,
     gene: GeneRecord,
-) -> list[AnnotatedVariant]:
+    covered_cds_start: int | None = None,
+    covered_cds_end: int | None = None,
+) -> tuple[list[AnnotatedVariant], list[CoverageGap]]:
     """
     Walk the pairwise alignment in reference reading frame and emit AA differences.
 
@@ -89,10 +91,15 @@ def _annotate_from_alignment(
     Insertions are processed before each codon; deletions and SNPs within codons
     are handled per triplet. A frameshift stops further processing of that gene.
 
+    A codon where all three query positions are 'N' is treated as non-covered and
+    recorded as a CoverageGap instead of being IUPAC-expanded.
+
     :param aligned_ref: reference CDS with gap characters
     :param aligned_query: query CDS with gap characters
     :param gene: gene record with stored nt_sequence and codon_start
-    :return: annotated variants (non-synonymous changes only)
+    :param covered_cds_start: optional CDS nt start (inclusive) of the aligned/assessable region
+    :param covered_cds_end: optional CDS nt end (exclusive) of the aligned/assessable region
+    :return: (annotated variants, coverage gaps) — non-synonymous changes and non-covered codons
     """
     frame = gene.codon_start
 
@@ -109,10 +116,20 @@ def _annotate_from_alignment(
 
     coding = ref_positions[frame:]  # skip leading non-coding frame offset
     annotations: list[AnnotatedVariant] = []
+    coverage_gaps: list[CoverageGap] = []
     codon_idx = 0
     i = 0
 
     while i < len(coding):
+        codon_nt_start = frame + codon_idx * 3
+        codon_nt_end = codon_nt_start + 3
+        if covered_cds_start is not None and covered_cds_end is not None:
+            if codon_nt_start < covered_cds_start or codon_nt_end > covered_cds_end:
+                coverage_gaps.append(CoverageGap(gene_name=gene.name, codon_pos=codon_idx))
+                i += 3
+                codon_idx += 1
+                continue
+
         _, _, ins_before = coding[i]
 
         # Insertions before this codon (between previous and current codon boundary)
@@ -149,6 +166,9 @@ def _annotate_from_alignment(
             annotations.append(ann)
             if ann.consequence == 'frameshift':
                 break
+        elif query_codon.upper() == 'NNN':
+            # Full-codon N-stretch: no coverage → do not IUPAC-expand
+            coverage_gaps.append(CoverageGap(gene_name=gene.name, codon_pos=codon_idx))
         else:
             # No gaps — expand IUPAC ambiguity and emit non-synonymous changes
             anns = _annotate_snp_codon(ref_codon, query_codon, ref_aa, codon_idx, gene)
@@ -157,7 +177,7 @@ def _annotate_from_alignment(
         i += 3
         codon_idx += 1
 
-    return annotations
+    return annotations, coverage_gaps
 
 
 def _codon_genomic_pos(gene: GeneRecord, codon_idx: int) -> int:

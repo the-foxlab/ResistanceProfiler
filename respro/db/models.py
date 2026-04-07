@@ -18,6 +18,14 @@ class Publication:
     raw_input: str  # original curator string; preserved as display fallback
 
 
+@dataclass(frozen=True)
+class CoverageGap:
+    """A codon position that could not be assessed due to a full-codon N-stretch in FASTA mode."""
+
+    gene_name: str
+    codon_pos: int  # 0-based codon index
+
+
 @dataclass
 class GeneRecord:
     """A gene or CDS annotation loaded from the database."""

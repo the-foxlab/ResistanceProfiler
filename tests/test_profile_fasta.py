@@ -409,6 +409,18 @@ class TestResolveFastaReference:
             resolve_fasta_query(conn, fasta_path)
         conn.close()
 
+    def test_trailing_ns_are_trimmed_before_matching(self, fasta_db: Path, tmp_path: Path) -> None:
+        fasta_path = tmp_path / 'query_trailing_n.fasta'
+        fasta_path.write_text(f'>user_ref\n{TINY_REF_SEQ}NNNNNN\n')
+
+        conn = open_project_db(fasta_db)
+        name, seq, matches = resolve_fasta_query(conn, fasta_path)
+
+        assert name == 'user_ref'
+        assert seq == TINY_REF_SEQ
+        assert len(matches) >= 1
+        conn.close()
+
 
 class TestResolveCachedQueryReference:
     def test_resolves_stored_header(self, fasta_db: Path, tmp_path: Path) -> None:
@@ -771,15 +783,16 @@ class TestFastaConsensusProfile:
     def test_perfect_match_produces_no_annotations(self, simple_gene: GeneRecord) -> None:
         """Identical consensus emits zero annotations (all synonymous)."""
         match = _make_match(simple_gene, _SIMPLE_CDS)
-        anns = profile_fasta_consensus(_SIMPLE_CDS, [match])
+        anns, gaps = profile_fasta_consensus(_SIMPLE_CDS, [match])
         assert anns == []
+        assert gaps == []
 
     def test_missense_snp_detected(self, simple_gene: GeneRecord) -> None:
         """Single K→E substitution at codon 1 → one missense annotation."""
         # ATGGAAGCTTAA: codon 1 = GAA = E (was AAA = K)
         query = 'ATGGAAGCTTAA'
         match = _make_match(simple_gene, query)
-        anns = profile_fasta_consensus(query, [match])
+        anns, gaps = profile_fasta_consensus(query, [match])
 
         assert len(anns) == 1
         ann = anns[0]
@@ -795,7 +808,7 @@ class TestFastaConsensusProfile:
         # AAA → AAG: both encode K
         query = 'ATGAAGGCTTAA'
         match = _make_match(simple_gene, query)
-        anns = profile_fasta_consensus(query, [match])
+        anns, gaps = profile_fasta_consensus(query, [match])
         assert anns == []
 
     def test_stop_gained(self, simple_gene: GeneRecord) -> None:
@@ -803,7 +816,7 @@ class TestFastaConsensusProfile:
         # ATGTAAGCTTAA: codon 1 = TAA = *
         query = 'ATGTAAGCTTAA'
         match = _make_match(simple_gene, query)
-        anns = profile_fasta_consensus(query, [match])
+        anns, gaps = profile_fasta_consensus(query, [match])
 
         assert len(anns) == 1
         assert anns[0].alt_aa == '*'
@@ -814,7 +827,7 @@ class TestFastaConsensusProfile:
         # Insert 'A' after codon 1 → ATGAAAAGCTTAA (13 nt): frameshift at some codon
         query = 'ATGAAAAGCTTAA'
         match = _make_match(simple_gene, query)
-        anns = profile_fasta_consensus(query, [match])
+        anns, gaps = profile_fasta_consensus(query, [match])
 
         assert len(anns) == 1
         assert anns[0].consequence == 'frameshift'
@@ -825,7 +838,7 @@ class TestFastaConsensusProfile:
         # 'ATGAAAGGGGCTTAA' = ATG AAA [GGG inserted] GCT TAA (15 nt)
         query = 'ATGAAAGGGGCTTAA'
         match = _make_match(simple_gene, query)
-        anns = profile_fasta_consensus(query, [match])
+        anns, gaps = profile_fasta_consensus(query, [match])
 
         # One insertion at codon 2 (A→AG), no downstream frameshifts
         assert any(a.consequence == 'insertion' for a in anns)
@@ -836,7 +849,7 @@ class TestFastaConsensusProfile:
         # 'ATGAAGCTTAA' (11 nt): 1 base deleted from codon 1 → frameshift
         query = 'ATGAAGCTTAA'
         match = _make_match(simple_gene, query)
-        anns = profile_fasta_consensus(query, [match])
+        anns, gaps = profile_fasta_consensus(query, [match])
 
         assert len(anns) == 1
         assert anns[0].consequence == 'frameshift'
@@ -847,7 +860,7 @@ class TestFastaConsensusProfile:
         # 'ATGRAAGCTTAA': codon 1 = RAA = AAA (K) or GAA (E)
         query = 'ATGRAAGCTTAA'
         match = _make_match(simple_gene, query)
-        anns = profile_fasta_consensus(query, [match])
+        anns, gaps = profile_fasta_consensus(query, [match])
 
         assert len(anns) == 1
         ann = anns[0]
@@ -860,7 +873,7 @@ class TestFastaConsensusProfile:
         # K→E at codon 1 (codons: 0=ATG pos 0, 1=AAA pos 3, 2=GCT pos 6, 3=TAA pos 9)
         query = 'ATGGAAGCTTAA'
         match = _make_match(simple_gene, query)
-        anns = profile_fasta_consensus(query, [match])
+        anns, gaps = profile_fasta_consensus(query, [match])
 
         assert len(anns) == 1
         # Codon 1 starts at genomic pos 3 (0-based)
@@ -874,8 +887,85 @@ class TestFastaConsensusProfile:
             nt_sequence='',
         )
         match = _make_match(gene_no_seq, _SIMPLE_CDS)
-        anns = profile_fasta_consensus(_SIMPLE_CDS, [match])
+        anns, gaps = profile_fasta_consensus(_SIMPLE_CDS, [match])
         assert anns == []
+        assert gaps == []
+
+
+class TestNStretchCoverageGaps:
+    """N-stretch detection in FASTA mode — full-codon NNN → CoverageGap, partial N → IUPAC."""
+
+    def test_all_n_codon_produces_gap_not_annotation(self, simple_gene: GeneRecord) -> None:
+        """NNN at codon 1 yields a CoverageGap; no annotation emitted for that codon."""
+        # ATGNNNGCTTAA: codon 1 all-N
+        query = 'ATGNNNGCTTAA'
+        match = _make_match(simple_gene, query)
+        anns, gaps = profile_fasta_consensus(query, [match])
+
+        assert not any(a.codon_pos == 1 for a in anns)
+        assert any(g.gene_name == 'gag' and g.codon_pos == 1 for g in gaps)
+
+    def test_partial_n_codon_produces_iupac_expansion(self, simple_gene: GeneRecord) -> None:
+        """Single N in a codon stays as IUPAC expansion — no coverage gap emitted."""
+        # ATGAAN GCTTAA: codon 1 = AAN keeps internal ambiguity handling.
+        query = 'ATGAANGCTTAA'
+        match = _make_match(simple_gene, query)
+        anns, gaps = profile_fasta_consensus(query, [match])
+
+        codon1_anns = [a for a in anns if a.codon_pos == 1]
+        assert len(codon1_anns) > 0
+        assert not any(g.codon_pos == 1 for g in gaps)
+
+    def test_processing_continues_after_n_stretch(self, simple_gene: GeneRecord) -> None:
+        """Codons after an NNN gap are still annotated normally."""
+        aligned_ref = 'ATGAAAGCTTAA'
+        aligned_query = 'ATGNNNGAATAA'
+        anns, gaps = _annotate_from_alignment(
+            aligned_ref,
+            aligned_query,
+            simple_gene,
+            covered_cds_start=0,
+            covered_cds_end=12,
+        )
+
+        # Gap at codon 1
+        assert any(g.codon_pos == 1 for g in gaps)
+        # Missense at codon 2 (A→E)
+        assert any(a.codon_pos == 2 and a.ref_aa == 'A' and a.alt_aa == 'E' for a in anns)
+
+    def test_consecutive_n_codons_produce_multiple_gaps(self, simple_gene: GeneRecord) -> None:
+        """Two consecutive all-N codons each produce their own CoverageGap."""
+        # ATGNNNNNN TAA: codons 1+2 all-N, codon 3 unchanged stop
+        query = 'ATGNNNNNNTAA'
+        match = _make_match(simple_gene, query)
+        anns, gaps = profile_fasta_consensus(query, [match])
+
+        gap_positions = {g.codon_pos for g in gaps}
+        assert 1 in gap_positions
+        assert 2 in gap_positions
+
+    def test_lowercase_nnn_also_treated_as_gap(self, simple_gene: GeneRecord) -> None:
+        """Lower-case 'nnn' in a codon is treated as NNN (non-covered)."""
+        query = 'ATGnnnGCTTAA'
+        match = _make_match(simple_gene, query)
+        anns, gaps = profile_fasta_consensus(query, [match])
+
+        assert any(g.codon_pos == 1 for g in gaps)
+
+    def test_terminal_missing_sequence_and_terminal_n_are_equivalent(
+        self, simple_gene: GeneRecord,
+    ) -> None:
+        """Missing tail and trailing N tail produce identical uncovered codon positions."""
+        trimmed_query = 'ATGAAAGCT'  # last codon missing
+        trailing_n_query = 'ATGAAAGCTNNN'
+
+        match_trimmed = _make_match(simple_gene, trimmed_query)
+        _, gaps_trimmed = profile_fasta_consensus(trimmed_query, [match_trimmed])
+
+        match_n = _make_match(simple_gene, trailing_n_query)
+        _, gaps_n = profile_fasta_consensus(trailing_n_query, [match_n])
+
+        assert {g.codon_pos for g in gaps_trimmed} == {g.codon_pos for g in gaps_n}
 
 
 class TestFastaConsensusCli:

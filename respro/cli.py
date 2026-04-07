@@ -304,7 +304,11 @@ def profile_fasta(
         )
         genes, rules, rule_sets, rule_gene_names = _load_reference_data(project_conn, ref_id)
 
-        annotations = profile_fasta_consensus(query_seq, fasta_matches)
+        annotations, coverage_gaps = profile_fasta_consensus(query_seq, fasta_matches)
+        if coverage_gaps:
+            logger.warning(
+                '%d codon(s) could not be assessed due to N-stretch coverage gaps', len(coverage_gaps),
+            )
 
         # FASTA mode frequencies are discrete (1.0, 0.5, 0.33, 0.25) from IUPAC expansion.
         # Bin thresholds are adjusted to reflect these values cleanly.

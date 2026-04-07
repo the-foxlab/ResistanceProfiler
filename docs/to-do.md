@@ -107,6 +107,11 @@ Mark items done and update priorities after each completed milestone.
 - [x] Parallel gene alignment — `match_query_to_genes` now accepts `cores` parameter; per-gene alignment extracted into picklable `_align_gene_worker`; `--cores` added to both `profile-vcf` and `profile-fasta` (default 1)
 - [x] Coverage metric fix — `GeneMatch.coverage` split into `cds_coverage` and `query_coverage`; a match is accepted when identity passes AND either coverage meets the threshold; enables Sanger reads and amplicons (short queries that fully consume but cover only part of a CDS); DB column renamed `coverage` → `cds_coverage`; `query_coverage` added as optional migration column
 
+### Coverage analysis
+
+- [x] N-stretch handling in FASTA mode — full-codon NNN treated as non-covered; emits `CoverageGap` entries instead of IUPAC-expanded variants; partial-N codons (1–2 N) remain IUPAC-expanded; processing continues past gaps; `profile_fasta_consensus` returns `(annotations, coverage_gaps)` tuple
+
+
 ---
 
 ## Next
@@ -125,9 +130,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🔴 BAM-based coverage — introduce `pysam` and add a `--bam` option to `profile-vcf`; compute
   per-position depth and pass it to the gene-panel plot to shade non-covered regions below
   `--min-depth`
-- 🔴 N-stretch handling in FASTA mode — treat runs of N spanning a full codon as non-covered
-  rather than IUPAC-expanded; emit a coverage-gap annotation instead of fractional allele variants;
-  single-N positions within an otherwise unambiguous codon remain IUPAC-expanded
 - 🔴 Switch VCF parsing to `pysam.VariantFile` once pysam is a dependency — removes our own
   edge-case handling and delegates to a well-maintained library; do this in the same change as
   the BAM coverage work to avoid adding pysam twice
@@ -231,11 +233,29 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   in the rules TSV to raise an error; without `--strict`, emit a warning and skip unmatched
   rules instead of aborting; keeps the fail-fast default for fresh projects while allowing
   shared rule files that span multiple references
-- 🟢 Sanger AB1 input — add `respro profile-ab1` that reads an AB1 trace file directly via
-  Biopython `SeqIO.read(..., 'abi')`, extracts the called sequence and per-base quality scores,
-  filters low-quality positions as non-covered, then routes the result through the existing FASTA
-  profiling pipeline; the main complexity is IUPAC ambiguity from overlapping forward/reverse
-  traces and quality-based N-masking at the codon level
+- 🟢 Sanger AB1 input — add `respro profile-ab1` that reads an AB1 trace file via
+  `SeqIO.read(..., 'abi')` and derives a quality-aware consensus sequence that feeds directly into
+  the existing FASTA profiling pipeline; the quality model uses raw trace peak data
+  (`abif_raw['DATA9–12']` for G/A/T/C channels, `abif_raw['PLOC1']` for per-base peak positions)
+  and applies a three-tier classification per base position:
+  (1) **Confident call** — the dominant channel contributes >80% of total peak height at that
+  position: emit the called base unchanged;
+  (2) **Short ambiguous stretch (1–3 consecutive positions)** flanked on both sides by confident
+  calls — one or more secondary channels exceed a relative threshold (~33% of the dominant peak):
+  determine the set of active channels and map them to the correct IUPAC degenerate code (e.g.
+  A+G → R, C+T → Y, A+C+G → V); the existing `_expand_iupac_codon` and allele-frequency binning
+  already handle these correctly, so a two-peak overlap at 50% naturally yields AF=0.5, capturing
+  clinically relevant minority variants in mixed viral populations;
+  (3) **Non-covered (N)** — absolute peak height below a noise floor (e.g. 5% of read maximum)
+  regardless of ratio, or an ambiguous stretch longer than 3 positions: emit `N`; once N-stretch
+  handling in FASTA mode is implemented (🔴 Coverage analysis group), these N runs will be treated
+  as non-covered gaps rather than IUPAC-expanded;
+  thresholds (noise floor, relative secondary-peak cutoff) should be configurable as CLI flags
+  (`--ab1-min-signal`, `--ab1-ambiguity-cutoff`) with conservative defaults; Phred quality
+  (`letter_annotations['phred_quality']`) can serve as a fast pre-filter (Phred < 20 → ambiguous)
+  before the trace-peak analysis for positions that passed Phred but still show secondary peaks;
+  **depends on N-stretch FASTA handling** (🔴 Coverage analysis) being implemented first or in
+  the same change
 - 🟢 Summary / batch report — aggregate results across multiple runs stored in one `results.db`
 
 ### Public release
