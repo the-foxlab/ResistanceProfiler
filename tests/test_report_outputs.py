@@ -69,6 +69,7 @@ class TestProfilingResult:
         assert hits[0]['drug'] == 'DrugA'
         assert hits[0]['reference_identifier'] == 'tiny_ref'
         assert hits[0]['ic50'] == '>10x'
+        assert hits[0]['fold_ic50'] == ''
 
 
 

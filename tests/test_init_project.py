@@ -468,9 +468,10 @@ class TestIc50ParsingAndAggregation:
         init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
 
         conn = sqlite3.connect(str(db))
-        ic50 = conn.execute('SELECT ic50 FROM resistance_rule').fetchone()[0]
+        ic50, fold_ic50 = conn.execute('SELECT ic50, fold_ic50 FROM resistance_rule').fetchone()
         conn.close()
-        assert ic50 == '10'
+        assert ic50 == ''
+        assert fold_ic50 == '10'
 
     def test_allows_empty_or_none_ic50(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -508,18 +509,44 @@ class TestIc50ParsingAndAggregation:
         init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
 
         conn = sqlite3.connect(str(db))
-        ic50 = conn.execute('SELECT ic50 FROM resistance_rule_set').fetchone()[0]
+        ic50, fold_ic50 = conn.execute('SELECT ic50, fold_ic50 FROM resistance_rule_set').fetchone()
         conn.close()
-        assert ic50 == '8.5'
+        assert ic50 == ''
+        assert fold_ic50 == '8.5'
 
-    def test_rejects_multiple_ic50_alias_columns(self, tmp_path, tiny_genbank) -> None:
+    def test_allows_ic50_and_fold_ic50_together(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             gene\treference_identifier\tposition\treference\tmutation\tantiviral\tic50\tfold_ic50
             gag\ttiny_ref\t2\tK\tE\tDrugA\t4\t5
         """))
         db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+
+        conn = sqlite3.connect(str(db))
+        ic50, fold_ic50 = conn.execute('SELECT ic50, fold_ic50 FROM resistance_rule').fetchone()
+        conn.close()
+        assert ic50 == '4'
+        assert fold_ic50 == '5'
+
+    def test_rejects_two_ic50_alias_columns(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tic50\tic_50
+            gag\ttiny_ref\t2\tK\tE\tDrugA\t4\t5
+        """))
+        db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='only one IC50 column is allowed'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+
+    def test_rejects_two_fold_ic50_alias_columns(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tfold_ic50\tfold_ic_50
+            gag\ttiny_ref\t2\tK\tE\tDrugA\t4\t5
+        """))
+        db = tmp_path / 'proj.db'
+        with pytest.raises(ValueError, match='only one fold-IC50 column is allowed'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
 
 

@@ -27,7 +27,7 @@ Mark items done and update priorities after each completed milestone.
 - [x] Rules TSV parsing and validation (all required and optional columns)
 - [x] Mutation normalization (`normalize_mutation`) — canonical token set covering SNPs, indels, frameshifts, wildcards, HGVS-like notation
 - [x] Phenotype and clinical phenotype normalization
-- [x] IC50 column support (`ic50`, `ic_50`, `fold_ic50`)
+- [x] IC50 column support — `ic50`/`ic_50` and `fold_ic50`/`fold_ic_50` stored separately; both may coexist in one file; report columns shown only when values are present; empty optional columns (ic50, fold_ic50, clinical_phenotype, source) hidden per table section
 - [x] Drug deduplication — case-insensitive; biological duplicate detection for `init-add`
 - [x] Combination rule sets — `resistance_rule_set` + `resistance_rule_set_member` tables; TSV `rule_group` column
 - [x] `init-add` — extend existing project with new rules and optional additional GenBank annotations
@@ -104,6 +104,7 @@ Mark items done and update priorities after each completed milestone.
 - [x] Add `markupsafe>=2.1` as an explicit dependency in `pyproject.toml`
 - [x] VCF depth fallback — `_extract_depth` now returns `-1` sentinel when no depth field is found; depth filter in `profile-vcf` skips depth checking for sentinel variants so depth-free VCFs are not silently discarded
 - [x] Parallel gene alignment — `match_query_to_genes` now accepts `cores` parameter; per-gene alignment extracted into picklable `_align_gene_worker`; `--cores` added to both `profile-vcf` and `profile-fasta` (default 1)
+- [x] Coverage metric fix — `GeneMatch.coverage` split into `cds_coverage` and `query_coverage`; a match is accepted when identity passes AND either coverage meets the threshold; enables Sanger reads and amplicons (short queries that fully consume but cover only part of a CDS); DB column renamed `coverage` → `cds_coverage`; `query_coverage` added as optional migration column
 
 ---
 
@@ -117,27 +118,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟢 Add mypy or pyright to the dev toolchain — type hints are comprehensive throughout the
   codebase; a type checker run in CI would catch drift and wrong annotations before they reach tests
 - 🟢 Increase test coverage for `respro/io/vcf.py` (currently 57%)
-
-### Reference matching for partial sequences
-
-- 🔴 Fix coverage metric in `match_query_to_genes` — coverage is currently calculated as
-  `cds_aligned / len(cds)` (CDS coverage), which rejects valid matches from partial sequences
-  such as Sanger reads or amplicons that cover only part of a gene; for these inputs the query
-  aligns perfectly but CDS coverage may be well below the default 0.90 threshold; the fix is to
-  also compute query coverage = `aligned_query_bases / len(query)` and accept a match when
-  **either** CDS coverage or query coverage meets the threshold — a short query that is fully
-  consumed by the alignment is a valid match regardless of gene length; rename the `coverage`
-  field in `GeneMatch` to `cds_coverage` and add `query_coverage`; update the DB schema column
-  in `query_gene_mapping` and the `store_mappings` / `load_cached_mappings` helpers accordingly
-
-### Rule-position coverage gaps
-
-- 🟡 Track unassessed rule positions in the report — once per-position depth is available (from
-  BAM or N-stretch FASTA handling), cross-reference every resistance rule position against the
-  depth map for the aligned gene; a position is "not assessable" if depth < `--min-depth` or if
-  the codon spans an N-run; surface this per gene in the HTML report (e.g.
-  *"5 of 12 rule positions not assessable due to missing coverage"*) and include a count in the
-  summary header; this turns the coverage signal into actionable clinical information
 
 ### Coverage analysis (introduce together)
 
@@ -154,6 +134,15 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   a `coverage_gap` table (or JSON column on the run row) storing the list of gene positions below
   `--min-depth` or spanned by N-runs; `save_run` writes this data and `reconstruct_annotations`
   restores it so regenerated reports show the same unassessable-position warnings as the original
+- 🟡 Sequence-matching performance follow-up — after the `pysam` coverage/VCF changes land,
+  benchmark end-to-end `profile-vcf` runtime on multi-reference projects and decide whether
+  mappy-based reference preselection should become default instead of optional
+- 🟡 Track unassessed rule positions in the report — once per-position depth is available (from
+  BAM or N-stretch FASTA handling), cross-reference every resistance rule position against the
+  depth map for the aligned gene; a position is "not assessable" if depth < `--min-depth` or if
+  the codon spans an N-run; surface this per gene in the HTML report (e.g.
+  *"5 of 12 rule positions not assessable due to missing coverage"*) and include a count in the
+  summary header; this turns the coverage signal into actionable clinical information
 - 🟢 Within-codon quasi-species phasing via BAM — once BAM support is in place, for codons that
   carry two or three VCF-called SNPs check whether those mutations co-occur on the same reads
   using `pysam.AlignmentFile.fetch()` over the codon window (≤3 nt, always on a single read);
@@ -168,14 +157,16 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 - 🟡 Results database UUID — assign a stable UUID to each `results.db` at creation time
   (analogous to the project fingerprint); store it in a `results_db` metadata table
-- 🔴 Persist a per-run reproducibility manifest — store an immutable `run_manifest` in
-  `results.db` containing input checksums (VCF/FASTA and project DB), effective CLI parameters,
-  `respro` version, Python version, and a ruleset snapshot hash; surface it in report metadata and
-  `results.json` so runs are fully reproducible/auditable
-- 🟡 Prevent duplicate runs in `results.db` — deduplicate `save_run` via a stable
-  `run_fingerprint` (checksum) built from canonicalized resistance hits + `sample_name` + input
-  basename + `reference_name` + `project_fingerprint`; on fingerprint match, reuse existing
-  `run_id` instead of inserting a second identical run
+- 🔴 Per-run manifest and deduplication — store an immutable `run_manifest` JSON blob on the
+  `run` row in `results.db`; the manifest captures everything needed to reproduce and deduplicate
+  a run: input checksums (VCF/FASTA SHA-256, project DB SHA-256), effective CLI parameters,
+  `respro` version, Python version, and a ruleset snapshot hash (SHA-256 of all canonical rule
+  rows for the resolved reference); derive a stable `run_fingerprint` (SHA-256 of the canonical
+  manifest) and store it alongside the manifest; on `save_run`, query for an existing row with the
+  same fingerprint — if found, skip the insert and automatically regenerate the report from the
+  stored run (same output as a fresh run, zero re-profiling cost) instead of just returning the
+  `run_id` silently; surface the manifest in `results.json` and in the HTML report metadata so
+  every exported artefact is self-describing and auditable
 - 🟡 Show run provenance in HTML report — when a run is saved to a results DB, embed the
   results-DB UUID and run ID in the report header so the report is self-describing
 
@@ -215,6 +206,17 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 Regression tests for overlapping ORF annotation — no test currently verifies that a
   variant falling inside two genes simultaneously produces correct, independent annotations for
   both; add tests for both the VCF and FASTA profiling paths
+
+### Reference selection performance (multi-reference)
+
+- 🔴 mappy-backed reference preselection — in projects with multiple references, avoid full
+  per-gene alignment across every reference by first selecting likely candidate references with
+  mappy/minimizer mapping, then run the existing detailed alignment only on selected candidates;
+  prioritize this directly after `pysam` integration to prevent multi-reference runtime blowups.
+  Assess also if multiprocessing is still a good idea when changing to mappy.
+- 🟡 Aligner policy after `pysam` adoption — once `pysam` is required for coverage and VCF
+  parsing, reassess C-extension footprint and packaging path (PyPI/Bioconda), and keep `--aligner`
+  behavior explicit while transitioning toward a mappy-first default if benchmarks support it
 
 ### Usability and workflow
 
@@ -281,9 +283,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Deferred
 
-- 🟢 Switchable alignment backend — allow the user to choose between Biopython `PairwiseAligner`
-  and `mappy` via `--aligner`; adds a C dependency and interface complexity that is not justified
-  until the aligner proves to be a bottleneck in practice
 - 🟢 Web UI / app layer — deferred; must depend on stable backend APIs without moving domain
   logic out of `respro/`
 

@@ -387,7 +387,7 @@ def _draw_gene_panel(
         'no_database_hit': 'o',
     }
 
-    jittered = _apply_top_jitter(annotations)
+    jittered = _apply_top_jitter(annotations, gene_length=gene.end - gene.start)
 
     for ann, x_top in jittered:
         x_base = ann.variant.pos + 1
@@ -442,14 +442,21 @@ def _draw_gene_panel(
         shared_track_ax.set_xlim(ax.get_xlim())
 
 
-def _apply_top_jitter(annotations: list[AnnotatedVariant]) -> list[tuple[AnnotatedVariant, float]]:
+def _apply_top_jitter(
+    annotations: list[AnnotatedVariant],
+    gene_length: int,
+) -> list[tuple[AnnotatedVariant, float]]:
     """
     Add deterministic horizontal jitter enforcing minimum separation.
 
     The stem stays anchored at the true genomic position. Only the top dot is
     shifted slightly to separate overlapping points.
 
+    The minimum separation is 1/100 of the gene length so jitter scales
+    consistently across genes of different sizes.
+
     :param annotations: annotations within one gene panel
+    :param gene_length: length of the gene in nucleotides (end - start)
     :return: list of (annotation, jittered_x)
     """
     sorted_anns = sorted(
@@ -457,7 +464,8 @@ def _apply_top_jitter(annotations: list[AnnotatedVariant]) -> list[tuple[Annotat
         key=lambda ann: (ann.variant.pos, ann.variant.allele_freq, ann.alt_aa, ann.consequence),
     )
     x_values = [ann.variant.pos + 1 for ann in sorted_anns]
-    x_values_jittered = adjust_array_min_distance(x_values, min_distance=25)
+    min_distance = gene_length / 100
+    x_values_jittered = adjust_array_min_distance(x_values, min_distance=min_distance)
     return list(zip(sorted_anns, x_values_jittered))
 
 

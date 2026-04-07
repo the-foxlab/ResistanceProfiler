@@ -159,7 +159,7 @@ def pick_best_reference_id(matches: list[GeneMatch]) -> int:
     if not matches:
         raise ValueError('No FASTA gene matches available for reference selection')
 
-    best = max(matches, key=lambda m: (m.identity, m.coverage, -m.gene.id))
+    best = max(matches, key=lambda m: (m.identity, m.cds_coverage, -m.gene.id))
     return best.gene.reference_id
 
 

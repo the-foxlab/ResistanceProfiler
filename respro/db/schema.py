@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS resistance_rule (
     phenotype   TEXT    NOT NULL DEFAULT 'unknown',
     clinical_phenotype TEXT NOT NULL DEFAULT 'unknown',
     ic50        TEXT    DEFAULT '',
+    fold_ic50   TEXT    DEFAULT '',
     publication TEXT    DEFAULT '',
     source      TEXT    DEFAULT ''
 );
@@ -89,6 +90,7 @@ CREATE TABLE IF NOT EXISTS resistance_rule_set (
     phenotype   TEXT    NOT NULL DEFAULT 'unknown',
     clinical_phenotype TEXT NOT NULL DEFAULT 'unknown',
     ic50        TEXT    DEFAULT '',
+    fold_ic50   TEXT    DEFAULT '',
     publication TEXT    DEFAULT '',
     source      TEXT    DEFAULT '',
     group_name  TEXT    DEFAULT ''
@@ -124,7 +126,8 @@ CREATE TABLE IF NOT EXISTS query_gene_mapping (
     query_ref_id    INTEGER NOT NULL REFERENCES query_reference(id),
     gene_id         INTEGER NOT NULL REFERENCES gene(id),
     identity        REAL    NOT NULL,
-    coverage        REAL    NOT NULL,
+    cds_coverage    REAL    NOT NULL DEFAULT 0,
+    query_coverage  REAL    NOT NULL DEFAULT 0,
     query_start     INTEGER NOT NULL,
     query_end       INTEGER NOT NULL,
     strand          TEXT    NOT NULL DEFAULT '+',
@@ -224,7 +227,7 @@ _REQUIRED_PROJECT_COLUMNS = {
     'resistance_rule_set_member': {'id', 'rule_set_id', 'gene_id', 'position', 'mutation'},
     'query_reference': {'id', 'name', 'sequence', 'length', 'checksum'},
     'query_gene_mapping': {
-        'id', 'query_ref_id', 'gene_id', 'identity', 'coverage',
+        'id', 'query_ref_id', 'gene_id', 'identity', 'cds_coverage',
         'query_start', 'query_end', 'strand', 'cigar',
     },
 }
@@ -260,6 +263,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'phenotype': "TEXT NOT NULL DEFAULT 'unknown'",
         'clinical_phenotype': "TEXT NOT NULL DEFAULT 'unknown'",
         'ic50': "TEXT DEFAULT ''",
+        'fold_ic50': "TEXT DEFAULT ''",
         'publication': "TEXT DEFAULT ''",
         'source': "TEXT DEFAULT ''",
     },
@@ -267,6 +271,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'phenotype': "TEXT NOT NULL DEFAULT 'unknown'",
         'clinical_phenotype': "TEXT NOT NULL DEFAULT 'unknown'",
         'ic50': "TEXT DEFAULT ''",
+        'fold_ic50': "TEXT DEFAULT ''",
         'publication': "TEXT DEFAULT ''",
         'source': "TEXT DEFAULT ''",
         'group_name': "TEXT DEFAULT ''",
@@ -277,6 +282,9 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
     },
     'query_reference': {
         'created_at': "TEXT DEFAULT ''",
+    },
+    'query_gene_mapping': {
+        'query_coverage': 'REAL NOT NULL DEFAULT 0',
     },
 }
 

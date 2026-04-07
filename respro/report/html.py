@@ -144,10 +144,11 @@ def _build_db_hit_rows(result: ProfilingResult) -> list[dict]:
                 'af_bin': ann.af_bin,
                 'nt_change': nt_change,
                 'drug': rule.drug_name,
-                'ic50': rule.ic50 or '—',
+                'ic50': rule.ic50,
+                'fold_ic50': rule.fold_ic50,
                 'phenotype': rule.phenotype,
                 'clinical_phenotype': rule.clinical_phenotype,
-                'source': rule.source or '—',
+                'source': rule.source,
                 'publication': rule.publication or '',
             })
     return rows
@@ -171,7 +172,8 @@ def _build_combo_hit_rows(result: ProfilingResult) -> list[dict]:
             'group_name': rs.group_name or '—',
             'members': member_labels,
             'drug': rs.drug_name,
-            'ic50': rs.ic50 or '—',
+            'ic50': rs.ic50,
+            'fold_ic50': rs.fold_ic50,
             'phenotype': rs.phenotype,
             'clinical_phenotype': rs.clinical_phenotype,
             'phenotype_class': _phenotype_badge_class(rs.phenotype),
@@ -281,15 +283,36 @@ def _build_potential_effects_rows(
                 'rule_change': rule_change,
                 'similarity': similarity,
                 'drug': rule.drug_name,
-                'ic50': rule.ic50 or '—',
+                'ic50': rule.ic50,
+                'fold_ic50': rule.fold_ic50,
                 'phenotype': rule.phenotype,
                 'clinical_phenotype': rule.clinical_phenotype,
-                'source': rule.source or '—',
+                'source': rule.source,
                 'allele_freq': ann.variant.allele_freq,
                 'publication': rule.publication or '',
             })
 
     return rows
+
+
+def _col_visibility(rows: list[dict], columns: list[str]) -> dict[str, bool]:
+    """
+    Return a visibility flag for each column — True when at least one row has a meaningful value.
+
+    For 'clinical_phenotype', 'meaningful' means not 'unknown'. For all other columns,
+    any non-empty truthy value counts.
+
+    :param rows: list of row dicts
+    :param columns: column names to check
+    :return: dict mapping column name to bool
+    """
+    result: dict[str, bool] = {}
+    for col in columns:
+        if col == 'clinical_phenotype':
+            result[col] = any(r.get(col, 'unknown') != 'unknown' for r in rows)
+        else:
+            result[col] = any(bool(r.get(col)) for r in rows)
+    return result
 
 
 def _load_drug_cards(
@@ -398,6 +421,11 @@ def build_report_context(
     potential_rows = _build_potential_effects_rows(result, rules or [])
     summary['similarity_hits'] = len(potential_rows)
 
+    _optional_cols = ['ic50', 'fold_ic50', 'clinical_phenotype', 'source']
+    db_cols = _col_visibility(db_hit_rows, _optional_cols)
+    combo_cols = _col_visibility(combo_hit_rows, ['ic50', 'fold_ic50', 'clinical_phenotype'])
+    pot_cols = _col_visibility(potential_rows, _optional_cols)
+
     detected_drug_names: set[str] = set()
     for ann in result.cds_annotations:
         for rule in ann.rule_matches:
@@ -421,6 +449,9 @@ def build_report_context(
         'potential_rows': potential_rows,
         'drug_cards': drug_cards,
         'gene_cards': gene_cards,
+        'db_cols': db_cols,
+        'combo_cols': combo_cols,
+        'pot_cols': pot_cols,
     }
 
 

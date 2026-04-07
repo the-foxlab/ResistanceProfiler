@@ -34,7 +34,8 @@ class GeneMatch:
 
     gene: GeneRecord
     identity: float
-    coverage: float
+    cds_coverage: float   # fraction of CDS bases covered by the alignment
+    query_coverage: float  # fraction of query bases consumed by the alignment
     query_start: int
     query_end: int
     strand: str
@@ -61,6 +62,14 @@ def match_query_to_genes(
     strands of the query.  Matches that meet the identity and coverage
     thresholds are returned, sorted by identity descending.
 
+    A match is accepted when ``identity >= min_identity`` AND at least one of:
+
+    - ``cds_coverage >= min_coverage`` — the alignment covers enough of the CDS
+      (typical for full-length query sequences such as whole-genome FASTAs)
+    - ``query_coverage >= min_coverage`` — the query is almost entirely consumed
+      by the alignment (correct for short partial sequences such as Sanger reads
+      or amplicons that span only part of a gene)
+
     When ``cores > 1`` each gene is aligned in a separate worker process via
     ``multiprocessing.Pool``, which bypasses the GIL for the C-accelerated
     ``PairwiseAligner`` and scales well with a large gene panel.
@@ -68,7 +77,7 @@ def match_query_to_genes(
     :param query_sequence: user-provided nucleotide sequence
     :param genes: gene records to screen (typically only those with rules)
     :param min_identity: minimum nucleotide identity to accept
-    :param min_coverage: minimum fraction of CDS bases aligned
+    :param min_coverage: minimum CDS or query coverage fraction required
     :param cores: number of worker processes (1 = serial)
     :return: accepted GeneMatch list sorted by identity descending
     """
@@ -89,8 +98,9 @@ def match_query_to_genes(
             logger.debug('Gene %r: no qualifying match', gene.name)
         else:
             logger.info(
-                'Gene %r matched: identity=%.1f%%, coverage=%.1f%%, strand=%s',
-                result.gene.name, result.identity * 100, result.coverage * 100, result.strand,
+                'Gene %r matched: identity=%.1f%%, cds_coverage=%.1f%%, query_coverage=%.1f%%, strand=%s',
+                result.gene.name, result.identity * 100,
+                result.cds_coverage * 100, result.query_coverage * 100, result.strand,
             )
             matches.append(result)
 
@@ -222,7 +232,7 @@ def load_cached_mappings(
         return None
 
     rows = conn.execute(
-        'SELECT qgm.gene_id, qgm.identity, qgm.coverage, '
+        'SELECT qgm.gene_id, qgm.identity, qgm.cds_coverage, qgm.query_coverage, '
         'qgm.query_start, qgm.query_end, qgm.strand, qgm.cigar, '
         'g.reference_id, g.name, g.protein, g.start, g.end, g.strand AS gene_strand, '
         'g.codon_start, g.nt_sequence, g.aa_sequence '
@@ -249,7 +259,8 @@ def load_cached_mappings(
         matches.append(GeneMatch(
             gene=gene,
             identity=r['identity'],
-            coverage=r['coverage'],
+            cds_coverage=r['cds_coverage'],
+            query_coverage=r['query_coverage'],
             query_start=r['query_start'],
             query_end=r['query_end'],
             strand=r['strand'],
@@ -288,13 +299,15 @@ def store_mappings(
     for match in matches:
         conn.execute(
             'INSERT OR REPLACE INTO query_gene_mapping '
-            '(query_ref_id, gene_id, identity, coverage, query_start, query_end, strand, cigar) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            '(query_ref_id, gene_id, identity, cds_coverage, query_coverage, '
+            'query_start, query_end, strand, cigar) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 qref_id,
                 match.gene.id,
                 match.identity,
-                match.coverage,
+                match.cds_coverage,
+                match.query_coverage,
                 match.query_start,
                 match.query_end,
                 match.strand,
@@ -313,7 +326,8 @@ def store_mappings(
 @dataclass
 class _AlignResult:
     identity: float
-    coverage: float
+    cds_coverage: float
+    query_coverage: float
     query_start: int
     query_end: int
     strand: str
@@ -347,7 +361,8 @@ def _align_gene_worker(
         query_len = len(query_upper)
         best = _AlignResult(
             identity=best.identity,
-            coverage=best.coverage,
+            cds_coverage=best.cds_coverage,
+            query_coverage=best.query_coverage,
             query_start=query_len - best.query_end,
             query_end=query_len - best.query_start,
             strand='-',
@@ -355,13 +370,19 @@ def _align_gene_worker(
             cds_start=best.cds_start,
         )
 
-    if best.identity < min_identity or best.coverage < min_coverage:
+    # Accept when identity passes AND either coverage metric meets the threshold.
+    # query_coverage handles short partial sequences (Sanger reads, amplicons)
+    # that fully consume the query but cover only part of the CDS.
+    if best.identity < min_identity:
+        return None
+    if best.cds_coverage < min_coverage and best.query_coverage < min_coverage:
         return None
 
     return GeneMatch(
         gene=gene,
         identity=best.identity,
-        coverage=best.coverage,
+        cds_coverage=best.cds_coverage,
+        query_coverage=best.query_coverage,
         query_start=best.query_start,
         query_end=best.query_end,
         strand=best.strand,
@@ -390,11 +411,12 @@ def _align_cds_to_query(cds: str, query: str, strand: str) -> _AlignResult:
     try:
         best = alignments[0]
     except IndexError:
-        return _AlignResult(0.0, 0.0, 0, 0, strand, '')
+        return _AlignResult(0.0, 0.0, 0.0, 0, 0, strand, '')
     cigar, identity, cds_aligned, q_start, q_end, cds_start = _alignment_to_cigar(best, query, cds)
-    coverage = cds_aligned / len(cds) if cds else 0.0
+    cds_coverage = cds_aligned / len(cds) if cds else 0.0
+    query_coverage = (q_end - q_start) / len(query) if query else 0.0
 
-    return _AlignResult(identity, coverage, q_start, q_end, strand, cigar, cds_start)
+    return _AlignResult(identity, cds_coverage, query_coverage, q_start, q_end, strand, cigar, cds_start)
 
 
 def _alignment_to_cigar(

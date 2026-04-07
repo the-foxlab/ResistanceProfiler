@@ -37,7 +37,7 @@ def load_rules(conn: sqlite3.Connection, reference_id: int) -> list[ResistanceRu
             d.pubchem_url, d.description,
             rr.reference_identifier,
             rr.position, rr.reference, rr.mutation,
-            rr.phenotype, rr.clinical_phenotype, rr.ic50, rr.publication, rr.source
+            rr.phenotype, rr.clinical_phenotype, rr.ic50, rr.fold_ic50, rr.publication, rr.source
         FROM resistance_rule rr
         JOIN gene g ON g.id = rr.gene_id
         JOIN drug d ON d.id = rr.drug_id
@@ -61,6 +61,7 @@ def load_rules(conn: sqlite3.Connection, reference_id: int) -> list[ResistanceRu
             phenotype=r['phenotype'],
             clinical_phenotype=r['clinical_phenotype'] or 'unknown',
             ic50=r['ic50'] or '',
+            fold_ic50=r['fold_ic50'] or '',
             publication=r['publication'] or '',
             source=r['source'] or '',
             pubchem_url=r['pubchem_url'] or '',
@@ -136,7 +137,8 @@ def load_rule_sets(conn: sqlite3.Connection, reference_id: int) -> list[Resistan
         SELECT DISTINCT
             rs.id, rs.drug_id, d.name AS drug_name,
             d.pubchem_url, d.description,
-            rs.phenotype, rs.clinical_phenotype, rs.ic50, rs.publication, rs.source, rs.group_name
+            rs.phenotype, rs.clinical_phenotype, rs.ic50, rs.fold_ic50,
+            rs.publication, rs.source, rs.group_name
         FROM resistance_rule_set rs
         JOIN drug d ON d.id = rs.drug_id
         JOIN resistance_rule_set_member rsm ON rsm.rule_set_id = rs.id
@@ -159,6 +161,7 @@ def load_rule_sets(conn: sqlite3.Connection, reference_id: int) -> list[Resistan
             phenotype=r['phenotype'],
             clinical_phenotype=r['clinical_phenotype'] or 'unknown',
             ic50=r['ic50'] or '',
+            fold_ic50=r['fold_ic50'] or '',
             publication=r['publication'] or '',
             source=r['source'] or '',
             group_name=r['group_name'] or '',

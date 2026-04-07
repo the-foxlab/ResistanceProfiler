@@ -129,7 +129,7 @@ class TestProjectSchemaBoundary:
             'query_ref_id INTEGER NOT NULL, '
             'gene_id INTEGER NOT NULL, '
             'identity REAL NOT NULL, '
-            'coverage REAL NOT NULL, '
+            'cds_coverage REAL NOT NULL, '
             'query_start INTEGER NOT NULL, '
             'query_end INTEGER NOT NULL, '
             "strand TEXT NOT NULL DEFAULT '+', "
@@ -169,6 +169,10 @@ class TestProjectSchemaBoundary:
             row['name']
             for row in migrated_conn.execute('PRAGMA table_info(resistance_rule)').fetchall()
         }
+        mapping_columns = {
+            row['name']
+            for row in migrated_conn.execute('PRAGMA table_info(query_gene_mapping)').fetchall()
+        }
         migrated_reference = migrated_conn.execute(
             'SELECT accession, organism, taxonomy FROM reference WHERE id = 1'
         ).fetchone()
@@ -179,6 +183,7 @@ class TestProjectSchemaBoundary:
         migrated_conn.close()
 
         assert 'organism' in reference_columns
+        assert 'query_coverage' in mapping_columns  # auto-added by optional migration
         assert 'reference_identifier' in rule_columns
         assert 'clinical_phenotype' in rule_columns
         assert migrated_reference is not None

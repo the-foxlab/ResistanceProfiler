@@ -82,6 +82,7 @@ class ResistanceRule:
     phenotype: str
     clinical_phenotype: str = 'unknown'
     ic50: str = ''
+    fold_ic50: str = ''
     publication: str = ''
     source: str = ''
     pubchem_url: str = ''
@@ -112,6 +113,7 @@ class ResistanceRuleSet:
     phenotype: str
     clinical_phenotype: str = 'unknown'
     ic50: str = ''
+    fold_ic50: str = ''
     publication: str = ''
     source: str = ''
     group_name: str = ''
@@ -171,6 +173,7 @@ class AnnotatedVariant:
                 'phenotype': r.phenotype,
                 'clinical_phenotype': r.clinical_phenotype,
                 'ic50': r.ic50,
+                'fold_ic50': r.fold_ic50,
                 'publication': r.publication,
                 'pubchem_url': r.pubchem_url,
             }
@@ -197,6 +200,7 @@ class ComboRuleHit:
             'phenotype': rs.phenotype,
             'clinical_phenotype': rs.clinical_phenotype,
             'ic50': rs.ic50,
+            'fold_ic50': rs.fold_ic50,
             'publication': rs.publication,
             'source': rs.source,
             'pubchem_url': rs.pubchem_url,

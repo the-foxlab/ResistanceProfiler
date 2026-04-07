@@ -43,23 +43,36 @@ def _parse_ic50_value(raw: str) -> float | None:
         return None
 
 
+def _parse_single_ic50(raw: str, *, errors: list[str], context: str) -> str:
+    """Parse one IC50 cell value and return a canonical numeric string or empty string."""
+    value = raw.strip()
+    if not value or value.lower() == 'none':
+        return ''
+    parsed = _parse_ic50_value(value)
+    if parsed is None:
+        errors.append(f'{context}: invalid ic50 value {value!r}')
+        return ''
+    return f'{parsed:g}'
+
+
 def _normalize_ic50_from_row(
     row: dict[str, str],
     *,
     errors: list[str],
     context: str,
 ) -> str:
-    """Return canonical IC50 text or empty string for missing values."""
-    raw_ic50 = _get_value(row, 'ic50', 'ic_50', 'fold_ic50')
-    if not raw_ic50 or raw_ic50.lower() == 'none':
-        return ''
+    """Return canonical IC50 text or empty string; reads ic50/ic_50 columns only."""
+    return _parse_single_ic50(_get_value(row, 'ic50', 'ic_50'), errors=errors, context=context)
 
-    ic50_numeric = _parse_ic50_value(raw_ic50)
-    if ic50_numeric is None:
-        errors.append(f'{context}: invalid ic50 value {raw_ic50!r}')
-        return ''
 
-    return f'{ic50_numeric:g}'
+def _normalize_fold_ic50_from_row(
+    row: dict[str, str],
+    *,
+    errors: list[str],
+    context: str,
+) -> str:
+    """Return canonical fold-IC50 text or empty string; reads fold_ic50/fold_ic_50 columns only."""
+    return _parse_single_ic50(_get_value(row, 'fold_ic50', 'fold_ic_50'), errors=errors, context=context)
 
 
 def _normalize_publication_value(raw: str) -> str:
@@ -493,18 +506,26 @@ def _insert_combo_rule_sets(
         if phenotype_error:
             continue
 
-        # ic50: keep the highest numeric value across members in the same group.
+        # ic50 and fold_ic50: keep the highest numeric value across members in the same group.
         ic50_values: list[float] = []
+        fold_ic50_values: list[float] = []
         for combo_row in rows:
-            raw_ic50 = _get_value(combo_row, 'ic50', 'ic_50', 'fold_ic50')
-            if not raw_ic50 or raw_ic50.lower() == 'none':
-                continue
-            parsed_ic50 = _parse_ic50_value(raw_ic50)
-            if parsed_ic50 is None:
-                errors.append(f'Combo rule group {group_id!r}: invalid ic50 value {raw_ic50!r}')
-                continue
-            ic50_values.append(parsed_ic50)
+            raw_ic50 = _get_value(combo_row, 'ic50', 'ic_50')
+            if raw_ic50 and raw_ic50.lower() != 'none':
+                parsed = _parse_ic50_value(raw_ic50)
+                if parsed is None:
+                    errors.append(f'Combo rule group {group_id!r}: invalid ic50 value {raw_ic50!r}')
+                else:
+                    ic50_values.append(parsed)
+            raw_fold = _get_value(combo_row, 'fold_ic50', 'fold_ic_50')
+            if raw_fold and raw_fold.lower() != 'none':
+                parsed = _parse_ic50_value(raw_fold)
+                if parsed is None:
+                    errors.append(f'Combo rule group {group_id!r}: invalid fold_ic50 value {raw_fold!r}')
+                else:
+                    fold_ic50_values.append(parsed)
         ic50 = f'{max(ic50_values):g}' if ic50_values else ''
+        fold_ic50 = f'{max(fold_ic50_values):g}' if fold_ic50_values else ''
 
         # publication, source: first non-empty value wins.
         publication = next((_get_value(r, 'publication') for r in rows if _get_value(r, 'publication')), '')
@@ -612,9 +633,9 @@ def _insert_combo_rule_sets(
 
         cur = conn.execute(
             'INSERT INTO resistance_rule_set '
-            '(drug_id, phenotype, clinical_phenotype, ic50, publication, source, group_name) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (drug_id, phenotype, clinical_phenotype, ic50, publication, source, group_id),
+            '(drug_id, phenotype, clinical_phenotype, ic50, fold_ic50, publication, source, group_name) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (drug_id, phenotype, clinical_phenotype, ic50, fold_ic50, publication, source, group_id),
         )
         rule_set_id = cur.lastrowid
 
@@ -666,13 +687,19 @@ def _load_resistance_rules(
         all_rows = list(reader)
 
     header_columns = {col.strip() for col in (reader.fieldnames or []) if col}
-    ic50_aliases = {'ic50', 'ic_50', 'fold_ic50'}
-    present_ic50_aliases = sorted(header_columns & ic50_aliases)
-    if len(present_ic50_aliases) > 1:
+    present_ic50 = sorted(header_columns & {'ic50', 'ic_50'})
+    present_fold = sorted(header_columns & {'fold_ic50', 'fold_ic_50'})
+    if len(present_ic50) > 1:
         raise ValueError(
             'Rules validation failed:\n'
             '- only one IC50 column is allowed; found '
-            + ', '.join(repr(col) for col in present_ic50_aliases)
+            + ', '.join(repr(col) for col in present_ic50)
+        )
+    if len(present_fold) > 1:
+        raise ValueError(
+            'Rules validation failed:\n'
+            '- only one fold-IC50 column is allowed; found '
+            + ', '.join(repr(col) for col in present_fold)
         )
 
     required_field_errors: list[str] = []
@@ -752,6 +779,11 @@ def _load_resistance_rules(
             errors=errors,
             context=f'Rule for gene {gene_name!r} pos {position_raw!r}',
         )
+        fold_ic50_value = _normalize_fold_ic50_from_row(
+            row,
+            errors=errors,
+            context=f'Rule for gene {gene_name!r} pos {position_raw!r}',
+        )
         phenotype_value, clinical_phenotype_value = _normalize_phenotypes_from_row(
             row,
             errors=errors,
@@ -802,8 +834,8 @@ def _load_resistance_rules(
             'INSERT INTO resistance_rule '
             '('
             'gene_id, drug_id, reference_identifier, position, reference, mutation, '
-            'phenotype, clinical_phenotype, ic50, publication, source'
-            ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'phenotype, clinical_phenotype, ic50, fold_ic50, publication, source'
+            ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 gene_id,
                 drug_id,
@@ -814,6 +846,7 @@ def _load_resistance_rules(
                 phenotype_value,
                 clinical_phenotype_value,
                 ic50_value,
+                fold_ic50_value,
                 _normalize_publication_value(_get_value(row, 'publication')),
                 _get_value(row, 'source'),
             ),

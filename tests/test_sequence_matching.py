@@ -162,7 +162,8 @@ class TestMatchQueryToGenes:
         m = matches[0]
         assert m.gene.name == 'gag'
         assert m.identity == pytest.approx(1.0)
-        assert m.coverage == pytest.approx(1.0)
+        assert m.cds_coverage == pytest.approx(1.0)
+        assert m.query_coverage == pytest.approx(1.0)
         assert m.strand == '+'
         assert m.cigar == '30M'
 
@@ -209,6 +210,23 @@ class TestMatchQueryToGenes:
         assert len(matches) == 1
         assert matches[0].strand == '-'
         assert matches[0].identity == pytest.approx(1.0)
+
+    def test_partial_query_accepted_via_query_coverage(self, gene_with_rules: GeneRecord) -> None:
+        # A short prefix of the CDS — CDS coverage will be well below 0.90,
+        # but query coverage should be ~1.0 (the whole query aligns).
+        partial = _CDS_SEQ[:12]  # first 12 of 30 nt → 40% CDS coverage
+        matches = match_query_to_genes(partial, [gene_with_rules], min_coverage=0.90)
+        assert len(matches) == 1
+        m = matches[0]
+        assert m.query_coverage == pytest.approx(1.0)
+        assert m.cds_coverage < 0.90  # confirms it would have been rejected under old logic
+
+    def test_cds_and_query_coverage_both_stored(self, gene_with_rules: GeneRecord) -> None:
+        matches = match_query_to_genes(_CDS_SEQ, [gene_with_rules])
+        assert len(matches) == 1
+        m = matches[0]
+        assert m.cds_coverage == pytest.approx(1.0)
+        assert m.query_coverage == pytest.approx(1.0)
 
 
 class TestAlignerOverflowSafety:
@@ -292,6 +310,8 @@ class TestDbCaching:
         assert loaded[0].gene.name == 'gag'
         assert loaded[0].cigar == matches[0].cigar
         assert loaded[0].identity == pytest.approx(matches[0].identity)
+        assert loaded[0].cds_coverage == pytest.approx(matches[0].cds_coverage)
+        assert loaded[0].query_coverage == pytest.approx(matches[0].query_coverage)
 
     def test_cache_miss_returns_none(self, project_db: Path) -> None:
         from respro.db.schema import open_project_db

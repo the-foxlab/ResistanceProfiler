@@ -34,16 +34,17 @@ The following columns are required for every rules TSV:
 
 ## Optional columns
 
-| Column | Meaning | Allowed behavior |
-|---|---|---|
-| `phenotype` | Phenotypic interpretation | Optional. Normalized to `resistant`, `intermediate`, `sensitive`, or `unknown`. |
-| `clinical_phenotype` | Alternative clinical phenotype column | Optional. Normalized independently from `phenotype`. |
-| `ic50` | Numeric fold-change value | Optional. Only one IC50 column is allowed per file. |
-| `ic_50` | Alias for `ic50` | Optional. Mutually exclusive with `ic50` and `fold_ic50`. |
-| `fold_ic50` | Alias for `ic50` | Optional. Mutually exclusive with `ic50` and `ic_50`. |
-| `publication` | Literature reference | Free text, typically DOI or PubMed identifier. |
-| `source` | Provenance label | Free text, e.g. source database name. |
-| `rule_group` | Combination-rule label | Rows with the same non-empty value become one combination rule set. |
+| Column                               | Meaning | Allowed behavior                                                                |
+|--------------------------------------|---|---------------------------------------------------------------------------------|
+| `phenotype`                          | Phenotypic interpretation | Optional. Normalized to `resistant`, `intermediate`, `sensitive`, or `unknown`. |
+| `clinical_phenotype`                 | Alternative clinical phenotype column | Optional. Normalized independently from `phenotype`.                            |
+| `ic50`                               | Absolute IC50 numeric value | Optional. Parsed as a float. Mutually exclusive with `ic_50`. Can coexist with `fold_ic50`. |
+| `ic_50`                              | Alias for `ic50` | Optional. Mutually exclusive with `ic50`.                                       |
+| `fold_ic50`                          | Fold-change IC50 value | Optional. Parsed as a float. Mutually exclusive with `fold_ic_50`. Can coexist with `ic50`. |
+| `fold_ic_50`                         | Alias for `fold_ic50` | Optional. Mutually exclusive with `fold_ic50`.                                  |
+| `publication`                        | Literature reference | Free text, typically DOI or PubMed identifier.                                  |
+| `source`                             | Provenance label | Free text, e.g. source database name.                                           |
+| `rule_group`                         | Combination-rule label | Rows with the same non-empty value become one combination rule set.             |
 
 ## Column-by-column rules
 
@@ -219,10 +220,11 @@ Rules:
 - Both fields are normalized independently and stored separately.
 - Empty values normalize to `unknown` in each field.
 
-### `ic50`, `ic_50`, `fold_ic50`
+### `ic50`, `ic_50`, `fold_ic50`, `fold_ic_50`
 
-- These columns are optional.
-- Only one of these three column names may be present in a file.
+- `ic50` / `ic_50` store an absolute IC50 value; only one of the two aliases is allowed per file.
+- `fold_ic50` / `fold_ic_50` store a fold-change IC50 value; only one of the two aliases is allowed per file.
+- Both `ic50` (or `ic_50`) and `fold_ic50` (or `fold_ic_50`) may be present simultaneously in the same file — they are stored in separate database columns and displayed in separate report columns.
 - Values are parsed as floats.
 - Empty values and `None` are allowed and stored as empty.
 - Text around a number is tolerated when a numeric core can be extracted.
@@ -267,8 +269,8 @@ This column enables combination rules.
 ## Minimal valid single-rule example
 
 ```tsv
-gene	reference_identifier	position	reference	mutation	antiviral	phenotype	ic50	publication	source
-UL23	NC_001806	67	T	V	Aciclovir	resistant	8.0x	doi.org/10.1234/example	herpesdrg-db
+gene	reference_identifier	position	reference	mutation	antiviral	phenotype	ic50	fold_ic50	publication	source
+UL23	NC_001806	67	T	V	Aciclovir	resistant	8.0	4.0x	doi.org/10.1234/example	herpesdrg-db
 ```
 
 ## Minimal valid combination-rule example

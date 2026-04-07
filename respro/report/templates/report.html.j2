@@ -59,7 +59,12 @@
 <table class='sortable'>
 <thead><tr>
   <th>Gene</th><th>AA change</th><th>Frequency classification</th><th>Underlying nt change</th><th>Drug</th>
-  <th>IC50</th><th>Phenotype</th><th>Clinical phenotype</th><th>Source</th><th>Publication</th>
+  {% if db_cols.ic50 %}<th>IC50</th>{% endif %}
+  {% if db_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
+  <th>Phenotype</th>
+  {% if db_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
+  {% if db_cols.source %}<th>Source</th>{% endif %}
+  <th>Publication</th>
 </tr></thead>
 <tbody>
 {% for r in db_hit_rows %}
@@ -69,16 +74,19 @@
   <td data-sort-value='{{ r.af_bin }}'><span class='badge badge-{{ r.af_bin }}'>{{ r.af_bin }}</span></td>
   <td>{{ r.nt_change }}</td>
   <td>{{ r.drug }}</td>
-  <td>{{ r.ic50 }}</td>
+  {% if db_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
+  {% if db_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
   <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
       {% elif r.phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
       {% elif r.phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
       {% else %}<span class='badge badge-unknown'>{{ r.phenotype }}</span>{% endif %}</td>
+  {% if db_cols.clinical_phenotype %}
   <td>{% if r.clinical_phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
       {% elif r.clinical_phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
       {% elif r.clinical_phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
       {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
-  <td>{{ r.source }}</td>
+  {% endif %}
+  {% if db_cols.source %}<td>{{ r.source or '—' }}</td>{% endif %}
   <td>{% if r.publication %}<a href='{{ r.publication }}' target='_blank'>{{ r.publication }}</a>{% endif %}</td>
 </tr>
 {% endfor %}
@@ -92,7 +100,12 @@
 <div class='table-wrapper'>
 <table class='sortable'>
 <thead><tr>
-  <th>Group</th><th>Member mutations</th><th>Drug</th><th>IC50</th><th>Phenotype</th><th>Clinical phenotype</th><th>Publication</th>
+  <th>Group</th><th>Member mutations</th><th>Drug</th>
+  {% if combo_cols.ic50 %}<th>IC50</th>{% endif %}
+  {% if combo_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
+  <th>Phenotype</th>
+  {% if combo_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
+  <th>Publication</th>
 </tr></thead>
 <tbody>
 {% for r in combo_hit_rows %}
@@ -100,15 +113,18 @@
   <td>{{ r.group_name }}</td>
   <td>{{ r.members }}</td>
   <td>{{ r.drug }}</td>
-  <td>{{ r.ic50 }}</td>
+  {% if combo_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
+  {% if combo_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
   <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
       {% elif r.phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
       {% elif r.phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
       {% else %}<span class='badge badge-unknown'>{{ r.phenotype }}</span>{% endif %}</td>
+  {% if combo_cols.clinical_phenotype %}
   <td>{% if r.clinical_phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
       {% elif r.clinical_phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
       {% elif r.clinical_phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
       {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
+  {% endif %}
   <td>{% if r.publication %}<a href='{{ r.publication }}' target='_blank'>{{ r.publication }}</a>{% endif %}</td>
 </tr>
 {% endfor %}
@@ -123,8 +139,13 @@
 <div class='table-wrapper'>
 <table class='sortable'>
 <thead><tr>
-  <th>Gene</th><th>Observed AA change</th><th>Known rule</th><th>Similarity</th><th>Drug</th><th>IC50</th>
-  <th>Phenotype</th><th>Clinical phenotype</th><th>Source</th><th>Frequency</th><th>Publication</th>
+  <th>Gene</th><th>Observed AA change</th><th>Known rule</th><th>Similarity</th><th>Drug</th>
+  {% if pot_cols.ic50 %}<th>IC50</th>{% endif %}
+  {% if pot_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
+  <th>Phenotype</th>
+  {% if pot_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
+  {% if pot_cols.source %}<th>Source</th>{% endif %}
+  <th>Frequency</th><th>Publication</th>
 </tr></thead>
 <tbody>
 {% for r in potential_rows %}
@@ -134,16 +155,19 @@
   <td>{{ r.rule_change }}</td>
   <td><span class='badge badge-sim-{{ r.similarity }}'>{{ r.similarity }}</span></td>
   <td>{{ r.drug }}</td>
-  <td>{{ r.ic50 }}</td>
+  {% if pot_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
+  {% if pot_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
   <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
       {% elif r.phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
       {% elif r.phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
       {% else %}<span class='badge badge-unknown'>{{ r.phenotype }}</span>{% endif %}</td>
+  {% if pot_cols.clinical_phenotype %}
   <td>{% if r.clinical_phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
       {% elif r.clinical_phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
       {% elif r.clinical_phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
       {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
-  <td>{{ r.source }}</td>
+  {% endif %}
+  {% if pot_cols.source %}<td>{{ r.source or '—' }}</td>{% endif %}
   <td data-sort-value='{{ '%.6f'|format(r.allele_freq) }}'>{{ '%.3f'|format(r.allele_freq) }}</td>
   <td>{% if r.publication %}<a href='{{ r.publication }}' target='_blank'>{{ r.publication }}</a>{% endif %}</td>
 </tr>

@@ -96,9 +96,9 @@ def _resolve_reference(
     logger.info('Matched %d gene(s): %s', len(matched_gene_names), ', '.join(matched_gene_names))
     for match in fasta_matches:
         logger.debug(
-            'gene=%s identity=%.2f%% coverage=%.2f%% strand=%s cigar=%s',
-            match.gene.name, match.identity * 100, match.coverage * 100,
-            match.strand, match.cigar,
+            'gene=%s identity=%.2f%% cds_coverage=%.2f%% query_coverage=%.2f%% strand=%s cigar=%s',
+            match.gene.name, match.identity * 100, match.cds_coverage * 100,
+            match.query_coverage * 100, match.strand, match.cigar,
         )
 
     return ref_id, ref_name, fasta_matches

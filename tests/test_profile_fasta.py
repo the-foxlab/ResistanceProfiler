@@ -343,7 +343,8 @@ class TestRemapVariants:
             GeneMatch(
                 gene=gene_rev,
                 identity=1.0,
-                coverage=1.0,
+                cds_coverage=1.0,
+                query_coverage=1.0,
                 query_start=0,
                 query_end=6,
                 strand='-',
@@ -728,14 +729,15 @@ def _make_match(gene: GeneRecord, query: str, strand: str = '+') -> GeneMatch:
     """Build a GeneMatch with a real CIGAR by aligning query against the gene CDS."""
     if not gene.nt_sequence:
         return GeneMatch(
-            gene=gene, identity=0.0, coverage=0.0,
+            gene=gene, identity=0.0, cds_coverage=0.0, query_coverage=0.0,
             query_start=0, query_end=len(query), strand=strand, cigar='',
         )
     result = _align_cds_to_query(gene.nt_sequence.upper(), query.upper(), strand)
     return GeneMatch(
         gene=gene,
         identity=result.identity,
-        coverage=result.coverage,
+        cds_coverage=result.cds_coverage,
+        query_coverage=result.query_coverage,
         query_start=result.query_start,
         query_end=result.query_end,
         strand=strand,
