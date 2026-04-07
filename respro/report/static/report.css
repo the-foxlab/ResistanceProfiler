@@ -8,11 +8,32 @@ h2 { margin: 1.5rem 0 .5rem; color: var(--accent); border-bottom: 2px solid #eee
 .meta { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .5rem; }
 .meta dt { font-weight: 600; font-size: .85rem; color: #666; }
 .meta dd { margin-bottom: .4rem; }
-.stats { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
-.stat-card { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 1rem 1.5rem; min-width: 120px; text-align: center; flex: 1 1 auto; }
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.stat-card {
+  background: #fff; border: 1px solid #e1e4e8; border-radius: 6px;
+  padding: 1rem 1.5rem; text-align: center;
+  text-decoration: none; color: inherit;
+  transition: border-color .15s ease, box-shadow .15s ease;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+a.stat-card { cursor: pointer; }
+a.stat-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,0,.1); }
 .stat-card .number { font-size: 2rem; font-weight: 700; }
 .stat-card .label { font-size: .85rem; color: #666; }
 .stat-card.hit .number { color: var(--hit); }
+.stat-card.warn .number { color: #e67e22; }
+.stat-sub { margin-top: .35rem; display: flex; gap: .3rem; justify-content: center; flex-wrap: wrap; }
+.stat-pill { font-size: .68rem; font-weight: 700; padding: 1px 7px; border-radius: 8px; }
+.stat-pill.resistant { background: #e74c3c; color: #fff; }
+.stat-pill.intermediate { background: #f39c12; color: #fff; }
+.stat-pill.sensitive { background: #27ae60; color: #fff; }
+.stat-pill.zero { opacity: .28; }
+.stat-note { font-size: .72rem; color: #999; margin-top: .25rem; }
 .table-note { font-size: .85rem; color: #666; margin-bottom: .5rem; }
 .table-wrapper {
   max-width: 100%;
@@ -80,6 +101,26 @@ th.sortable-col[data-order='asc']::after { content: ' ↑'; opacity: 1; }
 th.sortable-col[data-order='desc']::after { content: ' ↓'; opacity: 1; }
 footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; font-size: .8rem; color: #999; }
 
+/* Collapsible sections */
+.section-toggle {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.section-toggle:hover { opacity: .8; }
+.toggle-arrow {
+  font-size: .75rem;
+  color: #aaa;
+  transition: transform .18s ease;
+  display: inline-block;
+  flex-shrink: 0;
+  margin-left: .5rem;
+}
+.section.open .toggle-arrow { transform: rotate(90deg); }
+.section:not(.open) .section-body { display: none; }
+
 .gene-cards { display: grid; grid-template-columns: 1fr; gap: .75rem; margin-bottom: 1.5rem; }
 .gene-card {
   background: #fff;
@@ -126,13 +167,19 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
   .badge { padding: 1px 6px; font-size: .7rem; }
 }
 
+/* Stats: switch to 2 rows (3 columns) when single row gets tight */
+@media (max-width: 1024px) {
+  .stats { grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+}
+
 @media (max-width: 768px) {
   body { padding: 1rem; }
   .logo-wrap svg { width: 300px; }
-  .stats { gap: 0.8rem; }
-  .stat-card { min-width: 90px; padding: .8rem 1rem; }
+  .stats { grid-template-columns: repeat(2, 1fr); gap: 0.8rem; }
+  .stat-card { padding: .8rem 1rem; }
   .stat-card .number { font-size: 1.5rem; }
   .stat-card .label { font-size: .75rem; }
+  .stat-note { font-size: .68rem; }
   .meta { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .3rem; padding: .8rem 1rem; }
   .meta dt { font-size: .8rem; }
   .meta dd { font-size: .9rem; }
@@ -155,8 +202,8 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
   body { padding: .8rem; }
   .report-header { flex-wrap: wrap; gap: .8rem; }
   .logo-wrap svg { width: 250px; }
-  .stats { gap: 0.5rem; }
-  .stat-card { min-width: 70px; padding: .6rem .8rem; }
+  .stats { grid-template-columns: 1fr; gap: 0.5rem; }
+  .stat-card { padding: .6rem .8rem; }
   .stat-card .number { font-size: 1.2rem; }
   .stat-card .label { font-size: .7rem; }
   .meta { grid-template-columns: 1fr; gap: .2rem; padding: .6rem .8rem; }

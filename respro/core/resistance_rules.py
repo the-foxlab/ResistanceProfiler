@@ -10,6 +10,7 @@ import sqlite3
 from respro.db.models import (
     AnnotatedVariant,
     ComboRuleHit,
+    Publication,
     ResistanceRule,
     ResistanceRuleSet,
     ResistanceRuleSetMember,
@@ -37,7 +38,7 @@ def load_rules(conn: sqlite3.Connection, reference_id: int) -> list[ResistanceRu
             d.pubchem_url, d.description,
             rr.reference_identifier,
             rr.position, rr.reference, rr.mutation,
-            rr.phenotype, rr.clinical_phenotype, rr.ic50, rr.fold_ic50, rr.publication, rr.source
+            rr.phenotype, rr.clinical_phenotype, rr.ic50, rr.fold_ic50, rr.source, rr.comment
         FROM resistance_rule rr
         JOIN gene g ON g.id = rr.gene_id
         JOIN drug d ON d.id = rr.drug_id
@@ -62,15 +63,54 @@ def load_rules(conn: sqlite3.Connection, reference_id: int) -> list[ResistanceRu
             clinical_phenotype=r['clinical_phenotype'] or 'unknown',
             ic50=r['ic50'] or '',
             fold_ic50=r['fold_ic50'] or '',
-            publication=r['publication'] or '',
             source=r['source'] or '',
+            comment=r['comment'] or '',
             pubchem_url=r['pubchem_url'] or '',
             description=r['description'] or '',
         )
         for r in rows
     ]
+
+    if rules:
+        _attach_publications_to_rules(conn, rules)
+
     logger.info('Loaded %d resistance rule(s)', len(rules))
     return rules
+
+
+def _attach_publications_to_rules(
+    conn: sqlite3.Connection,
+    rules: list[ResistanceRule],
+) -> None:
+    """
+    Batch-load publications for a list of rules and assign them in place.
+
+    :param conn: SQLite database connection
+    :param rules: list of ResistanceRule objects to enrich
+    """
+    rule_ids = [r.id for r in rules]
+    placeholders = ','.join('?' * len(rule_ids))
+    pub_rows = conn.execute(
+        f'SELECT rp.rule_id, p.id, p.doi, p.title, p.pubmed_id, p.raw_input '
+        f'FROM rule_publication rp '
+        f'JOIN publication p ON p.id = rp.publication_id '
+        f'WHERE rp.rule_id IN ({placeholders})',
+        rule_ids,
+    ).fetchall()
+
+    pubs_by_rule: dict[int, list[Publication]] = {}
+    for row in pub_rows:
+        pubs_by_rule.setdefault(int(row['rule_id']), []).append(
+            Publication(
+                id=int(row['id']),
+                doi=row['doi'] or '',
+                title=row['title'] or '',
+                pubmed_id=row['pubmed_id'] or '',
+                raw_input=row['raw_input'] or '',
+            )
+        )
+    for rule in rules:
+        rule.publications = pubs_by_rule.get(rule.id, [])
 
 
 def match_rules(
@@ -138,7 +178,7 @@ def load_rule_sets(conn: sqlite3.Connection, reference_id: int) -> list[Resistan
             rs.id, rs.drug_id, d.name AS drug_name,
             d.pubchem_url, d.description,
             rs.phenotype, rs.clinical_phenotype, rs.ic50, rs.fold_ic50,
-            rs.publication, rs.source, rs.group_name
+            rs.source, rs.group_name, rs.comment
         FROM resistance_rule_set rs
         JOIN drug d ON d.id = rs.drug_id
         JOIN resistance_rule_set_member rsm ON rsm.rule_set_id = rs.id
@@ -162,9 +202,9 @@ def load_rule_sets(conn: sqlite3.Connection, reference_id: int) -> list[Resistan
             clinical_phenotype=r['clinical_phenotype'] or 'unknown',
             ic50=r['ic50'] or '',
             fold_ic50=r['fold_ic50'] or '',
-            publication=r['publication'] or '',
             source=r['source'] or '',
             group_name=r['group_name'] or '',
+            comment=r['comment'] or '',
             pubchem_url=r['pubchem_url'] or '',
             description=r['description'] or '',
         )
@@ -197,8 +237,45 @@ def load_rule_sets(conn: sqlite3.Connection, reference_id: int) -> list[Resistan
             )
         )
 
+    _attach_publications_to_rule_sets(conn, list(rule_sets.values()))
+
     logger.info('Loaded %d combination rule set(s)', len(rule_sets))
     return list(rule_sets.values())
+
+
+def _attach_publications_to_rule_sets(
+    conn: sqlite3.Connection,
+    rule_sets: list[ResistanceRuleSet],
+) -> None:
+    """
+    Batch-load publications for a list of rule sets and assign them in place.
+
+    :param conn: SQLite database connection
+    :param rule_sets: list of ResistanceRuleSet objects to enrich
+    """
+    set_ids = [rs.id for rs in rule_sets]
+    placeholders = ','.join('?' * len(set_ids))
+    pub_rows = conn.execute(
+        f'SELECT rsp.rule_set_id, p.id, p.doi, p.title, p.pubmed_id, p.raw_input '
+        f'FROM rule_set_publication rsp '
+        f'JOIN publication p ON p.id = rsp.publication_id '
+        f'WHERE rsp.rule_set_id IN ({placeholders})',
+        set_ids,
+    ).fetchall()
+
+    pubs_by_set: dict[int, list[Publication]] = {}
+    for row in pub_rows:
+        pubs_by_set.setdefault(int(row['rule_set_id']), []).append(
+            Publication(
+                id=int(row['id']),
+                doi=row['doi'] or '',
+                title=row['title'] or '',
+                pubmed_id=row['pubmed_id'] or '',
+                raw_input=row['raw_input'] or '',
+            )
+        )
+    for rs in rule_sets:
+        rs.publications = pubs_by_set.get(rs.id, [])
 
 
 def match_rule_sets(

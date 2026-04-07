@@ -63,8 +63,8 @@ def main(verbose: int) -> None:
 @click.option('--rules', required=True, type=click.Path(exists=True), help='Resistance rules TSV.')
 @click.option('--output', '-o', required=True, type=click.Path(), help='Output SQLite database path.')
 @click.option('--overwrite', is_flag=True, default=False, help='Overwrite existing database.')
-@click.option('--drug-info/--no-drug-info', 'drug_info', default=True,
-    help='Query PubChem to attach CID, URL and description to each drug (default: on).',
+@click.option('--additional-info/--no-additional-info', 'additional_info', default=True,
+    help='Query PubChem for drug metadata and resolve publications via NCBI/CrossRef (default: on).',
 )
 def init(
     name: str,
@@ -72,7 +72,7 @@ def init(
     rules: str,
     output: str,
     overwrite: bool,
-    drug_info: bool,
+    additional_info: bool,
 ) -> None:
     """
     Initialise a project database from one or more GenBank reference records and resistance rules provided in TSV.
@@ -85,7 +85,7 @@ def init(
             genbank_paths=[Path(path) for path in genbank_paths],
             rules_tsv=Path(rules),
             overwrite=overwrite,
-            drug_info=drug_info,
+            additional_info=additional_info,
         )
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -97,14 +97,14 @@ def init(
 @click.option('--project', '-p', required=True, type=click.Path(exists=True), help='Existing project SQLite database.')
 @click.option('--genbank', 'genbank_paths', required=False, multiple=True, type=click.Path(exists=True), help='Optional GenBank file(s) with additional references/genes.')
 @click.option('--rules', required=True, type=click.Path(exists=True), help='Resistance rules TSV to add.')
-@click.option('--drug-info/--no-drug-info', 'drug_info', default=True,
-    help='Query PubChem to attach CID, URL and description to each new drug (default: on).',
+@click.option('--additional-info/--no-additional-info', 'additional_info', default=True,
+    help='Query PubChem for drug metadata and resolve publications via NCBI/CrossRef (default: on).',
 )
 def init_add(
     project: str,
     genbank_paths: tuple[str, ...],
     rules: str,
-    drug_info: bool,
+    additional_info: bool,
 ) -> None:
     """
     Add curated rules and optional GenBank annotations to an existing project database.
@@ -114,7 +114,7 @@ def init_add(
             db_path=Path(project),
             genbank_paths=[Path(path) for path in genbank_paths],
             rules_tsv=Path(rules),
-            drug_info=drug_info,
+            additional_info=additional_info,
         )
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

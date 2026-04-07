@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS resistance_rule (
     ic50        TEXT    DEFAULT '',
     fold_ic50   TEXT    DEFAULT '',
     publication TEXT    DEFAULT '',
-    source      TEXT    DEFAULT ''
+    source      TEXT    DEFAULT '',
+    comment     TEXT    DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_rule_gene_pos ON resistance_rule(gene_id, position);
@@ -93,7 +94,8 @@ CREATE TABLE IF NOT EXISTS resistance_rule_set (
     fold_ic50   TEXT    DEFAULT '',
     publication TEXT    DEFAULT '',
     source      TEXT    DEFAULT '',
-    group_name  TEXT    DEFAULT ''
+    group_name  TEXT    DEFAULT '',
+    comment     TEXT    DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS resistance_rule_set_member (
@@ -109,6 +111,32 @@ CREATE TABLE IF NOT EXISTS resistance_rule_set_member (
 CREATE INDEX IF NOT EXISTS idx_rule_set_drug ON resistance_rule_set(drug_id);
 CREATE INDEX IF NOT EXISTS idx_rule_set_member_set ON resistance_rule_set_member(rule_set_id);
 CREATE INDEX IF NOT EXISTS idx_rule_set_member_gene_pos ON resistance_rule_set_member(gene_id, position);
+
+-- Publications (deduped; doi is the natural key when available)
+CREATE TABLE IF NOT EXISTS publication (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    doi         TEXT    NOT NULL DEFAULT '',
+    title       TEXT    NOT NULL DEFAULT '',
+    pubmed_id   TEXT    NOT NULL DEFAULT '',
+    raw_input   TEXT    NOT NULL DEFAULT ''
+);
+
+-- Link tables between rules/rule-sets and publications
+CREATE TABLE IF NOT EXISTS rule_publication (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_id        INTEGER NOT NULL REFERENCES resistance_rule(id),
+    publication_id INTEGER NOT NULL REFERENCES publication(id),
+    UNIQUE(rule_id, publication_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rule_pub ON rule_publication(rule_id);
+
+CREATE TABLE IF NOT EXISTS rule_set_publication (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_set_id    INTEGER NOT NULL REFERENCES resistance_rule_set(id),
+    publication_id INTEGER NOT NULL REFERENCES publication(id),
+    UNIQUE(rule_set_id, publication_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rule_set_pub ON rule_set_publication(rule_set_id);
 
 -- Cached user-provided query references and their CDS mappings
 CREATE TABLE IF NOT EXISTS query_reference (
@@ -230,6 +258,9 @@ _REQUIRED_PROJECT_COLUMNS = {
         'id', 'query_ref_id', 'gene_id', 'identity', 'cds_coverage',
         'query_start', 'query_end', 'strand', 'cigar',
     },
+    'publication': {'id', 'doi', 'title', 'pubmed_id', 'raw_input'},
+    'rule_publication': {'id', 'rule_id', 'publication_id'},
+    'rule_set_publication': {'id', 'rule_set_id', 'publication_id'},
 }
 
 _OPTIONAL_PROJECT_COLUMN_DEFS = {
@@ -266,6 +297,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'fold_ic50': "TEXT DEFAULT ''",
         'publication': "TEXT DEFAULT ''",
         'source': "TEXT DEFAULT ''",
+        'comment': "TEXT DEFAULT ''",
     },
     'resistance_rule_set': {
         'phenotype': "TEXT NOT NULL DEFAULT 'unknown'",
@@ -275,6 +307,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'publication': "TEXT DEFAULT ''",
         'source': "TEXT DEFAULT ''",
         'group_name': "TEXT DEFAULT ''",
+        'comment': "TEXT DEFAULT ''",
     },
     'resistance_rule_set_member': {
         'reference_identifier': "TEXT DEFAULT ''",
@@ -458,11 +491,44 @@ def open_project_db(db_path: Path) -> sqlite3.Connection:
     require_file(db_path, 'Project database')
     conn = sqlite3.connect(str(db_path))
     _configure_connection(conn)
+    _ensure_optional_tables(conn)
     _validate_project_schema_overlap(conn, db_path)
     if _add_missing_optional_columns(conn, _OPTIONAL_PROJECT_COLUMN_DEFS):
         conn.commit()
     _ensure_project_uuid(conn)
     return conn
+
+
+def _ensure_optional_tables(conn: sqlite3.Connection) -> None:
+    """
+    Create publication join tables if they are absent from an existing project database.
+
+    Safe to call on new databases (uses CREATE TABLE IF NOT EXISTS).
+    """
+    conn.executescript("""\
+CREATE TABLE IF NOT EXISTS publication (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    doi        TEXT    NOT NULL DEFAULT '',
+    title      TEXT    NOT NULL DEFAULT '',
+    pubmed_id  TEXT    NOT NULL DEFAULT '',
+    raw_input  TEXT    NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS rule_publication (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_id        INTEGER NOT NULL REFERENCES resistance_rule(id),
+    publication_id INTEGER NOT NULL REFERENCES publication(id),
+    UNIQUE(rule_id, publication_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rule_pub ON rule_publication(rule_id);
+CREATE TABLE IF NOT EXISTS rule_set_publication (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_set_id    INTEGER NOT NULL REFERENCES resistance_rule_set(id),
+    publication_id INTEGER NOT NULL REFERENCES publication(id),
+    UNIQUE(rule_set_id, publication_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rule_set_pub ON rule_set_publication(rule_set_id);
+""")
+    conn.commit()
 
 
 def _ensure_project_uuid(conn: sqlite3.Connection) -> None:

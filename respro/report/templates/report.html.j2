@@ -40,21 +40,66 @@
 </dl>
 
 <div class='stats'>
-  <div class='stat-card'><div class='number'>{{ summary.total_variants }}</div><div class='label'>Total variants</div></div>
-  <div class='stat-card'><div class='number'>{{ summary.variants_in_cds }}</div><div class='label'>In CDS</div></div>
-  <div class='stat-card hit'><div class='number'>{{ summary.database_hits }}</div><div class='label'>Database hits</div></div>
-  <div class='stat-card'><div class='number'>{{ summary.similarity_hits }}</div><div class='label'>Similarity hits</div></div>
+  <a class='stat-card' href='#section-cds'>
+    <div class='number'>{{ summary.total_variants }}</div>
+    <div class='label'>Total variants</div>
+  </a>
+  <a class='stat-card' href='#section-cds'>
+    <div class='number'>{{ summary.variants_in_cds }}</div>
+    <div class='label'>In CDS</div>
+  </a>
+  {% if summary.missense_count %}
+  <a class='stat-card' href='#section-cds'>
+    <div class='number'>{{ summary.missense_count }}</div>
+    <div class='label'>Missense variants</div>
+  </a>
+  {% endif %}
+   {% if summary.high_impact_count %}
+  <a class='stat-card warn' href='#section-cds'>
+    <div class='number'>&#9888; {{ summary.high_impact_count }}</div>
+    <div class='label'>High-impact variants</div>
+    <div class='stat-note'>frameshift &middot; stop &middot; indel</div>
+  </a>
+  {% endif %}
+  <a class='stat-card hit' href='#section-db-hits'>
+    <div class='number'>{{ summary.database_hits }}</div>
+    <div class='label'>Database hits</div>
+    {% if summary.database_hits %}
+    <div class='stat-sub'>
+      <span class='stat-pill resistant{{ ' zero' if not summary.resistant_hits }}'>Resistant: {{ summary.resistant_hits }}</span>
+      <span class='stat-pill intermediate{{ ' zero' if not summary.intermediate_hits }}'>Intermediate: {{ summary.intermediate_hits }}</span>
+      <span class='stat-pill sensitive{{ ' zero' if not summary.sensitive_hits }}'>Sensitive: {{ summary.sensitive_hits }}</span>
+    </div>
+    {% endif %}
+  </a>
+  <a class='stat-card' href='#section-similarity'>
+    <div class='number'>{{ summary.similarity_hits }}</div>
+    <div class='label'>Similarity hits</div>
+    {% if summary.similarity_hits %}
+    <div class='stat-sub'>
+      <span class='stat-pill resistant{{ ' zero' if not summary.similarity_resistant }}'>Resistant: {{ summary.similarity_resistant }}</span>
+      <span class='stat-pill intermediate{{ ' zero' if not summary.similarity_intermediate }}'>Intermediate: {{ summary.similarity_intermediate }}</span>
+      <span class='stat-pill sensitive{{ ' zero' if not summary.similarity_sensitive }}'>Sensitive: {{ summary.similarity_sensitive }}</span>
+    </div>
+    {% endif %}
+  </a>
 </div>
 
 {% if plot_data %}
-<h2>Mutation overview</h2>
+<div class='section open'>
+<h2 class='section-toggle'>Mutation overview <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
 <div class='plot-container'>
   <img src='data:image/svg+xml;base64,{{ plot_data }}' alt='Lollipop plot'>
+</div>
+</div>
 </div>
 {% endif %}
 
 {% if db_hit_rows %}
-<h2>Mutations in database</h2>
+<div class='section open' id='section-db-hits'>
+<h2 class='section-toggle'>Mutations in database <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
 <div class='table-wrapper'>
 <table class='sortable'>
 <thead><tr>
@@ -64,7 +109,8 @@
   <th>Phenotype</th>
   {% if db_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
   {% if db_cols.source %}<th>Source</th>{% endif %}
-  <th>Publication</th>
+  {% if db_cols.comment %}<th>Comment</th>{% endif %}
+  {% if db_cols.publication %}<th>Ref</th>{% endif %}
 </tr></thead>
 <tbody>
 {% for r in db_hit_rows %}
@@ -87,16 +133,21 @@
       {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
   {% endif %}
   {% if db_cols.source %}<td>{{ r.source or '—' }}</td>{% endif %}
-  <td>{% if r.publication %}<a href='{{ r.publication }}' target='_blank'>{{ r.publication }}</a>{% endif %}</td>
+  {% if db_cols.comment %}<td>{{ r.comment or '—' }}</td>{% endif %}
+  {% if db_cols.publication %}<td>{% for n in r.pub_citations %}<a href='#ref-{{ n }}'>[{{ n }}]</a> {% endfor %}</td>{% endif %}
 </tr>
 {% endfor %}
 </tbody>
 </table>
 </div>
+</div>
+</div>
 {% endif %}
 
 {% if combo_hit_rows %}
-<h2>Combination rule hits</h2>
+<div class='section open'>
+<h2 class='section-toggle'>Combination rule hits <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
 <div class='table-wrapper'>
 <table class='sortable'>
 <thead><tr>
@@ -105,7 +156,8 @@
   {% if combo_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
   <th>Phenotype</th>
   {% if combo_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
-  <th>Publication</th>
+  {% if combo_cols.comment %}<th>Comment</th>{% endif %}
+  {% if combo_cols.publication %}<th>Ref</th>{% endif %}
 </tr></thead>
 <tbody>
 {% for r in combo_hit_rows %}
@@ -125,16 +177,21 @@
       {% elif r.clinical_phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
       {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
   {% endif %}
-  <td>{% if r.publication %}<a href='{{ r.publication }}' target='_blank'>{{ r.publication }}</a>{% endif %}</td>
+  {% if combo_cols.comment %}<td>{{ r.comment or '—' }}</td>{% endif %}
+  {% if combo_cols.publication %}<td>{% for n in r.pub_citations %}<a href='#ref-{{ n }}'>[{{ n }}]</a> {% endfor %}</td>{% endif %}
 </tr>
 {% endfor %}
 </tbody>
 </table>
 </div>
+</div>
+</div>
 {% endif %}
 
 {% if potential_rows %}
-<h2>Similarity to database entries</h2>
+<div class='section open' id='section-similarity'>
+<h2 class='section-toggle'>Similarity to database entries <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
 <p class='table-note'>Detected mutations at positions with known resistance rules but different amino acid changes. Similarity is scored with BLOSUM62.</p>
 <div class='table-wrapper'>
 <table class='sortable'>
@@ -145,7 +202,8 @@
   <th>Phenotype</th>
   {% if pot_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
   {% if pot_cols.source %}<th>Source</th>{% endif %}
-  <th>Frequency</th><th>Publication</th>
+  {% if pot_cols.comment %}<th>Comment</th>{% endif %}
+  <th>Frequency</th>{% if pot_cols.publication %}<th>Ref</th>{% endif %}
 </tr></thead>
 <tbody>
 {% for r in potential_rows %}
@@ -168,16 +226,21 @@
       {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
   {% endif %}
   {% if pot_cols.source %}<td>{{ r.source or '—' }}</td>{% endif %}
+  {% if pot_cols.comment %}<td>{{ r.comment or '—' }}</td>{% endif %}
   <td data-sort-value='{{ '%.6f'|format(r.allele_freq) }}'>{{ '%.3f'|format(r.allele_freq) }}</td>
-  <td>{% if r.publication %}<a href='{{ r.publication }}' target='_blank'>{{ r.publication }}</a>{% endif %}</td>
+  {% if pot_cols.publication %}<td>{% for n in r.pub_citations %}<a href='#ref-{{ n }}'>[{{ n }}]</a> {% endfor %}</td>{% endif %}
 </tr>
 {% endfor %}
 </tbody>
 </table>
 </div>
+</div>
+</div>
 {% endif %}
 
-<h2>All CDS variants</h2>
+<div class='section' id='section-cds'>
+<h2 class='section-toggle'>All CDS variants <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
 <div class='table-wrapper'>
 <table class='sortable'>
 <thead><tr>
@@ -198,9 +261,13 @@
 </tbody>
 </table>
 </div>
+</div>
+</div>
 
 {% if gene_cards %}
-<h2>Gene overview</h2>
+<div class='section'>
+<h2 class='section-toggle'>Gene overview <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
 <div class='gene-cards'>
 {% for g in gene_cards %}
 <div class='gene-card'>
@@ -219,10 +286,14 @@
 </div>
 {% endfor %}
 </div>
+</div>
+</div>
 {% endif %}
 
 {% if drug_cards %}
-<h2>Drug overview</h2>
+<div class='section'>
+<h2 class='section-toggle'>Drug overview <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
 <div class='drug-cards'>
 {% for d in drug_cards %}
 <div class='drug-card'>
@@ -234,6 +305,25 @@
   </div>
 </div>
 {% endfor %}
+</div>
+</div>
+</div>
+{% endif %}
+
+{% if bibliography %}
+<div class='section'>
+<h2 class='section-toggle'>References <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
+<ol class='bibliography'>
+{% for pub in bibliography %}
+<li id='ref-{{ pub.citation_num }}'>
+  {% if pub.title %}<em>{{ pub.title }}</em>{% else %}<span>{{ pub.raw_input or pub.doi }}</span>{% endif %}
+  {% if pub.doi %} — <a href='https://doi.org/{{ pub.doi }}' target='_blank' rel='noopener'>DOI ↗</a>{% endif %}
+  {% if pub.pubmed_id %} <a href='https://pubmed.ncbi.nlm.nih.gov/{{ pub.pubmed_id }}/' target='_blank' rel='noopener'>PubMed ↗</a>{% endif %}
+</li>
+{% endfor %}
+</ol>
+</div>
 </div>
 {% endif %}
 

@@ -12,8 +12,164 @@ from pathlib import Path
 
 from respro.core.annotate_vcf import normalize_mutation
 from respro.db.project.drugs import _get_or_create_drug_id
+from respro.io.publications import resolve_pubmed_to_doi
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_publication_token(token: str) -> tuple[str, str, str]:
+    """
+    Normalise a single publication token to (doi, pubmed_id, raw_input).
+
+    Accepted forms:
+    - ``https://doi.org/10.xxx`` or ``http://doi.org/10.xxx``
+    - ``doi.org/10.xxx``
+    - ``doi:10.xxx``
+    - ``PMID:12345678`` (case-insensitive) — pubmed_id only; doi resolved at insert time
+    - anything else → kept as raw_input only
+
+    :param token: single publication string
+    :return: (doi, pubmed_id, raw_input) tuple
+    """
+    t = token.strip()
+    if not t:
+        return '', '', ''
+
+    lower = t.lower()
+
+    if lower.startswith('pmid:'):
+        return '', t[5:].strip(), t
+
+    for prefix in ('https://doi.org/', 'http://doi.org/'):
+        if lower.startswith(prefix):
+            return t[len(prefix):].strip(), '', t
+
+    if lower.startswith('doi.org/'):
+        return t[8:].strip(), '', t
+
+    if lower.startswith('doi:'):
+        return t[4:].strip(), '', t
+
+    return '', '', t
+
+
+def _parse_publication_entries(raw: str) -> list[tuple[str, str, str]]:
+    """
+    Split a comma-separated publication string into normalised (doi, pubmed_id, raw_input) tuples.
+
+    :param raw: raw publication string from TSV cell
+    :return: list of (doi, pubmed_id, raw_input) tuples; empty entries are dropped
+    """
+    entries = []
+    for token in raw.split(','):
+        doi, pubmed_id, raw_input = _normalize_publication_token(token.strip())
+        if doi or pubmed_id or raw_input:
+            entries.append((doi, pubmed_id, raw_input))
+    return entries
+
+
+def _get_or_create_publication(
+    conn: sqlite3.Connection,
+    doi: str,
+    pubmed_id: str,
+    raw_input: str,
+    additional_info: bool,
+    pub_cache: dict[str, int],
+) -> int:
+    """
+    Return the id of an existing publication row, creating one if needed.
+
+    Dedup key: ``doi`` when non-empty; else ``raw_input``.
+    When ``additional_info`` is True and a PMID is available without a DOI,
+    NCBI E-utilities is queried to resolve the DOI. CrossRef is then queried
+    for the article title. Both lookups are best-effort and non-fatal.
+
+    :param conn: SQLite database connection
+    :param doi: bare DOI string (may be empty)
+    :param pubmed_id: PubMed ID digits string (may be empty)
+    :param raw_input: original curator token (preserved as fallback)
+    :param additional_info: whether to attempt HTTP metadata resolution
+    :param pub_cache: in-process cache mapping dedup key → publication id
+    :return: publication row id
+    """
+    if additional_info and pubmed_id and not doi:
+        resolved = resolve_pubmed_to_doi(pubmed_id)
+        if resolved:
+            doi = resolved
+            logger.debug('Resolved PMID:%s → DOI %s', pubmed_id, doi)
+        else:
+            logger.warning('Could not resolve PMID:%s to a DOI — stored without DOI', pubmed_id)
+
+    cache_key = doi if doi else raw_input
+
+    if cache_key in pub_cache:
+        return pub_cache[cache_key]
+
+    conn.row_factory = sqlite3.Row
+    if doi:
+        row = conn.execute(
+            'SELECT id FROM publication WHERE doi = ? LIMIT 1', (doi,)
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT id FROM publication WHERE doi = '' AND raw_input = ? LIMIT 1", (raw_input,)
+        ).fetchone()
+
+    if row is not None:
+        pub_cache[cache_key] = int(row['id'])
+        return int(row['id'])
+
+    title = ''
+    if additional_info and doi:
+        from respro.io.publications import fetch_publication_metadata
+        meta = fetch_publication_metadata(doi)
+        if meta:
+            title = meta.get('title', '')
+
+    cur = conn.execute(
+        'INSERT INTO publication (doi, title, pubmed_id, raw_input) VALUES (?, ?, ?, ?)',
+        (doi, title, pubmed_id, raw_input),
+    )
+    pub_id = int(cur.lastrowid)  # type: ignore[arg-type]
+    pub_cache[cache_key] = pub_id
+    return pub_id
+
+
+def _link_rule_publications(
+    conn: sqlite3.Connection,
+    rule_id: int,
+    raw_publication: str,
+    additional_info: bool,
+    pub_cache: dict[str, int],
+) -> None:
+    """Parse, resolve, and link all publications in a raw TSV cell to a single rule."""
+    for doi, pubmed_id, raw_input in _parse_publication_entries(raw_publication):
+        pub_id = _get_or_create_publication(
+            conn, doi, pubmed_id, raw_input, additional_info, pub_cache,
+        )
+        conn.execute(
+            'INSERT OR IGNORE INTO rule_publication (rule_id, publication_id) VALUES (?, ?)',
+            (rule_id, pub_id),
+        )
+
+
+def _link_rule_set_publications(
+    conn: sqlite3.Connection,
+    rule_set_id: int,
+    raw_publications: list[str],
+    additional_info: bool,
+    pub_cache: dict[str, int],
+) -> None:
+    """Parse, resolve, and link all publications from a combo group to a rule set."""
+    for raw in raw_publications:
+        for doi, pubmed_id, raw_input in _parse_publication_entries(raw):
+            pub_id = _get_or_create_publication(
+                conn, doi, pubmed_id, raw_input, additional_info, pub_cache,
+            )
+            conn.execute(
+                'INSERT OR IGNORE INTO rule_set_publication (rule_set_id, publication_id) VALUES (?, ?)',
+                (rule_set_id, pub_id),
+            )
 
 
 def _get_value(row: dict[str, str], *keys: str) -> str:
@@ -74,19 +230,6 @@ def _normalize_fold_ic50_from_row(
     """Return canonical fold-IC50 text or empty string; reads fold_ic50/fold_ic_50 columns only."""
     return _parse_single_ic50(_get_value(row, 'fold_ic50', 'fold_ic_50'), errors=errors, context=context)
 
-
-def _normalize_publication_value(raw: str) -> str:
-    """Normalize DOI publication links to absolute HTTPS URLs."""
-    value = raw.strip()
-    if not value:
-        return ''
-
-    lowered = value.lower()
-    if lowered.startswith('http://') or lowered.startswith('https://'):
-        return value
-    if lowered.startswith('doi.org/') or lowered.startswith('dx.doi.org/'):
-        return f'https://{value}'
-    return value
 
 
 def _normalize_phenotype_token(raw: str) -> str | None:
@@ -426,6 +569,8 @@ def _insert_combo_rule_sets(
     genes_by_name: dict[str, list[sqlite3.Row]],
     coord_base: int,
     drug_cache: dict[str, int],
+    pub_cache: dict[str, int],
+    additional_info: bool,
     errors: list[str],
     skipped_gene: list[str],
     skipped_ref: list[str],
@@ -527,10 +672,12 @@ def _insert_combo_rule_sets(
         ic50 = f'{max(ic50_values):g}' if ic50_values else ''
         fold_ic50 = f'{max(fold_ic50_values):g}' if fold_ic50_values else ''
 
-        # publication, source: first non-empty value wins.
-        publication = next((_get_value(r, 'publication') for r in rows if _get_value(r, 'publication')), '')
-        publication = _normalize_publication_value(publication)
+        # publication: union of all non-empty publication strings across the group.
+        all_publication_raws = [
+            _get_value(r, 'publication') for r in rows if _get_value(r, 'publication')
+        ]
         source = next((_get_value(r, 'source') for r in rows if _get_value(r, 'source')), '')
+        comment = next((_get_value(r, 'comment') for r in rows if _get_value(r, 'comment')), '')
 
         # --- per-member validation (pre-validate before any DB write) ---
         valid_members: list[tuple] = []
@@ -633,9 +780,9 @@ def _insert_combo_rule_sets(
 
         cur = conn.execute(
             'INSERT INTO resistance_rule_set '
-            '(drug_id, phenotype, clinical_phenotype, ic50, fold_ic50, publication, source, group_name) '
+            '(drug_id, phenotype, clinical_phenotype, ic50, fold_ic50, source, group_name, comment) '
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            (drug_id, phenotype, clinical_phenotype, ic50, fold_ic50, publication, source, group_id),
+            (drug_id, phenotype, clinical_phenotype, ic50, fold_ic50, source, group_id, comment),
         )
         rule_set_id = cur.lastrowid
 
@@ -647,6 +794,8 @@ def _insert_combo_rule_sets(
                 (rule_set_id, gene_id, reference_identifier, position_0based, reference_aa, mutation),
             )
 
+        _link_rule_set_publications(conn, rule_set_id, all_publication_raws, additional_info, pub_cache)
+
         count += 1
 
     return count
@@ -656,6 +805,7 @@ def _load_resistance_rules(
     conn: sqlite3.Connection,
     project_id: int,
     rules_tsv: Path,
+    additional_info: bool = False,
 ) -> int:
     """
     Load resistance rules from TSV file; return count of inserted rules.
@@ -671,6 +821,7 @@ def _load_resistance_rules(
     :return: number of single rules inserted (not counting combo rule sets)
     """
     drug_cache: dict[str, int] = {}
+    pub_cache: dict[str, int] = {}
     count = 0
     skipped_duplicates = 0
 
@@ -834,7 +985,7 @@ def _load_resistance_rules(
             'INSERT INTO resistance_rule '
             '('
             'gene_id, drug_id, reference_identifier, position, reference, mutation, '
-            'phenotype, clinical_phenotype, ic50, fold_ic50, publication, source'
+            'phenotype, clinical_phenotype, ic50, fold_ic50, source, comment'
             ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 gene_id,
@@ -847,15 +998,19 @@ def _load_resistance_rules(
                 clinical_phenotype_value,
                 ic50_value,
                 fold_ic50_value,
-                _normalize_publication_value(_get_value(row, 'publication')),
                 _get_value(row, 'source'),
+                _get_value(row, 'comment'),
             ),
         )
+        rule_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+        raw_publication = _get_value(row, 'publication')
+        if raw_publication:
+            _link_rule_publications(conn, rule_id, raw_publication, additional_info, pub_cache)
         count += 1
 
     combo_count = _insert_combo_rule_sets(
         conn, project_id, combo_rows, genes_by_name, coord_base,
-        drug_cache, errors, skipped_gene, skipped_ref, skipped_invalid_aa,
+        drug_cache, pub_cache, additional_info, errors, skipped_gene, skipped_ref, skipped_invalid_aa,
     )
 
     if skipped_gene:

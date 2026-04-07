@@ -271,7 +271,7 @@ class TestInitCli:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         row = conn.execute(
-            'SELECT rr.reference_identifier, rr.ic50, rr.publication, d.name AS drug_name, '
+            'SELECT rr.reference_identifier, rr.ic50, d.name AS drug_name, '
             'r.organism, r.taxonomy '
             'FROM resistance_rule rr '
             'JOIN drug d ON d.id = rr.drug_id '
@@ -279,15 +279,21 @@ class TestInitCli:
             'JOIN reference r ON r.id = g.reference_id '
             'LIMIT 1'
         ).fetchone()
+        pub_row = conn.execute(
+            'SELECT p.pubmed_id, p.raw_input FROM publication p '
+            'JOIN rule_publication rp ON rp.publication_id = p.id LIMIT 1'
+        ).fetchone()
         conn.close()
 
         assert row is not None
         assert row['reference_identifier'] == 'NC_000001'
         assert row['ic50'] == '10'
-        assert row['publication'] == 'PMID:12345'
         assert row['drug_name'] == 'drugy'
         assert row['organism'] == 'Human alphaherpesvirus 1'
         assert row['taxonomy'] == 'Viruses; Herpesvirales; Herpesviridae'
+        assert pub_row is not None
+        assert pub_row['pubmed_id'] == '12345'
+        assert pub_row['raw_input'] == 'PMID:12345'
 
     def test_init_accepts_multiple_genbank_files(self, tmp_path: Path):
         genbank_path_a = write_genbank(
@@ -332,7 +338,7 @@ class TestInitCli:
             '--genbank', str(genbank_path_b),
             '--rules', str(rules_tsv),
             '--output', str(db_path),
-            '--no-drug-info',
+            '--no-additional-info',
         ])
         assert result.exit_code == 0, result.output
 
@@ -382,7 +388,7 @@ class TestInitCli:
             '--genbank', str(genbank_path),
             '--rules', str(rules_tsv),
             '--output', str(db_path),
-            '--no-drug-info',
+            '--no-additional-info',
         ])
         assert result.exit_code == 0, result.output
 
@@ -432,7 +438,7 @@ class TestInitCli:
             '--genbank', str(genbank_path),
             '--rules', str(rules_initial),
             '--output', str(db_path),
-            '--no-drug-info',
+            '--no-additional-info',
         ])
         assert init_result.exit_code == 0, init_result.output
 
@@ -447,7 +453,7 @@ class TestInitCli:
             'init-add',
             '--project', str(db_path),
             '--rules', str(rules_append),
-            '--no-drug-info',
+            '--no-additional-info',
         ])
         assert append_result.exit_code == 0, append_result.output
         assert 'duplicate rule(s) skipped' in append_result.output
@@ -495,7 +501,7 @@ class TestInitCli:
             '--project', str(tmp_path / 'missing.db'),
             '--genbank', str(genbank_path),
             '--rules', str(rules_tsv),
-            '--no-drug-info',
+            '--no-additional-info',
         ])
         assert result.exit_code != 0
         assert 'does not exist' in result.output
@@ -517,7 +523,7 @@ class TestInitCli:
             'init-add',
             '--project', str(db_path),
             '--rules', str(rules_tsv),
-            '--no-drug-info',
+            '--no-additional-info',
         ])
 
         assert result.exit_code != 0
@@ -543,7 +549,7 @@ class TestInitCli:
             'init-add',
             '--project', str(db_path),
             '--rules', str(rules_tsv),
-            '--no-drug-info',
+            '--no-additional-info',
         ])
 
         assert result.exit_code != 0

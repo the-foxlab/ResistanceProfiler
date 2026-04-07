@@ -6,7 +6,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from respro.db.models import AnnotatedVariant, ResistanceRule, VariantCall
+from respro.db.models import AnnotatedVariant, Publication, ResistanceRule, VariantCall
 from respro.report.results_model import ProfilingResult
 
 
@@ -23,7 +23,8 @@ def _make_result() -> ProfilingResult:
         reference_identifier='tiny_ref',
         position=2, reference='K', mutation='E',
         phenotype='resistant',
-        ic50='>10x', publication='PMID:12345',
+        ic50='>10x',
+        publications=[Publication(id=1, doi='', title='', pubmed_id='12345', raw_input='PMID:12345')],
     )
     ann = AnnotatedVariant(
         variant=var,
@@ -70,6 +71,9 @@ class TestProfilingResult:
         assert hits[0]['reference_identifier'] == 'tiny_ref'
         assert hits[0]['ic50'] == '>10x'
         assert hits[0]['fold_ic50'] == ''
+        assert hits[0]['publications'] == [
+            {'doi': '', 'title': '', 'pubmed_id': '12345', 'raw_input': 'PMID:12345'}
+        ]
 
 
 

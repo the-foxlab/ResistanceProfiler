@@ -131,5 +131,27 @@
       });
     });
   });
+  document.querySelectorAll('.section-toggle').forEach((heading) => {
+    heading.setAttribute('role', 'button');
+    heading.tabIndex = 0;
+    const toggle = () => heading.closest('.section').classList.toggle('open');
+    heading.addEventListener('click', toggle);
+    heading.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+  });
+
+  // Auto-expand a collapsed section when an in-page anchor link targets it.
+  document.addEventListener('click', (e) => {
+    const link = e.target instanceof Element ? e.target.closest('a[href^="#"]') : null;
+    if (!link) return;
+    const id = link.getAttribute('href').slice(1);
+    const target = id ? document.getElementById(id) : null;
+    if (!target) return;
+    const section = target.closest('.section');
+    if (section && !section.classList.contains('open')) {
+      section.classList.add('open');
+    }
+  });
 })();
 

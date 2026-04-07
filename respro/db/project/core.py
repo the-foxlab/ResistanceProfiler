@@ -26,30 +26,23 @@ def init_project(
     genbank_paths: list[Path],
     rules_tsv: Path,
     overwrite: bool = False,
-    drug_info: bool = True,
+    additional_info: bool = True,
 ) -> Path:
     """
     Create and populate a new project database.
 
     :param db_path: where to write the SQLite file
     :param name: project name
-    :param genbank_paths: one or more GenBank file paths; each file may contain
-        one or more records and CDS features are imported as genes with
-        GenBank-derived identifiers
-    :param rules_tsv: tab-separated file with columns: gene, position, mutation,
-        antiviral, reference_identifier, reference; optional columns:
-        phenotype and/or clinical_phenotype, ic50, publication, source
-    :param overwrite: if True, delete an existing database at db_path before
-        creating a fresh one; if False (default), raise FileExistsError
-    :param drug_info: if True (default), query PubChem to attach CID, URL, and a
-        short description to each drug; failures are non-fatal and the project
-        is still created without drug information
+    :param genbank_paths: one or more GenBank file paths
+    :param rules_tsv: tab-separated resistance rules file
+    :param overwrite: if True, delete an existing database at db_path before creating a fresh one
+    :param additional_info: if True (default), query PubChem for drug metadata and resolve
+        publication DOIs/titles via NCBI and CrossRef; failures are non-fatal
     :return: path to the created database
     """
     if not genbank_paths:
         raise ValueError('At least one GenBank file must be provided')
 
-    # Validate all declared input files up front so init fails early and clearly.
     for genbank_path in genbank_paths:
         require_file(genbank_path, 'GenBank file')
     require_file(rules_tsv, 'Rules TSV')
@@ -64,11 +57,10 @@ def init_project(
 
     conn = create_schema(db_path)
     try:
-        # Load curated references/genes first, then validate and import rules.
         project_id = _insert_project(conn, name)
         _load_genbank_records(conn, project_id, genbank_records)
-        _load_resistance_rules(conn, project_id, rules_tsv)
-        if drug_info:
+        _load_resistance_rules(conn, project_id, rules_tsv, additional_info=additional_info)
+        if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
         conn.commit()
         logger.info('Project initialized: %s (%s)', name, db_path)
@@ -86,16 +78,15 @@ def add_to_project(
     db_path: Path,
     rules_tsv: Path,
     genbank_paths: list[Path] | None = None,
-    drug_info: bool = True,
+    additional_info: bool = True,
 ) -> Path:
     """
     Add curated rules and optional GenBank annotations to an existing project.
 
     :param db_path: existing project database path
     :param rules_tsv: tab-separated rules file to add
-    :param genbank_paths: optional GenBank files with additional references/genes;
-        if omitted, the existing DB annotations are used for rule validation
-    :param drug_info: if True, query PubChem for newly seen drugs
+    :param genbank_paths: optional GenBank files with additional references/genes
+    :param additional_info: if True, query PubChem for new drugs and resolve publication metadata
     :return: path to the updated database
     """
     require_file(db_path, 'Project database')
@@ -114,8 +105,8 @@ def add_to_project(
         _consolidate_drug_names_to_lowercase(conn, project_id)
         if records:
             _load_genbank_records(conn, project_id, records)
-        _load_resistance_rules(conn, project_id, rules_tsv)
-        if drug_info:
+        _load_resistance_rules(conn, project_id, rules_tsv, additional_info=additional_info)
+        if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
         conn.commit()
         logger.info('Project updated: %s', db_path)
@@ -154,4 +145,3 @@ def _ensure_project_has_reference_annotations(conn: sqlite3.Connection) -> None:
             'Existing database has no stored references/genes. '
             'Provide --genbank or rebuild the project with respro init.'
         )
-

@@ -135,7 +135,6 @@ def _build_db_hit_rows(result: ProfilingResult) -> list[dict]:
         aa_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
         nt_change = _format_nt_change(ann)
 
-        # One row per drug
         for rule in ann.rule_matches:
             rows.append({
                 'gene': ann.gene_name,
@@ -149,7 +148,9 @@ def _build_db_hit_rows(result: ProfilingResult) -> list[dict]:
                 'phenotype': rule.phenotype,
                 'clinical_phenotype': rule.clinical_phenotype,
                 'source': rule.source,
-                'publication': rule.publication or '',
+                'comment': rule.comment,
+                'publications': rule.publications,
+                'pub_citations': [],
             })
     return rows
 
@@ -178,7 +179,9 @@ def _build_combo_hit_rows(result: ProfilingResult) -> list[dict]:
             'clinical_phenotype': rs.clinical_phenotype,
             'phenotype_class': _phenotype_badge_class(rs.phenotype),
             'clinical_class': _phenotype_badge_class(rs.clinical_phenotype),
-            'publication': rs.publication or '',
+            'comment': rs.comment,
+            'publications': rs.publications,
+            'pub_citations': [],
         })
     return rows
 
@@ -288,8 +291,10 @@ def _build_potential_effects_rows(
                 'phenotype': rule.phenotype,
                 'clinical_phenotype': rule.clinical_phenotype,
                 'source': rule.source,
+                'comment': rule.comment,
                 'allele_freq': ann.variant.allele_freq,
-                'publication': rule.publication or '',
+                'publications': rule.publications,
+                'pub_citations': [],
             })
 
     return rows
@@ -299,8 +304,8 @@ def _col_visibility(rows: list[dict], columns: list[str]) -> dict[str, bool]:
     """
     Return a visibility flag for each column — True when at least one row has a meaningful value.
 
-    For 'clinical_phenotype', 'meaningful' means not 'unknown'. For all other columns,
-    any non-empty truthy value counts.
+    For 'clinical_phenotype', meaningful means not 'unknown'.
+    For 'publication', checks 'pub_citations'. For all others, any truthy value counts.
 
     :param rows: list of row dicts
     :param columns: column names to check
@@ -310,9 +315,41 @@ def _col_visibility(rows: list[dict], columns: list[str]) -> dict[str, bool]:
     for col in columns:
         if col == 'clinical_phenotype':
             result[col] = any(r.get(col, 'unknown') != 'unknown' for r in rows)
+        elif col == 'publication':
+            result[col] = any(r.get('pub_citations') for r in rows)
         else:
             result[col] = any(bool(r.get(col)) for r in rows)
     return result
+
+
+def _build_bibliography(
+    *row_sets: list[dict],
+) -> tuple[list[dict], dict[int, int]]:
+    """
+    Collect unique publications across all row sets and assign sequential citation numbers.
+
+    Publications appear in order of first encounter (db_hits → combo_hits → potential).
+
+    :param row_sets: one or more row-dict lists to collect publications from
+    :return: (ordered bibliography dicts, mapping of publication id → citation number)
+    """
+    seen: dict[int, int] = {}  # pub.id → citation number
+    ordered: list[dict] = []
+    num = 1
+    for rows in row_sets:
+        for row in rows:
+            for pub in row.get('publications', []):
+                if pub.id not in seen:
+                    seen[pub.id] = num
+                    ordered.append({
+                        'citation_num': num,
+                        'doi': pub.doi,
+                        'title': pub.title,
+                        'pubmed_id': pub.pubmed_id,
+                        'raw_input': pub.raw_input,
+                    })
+                    num += 1
+    return ordered, seen
 
 
 def _load_drug_cards(
@@ -421,9 +458,33 @@ def build_report_context(
     potential_rows = _build_potential_effects_rows(result, rules or [])
     summary['similarity_hits'] = len(potential_rows)
 
-    _optional_cols = ['ic50', 'fold_ic50', 'clinical_phenotype', 'source']
+    summary['resistant_hits'] = sum(1 for r in db_hit_rows if r['phenotype'] == 'resistant')
+    summary['intermediate_hits'] = sum(1 for r in db_hit_rows if r['phenotype'] == 'intermediate')
+    summary['sensitive_hits'] = sum(1 for r in db_hit_rows if r['phenotype'] == 'sensitive')
+
+    summary['similarity_resistant'] = sum(1 for r in potential_rows if r['phenotype'] == 'resistant')
+    summary['similarity_intermediate'] = sum(1 for r in potential_rows if r['phenotype'] == 'intermediate')
+    summary['similarity_sensitive'] = sum(1 for r in potential_rows if r['phenotype'] == 'sensitive')
+
+    _high_impact = {'frameshift', 'stop_gained', 'stop_lost', 'start_lost', 'insertion', 'deletion'}
+    summary['high_impact_count'] = sum(
+        1 for ann in result.cds_annotations if ann.consequence in _high_impact
+    )
+    summary['missense_count'] = sum(
+        1 for ann in result.cds_annotations if ann.consequence == 'missense'
+    )
+
+    bibliography, pub_id_to_num = _build_bibliography(db_hit_rows, combo_hit_rows, potential_rows)
+    for row in [*db_hit_rows, *combo_hit_rows, *potential_rows]:
+        row['pub_citations'] = [
+            pub_id_to_num[pub.id]
+            for pub in row.get('publications', [])
+            if pub.id in pub_id_to_num
+        ]
+
+    _optional_cols = ['ic50', 'fold_ic50', 'clinical_phenotype', 'source', 'comment', 'publication']
     db_cols = _col_visibility(db_hit_rows, _optional_cols)
-    combo_cols = _col_visibility(combo_hit_rows, ['ic50', 'fold_ic50', 'clinical_phenotype'])
+    combo_cols = _col_visibility(combo_hit_rows, ['ic50', 'fold_ic50', 'clinical_phenotype', 'comment', 'publication'])
     pot_cols = _col_visibility(potential_rows, _optional_cols)
 
     detected_drug_names: set[str] = set()
@@ -452,6 +513,7 @@ def build_report_context(
         'db_cols': db_cols,
         'combo_cols': combo_cols,
         'pot_cols': pot_cols,
+        'bibliography': bibliography,
     }
 
 

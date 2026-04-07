@@ -8,7 +8,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from respro.db.models import AnnotatedVariant, ResistanceRule, VariantCall
+from respro.db.models import AnnotatedVariant, Publication, ResistanceRule, VariantCall
 from respro.report.results_model import ProfilingResult
 
 
@@ -180,6 +180,16 @@ def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
 
 def _rule_from_hit(hit: dict, gene_name: str) -> ResistanceRule:
     """Reconstruct a ResistanceRule shell from a stored drug_hits JSON entry."""
+    publications = [
+        Publication(
+            id=0,
+            doi=p.get('doi', ''),
+            title=p.get('title', ''),
+            pubmed_id=p.get('pubmed_id', ''),
+            raw_input=p.get('raw_input', ''),
+        )
+        for p in hit.get('publications', [])
+    ]
     return ResistanceRule(
         id=0,
         gene_name=gene_name,
@@ -193,7 +203,8 @@ def _rule_from_hit(hit: dict, gene_name: str) -> ResistanceRule:
         phenotype=hit.get('phenotype', ''),
         clinical_phenotype=hit.get('clinical_phenotype', 'unknown'),
         ic50=hit.get('ic50', ''),
-        publication=hit.get('publication', ''),
+        fold_ic50=hit.get('fold_ic50', ''),
+        publications=publications,
         pubchem_url=hit.get('pubchem_url', ''),
     )
 

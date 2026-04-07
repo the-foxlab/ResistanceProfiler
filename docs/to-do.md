@@ -32,6 +32,7 @@ Mark items done and update priorities after each completed milestone.
 - [x] Combination rule sets — `resistance_rule_set` + `resistance_rule_set_member` tables; TSV `rule_group` column
 - [x] `init-add` — extend existing project with new rules and optional additional GenBank annotations
 - [x] PubChem integration — best-effort drug CID, canonical URL, short description; fully non-fatal
+- [x] Publication table — deduplicated `publication` table + `rule_publication` / `rule_set_publication` join tables; all publications from all combo-group members collected; PMID resolved to DOI via NCBI E-utilities; title fetched from CrossRef; `--drug-info` renamed to `--additional-info` covering both drugs and publications; citation-number bibliography section in HTML report
 
 ### Profiling — VCF mode
 
@@ -254,6 +255,14 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   Markdown pages for installation, database preparation (GenBank + TSV format), profiling (VCF and
   FASTA), regeneration, and output formats; follow the style of varVAMP
   (https://github.com/jonas-fuchs/varVAMP)
+- 🟡 Example data for new users — add a small, self-contained example dataset (GenBank file,
+  rules TSV, and a matching VCF or consensus FASTA) to the repository so users can follow the
+  quick-start guide end-to-end without sourcing their own data; keep the files small enough to
+  live in `example/` without bloating the repo (ideally < 1 MB total)
+- 🟡 GitHub Pages example report — add a GitHub Actions workflow triggered on each versioned
+  release that runs `respro` against the example data, renders the HTML report, and publishes it
+  to GitHub Pages; gives prospective users a live, always-current preview of the report output
+  without downloading anything
 - 🟡 Bioconda package — write a Bioconda recipe (`meta.yaml`) and submit a PR to
   bioconda-recipes; Bioconda is the standard distribution channel for bioinformatics CLI tools
   and avoids requiring users to have a working pip/Python setup; dependency on pysam makes
@@ -269,17 +278,27 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 ### Databases
 
 - 🟡 Companion database repository — separate public GitHub repo with automated bots that scrape
-  known public resistance databases (e.g. HerpesdrG, HIVDB) and format them as ready-to-use .tsv files. 
-  Also format them to .db files for the use with the respro databses CLI command.
+  known public resistance databases (e.g. HerpesdrG, HIVDB) and format them as ready-to-use .tsv
+  files; also pre-build `.db` files for direct use with the `respro databases` CLI command; the
+  repo's CI must monitor two triggers independently: (1) upstream database content changes, which
+  trigger a TSV/DB rebuild for the current `PROJECT_SCHEMA_VERSION`, and (2) new `respro` releases,
+  which must be checked for a `PROJECT_SCHEMA_VERSION` bump — if the schema version has increased,
+  all databases must be rebuilt against the new schema and released as new assets; old `.db` assets
+  built against earlier schema versions must be retained in prior releases (not deleted) so that
+  users pinned to an older `respro` version can still download a compatible database; each release
+  asset filename and metadata must embed the `PROJECT_SCHEMA_VERSION` it was built with (e.g.
+  `hsv1_schema1.db`) so that both humans and the CLI can identify compatibility at a glance
 - 🟡 Add `respro databases` CLI command — new command group that talks to the companion database
   repository via the GitHub Releases API; implement three options:
   `--list` (print available databases with version and description),
-  `--download <identifier>` (fetch the TSV for a named database release to disk),
+  `--download <identifier>` (fetch the TSV or DB for a named database release to disk),
   `--path <dir>` (destination directory for the download, default: current directory);
-  implement in a new `respro/io/databases.py` module using stdlib `urllib.request` to avoid new
-  heavy dependencies; the companion repo must publish versioned GitHub releases with one
-  structured TSV asset per pathogen/database; depends on the companion database repository
-  existing and following a consistent asset naming convention
+  `--list` must filter assets by the running `PROJECT_SCHEMA_VERSION` and only show databases
+  whose schema version matches — databases built for a different schema are silently omitted from
+  the list (a `--all` flag can expose them with a compatibility warning); implement in a new
+  `respro/io/databases.py` module using stdlib `urllib.request` to avoid new heavy dependencies;
+  depends on the companion database repository existing and following a consistent asset naming
+  convention that encodes `PROJECT_SCHEMA_VERSION`
 
 ### Deferred
 

@@ -252,13 +252,15 @@ SQLite schema and project/results database initialization logic.
 
 - `schema.py`: project and results schema creation plus validation helpers.
 - `models.py`: database-facing data structures and row mapping helpers,
-  including combined rule-set containers.
+  including `Publication`, combined rule-set containers, and `drug_hits_json` serialization.
 - `project/`: project creation, validation, and curated data loading subpackage;
   enforces the rules TSV schema documented in `docs/rules-tsv-format.md`.
   - `core.py`: `init_project` and `add_to_project` orchestration; project-row helpers.
   - `genes.py`: GenBank reference and CDS gene loading; NCBI protein URL resolution.
   - `drugs.py`: drug get-or-create, case deduplication, and PubChem enrichment.
-  - `rules.py`: TSV parsing, coordinate-base detection, AA validation, combo rule sets.
+  - `rules.py`: TSV parsing, coordinate-base detection, AA validation, combo rule sets,
+    publication token normalization, and `publication` / `rule_publication` / `rule_set_publication`
+    row insertion.
 - `results.py`: profiling run persistence — `save_run`, `load_run`, `list_runs`,
   `reconstruct_annotations`, and `project_fingerprint` for cross-DB validation.
 
@@ -283,8 +285,10 @@ Input readers, format-specific parsing, and lightweight external data clients.
   and gene loading for a resolved reference.
 - `pubchem.py`: thin, stdlib-only PubChem PUG REST client. Resolves drug names
   to PubChem CIDs, canonical URLs, short descriptions, and structure-image URLs.
-  All failures (network unavailable, name not recognised, unexpected API response)
-  return `None` so callers treat PubChem lookup as strictly best-effort.
+  All failures return `None` so callers treat PubChem lookup as strictly best-effort.
+- `publications.py`: thin, stdlib-only clients for NCBI E-utilities and CrossRef.
+  Resolves `PMID:` tokens to DOIs (`resolve_pubmed_to_doi`) and fetches publication
+  titles (`fetch_publication_metadata`). All failures are non-fatal.
 
 Parsing and validation should live here when they are primarily format concerns.
 Once data is normalized into domain objects, downstream logic should move into

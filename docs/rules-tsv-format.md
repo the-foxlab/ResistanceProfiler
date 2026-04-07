@@ -45,6 +45,7 @@ The following columns are required for every rules TSV:
 | `publication`                        | Literature reference | Free text, typically DOI or PubMed identifier.                                  |
 | `source`                             | Provenance label | Free text, e.g. source database name.                                           |
 | `rule_group`                         | Combination-rule label | Rows with the same non-empty value become one combination rule set.             |
+| `comment`                            | Free-text curator note | Optional. Any information the curator considers relevant; stored verbatim.      |
 
 ## Column-by-column rules
 
@@ -244,13 +245,28 @@ If a non-empty value contains no parseable numeric component, import fails.
 
 ### `publication`
 
-- Optional free text.
-- First non-empty value wins within a combination rule group.
+- Optional.
+- Comma-separated list of publication references.
+- Each entry is one of:
+  - `PMID:<digits>` — PubMed identifier (e.g. `PMID:12345678`)
+  - `doi:<10.xxx>` or `doi.org/10.xxx` or `https://doi.org/10.xxx` — DOI
+  - Free text (stored as raw_input, no link generated)
+- Entries are stored in a deduplicated `publication` table and linked to each rule via a join table.
+- When `--additional-info` is enabled (default), `PMID:` entries are resolved to DOIs via NCBI
+  E-utilities and titles are fetched from CrossRef.
+- For combination rule groups, publications from **all** member rows are collected (union).
 
 ### `source`
 
 - Optional free text.
 - First non-empty value wins within a combination rule group.
+
+### `comment`
+
+- Optional free text.
+- Any information the curator considers relevant; stored verbatim.
+- First non-empty value wins within a combination rule group.
+- Displayed in the HTML report when at least one rule carries a non-empty value.
 
 ### `rule_group`
 

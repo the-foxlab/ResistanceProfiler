@@ -316,7 +316,7 @@ class TestComboRuleParsing:
         """))
         db = tmp_path / 'proj.db'
         init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
-                     rules_tsv=tsv, drug_info=False)
+                     rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
         single_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
@@ -337,7 +337,7 @@ class TestComboRuleParsing:
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='at least 2 member'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
-                         rules_tsv=tsv, drug_info=False)
+                         rules_tsv=tsv, additional_info=False)
 
     def test_combo_group_inconsistent_drug_raises(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -349,7 +349,7 @@ class TestComboRuleParsing:
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='inconsistent antiviral'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
-                         rules_tsv=tsv, drug_info=False)
+                         rules_tsv=tsv, additional_info=False)
 
     def test_duplicate_combo_group_is_skipped_on_reinit(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -360,59 +360,72 @@ class TestComboRuleParsing:
         """))
         db = tmp_path / 'proj.db'
         init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
-                     rules_tsv=tsv, drug_info=False)
+                     rules_tsv=tsv, additional_info=False)
         # init-add with the same TSV must not create a second copy
         from respro.db.project import add_to_project
-        add_to_project(db_path=db, rules_tsv=tsv, drug_info=False)
+        add_to_project(db_path=db, rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
         set_count = conn.execute('SELECT COUNT(*) FROM resistance_rule_set').fetchone()[0]
         conn.close()
         assert set_count == 1
 
-    def test_single_rule_publication_doi_gets_https_prefix(self, tmp_path, tiny_genbank) -> None:
+    def test_single_rule_publication_doi_is_stored_in_publication_table(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
             gag\ttiny_ref\t2\tK\tE\tDrugA\tdoi.org/10.1086/590668
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
-        publication = conn.execute('SELECT publication FROM resistance_rule').fetchone()[0]
+        row = conn.execute(
+            'SELECT p.doi FROM publication p '
+            'JOIN rule_publication rp ON rp.publication_id = p.id'
+        ).fetchone()
         conn.close()
-        assert publication == 'https://doi.org/10.1086/590668'
+        assert row is not None
+        assert row[0] == '10.1086/590668'
 
-    def test_single_rule_publication_already_https_is_unchanged(self, tmp_path, tiny_genbank) -> None:
+    def test_single_rule_publication_https_doi_is_stored(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
             gag\ttiny_ref\t2\tK\tE\tDrugA\thttps://doi.org/10.1086/590668
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
-        publication = conn.execute('SELECT publication FROM resistance_rule').fetchone()[0]
+        row = conn.execute(
+            'SELECT p.doi FROM publication p '
+            'JOIN rule_publication rp ON rp.publication_id = p.id'
+        ).fetchone()
         conn.close()
-        assert publication == 'https://doi.org/10.1086/590668'
+        assert row is not None
+        assert row[0] == '10.1086/590668'
 
-    def test_single_rule_publication_pmid_is_unchanged(self, tmp_path, tiny_genbank) -> None:
+    def test_single_rule_publication_pmid_is_stored(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
             gag\ttiny_ref\t2\tK\tE\tDrugA\tPMID:12345678
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
-        publication = conn.execute('SELECT publication FROM resistance_rule').fetchone()[0]
+        row = conn.execute(
+            'SELECT p.pubmed_id, p.raw_input FROM publication p '
+            'JOIN rule_publication rp ON rp.publication_id = p.id'
+        ).fetchone()
         conn.close()
-        assert publication == 'PMID:12345678'
+        assert row is not None
+        assert row[0] == '12345678'
+        assert row[1] == 'PMID:12345678'
 
-    def test_combo_rule_set_publication_doi_gets_https_prefix(self, tmp_path, tiny_genbank) -> None:
+    def test_combo_rule_set_publication_doi_is_stored(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group\tpublication
@@ -420,12 +433,16 @@ class TestComboRuleParsing:
             gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_KE_PV\t
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
-        publication = conn.execute('SELECT publication FROM resistance_rule_set').fetchone()[0]
+        row = conn.execute(
+            'SELECT p.doi FROM publication p '
+            'JOIN rule_set_publication rsp ON rsp.publication_id = p.id'
+        ).fetchone()
         conn.close()
-        assert publication == 'https://doi.org/10.1086/590668'
+        assert row is not None
+        assert row[0] == '10.1086/590668'
 
 
 class TestNcbiProteinAccession:
@@ -465,7 +482,7 @@ class TestIc50ParsingAndAggregation:
             gag\ttiny_ref\t2\tK\tE\tDrugA\t>10x
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
         ic50, fold_ic50 = conn.execute('SELECT ic50, fold_ic50 FROM resistance_rule').fetchone()
@@ -481,7 +498,7 @@ class TestIc50ParsingAndAggregation:
             gag\ttiny_ref\t6\tP\tV\tDrugA\tNone
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
         values = [row[0] for row in conn.execute('SELECT ic50 FROM resistance_rule ORDER BY id').fetchall()]
@@ -496,7 +513,7 @@ class TestIc50ParsingAndAggregation:
         """))
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='invalid ic50 value'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
     def test_combo_group_uses_highest_numeric_ic50(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -506,7 +523,7 @@ class TestIc50ParsingAndAggregation:
             gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_1\t8.5 fold
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
         ic50, fold_ic50 = conn.execute('SELECT ic50, fold_ic50 FROM resistance_rule_set').fetchone()
@@ -521,7 +538,7 @@ class TestIc50ParsingAndAggregation:
             gag\ttiny_ref\t2\tK\tE\tDrugA\t4\t5
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
         ic50, fold_ic50 = conn.execute('SELECT ic50, fold_ic50 FROM resistance_rule').fetchone()
@@ -537,7 +554,7 @@ class TestIc50ParsingAndAggregation:
         """))
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='only one IC50 column is allowed'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
     def test_rejects_two_fold_ic50_alias_columns(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -547,7 +564,7 @@ class TestIc50ParsingAndAggregation:
         """))
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='only one fold-IC50 column is allowed'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
 
 class TestPhenotypeNormalization:
@@ -574,7 +591,7 @@ class TestPhenotypeNormalization:
             gag\ttiny_ref\t5\tG\tA\tDrugU\tNone
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
         conn.row_factory = sqlite3.Row
@@ -599,7 +616,7 @@ class TestPhenotypeNormalization:
             gag\ttiny_ref\t2\tK\tE\tDrugA\tres\tR
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
         phenotype, clinical = conn.execute(
@@ -616,7 +633,7 @@ class TestPhenotypeNormalization:
             gag\ttiny_ref\t2\tK\tE\tDrugA\tres\ts
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
         phenotype, clinical = conn.execute(
@@ -634,7 +651,7 @@ class TestPhenotypeNormalization:
         """))
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='unrecognised mutation'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
     def test_rejects_noop_single_rule(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -644,7 +661,7 @@ class TestPhenotypeNormalization:
         """))
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='does not change reference'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
     def test_rejects_noop_combo_member(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -655,7 +672,7 @@ class TestPhenotypeNormalization:
         """))
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='does not change reference'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
     def test_skips_single_rule_with_unsupported_amino_acid_token(self, tmp_path, tiny_genbank, caplog) -> None:
         import logging
@@ -669,7 +686,7 @@ class TestPhenotypeNormalization:
         db = tmp_path / 'proj.db'
 
         with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
         count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
@@ -692,7 +709,7 @@ class TestPhenotypeNormalization:
         db = tmp_path / 'proj.db'
 
         with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
         combo_count = conn.execute('SELECT COUNT(*) FROM resistance_rule_set').fetchone()[0]
@@ -744,7 +761,7 @@ class TestGenbankTranslationQuality:
 
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='internal stop codon'):
-            init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, drug_info=False)
+            init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
 
     def test_raises_when_reference_identifier_is_missing(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -754,7 +771,7 @@ class TestGenbankTranslationQuality:
         """))
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='missing required field reference_identifier'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
     def test_raises_when_reference_aa_is_missing(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -764,5 +781,5 @@ class TestGenbankTranslationQuality:
         """))
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='missing required field reference'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, drug_info=False)
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 

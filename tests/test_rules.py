@@ -30,7 +30,7 @@ class TestLoadRules:
         assert rule.phenotype == 'resistant'
         assert rule.reference_identifier == ''
         assert rule.ic50 == ''
-        assert rule.publication == ''
+        assert rule.publications == []
 
 
 class TestMatchRules:

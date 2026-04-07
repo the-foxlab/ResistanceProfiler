@@ -7,6 +7,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 
+@dataclass(frozen=True)
+class Publication:
+    """A deduplicated publication entry linked to one or more resistance rules."""
+
+    id: int
+    doi: str
+    title: str
+    pubmed_id: str
+    raw_input: str  # original curator string; preserved as display fallback
+
+
 @dataclass
 class GeneRecord:
     """A gene or CDS annotation loaded from the database."""
@@ -83,10 +94,11 @@ class ResistanceRule:
     clinical_phenotype: str = 'unknown'
     ic50: str = ''
     fold_ic50: str = ''
-    publication: str = ''
     source: str = ''
     pubchem_url: str = ''
     description: str = ''
+    comment: str = ''
+    publications: list[Publication] = field(default_factory=list)
 
 
 @dataclass
@@ -114,11 +126,12 @@ class ResistanceRuleSet:
     clinical_phenotype: str = 'unknown'
     ic50: str = ''
     fold_ic50: str = ''
-    publication: str = ''
     source: str = ''
     group_name: str = ''
     pubchem_url: str = ''
     description: str = ''
+    comment: str = ''
+    publications: list[Publication] = field(default_factory=list)
     members: list[ResistanceRuleSetMember] = field(default_factory=list)
 
 
@@ -174,7 +187,10 @@ class AnnotatedVariant:
                 'clinical_phenotype': r.clinical_phenotype,
                 'ic50': r.ic50,
                 'fold_ic50': r.fold_ic50,
-                'publication': r.publication,
+                'publications': [
+                    {'doi': p.doi, 'title': p.title, 'pubmed_id': p.pubmed_id, 'raw_input': p.raw_input}
+                    for p in r.publications
+                ],
                 'pubchem_url': r.pubchem_url,
             }
             for r in self.rule_matches
@@ -201,7 +217,10 @@ class ComboRuleHit:
             'clinical_phenotype': rs.clinical_phenotype,
             'ic50': rs.ic50,
             'fold_ic50': rs.fold_ic50,
-            'publication': rs.publication,
+            'publications': [
+                {'doi': p.doi, 'title': p.title, 'pubmed_id': p.pubmed_id, 'raw_input': p.raw_input}
+                for p in rs.publications
+            ],
             'source': rs.source,
             'pubchem_url': rs.pubchem_url,
             'rule_group': rs.group_name,
