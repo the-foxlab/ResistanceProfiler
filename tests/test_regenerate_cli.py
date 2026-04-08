@@ -8,9 +8,9 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
+from typer.testing import CliRunner
 
-from respro.cli import main
+from respro.cli import app
 from respro.db.results import save_run, project_fingerprint
 from respro.db.schema import init_results_db, open_project_db
 from respro.report.results_model import ProfilingResult
@@ -18,8 +18,8 @@ from respro.report.results_model import ProfilingResult
 
 def _run_profile(project_db: Path, sample_vcf: Path, sample_ref_fasta: Path, results_db: Path, tmp_path: Path) -> None:
     """Helper: run profile-vcf with --results-db and assert success."""
-    result = CliRunner().invoke(main, [
-        'profile-vcf',
+    result = CliRunner().invoke(app, [
+        'profile', 'vcf',
         '--project', str(project_db),
         '--vcf', str(sample_vcf),
         '--ref-fasta', str(sample_ref_fasta),
@@ -42,8 +42,8 @@ class TestRegenerateListCommand:
         results_db = tmp_path / 'results.db'
         _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
 
-        result = CliRunner().invoke(main, [
-            'regenerate',
+        result = CliRunner().invoke(app, [
+            'results', 'regenerate',
             '--result-db', str(results_db),
             '--list',
         ])
@@ -57,8 +57,8 @@ class TestRegenerateListCommand:
         conn = init_results_db(results_db)
         conn.close()
 
-        result = CliRunner().invoke(main, [
-            'regenerate',
+        result = CliRunner().invoke(app, [
+            'results', 'regenerate',
             '--result-db', str(results_db),
             '--list',
         ])
@@ -71,8 +71,8 @@ class TestRegenerateListCommand:
         conn = init_results_db(results_db)
         conn.close()
 
-        result = CliRunner().invoke(main, [
-            'regenerate',
+        result = CliRunner().invoke(app, [
+            'results', 'regenerate',
             '--result-db', str(results_db),
             '--list',
             '--identifier', '1',
@@ -86,8 +86,8 @@ class TestRegenerateListCommand:
         conn = init_results_db(results_db)
         conn.close()
 
-        result = CliRunner().invoke(main, [
-            'regenerate',
+        result = CliRunner().invoke(app, [
+            'results', 'regenerate',
             '--result-db', str(results_db),
         ])
 
@@ -106,8 +106,8 @@ class TestRegenerateByIdentifier:
         _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
 
         out_dir = tmp_path / 'regenerated'
-        result = CliRunner().invoke(main, [
-            'regenerate',
+        result = CliRunner().invoke(app, [
+            'results', 'regenerate',
             '--result-db', str(results_db),
             '--identifier', '1',
             '--project', str(project_db),
@@ -125,8 +125,8 @@ class TestRegenerateByIdentifier:
         conn = init_results_db(results_db)
         conn.close()
 
-        result = CliRunner().invoke(main, [
-            'regenerate',
+        result = CliRunner().invoke(app, [
+            'results', 'regenerate',
             '--result-db', str(results_db),
             '--identifier', '1',
             '--out', str(tmp_path / 'out'),
@@ -144,8 +144,8 @@ class TestRegenerateByIdentifier:
         conn = init_results_db(results_db)
         conn.close()
 
-        result = CliRunner().invoke(main, [
-            'regenerate',
+        result = CliRunner().invoke(app, [
+            'results', 'regenerate',
             '--result-db', str(results_db),
             '--identifier', '1',
             '--project', str(project_db),
@@ -163,8 +163,8 @@ class TestRegenerateByIdentifier:
         conn = init_results_db(results_db)
         conn.close()
 
-        result = CliRunner().invoke(main, [
-            'regenerate',
+        result = CliRunner().invoke(app, [
+            'results', 'regenerate',
             '--result-db', str(results_db),
             '--identifier', '999',
             '--project', str(project_db),
@@ -190,8 +190,8 @@ class TestRegenerateByIdentifier:
         conn.commit()
         conn.close()
 
-        result = CliRunner().invoke(main, [
-            'regenerate',
+        result = CliRunner().invoke(app, [
+            'results', 'regenerate',
             '--result-db', str(results_db),
             '--identifier', '1',
             '--project', str(project_db),

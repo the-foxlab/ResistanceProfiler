@@ -41,6 +41,7 @@ class GeneRecord:
     codon_start: int = 0  # 0-based offset (GenBank codon_start qualifier minus 1)
     nt_sequence: str = ''  # CDS nucleotide slice in coding orientation
     aa_sequence: str = ''  # pre-translated protein sequence stored at init time
+    reference_accession: str = ''  # accession of the parent reference (e.g. NC_001806)
 
     @property
     def length_nt(self) -> int:

@@ -13,8 +13,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Annotated
 
 import click
+import typer
+from rich import box
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 
 from respro import __version__
 from respro.cli_helpers import (
@@ -26,7 +32,7 @@ from respro.cli_helpers import (
 from respro.core.profile_fasta import profile_fasta_consensus
 from respro.core.profile_helpers import resolve_cached_query_reference, resolve_fasta_query
 from respro.core.profile_vcf import remap_variants
-from respro.core.resistance_rules import load_rule_sets, load_rules
+from respro.core.resistance_rules import load_rules
 from respro.core.annotate_vcf import annotate_variants
 from respro.db.project import add_to_project, init_project
 from respro.db.results import list_runs, load_run, reconstruct_annotations
@@ -37,134 +43,332 @@ from respro.io.reference import load_genes_for_reference
 from respro.io.vcf import parse_vcf
 from respro.report.html import export_results
 from respro.report.results_model import ProfilingResult
-from respro.utils.logging import setup_logging
+from respro.utils.logging import setup_logging, err_console
 
 
-@click.group()
-@click.version_option(version=__version__, prog_name='respro')
-@click.option('-v', '--verbose', count=True, help='Increase verbosity (-v info, -vv debug).')
-def main(verbose: int) -> None:
-    """
-    ResistanceProfiler — pathogen-agnostic antiviral resistance profiling.
-    """
+app = typer.Typer(
+    help='ResistanceProfiler — agnostic antiviral resistance profiling framework.',
+    no_args_is_help=True,
+    pretty_exceptions_enable=False,
+)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Shared output helpers
+# ──────────────────────────────────────────────────────────────────────
+
+def _print_completion_panel(console: Console, title: str, result, outputs: dict) -> None:
+    """Render a summary panel after a profiling run."""
+    hit_line = f'{result.resistance_hits} database hit(s)'
+    if hasattr(result, 'combo_hits') and result.combo_hits:
+        hit_line += f'  ·  {len(result.combo_hits)} combo rule hit(s)'
+    lines = [hit_line, '']
+    for fmt, path in outputs.items():
+        lines.append(f'[dim]{fmt}[/dim]   {path}')
+    console.print(Panel('\n'.join(lines), title=f'[green]{title}[/green]', border_style='green'))
+
+
+def _print_runs_table(console: Console, runs: list) -> None:
+    """Render stored runs as a Rich table."""
+    table = Table(box=box.SIMPLE, header_style='bold cyan', show_edge=False)
+    table.add_column('ID', justify='right', style='dim', no_wrap=True)
+    table.add_column('Sample')
+    table.add_column('Reference')
+    table.add_column('Input')
+    table.add_column('Hits', justify='right')
+    table.add_column('Created', style='dim')
+    for run in runs:
+        table.add_row(
+            str(run['id']),
+            run['sample_name'] or '',
+            run['reference_name'],
+            Path(run['vcf_path']).name,
+            str(run['resistance_hits']),
+            run['created_at'],
+        )
+    console.print(table)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Global callback — version + verbosity
+# ──────────────────────────────────────────────────────────────────────
+
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f'respro {__version__}')
+        raise typer.Exit()
+
+
+@app.callback()
+def _callback(
+    verbose: Annotated[
+        int, typer.Option(
+            '--verbose',
+            '-v',
+            count=True,
+            metavar='',
+        show_default=False,
+        help='Increase verbosity (-v info, -vv debug).'
+        )
+    ] = 0,
+
+    version: Annotated[
+        bool | None, typer.Option(
+        '--version',
+            callback=_version_callback,
+            is_eager=True,
+            help='Show version and exit.'
+        )
+    ] = None
+
+) -> None:
     setup_logging(verbose)
 
 
 # ──────────────────────────────────────────────────────────────────────
-# init module
+# init
 # ──────────────────────────────────────────────────────────────────────
 
-@main.command()
-@click.option('--name', '-n', required=True, help='Project name.')
-@click.option(
-    '--genbank', '-g', 'genbank_paths', required=True, multiple=True,
-    type=click.Path(exists=True),
-    help='One or more GenBank files. Can be repeated; each file may itself contain multiple records.',
-)
-@click.option('--rules', '-r', required=True, type=click.Path(exists=True), help='Resistance rules TSV.')
-@click.option('--output', '-o', required=True, type=click.Path(), help='Output SQLite database path.')
-@click.option('--overwrite', is_flag=True, default=False, help='Overwrite existing database.')
-@click.option('--additional-info/--no-additional-info', 'additional_info', default=True,
-    help='Query PubChem for drug metadata and resolve publications via NCBI/CrossRef (default: on).',
-)
+@app.command()
 def init(
-    name: str,
-    genbank_paths: tuple[str, ...],
-    rules: str,
-    output: str,
-    overwrite: bool,
-    additional_info: bool,
+    name: Annotated[
+        str, typer.Option(
+            '--name',
+            '-n',
+            help='Project name.'
+        )
+    ],
+
+    rules: Annotated[
+        Path, typer.Option(
+            '--rules',
+            '-r',
+            help='Resistance rules TSV.'
+        )
+    ],
+
+    output: Annotated[
+        Path, typer.Option(
+            '--output',
+            '-o',
+            help='Output SQLite database path.'
+        )
+    ],
+
+    genbank_paths: Annotated[
+        list[Path] | None, typer.Option(
+            '--genbank',
+            '-g',
+            exists=True,
+            help='GenBank file(s). Repeat for multiple files.',
+        )
+    ] = None,
+
+    overwrite: Annotated[
+        bool, typer.Option(
+            '--overwrite',
+            help='Overwrite existing database.'
+        )
+    ] = False,
+
+    additional_info: Annotated[
+        bool, typer.Option(
+            '--additional-info/--no-additional-info',
+            help='Query PubChem for drug metadata and resolve publications via NCBI/CrossRef.'
+        )
+    ] = True,
+
 ) -> None:
     """
     Initialise a project database from one or more GenBank reference records and resistance rules provided in TSV.
     """
+    if not genbank_paths:
+        raise click.UsageError('At least one --genbank file is required.')
 
+    console = Console(highlight=False)
     try:
-        db_path = init_project(
-            db_path=Path(output),
-            name=name,
-            genbank_paths=[Path(path) for path in genbank_paths],
-            rules_tsv=Path(rules),
-            overwrite=overwrite,
-            additional_info=additional_info,
-        )
+        with err_console.status('[dim]Initialising project…[/dim]'):
+            db_path = init_project(
+                db_path=output,
+                name=name,
+                genbank_paths=list(genbank_paths),
+                rules_tsv=rules,
+                overwrite=overwrite,
+                additional_info=additional_info,
+            )
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
 
-    click.echo(f'✓ Project initialised: {db_path}')
+    console.print(f'[green]✓[/green] Project initialised: [cyan]{db_path}[/cyan]')
 
 
-@main.command('init-add')
-@click.option('--project', '-p', required=True, type=click.Path(exists=True), help='Existing project SQLite database.')
-@click.option('--genbank', '-g', 'genbank_paths', required=False, multiple=True, type=click.Path(exists=True), help='Optional GenBank file(s) with additional references/genes.')
-@click.option('--rules', '-r', required=True, type=click.Path(exists=True), help='Resistance rules TSV to add.')
-@click.option('--additional-info/--no-additional-info', 'additional_info', default=True,
-    help='Query PubChem for drug metadata and resolve publications via NCBI/CrossRef (default: on).',
-)
+# ──────────────────────────────────────────────────────────────────────
+# init-add
+# ──────────────────────────────────────────────────────────────────────
+
+@app.command('init-add')
 def init_add(
-    project: str,
-    genbank_paths: tuple[str, ...],
-    rules: str,
-    additional_info: bool,
+    project: Annotated[
+        Path,
+        typer.Option(
+            '--project',
+            '-p',
+            exists=True,
+            help='Existing project SQLite database.'
+        )
+    ],
+
+    rules: Annotated[
+        Path,
+        typer.Option(
+            '--rules',
+            '-r',
+            exists=True,
+            help='Resistance rules TSV to add.'
+        )
+    ],
+
+    genbank_paths: Annotated[
+        list[Path] | None,
+        typer.Option(
+            '--genbank',
+            '-g',
+            exists=True,
+            help='Optional GenBank file(s) with additional references/genes.',
+        )
+    ] = None,
+
+    additional_info: Annotated[
+        bool,
+        typer.Option(
+            '--additional-info/--no-additional-info',
+            help='Query PubChem for drug metadata and resolve publications via NCBI/CrossRef.',
+        )
+    ] = True
 ) -> None:
     """
     Add curated rules and optional GenBank annotations to an existing project database.
     """
+    console = Console(highlight=False)
     try:
-        db_path = add_to_project(
-            db_path=Path(project),
-            genbank_paths=[Path(path) for path in genbank_paths],
-            rules_tsv=Path(rules),
-            additional_info=additional_info,
-        )
+        with err_console.status('[dim]Updating project…[/dim]'):
+            db_path = add_to_project(
+                db_path=project,
+                genbank_paths=list(genbank_paths or []),
+                rules_tsv=rules,
+                additional_info=additional_info,
+            )
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
 
-    click.echo(f'✓ Project updated: {db_path}')
-
+    console.print(f'[green]✓[/green] Project updated: [cyan]{db_path}[/cyan]')
 
 
 # ──────────────────────────────────────────────────────────────────────
 # profile-vcf
 # ──────────────────────────────────────────────────────────────────────
 
-@main.command('profile-vcf')
-@click.option('--project', '-p', required=True, type=click.Path(exists=True), help='Project database.')
-@click.option('--vcf', '-f', required=True, type=click.Path(exists=True), help='Input VCF file.')
-@click.option('--ref-fasta', '-r', required=False, type=click.Path(exists=True),
-    help='Reference FASTA the VCF was called against (mutually exclusive with --query-ref-header).',
-)
-@click.option(
-    '--query-ref-header',
-    required=False,
-    help='Reuse a previously cached query reference by its stored FASTA header (mutually exclusive with --ref-fasta).',
-)
-@click.option('--sample', '-s', default='sample', help='Sample name for the report. Default: sample')
-@click.option('--output', '-o', default='output', type=click.Path(), help='Output directory.')
-@click.option(
-    '--results-db', '-d',
-    default=None,
-    type=click.Path(),
-    help='Optional results database path. Creates or appends to an existing SQLite results database.',
-)
-@click.option('--cache/--no-cache', 'use_cache', default=True,
-    help='Reuse/store FASTA reference mapping cache in the project database (default: on).',
-)
-@click.option('--min-af', default=0.01, type=float, help='Minimum allele frequency filter. Default: 0.01')
-@click.option('--min-depth', default=10, type=int, help='Minimum read depth filter. Default: 10')
-@click.option('--cores', '-c', default=1, type=int, help='Number of parallel worker processes for gene alignment. Default: 1')
+@app.command('profile-vcf')
 def profile_vcf(
-    project: str,
-    vcf: str,
-    ref_fasta: str | None,
-    query_ref_header: str | None,
-    sample: str,
-    output: str,
-    results_db: str | None,
-    use_cache: bool,
-    min_af: float,
-    min_depth: int,
-    cores: int,
+    project: Annotated[
+        Path,
+        typer.Option(
+            '--project',
+            '-p',
+            exists=True,
+            help='Project database.'
+        )
+    ],
+
+    vcf: Annotated[
+        Path,
+        typer.Option(
+            '--vcf',
+            '-f',
+            exists=True,
+            help='Input VCF file.'
+        )
+    ],
+
+    ref_fasta: Annotated[
+        Path | None,
+        typer.Option(
+            '--ref-fasta',
+            '-r',
+            exists=True,
+            help='Reference FASTA the VCF was called against (mutually exclusive with --query-ref-header).'
+        )
+    ] = None,
+
+    query_ref_header: Annotated[
+        str | None,
+        typer.Option(
+            '--query-ref-header',
+            '-q',
+            help='Reuse a previously cached query reference by its stored FASTA header (mutually exclusive with --ref-fasta).'
+        )
+    ] = None,
+
+    sample: Annotated[
+        str,
+        typer.Option(
+            '--sample',
+            '-s',
+            help='Sample name for the report.'
+        )
+    ] = 'sample',
+
+    output: Annotated[
+        Path,
+        typer.Option(
+            '--output',
+            '-o',
+            help='Output directory.'
+        )
+    ] = Path('output'),
+
+    results_db: Annotated[
+        Path | None,
+        typer.Option(
+            '--results-db',
+            '-d',
+            help='Optional results database path. Creates or appends to an existing SQLite results database.'
+        )
+    ] = None,
+
+    min_af: Annotated[
+        float, typer.Option(
+            '--min-af',
+            '-ma',
+            help='Minimum allele frequency filter.'
+        )
+    ] = 0.01,
+
+    min_depth: Annotated[
+        int,
+        typer.Option(
+            '--min-depth',
+            '-md',
+            help='Minimum read depth filter.')
+    ] = 10,
+
+    cores: Annotated[
+        int,
+        typer.Option(
+            '--cores',
+            '-c',
+            help='Number of parallel worker processes for gene alignment.'
+        )
+    ] = 1,
+
+    use_cache: Annotated[
+        bool,
+        typer.Option(
+            '--cache/--no-cache',
+            help='Reuse/store FASTA reference mapping cache in the project database (default: on).'
+        )
+    ] = True
+
 ) -> None:
     """
     Run resistance profiling on a VCF file.
@@ -172,6 +376,7 @@ def profile_vcf(
     Provide exactly one of --ref-fasta or --query-ref-header to specify the query reference.
     """
     logger = logging.getLogger('respro')
+    console = Console(highlight=False)
     project_conn = None
     results_conn = None
 
@@ -181,17 +386,20 @@ def profile_vcf(
                 'Provide exactly one of --ref-fasta or --query-ref-header.'
             )
 
-        project_conn = open_project_db(Path(project))
+        project_conn = open_project_db(project)
         project_row = project_conn.execute('SELECT name FROM project LIMIT 1').fetchone()
         if project_row is None:
             raise click.ClickException('No project found in the database')
 
-        results_conn = _init_results_db_connection(results_db, project_conn, logger)
+        results_conn = _init_results_db_connection(
+            str(results_db) if results_db else None, project_conn, logger,
+        )
 
         if ref_fasta is not None:
-            query_name, query_seq, fasta_matches = resolve_fasta_query(
-                project_conn, Path(ref_fasta), use_cache=use_cache, cores=cores,
-            )
+            with err_console.status('[dim]Aligning reference FASTA to gene panel…[/dim]'):
+                query_name, query_seq, fasta_matches = resolve_fasta_query(
+                    project_conn, ref_fasta, use_cache=use_cache, cores=cores,
+                )
         else:
             query_name, query_seq, fasta_matches = resolve_cached_query_reference(
                 project_conn, query_ref_header or '',
@@ -202,7 +410,7 @@ def profile_vcf(
         )
         genes, rules, rule_sets, rule_gene_names = _load_reference_data(project_conn, ref_id)
 
-        variants = parse_vcf(Path(vcf))
+        variants = parse_vcf(vcf)
         logger.info('Parsed %d variant(s)', len(variants))
         variants = [
             v for v in variants
@@ -227,25 +435,20 @@ def profile_vcf(
             project_name=project_row['name'],
             ref_name=ref_name,
             sample=sample,
-            input_basename=Path(vcf).name,
+            input_basename=vcf.name,
             total_variants=total_variants,
             variants_in_cds=variants_in_cds,
-            output_dir=Path(output),
+            output_dir=output,
             genes=genes,
             rule_gene_names=rule_gene_names,
             rules=rules,
             results_conn=results_conn,
-            project_path=Path(project),
+            project_path=project,
             logger=logger,
         )
 
-        click.echo(
-            '✓ Profiling complete — '
-            f'{result.resistance_hits} database hit(s), '
-            f'{len(result.combo_hits)} combo rule hit(s)'
-        )
-        for fmt, path in outputs.items():
-            click.echo(f'  {fmt}: {path}')
+        _print_completion_panel(console, '✓ Profiling complete', result, outputs)
+
     except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     finally:
@@ -259,46 +462,86 @@ def profile_vcf(
 # profile-fasta
 # ──────────────────────────────────────────────────────────────────────
 
-@main.command('profile-fasta')
-@click.option('--project', '-p', required=True, type=click.Path(exists=True), help='Project database.')
-@click.option('--fasta', '-f', 'consensus_fasta', required=True, type=click.Path(exists=True),
-    help='Input consensus FASTA sequence.',
-)
-@click.option('--sample', '-s', default='sample', help='Sample name for the report. Default: sample')
-@click.option('--output', '-o', default='output', type=click.Path(), help='Output directory.')
-@click.option(
-    '--results-db', '-d',
-    default=None,
-    type=click.Path(),
-    help='Optional results database path. Creates or appends to an existing SQLite results database.',
-)
-@click.option('--cores', '-c', default=1, type=int, help='Number of parallel worker processes for gene alignment. Default: 1')
+@app.command('profile-fasta')
 def profile_fasta(
-    project: str,
-    consensus_fasta: str,
-    sample: str,
-    output: str,
-    results_db: str | None,
-    cores: int,
+    project: Annotated[
+        Path,
+        typer.Option(
+            '--project',
+            '-p',
+            exists=True,
+            help='Project database.'
+        )
+    ],
+
+    consensus_fasta: Annotated[
+        Path,
+        typer.Option(
+            '--fasta',
+            '-f',
+            exists=True,
+            help='Input consensus FASTA sequence.'
+        )
+    ],
+
+    sample: Annotated[
+        str,
+        typer.Option(
+            '--sample',
+            '-s',
+            help='Sample name for the report.'
+        )
+    ] = 'sample',
+
+    output: Annotated[
+        Path,
+        typer.Option(
+            '--output',
+            '-o',
+            help='Output directory.'
+        )
+    ] = Path('output'),
+
+    results_db: Annotated[
+        Path | None,
+        typer.Option(
+            '--results-db',
+            '-d',
+            help='Optional results database path. Creates or appends to an existing SQLite results database.'
+        )
+    ] = None,
+
+    cores: Annotated[
+        int,
+        typer.Option(
+            '--cores',
+            '-c',
+            help='Number of parallel worker processes for gene alignment.'
+        )
+    ] = 1
 ) -> None:
     """
     Run resistance profiling on a consensus FASTA sequence.
     """
     logger = logging.getLogger('respro')
+    console = Console(highlight=False)
     project_conn = None
     results_conn = None
 
     try:
-        project_conn = open_project_db(Path(project))
+        project_conn = open_project_db(project)
         project_row = project_conn.execute('SELECT name FROM project LIMIT 1').fetchone()
         if project_row is None:
             raise click.ClickException('No project found in the database')
 
-        results_conn = _init_results_db_connection(results_db, project_conn, logger)
-
-        query_name, query_seq, fasta_matches = resolve_fasta_query(
-            project_conn, Path(consensus_fasta), use_cache=False, cores=cores,
+        results_conn = _init_results_db_connection(
+            str(results_db) if results_db else None, project_conn, logger,
         )
+
+        with err_console.status('[dim]Aligning FASTA to gene panel…[/dim]'):
+            query_name, query_seq, fasta_matches = resolve_fasta_query(
+                project_conn, consensus_fasta, use_cache=False, cores=cores,
+            )
 
         ref_id, ref_name, fasta_matches = _resolve_reference(
             project_conn, fasta_matches, query_name, logger,
@@ -306,6 +549,7 @@ def profile_fasta(
         genes, rules, rule_sets, rule_gene_names = _load_reference_data(project_conn, ref_id)
 
         annotations, coverage_gaps = profile_fasta_consensus(query_seq, fasta_matches)
+
         if coverage_gaps:
             total_non_covered = sum(gap.codon_end - gap.codon_start + 1 for gap in coverage_gaps)
             logger.warning(
@@ -330,27 +574,22 @@ def profile_fasta(
             project_name=project_row['name'],
             ref_name=ref_name,
             sample=sample,
-            input_basename=Path(consensus_fasta).name,
+            input_basename=consensus_fasta.name,
             total_variants=len(annotations),
             variants_in_cds=len(annotations),
-            output_dir=Path(output),
+            output_dir=output,
             genes=genes,
             rule_gene_names=rule_gene_names,
             rules=rules,
             results_conn=results_conn,
-            project_path=Path(project),
+            project_path=project,
             logger=logger,
             af_bins=fasta_af_bins,
             coverage_gaps=coverage_gaps,
         )
 
-        click.echo(
-            '✓ Profiling complete — '
-            f'{result.resistance_hits} database hit(s), '
-            f'{len(result.combo_hits)} combo rule hit(s)'
-        )
-        for fmt, path in outputs.items():
-            click.echo(f'  {fmt}: {path}')
+        _print_completion_panel(console, '✓ Profiling complete', result, outputs)
+
     except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     finally:
@@ -364,22 +603,55 @@ def profile_fasta(
 # regenerate
 # ──────────────────────────────────────────────────────────────────────
 
-@main.command('regenerate')
-@click.option('--result-db', '-d', required=True, type=click.Path(exists=True), help='Results database.')
-@click.option('--list', '-l', 'list_flag', is_flag=True, default=False, help='List all stored results.')
-@click.option('--identifier', '-i', 'run_id', type=int, default=None, help='Run ID to regenerate.')
-@click.option('--project', '-p', type=click.Path(exists=True), default=None,
-    help='Project database (required with --identifier).',
-)
-@click.option('--out', '-o', type=click.Path(), default=None,
-    help='Output directory (required with --identifier).',
-)
+@app.command('regenerate')
 def regenerate(
-    result_db: str,
-    list_flag: bool,
-    run_id: int | None,
-    project: str | None,
-    out: str | None,
+    result_db: Annotated[
+        Path,
+        typer.Option(
+            '--result-db',
+            '-d',
+            exists=True,
+            help='Results database.'
+        )
+    ],
+
+    run_id: Annotated[
+        int | None,
+        typer.Option(
+            '--identifier',
+            '-i',
+            help='Run ID to regenerate.'
+        )
+    ] = None,
+
+    project: Annotated[
+        Path | None,
+        typer.Option(
+            '--project',
+            '-p',
+            exists=True,
+            help='Project database (required with --identifier).'
+        )
+    ] = None,
+
+    out: Annotated[
+        Path | None,
+        typer.Option(
+            '--out',
+            '-o',
+            help='Output directory (required with --identifier).',
+        )
+    ] = None,
+
+    list_flag: Annotated[
+        bool,
+        typer.Option(
+            '--list',
+            '-l',
+            help='List all stored results.'
+        )
+    ] = False,
+
 ) -> None:
     """
     List stored profiling results or regenerate a report from a results database.
@@ -388,11 +660,12 @@ def regenerate(
     --out to regenerate the full report for a specific run.
     """
     logger = logging.getLogger('respro')
+    console = Console(highlight=False)
     results_conn = None
     project_conn = None
 
     try:
-        results_conn = open_results_db(Path(result_db))
+        results_conn = open_results_db(result_db)
 
         if list_flag and run_id is not None:
             raise click.UsageError('Use either --list or --identifier, not both.')
@@ -405,16 +678,9 @@ def regenerate(
         if list_flag:
             runs = list_runs(results_conn)
             if not runs:
-                click.echo('No stored results found.')
+                console.print('No stored results found.')
                 return
-            click.echo(f'{"ID":>4}  {"Sample":<16}  {"Reference":<20}  {"VCF":<30}  {"Hits":>4}  Created')
-            click.echo('─' * 95)
-            for run in runs:
-                click.echo(
-                    f'{run["id"]:>4}  {(run["sample_name"] or ""):<16}  '
-                    f'{run["reference_name"]:<20}  {Path(run["vcf_path"]).name:<30}  '
-                    f'{run["resistance_hits"]:>4}  {run["created_at"]}'
-                )
+            _print_runs_table(console, runs)
             return
 
         if project is None:
@@ -422,10 +688,13 @@ def regenerate(
         if out is None:
             raise click.UsageError('--out is required with --identifier.')
 
+        if run_id is None:
+            raise click.UsageError('--identifier is required when not using --list.')
+
         run_dict, variant_rows = load_run(results_conn, run_id)
         coverage_gaps = load_coverage_gaps(results_conn, run_id)
 
-        project_conn = open_project_db(Path(project))
+        project_conn = open_project_db(project)
 
         # Validate that the provided project DB matches the one used for this run.
         stored_fp = run_dict.get('project_fingerprint', '')
@@ -479,19 +748,24 @@ def regenerate(
             rules = load_rules(project_conn, ref_id)
             rule_gene_names = {rule.gene_name for rule in rules}
 
-        output_dir = Path(out)
-        outputs = export_results(
-            result,
-            output_dir,
-            genes=genes,
-            rule_gene_names=rule_gene_names,
-            project_conn=project_conn,
-            rules=rules,
-        )
+        with err_console.status(f'[dim]Regenerating run #{run_id}…[/dim]'):
+            output_dir = out
+            outputs = export_results(
+                result,
+                output_dir,
+                genes=genes,
+                rule_gene_names=rule_gene_names,
+                project_conn=project_conn,
+                rules=rules,
+            )
 
-        click.echo(f'✓ Regenerated run #{run_id} — {result.resistance_hits} database hit(s)')
+        console.print(Panel(
+            f'{result.resistance_hits} database hit(s)',
+            title=f'[green]✓ Regenerated run #{run_id}[/green]',
+            border_style='green',
+        ))
         for fmt, path in outputs.items():
-            click.echo(f'  {fmt}: {path}')
+            console.print(f'  [dim]{fmt}[/dim]   {path}')
 
     except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -502,6 +776,6 @@ def regenerate(
             project_conn.close()
 
 
-if __name__ == '__main__':
-    main()
 
+if __name__ == '__main__':
+    app()

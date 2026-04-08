@@ -94,12 +94,14 @@ def match_query_to_genes(
 
     matches: list[GeneMatch] = []
     for gene, result in zip(genes, raw):
+        ref = gene.reference_accession or str(gene.reference_id)
         if result is None:
-            logger.debug('Gene %r: no qualifying match', gene.name)
+            logger.debug('%s — Gene %r: no qualifying match', ref, gene.name)
         else:
             logger.info(
-                'Gene %r matched: identity=%.1f%%, cds_coverage=%.1f%%, query_coverage=%.1f%%, strand=%s',
-                result.gene.name, result.identity * 100,
+                '%s — Gene %r matched: identity=%.1f%%, cds_coverage=%.1f%%, '
+                'query_coverage=%.1f%%, strand=%s',
+                ref, result.gene.name, result.identity * 100,
                 result.cds_coverage * 100, result.query_coverage * 100, result.strand,
             )
             matches.append(result)
@@ -122,16 +124,20 @@ def load_genes_with_rules(
     if reference_id is None:
         rows = conn.execute(
             'SELECT DISTINCT g.id, g.reference_id, g.name, g.protein, '
-            'g.start, g.end, g.strand, g.codon_start, g.nt_sequence, g.aa_sequence '
+            'g.start, g.end, g.strand, g.codon_start, g.nt_sequence, g.aa_sequence, '
+            'r.accession AS reference_accession '
             'FROM gene g '
+            'JOIN reference r ON r.id = g.reference_id '
             'JOIN resistance_rule rr ON rr.gene_id = g.id '
             'ORDER BY g.reference_id, g.start',
         ).fetchall()
     else:
         rows = conn.execute(
             'SELECT DISTINCT g.id, g.reference_id, g.name, g.protein, '
-            'g.start, g.end, g.strand, g.codon_start, g.nt_sequence, g.aa_sequence '
+            'g.start, g.end, g.strand, g.codon_start, g.nt_sequence, g.aa_sequence, '
+            'r.accession AS reference_accession '
             'FROM gene g '
+            'JOIN reference r ON r.id = g.reference_id '
             'JOIN resistance_rule rr ON rr.gene_id = g.id '
             'WHERE g.reference_id = ? '
             'ORDER BY g.start',
@@ -149,6 +155,7 @@ def load_genes_with_rules(
             codon_start=r['codon_start'],
             nt_sequence=r['nt_sequence'] or '',
             aa_sequence=r['aa_sequence'] or '',
+            reference_accession=r['reference_accession'] or '',
         )
         for r in rows
     ]
@@ -235,9 +242,11 @@ def load_cached_mappings(
         'SELECT qgm.gene_id, qgm.identity, qgm.cds_coverage, qgm.query_coverage, '
         'qgm.query_start, qgm.query_end, qgm.strand, qgm.cigar, '
         'g.reference_id, g.name, g.protein, g.start, g.end, g.strand AS gene_strand, '
-        'g.codon_start, g.nt_sequence, g.aa_sequence '
+        'g.codon_start, g.nt_sequence, g.aa_sequence, '
+        'r.accession AS reference_accession '
         'FROM query_gene_mapping qgm '
         'JOIN gene g ON g.id = qgm.gene_id '
+        'JOIN reference r ON r.id = g.reference_id '
         'WHERE qgm.query_ref_id = ?',
         (qref['id'],),
     ).fetchall()
@@ -255,6 +264,7 @@ def load_cached_mappings(
             codon_start=r['codon_start'],
             nt_sequence=r['nt_sequence'] or '',
             aa_sequence=r['aa_sequence'] or '',
+            reference_accession=r['reference_accession'] or '',
         )
         matches.append(GeneMatch(
             gene=gene,

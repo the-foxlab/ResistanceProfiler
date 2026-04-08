@@ -3,34 +3,31 @@ Structured logging setup for ResistanceProfiler.
 """
 
 import logging
-import sys
 
-# ANSI escape codes — only applied when writing to a real terminal
-_RESET = '\033[0m'
-_COLOURS = {
-    logging.DEBUG:    '\033[37m',    # white / light grey
-    logging.INFO:     '\033[32m',    # green
-    logging.WARNING:  '\033[33m',    # orange / yellow
-    logging.ERROR:    '\033[31m',    # red
-    logging.CRITICAL: '\033[31;1m',  # bold red
-}
+from rich.console import Console
+from rich.highlighter import RegexHighlighter
+from rich.logging import RichHandler
+from rich.theme import Theme
 
 
-class _ColourFormatter(logging.Formatter):
-    """
-    Formatter that wraps each line in ANSI colour codes when connected to a TTY.
-    """
+class _LogHighlighter(RegexHighlighter):
+    """Highlights quoted strings and respro.* module paths in log messages."""
 
-    def __init__(self, fmt: str, datefmt: str, stream) -> None:
-        super().__init__(fmt, datefmt=datefmt)
-        self._use_colour = hasattr(stream, 'isatty') and stream.isatty()
+    highlights = [
+        r'(?P<str_val>\'[^\']*\'|\"[^\"]*\")',   # single- or double-quoted strings
+        r'(?P<module>respro(?:\.[a-z][a-z0-9_]*)*)',  # respro or respro.module.path identifiers
+    ]
 
-    def format(self, record: logging.LogRecord) -> str:
-        msg = super().format(record)
-        if self._use_colour:
-            colour = _COLOURS.get(record.levelno, '')
-            return f'{colour}{msg}{_RESET}'
-        return msg
+
+_LOG_THEME = Theme({
+    'str_val': 'green1',    # same shade as Rich's repr.str
+    'module': 'bold cyan',
+})
+
+# Shared stderr console used by both RichHandler and CLI status spinners.
+# Sharing the same Console instance lets Rich coordinate spinner animations
+# with log output — the spinner pauses cleanly when a log line is emitted.
+err_console = Console(stderr=True, theme=_LOG_THEME)
 
 
 def setup_logging(verbosity: int = 0) -> logging.Logger:
@@ -46,14 +43,15 @@ def setup_logging(verbosity: int = 0) -> logging.Logger:
     logger.setLevel(level)
 
     if not logger.handlers:
-        handler = logging.StreamHandler(sys.stderr)
-        handler.setLevel(level)
-        fmt = _ColourFormatter(
-            '[%(asctime)s] %(levelname)-8s %(name)s — %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S',
-            stream=sys.stderr,
+        handler = RichHandler(
+            level=level,
+            show_path=False,
+            rich_tracebacks=False,
+            log_time_format='[%Y-%m-%d %H:%M:%S]',
+            highlighter=_LogHighlighter(),
+            console=err_console,
         )
-        handler.setFormatter(fmt)
+        handler.setFormatter(logging.Formatter('%(name)s — %(message)s'))
         logger.addHandler(handler)
 
     return logger

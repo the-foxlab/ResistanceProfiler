@@ -5,10 +5,10 @@ Tests for the CLI profile-vcf command — end-to-end integration.
 import sqlite3
 from pathlib import Path
 
-from click.testing import CliRunner
+from typer.testing import CliRunner
 
 from conftest import write_genbank
-from respro.cli import main
+from respro.cli import app
 from respro.db.schema import create_schema, init_results_db
 
 
@@ -25,8 +25,8 @@ class TestProfileCli:
         """Running profile should produce an HTML report named after the input VCF."""
         output_dir = tmp_path / 'results'
         runner = CliRunner()
-        result = runner.invoke(main, [
-            'profile-vcf',
+        result = runner.invoke(app, [
+            'profile', 'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -52,8 +52,8 @@ class TestProfileCli:
     ):
         output_dir = tmp_path / 'html_results'
         runner = CliRunner()
-        result = runner.invoke(main, [
-            'profile-vcf',
+        result = runner.invoke(app, [
+            'profile', 'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -83,8 +83,8 @@ class TestProfileCli:
         )
         output_dir = tmp_path / 'hit_results'
         runner = CliRunner()
-        result = runner.invoke(main, [
-            'profile-vcf',
+        result = runner.invoke(app, [
+            'profile', 'vcf',
             '--project', str(project_db),
             '--vcf', str(vcf_path),
             '--ref-fasta', str(sample_ref_fasta),
@@ -104,8 +104,8 @@ class TestProfileCli:
     ):
         output_dir = tmp_path / 'results_with_db'
         results_db = tmp_path / 'run_results.db'
-        result = CliRunner().invoke(main, [
-            'profile-vcf',
+        result = CliRunner().invoke(app, [
+            'profile', 'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -136,8 +136,8 @@ class TestProfileCli:
         conn = init_results_db(results_db)
         conn.close()
 
-        result = CliRunner().invoke(main, [
-            'profile-vcf',
+        result = CliRunner().invoke(app, [
+            'profile', 'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -162,8 +162,8 @@ class TestProfileCli:
         conn.commit()
         conn.close()
 
-        result = CliRunner().invoke(main, [
-            'profile-vcf',
+        result = CliRunner().invoke(app, [
+            'profile', 'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -184,8 +184,8 @@ class TestProfileCli:
         bad_fasta = tmp_path / 'bad_ref.fasta'
         bad_fasta.write_text('>unrelated\nGATTACAGATTACAGATTACAGATTACA\n')
 
-        result = CliRunner().invoke(main, [
-            'profile-vcf',
+        result = CliRunner().invoke(app, [
+            'profile', 'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(bad_fasta),
@@ -224,8 +224,8 @@ class TestInitCli:
 
         db_path = tmp_path / 'project.db'
         runner = CliRunner()
-        result = runner.invoke(main, [
-            'init',
+        result = runner.invoke(app, [
+            'project', 'init',
             '--name', 'CLI Test',
             '--genbank', str(genbank_path),
             '--rules', str(rules_tsv),
@@ -259,8 +259,8 @@ class TestInitCli:
 
         db_path = tmp_path / 'project_extended.db'
         runner = CliRunner()
-        result = runner.invoke(main, [
-            'init',
+        result = runner.invoke(app, [
+            'project', 'init',
             '--name', 'CLI Test Extended',
             '--genbank', str(genbank_path),
             '--rules', str(rules_tsv),
@@ -331,8 +331,8 @@ class TestInitCli:
         )
 
         db_path = tmp_path / 'project_multi_input.db'
-        result = CliRunner().invoke(main, [
-            'init',
+        result = CliRunner().invoke(app, [
+            'project', 'init',
             '--name', 'CLI Multiple GenBank Test',
             '--genbank', str(genbank_path_a),
             '--genbank', str(genbank_path_b),
@@ -382,8 +382,8 @@ class TestInitCli:
         )
 
         db_path = tmp_path / 'project_norm.db'
-        result = CliRunner().invoke(main, [
-            'init',
+        result = CliRunner().invoke(app, [
+            'project', 'init',
             '--name', 'Mutation Normalization Test',
             '--genbank', str(genbank_path),
             '--rules', str(rules_tsv),
@@ -432,8 +432,8 @@ class TestInitCli:
 
         db_path = tmp_path / 'append.db'
         runner = CliRunner()
-        init_result = runner.invoke(main, [
-            'init',
+        init_result = runner.invoke(app, [
+            'project', 'init',
             '--name', 'Append Test',
             '--genbank', str(genbank_path),
             '--rules', str(rules_initial),
@@ -449,14 +449,15 @@ class TestInitCli:
             'ref1\tgag\t3\tA\tV\tDRUGX\tresistant\t5x\n'
         )
 
-        append_result = runner.invoke(main, [
-            'init-add',
+        append_result = runner.invoke(app, [
+            'project', 'add',
             '--project', str(db_path),
             '--rules', str(rules_append),
             '--no-additional-info',
         ])
         assert append_result.exit_code == 0, append_result.output
-        assert 'duplicate rule(s) skipped' in append_result.output
+        # Rich may wrap the log line in non-TTY mode; collapse whitespace before checking.
+        assert 'duplicate rule(s) skipped' in ' '.join(append_result.output.split())
 
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
@@ -496,8 +497,8 @@ class TestInitCli:
             'ref1\tgag\t2\tK\tE\tDrugX\n'
         )
 
-        result = CliRunner().invoke(main, [
-            'init-add',
+        result = CliRunner().invoke(app, [
+            'project', 'add',
             '--project', str(tmp_path / 'missing.db'),
             '--genbank', str(genbank_path),
             '--rules', str(rules_tsv),
@@ -519,8 +520,8 @@ class TestInitCli:
             'REF1\tgag\t2\tK\tE\tDrugX\n'
         )
 
-        result = CliRunner().invoke(main, [
-            'init-add',
+        result = CliRunner().invoke(app, [
+            'project', 'add',
             '--project', str(db_path),
             '--rules', str(rules_tsv),
             '--no-additional-info',
@@ -545,8 +546,8 @@ class TestInitCli:
             'gag\t2\tK\tE\tDrugX\n'
         )
 
-        result = CliRunner().invoke(main, [
-            'init-add',
+        result = CliRunner().invoke(app, [
+            'project', 'add',
             '--project', str(db_path),
             '--rules', str(rules_tsv),
             '--no-additional-info',
@@ -575,8 +576,8 @@ class TestInitCli:
             'REF1\tpol\t2\tK\tE\tDrugX\n'
         )
 
-        result = CliRunner().invoke(main, [
-            'init',
+        result = CliRunner().invoke(app, [
+            'project', 'init',
             '--name', 'Missing Gene Test',
             '--genbank', str(genbank_path),
             '--rules', str(rules_tsv),
@@ -614,8 +615,8 @@ class TestInitCli:
             'gag\t2\tK\tE\tDrugX\n'
         )
 
-        result = CliRunner().invoke(main, [
-            'init',
+        result = CliRunner().invoke(app, [
+            'project', 'init',
             '--name', 'Ambiguous Ref Test',
             '--genbank', str(genbank_path),
             '--rules', str(rules_tsv),
@@ -635,8 +636,8 @@ class TestInitCli:
     ):
         """After profiling with --results-db, a run row and variant rows must be stored."""
         results_db = tmp_path / 'populated.db'
-        result = CliRunner().invoke(main, [
-            'profile-vcf',
+        result = CliRunner().invoke(app, [
+            'profile', 'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -664,7 +665,7 @@ class TestExportCli:
     """The ``export`` command has been removed; these tests verify it no longer exists."""
 
     def test_export_command_no_longer_exists(self, project_db: Path, tmp_path: Path):
-        result = CliRunner().invoke(main, [
+        result = CliRunner().invoke(app, [
             'export',
             '--project', str(project_db),
             '--output', str(tmp_path / 'bundle.zip'),

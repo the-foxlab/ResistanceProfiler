@@ -114,7 +114,7 @@ def _get_or_create_publication(
         if meta:
             if meta['doi'] and not doi:
                 doi = meta['doi']
-                logger.debug('Resolved PMID:%s → DOI %s', pubmed_id, doi)
+                logger.info('Resolved PMID:%s → DOI %s', pubmed_id, doi)
             prefetched_title = meta['title']
 
     cache_key = doi if doi else raw_input
@@ -532,12 +532,12 @@ def _validate_reference_amino_acids(
             if actual != ref_aa.upper():
                 mismatch_keys.add((gene_name, position_raw, reference_identifier, ref_aa))
                 mismatch_details.append(
-                    f'  gene {gene_name!r} pos {pos} ({coord_base}-based): '
+                    f'  {reference_identifier} gene {gene_name!r} pos {pos} ({coord_base}-based): '
                     f'rule says {ref_aa!r}, gene sequence has {actual!r} — rule will be skipped'
                 )
         else:
             out_of_range.append(
-                f'  gene {gene_name!r} pos {pos} ({coord_base}-based): '
+                f'  {reference_identifier} gene {gene_name!r} pos {pos} ({coord_base}-based): '
                 f'out of range (aa_sequence length = {len(aa_seq)}) — rule will be skipped'
             )
 

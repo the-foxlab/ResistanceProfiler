@@ -8,10 +8,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
+from typer.testing import CliRunner
 
 from conftest import TINY_REF_SEQ, TINY_REF_NAME
-from respro.cli import main
+from respro.cli import app
 from respro.core.annotate_fasta import _annotate_from_alignment, _expand_iupac_codon
 from respro.core.profile_fasta import profile_fasta_consensus
 from respro.core.profile_helpers import (
@@ -501,7 +501,7 @@ class TestProfileFastaCli:
             'user_ref\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
         )
 
-        result = CliRunner().invoke(main, [
+        result = CliRunner().invoke(app, [
             'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
@@ -521,7 +521,7 @@ class TestProfileFastaCli:
             'user_ref\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
         )
 
-        result = CliRunner().invoke(main, [
+        result = CliRunner().invoke(app, [
             'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
@@ -550,7 +550,7 @@ class TestProfileFastaCli:
 
         output_dir = tmp_path / 'fasta_ref_b_results'
         runner = CliRunner()
-        result = runner.invoke(main, [
+        result = runner.invoke(app, [
             'profile-vcf',
             '--project', str(fasta_db_multi_reference),
             '--vcf', str(vcf_path),
@@ -584,7 +584,7 @@ class TestProfileFastaCli:
         )
 
         output_dir = tmp_path / 'header_results'
-        result = CliRunner().invoke(main, [
+        result = CliRunner().invoke(app, [
             'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
@@ -615,7 +615,7 @@ class TestProfileFastaCli:
             'stored_ref\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
         )
 
-        result = CliRunner().invoke(main, [
+        result = CliRunner().invoke(app, [
             'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
@@ -624,7 +624,9 @@ class TestProfileFastaCli:
         ])
 
         assert result.exit_code != 0
-        assert 'Available cached headers: stored_ref' in result.output
+        normalized = ' '.join(result.output.split())
+        assert 'Available cached' in normalized
+        assert 'headers: stored_ref' in normalized
 
     def test_fasta_profile_detects_resistance_hit(
         self, fasta_db: Path, tmp_path: Path,
@@ -643,7 +645,7 @@ class TestProfileFastaCli:
 
         output_dir = tmp_path / 'fasta_results'
         runner = CliRunner()
-        result = runner.invoke(main, [
+        result = runner.invoke(app, [
             'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
@@ -673,7 +675,7 @@ class TestProfileFastaCli:
 
         output_dir = tmp_path / 'outside_results'
         runner = CliRunner()
-        result = runner.invoke(main, [
+        result = runner.invoke(app, [
             'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
@@ -702,7 +704,7 @@ class TestProfileFastaCli:
 
         output_dir = tmp_path / 'json_results'
         runner = CliRunner()
-        result = runner.invoke(main, [
+        result = runner.invoke(app, [
             'profile-vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
@@ -982,7 +984,7 @@ class TestFastaConsensusCli:
         fasta_path.write_text(f'>consensus\n{mutant}\n')
 
         output_dir = tmp_path / 'out'
-        result = CliRunner().invoke(main, [
+        result = CliRunner().invoke(app, [
             'profile-fasta',
             '--project', str(fasta_db),
             '--fasta', str(fasta_path),
@@ -1000,7 +1002,7 @@ class TestFastaConsensusCli:
         fasta_path.write_text(f'>identical\n{TINY_REF_SEQ}\n')
 
         output_dir = tmp_path / 'out'
-        result = CliRunner().invoke(main, [
+        result = CliRunner().invoke(app, [
             'profile-fasta',
             '--project', str(fasta_db),
             '--fasta', str(fasta_path),
