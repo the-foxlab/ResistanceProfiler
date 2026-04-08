@@ -175,6 +175,17 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   manually in SQLite; add a test that runs `init_project` from a TSV with `rule_group` entries
   and verifies the loaded rule sets match expectations; required before extending combo rule
   persistence
+- 🟡 Regression tests for combo rules with shared substitutions — no test currently verifies
+  that a variant shared between two rule sets causes both to fire independently with the shared
+  `AnnotatedVariant` appearing in both `ComboRuleHit.matched_variants`; add focused tests in
+  `TestMatchRuleSets` covering: (a) two rule sets that share one member mutation both fire when
+  all members are present, (b) only the rule set whose unique member is present fires when the
+  shared mutation is present but one rule set's unique member is absent
+- 🟢 Uniqueness constraint on `resistance_rule_set_member` — the schema lacks a UNIQUE
+  constraint on `(rule_set_id, gene_id, position, mutation)`; a malformed rule set with
+  duplicate members would allow a single variant to satisfy multiple member slots,
+  letting a rule fire with fewer distinct mutations than intended; add a DB-level UNIQUE
+  constraint and dedup validation in `_insert_combo_rule_sets` before inserting members
 - 🟢 N-of-M / OR-logic for combination rules — current AND-only semantics cannot express
   "at least 2 of these 3 mutations"; add an optional `min_members` field to the rule set so
   curators can describe partial co-occurrence resistance

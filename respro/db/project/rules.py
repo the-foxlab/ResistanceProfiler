@@ -656,10 +656,11 @@ def _insert_combo_rule_sets(
     :return: number of combination rule sets successfully inserted
     """
     # Group rows by rule_group value (preserves insertion order in Python ≥ 3.7).
+    # A row may carry a comma-separated list of group labels, assigning it to each group.
     groups: dict[str, list[dict]] = {}
     for row in combo_rows:
-        group_id = _get_value(row, 'rule_group')
-        groups.setdefault(group_id, []).append(row)
+        for group_id in [g.strip() for g in _get_value(row, 'rule_group').split(',') if g.strip()]:
+            groups.setdefault(group_id, []).append(row)
 
     count = 0
     for group_id, rows in groups.items():

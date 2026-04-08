@@ -352,6 +352,35 @@ class TestComboRuleParsing:
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=False)
 
+    def test_row_with_multiple_group_labels_creates_separate_rule_sets(
+        self, tmp_path, tiny_genbank
+    ) -> None:
+        # Row for gag pos 2 (K→E) belongs to both groups via comma-separated rule_group.
+        # Each group gets two members: the shared row plus one unique row.
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroupA, groupB
+            gag\ttiny_ref\t3\tA\tV\tDrugA\tresistant\tgroupA
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tgroupB
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                     rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        set_count = conn.execute('SELECT COUNT(*) FROM resistance_rule_set').fetchone()[0]
+        member_count = conn.execute('SELECT COUNT(*) FROM resistance_rule_set_member').fetchone()[0]
+        group_names = {
+            row[0]
+            for row in conn.execute('SELECT group_name FROM resistance_rule_set').fetchall()
+        }
+        conn.close()
+
+        assert set_count == 2          # two independent rule sets
+        assert member_count == 4       # 2 members each (shared + unique)
+        assert group_names == {'groupA', 'groupB'}
+
     def test_combo_group_inconsistent_drug_raises(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\

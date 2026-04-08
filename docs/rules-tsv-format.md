@@ -44,7 +44,7 @@ The following columns are required for every rules TSV:
 | `fold_ic_50`                         | Alias for `fold_ic50` | Optional. Mutually exclusive with `fold_ic50`.                                  |
 | `publication`                        | Literature reference | Free text, typically DOI or PubMed identifier.                                  |
 | `source`                             | Provenance label | Free text, e.g. source database name.                                           |
-| `rule_group`                         | Combination-rule label | Rows with the same non-empty value become one combination rule set.             |
+| `rule_group`                         | Combination-rule label | Rows with the same non-empty value become one combination rule set. Comma-separated values assign a row to multiple groups. |
 | `comment`                            | Free-text curator note | Optional. Any information the curator considers relevant; stored verbatim.      |
 
 ## Column-by-column rules
@@ -281,8 +281,10 @@ If a non-empty value contains no parseable numeric component, import fails.
 
 This column enables combination rules.
 
-- Empty or missing `rule_group` -> single rule.
-- Same non-empty `rule_group` across multiple rows -> one combination rule set.
+- Empty or missing `rule_group` → single rule.
+- Same non-empty `rule_group` across multiple rows → one combination rule set.
+- A comma-separated list of labels assigns the row to **each** named group independently
+  (e.g. `groupA, groupB` makes the row a member of both `groupA` and `groupB`).
 - At least two valid members are required per group.
 - All rows in a group must agree on:
   - `antiviral`
@@ -304,6 +306,16 @@ UL23	NC_001806	67	T	V	Aciclovir	resistant	8.0	4.0	doi.org/10.1234/example	herpes
 gene	reference_identifier	position	reference	mutation	antiviral	phenotype	ic50	publication	source	rule_group
 UL23	NC_001806	92	N	L	Aciclovir	resistant	8.0	doi.org/10.1234/example	herpesdrg-db	UL23_N92L+UL30_K715I
 UL30	NC_001806	715	K	I	Aciclovir	resistant	8.0	doi.org/10.1234/example	herpesdrg-db	UL23_N92L+UL30_K715I
+```
+
+A row may appear in multiple groups by providing a comma-separated label list.
+In this example the shared `UL23 N92L` mutation belongs to two groups:
+
+```tsv
+gene	reference_identifier	position	reference	mutation	antiviral	phenotype	rule_group
+UL23	NC_001806	92	N	L	Aciclovir	resistant	groupA, groupB
+UL30	NC_001806	715	K	I	Aciclovir	resistant	groupA
+UL30	NC_001806	300	D	E	Aciclovir	resistant	groupB
 ```
 
 ## Practical recommendation
