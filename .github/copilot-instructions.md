@@ -23,6 +23,7 @@ Keep this file focused on how code should be written in this repository.
   Place functions in named submodules (e.g. `respro/utils/files.py`) and import from there.
 - If any feature is removed from the codebase, remove all related tests.
 - If a feature is only loaded by tests remove it from the codebase.
+- Never write imports into functions or classes. Always import from the top level.
 
 ## Code style
 

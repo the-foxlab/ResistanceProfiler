@@ -271,9 +271,6 @@ def _build_potential_effects_rows(
         ann_is_indel = ann.consequence in ('insertion', 'deletion') or len(ann.alt_aa) != 1
 
         for rule in rules_by_pos[pos_key]:
-            # Skip wildcard rules (already matched as direct hits)
-            if rule.mutation.lower() == 'any':
-                continue
 
             # Indel observations should only be compared to indel-like rule tokens.
             rule_is_indel = rule.mutation.lower() == 'fsx' or any(ch.isdigit() for ch in rule.mutation)

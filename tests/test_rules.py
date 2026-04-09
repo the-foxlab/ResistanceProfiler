@@ -84,7 +84,7 @@ class TestMatchRules:
         result = match_rules([ann], [rule])
         assert not result[0].is_resistance_hit
 
-    def test_wildcard_match(self):
+    def test_any_token_is_not_matched_as_wildcard(self):
         rule = ResistanceRule(
             id=1, gene_name='gag', gene_id=1,
             drug_name='DrugA', drug_id=1,
@@ -98,7 +98,7 @@ class TestMatchRules:
             ref_aa='K', alt_aa='Q', consequence='missense',
         )
         result = match_rules([ann], [rule])
-        assert result[0].is_resistance_hit
+        assert not result[0].is_resistance_hit
 
     def test_stop_rule_star_is_not_wildcard(self):
         rule = ResistanceRule(
@@ -158,6 +158,76 @@ class TestMatchRules:
         assert len(result[0].rule_matches) == 2
         drug_names = {m.drug_name for m in result[0].rule_matches}
         assert drug_names == {'DrugA', 'DrugB'}
+
+    def test_deletion_rule_requires_full_reference_block(self):
+        rules = [
+            ResistanceRule(
+                id=1,
+                gene_name='gag',
+                gene_id=1,
+                drug_name='DrugA',
+                drug_id=1,
+                reference_identifier='',
+                position=4,
+                reference='YP',
+                mutation='Y',
+                phenotype='resistant',
+            ),
+            ResistanceRule(
+                id=2,
+                gene_name='gag',
+                gene_id=1,
+                drug_name='DrugB',
+                drug_id=2,
+                reference_identifier='',
+                position=4,
+                reference='YQ',
+                mutation='Y',
+                phenotype='resistant',
+            ),
+        ]
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=12, ref='A', alt='T', allele_freq=0.9, depth=100),
+            gene_name='gag',
+            codon_pos=4,
+            ref_aa='YP',
+            alt_aa='Y',
+            consequence='deletion',
+        )
+
+        result = match_rules([ann], rules)
+
+        assert len(result[0].rule_matches) == 1
+        assert result[0].rule_matches[0].drug_name == 'DrugA'
+
+    def test_insertion_rule_matches_by_mutation_state(self):
+        rules = [
+            ResistanceRule(
+                id=1,
+                gene_name='gag',
+                gene_id=1,
+                drug_name='DrugA',
+                drug_id=1,
+                reference_identifier='',
+                position=4,
+                reference='A',
+                mutation='FG',
+                phenotype='resistant',
+            )
+        ]
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=12, ref='A', alt='T', allele_freq=0.9, depth=100),
+            gene_name='gag',
+            codon_pos=4,
+            ref_aa='F',
+            alt_aa='FG',
+            consequence='insertion',
+        )
+
+        result = match_rules([ann], rules)
+
+        assert len(result[0].rule_matches) == 1
+        assert result[0].rule_matches[0].drug_name == 'DrugA'
 
 
 # ─── Helpers for combo rule tests ────────────────────────────────────────────
@@ -225,14 +295,14 @@ class TestMatchRuleSets:
         hits = match_rule_sets([syn, present], [rule_set])
         assert hits == []
 
-    def test_wildcard_member_matches_any_non_ref_aa(self):
+    def test_any_member_does_not_match_combo_rule(self):
         rule_set = _make_rule_set([('gag', 1, 'any'), ('gag', 5, 'V')])
         annotations = [
-            _make_ann('gag', 1, 'K', 'Q'),  # any non-ref matches
+            _make_ann('gag', 1, 'K', 'Q'),
             _make_ann('gag', 5, 'A', 'V'),
         ]
         hits = match_rule_sets(annotations, [rule_set])
-        assert len(hits) == 1
+        assert hits == []
 
     def test_empty_rule_sets_returns_empty(self):
         ann = _make_ann('gag', 1, 'K', 'E')
@@ -263,6 +333,48 @@ class TestMatchRuleSets:
         # positions in output are 1-based
         assert d['members'][0]['position'] == 2
         assert d['members'][1]['position'] == 6
+
+    def test_insertion_member_matches_by_mutation_state(self):
+        rs = ResistanceRuleSet(id=1, drug_name='DrugA', drug_id=1, phenotype='resistant')
+        rs.members.append(
+            ResistanceRuleSetMember(
+                id=1,
+                rule_set_id=1,
+                gene_name='gag',
+                gene_id=1,
+                reference_identifier='',
+                position=4,
+                reference='A',
+                mutation='FG',
+            )
+        )
+        rs.members.append(
+            ResistanceRuleSetMember(
+                id=2,
+                rule_set_id=1,
+                gene_name='gag',
+                gene_id=1,
+                reference_identifier='',
+                position=6,
+                reference='P',
+                mutation='V',
+            )
+        )
+
+        annotations = [
+            AnnotatedVariant(
+                variant=VariantCall(chrom='ref', pos=12, ref='A', alt='T', allele_freq=0.9, depth=100),
+                gene_name='gag',
+                codon_pos=4,
+                ref_aa='F',
+                alt_aa='FG',
+                consequence='insertion',
+            ),
+            _make_ann('gag', 6, 'P', 'V'),
+        ]
+
+        hits = match_rule_sets(annotations, [rs])
+        assert len(hits) == 1
 
 
 class TestLoadRuleSets:

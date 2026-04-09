@@ -766,6 +766,48 @@ class TestPhenotypeNormalization:
         assert drugs == {'druggood'}
         assert any('unsupported amino-acid tokens' in rec.message for rec in caplog.records)
 
+    def test_skips_single_rule_with_wildcard_like_any_token(self, tmp_path, tiny_genbank, caplog) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            gag\ttiny_ref\t2\tK\tany\tDrugBad\tresistant
+            gag\ttiny_ref\t6\tP\tV\tDrugGood\tresistant
+        """))
+        db = tmp_path / 'proj.db'
+
+        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
+        drugs = {row[0] for row in conn.execute('SELECT name FROM drug').fetchall()}
+        conn.close()
+
+        assert count == 1
+        assert drugs == {'druggood'}
+        assert any('unsupported amino-acid tokens' in rec.message for rec in caplog.records)
+
+    def test_skips_single_rule_with_wildcard_like_x_token(self, tmp_path, tiny_genbank, caplog) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            gag\ttiny_ref\t2\tK\tx\tDrugBad\tresistant
+            gag\ttiny_ref\t6\tP\tV\tDrugGood\tresistant
+        """))
+        db = tmp_path / 'proj.db'
+
+        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
+        drugs = {row[0] for row in conn.execute('SELECT name FROM drug').fetchall()}
+        conn.close()
+
+        assert count == 1
+        assert drugs == {'druggood'}
+        assert any('unsupported amino-acid tokens' in rec.message for rec in caplog.records)
+
     def test_skips_combo_group_with_unsupported_amino_acid_token(self, tmp_path, tiny_genbank, caplog) -> None:
         import logging
 
@@ -1007,7 +1049,7 @@ class TestAnchorlessDeletion:
         return gb
 
     def test_single_aa_deletion_loads(self, tmp_path, tiny_genbank) -> None:
-        # A at pos 3 (1-based); anchor K at pos 2; canonical mutation KA2K
+        # A at pos 3 (1-based); anchor K at pos 2; stored as reference=KA, mutation=K.
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
@@ -1026,11 +1068,11 @@ class TestAnchorlessDeletion:
         assert row is not None
         # Stored position is the anchor's 0-based index (1-based pos 2 → 0-based 1)
         assert row[0] == 1
-        assert row[1] == 'K'
-        assert row[2] == 'KA2K'
+        assert row[1] == 'KA'
+        assert row[2] == 'K'
 
     def test_multi_aa_deletion_loads(self, tmp_path, tiny_genbank) -> None:
-        # FG at pos 4-5 (1-based); anchor A at pos 3; canonical mutation AFG3A
+        # FG at pos 4-5 (1-based); anchor A at pos 3; stored as reference=AFG, mutation=A.
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
@@ -1048,8 +1090,68 @@ class TestAnchorlessDeletion:
 
         assert row is not None
         assert row[0] == 2   # anchor A at 0-based index 2
-        assert row[1] == 'A'
-        assert row[2] == 'AFG3A'
+        assert row[1] == 'AFG'
+        assert row[2] == 'A'
+
+    def test_accepts_direct_indel_columns_and_keeps_storage(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral
+            gag\ttiny_ref\t4\tF\tFDDD\tDrugIns
+            gag\ttiny_ref\t6\tPK\tP\tDrugDel
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(
+            db_path=db,
+            name='test',
+            genbank_paths=[tiny_genbank],
+            rules_tsv=tsv,
+            additional_info=False,
+        )
+
+        conn = sqlite3.connect(str(db))
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            'SELECT position, reference, mutation FROM resistance_rule ORDER BY id'
+        ).fetchall()
+        conn.close()
+
+        assert rows[0]['position'] == 3
+        assert rows[0]['reference'] == 'F'
+        assert rows[0]['mutation'] == 'FDDD'
+        assert rows[1]['position'] == 5
+        assert rows[1]['reference'] == 'PK'
+        assert rows[1]['mutation'] == 'P'
+
+    def test_legacy_indel_rewrite_is_stored_as_split_columns(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral
+            gag\ttiny_ref\t4\tF\tF4FDDD\tDrugIns
+            gag\ttiny_ref\t6\tP\tPK6P\tDrugDel
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(
+            db_path=db,
+            name='test',
+            genbank_paths=[tiny_genbank],
+            rules_tsv=tsv,
+            additional_info=False,
+        )
+
+        conn = sqlite3.connect(str(db))
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            'SELECT position, reference, mutation FROM resistance_rule ORDER BY id'
+        ).fetchall()
+        conn.close()
+
+        assert rows[0]['position'] == 3
+        assert rows[0]['reference'] == 'F'
+        assert rows[0]['mutation'] == 'FDDD'
+        assert rows[1]['position'] == 5
+        assert rows[1]['reference'] == 'PK'
+        assert rows[1]['mutation'] == 'P'
 
     def test_block_mismatch_raises(self, tmp_path, tiny_genbank) -> None:
         # reference=A is correct at pos 3, but mutation token claims 'Q' is deleted —

@@ -79,121 +79,112 @@ The following columns are required for every rules TSV:
 
 ### `mutation`
 
-This column stores the alternate state only. During import, `respro` normalizes
-accepted forms to canonical internal tokens.
+This column stores the alternate amino-acid state. Input is normalized during import.
 
-#### Preferred canonical writing (recommended for curation)
+Canonical internal tokens are:
 
-Use these forms when you curate or export rules manually:
+- single AA (`A`..`Y` from the 20 standard residues)
+- `*` (stop)
+- `fsX` (frameshift)
+- insertion token like `F50FGG`
+- deletion token like `FGG50F`
 
-1. **Substitution / stop**: single token (`L`, `*`, `any`)
-2. **Frameshift**: `fsX`
-3. **Insertion**: `REF + POSITION + ALT`, e.g. `F50FGG`
-4. **Deletion with explicit block**: `DELETED_BLOCK + POSITION + ANCHOR`, e.g. `FGG50F`
-
-The parser accepts additional input forms, but the canonical forms above are the
-most robust and easiest to review.
-
-#### Canonical internal mutation tokens
-
-| Canonical token | Meaning | Example display |
-|---|---|---|
-| `A`-`Z` | Specific alternate amino acid | `F67L` |
-| `*` | Stop gained | `F67*` |
-| `fsX` | Frameshift | `F67fsX` |
-| `F50FGG` | Insertion | `F50FGG` |
-| `FGG50F` | Deletion with explicit deleted block | `FGG50F` |
-| `any` | Wildcard for any non-reference amino acid | `F67any` |
-
-Allowed amino-acid letters are the 20 standard residues:
+Allowed AA letters for specific residues are:
 
 `A C D E F G H I K L M N P Q R S T V W Y`
 
-Any other letter in mutation tokens is treated as unsupported.
+Everything else (`X`, `B`, `J`, `Z`, `any`, etc.) is unsupported.
 
-#### Accepted substitution and stop inputs
+#### 1) Substitution (missense/synonymous/stop-loss target)
 
-| Input examples | Stored as |
+| Status | Forms |
 |---|---|
-| `F67L`, `f67l`, `*67L`, `F67F` | `L`, `L`, `L`, `F` |
-| `F67*`, `F67stop`, `F67STOP` | `*` |
-
-#### Accepted frameshift inputs
-
-| Input examples | Stored as |
-|---|---|
-| `F67fs`, `F67frameshift`, `F67fsX`, `F67fsATFF*` | `fsX` |
-| `fs`, `frameshift` | `fsX` |
-
-Practical examples:
-
-| Curator input | Stored token |
-|---|---|
-| `UL30 K539fs` | `fsX` |
-| `UL30 K539frameshift` | `fsX` |
-| `UL30 K539fsATGG*` | `fsX` |
-
-Only the fact that a frameshift occurred is retained. Any downstream frameshift
-sequence is discarded.
-
-#### Accepted insertion and deletion inputs
-
-| Input examples | Stored as |
-|---|---|
-| `F50FGG` | `F50FGG` |
-| `F50_F51insGG` | `F50FGG` |
-| `insGG` with `reference=F` and `position=50` | `F50FGG` |
-| `FGG50F` | `FGG50F` |
-| `F50delGG` | `FGG50F` |
-| `Q35del` with `reference=Q` and `position=35` | `KA34K` (anchor resolved from gene sequence) |
-| `FG4del` with `reference=F` and `position=4` | `AFG3A` (anchor resolved from gene sequence) |
-
-Practical examples:
-
-| Mutation type | Curator input | Stored token | Preferred canonical token |
-|---|---|---|---|
-| insertion | `F50FGG` | `F50FGG` | `F50FGG` |
-| insertion | `F50_F51insGG` | `F50FGG` | `F50FGG` |
-| insertion (context form) | `insGG` + `reference=F`, `position=50` | `F50FGG` | `F50FGG` |
-| deletion (explicit) | `FGG50F` | `FGG50F` | `FGG50F` |
-| deletion (explicit) | `F50delGG` | `FGG50F` | `FGG50F` |
-
-Rejected deletion inputs (not allowed):
-
-- `delF67`
-- `del67`
-- `del`
-
-Anchor-less deletion notation (`Q35del`, `FG4del`):
-
-- Write `{deleted_block}{position}del` in the `mutation` column.
-- Set `reference` to the first AA of the deleted block and `position` to the deletion start.
-- `respro init` fetches the anchor AA (the residue immediately preceding the deletion) from
-  the stored GenBank sequence and converts the token to canonical `ANCHOR+BLOCK+POS+ANCHOR` form.
-- Deletion at position 1 is rejected (no preceding anchor residue).
+| Allowed | single AA token (`L`, `E`, `M`), full rewrite form like `F67L` (stored as `L`) |
+| Not allowed | `X`, `x`, `any`, tokens containing non-standard AA letters |
 
 Notes:
 
-- Preferred insertion form: `REF + POSITION + ALT`, e.g. `F50FGG`.
-- Preferred deletion form: `DELETED_BLOCK + POSITION + ANCHOR`, e.g. `FGG50F`.
-- For best reproducibility, write insertions/deletions directly in canonical
-  form instead of relying on parser conversion.
+- Full rewrite substitution (`F67L`) is accepted and reduced to the right-side token (`L`).
+- `mutation == reference` is rejected as no-op during rule validation.
 
-#### Accepted wildcard inputs
+#### 2) Stop mutation
 
-| Input examples | Stored as |
+| Status | Forms |
 |---|---|
-| `any`, `x`, `X` | `any` |
+| Allowed | `*`, `STOP`, `F67*`, `F67stop` |
+| Not allowed | wildcard-like tokens (`any`, `X`) |
 
-#### Matching behavior
+Stored as canonical `*`.
 
-- Exact rule matching uses the normalized token.
-- Wildcard matching is only for canonical `any`.
-- `*` is treated as a specific stop event and is not wildcard.
-- No-op entries are rejected: after normalization, `mutation` must not be equal
-  to `reference` (example: `reference=E`, `mutation=E`).
-- Unsupported amino-acid tokens (outside the standard 20 letters, except `fsX`,
-  `*`, and `any`) are skipped and reported as warnings during import.
+#### 3) Frameshift
+
+| Status | Forms |
+|---|---|
+| Allowed | `fs`, `fsX`, `frameshift`, `F67fs`, `F67frameshift`, `F67fsATFF*` |
+| Not allowed | malformed tokens that do not start with frameshift notation |
+
+Stored as canonical `fsX`. Any downstream sequence after `fs` is discarded.
+
+#### 4) Insertion
+
+| Status | Forms |
+|---|---|
+| Allowed | canonical `F50FGG`, HGVS-like `F50_F51insGG`, context form `insGG` (requires row `reference` and `position`) |
+| Not allowed | `insGG` without `reference` or without `position`, malformed `ins` tokens |
+
+Stored in insertion canonical style: `ANCHOR + POSITION + RESULT` (e.g. `F50FGG`).
+
+#### 5) Deletion with explicit deleted block
+
+| Status | Forms |
+|---|---|
+| Allowed | canonical `FGG50F`, HGVS-like `F50delGG` |
+| Not allowed | prefix-deletion forms `delF67`, `del67`, bare `del` |
+
+Stored in deletion canonical style: `DELETED_BLOCK + POSITION + ANCHOR` (e.g. `FGG50F`).
+
+#### 6) Anchor-less deletion helper notation
+
+| Status | Forms |
+|---|---|
+| Allowed | `{deleted_block}{position}del`, e.g. `Q35del`, `FG4del` |
+| Not allowed | deletion starting at first residue (no upstream anchor), deleted block that does not match gene sequence |
+
+Behavior:
+
+- `position` in TSV is deletion start.
+- Import resolves the upstream anchor from the GenBank AA sequence.
+- Storage is converted to explicit deletion alleles (`reference` becomes anchor+deleted block, `mutation` becomes anchor).
+
+#### Matching and validation behavior
+
+- Rule matching is explicit allele matching only.
+- `*` is a specific stop event, not wildcard.
+- No-op entries are rejected (`mutation` equals `reference`).
+- Unsupported mutation tokens are skipped with warning during import.
+
+### TSV to database storage mapping (core rule columns)
+
+The table below shows how `reference_identifier` (spelling in TSV), `position`, `reference`, and
+`mutation` are interpreted and stored in `resistance_rule` / `resistance_rule_set_member`.
+
+| Mutation type | TSV `reference_identifier` | TSV `position` | TSV `reference` | TSV `mutation` | Stored DB `position` | Stored DB `reference` | Stored DB `mutation` |
+|---|---:|---:|---|---|---:|---|---|
+| Substitution (canonical) | `NC_001806` | `67` | `F` | `L` | `66` | `F` | `L` |
+| Substitution (rewrite form) | `NC_001806` | `67` | `F` | `F67L` | `66` | `F` | `L` |
+| Stop | `NC_001806` | `67` | `F` | `F67stop` | `66` | `F` | `*` |
+| Frameshift | `NC_001806` | `67` | `F` | `F67fsATFF*` | `66` | `F` | `fsX` |
+| Insertion (canonical) | `NC_001806` | `50` | `F` | `F50FGG` | `49` | `F` | `FGG` |
+| Insertion (HGVS-like) | `NC_001806` | `50` | `F` | `F50_F51insGG` | `49` | `F` | `FGG` |
+| Deletion (canonical) | `NC_001806` | `50` | `FGG` | `FGG50F` | `49` | `FGG` | `F` |
+| Deletion (HGVS-like) | `NC_001806` | `50` | `F` | `F50delGG` | `49` | `FGG` | `F` |
+| Anchor-less deletion | `NC_001806` | `35` | `Q` | `Q35del` | `33` | `KQ` | `K` |
+
+Storage notes:
+
+- Stored DB `position` is 0-based.
+- For single-AA substitutions and stop rules, DB keeps `reference` from TSV and stores only the alt token in `mutation`.
+- For insertions/deletions, DB stores explicit resulting alleles: `reference` and `mutation` are expanded/split for exact matching.
 
 ### `antiviral`
 

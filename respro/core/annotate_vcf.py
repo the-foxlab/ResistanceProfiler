@@ -338,13 +338,11 @@ def normalize_mutation(
     - ``fsX``      — frameshift at this codon
     - ``F50FGG``   — insertion: insertion after F50 resulting in ``FGG``
     - ``FGG50F``   — deletion: deletion from ``FGG`` to ``F`` at anchor position 50
-    - ``any``      — wildcard: matches any non-reference amino acid at this position
 
     The function accepts full notation and common flexible input forms used in
     resistance tables. It normalizes to the project notation above.
 
-    Bare ``x`` / ``X`` are treated as wildcards (``any``).  Bare ``*`` means
-    stop-gained and already follows the canonical nomenclature.
+    Bare ``*`` means stop-gained and already follows the canonical nomenclature.
 
     :param raw: raw string from the mutation column of a rules TSV
     :param reference: optional reference AA from the rules row
@@ -410,10 +408,6 @@ def normalize_mutation(
 
     # ── Bare tokens ───────────────────────────────────────────────────────────
 
-    # Wildcard
-    if s_upper == 'ANY':
-        return 'any'
-
     # Bare stop token/word
     if s == '*' or s_upper == 'STOP':
         return '*'
@@ -433,10 +427,11 @@ def normalize_mutation(
     if s_upper == 'DEL':
         return None
 
-    # Single amino acid letter — bare 'X'/'x' is treated as wildcard
+    # Single amino acid letter
     if _RE_BARE_AA.match(s):
-        alt = s_upper
-        return 'any' if alt == 'X' else alt
+        if s_upper == 'X':
+            return None
+        return s_upper
 
     return None
 

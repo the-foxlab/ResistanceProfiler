@@ -116,10 +116,10 @@ class TestNormalizeMutation:
         assert normalize_mutation('insGG', reference='F', position_1based=50) == 'F50FGG'
         assert normalize_mutation('insGG') is None
 
-    def test_wildcard_notation(self):
-        assert normalize_mutation('any') == 'any'
-        assert normalize_mutation('x') == 'any'
-        assert normalize_mutation('X') == 'any'
+    def test_rejects_wildcard_notation(self):
+        assert normalize_mutation('any') is None
+        assert normalize_mutation('x') is None
+        assert normalize_mutation('X') is None
 
     def test_bare_star_is_stop(self):
         assert normalize_mutation('*') == '*'

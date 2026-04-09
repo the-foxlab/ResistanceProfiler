@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from respro.io.pubchem import lookup_drug
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,6 @@ def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
     :param conn: SQLite database connection (row_factory must be sqlite3.Row)
     :param project_id: project ID used to scope the drug lookup
     """
-    from respro.io.pubchem import lookup_drug
 
     conn.row_factory = sqlite3.Row
     drug_rows = conn.execute(

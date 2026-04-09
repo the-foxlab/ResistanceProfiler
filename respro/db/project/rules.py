@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 # Detects anchor-less deletion tokens emitted by companion database converters.
 # Form: one or more AA letters + position digits + "del" (case-insensitive), e.g. "Q35del", "DD676del".
 _RE_ANCHORLESS_DEL = re.compile(r'^([A-Za-z]+)\d+del$', re.IGNORECASE)
+_RE_REWRITE_TOKEN = re.compile(r'^([A-Z*]+)(\d+)([A-Z*]+)$')
 
 
 def _normalize_publication_token(token: str) -> tuple[str, str, str]:
@@ -311,7 +312,7 @@ def _normalize_phenotypes_from_row(
 
 def _is_noop_mutation(reference_aa: str, mutation: str) -> bool:
     """Return True when a rule encodes no amino-acid change."""
-    return len(reference_aa) == 1 and len(mutation) == 1 and reference_aa.upper() == mutation.upper()
+    return reference_aa.upper() == mutation.upper()
 
 
 def _is_supported_mutation_token(mutation: str) -> bool:
@@ -319,17 +320,84 @@ def _is_supported_mutation_token(mutation: str) -> bool:
     aa_letters = frozenset('ACDEFGHIKLMNPQRSTVWY')
 
     token = mutation.upper()
-    if token in {'FSX', '*', 'ANY'}:
-        return True
-    if len(token) == 1:
-        return token in aa_letters
-
-    match = re.fullmatch(r'([A-Z]+)(\d+)([A-Z]+)', token)
-    if match is None:
+    if token == 'ANY':
         return False
+    if token in {'FSX', '*'}:
+        return True
+    if re.fullmatch(r'[A-Z]+', token):
+        return set(token) <= aa_letters
+    return False
 
-    left, _, right = match.groups()
-    return set(left) <= aa_letters and set(right) <= aa_letters
+
+def _normalize_rule_alleles_for_storage(
+    *,
+    reference_aa: str,
+    mutation_raw: str,
+    position_0based: int,
+    context: str,
+    errors: list[str],
+) -> tuple[int, str, str] | None:
+    """
+    Normalize one rule row to canonical DB storage columns.
+
+    Supports both legacy rewrite notation (e.g. ``Y4YDDD``, ``YP4Y``) and
+    the new spaltenorientierte representation (e.g. ``reference='YP', mutation='Y'``).
+
+    :param reference_aa: value from TSV reference column
+    :param mutation_raw: value from TSV mutation column
+    :param position_0based: row position converted to 0-based
+    :param context: human-readable context for validation errors
+    :param errors: shared error collector
+    :return: (position_0based, reference, mutation) or None on validation failure
+    """
+    reference = reference_aa.strip().upper()
+    mutation_input = mutation_raw.strip()
+    if not reference or not mutation_input:
+        return None
+
+    token_upper = mutation_input.upper()
+    is_direct_aa_token = (
+        re.fullmatch(r'[A-Za-z*]+', mutation_input) is not None
+        and not token_upper.startswith('INS')
+        and token_upper != 'DEL'
+    )
+
+    if is_direct_aa_token:
+        if token_upper in {'*', 'STOP'}:
+            mutation = '*'
+        elif token_upper.startswith('FS') or token_upper.startswith('FRAMESHIFT'):
+            mutation = 'fsX'
+        else:
+            mutation = token_upper
+    else:
+        mutation = normalize_mutation(
+            mutation_input,
+            reference=reference,
+            position_1based=position_0based + 1,
+        )
+        if mutation is None:
+            errors.append(f'{context}: unrecognised mutation {mutation_raw!r}')
+            return None
+
+    rewrite_match = _RE_REWRITE_TOKEN.fullmatch(mutation.upper())
+    if rewrite_match is None:
+        return position_0based, reference, mutation
+
+    left, pos_text, right = rewrite_match.groups()
+
+    # SNP-style rewrites keep mutation-only storage (alt AA token).
+    if len(left) == 1 and len(right) == 1:
+        return position_0based, reference, right
+
+    anchor_pos_0based = int(pos_text) - 1
+    if anchor_pos_0based != position_0based:
+        errors.append(
+            f'{context}: position {position_0based + 1} conflicts with mutation token '
+            f'{mutation!r} (anchor position is {anchor_pos_0based + 1})'
+        )
+        return None
+
+    return anchor_pos_0based, left, right
 
 
 def _resolve_rule_gene_id(candidates: list[sqlite3.Row], reference_identifier: str) -> int | None:
@@ -437,6 +505,7 @@ def _detect_coordinate_base(
 
         if not ref_aa or not position_raw or gene_name not in genes_by_name:
             continue
+        anchor_ref = ref_aa[0].upper()
 
         reference_identifier = _get_value(row, 'reference_identifier')
         aa_seq = _get_gene_aa_sequence(genes_by_name[gene_name], reference_identifier)
@@ -449,9 +518,9 @@ def _detect_coordinate_base(
             continue
 
         verifiable += 1
-        if 1 <= pos <= len(aa_seq) and aa_seq[pos - 1].upper() == ref_aa.upper():
+        if 1 <= pos <= len(aa_seq) and aa_seq[pos - 1].upper() == anchor_ref:
             matches_1based += 1
-        if 0 <= pos < len(aa_seq) and aa_seq[pos].upper() == ref_aa.upper():
+        if 0 <= pos < len(aa_seq) and aa_seq[pos].upper() == anchor_ref:
             matches_0based += 1
 
     if verifiable == 0:
@@ -527,9 +596,11 @@ def _validate_reference_amino_acids(
             continue
 
         pos_0based = pos - coord_base
-        if 0 <= pos_0based < len(aa_seq):
-            actual = aa_seq[pos_0based].upper()
-            if actual != ref_aa.upper():
+        ref_block = ref_aa.upper()
+        end_pos = pos_0based + len(ref_block)
+        if 0 <= pos_0based and end_pos <= len(aa_seq):
+            actual = aa_seq[pos_0based:end_pos].upper()
+            if actual != ref_block:
                 mismatch_keys.add((gene_name, position_raw, reference_identifier, ref_aa))
                 mismatch_details.append(
                     f'  {reference_identifier} gene {gene_name!r} pos {pos} ({coord_base}-based): '
@@ -817,18 +888,20 @@ def _insert_combo_rule_sets(
                     continue
                 position_0based, reference_aa, mutation_raw = resolved
 
-            mutation = normalize_mutation(
-                mutation_raw,
-                reference=reference_aa,
-                position_1based=position_0based + 1,
-            )
-            if mutation is None:
-                errors.append(
+            normalized = _normalize_rule_alleles_for_storage(
+                reference_aa=reference_aa,
+                mutation_raw=mutation_raw,
+                position_0based=position_0based,
+                context=(
                     f'Combo rule group {group_id!r}: member for gene {gene_name!r} '
-                    f'pos {position_raw!r} has unrecognised mutation {mutation_raw!r}'
-                )
+                    f'pos {position_raw!r}'
+                ),
+                errors=errors,
+            )
+            if normalized is None:
                 group_ok = False
                 continue
+            position_0based, reference_aa, mutation = normalized
 
             if _is_noop_mutation(reference_aa, mutation):
                 errors.append(
@@ -1052,17 +1125,16 @@ def _load_resistance_rules(
             errors=errors,
             context=f'Rule for gene {gene_name!r} pos {position_raw!r}',
         )
-        mutation = normalize_mutation(
-            mutation_raw,
-            reference=reference_aa,
-            position_1based=position_0based + 1,
+        normalized = _normalize_rule_alleles_for_storage(
+            reference_aa=reference_aa,
+            mutation_raw=mutation_raw,
+            position_0based=position_0based,
+            context=f'Rule for gene {gene_name!r} pos {position_raw!r}',
+            errors=errors,
         )
-        if mutation is None:
-            errors.append(
-                f'Rule for gene {gene_name!r} pos {position_raw!r}: '
-                f'unrecognised mutation {mutation_raw!r}'
-            )
+        if normalized is None:
             continue
+        position_0based, reference_aa, mutation = normalized
 
         if _is_noop_mutation(reference_aa, mutation):
             errors.append(

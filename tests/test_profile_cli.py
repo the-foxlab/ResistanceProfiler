@@ -378,7 +378,6 @@ class TestInitCli:
             'NC_000001\tgag\t2\tK\tF2STOP\tDrugStop\tresistant\n'
             'NC_000001\tgag\t2\tK\tK2frameshift\tDrugFs\tresistant\n'
             'NC_000001\tgag\t2\tK\tK2delQ\tDrugDel\tresistant\n'
-            'NC_000001\tgag\t2\tK\tany\tDrugAny\tresistant\n'
         )
 
         db_path = tmp_path / 'project_norm.db'
@@ -403,8 +402,7 @@ class TestInitCli:
 
         observed = {row['drug_name']: row['mutation'] for row in rows}
         assert observed == {
-            'drugany': 'any',
-            'drugdel': 'KQ2K',
+            'drugdel': 'K',
             'drugfs': 'fsX',
             'drugstop': '*',
         }

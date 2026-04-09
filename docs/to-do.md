@@ -25,7 +25,8 @@ Mark items done and update priorities after each completed milestone.
 - [x] Organism and taxonomy metadata stored per reference
 - [x] Multi-reference support — multiple pathogens in one project database
 - [x] Rules TSV parsing and validation (all required and optional columns)
-- [x] Mutation normalization (`normalize_mutation`) — canonical token set covering SNPs, indels, frameshifts, wildcards, HGVS-like notation
+- [x] Mutation normalization (`normalize_mutation`) — canonical token set covering SNPs, indels, frameshifts, and HGVS-like notation
+- [x] INDEL rule storage model switched to explicit `position` + `reference` + `mutation` alleles (legacy rewrite notation still accepted on import)
 - [x] Phenotype and clinical phenotype normalization
 - [x] IC50 column support — `ic50`/`ic_50` and `fold_ic50`/`fold_ic_50` stored separately; both may coexist in one file; report columns shown only when values are present; empty optional columns (ic50, fold_ic50, clinical_phenotype, source) hidden per table section
 - [x] Drug deduplication — case-insensitive; biological duplicate detection for `init-add`
@@ -62,7 +63,7 @@ Mark items done and update priorities after each completed milestone.
 
 ### Resistance rule matching
 
-- [x] Single-mutation rule matching — exact and wildcard (`any`) per-position matching
+- [x] Single-mutation rule matching — explicit per-position allele matching only (no wildcard token support)
 - [x] Combination rule matching (`match_rule_sets`) — all members must co-occur to fire
 - [x] BLOSUM62 similarity scoring for matched substitutions (`core/similarity.py`)
 
