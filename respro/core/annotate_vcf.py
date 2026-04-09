@@ -23,35 +23,6 @@ _RE_DEL_PREFIX = re.compile(r'^del([A-Z*]+)?(?:[A-Z*]\d+|\d+)$', re.IGNORECASE)
 _RE_BARE_AA = re.compile(r'^[A-Z]$', re.IGNORECASE)
 
 
-def reverse_complement(seq: str) -> str:
-    """
-    Return the reverse complement of a DNA sequence.
-
-    :param seq: DNA sequence
-    :return: reverse complement of the sequence
-    """
-    return str(Seq(seq.upper()).reverse_complement())
-
-
-def translate_codon(codon: str) -> str:
-    """
-    Translate a three-letter DNA codon to a single-letter amino acid.
-
-    Returns '*' for stop codons, '?' for ambiguous or invalid codons.
-
-    :param codon: three-letter DNA codon
-    :return: single-letter amino acid code
-    """
-    codon = codon.upper()
-    if len(codon) != 3:
-        return '?'
-    try:
-        aa = str(Seq(codon).translate())
-        return aa if aa else '?'
-    except Exception:
-        return '?'
-
-
 def annotate_variants(
     variants: list[VariantCall],
     genes: list[GeneRecord],
@@ -81,7 +52,6 @@ def annotate_variants(
 
     for var_idx, var in enumerate(variants):
         matching_genes = [g for g in genes if g.contains(var.pos)]
-
         if not matching_genes:
             results.append(AnnotatedVariant(variant=var))
             continue
@@ -109,6 +79,35 @@ def annotate_variants(
         skipped_non_snp,
     )
     return results
+
+
+def reverse_complement(seq: str) -> str:
+    """
+    Return the reverse complement of a DNA sequence.
+
+    :param seq: DNA sequence
+    :return: reverse complement of the sequence
+    """
+    return str(Seq(seq.upper()).reverse_complement())
+
+
+def translate_codon(codon: str) -> str:
+    """
+    Translate a three-letter DNA codon to a single-letter amino acid.
+
+    Returns '*' for stop codons, '?' for ambiguous or invalid codons.
+
+    :param codon: three-letter DNA codon
+    :return: single-letter amino acid code
+    """
+    codon = codon.upper()
+    if len(codon) != 3:
+        return '?'
+    try:
+        aa = str(Seq(codon).translate())
+        return aa if aa else '?'
+    except Exception:
+        return '?'
 
 
 def _is_snp(ref: str, alt: str) -> bool:
@@ -435,40 +434,4 @@ def normalize_mutation(
 
     return None
 
-
-# ──────────────────────────────────────────────────────────────────────
-# Allele-frequency binning
-# ──────────────────────────────────────────────────────────────────────
-
-def assign_af_bins(
-    annotations: list[AnnotatedVariant],
-    bins: dict[str, tuple[float, float]] | None = None,
-) -> list[AnnotatedVariant]:
-    """
-    Assign an allele-frequency bin label to each annotated variant.
-
-    Mutates ``af_bin`` in place and returns the same list.
-
-    :param annotations: annotated variants to bin
-    :param bins: mapping of bin label to (lower_inclusive, upper_inclusive);
-        defaults to the built-in high/intermediate/low bins
-    :return: the same annotations list with af_bin populated
-    """
-    if bins is None:
-        bins = {
-            'high': (0.75, 1.0),
-            'intermediate': (0.25, 0.7499),
-            'low': (0.01, 0.2499),
-        }
-
-    # Sort bins by lower bound descending so higher bins are checked first
-    sorted_bins = sorted(bins.items(), key=lambda x: -x[1][0])
-
-    for ann in annotations:
-        af = ann.variant.allele_freq
-        for label, (lo, hi) in sorted_bins:
-            if lo <= af <= hi:
-                ann.af_bin = label
-
-    return annotations
 

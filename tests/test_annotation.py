@@ -4,12 +4,12 @@ Tests for codon-aware annotation logic.
 
 from respro.core.annotate_vcf import (
     annotate_variants,
-    assign_af_bins,
     normalize_mutation,
     reverse_complement,
     translate_codon,
     _classify_snp_consequence,
 )
+from respro.cli_helpers import assign_af_bins
 from respro.db.models import AnnotatedVariant, GeneRecord, VariantCall
 
 

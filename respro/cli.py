@@ -251,7 +251,7 @@ def init_add(
     """
     console = Console(highlight=False)
     try:
-        with err_console.status('[dim]Updating project…[/dim]'):
+        with err_console.status('[dim]Updating project database…[/dim]'):
             db_path = add_to_project(
                 db_path=project,
                 genbank_paths=list(genbank_paths or []),
@@ -396,7 +396,7 @@ def profile_vcf(
         )
 
         if ref_fasta is not None:
-            with err_console.status('[dim]Profiling vcf…[/dim]'):
+            with err_console.status('[dim]Aligning reference to internal references…[/dim]'):
                 query_name, query_seq, fasta_matches = resolve_fasta_query(
                     project_conn, ref_fasta, use_cache=use_cache, cores=cores,
                 )
@@ -538,7 +538,7 @@ def profile_fasta(
             str(results_db) if results_db else None, project_conn, logger,
         )
 
-        with err_console.status('[dim]Profiling fasta sequence…[/dim]'):
+        with err_console.status('[dim]Aligning fasta sequence to internal references…[/dim]'):
             query_name, query_seq, fasta_matches = resolve_fasta_query(
                 project_conn, consensus_fasta, use_cache=False, cores=cores,
             )

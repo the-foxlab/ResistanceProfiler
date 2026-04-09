@@ -105,7 +105,7 @@ def match_query_to_genes(
                 result.cds_coverage * 100, result.query_coverage * 100, result.strand,
             )
             matches.append(result)
-
+    # select the internal ref with the highest identity
     matches.sort(key=lambda m: -m.identity)
     return matches
 

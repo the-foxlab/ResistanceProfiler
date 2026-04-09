@@ -15,7 +15,7 @@ import click
 
 from respro.core.profile_helpers import pick_best_reference_id, select_matches_for_reference
 from respro.core.resistance_rules import load_rule_sets, load_rules, match_rule_sets, match_rules
-from respro.core.annotate_vcf import assign_af_bins
+from respro.db.models import AnnotatedVariant
 from respro.db.models import CoverageGap
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.results import save_run
@@ -211,3 +211,34 @@ def _finalize_and_export(
 
     return result, outputs
 
+def assign_af_bins(
+    annotations: list[AnnotatedVariant],
+    bins: dict[str, tuple[float, float]] | None = None,
+) -> list[AnnotatedVariant]:
+    """
+    Assign an allele-frequency bin label to each annotated variant.
+
+    Mutates ``af_bin`` in place and returns the same list.
+
+    :param annotations: annotated variants to bin
+    :param bins: mapping of bin label to (lower_inclusive, upper_inclusive);
+        defaults to the built-in high/intermediate/low bins
+    :return: the same annotations list with af_bin populated
+    """
+    if bins is None:
+        bins = {
+            'high': (0.75, 1.0),
+            'intermediate': (0.25, 0.7499),
+            'low': (0.01, 0.2499),
+        }
+
+    # Sort bins by lower bound descending so higher bins are checked first
+    sorted_bins = sorted(bins.items(), key=lambda x: -x[1][0])
+
+    for ann in annotations:
+        af = ann.variant.allele_freq
+        for label, (lo, hi) in sorted_bins:
+            if lo <= af <= hi:
+                ann.af_bin = label
+
+    return annotations

@@ -24,6 +24,7 @@ Keep this file focused on how code should be written in this repository.
 - If any feature is removed from the codebase, remove all related tests.
 - If a feature is only loaded by tests remove it from the codebase.
 - Never write imports into functions or classes. Always import from the top level.
+- Try to write important functions with main functionality first and helper functions afterwards.
 
 ## Code style
 
