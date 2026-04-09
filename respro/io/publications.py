@@ -63,7 +63,7 @@ def fetch_pubmed_metadata(pmid: str, timeout: int = 3) -> dict | None:
         return None
 
 
-def fetch_publication_metadata(doi: str, timeout: int = 3) -> dict | None:
+def fetch_publication_metadata(doi: str, timeout: int = 5) -> dict | None:
     """
     Fetch a publication title from the CrossRef API.
 
