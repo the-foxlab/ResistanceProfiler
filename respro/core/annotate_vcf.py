@@ -60,12 +60,11 @@ def annotate_variants(
     """
     Annotate a list of variants with codon-aware amino acid consequences.
 
-    Handles SNPs, insertions, deletions, and frameshifts. Variants outside
-    any CDS are included with empty gene_name.
+    Handles SNPs only. Non-SNP variants are ignored in CDS annotation.
+    Variants outside any CDS are included with empty gene_name.
 
     SNP consequences can use a query codon from FASTA-based remapping when
-    available (``VariantCall.query_ref_codon``). Indels are always annotated
-    against the internal CDS sequence.
+    available (``VariantCall.query_ref_codon``).
 
     :param variants: parsed variant calls (0-based positions). Variants with no CDS hit are
         included with empty gene_name. If two or more SNPs in the same gene codon all have
@@ -77,6 +76,7 @@ def annotate_variants(
     :return: list of AnnotatedVariant
     """
     results: list[AnnotatedVariant] = []
+    skipped_non_snp = 0
     group_plan = _plan_combined_snp_groups(variants, genes, snp_combine_af_threshold)
 
     for var_idx, var in enumerate(variants):
@@ -95,26 +95,25 @@ def annotate_variants(
                     members = [variants[i] for i in group]
                     results.append(_annotate_combined_snp_codon(members, gene))
                 continue
-            results.append(
-                _annotate_variant_in_gene(var, gene)
-            )
+            ann = _annotate_variant_in_gene(var, gene)
+            if ann is None:
+                skipped_non_snp += 1
+                continue
+            results.append(ann)
 
     logger.info(
-        'Annotated %d variant(s) -> %d annotation(s) (%d in CDS)',
+        'Annotated %d variant(s) -> %d annotation(s) (%d in CDS, %d non-SNP skipped)',
         len(variants),
         len(results),
         sum(1 for a in results if a.gene_name),
+        skipped_non_snp,
     )
     return results
 
 
-def _variant_type(ref: str, alt: str) -> str:
-    """Classify a variant as SNP, INS, or DEL based on allele lengths."""
-    if len(ref) == 1 and len(alt) == 1:
-        return 'SNP'
-    if len(alt) > len(ref):
-        return 'INS'
-    return 'DEL'
+def _is_snp(ref: str, alt: str) -> bool:
+    """Return True when both REF and ALT are single nucleotides."""
+    return len(ref) == 1 and len(alt) == 1
 
 
 def _plan_combined_snp_groups(
@@ -132,7 +131,7 @@ def _plan_combined_snp_groups(
     """
     grouped: dict[tuple[int, int], list[int]] = {}
     for idx, var in enumerate(variants):
-        if _variant_type(var.ref, var.alt) != 'SNP':
+        if not _is_snp(var.ref, var.alt):
             continue
         for gene in genes:
             if not gene.contains(var.pos):
@@ -227,13 +226,13 @@ def _annotate_combined_snp_codon(
 def _annotate_variant_in_gene(
     var: VariantCall,
     gene: GeneRecord,
-) -> AnnotatedVariant:
+) -> AnnotatedVariant | None:
     """
-    Annotate a single variant (SNP, insertion, or deletion) within a gene.
+    Annotate a single SNP within a gene.
 
     Uses the gene's stored CDS nucleotide sequence in coding orientation
-    to split into codons, apply the variant, and determine the amino acid
-    consequence.
+    to split into codons, apply the SNP, and determine the amino acid
+    consequence. Non-SNP variants are ignored.
     """
 
     seq_cds = gene.nt_sequence.upper()
@@ -243,11 +242,9 @@ def _annotate_variant_in_gene(
     # Convert genomic variant to CDS coordinates
     if gene.strand == '-':
         cds_variant_pos = (gene.end - 1) - var.pos
-        ref = reverse_complement(var.ref)
         mut = reverse_complement(var.alt)
     else:
         cds_variant_pos = var.pos - gene.start
-        ref = var.ref
         mut = var.alt
 
     coding_variant_pos = cds_variant_pos - gene.codon_start
@@ -263,18 +260,10 @@ def _annotate_variant_in_gene(
     if mut_codon_idx < 0 or mut_codon_idx >= len(cds_codons):
         return AnnotatedVariant(variant=var, gene_name=gene.name)
 
-    vtype = _variant_type(var.ref, var.alt)
+    if not _is_snp(var.ref, var.alt):
+        return None
 
-    if vtype == 'SNP':
-        return _annotate_snp(var, gene, cds_codons, mut_codon_idx, codon_pos_in_codon, mut)
-    elif vtype == 'INS':
-        return _annotate_insertion(
-            var, gene, cds_codons, mut_codon_idx, codon_pos_in_codon, ref, mut
-        )
-    else:
-        return _annotate_deletion(
-            var, gene, cds_codons, mut_codon_idx, codon_pos_in_codon, ref, mut
-        )
+    return _annotate_snp(var, gene, cds_codons, mut_codon_idx, codon_pos_in_codon, mut)
 
 
 def _annotate_snp(
@@ -314,121 +303,6 @@ def _annotate_snp(
         alt_codon=alt_codon_str,
         ref_aa=ref_aa,
         alt_aa=alt_aa,
-        consequence=consequence,
-    )
-
-
-def _annotate_insertion(
-    var: VariantCall,
-    gene: GeneRecord,
-    cds_codons: list[list[str]],
-    mut_codon_idx: int,
-    codon_pos: int,
-    ref: str,
-    mut: str,
-) -> AnnotatedVariant:
-    """Annotate an insertion variant."""
-    ref_codon_str = ''.join(cds_codons[mut_codon_idx])
-    ref_aa = translate_codon(ref_codon_str)
-    inserted_bases = mut[len(ref):]
-
-    # Non-triplet insertion → frameshift
-    if len(inserted_bases) % 3 != 0:
-        return AnnotatedVariant(
-            variant=var,
-            gene_name=gene.name,
-            codon_pos=mut_codon_idx,
-            ref_codon=ref_codon_str,
-            alt_codon='',
-            ref_aa=ref_aa,
-            alt_aa='fsX',
-            consequence='frameshift',
-        )
-
-    # In-frame insertion: splice inserted bases into the codon context and translate
-    alt_codon_bases = list(cds_codons[mut_codon_idx])
-    alt_codon_bases[codon_pos] = mut
-    expanded_seq = ''.join(alt_codon_bases)
-    alt_aa_seq = str(Seq(expanded_seq).translate())
-
-    consequence = 'insertion'
-    if mut_codon_idx == 0 and (not alt_aa_seq or alt_aa_seq[0] != 'M'):
-        consequence = 'start_lost'
-    elif ref_aa != '*' and '*' in alt_aa_seq[1:]:
-        consequence = 'nonsense'
-    elif ref_aa == '*' and '*' not in alt_aa_seq:
-        consequence = 'stop_loss'
-
-    return AnnotatedVariant(
-        variant=var,
-        gene_name=gene.name,
-        codon_pos=mut_codon_idx,
-        ref_codon=ref_codon_str,
-        alt_codon=expanded_seq,
-        ref_aa=ref_aa,
-        alt_aa=alt_aa_seq,
-        consequence=consequence,
-    )
-
-
-def _annotate_deletion(
-    var: VariantCall,
-    gene: GeneRecord,
-    cds_codons: list[list[str]],
-    mut_codon_idx: int,
-    codon_pos: int,
-    ref: str,
-    mut: str,
-) -> AnnotatedVariant:
-    """Annotate a deletion variant."""
-    ref_codon_str = ''.join(cds_codons[mut_codon_idx])
-    ref_aa = translate_codon(ref_codon_str)
-    deleted_bases = len(ref) - len(mut)
-
-    # Non-triplet deletion → frameshift
-    if deleted_bases % 3 != 0:
-        return AnnotatedVariant(
-            variant=var,
-            gene_name=gene.name,
-            codon_pos=mut_codon_idx,
-            ref_codon=ref_codon_str,
-            alt_codon='',
-            ref_aa=ref_aa,
-            alt_aa='fsX',
-            consequence='frameshift',
-        )
-
-    # In-frame deletion: determine affected codons and compute resulting AA
-    deleted_codons = deleted_bases // 3
-    if codon_pos == 2:
-        # Deletion starts at the last position of this codon → next codons are deleted
-        affected = cds_codons[mut_codon_idx:mut_codon_idx + 1 + deleted_codons]
-        deletion_seq = ''.join(sum(affected, []))
-        deletion_aa = str(Seq(deletion_seq).translate())
-        new_aa = ref_aa
-    else:
-        end_idx = mut_codon_idx + 1 + deleted_codons
-        affected = cds_codons[mut_codon_idx:end_idx]
-        deletion_seq = ''.join(sum(affected, []))
-        deletion_aa = str(Seq(deletion_seq).translate())
-        # New codon is the kept prefix of the first codon + kept suffix of the last codon
-        remaining = affected[0][:codon_pos + 1] + affected[-1][codon_pos + 1:]
-        new_aa = str(Seq(''.join(remaining)).translate()) if len(remaining) == 3 else '?'
-
-    consequence = 'deletion'
-    if mut_codon_idx == 0 and new_aa != 'M':
-        consequence = 'start_lost'
-    elif '*' in deletion_aa and new_aa != '*':
-        consequence = 'stop_loss'
-
-    return AnnotatedVariant(
-        variant=var,
-        gene_name=gene.name,
-        codon_pos=mut_codon_idx,
-        ref_codon=ref_codon_str,
-        alt_codon=''.join(sum(cds_codons[mut_codon_idx:mut_codon_idx + 1], [])),
-        ref_aa=deletion_aa,
-        alt_aa=new_aa,
         consequence=consequence,
     )
 
@@ -597,20 +471,9 @@ def assign_af_bins(
 
     for ann in annotations:
         af = ann.variant.allele_freq
-        ann.af_bin = _classify_af(af, sorted_bins)
+        for label, (lo, hi) in sorted_bins:
+            if lo <= af <= hi:
+                ann.af_bin = label
 
     return annotations
 
-
-def _classify_af(af: float, sorted_bins: list[tuple[str, tuple[float, float]]]) -> str:
-    """
-    Return the bin label for a given allele frequency.
-
-    :param af: allele frequency value
-    :param sorted_bins: sorted list of (label, (lo, hi)) tuples
-    :return: bin label for the allele frequency
-    """
-    for label, (lo, hi) in sorted_bins:
-        if lo <= af <= hi:
-            return label
-    return 'unknown'

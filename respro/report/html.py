@@ -120,6 +120,21 @@ def _phenotype_badge_class(value: str) -> str:
     return 'unknown'
 
 
+def _effective_phenotype(row: dict) -> str:
+    """
+    Return the single effective phenotype for a hit row.
+
+    Prefers ``phenotype`` when it carries a meaningful value; falls back to
+    ``clinical_phenotype`` otherwise. This ensures each row is counted in
+    exactly one phenotype bucket.
+
+    :param row: a db_hit or potential_effects row dict
+    :return: one of 'resistant', 'intermediate', 'sensitive', or 'unknown'
+    """
+    p = row.get('phenotype', '')
+    return p if p and p != 'unknown' else row.get('clinical_phenotype', 'unknown')
+
+
 def _build_db_hit_rows(result: ProfilingResult) -> list[dict]:
     """
     Build one row per drug per annotated variant that matched a resistance rule.
@@ -282,6 +297,7 @@ def _build_potential_effects_rows(
 
             rows.append({
                 'gene': ann.gene_name,
+                'codon_pos': ann.codon_pos,
                 'observed_change': observed_change,
                 'rule_change': rule_change,
                 'similarity': similarity,
@@ -494,15 +510,16 @@ def build_report_context(
     else:
         total_rule_positions = 0
         unassessed_rule_positions = 0
-    summary['similarity_hits'] = len(potential_rows)
+    summary['similarity_hits'] = len({(r['gene'], r['codon_pos']) for r in potential_rows})
+    summary['similarity_rules'] = len({(r['gene'], r['observed_change']) for r in potential_rows})
 
-    summary['resistant_hits'] = sum(1 for r in db_hit_rows if r['phenotype'] == 'resistant' or r['clinical_phenotype'] == 'resistant')
-    summary['intermediate_hits'] = sum(1 for r in db_hit_rows if r['phenotype'] == 'intermediate' or r['clinical_phenotype'] == 'intermediate')
-    summary['sensitive_hits'] = sum(1 for r in db_hit_rows if r['phenotype'] == 'sensitive' or r['clinical_phenotype'] == 'sensitive')
+    summary['resistant_hits'] = sum(1 for r in db_hit_rows if _effective_phenotype(r) == 'resistant')
+    summary['intermediate_hits'] = sum(1 for r in db_hit_rows if _effective_phenotype(r) == 'intermediate')
+    summary['sensitive_hits'] = sum(1 for r in db_hit_rows if _effective_phenotype(r) == 'sensitive')
 
-    summary['similarity_resistant'] = sum(1 for r in potential_rows if r['phenotype'] == 'resistant' or r['clinical_phenotype'] == 'resistant')
-    summary['similarity_intermediate'] = sum(1 for r in potential_rows if r['phenotype'] == 'intermediate' or r['clinical_phenotype'] == 'intermediate')
-    summary['similarity_sensitive'] = sum(1 for r in potential_rows if r['phenotype'] == 'sensitive'or r['clinical_phenotype'] == 'sensitive')
+    summary['similarity_resistant'] = sum(1 for r in potential_rows if _effective_phenotype(r) == 'resistant')
+    summary['similarity_intermediate'] = sum(1 for r in potential_rows if _effective_phenotype(r) == 'intermediate')
+    summary['similarity_sensitive'] = sum(1 for r in potential_rows if _effective_phenotype(r) == 'sensitive')
 
     _high_impact = {'frameshift', 'stop_gained', 'stop_lost', 'start_lost', 'insertion', 'deletion'}
     summary['high_impact_count'] = sum(
@@ -526,6 +543,17 @@ def build_report_context(
     db_cols = _col_visibility(db_hit_rows, _optional_cols)
     combo_cols = _col_visibility(combo_hit_rows, ['ic50', 'fold_ic50', 'clinical_phenotype', 'comment', 'publication'])
     pot_cols = _col_visibility(potential_rows, _optional_cols)
+
+    # Unify clinical_phenotype visibility across all hit sections: if any section has
+    # meaningful values, all sections show the column so the report is consistent.
+    any_clinical = (
+        db_cols['clinical_phenotype']
+        or combo_cols.get('clinical_phenotype', False)
+        or pot_cols['clinical_phenotype']
+    )
+    db_cols['clinical_phenotype'] = any_clinical
+    combo_cols['clinical_phenotype'] = any_clinical
+    pot_cols['clinical_phenotype'] = any_clinical
 
     detected_drug_names: set[str] = set()
     for ann in result.cds_annotations:

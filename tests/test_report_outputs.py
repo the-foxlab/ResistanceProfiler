@@ -123,21 +123,184 @@ class TestBuildReportContext:
         assert '1 position' in html
         assert '1 rule' in html
 
+    def test_db_hits_phenotype_prefers_phenotype_over_clinical(self) -> None:
+        # Rule with phenotype='resistant', clinical_phenotype='intermediate'
+        # → should count as resistant only, NOT as both resistant and intermediate.
+        var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=300)
+        rule = ResistanceRule(
+            id=1, gene_name='gag', gene_id=1,
+            drug_name='DrugA', drug_id=1, reference_identifier='ref',
+            position=2, reference='K', mutation='E',
+            phenotype='resistant', clinical_phenotype='intermediate',
+        )
+        ann = AnnotatedVariant(
+            variant=var, gene_name='gag', codon_pos=2,
+            ref_aa='K', alt_aa='E', consequence='missense', af_bin='high',
+            rule_matches=[rule],
+        )
+        r = ProfilingResult(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            total_variants=1, variants_in_cds=1, resistance_hits=1, annotations=[ann],
+        )
+        ctx = build_report_context(r)
+        assert ctx['summary']['resistant_hits'] == 1
+        assert ctx['summary']['intermediate_hits'] == 0  # not double-counted
 
-class TestHtmlExport:
-    def test_render_html(self):
-        r = _make_result()
-        html = render_html(r)
-        assert '<title>ResistanceProfiler - test.vcf</title>' in html
-        assert 'ResistanceProfiler' in html
-        assert 'K2E' in html or 'gag' in html
+    def test_db_hits_falls_back_to_clinical_phenotype_when_phenotype_unknown(self) -> None:
+        # Rule with phenotype='unknown', clinical_phenotype='resistant'
+        # → should count as resistant via fallback.
+        var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=300)
+        rule = ResistanceRule(
+            id=1, gene_name='gag', gene_id=1,
+            drug_name='DrugA', drug_id=1, reference_identifier='ref',
+            position=2, reference='K', mutation='E',
+            phenotype='unknown', clinical_phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=var, gene_name='gag', codon_pos=2,
+            ref_aa='K', alt_aa='E', consequence='missense', af_bin='high',
+            rule_matches=[rule],
+        )
+        r = ProfilingResult(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            total_variants=1, variants_in_cds=1, resistance_hits=1, annotations=[ann],
+        )
+        ctx = build_report_context(r)
+        assert ctx['summary']['resistant_hits'] == 1
+        assert ctx['summary']['intermediate_hits'] == 0
 
-    def test_render_html_embeds_favicon(self):
-        r = _make_result()
-        html = render_html(r)
+    def test_similarity_hits_counts_unique_positions(self) -> None:
+        # Two rules at the same (gene, codon_pos) for different drugs
+        # → similarity_hits = 1 unique position, similarity_rules = 2
+        var = VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.5, depth=100)
+        ann = AnnotatedVariant(
+            variant=var, gene_name='gag', codon_pos=5,
+            ref_aa='L', alt_aa='V', consequence='missense', af_bin='high',
+        )
+        rule_a = ResistanceRule(
+            id=10, gene_name='gag', gene_id=1,
+            drug_name='DrugA', drug_id=1, reference_identifier='ref',
+            position=5, reference='L', mutation='I', phenotype='resistant',
+        )
+        rule_b = ResistanceRule(
+            id=11, gene_name='gag', gene_id=1,
+            drug_name='DrugB', drug_id=2, reference_identifier='ref',
+            position=5, reference='L', mutation='I', phenotype='intermediate',
+        )
+        r = ProfilingResult(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
+        )
+        ctx = build_report_context(r, rules=[rule_a, rule_b])
+        assert ctx['summary']['similarity_hits'] == 1      # 1 unique position
+        assert ctx['summary']['similarity_rules'] == 1     # 1 unique observed mutation (V), matched by 2 drugs
 
-        assert "rel='icon'" in html
-        assert 'data:image/svg+xml;base64,' in html
+    def test_similarity_phenotype_prefers_phenotype_over_clinical(self) -> None:
+        # Similarity row with phenotype='resistant', clinical_phenotype='intermediate'
+        # → counted as resistant only.
+        var = VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.5, depth=100)
+        ann = AnnotatedVariant(
+            variant=var, gene_name='gag', codon_pos=5,
+            ref_aa='L', alt_aa='V', consequence='missense', af_bin='high',
+        )
+        rule = ResistanceRule(
+            id=10, gene_name='gag', gene_id=1,
+            drug_name='DrugA', drug_id=1, reference_identifier='ref',
+            position=5, reference='L', mutation='I',
+            phenotype='resistant', clinical_phenotype='intermediate',
+        )
+        r = ProfilingResult(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
+        )
+        ctx = build_report_context(r, rules=[rule])
+        assert ctx['summary']['similarity_resistant'] == 1
+        assert ctx['summary']['similarity_intermediate'] == 0  # not double-counted
+
+    def test_similarity_clinical_phenotype_column_rendered_when_available(self) -> None:
+        # When a similarity rule has a non-unknown clinical_phenotype, the
+        # 'Clinical phenotype' column must appear in the rendered HTML — analogous
+        # to the 'Mutations in database' section.
+        var = VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.5, depth=100)
+        ann = AnnotatedVariant(
+            variant=var, gene_name='gag', codon_pos=5,
+            ref_aa='L', alt_aa='V', consequence='missense', af_bin='high',
+        )
+        rule = ResistanceRule(
+            id=10, gene_name='gag', gene_id=1,
+            drug_name='DrugA', drug_id=1, reference_identifier='ref',
+            position=5, reference='L', mutation='I',
+            phenotype='unknown', clinical_phenotype='resistant',
+        )
+        r = ProfilingResult(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
+        )
+        html = render_html(r, rules=[rule])
+        assert 'Clinical phenotype' in html
+        # The clinical badge must appear inside the similarity section
+        sim_start = html.find('section-similarity')
+        assert sim_start != -1
+        assert 'badge-resistant' in html[sim_start:]
+
+    def test_similarity_clinical_phenotype_column_hidden_when_all_unknown(self) -> None:
+        # When all rules across ALL sections have clinical_phenotype='unknown' the column
+        # must be omitted everywhere — same 'if available' behaviour as 'Mutations in database'.
+        var = VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.5, depth=100)
+        ann = AnnotatedVariant(
+            variant=var, gene_name='gag', codon_pos=5,
+            ref_aa='L', alt_aa='V', consequence='missense', af_bin='high',
+        )
+        rule = ResistanceRule(
+            id=10, gene_name='gag', gene_id=1,
+            drug_name='DrugA', drug_id=1, reference_identifier='ref',
+            position=5, reference='L', mutation='I',
+            phenotype='resistant',  # clinical_phenotype defaults to 'unknown'
+        )
+        r = ProfilingResult(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
+        )
+        html = render_html(r, rules=[rule])
+        assert 'Clinical phenotype' not in html
+
+    def test_similarity_clinical_phenotype_shown_when_db_hits_have_it(self) -> None:
+        # If db_hits carry a non-unknown clinical_phenotype, the similarity section must
+        # ALSO show the Clinical phenotype column even if those similarity rules have 'unknown'.
+        var_hit = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=300)
+        rule_hit = ResistanceRule(
+            id=1, gene_name='gag', gene_id=1,
+            drug_name='DrugA', drug_id=1, reference_identifier='ref',
+            position=2, reference='K', mutation='E',
+            phenotype='resistant', clinical_phenotype='resistant',
+        )
+        ann_hit = AnnotatedVariant(
+            variant=var_hit, gene_name='gag', codon_pos=2,
+            ref_aa='K', alt_aa='E', consequence='missense', af_bin='high',
+            rule_matches=[rule_hit],
+        )
+        # Similarity hit at a different position — rule has clinical_phenotype='unknown'
+        var_sim = VariantCall(chrom='ref', pos=15, ref='C', alt='T', allele_freq=0.5, depth=100)
+        rule_sim = ResistanceRule(
+            id=2, gene_name='gag', gene_id=1,
+            drug_name='DrugA', drug_id=1, reference_identifier='ref',
+            position=5, reference='L', mutation='I',
+            phenotype='resistant',  # clinical_phenotype='unknown' (default)
+        )
+        ann_sim = AnnotatedVariant(
+            variant=var_sim, gene_name='gag', codon_pos=5,
+            ref_aa='L', alt_aa='V', consequence='missense', af_bin='high',
+        )
+        r = ProfilingResult(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            total_variants=2, variants_in_cds=2, resistance_hits=1,
+            annotations=[ann_hit, ann_sim],
+        )
+        html = render_html(r, rules=[rule_hit, rule_sim])
+        sim_start = html.find('section-similarity')
+        assert sim_start != -1
+        # Clinical phenotype column must appear in the similarity section too
+        assert 'Clinical phenotype' in html[sim_start:]
 
     def test_potential_effects_excludes_snp_rule_for_indel_annotation(self):
 

@@ -296,7 +296,7 @@ def match_rule_sets(
     if not rule_sets:
         return []
 
-    # Build lookup from (gene_name, codon_pos, alt_aa) → AnnotatedVariant.
+    # Build lookup from (gene_name, codon_pos, mutation_token) -> AnnotatedVariant.
     # Synonymous variants cannot satisfy a resistance rule member.
     present: dict[tuple[str, int, str], AnnotatedVariant] = {}
     wildcard_present: dict[tuple[str, int], AnnotatedVariant] = {}
@@ -309,7 +309,6 @@ def match_rule_sets(
 
     hits: list[ComboRuleHit] = []
     for rule_set in rule_sets:
-
         contributing: list[AnnotatedVariant] = []
         all_matched = True
         for member in rule_set.members:

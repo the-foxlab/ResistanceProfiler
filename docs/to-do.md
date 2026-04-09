@@ -51,6 +51,7 @@ Mark items done and update priorities after each completed milestone.
 - [x] IUPAC ambiguity expansion — all possible codons enumerated; fractional `allele_freq`
 - [x] SNP, in-frame insertion, in-frame deletion, and frameshift detection from FASTA
 - [x] FASTA-mode AF bins — adjusted thresholds for discrete IUPAC-derived frequencies
+- [x] SNP-only annotation mode — removed INDEL annotation paths from VCF/FASTA workflows and related tests
 
 ### Codon-aware annotation
 

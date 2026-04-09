@@ -19,7 +19,7 @@ from respro.report.results_model import ProfilingResult
 def _run_profile(project_db: Path, sample_vcf: Path, sample_ref_fasta: Path, results_db: Path, tmp_path: Path) -> None:
     """Helper: run profile-vcf with --results-db and assert success."""
     result = CliRunner().invoke(app, [
-        'profile', 'vcf',
+        'profile-vcf',
         '--project', str(project_db),
         '--vcf', str(sample_vcf),
         '--ref-fasta', str(sample_ref_fasta),
@@ -43,7 +43,7 @@ class TestRegenerateListCommand:
         _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
 
         result = CliRunner().invoke(app, [
-            'results', 'regenerate',
+            'regenerate',
             '--result-db', str(results_db),
             '--list',
         ])
@@ -58,7 +58,7 @@ class TestRegenerateListCommand:
         conn.close()
 
         result = CliRunner().invoke(app, [
-            'results', 'regenerate',
+            'regenerate',
             '--result-db', str(results_db),
             '--list',
         ])
@@ -72,7 +72,7 @@ class TestRegenerateListCommand:
         conn.close()
 
         result = CliRunner().invoke(app, [
-            'results', 'regenerate',
+            'regenerate',
             '--result-db', str(results_db),
             '--list',
             '--identifier', '1',
@@ -87,7 +87,7 @@ class TestRegenerateListCommand:
         conn.close()
 
         result = CliRunner().invoke(app, [
-            'results', 'regenerate',
+            'regenerate',
             '--result-db', str(results_db),
         ])
 
@@ -107,7 +107,7 @@ class TestRegenerateByIdentifier:
 
         out_dir = tmp_path / 'regenerated'
         result = CliRunner().invoke(app, [
-            'results', 'regenerate',
+            'regenerate',
             '--result-db', str(results_db),
             '--identifier', '1',
             '--project', str(project_db),
@@ -126,7 +126,7 @@ class TestRegenerateByIdentifier:
         conn.close()
 
         result = CliRunner().invoke(app, [
-            'results', 'regenerate',
+            'regenerate',
             '--result-db', str(results_db),
             '--identifier', '1',
             '--out', str(tmp_path / 'out'),
@@ -145,7 +145,7 @@ class TestRegenerateByIdentifier:
         conn.close()
 
         result = CliRunner().invoke(app, [
-            'results', 'regenerate',
+            'regenerate',
             '--result-db', str(results_db),
             '--identifier', '1',
             '--project', str(project_db),
@@ -164,7 +164,7 @@ class TestRegenerateByIdentifier:
         conn.close()
 
         result = CliRunner().invoke(app, [
-            'results', 'regenerate',
+            'regenerate',
             '--result-db', str(results_db),
             '--identifier', '999',
             '--project', str(project_db),
@@ -191,7 +191,7 @@ class TestRegenerateByIdentifier:
         conn.close()
 
         result = CliRunner().invoke(app, [
-            'results', 'regenerate',
+            'regenerate',
             '--result-db', str(results_db),
             '--identifier', '1',
             '--project', str(project_db),

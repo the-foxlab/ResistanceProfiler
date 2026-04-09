@@ -73,6 +73,7 @@
     <div class='number'>{{ summary.similarity_hits }}</div>
     <div class='label'>Similarity hits</div>
     {% if summary.similarity_hits %}
+    <div class='stat-note'>{{ summary.similarity_hits }} position{{ 's' if summary.similarity_hits != 1 }} &middot; {{ summary.similarity_rules }} rule{{ 's' if summary.similarity_rules != 1 }}</div>
     <div class='stat-sub'>
       <span class='stat-pill resistant{{ ' zero' if not summary.similarity_resistant }}'>Resistant: {{ summary.similarity_resistant }}</span>
       <span class='stat-pill intermediate{{ ' zero' if not summary.similarity_intermediate }}'>Intermediate: {{ summary.similarity_intermediate }}</span>

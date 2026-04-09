@@ -28,7 +28,7 @@ def remap_variants(
     1. Excludes positions outside any matched CDS region in the query.
     2. Maps the query position to a CDS position via the inverted CIGAR.
     3. Sanity-checks that the VCF REF base agrees with the query FASTA.
-    4. For SNPs, stores query codon context for downstream annotation.
+    4. Stores query codon context for downstream SNP annotation.
     5. Converts the CDS position to an internal genomic position and transforms
        REF/ALT bases to the internal forward strand.
 
@@ -52,6 +52,11 @@ def remap_variants(
     remapped: list[VariantCall] = []
     warnings: list[str] = []
     for var in variants:
+        if len(var.ref) != 1 or len(var.alt) != 1:
+            warnings.append(
+                f'pos {var.pos + 1}: skipping non-SNP variant {var.ref!r}>{var.alt!r}'
+            )
+            continue
 
         hit = False
         for match, q2c in match_maps:
@@ -141,4 +146,3 @@ def _extract_query_ref_codon(
 def _complement_base(base: str) -> str:
     """Return the nucleotide complement using Biopython semantics."""
     return str(Seq(base).complement())
-

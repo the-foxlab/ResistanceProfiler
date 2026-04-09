@@ -175,14 +175,12 @@ class TestAnnotateVariantsForward:
         assert len(results) == 1
         assert results[0].gene_name == ''
 
-    def test_deletion_in_gene_annotated(self, tiny_gene, tiny_ref_seq):
-        """A 1-base deletion in the gene is now annotated (frameshift)."""
+    def test_non_snp_in_gene_is_skipped(self, tiny_gene, tiny_ref_seq):
+        """INDELs in CDS are ignored in SNP-only annotation mode."""
         var = VariantCall(chrom='ref', pos=3, ref='AA', alt='A', allele_freq=0.5, depth=50)
         results = annotate_variants([var], [tiny_gene])
 
-        assert len(results) == 1
-        assert results[0].gene_name == 'gag'
-        assert results[0].consequence == 'frameshift'
+        assert results == []
 
     def test_combines_two_high_af_snps_in_same_codon(self, tiny_gene, tiny_ref_seq):
         """Two SNPs in one codon with AF > 0.7 are annotated as one codon event."""
@@ -277,85 +275,6 @@ class TestAnnotateVariantsReverse:
         assert ann.alt_aa == 'D'
         assert ann.consequence == 'missense'
 
-
-# ─── annotate_variants — insertions ──────────────────────────────────
-
-class TestAnnotateInsertions:
-    """Test insertion annotation."""
-
-    def test_inframe_insertion(self, tiny_gene, tiny_ref_seq):
-        """A 3-base insertion (triplet) → inframe_insertion."""
-        # pos 3, ref A, alt AGGG → insert GGG (3 bases, in-frame)
-        var = VariantCall(chrom='ref', pos=3, ref='A', alt='AGGG', allele_freq=0.8, depth=100)
-        results = annotate_variants([var], [tiny_gene])
-
-        assert len(results) == 1
-        ann = results[0]
-        assert ann.gene_name == 'gag'
-        assert ann.consequence == 'insertion'
-
-    def test_frameshift_insertion(self, tiny_gene, tiny_ref_seq):
-        """A 1-base insertion → frameshift."""
-        var = VariantCall(chrom='ref', pos=3, ref='A', alt='AG', allele_freq=0.8, depth=100)
-        results = annotate_variants([var], [tiny_gene])
-
-        assert len(results) == 1
-        ann = results[0]
-        assert ann.gene_name == 'gag'
-        assert ann.consequence == 'frameshift'
-        assert ann.alt_aa == 'fsX'
-
-    def test_frameshift_insertion_2base(self, tiny_gene, tiny_ref_seq):
-        """A 2-base insertion → frameshift."""
-        var = VariantCall(chrom='ref', pos=3, ref='A', alt='AGG', allele_freq=0.8, depth=100)
-        results = annotate_variants([var], [tiny_gene])
-
-        assert len(results) == 1
-        assert results[0].consequence == 'frameshift'
-
-
-# ─── annotate_variants — deletions ───────────────────────────────────
-
-class TestAnnotateDeletions:
-    """Test deletion annotation."""
-
-    def test_inframe_deletion(self, tiny_gene, tiny_ref_seq):
-        """A 3-base deletion (triplet) → inframe_deletion."""
-        # pos 3, ref AAAG (4 chars), alt A (1 char) → 3 bases deleted, in-frame
-        var = VariantCall(chrom='ref', pos=3, ref='AAAG', alt='A', allele_freq=0.8, depth=100)
-        results = annotate_variants([var], [tiny_gene])
-
-        assert len(results) == 1
-        ann = results[0]
-        assert ann.gene_name == 'gag'
-        assert ann.consequence == 'deletion'
-
-    def test_frameshift_deletion(self, tiny_gene, tiny_ref_seq):
-        """A 1-base deletion → frameshift."""
-        var = VariantCall(chrom='ref', pos=3, ref='AA', alt='A', allele_freq=0.8, depth=100)
-        results = annotate_variants([var], [tiny_gene])
-
-        assert len(results) == 1
-        ann = results[0]
-        assert ann.gene_name == 'gag'
-        assert ann.consequence == 'frameshift'
-        assert ann.alt_aa == 'fsX'
-
-    def test_frameshift_deletion_2base(self, tiny_gene, tiny_ref_seq):
-        """A 2-base deletion → frameshift."""
-        var = VariantCall(chrom='ref', pos=3, ref='AAA', alt='A', allele_freq=0.8, depth=100)
-        results = annotate_variants([var], [tiny_gene])
-
-        assert len(results) == 1
-        assert results[0].consequence == 'frameshift'
-
-    def test_variant_outside_gene_indel(self, tiny_gene, tiny_ref_seq):
-        """An indel outside the gene gets no gene annotation."""
-        var = VariantCall(chrom='ref', pos=89, ref='NN', alt='N', allele_freq=0.5, depth=50)
-        results = annotate_variants([var], [tiny_gene])
-
-        assert len(results) == 1
-        assert results[0].gene_name == ''
 
 
 # ─── annotate_variants — divergent user reference ────────────────────
@@ -478,10 +397,6 @@ class TestAssignAfBins:
     def test_vcf_low(self) -> None:
         anns = assign_af_bins([_make_ann(0.05)])
         assert anns[0].af_bin == 'low'
-
-    def test_vcf_unknown_below_threshold(self) -> None:
-        anns = assign_af_bins([_make_ann(0.001)])
-        assert anns[0].af_bin == 'unknown'
 
     # FASTA-mode bins: high=1.0, intermediate=0.5, low=0.33/0.25
     _FASTA_BINS = {

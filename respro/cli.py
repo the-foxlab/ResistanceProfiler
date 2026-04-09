@@ -187,7 +187,7 @@ def init(
 
     console = Console(highlight=False)
     try:
-        with err_console.status('[dim]Initialising project…[/dim]'):
+        with err_console.status('[dim]Initialising project database…[/dim]'):
             db_path = init_project(
                 db_path=output,
                 name=name,
@@ -396,7 +396,7 @@ def profile_vcf(
         )
 
         if ref_fasta is not None:
-            with err_console.status('[dim]Aligning reference FASTA to gene panel…[/dim]'):
+            with err_console.status('[dim]Profiling vcf…[/dim]'):
                 query_name, query_seq, fasta_matches = resolve_fasta_query(
                     project_conn, ref_fasta, use_cache=use_cache, cores=cores,
                 )
@@ -538,7 +538,7 @@ def profile_fasta(
             str(results_db) if results_db else None, project_conn, logger,
         )
 
-        with err_console.status('[dim]Aligning FASTA to gene panel…[/dim]'):
+        with err_console.status('[dim]Profiling fasta sequence…[/dim]'):
             query_name, query_seq, fasta_matches = resolve_fasta_query(
                 project_conn, consensus_fasta, use_cache=False, cores=cores,
             )

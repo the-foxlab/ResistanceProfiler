@@ -11,8 +11,6 @@ import logging
 import re
 from itertools import product as itertools_product
 
-from Bio.Seq import Seq
-
 from respro.core.annotate_vcf import translate_codon
 from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord, VariantCall
 
@@ -88,8 +86,8 @@ def _annotate_from_alignment(
     in the alignment (i.e., at positions where ref is '-').
 
     Codons are defined by triplets of consecutive ref positions after the frame offset.
-    Insertions are processed before each codon; deletions and SNPs within codons
-    are handled per triplet. A frameshift stops further processing of that gene.
+    SNPs are emitted only for ungapped codons. Codons affected by insertions or
+    deletions are treated as non-assessable and reported as CoverageGaps.
 
     A codon where all three query positions are 'N' is treated as non-covered and
     recorded as a CoverageGap instead of being IUPAC-expanded.
@@ -132,13 +130,6 @@ def _annotate_from_alignment(
 
         _, _, ins_before = coding[i]
 
-        # Insertions before this codon (between previous and current codon boundary)
-        if ins_before:
-            ann = _annotate_insertion(ins_before, codon_idx, gene)
-            annotations.append(ann)
-            if ann.consequence == 'frameshift':
-                break
-
         if i + 3 > len(coding):
             break  # incomplete codon at end of CDS
 
@@ -146,12 +137,8 @@ def _annotate_from_alignment(
 
         # Insertions embedded within this codon (before positions 1 or 2)
         mid_insertions = codon_triples[1][2] + codon_triples[2][2]
-        if mid_insertions:
-            ann = _annotate_insertion(mid_insertions, codon_idx, gene)
-            annotations.append(ann)
-            if ann.consequence == 'frameshift':
-                break
-            # In-frame mid-codon insertion: codon boundaries after this are still valid
+        if ins_before or mid_insertions:
+            gap_codon_indices.append(codon_idx)
             i += 3
             codon_idx += 1
             continue
@@ -161,11 +148,7 @@ def _annotate_from_alignment(
         ref_aa = translate_codon(ref_codon)
 
         if '-' in query_codon:
-            deleted_count = query_codon.count('-')
-            ann = _annotate_deletion(deleted_count, ref_codon, query_codon, ref_aa, codon_idx, gene)
-            annotations.append(ann)
-            if ann.consequence == 'frameshift':
-                break
+            gap_codon_indices.append(codon_idx)
         elif query_codon.upper() == 'NNN':
             # Full-codon N-stretch: no coverage → do not IUPAC-expand
             gap_codon_indices.append(codon_idx)
@@ -239,107 +222,6 @@ def _make_variant(
         filter_status='PASS',
     )
 
-
-def _annotate_insertion(inserted: str, codon_idx: int, gene: GeneRecord) -> AnnotatedVariant:
-    """
-    Annotate a query insertion at codon_idx.
-
-    Non-3n insertions → frameshift (stops further processing).
-    Triplet insertions → in-frame insertion with translated inserted amino acids.
-
-    The variant alt is stored as ref_codon + inserted (anchor style) so the NT
-    change display can reconstruct the full codon context.
-
-    :param inserted: inserted query bases
-    :param codon_idx: 0-based codon index where insertion occurs
-    :param gene: gene record
-    :return: AnnotatedVariant
-    """
-    ref_aa = gene.aa_sequence[codon_idx] if codon_idx < len(gene.aa_sequence) else '?'
-    nt_start = gene.codon_start + codon_idx * 3
-    ref_nt = gene.nt_sequence[nt_start:nt_start + 3]
-
-    # Store alt as anchor codon + inserted bases so the NT display is unambiguous
-    var = _make_variant(gene, codon_idx, ref_nt, ref_nt + inserted)
-
-    if len(inserted) % 3 != 0:
-        return AnnotatedVariant(
-            variant=var,
-            gene_name=gene.name,
-            codon_pos=codon_idx,
-            ref_codon=ref_nt,
-            alt_codon=ref_nt + inserted,
-            ref_aa=ref_aa,
-            alt_aa='fsX',
-            consequence='frameshift',
-            is_fasta_mode=True,
-        )
-
-    inserted_aa = str(Seq(inserted).translate())
-    return AnnotatedVariant(
-        variant=var,
-        gene_name=gene.name,
-        codon_pos=codon_idx,
-        ref_codon=ref_nt,
-        alt_codon=ref_nt + inserted,
-        ref_aa=ref_aa,
-        alt_aa=f'{ref_aa}{inserted_aa}',
-        consequence='insertion',
-        is_fasta_mode=True,
-    )
-
-
-def _annotate_deletion(
-    deleted_count: int,
-    ref_codon: str,
-    query_codon: str,
-    ref_aa: str,
-    codon_idx: int,
-    gene: GeneRecord,
-) -> AnnotatedVariant:
-    """
-    Annotate a deletion within one codon.
-
-    Non-3n deletions → frameshift (stops further processing).
-    Triplet deletions → in-frame deletion with translated remaining bases.
-
-    :param deleted_count: number of '-' characters in query_codon
-    :param ref_codon: 3-base reference codon
-    :param query_codon: 3-base query codon with '-' for deleted positions
-    :param ref_aa: reference amino acid
-    :param codon_idx: 0-based codon index
-    :param gene: gene record
-    :return: AnnotatedVariant
-    """
-    remaining = query_codon.replace('-', '')
-    var = _make_variant(gene, codon_idx, ref_codon, remaining or '-')
-
-    if deleted_count % 3 != 0:
-        return AnnotatedVariant(
-            variant=var,
-            gene_name=gene.name,
-            codon_pos=codon_idx,
-            ref_codon=ref_codon,
-            alt_codon='',
-            ref_aa=ref_aa,
-            alt_aa='fsX',
-            consequence='frameshift',
-            is_fasta_mode=True,
-        )
-
-    # In-frame deletion: pad to 3 bases if fewer remain (partial codon)
-    alt_aa = translate_codon(remaining.ljust(3, 'N')) if remaining else '?'
-    return AnnotatedVariant(
-        variant=var,
-        gene_name=gene.name,
-        codon_pos=codon_idx,
-        ref_codon=ref_codon,
-        alt_codon=remaining,
-        ref_aa=ref_aa,
-        alt_aa=alt_aa,
-        consequence='deletion',
-        is_fasta_mode=True,
-    )
 
 
 def _annotate_snp_codon(

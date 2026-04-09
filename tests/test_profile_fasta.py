@@ -312,18 +312,19 @@ class TestRemapVariants:
         assert len(remapped) == 1
         assert remapped[0].query_ref_codon == 'AAA'
 
-    def test_indel_does_not_store_query_ref_codon(self, gene_fwd: GeneRecord) -> None:
-        """Indels remain anchored to internal CDS without query codon overrides."""
+    def test_indel_is_skipped_in_snp_only_mode(self, gene_fwd: GeneRecord) -> None:
+        """Non-SNP calls are excluded during remapping in SNP-only mode."""
         query = TINY_REF_SEQ
         matches = match_query_to_genes(query, [gene_fwd])
 
         variants = [
             VariantCall(chrom='c', pos=3, ref='A', alt='AG', allele_freq=0.4, depth=20),
         ]
-        remapped, _ = remap_variants(variants, matches, query)
+        remapped, warnings = remap_variants(variants, matches, query)
 
-        assert len(remapped) == 1
-        assert remapped[0].query_ref_codon == ''
+        assert remapped == []
+        assert len(warnings) == 1
+        assert 'skipping non-SNP variant' in warnings[0]
 
     def test_snp_stores_query_ref_codon_for_reverse_match(self) -> None:
         """Reverse-strand matches must reconstruct query codon in CDS orientation."""
@@ -824,38 +825,23 @@ class TestFastaConsensusProfile:
         assert anns[0].alt_aa == '*'
         assert anns[0].consequence == 'stop_gained'
 
-    def test_frameshift_insertion_stops_processing(self, simple_gene: GeneRecord) -> None:
-        """Single-base insertion → frameshift annotation; no further codons processed."""
-        # Insert 'A' after codon 1 → ATGAAAAGCTTAA (13 nt): frameshift at some codon
+    def test_insertion_codon_is_treated_as_non_assessable(self, simple_gene: GeneRecord) -> None:
+        """Codons hit by insertions are treated as coverage gaps in SNP-only mode."""
         query = 'ATGAAAAGCTTAA'
         match = _make_match(simple_gene, query)
         anns, gaps = profile_fasta_consensus(query, [match])
 
-        assert len(anns) == 1
-        assert anns[0].consequence == 'frameshift'
-        assert anns[0].alt_aa == 'fsX'
+        assert anns == []
+        assert any(g.codon_start <= 1 <= g.codon_end for g in gaps)
 
-    def test_inframe_insertion_continues_processing(self, simple_gene: GeneRecord) -> None:
-        """Three-base insertion → insertion annotation; subsequent codons still processed."""
-        # 'ATGAAAGGGGCTTAA' = ATG AAA [GGG inserted] GCT TAA (15 nt)
-        query = 'ATGAAAGGGGCTTAA'
-        match = _make_match(simple_gene, query)
-        anns, gaps = profile_fasta_consensus(query, [match])
-
-        # One insertion at codon 2 (A→AG), no downstream frameshifts
-        assert any(a.consequence == 'insertion' for a in anns)
-        assert not any(a.consequence == 'frameshift' for a in anns)
-
-    def test_frameshift_deletion_stops_processing(self, simple_gene: GeneRecord) -> None:
-        """Single-base deletion → frameshift; subsequent codons not emitted."""
-        # 'ATGAAGCTTAA' (11 nt): 1 base deleted from codon 1 → frameshift
+    def test_deletion_codon_is_treated_as_non_assessable(self, simple_gene: GeneRecord) -> None:
+        """Codons hit by deletions are treated as coverage gaps in SNP-only mode."""
         query = 'ATGAAGCTTAA'
         match = _make_match(simple_gene, query)
         anns, gaps = profile_fasta_consensus(query, [match])
 
-        assert len(anns) == 1
-        assert anns[0].consequence == 'frameshift'
-        assert anns[0].alt_aa == 'fsX'
+        assert anns == []
+        assert any(g.codon_start <= 1 <= g.codon_end for g in gaps)
 
     def test_iupac_ambiguous_base_emits_split_frequency(self, simple_gene: GeneRecord) -> None:
         """IUPAC 'R' at codon 1 → K (ref) or E: only E emitted with af=0.5."""
