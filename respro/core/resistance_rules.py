@@ -166,6 +166,7 @@ def match_rules(
 def match_rule_sets(
     annotations: list[AnnotatedVariant],
     rule_sets: list[ResistanceRuleSet],
+    snp_combine_af_threshold: float = 0.75,
 ) -> list[ComboRuleHit]:
     """
     Match annotated variants against combination resistance rule sets.
@@ -175,16 +176,20 @@ def match_rule_sets(
 
     :param annotations: list of annotated variants
     :param rule_sets: list of ResistanceRuleSet objects with populated members
+    :param snp_combine_af_threshold: strict AF threshold used for combo-member support;
+        only annotations with AF > threshold can satisfy a combo member
     :return: list of ComboRuleHit for every rule set that fired
     """
     if not rule_sets:
         return []
 
     # Build lookup from (gene_name, codon_pos) -> list[AnnotatedVariant].
-    # Synonymous variants cannot satisfy a resistance rule member.
+    # Synonymous and low-AF variants cannot satisfy a resistance rule member.
     present: dict[tuple[str, int], list[AnnotatedVariant]] = {}
     for ann in annotations:
         if not ann.gene_name or not ann.alt_aa or ann.consequence == 'synonymous':
+            continue
+        if ann.variant.allele_freq <= snp_combine_af_threshold:
             continue
         present.setdefault((ann.gene_name, ann.codon_pos), []).append(ann)
 

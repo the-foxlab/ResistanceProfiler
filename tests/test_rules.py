@@ -295,6 +295,30 @@ class TestMatchRuleSets:
         hits = match_rule_sets([syn, present], [rule_set])
         assert hits == []
 
+    def test_low_af_member_does_not_satisfy_combo_rule(self):
+        rule_set = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
+        low_af = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T', allele_freq=0.5, depth=100),
+            gene_name='gag', codon_pos=1,
+            ref_aa='K', alt_aa='E', consequence='missense',
+        )
+        high_af = _make_ann('gag', 5, 'A', 'V')
+
+        hits = match_rule_sets([low_af, high_af], [rule_set])
+        assert hits == []
+
+    def test_member_at_exact_af_threshold_does_not_satisfy_combo_rule(self):
+        rule_set = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
+        at_threshold = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T', allele_freq=0.75, depth=100),
+            gene_name='gag', codon_pos=1,
+            ref_aa='K', alt_aa='E', consequence='missense',
+        )
+        high_af = _make_ann('gag', 5, 'A', 'V')
+
+        hits = match_rule_sets([at_threshold, high_af], [rule_set])
+        assert hits == []
+
     def test_any_member_does_not_match_combo_rule(self):
         rule_set = _make_rule_set([('gag', 1, 'any'), ('gag', 5, 'V')])
         annotations = [
