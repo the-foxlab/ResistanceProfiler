@@ -8,6 +8,7 @@ from respro.core.annotate_vcf import (
     reverse_complement,
     translate_codon,
     _classify_snp_consequence,
+    _annotate_variant_in_gene,
 )
 from respro.cli_helpers import assign_af_bins
 from respro.db.models import AnnotatedVariant, GeneRecord, VariantCall
@@ -175,12 +176,19 @@ class TestAnnotateVariantsForward:
         assert len(results) == 1
         assert results[0].gene_name == ''
 
-    def test_non_snp_in_gene_is_skipped(self, tiny_gene, tiny_ref_seq):
-        """INDELs in CDS are ignored in SNP-only annotation mode."""
+    def test_frameshift_deletion_in_gene_is_annotated(self, tiny_gene, tiny_ref_seq):
+        """1-nt deletion at a codon boundary produces a frameshift annotation."""
+        # tiny_gene codon 1: pos 3–5, AAA (K); 1-nt deletion → frameshift
         var = VariantCall(chrom='ref', pos=3, ref='AA', alt='A', allele_freq=0.5, depth=50)
         results = annotate_variants([var], [tiny_gene])
 
-        assert results == []
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.gene_name == 'gag'
+        assert ann.codon_pos == 1
+        assert ann.ref_aa == 'K'
+        assert ann.alt_aa == 'fsX'
+        assert ann.consequence == 'frameshift'
 
     def test_combines_two_high_af_snps_in_same_codon(self, tiny_gene, tiny_ref_seq):
         """Two SNPs in one codon with AF > 0.7 are annotated as one codon event."""
@@ -422,3 +430,221 @@ class TestAssignAfBins:
         """1/4 frequency (4-way IUPAC) maps to low."""
         anns = assign_af_bins([_make_ann(0.25)], bins=self._FASTA_BINS)
         assert anns[0].af_bin == 'low'
+
+
+# ─── Helper ──────────────────────────────────────────────────────────
+
+def _make_gene(nt_sequence: str, strand: str = '+') -> GeneRecord:
+    end = len(nt_sequence)
+    seq = nt_sequence if strand == '+' else reverse_complement(nt_sequence)
+    return GeneRecord(
+        id=1, reference_id=1, name='gene', protein='P',
+        start=0, end=end, strand=strand, codon_start=0,
+        nt_sequence=nt_sequence,
+        # For minus-strand genes, nt_sequence is stored in coding orientation
+        # (reverse-complement of the genomic slice), but we override below.
+    )
+
+
+# ─── Insertion annotation ─────────────────────────────────────────────
+
+class TestInsertionAnnotation:
+    """Codon-aware annotation for VCF insertions."""
+
+    def _fwd_gene(self) -> GeneRecord:
+        # ATG GGG TTT → M G F (9 nt, forward strand)
+        return GeneRecord(
+            id=1, reference_id=1, name='gene', protein='P',
+            start=0, end=9, strand='+', codon_start=0, nt_sequence='ATGGGGTTT',
+        )
+
+    def _rev_gene(self) -> GeneRecord:
+        # Minus-strand gene with coding sequence ATG GGG TTT → M G F
+        # Genomic sequence is revcomp('ATGGGGTTT') = 'AAACCCCAT'
+        # But nt_sequence stores coding orientation: 'ATGGGGTTT'
+        return GeneRecord(
+            id=1, reference_id=1, name='gene', protein='P',
+            start=0, end=9, strand='-', codon_start=0, nt_sequence='ATGGGGTTT',
+        )
+
+    def test_inframe_insertion_at_codon_boundary(self) -> None:
+        """In-frame insertion at codon 0 boundary: anchor M, inserted G → alt_aa MG."""
+        gene = self._fwd_gene()
+        # pos=0 (codon 0, frame_offset 0), insert 'GGG' after anchor A
+        var = VariantCall(chrom='c', pos=0, ref='A', alt='AGGG', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.gene_name == 'gene'
+        assert ann.codon_pos == 0
+        assert ann.ref_aa == 'M'
+        assert ann.alt_aa == 'MG'
+        assert ann.consequence == 'insertion'
+
+    def test_inframe_insertion_second_codon(self) -> None:
+        """In-frame insertion at codon 1 boundary: anchor G, inserted G → alt_aa GG."""
+        gene = self._fwd_gene()
+        # pos=3 (codon 1 = GGG = G, frame_offset 0), insert 'GGG' after anchor G
+        var = VariantCall(chrom='c', pos=3, ref='G', alt='GGGG', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.ref_aa == 'G'
+        assert ann.alt_aa == 'GG'
+        assert ann.consequence == 'insertion'
+
+    def test_frameshift_insertion(self) -> None:
+        """1-nt insertion at codon boundary is annotated as frameshift."""
+        gene = self._fwd_gene()
+        var = VariantCall(chrom='c', pos=0, ref='A', alt='AG', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.ref_aa == 'M'
+        assert ann.alt_aa == 'fsX'
+        assert ann.consequence == 'frameshift'
+
+    def test_insertion_at_mid_codon_returns_none(self) -> None:
+        """Insertion anchored mid-codon (frame_offset != 0) is non-assessable."""
+        gene = self._fwd_gene()
+        # pos=1 is frame_offset 1 within codon 0
+        var = VariantCall(chrom='c', pos=1, ref='T', alt='TGGG', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is None
+
+    def test_inframe_insertion_negative_strand(self) -> None:
+        """In-frame insertion on a negative-strand gene uses revcomp of inserted bases."""
+        gene = self._rev_gene()
+        # Minus-strand gene: coding seq 'ATGGGGTTT' (M G F), stored in coding orientation.
+        # cds_variant_pos for pos=8 = (end-1) - pos = 8 - 8 = 0 → codon 0 (ATG=M), frame_offset 0.
+        # Inserted bases (genomic): 'GGG' → revcomp for minus strand → 'CCC' → translate → 'P'
+        var = VariantCall(chrom='c', pos=8, ref='A', alt='AGGG', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.ref_aa == 'M'
+        assert ann.alt_aa == 'MP'
+        assert ann.consequence == 'insertion'
+
+
+# ─── Deletion annotation ──────────────────────────────────────────────
+
+class TestDeletionAnnotation:
+    """Codon-aware annotation for VCF deletions."""
+
+    def _fwd_gene(self) -> GeneRecord:
+        # ATG GGG TTT → M G F (9 nt, forward strand)
+        return GeneRecord(
+            id=1, reference_id=1, name='gene', protein='P',
+            start=0, end=9, strand='+', codon_start=0, nt_sequence='ATGGGGTTT',
+        )
+
+    def test_inframe_deletion(self) -> None:
+        """3-nt deletion at codon 0 boundary: ref_aa MG (deleted G), alt_aa M."""
+        gene = self._fwd_gene()
+        # pos=0 (codon 0 = ATG = M, frame_offset 0), delete 'TGG' after anchor A
+        # ref='ATGG', alt='A' → deleted_bases='TGG' → translate 'TGG' → W (Trp)
+        var = VariantCall(chrom='c', pos=0, ref='ATGG', alt='A', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.gene_name == 'gene'
+        assert ann.codon_pos == 0
+        assert ann.ref_aa == 'MW'
+        assert ann.alt_aa == 'M'
+        assert ann.consequence == 'deletion'
+
+    def test_inframe_deletion_multi_codon(self) -> None:
+        """6-nt deletion spans two payload codons: ref_aa has three AAs, alt_aa has anchor only."""
+        gene = self._fwd_gene()
+        # pos=0, delete 6 nt payload: 'TGGGGT' → translate → 'WG' (W=TGG, G=GGT)
+        # ref='ATGGGGT', alt='A'
+        var = VariantCall(chrom='c', pos=0, ref='ATGGGGT', alt='A', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.codon_pos == 0
+        assert ann.ref_aa == 'MWG'
+        assert ann.alt_aa == 'M'
+        assert ann.consequence == 'deletion'
+
+    def test_frameshift_deletion(self) -> None:
+        """1-nt deletion at codon boundary is annotated as frameshift."""
+        gene = self._fwd_gene()
+        # pos=0, ref='AT', alt='A' → delete 1 nt → frameshift
+        var = VariantCall(chrom='c', pos=0, ref='AT', alt='A', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.ref_aa == 'M'
+        assert ann.alt_aa == 'fsX'
+        assert ann.consequence == 'frameshift'
+
+    def test_deletion_at_mid_codon_returns_none(self) -> None:
+        """Deletion anchored mid-codon (frame_offset != 0) is non-assessable."""
+        gene = self._fwd_gene()
+        # pos=1 is frame_offset 1 within codon 0
+        var = VariantCall(chrom='c', pos=1, ref='TGGG', alt='T', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is None
+
+    def test_inframe_deletion_negative_strand(self) -> None:
+        """In-frame deletion on a negative-strand gene uses revcomp of deleted bases."""
+        gene = GeneRecord(
+            id=1, reference_id=1, name='gene', protein='P',
+            start=0, end=9, strand='-', codon_start=0, nt_sequence='ATGGGGTTT',
+        )
+        # cds_variant_pos for pos=8 = (end-1) - pos = 8 - 8 = 0 → codon 0 (ATG=M), frame_offset 0.
+        # Deleted bases (genomic): 'AAA' → revcomp for minus strand → 'TTT' → translate → 'F'
+        var = VariantCall(chrom='c', pos=8, ref='AAAA', alt='A', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.ref_aa == 'MF'
+        assert ann.alt_aa == 'M'
+        assert ann.consequence == 'deletion'
+
+
+# ─── Frameshift annotation ────────────────────────────────────────────
+
+class TestFrameshiftAnnotation:
+    """Frameshift annotations store anchor AA; alt_aa is 'fsX'."""
+
+    def _fwd_gene(self) -> GeneRecord:
+        return GeneRecord(
+            id=1, reference_id=1, name='gene', protein='P',
+            start=0, end=9, strand='+', codon_start=0, nt_sequence='ATGGGGTTT',
+        )
+
+    def test_frameshift_insertion_stores_anchor_aa(self) -> None:
+        gene = self._fwd_gene()
+        var = VariantCall(chrom='c', pos=3, ref='G', alt='GG', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.codon_pos == 1
+        assert ann.ref_aa == 'G'   # codon GGG → G
+        assert ann.alt_aa == 'fsX'
+        assert ann.consequence == 'frameshift'
+        assert ann.ref_codon == 'GGG'
+
+    def test_frameshift_deletion_stores_anchor_aa(self) -> None:
+        gene = self._fwd_gene()
+        var = VariantCall(chrom='c', pos=3, ref='GG', alt='G', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.ref_aa == 'G'
+        assert ann.alt_aa == 'fsX'
+        assert ann.consequence == 'frameshift'
+
+    def test_frameshift_through_annotate_variants(self) -> None:
+        """annotate_variants correctly includes frameshift results."""
+        gene = self._fwd_gene()
+        var = VariantCall(chrom='c', pos=0, ref='AT', alt='A', allele_freq=0.8, depth=100)
+        results = annotate_variants([var], [gene])
+
+        assert len(results) == 1
+        assert results[0].consequence == 'frameshift'

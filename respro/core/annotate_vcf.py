@@ -31,7 +31,8 @@ def annotate_variants(
     """
     Annotate a list of variants with codon-aware amino acid consequences.
 
-    Handles SNPs only. Non-SNP variants are ignored in CDS annotation.
+    Handles SNPs, in-frame insertions, in-frame deletions, and frameshifts in CDS regions.
+    Non-assessable variants (e.g., mid-codon indels) are silently skipped.
     Variants outside any CDS are included with empty gene_name.
 
     SNP consequences can use a query codon from FASTA-based remapping when
@@ -72,7 +73,7 @@ def annotate_variants(
             results.append(ann)
 
     logger.info(
-        'Annotated %d variant(s) -> %d annotation(s) (%d in CDS, %d non-SNP skipped)',
+        'Annotated %d variant(s) -> %d annotation(s) (%d in CDS, %d non-assessable skipped)',
         len(variants),
         len(results),
         sum(1 for a in results if a.gene_name),
@@ -113,6 +114,36 @@ def translate_codon(codon: str) -> str:
 def _is_snp(ref: str, alt: str) -> bool:
     """Return True when both REF and ALT are single nucleotides."""
     return len(ref) == 1 and len(alt) == 1
+
+
+def _is_insertion(ref: str, alt: str) -> bool:
+    """Return True when ALT is longer than REF (VCF anchor-base convention)."""
+    return len(alt) > len(ref)
+
+
+def _is_deletion(ref: str, alt: str) -> bool:
+    """Return True when REF is longer than ALT (VCF anchor-base convention)."""
+    return len(ref) > len(alt)
+
+
+def _is_inframe(ref: str, alt: str) -> bool:
+    """Return True when the indel length is a multiple of 3."""
+    return abs(len(alt) - len(ref)) % 3 == 0
+
+
+def _translate_indel_bases(bases: str, strand: str) -> str:
+    """
+    Translate inserted or deleted nucleotide bases to amino acids.
+
+    For negative-strand genes the bases (given in genomic / VCF orientation) are
+    reverse-complemented before translation so they are in coding orientation.
+
+    :param bases: nucleotide string in VCF (genomic) orientation; must be a multiple of 3
+    :param strand: '+' or '-'
+    :return: amino acid string
+    """
+    oriented = reverse_complement(bases) if strand == '-' else bases.upper()
+    return str(Seq(oriented).translate())
 
 
 def _plan_combined_snp_groups(
@@ -227,42 +258,43 @@ def _annotate_variant_in_gene(
     gene: GeneRecord,
 ) -> AnnotatedVariant | None:
     """
-    Annotate a single SNP within a gene.
+    Annotate a single variant within a gene.
 
-    Uses the gene's stored CDS nucleotide sequence in coding orientation
-    to split into codons, apply the SNP, and determine the amino acid
-    consequence. Non-SNP variants are ignored.
+    Handles SNPs, in-frame insertions, in-frame deletions, and frameshifts.
+    Mid-codon indels (anchor not at a codon boundary) are non-assessable and return None.
     """
-
     seq_cds = gene.nt_sequence.upper()
     if not seq_cds:
         return AnnotatedVariant(variant=var, gene_name=gene.name)
 
-    # Convert genomic variant to CDS coordinates
+    coding_nt = seq_cds[gene.codon_start:]
+
     if gene.strand == '-':
         cds_variant_pos = (gene.end - 1) - var.pos
-        mut = reverse_complement(var.alt)
     else:
         cds_variant_pos = var.pos - gene.start
-        mut = var.alt
 
     coding_variant_pos = cds_variant_pos - gene.codon_start
     if coding_variant_pos < 0:
         return AnnotatedVariant(variant=var, gene_name=gene.name)
 
-    # Split CDS into codon triplets
-    coding_nt = seq_cds[gene.codon_start:]
-    cds_codons = [list(coding_nt[i:i + 3]) for i in range(0, len(coding_nt), 3)]
-    mut_codon_idx = coding_variant_pos // 3
-    codon_pos_in_codon = coding_variant_pos % 3
+    codon_idx = coding_variant_pos // 3
+    frame_offset = coding_variant_pos % 3
 
-    if mut_codon_idx < 0 or mut_codon_idx >= len(cds_codons):
-        return AnnotatedVariant(variant=var, gene_name=gene.name)
+    if _is_snp(var.ref, var.alt):
+        cds_codons = [list(coding_nt[i:i + 3]) for i in range(0, len(coding_nt), 3)]
+        if codon_idx >= len(cds_codons):
+            return AnnotatedVariant(variant=var, gene_name=gene.name)
+        mut = reverse_complement(var.alt) if gene.strand == '-' else var.alt
+        return _annotate_snp(var, gene, cds_codons, codon_idx, frame_offset, mut)
 
-    if not _is_snp(var.ref, var.alt):
-        return None
+    if _is_insertion(var.ref, var.alt):
+        return _annotate_insertion(var, gene, coding_nt, codon_idx, frame_offset)
 
-    return _annotate_snp(var, gene, cds_codons, mut_codon_idx, codon_pos_in_codon, mut)
+    if _is_deletion(var.ref, var.alt):
+        return _annotate_deletion(var, gene, coding_nt, codon_idx, frame_offset)
+
+    return None
 
 
 def _annotate_snp(
@@ -319,6 +351,124 @@ def _classify_snp_consequence(ref_aa: str, alt_aa: str, codon_idx: int) -> str:
     if ref_aa == '*':
         return 'stop_loss'
     return 'missense'
+
+
+def _annotate_frameshift(
+    var: VariantCall,
+    gene: GeneRecord,
+    coding_nt: str,
+    codon_idx: int,
+) -> AnnotatedVariant:
+    """
+    Annotate a frameshift indel.
+
+    Records the anchor codon amino acid; the alt_aa sentinel 'fsX' identifies
+    the variant as a frameshift for rule matching.
+
+    :param var: variant call
+    :param gene: gene record
+    :param coding_nt: coding nucleotide sequence (from codon_start onward)
+    :param codon_idx: 0-based codon index of the anchor base
+    :return: AnnotatedVariant with consequence='frameshift'
+    """
+    anchor_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+    anchor_aa = translate_codon(anchor_codon)
+    return AnnotatedVariant(
+        variant=var,
+        gene_name=gene.name,
+        codon_pos=codon_idx,
+        ref_codon=anchor_codon,
+        alt_codon='',
+        ref_aa=anchor_aa,
+        alt_aa='fsX',
+        consequence='frameshift',
+    )
+
+
+def _annotate_insertion(
+    var: VariantCall,
+    gene: GeneRecord,
+    coding_nt: str,
+    codon_idx: int,
+    frame_offset: int,
+) -> AnnotatedVariant | None:
+    """
+    Annotate an in-frame insertion or frameshift insertion.
+
+    The anchor base must be at a codon boundary (frame_offset == 0) for the
+    insertion to be assessable. Mid-codon insertions return None.
+
+    :param var: variant call; ALT uses VCF anchor-base convention (alt[1:] are inserted bases)
+    :param gene: gene record
+    :param coding_nt: coding nucleotide sequence (from codon_start onward)
+    :param codon_idx: 0-based codon index of the anchor base
+    :param frame_offset: position of anchor base within its codon (0, 1, or 2)
+    :return: AnnotatedVariant or None if non-assessable
+    """
+    if frame_offset != 0:
+        return None
+
+    if not _is_inframe(var.ref, var.alt):
+        return _annotate_frameshift(var, gene, coding_nt, codon_idx)
+
+    anchor_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+    anchor_aa = translate_codon(anchor_codon)
+    inserted_bases = var.alt[1:]  # strip anchor base
+    inserted_aas = _translate_indel_bases(inserted_bases, gene.strand)
+
+    return AnnotatedVariant(
+        variant=var,
+        gene_name=gene.name,
+        codon_pos=codon_idx,
+        ref_codon=anchor_codon,
+        alt_codon='',
+        ref_aa=anchor_aa,
+        alt_aa=anchor_aa + inserted_aas,
+        consequence='insertion',
+    )
+
+
+def _annotate_deletion(
+    var: VariantCall,
+    gene: GeneRecord,
+    coding_nt: str,
+    codon_idx: int,
+    frame_offset: int,
+) -> AnnotatedVariant | None:
+    """
+    Annotate an in-frame deletion or frameshift deletion.
+
+    The anchor base must be at a codon boundary (frame_offset == 0) for the
+    deletion to be assessable. Mid-codon deletions return None.
+
+    :param var: variant call; REF uses VCF anchor-base convention (ref[1:] are deleted bases)
+    :param gene: gene record
+    :param coding_nt: coding nucleotide sequence (from codon_start onward)
+    :param codon_idx: 0-based codon index of the anchor base
+    :param frame_offset: position of anchor base within its codon (0, 1, or 2)
+    :return: AnnotatedVariant or None if non-assessable
+    """
+    if frame_offset != 0:
+        return None
+
+    if not _is_inframe(var.ref, var.alt):
+        return _annotate_frameshift(var, gene, coding_nt, codon_idx)
+
+    anchor_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+    anchor_aa = translate_codon(anchor_codon)
+    deleted_bases = var.ref[1:]  # strip anchor base
+    deleted_aas = _translate_indel_bases(deleted_bases, gene.strand)
+
+    return AnnotatedVariant(
+        variant=var,
+        gene_name=gene.name,
+        codon_pos=codon_idx,
+        ref_codon=anchor_codon,
+        alt_codon='',
+        ref_aa=anchor_aa + deleted_aas,
+        alt_aa=anchor_aa,
+        consequence='deletion',
+    )
 
 
 def normalize_mutation(

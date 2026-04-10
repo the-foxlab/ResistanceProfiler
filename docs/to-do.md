@@ -53,6 +53,7 @@ Mark items done and update priorities after each completed milestone.
 - [x] SNP, in-frame insertion, in-frame deletion, and frameshift detection from FASTA
 - [x] FASTA-mode AF bins — adjusted thresholds for discrete IUPAC-derived frequencies
 - [x] SNP-only annotation mode — removed INDEL annotation paths from VCF/FASTA workflows and related tests
+- [x] VCF in-frame insertion, in-frame deletion, and frameshift annotation — `_annotate_insertion`, `_annotate_deletion`, `_annotate_frameshift` added to `annotate_vcf.py`; mid-codon indels are non-assessable (return None); frameshift uses `alt_aa='fsX'` sentinel for rule matching
 
 ### Codon-aware annotation
 

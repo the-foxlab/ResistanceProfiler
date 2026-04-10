@@ -92,7 +92,7 @@ flowchart TD
     end
 
     %% ── Databases ────────────────────────────────────────────────────
-    subgraph DB["🗄️  Databases  ·  respro/db/"]
+    subgraph DB["Databases  ·  respro/db/"]
         db_ip["project/\nbuild / extend project DB"]
         db_pj[("project.db\nreferences · genes · rules · drugs")]
         db_rs[("results.db\nruns · variant results")]
@@ -424,4 +424,3 @@ This separation helps keep logic testable and output generation consistent.
 
 If you move files, split modules, or add major new subsystems, update this document in
 that same change so the structure guide stays accurate.
-
