@@ -27,10 +27,11 @@ def remap_variants(
 
     1. Excludes positions outside any matched CDS region in the query.
     2. Maps the query position to a CDS position via the inverted CIGAR.
-    3. Sanity-checks that the VCF REF base agrees with the query FASTA.
-    4. Stores query codon context for downstream SNP annotation.
+    3. Sanity-checks that the VCF REF anchor base agrees with the query FASTA.
+    4. Stores the query codon context in every remapped variant for downstream annotation.
     5. Converts the CDS position to an internal genomic position and transforms
-       REF/ALT bases to the internal forward strand.
+       REF/ALT alleles to the internal forward strand (anchor complement + payload RC
+       for indels when the alignment strand and gene strand differ).
 
     :param variants: parsed VCF variants (0-based on user reference)
     :param matches: gene matches from FASTA alignment
@@ -52,12 +53,6 @@ def remap_variants(
     remapped: list[VariantCall] = []
     warnings: list[str] = []
     for var in variants:
-        if len(var.ref) != 1 or len(var.alt) != 1:
-            warnings.append(
-                f'pos {var.pos + 1}: skipping non-SNP variant {var.ref!r}>{var.alt!r}'
-            )
-            continue
-
         hit = False
         for match, q2c in match_maps:
             if var.pos not in q2c:
@@ -70,11 +65,11 @@ def remap_variants(
             if not (0 <= var.pos < query_len):
                 continue
 
-            # Sanity check: VCF REF must agree with query FASTA
+            # Sanity check: VCF anchor REF base must agree with query FASTA
             query_base = query_upper[var.pos]
-            if query_base != var.ref.upper():
+            if query_base != var.ref[0].upper():
                 warnings.append(
-                    f'pos {var.pos + 1}: VCF REF {var.ref!r} \u2260 FASTA '
+                    f'pos {var.pos + 1}: VCF REF anchor {var.ref[0]!r} \u2260 FASTA '
                     f'{query_base!r}'
                 )
                 continue
@@ -85,14 +80,12 @@ def remap_variants(
             # Transform REF/ALT to internal reference forward strand.
             # Complement is needed when alignment strand and gene strand differ.
             need_comp = (match.strand != gene.strand)
-            ref_base = _complement_base(var.ref) if need_comp else var.ref
-            alt_base = _complement_base(var.alt) if need_comp else var.alt
+            ref_base = _transform_allele(var.ref, need_comp)
+            alt_base = _transform_allele(var.alt, need_comp)
 
-            query_ref_codon = ''
-            if len(var.ref) == 1 and len(var.alt) == 1:
-                query_ref_codon = _extract_query_ref_codon(q2c, query_upper, cds_pos)
-                if match.strand == '-' and len(query_ref_codon) == 3:
-                    query_ref_codon = str(Seq(query_ref_codon).complement())
+            query_ref_codon = _extract_query_ref_codon(q2c, query_upper, cds_pos)
+            if match.strand == '-' and len(query_ref_codon) == 3:
+                query_ref_codon = str(Seq(query_ref_codon).complement())
 
             remapped.append(VariantCall(
                 chrom=var.chrom,
@@ -141,6 +134,24 @@ def _extract_query_ref_codon(
             return ''
         codon_bases.append(query_sequence[query_pos])
     return ''.join(codon_bases)
+
+
+def _transform_allele(allele: str, need_comp: bool) -> str:
+    """
+    Transform a VCF allele to internal forward-strand orientation.
+
+    For SNPs, complements the single base. For indels, complements the anchor
+    base (allele[0]) and reverse-complements the payload (allele[1:]).
+
+    :param allele: VCF allele string (REF or ALT)
+    :param need_comp: True when alignment strand and gene strand differ
+    :return: transformed allele string
+    """
+    if not need_comp or not allele:
+        return allele
+    anchor = str(Seq(allele[0]).complement())
+    payload = str(Seq(allele[1:]).reverse_complement()) if len(allele) > 1 else ''
+    return anchor + payload
 
 
 def _complement_base(base: str) -> str:

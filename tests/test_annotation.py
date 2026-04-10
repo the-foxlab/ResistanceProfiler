@@ -527,6 +527,41 @@ class TestInsertionAnnotation:
         assert ann.alt_aa == 'MP'
         assert ann.consequence == 'insertion'
 
+    def test_insertion_uses_query_anchor_codon_positive_strand(self) -> None:
+        """Forward-strand gene: query_ref_codon overrides internal CDS for anchor AA."""
+        gene = self._fwd_gene()
+        # Internal codon 1 = 'GGG' → G; user's query codon 1 = 'AGG' → R (divergent anchor).
+        # Rule in the DB says reference='R', mutation='RG' → only matches when anchor comes from query.
+        var = VariantCall(
+            chrom='c', pos=3, ref='G', alt='GGGG', allele_freq=0.9, depth=100,
+            query_ref_codon='AGG',
+        )
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.ref_aa == 'R'
+        assert ann.alt_aa == 'RG'
+        assert ann.consequence == 'insertion'
+
+    def test_insertion_uses_query_anchor_codon_negative_strand(self) -> None:
+        """Minus-strand gene: query_ref_codon is expected in CDS orientation."""
+        gene = self._rev_gene()
+        # Minus-strand gene coding 'ATGGGGTTT' (M G F).
+        # Anchor at CDS pos 3 (start of codon 1) → genomic pos = (9-1)-3 = 5.
+        # Genomic base at 5 = 'C' (from AAACCCCAT, the genomic forward for this gene).
+        # Insert 'CCC' on forward strand → RC = 'GGG' → G (glycine in coding).
+        # query_ref_codon='AGG' → R instead of internal G.
+        var = VariantCall(
+            chrom='c', pos=5, ref='C', alt='CCCC', allele_freq=0.9, depth=100,
+            query_ref_codon='AGG',
+        )
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.ref_aa == 'R'
+        assert ann.alt_aa == 'RG'
+        assert ann.consequence == 'insertion'
+
 
 # ─── Deletion annotation ──────────────────────────────────────────────
 
@@ -606,6 +641,42 @@ class TestDeletionAnnotation:
         assert ann.alt_aa == 'M'
         assert ann.consequence == 'deletion'
 
+    def test_deletion_uses_query_anchor_codon_positive_strand(self) -> None:
+        """Forward-strand gene: query_ref_codon overrides internal CDS for anchor AA."""
+        gene = self._fwd_gene()
+        # Internal codon 1 = 'GGG' → G; user's query codon 1 = 'AGG' → R (divergent anchor).
+        # Deletion of 'GGG' (next codon, G) from anchor codon 1.
+        var = VariantCall(
+            chrom='c', pos=3, ref='GGGG', alt='G', allele_freq=0.9, depth=100,
+            query_ref_codon='AGG',
+        )
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.ref_aa == 'RG'   # anchor from query (R) + deleted G
+        assert ann.alt_aa == 'R'
+        assert ann.consequence == 'deletion'
+
+    def test_deletion_uses_query_anchor_codon_negative_strand(self) -> None:
+        """Minus-strand gene: query_ref_codon (CDS orientation) used as anchor."""
+        gene = GeneRecord(
+            id=1, reference_id=1, name='gene', protein='P',
+            start=0, end=9, strand='-', codon_start=0, nt_sequence='ATGGGGTTT',
+        )
+        # Anchor at CDS pos 3 → genomic pos = (9-1)-3 = 5.
+        # Delete 'CCC' on forward strand → RC = 'GGG' → G (glycine in coding).
+        # query_ref_codon='AGG' → R instead of internal G.
+        var = VariantCall(
+            chrom='c', pos=5, ref='CCCC', alt='C', allele_freq=0.9, depth=100,
+            query_ref_codon='AGG',
+        )
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.ref_aa == 'RG'   # anchor R (from query) + deleted G
+        assert ann.alt_aa == 'R'
+        assert ann.consequence == 'deletion'
+
 
 # ─── Frameshift annotation ────────────────────────────────────────────
 
@@ -648,3 +719,18 @@ class TestFrameshiftAnnotation:
 
         assert len(results) == 1
         assert results[0].consequence == 'frameshift'
+
+    def test_frameshift_uses_query_anchor_codon(self) -> None:
+        """query_ref_codon used as anchor codon for frameshift too."""
+        gene = self._fwd_gene()
+        # Internal codon 1 = 'GGG' → G; user's query codon 1 = 'AGG' → R.
+        var = VariantCall(
+            chrom='c', pos=3, ref='GG', alt='G', allele_freq=0.9, depth=100,
+            query_ref_codon='AGG',
+        )
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.ref_aa == 'R'   # from query, not internal G
+        assert ann.alt_aa == 'fsX'
+        assert ann.consequence == 'frameshift'

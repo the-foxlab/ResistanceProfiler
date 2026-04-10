@@ -54,6 +54,7 @@ Mark items done and update priorities after each completed milestone.
 - [x] FASTA-mode AF bins — adjusted thresholds for discrete IUPAC-derived frequencies
 - [x] SNP-only annotation mode — removed INDEL annotation paths from VCF/FASTA workflows and related tests
 - [x] VCF in-frame insertion, in-frame deletion, and frameshift annotation — `_annotate_insertion`, `_annotate_deletion`, `_annotate_frameshift` added to `annotate_vcf.py`; mid-codon indels are non-assessable (return None); frameshift uses `alt_aa='fsX'` sentinel for rule matching
+- [x] VCF indel strand-aware query anchor — `remap_variants` now passes all variant types through (non-SNP skip removed); allele strand-flip uses `_transform_allele` (anchor complement + payload RC); `query_ref_codon` populated for all variant types; indel annotation handlers use query codon as anchor AA when available
 
 ### Codon-aware annotation
 

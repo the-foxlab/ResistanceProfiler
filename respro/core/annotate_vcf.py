@@ -371,7 +371,9 @@ def _annotate_frameshift(
     :param codon_idx: 0-based codon index of the anchor base
     :return: AnnotatedVariant with consequence='frameshift'
     """
-    anchor_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+    internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+    query_codon = var.query_ref_codon.upper()
+    anchor_codon = query_codon if len(query_codon) == 3 else internal_codon
     anchor_aa = translate_codon(anchor_codon)
     return AnnotatedVariant(
         variant=var,
@@ -411,7 +413,9 @@ def _annotate_insertion(
     if not _is_inframe(var.ref, var.alt):
         return _annotate_frameshift(var, gene, coding_nt, codon_idx)
 
-    anchor_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+    internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+    query_codon = var.query_ref_codon.upper()
+    anchor_codon = query_codon if len(query_codon) == 3 else internal_codon
     anchor_aa = translate_codon(anchor_codon)
     inserted_bases = var.alt[1:]  # strip anchor base
     inserted_aas = _translate_indel_bases(inserted_bases, gene.strand)
@@ -454,7 +458,9 @@ def _annotate_deletion(
     if not _is_inframe(var.ref, var.alt):
         return _annotate_frameshift(var, gene, coding_nt, codon_idx)
 
-    anchor_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+    internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+    query_codon = var.query_ref_codon.upper()
+    anchor_codon = query_codon if len(query_codon) == 3 else internal_codon
     anchor_aa = translate_codon(anchor_codon)
     deleted_bases = var.ref[1:]  # strip anchor base
     deleted_aas = _translate_indel_bases(deleted_bases, gene.strand)

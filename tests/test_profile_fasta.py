@@ -312,20 +312,6 @@ class TestRemapVariants:
         assert len(remapped) == 1
         assert remapped[0].query_ref_codon == 'AAA'
 
-    def test_indel_is_skipped_in_snp_only_mode(self, gene_fwd: GeneRecord) -> None:
-        """Non-SNP calls are excluded during remapping in SNP-only mode."""
-        query = TINY_REF_SEQ
-        matches = match_query_to_genes(query, [gene_fwd])
-
-        variants = [
-            VariantCall(chrom='c', pos=3, ref='A', alt='AG', allele_freq=0.4, depth=20),
-        ]
-        remapped, warnings = remap_variants(variants, matches, query)
-
-        assert remapped == []
-        assert len(warnings) == 1
-        assert 'skipping non-SNP variant' in warnings[0]
-
     def test_snp_stores_query_ref_codon_for_reverse_match(self) -> None:
         """Reverse-strand matches must reconstruct query codon in CDS orientation."""
         gene_rev = GeneRecord(
