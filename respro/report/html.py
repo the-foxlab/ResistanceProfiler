@@ -13,7 +13,13 @@ from markupsafe import Markup, escape
 
 from respro import __version__
 from respro.core.annotation import classify_similarity
-from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord, ResistanceRule
+from respro.db.models import (
+    AnnotatedVariant,
+    CoverageGap,
+    GeneRecord,
+    ProfilingResult,
+    ResistanceRule,
+)
 from respro.report.palette import (
     AF_BIN_COLOURS,
     MUTATION_COLOURS,
@@ -22,7 +28,6 @@ from respro.report.palette import (
     badge_text_colour,
 )
 from respro.report.plots import render_lollipop_plot_bytes
-from respro.db.models import ProfilingResult
 
 logger = logging.getLogger(__name__)
 

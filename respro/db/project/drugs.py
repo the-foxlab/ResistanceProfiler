@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+
 from respro.io.pubchem import lookup_drug
 
 logger = logging.getLogger(__name__)

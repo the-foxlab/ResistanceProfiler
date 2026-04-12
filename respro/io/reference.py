@@ -9,7 +9,6 @@ import sqlite3
 from pathlib import Path
 
 from Bio import SeqIO
-from Bio.Seq import Seq
 
 from respro.db.models import GeneRecord
 

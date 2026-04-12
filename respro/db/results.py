@@ -8,8 +8,14 @@ import json
 import sqlite3
 from pathlib import Path
 
-from respro.db.models import AnnotatedVariant, CoverageGap, Publication, ResistanceRule, VariantCall
-from respro.db.models import ProfilingResult
+from respro.db.models import (
+    AnnotatedVariant,
+    CoverageGap,
+    ProfilingResult,
+    Publication,
+    ResistanceRule,
+    VariantCall,
+)
 
 
 def project_fingerprint(project_conn: sqlite3.Connection) -> str:
