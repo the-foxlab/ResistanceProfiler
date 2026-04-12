@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from respro.core.resistance_rules import load_rules, load_rule_sets, match_rules, match_rule_sets
+from respro.core.rules import load_rules, load_rule_sets, match_rules, match_rule_sets
 from respro.db.models import (
     AnnotatedVariant, ResistanceRule, ResistanceRuleSet, ResistanceRuleSetMember, VariantCall,
 )

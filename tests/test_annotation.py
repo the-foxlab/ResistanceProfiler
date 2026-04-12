@@ -3,7 +3,7 @@ Tests for codon-aware annotation logic.
 """
 
 from respro.cli_helpers import assign_af_bins
-from respro.core.annotate_vcf import (
+from respro.core.annotation import (
     _annotate_variant_in_gene,
     _classify_snp_consequence,
     annotate_variants,

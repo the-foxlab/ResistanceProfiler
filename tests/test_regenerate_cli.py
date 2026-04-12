@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 from respro.cli import app
 from respro.db.results import save_run, project_fingerprint
 from respro.db.schema import init_results_db, open_project_db
-from respro.report.results_model import ProfilingResult
+from respro.db.models import ProfilingResult
 
 
 def _run_profile(project_db: Path, sample_vcf: Path, sample_ref_fasta: Path, results_db: Path, tmp_path: Path) -> None:

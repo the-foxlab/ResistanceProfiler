@@ -2,9 +2,9 @@
 Tests for VCF remapping — indel strand handling and query_ref_codon population.
 """
 
-from respro.core.annotate_vcf import reverse_complement
-from respro.core.profile_vcf import _transform_allele, remap_variants
-from respro.core.sequence_matching import GeneMatch
+from respro.core.annotation import reverse_complement
+from respro.core.vcf_remap import _transform_allele, remap_variants
+from respro.db.models import GeneMatch
 from respro.db.models import GeneRecord, VariantCall
 
 

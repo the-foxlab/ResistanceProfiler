@@ -13,16 +13,15 @@ from pathlib import Path
 
 import click
 
-from respro.core.profile_helpers import pick_best_reference_id, select_matches_for_reference
-from respro.core.resistance_rules import load_rule_sets, load_rules, match_rule_sets, match_rules
-from respro.db.models import AnnotatedVariant
-from respro.db.models import CoverageGap
+from respro.core.query import pick_best_reference_id, select_matches_for_reference
+from respro.core.rules import load_rule_sets, load_rules, match_rule_sets, match_rules
+from respro.db.models import AnnotatedVariant, CoverageGap
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.results import save_run
 from respro.db.schema import init_results_db
 from respro.io.reference import load_genes_for_reference
 from respro.report.html import export_results
-from respro.report.results_model import ProfilingResult
+from respro.db.models import ProfilingResult
 
 
 def _init_results_db_connection(

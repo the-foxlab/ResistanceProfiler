@@ -24,7 +24,7 @@ from respro.report.palette import (
     NON_COVERED_COLOUR,
     mutation_legend_patches,
 )
-from respro.report.results_model import ProfilingResult
+from respro.db.models import ProfilingResult
 
 matplotlib.use('Agg')
 logger = logging.getLogger(__name__)

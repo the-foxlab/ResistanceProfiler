@@ -21,7 +21,7 @@ from respro.db.results import (
     save_run,
 )
 from respro.db.schema import create_schema, init_results_db, open_project_db
-from respro.report.results_model import ProfilingResult
+from respro.db.models import ProfilingResult
 
 
 class TestProjectSchemaBoundary:

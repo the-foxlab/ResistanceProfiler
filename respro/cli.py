@@ -29,11 +29,11 @@ from respro.cli_helpers import (
     _load_reference_data,
     _resolve_reference,
 )
-from respro.core.profile_fasta import profile_fasta_consensus
-from respro.core.profile_helpers import resolve_cached_query_reference, resolve_fasta_query
-from respro.core.profile_vcf import remap_variants
-from respro.core.resistance_rules import load_rules
-from respro.core.annotate_vcf import annotate_variants
+from respro.core.fasta_profile import profile_fasta_consensus
+from respro.core.query import resolve_cached_query_reference, resolve_fasta_query
+from respro.core.vcf_remap import remap_variants
+from respro.core.rules import load_rules
+from respro.core.annotation import annotate_variants
 from respro.db.project import add_to_project, init_project
 from respro.db.results import list_runs, load_run, reconstruct_annotations
 from respro.db.results import load_coverage_gaps
@@ -42,7 +42,7 @@ from respro.db.schema import open_project_db, open_results_db
 from respro.io.reference import load_genes_for_reference
 from respro.io.vcf import parse_vcf
 from respro.report.html import export_results
-from respro.report.results_model import ProfilingResult
+from respro.db.models import ProfilingResult
 from respro.utils.logging import setup_logging, err_console
 
 

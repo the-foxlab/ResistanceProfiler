@@ -238,9 +238,18 @@ When reviewing code, check the whole repository for:
 
 - Coding standards and conventions
 - Unused features, functions, classes, modules or imports
+- Group related functions into modules
+- Check for logical consistency and correctness, especially in edge cases
+- add comments where the intent or logic is not immediately clear
 - Unnecessary complexity
 - Simplify highly nested functions or methods
-- Always try to simplify and improve readability
+- Simplify and improve readability
+- Follow SOLID, KISS and DRY principles
+- Check for proper error handling and informative error messages
+- Check for proper use of type hints and docstrings
+- Check for proper test coverage and quality of test cases
+- Remove any behaviour that is intended for backward compatibility if not
+being explicitly requested by the user
 
 ## Testing
 

@@ -12,7 +12,7 @@ from jinja2 import BaseLoader, Environment
 from markupsafe import Markup, escape
 
 from respro import __version__
-from respro.core.similarity import classify_similarity
+from respro.core.annotation import classify_similarity
 from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord, ResistanceRule
 from respro.report.palette import (
     AF_BIN_COLOURS,
@@ -22,7 +22,7 @@ from respro.report.palette import (
     badge_text_colour,
 )
 from respro.report.plots import render_lollipop_plot_bytes
-from respro.report.results_model import ProfilingResult
+from respro.db.models import ProfilingResult
 
 logger = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ import sqlite3
 from pathlib import Path
 
 from respro.db.models import AnnotatedVariant, CoverageGap, Publication, ResistanceRule, VariantCall
-from respro.report.results_model import ProfilingResult
+from respro.db.models import ProfilingResult
 
 
 def project_fingerprint(project_conn: sqlite3.Connection) -> str:

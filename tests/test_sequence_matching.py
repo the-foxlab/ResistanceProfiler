@@ -1,5 +1,5 @@
 """
-Tests for sequence matching — CDS alignment, CIGAR mapping, and DB caching.
+Tests for sequence alignment — CDS alignment, CIGAR mapping, and DB caching.
 """
 
 from __future__ import annotations
@@ -9,9 +9,8 @@ from pathlib import Path
 
 import pytest
 
-import respro.core.sequence_matching as sequence_matching
-from respro.core.sequence_matching import (
-    GeneMatch,
+import respro.core.alignment as alignment
+from respro.core.alignment import (
     cigar_to_coordinate_map,
     load_cached_mappings,
     load_genes_with_rules,
@@ -20,6 +19,7 @@ from respro.core.sequence_matching import (
     sequence_checksum,
     store_mappings,
 )
+from respro.db.models import GeneMatch
 from respro.db.models import GeneRecord
 from respro.db.schema import create_schema
 
@@ -251,14 +251,14 @@ class TestAlignerOverflowSafety:
             def align(self, query: str, cds: str):
                 return _FakeAlignments()
 
-        monkeypatch.setattr(sequence_matching, 'PairwiseAligner', _FakeAligner)
+        monkeypatch.setattr(alignment, 'PairwiseAligner', _FakeAligner)
         monkeypatch.setattr(
-            sequence_matching,
+            alignment,
             '_alignment_to_cigar',
             lambda alignment, query, cds: ('10M', 1.0, 10, 0, 10, 0),
         )
 
-        result = sequence_matching._align_cds_to_query('ATGATGATGA', 'ATGATGATGA', '+')
+        result = alignment._align_cds_to_query('ATGATGATGA', 'ATGATGATGA', '+')
         assert result.identity == pytest.approx(1.0)
         assert result.cigar == '10M'
 

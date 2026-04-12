@@ -5,7 +5,7 @@ Tests for report output generation.
 import sqlite3
 
 from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord, Publication, ResistanceRule, VariantCall
-from respro.report.results_model import ProfilingResult
+from respro.db.models import ProfilingResult
 from respro.report.html import build_report_context
 from respro.report.html import _build_potential_effects_rows
 from respro.report.html import _load_gene_cards
