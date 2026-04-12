@@ -2,17 +2,16 @@
 Tests for codon-aware annotation logic.
 """
 
+from respro.cli_helpers import assign_af_bins
 from respro.core.annotate_vcf import (
+    _annotate_variant_in_gene,
+    _classify_snp_consequence,
     annotate_variants,
     normalize_mutation,
     reverse_complement,
     translate_codon,
-    _classify_snp_consequence,
-    _annotate_variant_in_gene,
 )
-from respro.cli_helpers import assign_af_bins
 from respro.db.models import AnnotatedVariant, GeneRecord, VariantCall
-
 
 # ─── translate_codon ──────────────────────────────────────────────────
 
@@ -504,14 +503,29 @@ class TestInsertionAnnotation:
         assert ann.alt_aa == 'fsX'
         assert ann.consequence == 'frameshift'
 
-    def test_insertion_at_mid_codon_returns_none(self) -> None:
-        """Insertion anchored mid-codon (frame_offset != 0) is non-assessable."""
+    def test_inframe_insertion_at_mid_codon_is_complex(self) -> None:
+        """In-frame insertion anchored mid-codon is annotated as inframe_complex."""
         gene = self._fwd_gene()
         # pos=1 is frame_offset 1 within codon 0
         var = VariantCall(chrom='c', pos=1, ref='T', alt='TGGG', allele_freq=0.9, depth=100)
         ann = _annotate_variant_in_gene(var, gene)
 
-        assert ann is None
+        assert ann is not None
+        assert ann.ref_aa == '?'
+        assert ann.alt_aa == '?'
+        assert ann.consequence == 'inframe_complex'
+
+    def test_mid_codon_non_inframe_insertion_is_frameshift(self) -> None:
+        """Non-in-frame insertion is frameshift even when anchored mid-codon."""
+        gene = self._fwd_gene()
+        # pos=1 is frame_offset 1 within codon 0; 1-nt payload insertion -> frameshift
+        var = VariantCall(chrom='c', pos=1, ref='T', alt='TG', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.ref_aa == 'M'
+        assert ann.alt_aa == 'fsX'
+        assert ann.consequence == 'frameshift'
 
     def test_inframe_insertion_negative_strand(self) -> None:
         """In-frame insertion on a negative-strand gene uses revcomp of inserted bases."""
@@ -616,14 +630,29 @@ class TestDeletionAnnotation:
         assert ann.alt_aa == 'fsX'
         assert ann.consequence == 'frameshift'
 
-    def test_deletion_at_mid_codon_returns_none(self) -> None:
-        """Deletion anchored mid-codon (frame_offset != 0) is non-assessable."""
+    def test_inframe_deletion_at_mid_codon_is_complex(self) -> None:
+        """In-frame deletion anchored mid-codon is annotated as inframe_complex."""
         gene = self._fwd_gene()
         # pos=1 is frame_offset 1 within codon 0
         var = VariantCall(chrom='c', pos=1, ref='TGGG', alt='T', allele_freq=0.9, depth=100)
         ann = _annotate_variant_in_gene(var, gene)
 
-        assert ann is None
+        assert ann is not None
+        assert ann.ref_aa == '?'
+        assert ann.alt_aa == '?'
+        assert ann.consequence == 'inframe_complex'
+
+    def test_mid_codon_non_inframe_deletion_is_frameshift(self) -> None:
+        """Non-in-frame deletion is frameshift even when anchored mid-codon."""
+        gene = self._fwd_gene()
+        # pos=1 is frame_offset 1 within codon 0; delete 1 nt payload -> frameshift
+        var = VariantCall(chrom='c', pos=1, ref='TG', alt='T', allele_freq=0.9, depth=100)
+        ann = _annotate_variant_in_gene(var, gene)
+
+        assert ann is not None
+        assert ann.ref_aa == 'M'
+        assert ann.alt_aa == 'fsX'
+        assert ann.consequence == 'frameshift'
 
     def test_inframe_deletion_negative_strand(self) -> None:
         """In-frame deletion on a negative-strand gene uses revcomp of deleted bases."""

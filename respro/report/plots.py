@@ -14,12 +14,20 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord
-from respro.report.palette import MUTATION_COLOURS
+from respro.report.palette import (
+    GENE_BASELINE_COLOUR,
+    GENE_DEFAULT_COLOUR,
+    GENE_DEFAULT_EDGE,
+    GENE_HIGHLIGHTED_COLOUR,
+    GENE_HIGHLIGHTED_EDGE,
+    MUTATION_COLOURS,
+    NON_COVERED_COLOUR,
+    mutation_legend_patches,
+)
 from respro.report.results_model import ProfilingResult
 
 matplotlib.use('Agg')
 logger = logging.getLogger(__name__)
-_NON_COVERED_COLOUR = '#6b7280'
 
 
 def lollipop_plot(
@@ -133,22 +141,12 @@ def _build_lollipop_figure(
         reference_length_nt=result.reference_length_nt,
     )
     # Legend handles
+    effects_for_legend = {ann.consequence for ann in cds}
     handles = [
         plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='white',
                    markeredgecolor='black', markersize=8, label='Database hit'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['missense'],
-                   markeredgecolor='white', markersize=8, label='Missense'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['synonymous'],
-                   markeredgecolor='white', markersize=8, label='Synonymous'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['stop_gained'],
-                   markeredgecolor='white', markersize=8, label='Stop gained/lost'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['frameshift'],
-                   markeredgecolor='white', markersize=8, label='Frameshift'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['insertion'],
-                   markeredgecolor='white', markersize=8, label='Insertion'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=MUTATION_COLOURS['deletion'],
-                   markeredgecolor='white', markersize=8, label='Deletion'),
-        mpatches.Patch(facecolor=_NON_COVERED_COLOUR, alpha=0.12, edgecolor='none', label='non covered'),
+        mpatches.Patch(facecolor=NON_COVERED_COLOUR, alpha=0.12, edgecolor='none', label='non covered'),
+        *mutation_legend_patches(effects_for_legend),
     ]
 
     for i, gene in enumerate(plot_genes):
@@ -274,7 +272,7 @@ def _draw_genome_overview(
     track_height = 0.44
     track_step = track_height * 0.2
     # Baseline beneath the tracks
-    ax.hlines(0.0, genome_start, genome_end, color='dimgrey', linewidth=1.0, zorder=1)
+    ax.hlines(0.0, genome_start, genome_end, color=GENE_BASELINE_COLOUR, linewidth=1.0, zorder=1)
 
     for gene in sorted_genes:
         track = tracks[gene.name]
@@ -282,8 +280,8 @@ def _draw_genome_overview(
         left = gene.start + 1
         width = max(1, gene.end - gene.start)
         is_highlighted = gene.name in highlighted_gene_names
-        colour = 'steelblue' if is_highlighted else '#d9dde3'
-        edge = 'slategrey' if is_highlighted else '#8d99a6'
+        colour = GENE_HIGHLIGHTED_COLOUR if is_highlighted else GENE_DEFAULT_COLOUR
+        edge = GENE_HIGHLIGHTED_EDGE if is_highlighted else GENE_DEFAULT_EDGE
         rect = mpatches.Rectangle(
             (left, y - (track_height / 2.0)),
             width,
@@ -306,7 +304,7 @@ def _draw_genome_overview(
                 va='bottom',
                 fontsize=8,
                 fontweight='bold',
-                color='slategrey',
+                color=GENE_HIGHLIGHTED_EDGE,
             )
 
     ax.set_title('Genome overview', fontsize=8, loc='left', fontweight='bold')
@@ -353,14 +351,14 @@ def _draw_gene_track(ax, gene: GeneRecord) -> None:
     # Draw gene arrow/rectangle
     gene_width = gene.end - gene.start
     pad = max(10, int((gene.end - gene.start) * 0.03))
-    ax.hlines(0.5, gene.start + 1 - pad, gene.end + pad, color='dimgrey', linewidth=1.0, zorder=-10)
+    ax.hlines(0.5, gene.start + 1 - pad, gene.end + pad, color=GENE_BASELINE_COLOUR, linewidth=1.0, zorder=-10)
 
     rect = mpatches.Rectangle(
         (gene.start + 1, 0.3),
         gene_width,
         0.4,
-        facecolor='steelblue',
-        edgecolor='slategrey',
+        facecolor=GENE_HIGHLIGHTED_COLOUR,
+        edgecolor=GENE_HIGHLIGHTED_EDGE,
         alpha=1,
         linewidth=1.0,
         zorder=2,
@@ -516,7 +514,7 @@ def _draw_non_covered_regions(ax, gene: GeneRecord, coverage_gaps: list[Coverage
             right_end + 0.5,
             ymin=0.0,
             ymax=1.0,
-            facecolor=_NON_COVERED_COLOUR,
+            facecolor=NON_COVERED_COLOUR,
             alpha=0.12,
             linewidth=0,
             zorder=0,

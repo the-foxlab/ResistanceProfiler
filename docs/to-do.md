@@ -9,119 +9,119 @@ Mark items done and update priorities after each completed milestone.
 
 ### Core infrastructure
 
-- [x] SQLite-backed project database (`project.db`) with versioned schema (`PROJECT_SCHEMA_VERSION`)
-- [x] SQLite-backed results database (`results.db`) for persisting runs and regenerating reports
-- [x] Project fingerprint (UUID) for cross-database run validation
-- [x] CLI entry points: `respro init`, `respro init-add`, `respro profile-vcf`, `respro profile-fasta`, `respro regenerate`
-- [x] Verbosity control via `-v` / `-vv` flags
-- [x] No functions in `__init__.py` — only module docstrings; functions in named submodules
-- [x] File validation helper (`utils/files.py` → `require_file`)
-- [x] Strand validation moved into `respro/io/genbank.py`
+- [X] SQLite-backed project database (`project.db`) with versioned schema (`PROJECT_SCHEMA_VERSION`)
+- [X] SQLite-backed results database (`results.db`) for persisting runs and regenerating reports
+- [X] Project fingerprint (UUID) for cross-database run validation
+- [X] CLI entry points: `respro init`, `respro init-add`, `respro profile-vcf`, `respro profile-fasta`, `respro regenerate`
+- [X] Verbosity control via `-v` / `-vv` flags
+- [X] No functions in `__init__.py` — only module docstrings; functions in named submodules
+- [X] File validation helper (`utils/files.py` → `require_file`)
+- [X] Strand validation moved into `respro/io/genbank.py`
 
 ### Project initialisation
 
-- [x] GenBank parsing — multi-record files, multiple files via repeated `--genbank`
-- [x] CDS extraction — gene/protein name, coordinates, strand, `codon_start`, NT slice, AA translation
-- [x] Organism and taxonomy metadata stored per reference
-- [x] Multi-reference support — multiple pathogens in one project database
-- [x] Rules TSV parsing and validation (all required and optional columns)
-- [x] Mutation normalization (`normalize_mutation`) — canonical token set covering SNPs, indels, frameshifts, and HGVS-like notation
-- [x] INDEL rule storage model switched to explicit `position` + `reference` + `mutation` alleles (legacy rewrite notation still accepted on import)
-- [x] Phenotype and clinical phenotype normalization
-- [x] IC50 column support — `ic50`/`ic_50` and `fold_ic50`/`fold_ic_50` stored separately; both may coexist in one file; report columns shown only when values are present; empty optional columns (ic50, fold_ic50, clinical_phenotype, source) hidden per table section
-- [x] Drug deduplication — case-insensitive; biological duplicate detection for `init-add`
-- [x] Combination rule sets — `resistance_rule_set` + `resistance_rule_set_member` tables; TSV `rule_group` column
-- [x] `init-add` — extend existing project with new rules and optional additional GenBank annotations
-- [x] PubChem integration — best-effort drug CID, canonical URL, short description; fully non-fatal
-- [x] Publication table — deduplicated `publication` table + `rule_publication` / `rule_set_publication` join tables; all publications from all combo-group members collected; PMID resolved to DOI via NCBI E-utilities; title fetched from CrossRef; `--drug-info` renamed to `--additional-info` covering both drugs and publications; citation-number bibliography section in HTML report
+- [X] GenBank parsing — multi-record files, multiple files via repeated `--genbank`
+- [X] CDS extraction — gene/protein name, coordinates, strand, `codon_start`, NT slice, AA translation
+- [X] Organism and taxonomy metadata stored per reference
+- [X] Multi-reference support — multiple pathogens in one project database
+- [X] Rules TSV parsing and validation (all required and optional columns)
+- [X] Mutation normalization (`normalize_mutation`) — canonical token set covering SNPs, indels, frameshifts, and HGVS-like notation
+- [X] INDEL rule storage model switched to explicit `position` + `reference` + `mutation` alleles (legacy rewrite notation still accepted on import)
+- [X] Phenotype and clinical phenotype normalization
+- [X] IC50 column support — `ic50`/`ic_50` and `fold_ic50`/`fold_ic_50` stored separately; both may coexist in one file; report columns shown only when values are present; empty optional columns (ic50, fold_ic50, clinical_phenotype, source) hidden per table section
+- [X] Drug deduplication — case-insensitive; biological duplicate detection for `init-add`
+- [X] Combination rule sets — `resistance_rule_set` + `resistance_rule_set_member` tables; TSV `rule_group` column
+- [X] `init-add` — extend existing project with new rules and optional additional GenBank annotations
+- [X] PubChem integration — best-effort drug CID, canonical URL, short description; fully non-fatal
+- [X] Publication table — deduplicated `publication` table + `rule_publication` / `rule_set_publication` join tables; all publications from all combo-group members collected; PMID resolved to DOI via NCBI E-utilities; title fetched from CrossRef; `--drug-info` renamed to `--additional-info` covering both drugs and publications; citation-number bibliography section in HTML report
 
 ### Profiling — VCF mode
 
-- [x] VCF ingestion — allele frequency, read depth, filter status
-- [x] Allele-frequency and depth filtering (`--min-af`, `--min-depth`)
-- [x] Reference FASTA alignment via Biopython `PairwiseAligner` with CIGAR maps
-- [x] CIGAR-based coordinate remapping — VCF variants from user-reference to internal CDS coordinates
-- [x] Alignment result caching in `project.db` (`query_reference`, `query_gene_mapping`)
-- [x] `--query-ref-header` — reuse a previously cached reference alignment
-- [x] `--cache` / `--no-cache` flag to control caching behaviour
-- [x] REF allele verification against active query sequence during remap
+- [X] VCF ingestion — allele frequency, read depth, filter status
+- [X] Allele-frequency and depth filtering (`--min-af`, `--min-depth`)
+- [X] Reference FASTA alignment via Biopython `PairwiseAligner` with CIGAR maps
+- [X] CIGAR-based coordinate remapping — VCF variants from user-reference to internal CDS coordinates
+- [X] Alignment result caching in `project.db` (`query_reference`, `query_gene_mapping`)
+- [X] `--query-ref-header` — reuse a previously cached reference alignment
+- [X] `--cache` / `--no-cache` flag to control caching behaviour
+- [X] REF allele verification against active query sequence during remap
 
 ### Profiling — FASTA mode
 
-- [x] Consensus FASTA profiling — codon-walk, amino acid diff, no VCF required
-- [x] IUPAC ambiguity expansion — all possible codons enumerated; fractional `allele_freq`
-- [x] SNP, in-frame insertion, in-frame deletion, and frameshift detection from FASTA
-- [x] FASTA-mode AF bins — adjusted thresholds for discrete IUPAC-derived frequencies
-- [x] SNP-only annotation mode — removed INDEL annotation paths from VCF/FASTA workflows and related tests
-- [x] VCF in-frame insertion, in-frame deletion, and frameshift annotation — `_annotate_insertion`, `_annotate_deletion`, `_annotate_frameshift` added to `annotate_vcf.py`; mid-codon indels are non-assessable (return None); frameshift uses `alt_aa='fsX'` sentinel for rule matching
-- [x] VCF indel strand-aware query anchor — `remap_variants` now passes all variant types through (non-SNP skip removed); allele strand-flip uses `_transform_allele` (anchor complement + payload RC); `query_ref_codon` populated for all variant types; indel annotation handlers use query codon as anchor AA when available
+- [X] Consensus FASTA profiling — codon-walk, amino acid diff, no VCF required
+- [X] IUPAC ambiguity expansion — all possible codons enumerated; fractional `allele_freq`
+- [X] SNP, in-frame insertion, in-frame deletion, and frameshift detection from FASTA
+- [X] FASTA-mode AF bins — adjusted thresholds for discrete IUPAC-derived frequencies
+- [X] SNP-only annotation mode — removed INDEL annotation paths from VCF/FASTA workflows and related tests
+- [X] VCF in-frame insertion, in-frame deletion, and frameshift annotation — `_annotate_insertion`, `_annotate_deletion`, `_annotate_frameshift` added to `annotate_vcf.py`; mid-codon indels are non-assessable (return None); frameshift uses `alt_aa='fsX'` sentinel for rule matching
+- [X] VCF indel strand-aware query anchor — `remap_variants` now passes all variant types through (non-SNP skip removed); allele strand-flip uses `_transform_allele` (anchor complement + payload RC); `query_ref_codon` populated for all variant types; indel annotation handlers use query codon as anchor AA when available
 
 ### Codon-aware annotation
 
-- [x] Consequence classification — synonymous, missense, stop-gained, stop-loss, start-lost, frameshift, insertion, deletion, unknown
-- [x] Strand-aware annotation — forward and reverse CDS handled correctly
-- [x] Combined SNP codon events — multiple high-AF SNPs in the same codon annotated as one event
-- [x] Allele-frequency binning — high / intermediate / low; customizable thresholds
+- [X] Consequence classification — synonymous, missense, stop-gained, stop-loss, start-lost, frameshift, insertion, deletion, unknown
+- [X] Strand-aware annotation — forward and reverse CDS handled correctly
+- [X] Combined SNP codon events — multiple high-AF SNPs in the same codon annotated as one event
+- [X] Allele-frequency binning — high / intermediate / low; customizable thresholds
 
 ### Resistance rule matching
 
-- [x] Single-mutation rule matching — explicit per-position allele matching only (no wildcard token support)
-- [x] Combination rule matching (`match_rule_sets`) — all members must co-occur to fire
-- [x] BLOSUM62 similarity scoring for matched substitutions (`core/similarity.py`)
+- [X] Single-mutation rule matching — explicit per-position allele matching only (no wildcard token support)
+- [X] Combination rule matching (`match_rule_sets`) — all members must co-occur to fire
+- [X] BLOSUM62 similarity scoring for matched substitutions (`core/similarity.py`)
 
 ### Reporting and export
 
-- [x] Standalone HTML report — Jinja2 template with inlined CSS and JS; no external assets required
-- [x] Genome-overview + gene-level lollipop plot — matplotlib SVG/PNG, embedded in HTML
-- [x] Mutation colour palette — consequence-typed, reused across plot and table
-- [x] NT change column with changed-position highlighting (bold + underline) in FASTA mode
-- [x] Client-side sortable table
-- [x] Drug metadata in report — PubChem URL as clickable link
-- [x] Combo rule hits displayed in report
-- [x] GitHub logo linked to repository; star badge shown
-- [x] JSON export — full variant + combo rule hit data (`results.json`)
-- [x] TSV export removed — dead code, never exposed in CLI; `write_tsv` / `to_tsv_string` and `export.py` deleted
-- [x] Deterministic output filenames — safe stem derived from input VCF/FASTA name
+- [X] Standalone HTML report — Jinja2 template with inlined CSS and JS; no external assets required
+- [X] Genome-overview + gene-level lollipop plot — matplotlib SVG/PNG, embedded in HTML
+- [X] Mutation colour palette — consequence-typed, reused across plot and table
+- [X] NT change column with changed-position highlighting (bold + underline) in FASTA mode
+- [X] Client-side sortable table
+- [X] Drug metadata in report — PubChem URL as clickable link
+- [X] Combo rule hits displayed in report
+- [X] GitHub logo linked to repository; star badge shown
+- [X] JSON export — full variant + combo rule hit data (`results.json`)
+- [X] TSV export removed — dead code, never exposed in CLI; `write_tsv` / `to_tsv_string` and `export.py` deleted
+- [X] Deterministic output filenames — safe stem derived from input VCF/FASTA name
 
 ### Results database and regeneration
 
-- [x] `save_run` — persist a full profiling result to `results.db`
-- [x] `load_run` — reconstruct a run from `results.db`
-- [x] `list_runs` — tabular CLI listing of all stored runs
-- [x] `reconstruct_annotations` — rebuild `AnnotatedVariant` objects from stored rows
-- [x] `respro regenerate` — re-export report from stored run with project-fingerprint validation
+- [X] `save_run` — persist a full profiling result to `results.db`
+- [X] `load_run` — reconstruct a run from `results.db`
+- [X] `list_runs` — tabular CLI listing of all stored runs
+- [X] `reconstruct_annotations` — rebuild `AnnotatedVariant` objects from stored rows
+- [X] `respro regenerate` — re-export report from stored run with project-fingerprint validation
 
 ### Code quality and testing
 
-- [x] Full type hints on all public APIs; `from __future__ import annotations` where needed
-- [x] Frozen dataclasses for immutable result containers
-- [x] Focused test suite: annotation, sequence matching, FASTA profiling, reference IO, rules, CLI, results DB, regenerate, report outputs, PubChem (fully mocked), init project
-- [x] Pandas removed as dependency — stdlib `csv` used throughout
-- [x] No ML references in codebase or documentation
-- [x] Ruff clean — fixed F841 (unused variable in `plots.py`), W292 (missing newline in `profile.py`), I001 (import ordering); E501 excluded from CI enforcement (enforced by editor convention)
-- [x] VCF AF fallback corrected — `_extract_af` now returns `1.0` (not `0.0`) when no AF field is
+- [X] Full type hints on all public APIs; `from __future__ import annotations` where needed
+- [X] Frozen dataclasses for immutable result containers
+- [X] Focused test suite: annotation, sequence matching, FASTA profiling, reference IO, rules, CLI, results DB, regenerate, report outputs, PubChem (fully mocked), init project
+- [X] Pandas removed as dependency — stdlib `csv` used throughout
+- [X] No ML references in codebase or documentation
+- [X] Ruff clean — fixed F841 (unused variable in `plots.py`), W292 (missing newline in `profile.py`), I001 (import ordering); E501 excluded from CI enforcement (enforced by editor convention)
+- [X] VCF AF fallback corrected — `_extract_af` now returns `1.0` (not `0.0`) when no AF field is
   present; prevents silent variant loss for germline, Sanger-derived, and simple-caller VCFs that
   carry no `AF`/`VAF`/`FREQ`/`AD` information
-- [x] Split `respro/db/init_project.py` into `respro/db/project/` subpackage — `core.py` (orchestration), `genes.py` (GenBank loading), `drugs.py` (drug resolution + PubChem), `rules.py` (TSV parsing, validation, combo rules)
-- [x] Move shared profiling orchestration helpers out of `respro/cli.py` into `respro/cli_helpers.py` — `_init_results_db_connection`, `_resolve_reference`, `_load_reference_data`, and `_finalize_and_export`; behavior unchanged
-- [x] Split `respro/core/profile.py` — shared helpers (CIGAR inversion, query-sequence resolution) moved to `respro/core/profile_helpers.py`; VCF-specific remapping kept in `respro/core/vcf_profile.py`
-- [x] Split FASTA annotation helpers into `respro/core/annotate_fasta.py` — orchestration (`profile_fasta_consensus`, `_profile_gene`) in `profile_fasta.py`; codon/indel annotation, IUPAC expansion, and consequence helpers extracted; VCF remapping in `annotate_vcf.py`
-- [x] Add `markupsafe>=2.1` as an explicit dependency in `pyproject.toml`
-- [x] VCF depth fallback — `_extract_depth` now returns `-1` sentinel when no depth field is found; depth filter in `profile-vcf` skips depth checking for sentinel variants so depth-free VCFs are not silently discarded
-- [x] Parallel gene alignment — `match_query_to_genes` now accepts `cores` parameter; per-gene alignment extracted into picklable `_align_gene_worker`; `--cores` added to both `profile-vcf` and `profile-fasta` (default 1)
-- [x] Coverage metric fix — `GeneMatch.coverage` split into `cds_coverage` and `query_coverage`; a match is accepted when identity passes AND either coverage meets the threshold; enables Sanger reads and amplicons (short queries that fully consume but cover only part of a CDS); DB column renamed `coverage` → `cds_coverage`; `query_coverage` added as optional migration column
+- [X] Split `respro/db/init_project.py` into `respro/db/project/` subpackage — `core.py` (orchestration), `genes.py` (GenBank loading), `drugs.py` (drug resolution + PubChem), `rules.py` (TSV parsing, validation, combo rules)
+- [X] Move shared profiling orchestration helpers out of `respro/cli.py` into `respro/cli_helpers.py` — `_init_results_db_connection`, `_resolve_reference`, `_load_reference_data`, and `_finalize_and_export`; behavior unchanged
+- [X] Split `respro/core/profile.py` — shared helpers (CIGAR inversion, query-sequence resolution) moved to `respro/core/profile_helpers.py`; VCF-specific remapping kept in `respro/core/vcf_profile.py`
+- [X] Split FASTA annotation helpers into `respro/core/annotate_fasta.py` — orchestration (`profile_fasta_consensus`, `_profile_gene`) in `profile_fasta.py`; codon/indel annotation, IUPAC expansion, and consequence helpers extracted; VCF remapping in `annotate_vcf.py`
+- [X] Add `markupsafe>=2.1` as an explicit dependency in `pyproject.toml`
+- [X] VCF depth fallback — `_extract_depth` now returns `-1` sentinel when no depth field is found; depth filter in `profile-vcf` skips depth checking for sentinel variants so depth-free VCFs are not silently discarded
+- [X] Parallel gene alignment — `match_query_to_genes` now accepts `cores` parameter; per-gene alignment extracted into picklable `_align_gene_worker`; `--cores` added to both `profile-vcf` and `profile-fasta` (default 1)
+- [X] Coverage metric fix — `GeneMatch.coverage` split into `cds_coverage` and `query_coverage`; a match is accepted when identity passes AND either coverage meets the threshold; enables Sanger reads and amplicons (short queries that fully consume but cover only part of a CDS); DB column renamed `coverage` → `cds_coverage`; `query_coverage` added as optional migration column
 
 ### Coverage analysis
 
-- [x] N-stretch handling in FASTA mode — full-codon NNN treated as non-covered; emits `CoverageGap` entries instead of IUPAC-expanded variants; partial-N codons (1–2 N) remain IUPAC-expanded; processing continues past gaps; `profile_fasta_consensus` returns `(annotations, coverage_gaps)` tuple
-- [x] Unassessed rule-position reporting — cross-reference resistance-rule codon positions with FASTA `CoverageGap` entries in the HTML report summary and per-gene section; lollipop plots now shade non-covered codon spans with low alpha and include a `non covered` legend item
-- [x] Persist non-covered regions to `results.db` — `coverage_gap` table (gene_name, codon_pos per run) added to results schema; `save_run` writes gaps from `ProfilingResult.coverage_gaps`; `load_coverage_gaps` restores them; `regenerate` passes gaps into the reconstructed `ProfilingResult` so regenerated reports show the same unassessable-position warnings; existing databases are migrated automatically on open
-- [x] Codon stretches for coverage gaps — `CoverageGap` now stores `codon_start`/`codon_end` (inclusive range) instead of individual `codon_pos`; consecutive non-covered codons are merged into one stretch in `annotate_fasta.py`; DB schema updated to `codon_start`/`codon_end` columns; `_count_unassessed_rule_positions` uses range-based lookup; plot drawing simplified by removing `_merge_consecutive_positions`
+- [X] N-stretch handling in FASTA mode — full-codon NNN treated as non-covered; emits `CoverageGap` entries instead of IUPAC-expanded variants; partial-N codons (1–2 N) remain IUPAC-expanded; processing continues past gaps; `profile_fasta_consensus` returns `(annotations, coverage_gaps)` tuple
+- [X] Unassessed rule-position reporting — cross-reference resistance-rule codon positions with FASTA `CoverageGap` entries in the HTML report summary and per-gene section; lollipop plots now shade non-covered codon spans with low alpha and include a `non covered` legend item
+- [X] Persist non-covered regions to `results.db` — `coverage_gap` table (gene_name, codon_pos per run) added to results schema; `save_run` writes gaps from `ProfilingResult.coverage_gaps`; `load_coverage_gaps` restores them; `regenerate` passes gaps into the reconstructed `ProfilingResult` so regenerated reports show the same unassessable-position warnings; existing databases are migrated automatically on open
+- [X] Codon stretches for coverage gaps — `CoverageGap` now stores `codon_start`/`codon_end` (inclusive range) instead of individual `codon_pos`; consecutive non-covered codons are merged into one stretch in `annotate_fasta.py`; DB schema updated to `codon_start`/`codon_end` columns; `_count_unassessed_rule_positions` uses range-based lookup; plot drawing simplified by removing `_merge_consecutive_positions`
 
 ### Usability and workflow
 
-- [x] Add short CLI option aliases alongside existing long options — `-n`/`-g`/`-r` for `init`; `-g`/`-r` for `init-add`; `-f`/`-r`/`-s`/`-d`/`-c` for `profile-vcf`; `-f`/`-s`/`-d`/`-c` for `profile-fasta`; `-d`/`-l`/`-i` for `regenerate`; long options and behavior unchanged
-- [x] Lenient rule loading — rules whose reference AA does not match the GenBank gene sequence are skipped with a warning instead of aborting; unknown gene names are also silently skipped with a warning; applies to single rules and combination rule group members
+- [X] Add short CLI option aliases alongside existing long options — `-n`/`-g`/`-r` for `init`; `-g`/`-r` for `init-add`; `-f`/`-r`/`-s`/`-d`/`-c` for `profile-vcf`; `-f`/`-s`/`-d`/`-c` for `profile-fasta`; `-d`/`-l`/`-i` for `regenerate`; long options and behavior unchanged
+- [X] Lenient rule loading — rules whose reference AA does not match the GenBank gene sequence are skipped with a warning instead of aborting; unknown gene names are also silently skipped with a warning; applies to single rules and combination rule group members
 
 ---
 
@@ -320,4 +320,3 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   once the core profiling and reporting pipeline is stable and released
 - 🟢 Web UI / app layer — deferred; must depend on stable backend APIs without moving domain
   logic out of `respro/`
-

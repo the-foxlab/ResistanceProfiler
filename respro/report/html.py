@@ -14,7 +14,13 @@ from markupsafe import Markup, escape
 from respro import __version__
 from respro.core.similarity import classify_similarity
 from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord, ResistanceRule
-from respro.report.palette import MUTATION_COLOURS
+from respro.report.palette import (
+    AF_BIN_COLOURS,
+    MUTATION_COLOURS,
+    PHENOTYPE_COLOURS,
+    SIMILARITY_COLOURS,
+    badge_text_colour,
+)
 from respro.report.plots import render_lollipop_plot_bytes
 from respro.report.results_model import ProfilingResult
 
@@ -211,15 +217,18 @@ def _build_cds_rows(result: ProfilingResult) -> list[dict]:
     rows: list[dict] = []
     for ann in result.cds_annotations:
         nt_change = _format_nt_change(ann)
-        aa_change = ''
-        if ann.ref_aa and ann.alt_aa:
-            aa_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+        if ann.consequence == 'inframe_complex':
+            aa_change = '?'
+            display_consequence = 'complex'
+        else:
+            aa_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}' if ann.ref_aa and ann.alt_aa else ''
+            display_consequence = ann.consequence
 
         rows.append({
             'gene': ann.gene_name,
             'nt_change': nt_change,
             'aa_change': aa_change,
-            'consequence': ann.consequence,
+            'consequence': display_consequence,
             'allele_freq': ann.variant.allele_freq,
             'af_bin': ann.af_bin,
             'database_hit': ann.is_resistance_hit,
@@ -251,7 +260,7 @@ def _build_potential_effects_rows(
     for rule in rules:
         rules_by_pos.setdefault((rule.gene_name, rule.position), []).append(rule)
 
-    excluded_consequences = {'frameshift', 'stop_gained', 'synonymous'}
+    excluded_consequences = {'frameshift', 'stop_gained', 'synonymous', 'inframe_complex'}
     rows: list[dict] = []
     seen: set[tuple[str, int, str, str]] = set()
 
@@ -622,6 +631,10 @@ def render_html(
         css=css_text,
         js=js_text,
         mutation_colours=MUTATION_COLOURS,
+        phenotype_colours=PHENOTYPE_COLOURS,
+        af_bin_colours=AF_BIN_COLOURS,
+        similarity_colours=SIMILARITY_COLOURS,
+        badge_text_colour=badge_text_colour,
         version=__version__,
     )
 

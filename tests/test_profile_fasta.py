@@ -8,9 +8,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from conftest import TINY_REF_NAME, TINY_REF_SEQ
 from typer.testing import CliRunner
 
-from conftest import TINY_REF_SEQ, TINY_REF_NAME
 from respro.cli import app
 from respro.core.annotate_fasta import _annotate_from_alignment, _expand_iupac_codon
 from respro.core.profile_fasta import profile_fasta_consensus
@@ -22,11 +22,14 @@ from respro.core.profile_helpers import (
 )
 from respro.core.profile_vcf import remap_variants
 from respro.core.sequence_matching import (
-    GeneMatch, _align_cds_to_query, match_query_to_genes, sequence_checksum, store_mappings,
+    GeneMatch,
+    _align_cds_to_query,
+    match_query_to_genes,
+    sequence_checksum,
+    store_mappings,
 )
 from respro.db.models import GeneRecord, VariantCall
 from respro.db.schema import create_schema, open_project_db
-
 
 # ──────────────────────────────────────────────────────────────────────
 # Fixtures

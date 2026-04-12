@@ -8,14 +8,21 @@
 <link rel='shortcut icon' href='{{ favicon_data_uri }}'>
 <style>{{ css }}</style>
 <style>
-  .badge-missense { background: {{ mutation_colours['missense'] }}; color: #fff; }
-  .badge-synonymous { background: {{ mutation_colours['synonymous'] }}; color: #fff; }
-  .badge-nonsense { background: {{ mutation_colours['nonsense'] }}; color: #fff; }
-  .badge-stop_gained { background: {{ mutation_colours['stop_gained'] }}; color: #fff; }
-  .badge-stop_loss { background: {{ mutation_colours['stop_loss'] }}; color: #fff; }
-  .badge-frameshift { background: {{ mutation_colours['frameshift'] }}; color: #fff; }
-  .badge-insertion { background: {{ mutation_colours['insertion'] }}; color: #fff; }
-  .badge-deletion { background: {{ mutation_colours['deletion'] }}; color: #fff; }
+  {% for effect, colour in mutation_colours.items() %}
+  .badge-{{ effect.replace('inframe_complex', 'complex') }} { background: {{ colour }}; color: {{ badge_text_colour(colour) }}; }
+  {% endfor %}
+  {% for key, colour in phenotype_colours.items() %}
+  .badge-{{ 'intermediate-p' if key == 'intermediate' else key }} { background: {{ colour }}; color: {{ badge_text_colour(colour) }}; }
+  {% endfor %}
+  {% for key, colour in af_bin_colours.items() %}
+  .badge-{{ key }} { background: {{ colour }}; color: {{ badge_text_colour(colour) }}; }
+  {% endfor %}
+  {% for key, colour in similarity_colours.items() %}
+  .badge-sim-{{ key }} { background: {{ colour }}; color: {{ badge_text_colour(colour) }}; }
+  {% endfor %}
+  {% for key, colour in phenotype_colours.items() %}
+  .stat-pill.{{ key }} { background: {{ colour }}; color: {{ badge_text_colour(colour) }}; }
+  {% endfor %}
 </style>
 </head>
 <body>

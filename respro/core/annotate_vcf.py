@@ -31,8 +31,8 @@ def annotate_variants(
     """
     Annotate a list of variants with codon-aware amino acid consequences.
 
-    Handles SNPs, in-frame insertions, in-frame deletions, and frameshifts in CDS regions.
-    Non-assessable variants (e.g., mid-codon indels) are silently skipped.
+    Handles SNPs, in-frame insertions, in-frame deletions, frameshifts, and in-frame complex
+    indels in CDS regions. Only variants outside any CDS are skipped (included with empty gene_name).
     Variants outside any CDS are included with empty gene_name.
 
     SNP consequences can use a query codon from FASTA-based remapping when
@@ -260,8 +260,8 @@ def _annotate_variant_in_gene(
     """
     Annotate a single variant within a gene.
 
-    Handles SNPs, in-frame insertions, in-frame deletions, and frameshifts.
-    Mid-codon indels (anchor not at a codon boundary) are non-assessable and return None.
+    Handles SNPs, in-frame insertions, in-frame deletions, frameshifts, and mid-codon in-frame
+    indels (annotated as inframe_complex).
     """
     seq_cds = gene.nt_sequence.upper()
     if not seq_cds:
@@ -393,25 +393,40 @@ def _annotate_insertion(
     coding_nt: str,
     codon_idx: int,
     frame_offset: int,
-) -> AnnotatedVariant | None:
+) -> AnnotatedVariant:
     """
     Annotate an in-frame insertion or frameshift insertion.
 
-    The anchor base must be at a codon boundary (frame_offset == 0) for the
-    insertion to be assessable. Mid-codon insertions return None.
+    Non-in-frame insertions are always annotated as frameshift.
+    In-frame insertions whose anchor is at a codon boundary (frame_offset == 0) are
+    annotated as insertion. Mid-codon in-frame insertions are annotated as inframe_complex
+    because two neighbouring codons are partially rewritten; the AA consequence is not
+    resolvable to a single canonical token.
 
     :param var: variant call; ALT uses VCF anchor-base convention (alt[1:] are inserted bases)
     :param gene: gene record
     :param coding_nt: coding nucleotide sequence (from codon_start onward)
     :param codon_idx: 0-based codon index of the anchor base
     :param frame_offset: position of anchor base within its codon (0, 1, or 2)
-    :return: AnnotatedVariant or None if non-assessable
+    :return: AnnotatedVariant
     """
-    if frame_offset != 0:
-        return None
-
     if not _is_inframe(var.ref, var.alt):
         return _annotate_frameshift(var, gene, coding_nt, codon_idx)
+
+    if frame_offset != 0:
+        internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+        query_codon = var.query_ref_codon.upper()
+        anchor_codon = query_codon if len(query_codon) == 3 else internal_codon
+        return AnnotatedVariant(
+            variant=var,
+            gene_name=gene.name,
+            codon_pos=codon_idx,
+            ref_codon=anchor_codon,
+            alt_codon='',
+            ref_aa='?',
+            alt_aa='?',
+            consequence='inframe_complex',
+        )
 
     internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
     query_codon = var.query_ref_codon.upper()
@@ -438,25 +453,40 @@ def _annotate_deletion(
     coding_nt: str,
     codon_idx: int,
     frame_offset: int,
-) -> AnnotatedVariant | None:
+) -> AnnotatedVariant:
     """
     Annotate an in-frame deletion or frameshift deletion.
 
-    The anchor base must be at a codon boundary (frame_offset == 0) for the
-    deletion to be assessable. Mid-codon deletions return None.
+    Non-in-frame deletions are always annotated as frameshift.
+    In-frame deletions whose anchor is at a codon boundary (frame_offset == 0) are
+    annotated as deletion. Mid-codon in-frame deletions are annotated as inframe_complex
+    because two neighbouring codons are partially rewritten; the AA consequence is not
+    resolvable to a single canonical token.
 
     :param var: variant call; REF uses VCF anchor-base convention (ref[1:] are deleted bases)
     :param gene: gene record
     :param coding_nt: coding nucleotide sequence (from codon_start onward)
     :param codon_idx: 0-based codon index of the anchor base
     :param frame_offset: position of anchor base within its codon (0, 1, or 2)
-    :return: AnnotatedVariant or None if non-assessable
+    :return: AnnotatedVariant
     """
-    if frame_offset != 0:
-        return None
-
     if not _is_inframe(var.ref, var.alt):
         return _annotate_frameshift(var, gene, coding_nt, codon_idx)
+
+    if frame_offset != 0:
+        internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+        query_codon = var.query_ref_codon.upper()
+        anchor_codon = query_codon if len(query_codon) == 3 else internal_codon
+        return AnnotatedVariant(
+            variant=var,
+            gene_name=gene.name,
+            codon_pos=codon_idx,
+            ref_codon=anchor_codon,
+            alt_codon='',
+            ref_aa='?',
+            alt_aa='?',
+            consequence='inframe_complex',
+        )
 
     internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
     query_codon = var.query_ref_codon.upper()
@@ -489,7 +519,7 @@ def normalize_mutation(
     The canonical tokens are:
 
     - ``A``–``Z``  — specific alt amino acid (missense, synonymous, stop-loss target)
-    - ``*``        — stop gained (nonsense)
+    - ``*``        — stop gained
     - ``fsX``      — frameshift at this codon
     - ``F50FGG``   — insertion: insertion after F50 resulting in ``FGG``
     - ``FGG50F``   — deletion: deletion from ``FGG`` to ``F`` at anchor position 50
