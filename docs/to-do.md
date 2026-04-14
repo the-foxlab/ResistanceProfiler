@@ -45,6 +45,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] `--query-ref-header` — reuse a previously cached reference alignment
 - [X] `--cache` / `--no-cache` flag to control caching behaviour
 - [X] REF allele verification against active query sequence during remap
+- [X] Strand-aware VCF remap anchor model — nucleotide anchor projection and amino-acid anchor context are handled separately; reverse-orientation indels now switch anchor side correctly during remap
 
 ### Profiling — FASTA mode
 
@@ -122,6 +123,7 @@ Mark items done and update priorities after each completed milestone.
 
 - [X] Add short CLI option aliases alongside existing long options — `-n`/`-g`/`-r` for `init`; `-g`/`-r` for `init-add`; `-f`/`-r`/`-s`/`-d`/`-c` for `profile-vcf`; `-f`/`-s`/`-d`/`-c` for `profile-fasta`; `-d`/`-l`/`-i` for `regenerate`; long options and behavior unchanged
 - [X] Lenient rule loading — rules whose reference AA does not match the GenBank gene sequence are skipped with a warning instead of aborting; unknown gene names are also silently skipped with a warning; applies to single rules and combination rule group members
+- [X] Canonical VCF orientation acceptance suite (E1-E7) — full matrix coverage for +/+ , +/- , -/+ , -/- constellations plus query insertion/deletion and mismatch-column projection cases
 
 ---
 

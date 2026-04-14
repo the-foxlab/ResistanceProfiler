@@ -6,6 +6,8 @@ new work should go.
 For implementation priorities, see `docs/to-do.md`.
 For rules TSV formatting, allowed entries, and mutation notation, see
 `docs/rules-tsv-format.md`.
+For the official VCF and FASTA annotation algorithms, see
+`docs/annotation-algorithms.md`.
 For coding standards and Copilot-specific guidance, see
 `.github/copilot-instructions.md`.
 
@@ -25,6 +27,7 @@ ReistanceProfiler/
 ├── .github/
 │   └── copilot-instructions.md
 ├── docs/
+│   ├── annotation-algorithms.md
 │   ├── project-structure.md
 │   ├── rules-tsv-format.md
 │   └── to-do.md

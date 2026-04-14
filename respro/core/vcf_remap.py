@@ -51,14 +51,20 @@ def remap_variants(
 
     remapped: list[VariantCall] = []
     warnings: list[str] = []
-    for var in variants:
+    remap_input_variants = _expand_anchor_changed_indels(variants, warnings)
+
+    for var in remap_input_variants:
         hit = False
         for match, q2c in match_maps:
             if var.pos not in q2c:
                 continue
 
-            cds_pos = q2c[var.pos]
             gene = match.gene
+            reverse_to_reference = (match.strand != gene.strand)
+
+            cds_pos = _map_variant_anchor_cds_pos(var, q2c, reverse_to_reference, gene.strand)
+            if cds_pos is None:
+                continue
 
             # VCF position must be within query sequence
             if not (0 <= var.pos < query_len):
@@ -77,12 +83,20 @@ def remap_variants(
             genomic_pos = _cds_pos_to_genomic_pos(gene, cds_pos)
 
             # Transform REF/ALT to internal reference forward strand.
-            # Complement is needed when alignment strand and gene strand differ.
-            need_comp = (match.strand != gene.strand)
-            ref_base = _transform_allele(var.ref, need_comp)
-            alt_base = _transform_allele(var.alt, need_comp)
+            # Reverse-orientation indels also switch anchor side.
+            if _is_indel(var.ref, var.alt) and reverse_to_reference:
+                ref_base, alt_base = _remap_reverse_indel_alleles(var, gene, genomic_pos)
+            else:
+                ref_base = _transform_allele(var.ref, reverse_to_reference)
+                alt_base = _transform_allele(var.alt, reverse_to_reference)
 
-            query_ref_codon = _extract_query_ref_codon(q2c, query_upper, cds_pos)
+            codon_context_pos = cds_pos
+            if _is_indel(var.ref, var.alt):
+                codon_context_pos = _indel_anchor_cds_pos(cds_pos, len(var.ref), gene.strand)
+
+            query_ref_codon = ''
+            if codon_context_pos >= 0:
+                query_ref_codon = _extract_query_ref_codon(q2c, query_upper, codon_context_pos)
             if match.strand == '-' and len(query_ref_codon) == 3:
                 query_ref_codon = str(Seq(query_ref_codon).complement())
 
@@ -107,9 +121,62 @@ def remap_variants(
 
     logger.info(
         'Remapped %d of %d variant(s); %d warning(s)',
-        len(remapped), len(variants), len(warnings),
+        len(remapped), len(remap_input_variants), len(warnings),
     )
     return remapped, warnings
+
+
+def _expand_anchor_changed_indels(
+    variants: list[VariantCall],
+    warnings: list[str],
+) -> list[VariantCall]:
+    """
+    Split non-canonical indels with changed anchor base into two deterministic events.
+
+    Some callers may encode a base substitution at the VCF anchor together with an indel,
+    e.g. ``ATTT -> G``. If left as one event, anchor switching during remap can hide the
+    substitution signal. To preserve information deterministically, such records are expanded
+    into:
+
+    1) anchor SNP: ``A -> G`` at the same query position
+    2) canonical indel: same REF with ALT anchor reset to REF anchor (``ATTT -> A``)
+    """
+    expanded: list[VariantCall] = []
+    split_count = 0
+    for var in variants:
+        if _is_indel(var.ref, var.alt) and var.ref and var.alt and var.ref[0] != var.alt[0]:
+            split_count += 1
+            expanded.append(
+                VariantCall(
+                    chrom=var.chrom,
+                    pos=var.pos,
+                    ref=var.ref[0],
+                    alt=var.alt[0],
+                    allele_freq=var.allele_freq,
+                    depth=var.depth,
+                    filter_status=var.filter_status,
+                )
+            )
+            expanded.append(
+                VariantCall(
+                    chrom=var.chrom,
+                    pos=var.pos,
+                    ref=var.ref,
+                    alt=var.ref[0] + var.alt[1:],
+                    allele_freq=var.allele_freq,
+                    depth=var.depth,
+                    filter_status=var.filter_status,
+                )
+            )
+            continue
+        expanded.append(var)
+
+    if split_count:
+        warnings.append(
+            f'Split {split_count} indel record(s) with changed VCF anchor into '
+            'anchor SNP + canonical indel to preserve anchor substitution signal'
+        )
+    return expanded
 
 
 def _extract_query_ref_codon(
@@ -151,6 +218,77 @@ def _transform_allele(allele: str, need_comp: bool) -> str:
     anchor = str(Seq(allele[0]).complement())
     payload = str(Seq(allele[1:]).reverse_complement()) if len(allele) > 1 else ''
     return anchor + payload
+
+
+def _is_indel(ref: str, alt: str) -> bool:
+    """Return True when the VCF allele pair represents an insertion or deletion."""
+    return len(ref) != 1 or len(alt) != 1
+
+
+def _map_variant_anchor_cds_pos(
+    var: VariantCall,
+    query_to_cds: dict[int, int],
+    reverse_to_reference: bool,
+    gene_strand: str,
+) -> int | None:
+    """
+    Map variant anchor to CDS position, including reverse-orientation indel anchor switching.
+
+    For reverse-orientation indels, the VCF anchor switches to the opposite side after
+    projection to the internal forward reference.
+    """
+    if var.pos not in query_to_cds:
+        return None
+    if not reverse_to_reference or not _is_indel(var.ref, var.alt):
+        return query_to_cds[var.pos]
+
+    query_ref_end = var.pos + len(var.ref) - 1
+    cds_ref_end = query_to_cds.get(query_ref_end)
+    if cds_ref_end is None:
+        return None
+    shift = -1 if gene_strand == '+' else 1
+    mapped = cds_ref_end + shift
+    if mapped < 0:
+        return None
+    return mapped
+
+
+def _remap_reverse_indel_alleles(
+    var: VariantCall,
+    gene: GeneRecord,
+    genomic_anchor_pos: int,
+) -> tuple[str, str]:
+    """
+    Remap reverse-orientation indels using an internal-reference anchor base.
+
+    The anchor nucleotide must come from the projected internal reference position,
+    while the inserted/deleted payload is reverse-complemented.
+    """
+    anchor = _internal_forward_base(gene, genomic_anchor_pos)
+    if len(var.alt) > len(var.ref):
+        inserted = str(Seq(var.alt[1:]).reverse_complement())
+        return anchor, anchor + inserted
+
+    deleted = str(Seq(var.ref[1:]).reverse_complement())
+    return anchor + deleted, anchor
+
+
+def _internal_forward_base(gene: GeneRecord, genomic_pos: int) -> str:
+    """Return the internal forward-reference nucleotide at one genomic position."""
+    cds_pos = genomic_pos - gene.start if gene.strand == '+' else (gene.end - 1) - genomic_pos
+    if cds_pos < 0 or cds_pos >= len(gene.nt_sequence):
+        return ''
+    coding_base = gene.nt_sequence.upper()[cds_pos]
+    if gene.strand == '+':
+        return coding_base
+    return str(Seq(coding_base).complement())
+
+
+def _indel_anchor_cds_pos(cds_pos: int, ref_len: int, gene_strand: str) -> int:
+    """Return CDS anchor position used for indel amino-acid context extraction."""
+    if gene_strand == '+':
+        return cds_pos
+    return cds_pos - ref_len
 
 
 

@@ -469,8 +469,8 @@ class TestInsertionAnnotation:
     def test_inframe_insertion_at_codon_boundary(self) -> None:
         """In-frame insertion at codon 0 boundary: anchor M, inserted G → alt_aa MG."""
         gene = self._fwd_gene()
-        # pos=0 (codon 0, frame_offset 0), insert 'GGG' after anchor A
-        var = VariantCall(chrom='c', pos=0, ref='A', alt='AGGG', allele_freq=0.9, depth=100)
+        # VCF anchor is the preceding nucleotide in genomic 5'->3': boundary after codon 0 -> pos=2.
+        var = VariantCall(chrom='c', pos=2, ref='G', alt='GGGG', allele_freq=0.9, depth=100)
         ann = _annotate_variant_in_gene(var, gene)
 
         assert ann is not None
@@ -483,8 +483,8 @@ class TestInsertionAnnotation:
     def test_inframe_insertion_second_codon(self) -> None:
         """In-frame insertion at codon 1 boundary: anchor G, inserted G → alt_aa GG."""
         gene = self._fwd_gene()
-        # pos=3 (codon 1 = GGG = G, frame_offset 0), insert 'GGG' after anchor G
-        var = VariantCall(chrom='c', pos=3, ref='G', alt='GGGG', allele_freq=0.9, depth=100)
+        # Boundary after codon 1 -> anchor at pos=5.
+        var = VariantCall(chrom='c', pos=5, ref='G', alt='GGGG', allele_freq=0.9, depth=100)
         ann = _annotate_variant_in_gene(var, gene)
 
         assert ann is not None
@@ -495,7 +495,7 @@ class TestInsertionAnnotation:
     def test_frameshift_insertion(self) -> None:
         """1-nt insertion at codon boundary is annotated as frameshift."""
         gene = self._fwd_gene()
-        var = VariantCall(chrom='c', pos=0, ref='A', alt='AG', allele_freq=0.9, depth=100)
+        var = VariantCall(chrom='c', pos=2, ref='G', alt='GG', allele_freq=0.9, depth=100)
         ann = _annotate_variant_in_gene(var, gene)
 
         assert ann is not None
@@ -506,12 +506,12 @@ class TestInsertionAnnotation:
     def test_inframe_insertion_at_mid_codon_is_complex(self) -> None:
         """In-frame insertion anchored mid-codon is annotated as inframe_complex."""
         gene = self._fwd_gene()
-        # pos=1 is frame_offset 1 within codon 0
+        # pos=1 is mid-codon for codon 0 under VCF-anchor semantics.
         var = VariantCall(chrom='c', pos=1, ref='T', alt='TGGG', allele_freq=0.9, depth=100)
         ann = _annotate_variant_in_gene(var, gene)
 
         assert ann is not None
-        assert ann.ref_aa == '?'
+        assert ann.ref_aa == 'M'
         assert ann.alt_aa == '?'
         assert ann.consequence == 'inframe_complex'
 
@@ -530,10 +530,8 @@ class TestInsertionAnnotation:
     def test_inframe_insertion_negative_strand(self) -> None:
         """In-frame insertion on a negative-strand gene uses revcomp of inserted bases."""
         gene = self._rev_gene()
-        # Minus-strand gene: coding seq 'ATGGGGTTT' (M G F), stored in coding orientation.
-        # cds_variant_pos for pos=8 = (end-1) - pos = 8 - 8 = 0 → codon 0 (ATG=M), frame_offset 0.
-        # Inserted bases (genomic): 'GGG' → revcomp for minus strand → 'CCC' → translate → 'P'
-        var = VariantCall(chrom='c', pos=8, ref='A', alt='AGGG', allele_freq=0.9, depth=100)
+        # Boundary after codon 0 on '-' strand maps to genomic anchor pos=5.
+        var = VariantCall(chrom='c', pos=5, ref='C', alt='CGGG', allele_freq=0.9, depth=100)
         ann = _annotate_variant_in_gene(var, gene)
 
         assert ann is not None
@@ -547,7 +545,7 @@ class TestInsertionAnnotation:
         # Internal codon 1 = 'GGG' → G; user's query codon 1 = 'AGG' → R (divergent anchor).
         # Rule in the DB says reference='R', mutation='RG' → only matches when anchor comes from query.
         var = VariantCall(
-            chrom='c', pos=3, ref='G', alt='GGGG', allele_freq=0.9, depth=100,
+            chrom='c', pos=5, ref='G', alt='GGGG', allele_freq=0.9, depth=100,
             query_ref_codon='AGG',
         )
         ann = _annotate_variant_in_gene(var, gene)
@@ -592,9 +590,8 @@ class TestDeletionAnnotation:
     def test_inframe_deletion(self) -> None:
         """3-nt deletion at codon 0 boundary: ref_aa MG (deleted G), alt_aa M."""
         gene = self._fwd_gene()
-        # pos=0 (codon 0 = ATG = M, frame_offset 0), delete 'TGG' after anchor A
-        # ref='ATGG', alt='A' → deleted_bases='TGG' → translate 'TGG' → W (Trp)
-        var = VariantCall(chrom='c', pos=0, ref='ATGG', alt='A', allele_freq=0.9, depth=100)
+        # Boundary after codon 0 -> anchor at pos=2.
+        var = VariantCall(chrom='c', pos=2, ref='GTGG', alt='G', allele_freq=0.9, depth=100)
         ann = _annotate_variant_in_gene(var, gene)
 
         assert ann is not None
@@ -607,9 +604,8 @@ class TestDeletionAnnotation:
     def test_inframe_deletion_multi_codon(self) -> None:
         """6-nt deletion spans two payload codons: ref_aa has three AAs, alt_aa has anchor only."""
         gene = self._fwd_gene()
-        # pos=0, delete 6 nt payload: 'TGGGGT' → translate → 'WG' (W=TGG, G=GGT)
-        # ref='ATGGGGT', alt='A'
-        var = VariantCall(chrom='c', pos=0, ref='ATGGGGT', alt='A', allele_freq=0.9, depth=100)
+        # Boundary after codon 0, deleting 6-nt payload.
+        var = VariantCall(chrom='c', pos=2, ref='GTGGGGT', alt='G', allele_freq=0.9, depth=100)
         ann = _annotate_variant_in_gene(var, gene)
 
         assert ann is not None
@@ -621,8 +617,7 @@ class TestDeletionAnnotation:
     def test_frameshift_deletion(self) -> None:
         """1-nt deletion at codon boundary is annotated as frameshift."""
         gene = self._fwd_gene()
-        # pos=0, ref='AT', alt='A' → delete 1 nt → frameshift
-        var = VariantCall(chrom='c', pos=0, ref='AT', alt='A', allele_freq=0.9, depth=100)
+        var = VariantCall(chrom='c', pos=2, ref='GT', alt='G', allele_freq=0.9, depth=100)
         ann = _annotate_variant_in_gene(var, gene)
 
         assert ann is not None
@@ -638,7 +633,7 @@ class TestDeletionAnnotation:
         ann = _annotate_variant_in_gene(var, gene)
 
         assert ann is not None
-        assert ann.ref_aa == '?'
+        assert ann.ref_aa == 'M'
         assert ann.alt_aa == '?'
         assert ann.consequence == 'inframe_complex'
 
@@ -660,9 +655,8 @@ class TestDeletionAnnotation:
             id=1, reference_id=1, name='gene', protein='P',
             start=0, end=9, strand='-', codon_start=0, nt_sequence='ATGGGGTTT',
         )
-        # cds_variant_pos for pos=8 = (end-1) - pos = 8 - 8 = 0 → codon 0 (ATG=M), frame_offset 0.
-        # Deleted bases (genomic): 'AAA' → revcomp for minus strand → 'TTT' → translate → 'F'
-        var = VariantCall(chrom='c', pos=8, ref='AAAA', alt='A', allele_freq=0.9, depth=100)
+        # Boundary after codon 0 on '-' strand maps to genomic anchor pos=2.
+        var = VariantCall(chrom='c', pos=2, ref='AAAA', alt='A', allele_freq=0.9, depth=100)
         ann = _annotate_variant_in_gene(var, gene)
 
         assert ann is not None
@@ -676,7 +670,7 @@ class TestDeletionAnnotation:
         # Internal codon 1 = 'GGG' → G; user's query codon 1 = 'AGG' → R (divergent anchor).
         # Deletion of 'GGG' (next codon, G) from anchor codon 1.
         var = VariantCall(
-            chrom='c', pos=3, ref='GGGG', alt='G', allele_freq=0.9, depth=100,
+            chrom='c', pos=5, ref='GGGG', alt='G', allele_freq=0.9, depth=100,
             query_ref_codon='AGG',
         )
         ann = _annotate_variant_in_gene(var, gene)
@@ -692,17 +686,15 @@ class TestDeletionAnnotation:
             id=1, reference_id=1, name='gene', protein='P',
             start=0, end=9, strand='-', codon_start=0, nt_sequence='ATGGGGTTT',
         )
-        # Anchor at CDS pos 3 → genomic pos = (9-1)-3 = 5.
-        # Delete 'CCC' on forward strand → RC = 'GGG' → G (glycine in coding).
-        # query_ref_codon='AGG' → R instead of internal G.
+        # Boundary after codon 0 on '-' strand maps to genomic anchor pos=2.
         var = VariantCall(
-            chrom='c', pos=5, ref='CCCC', alt='C', allele_freq=0.9, depth=100,
+            chrom='c', pos=2, ref='AAAA', alt='A', allele_freq=0.9, depth=100,
             query_ref_codon='AGG',
         )
         ann = _annotate_variant_in_gene(var, gene)
 
         assert ann is not None
-        assert ann.ref_aa == 'RG'   # anchor R (from query) + deleted G
+        assert ann.ref_aa == 'RF'   # anchor R (from query) + deleted F
         assert ann.alt_aa == 'R'
         assert ann.consequence == 'deletion'
 

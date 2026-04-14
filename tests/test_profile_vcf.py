@@ -1,246 +1,263 @@
 """
-Tests for VCF remapping — indel strand handling and query_ref_codon population.
+Canonical VCF remap/annotation orientation tests (E1-E7).
 """
 
-from respro.core.annotation import reverse_complement
+from __future__ import annotations
+
+import re
+
+import pytest
+
+from respro.core.annotation import annotate_variants, reverse_complement
 from respro.core.vcf_remap import _transform_allele, remap_variants
-from respro.db.models import GeneMatch
-from respro.db.models import GeneRecord, VariantCall
+from respro.db.models import GeneMatch, GeneRecord, VariantCall
 
 
-# ─── _transform_allele ────────────────────────────────────────────────
-
-class TestTransformAllele:
-    """Unit tests for the VCF allele strand-flip helper."""
-
-    def test_snp_need_comp_false(self) -> None:
-        assert _transform_allele('A', need_comp=False) == 'A'
-
-    def test_snp_need_comp_true(self) -> None:
-        # Single-base: just complement.
-        assert _transform_allele('A', need_comp=True) == 'T'
-        assert _transform_allele('C', need_comp=True) == 'G'
-
-    def test_insertion_allele_need_comp_false(self) -> None:
-        # Multi-base: untouched when no flip needed.
-        assert _transform_allele('AGGG', need_comp=False) == 'AGGG'
-
-    def test_insertion_allele_need_comp_true(self) -> None:
-        # complement(anchor) + RC(payload): complement('A')='T', RC('GGG')='CCC'
-        assert _transform_allele('AGGG', need_comp=True) == 'TCCC'
-
-    def test_deletion_ref_need_comp_true(self) -> None:
-        # complement('C')='G', RC('TGG')='CCA'
-        assert _transform_allele('CTGG', need_comp=True) == 'GCCA'
-
-    def test_single_char_allele_need_comp_true(self) -> None:
-        # anchor only, no payload — same as SNP complement
-        assert _transform_allele('G', need_comp=True) == 'C'
-
-    def test_empty_allele_unchanged(self) -> None:
-        assert _transform_allele('', need_comp=True) == ''
+def _make_gene(*, strand: str) -> GeneRecord:
+    """Build the shared 18-nt test gene (MQVGN* coding sequence)."""
+    return GeneRecord(
+        id=1,
+        reference_id=1,
+        name='gene',
+        protein='P',
+        start=0,
+        end=18,
+        strand=strand,
+        codon_start=0,
+        nt_sequence='ATGCAAGTCGGAAACTAA',
+    )
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────
-
-def _make_match(gene: GeneRecord, strand: str, query_len: int) -> GeneMatch:
-    """Build a perfect-identity GeneMatch with a simple identity CIGAR."""
-    cds_len = gene.end - gene.start
+def _make_match(gene: GeneRecord, *, match_strand: str, query: str, cigar: str) -> GeneMatch:
+    """Build a controlled GeneMatch for remap tests."""
     return GeneMatch(
         gene=gene,
         identity=1.0,
         cds_coverage=1.0,
         query_coverage=1.0,
         query_start=0,
-        query_end=query_len,
-        strand=strand,
-        cigar=f'{cds_len}M',
+        query_end=len(query),
+        strand=match_strand,
+        cigar=cigar,
     )
 
 
-# ─── remap_variants — forward strand gene ─────────────────────────────
-
-class TestRemapVariantsInsertion:
-    """remap_variants correctly passes through and transforms indels."""
-
-    def _plus_gene(self) -> GeneRecord:
-        # ATG GGG TTT → M G F (9 nt, forward strand)
-        return GeneRecord(
-            id=1, reference_id=1, name='gene', protein='P',
-            start=0, end=9, strand='+', codon_start=0, nt_sequence='ATGGGGTTT',
-        )
-
-    def _minus_gene(self) -> GeneRecord:
-        # CDS 'ATGGGGTTT' (M G F), gene on minus strand.
-        # Genomic forward = RC('ATGGGGTTT') = 'AAACCCAT'... computed precisely:
-        # complement(ATGGGGTTT) = TACCCCAAA, reversed = AAACCCAT... 9 chars:
-        # A-T-G-G-G-G-T-T-T → complement → T-A-C-C-C-C-A-A-A → reversed → AAACCCCAT
-        return GeneRecord(
-            id=1, reference_id=1, name='gene', protein='P',
-            start=0, end=9, strand='-', codon_start=0, nt_sequence='ATGGGGTTT',
-        )
-
-    def test_inframe_insertion_plus_gene_plus_match(self) -> None:
-        """Forward gene, forward alignment: allele passes through, query_ref_codon set."""
-        gene = self._plus_gene()
-        query = 'ATGGGGTTT'  # identical to CDS
-        match = _make_match(gene, '+', len(query))
-
-        var = VariantCall(chrom='c', pos=3, ref='G', alt='GGGG', allele_freq=0.9, depth=100)
-        remapped, warnings = remap_variants([var], [match], query)
-
-        assert not warnings
-        assert len(remapped) == 1
-        r = remapped[0]
-        assert r.pos == 3
-        assert r.ref == 'G'
-        assert r.alt == 'GGGG'
-        # Codon 1 = query[3:6] = 'GGG'; match.strand='+': no complement
-        assert r.query_ref_codon == 'GGG'
-
-    def test_inframe_insertion_plus_gene_divergent_query_codon(self) -> None:
-        """Divergent anchor codon in query is captured in query_ref_codon."""
-        gene = self._plus_gene()
-        # User's query has 'A' at codon 1 pos 0 instead of 'G' → codon 'AGG' → R
-        query = 'ATGAGGTTT'
-        match = _make_match(gene, '+', len(query))
-
-        var = VariantCall(chrom='c', pos=3, ref='A', alt='AGGG', allele_freq=0.9, depth=100)
-        remapped, warnings = remap_variants([var], [match], query)
-
-        assert not warnings
-        assert len(remapped) == 1
-        assert remapped[0].query_ref_codon == 'AGG'
-
-    def test_inframe_insertion_minus_gene_minus_match(self) -> None:
-        """Minus gene, minus-strand alignment (need_comp=False): allele unchanged, codon set."""
-        gene = self._minus_gene()
-        # Genomic forward for this gene: AAACCCCAT (9 nt).
-        # The RC of the query aligns forward to the CDS → match.strand='-'.
-        genomic_fwd = reverse_complement('ATGGGGTTT')  # = 'AAACCCCAT'
-        query = genomic_fwd
-        match = _make_match(gene, '-', len(query))
-
-        # Anchor at CDS pos 3 → genomic pos = (9-1)-3 = 5.
-        # On genomic forward, pos 5 = 'C' (from AAACCCCAT: A=0,A=1,A=2,C=3,C=4,C=5,C=6,A=7,T=8).
-        # Insert 'CCC' in forward direction → coding = RC('CCC') = 'GGG' → G.
-        var = VariantCall(chrom='c', pos=5, ref='C', alt='CCCC', allele_freq=0.9, depth=100)
-        remapped, warnings = remap_variants([var], [match], query)
-
-        assert not warnings
-        assert len(remapped) == 1
-        r = remapped[0]
-        # need_comp = (match.strand '-' != gene.strand '-') = False → allele unchanged
-        assert r.ref == 'C'
-        assert r.alt == 'CCCC'
-        assert r.pos == 5
-        # query_ref_codon for CDS pos 3 (codon 1 = 'GGG' in coding orientation):
-        # match.strand='-': complement applied → 'GGG'
-        assert r.query_ref_codon == 'GGG'
-
-    def test_inframe_insertion_plus_gene_minus_match_transforms_allele(self) -> None:
-        """Plus gene, minus-strand alignment (need_comp=True): allele is anchor-complement + RC payload."""
-        gene = self._plus_gene()
-        # Query aligns in RC to the CDS → match.strand='-', gene.strand='+' → need_comp=True.
-        # User's "reference" is the RC of the CDS: RC('ATGGGGTTT') = 'AAACCCCAT'
-        query = reverse_complement('ATGGGGTTT')  # = 'AAACCCCAT'
-        match = _make_match(gene, '-', len(query))
-
-        # In the RC-query space, the alignment maps RC positions to CDS positions.
-        # RC-query[0] aligns to CDS[0] (A). Forward-query pos = query_len-1 - 0 = 8.
-        # So q2c[8]=0, q2c[7]=1, ..., q2c[0]=8.
-        # CDS pos 3 → forward-query pos = 8-3=5. genomic_pos = gene.start + 3 = 3.
-        # On query (AAACCCCAT), pos 5 = 'C'.
-        # Insertion of 'GGG' at forward-query pos 5: ref='C', alt='CGGG'.
-        # need_comp=True → _transform_allele:
-        #   ref = complement('C') = 'G'
-        #   alt = complement('C') + RC('GGG') = 'G' + 'CCC' = 'GCCC'
-        var = VariantCall(chrom='c', pos=5, ref='C', alt='CGGG', allele_freq=0.9, depth=100)
-        remapped, warnings = remap_variants([var], [match], query)
-
-        assert not warnings
-        assert len(remapped) == 1
-        r = remapped[0]
-        assert r.pos == 3   # genomic_pos on internal forward
-        assert r.ref == 'G'
-        assert r.alt == 'GCCC'
-        # query_ref_codon for CDS pos 3: forward positions 5,4,3 → query 'C','C','C' = 'CCC'
-        # match.strand='-': complement → 'GGG'
-        assert r.query_ref_codon == 'GGG'
-
-    def test_frameshift_insertion_remapped(self) -> None:
-        """1-nt insertion is remapped (not skipped) and survives to annotation."""
-        gene = self._plus_gene()
-        query = 'ATGGGGTTT'
-        match = _make_match(gene, '+', len(query))
-
-        var = VariantCall(chrom='c', pos=3, ref='G', alt='GG', allele_freq=0.9, depth=100)
-        remapped, warnings = remap_variants([var], [match], query)
-
-        assert not warnings
-        assert len(remapped) == 1
-        assert remapped[0].ref == 'G'
-        assert remapped[0].alt == 'GG'
+def _variant_from_token(token: str) -> VariantCall:
+    """Parse compact mutation token like A4G, AGTC5A, C11CAAA."""
+    m = re.match(r'^([ACGT]+)(\d+)([ACGT]+)$', token)
+    if m is None:
+        raise ValueError(f'Invalid token: {token!r}')
+    ref, pos_str, alt = m.groups()
+    return VariantCall(chrom='c', pos=int(pos_str), ref=ref, alt=alt, allele_freq=0.9, depth=100)
 
 
-# ─── remap_variants — deletion ────────────────────────────────────────
+def _token_from_variant(var: VariantCall) -> str:
+    """Convert a VariantCall back to compact token form used in examples."""
+    return f'{var.ref}{var.pos}{var.alt}'
 
-class TestRemapVariantsDeletion:
-    """remap_variants correctly handles deletions."""
 
-    def _plus_gene(self) -> GeneRecord:
-        return GeneRecord(
-            id=1, reference_id=1, name='gene', protein='P',
-            start=0, end=9, strand='+', codon_start=0, nt_sequence='ATGGGGTTT',
-        )
+def _assert_aa_token(ann, expected: str) -> None:
+    """Assert expected AA token such as Q1R, Q1fsX, Q1?, QV2Q."""
+    if expected.endswith('fsX'):
+        assert ann.ref_aa == expected[0]
+        assert ann.codon_pos == int(expected[1:-3])
+        assert ann.alt_aa == 'fsX'
+        assert ann.consequence == 'frameshift'
+        return
+    if expected.endswith('?'):
+        assert ann.ref_aa == expected[0]
+        assert ann.codon_pos == int(expected[1:-1])
+        assert ann.alt_aa == '?'
+        assert ann.consequence == 'inframe_complex'
+        return
 
-    def test_inframe_deletion_plus_gene_plus_match(self) -> None:
-        gene = self._plus_gene()
-        query = 'ATGGGGTTT'
-        match = _make_match(gene, '+', len(query))
+    m = re.match(r'^([A-Z*]+)(\d+)([A-Z*]+)$', expected)
+    if m is None:
+        raise ValueError(f'Invalid AA expectation: {expected!r}')
+    ref_aa, pos_str, alt_aa = m.groups()
+    assert ann.ref_aa == ref_aa
+    if ann.consequence == 'deletion' and len(ref_aa) > len(alt_aa):
+        assert ann.codon_pos + 1 == int(pos_str)
+    else:
+        assert ann.codon_pos == int(pos_str)
+    assert ann.alt_aa == alt_aa
 
-        # Delete 'GGG' (codon 2) after anchor 'G' (codon 1 pos 0)
-        var = VariantCall(chrom='c', pos=3, ref='GGGG', alt='G', allele_freq=0.9, depth=100)
-        remapped, warnings = remap_variants([var], [match], query)
 
-        assert not warnings
-        assert len(remapped) == 1
-        r = remapped[0]
-        assert r.ref == 'GGGG'
-        assert r.alt == 'G'
-        assert r.query_ref_codon == 'GGG'
+class TestTransformAllele:
+    """Keep direct allele transformation helper checks."""
 
-    def test_inframe_deletion_plus_gene_minus_match_transforms_allele(self) -> None:
-        """need_comp=True: anchor complement + RC of deleted payload."""
-        gene = self._plus_gene()
-        query = reverse_complement('ATGGGGTTT')  # = 'AAACCCCAT'
-        match = _make_match(gene, '-', len(query))
+    def test_snp_need_comp_false(self) -> None:
+        assert _transform_allele('A', need_comp=False) == 'A'
 
-        # q2c[5]=3, pos 5 on query = 'C'. Delete 'CCC' after anchor.
-        # ref='CCCC', alt='C'.
-        # need_comp=True → ref = complement('C') + RC('CCC') = 'G' + 'GGG' = 'GGGG',
-        #                   alt = complement('C') = 'G'.
-        var = VariantCall(chrom='c', pos=5, ref='CCCC', alt='C', allele_freq=0.9, depth=100)
-        remapped, warnings = remap_variants([var], [match], query)
+    def test_snp_need_comp_true(self) -> None:
+        assert _transform_allele('A', need_comp=True) == 'T'
+        assert _transform_allele('C', need_comp=True) == 'G'
 
-        assert not warnings
-        assert len(remapped) == 1
-        r = remapped[0]
-        assert r.pos == 3
-        assert r.ref == 'GGGG'
-        assert r.alt == 'G'
-        assert r.query_ref_codon == 'GGG'
+    def test_indel_need_comp_true(self) -> None:
+        assert _transform_allele('AGGG', need_comp=True) == 'TCCC'
+        assert _transform_allele('CTGG', need_comp=True) == 'GCCA'
 
-    def test_anchor_ref_mismatch_produces_warning(self) -> None:
-        """VCF anchor base disagreeing with query FASTA emits a warning."""
-        gene = self._plus_gene()
-        query = 'ATGGGGTTT'
-        match = _make_match(gene, '+', len(query))
 
-        # Wrong anchor: pos=3 has 'G' in query, but REF says 'C'.
-        var = VariantCall(chrom='c', pos=3, ref='CGGG', alt='C', allele_freq=0.9, depth=100)
-        remapped, warnings = remap_variants([var], [match], query)
+@pytest.mark.parametrize(
+    ('gene_strand', 'match_strand', 'query_seq', 'query_token', 'expected_token', 'expected_aa'),
+    [
+        ('+', '+', 'ATGCAAGTCGGAAACTAA', 'A4G', 'A4G', 'Q1R'),
+        ('+', '+', 'ATGCAAGTCGGAAACTAA', 'A5ATT', 'A5ATT', 'Q1fsX'),
+        ('+', '+', 'ATGCAAGTCGGAAACTAA', 'CA3C', 'CA3C', 'Q1fsX'),
+        ('+', '+', 'ATGCAAGTCGGAAACTAA', 'C3CTTT', 'C3CTTT', 'Q1?'),
+        ('+', '+', 'ATGCAAGTCGGAAACTAA', 'CAAG3C', 'CAAG3C', 'Q1?'),
+        ('+', '+', 'ATGCAAGTCGGAAACTAA', 'A5ATTT', 'A5ATTT', 'Q1QF'),
+        ('+', '+', 'ATGCAAGTCGGAAACTAA', 'AGTC5A', 'AGTC5A', 'QV2Q'),
+        ('+', '-', 'TTAGTTTCCGACTTGCAT', 'T13C', 'A4G', 'Q1R'),
+        ('+', '-', 'TTAGTTTCCGACTTGCAT', 'C11CAAA', 'A5ATTT', 'Q1QF'),
+        ('+', '-', 'TTAGTTTCCGACTTGCAT', 'CGAC8C', 'AGTC5A', 'QV2Q'),
+        ('-', '-', 'TTAGTTTCCGACTTGCAT', 'T13C', 'T13C', 'Q1R'),
+        ('-', '-', 'TTAGTTTCCGACTTGCAT', 'C11CAAA', 'C11CAAA', 'Q1QF'),
+        ('-', '-', 'TTAGTTTCCGACTTGCAT', 'CGAC8C', 'CGAC8C', 'QV2Q'),
+        ('-', '+', 'ATGCAAGTCGGAAACTAA', 'A4G', 'T13C', 'Q1R'),
+        ('-', '+', 'ATGCAAGTCGGAAACTAA', 'A5ATTT', 'C11CAAA', 'Q1QF'),
+        ('-', '+', 'ATGCAAGTCGGAAACTAA', 'AGTC5A', 'CGAC8C', 'QV2Q'),
+    ],
+)
+def test_examples_e1_to_e4(
+    gene_strand: str,
+    match_strand: str,
+    query_seq: str,
+    query_token: str,
+    expected_token: str,
+    expected_aa: str,
+) -> None:
+    """Validate the canonical strand/orientation examples E1-E4."""
+    gene = _make_gene(strand=gene_strand)
+    match = _make_match(gene, match_strand=match_strand, query=query_seq, cigar='18M')
+    var = _variant_from_token(query_token)
 
-        assert len(remapped) == 0
-        assert len(warnings) == 1
-        assert 'REF' in warnings[0] or 'anchor' in warnings[0].lower() or '≠' in warnings[0]
+    remapped, warnings = remap_variants([var], [match], query_seq)
+
+    assert not warnings
+    assert len(remapped) == 1
+    assert _token_from_variant(remapped[0]) == expected_token, (
+        f'gene={gene_strand} match={match_strand} query={query_seq} '
+        f'in={query_token} out={_token_from_variant(remapped[0])} expected={expected_token}'
+    )
+
+    anns = annotate_variants(remapped, [gene])
+    assert len(anns) == 1
+    _assert_aa_token(anns[0], expected_aa)
+
+
+def test_example_e5_query_deletion_rc_orientation() -> None:
+    """E5: query has deletion vs reference and query aligns as reverse-complement."""
+    gene = _make_gene(strand='+')
+    query_seq = 'TTAGTTTCCTTGCAT'
+    match = _make_match(gene, match_strand='-', query=query_seq, cigar='6M3D9M')
+    var = _variant_from_token('C8T')
+
+    remapped, warnings = remap_variants([var], [match], query_seq)
+
+    assert not warnings
+    assert len(remapped) == 1
+    assert _token_from_variant(remapped[0]) == 'G9A'
+
+    anns = annotate_variants(remapped, [gene])
+    assert len(anns) == 1
+    _assert_aa_token(anns[0], 'G3R')
+
+
+def test_example_e6_query_insertion_projection_and_no_projection() -> None:
+    """E6: one SNP projects through insertion, one SNP in insertion has no projection."""
+    gene = _make_gene(strand='+')
+    query_seq = 'ATGCAATTTGTCGGAAACTAA'
+    match = _make_match(gene, match_strand='+', query=query_seq, cigar='6M3I12M')
+    projected = _variant_from_token('G9A')
+    non_projected = _variant_from_token('T7C')
+
+    remapped, warnings = remap_variants([projected, non_projected], [match], query_seq)
+
+    assert not warnings
+    assert len(remapped) == 1
+    assert _token_from_variant(remapped[0]) == 'G6A'
+
+    anns = annotate_variants(remapped, [gene])
+    assert len(anns) == 1
+    _assert_aa_token(anns[0], 'V2I')
+
+
+def test_example_e7_mismatch_column_projection() -> None:
+    """E7: SNP at mismatch column still projects and annotates correctly."""
+    gene = _make_gene(strand='+')
+    query_seq = 'ATGCAGGTCGGAAGCTAA'
+    match = _make_match(gene, match_strand='+', query=query_seq, cigar='18M')
+    var = _variant_from_token('G5T')
+
+    remapped, warnings = remap_variants([var], [match], query_seq)
+
+    assert not warnings
+    assert len(remapped) == 1
+    assert _token_from_variant(remapped[0]) == 'G5T'
+
+    anns = annotate_variants(remapped, [gene])
+    assert len(anns) == 1
+    _assert_aa_token(anns[0], 'Q1H')
+
+
+def test_anchor_ref_mismatch_produces_warning() -> None:
+    """VCF REF anchor mismatch to query emits warning and excludes the variant."""
+    gene = _make_gene(strand='+')
+    query = 'ATGCAAGTCGGAAACTAA'
+    match = _make_match(gene, match_strand='+', query=query, cigar='18M')
+    var = VariantCall(chrom='c', pos=3, ref='T', alt='G', allele_freq=0.9, depth=100)
+
+    remapped, warnings = remap_variants([var], [match], query)
+
+    assert len(remapped) == 0
+    assert len(warnings) == 1
+
+
+def test_minus_gene_reference_sequence_is_reverse_complement_of_coding_sequence() -> None:
+    """Guardrail: minus-gene genomic-forward reference sequence used in examples."""
+    assert reverse_complement('ATGCAAGTCGGAAACTAA') == 'TTAGTTTCCGACTTGCAT'
+
+
+def test_anchor_changed_indel_is_split_forward_orientation() -> None:
+    """Non-canonical indel with changed anchor is split into SNP + indel before remap."""
+    gene = _make_gene(strand='+')
+    query_seq = 'ATGCAAGTCGGAAACTAA'
+    match = _make_match(gene, match_strand='+', query=query_seq, cigar='18M')
+    # Encodes A->G at anchor plus 3-nt deletion payload in one record.
+    var = _variant_from_token('AAGT4G')
+
+    remapped, warnings = remap_variants([var], [match], query_seq)
+
+    assert any('Split' in w for w in warnings)
+    assert len(remapped) == 2
+    tokens = {_token_from_variant(v) for v in remapped}
+    assert 'A4G' in tokens
+    assert 'AAGT4A' in tokens
+
+    anns = annotate_variants(remapped, [gene])
+    consequences = {a.consequence for a in anns}
+    assert 'missense' in consequences
+    assert any(c in consequences for c in ('deletion', 'inframe_complex', 'frameshift'))
+
+
+def test_anchor_changed_indel_is_split_reverse_orientation() -> None:
+    """Reverse-orientation remap preserves both SNP and indel from changed-anchor record."""
+    gene = _make_gene(strand='+')
+    query_seq = 'TTAGTTTCCGACTTGCAT'
+    match = _make_match(gene, match_strand='-', query=query_seq, cigar='18M')
+    var = _variant_from_token('CAAA11G')
+
+    remapped, warnings = remap_variants([var], [match], query_seq)
+
+    assert any('Split' in w for w in warnings)
+    assert len(remapped) == 2
+    snp_count = sum(1 for v in remapped if len(v.ref) == 1 and len(v.alt) == 1)
+    indel_count = sum(1 for v in remapped if len(v.ref) != len(v.alt))
+    assert snp_count == 1
+    assert indel_count == 1
+
+    anns = annotate_variants(remapped, [gene])
+    consequences = {a.consequence for a in anns}
+    assert 'missense' in consequences
+    assert any(c in consequences for c in ('deletion', 'inframe_complex', 'frameshift'))

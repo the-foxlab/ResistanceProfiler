@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 # Form: one or more AA letters + position digits + "del" (case-insensitive), e.g. "Q35del", "DD676del".
 _RE_ANCHORLESS_DEL = re.compile(r'^([A-Za-z]+)\d+del$', re.IGNORECASE)
 _RE_REWRITE_TOKEN = re.compile(r'^([A-Z*]+)(\d+)([A-Z*]+)$')
+_AUTO_SPLIT_GROUP_PREFIX = '__auto_anchor_split_row_'
 
 
 def _normalize_publication_token(token: str) -> tuple[str, str, str]:
@@ -398,6 +399,131 @@ def _normalize_rule_alleles_for_storage(
         return None
 
     return anchor_pos_0based, left, right
+
+
+def _split_anchor_changed_indel_token(
+    mutation_raw: str,
+) -> tuple[str, str, str, str] | None:
+    """
+    Split mixed anchor-change indel rewrite tokens into two events.
+
+    Examples:
+    - ``GY50A`` -> ``G50A`` + ``GY50G``
+    - ``G50AW`` -> ``G50A`` + ``G50GW``
+
+    Returns tuple ``(sub_ref, sub_mut, indel_ref, indel_mut)`` using canonical
+    storage alleles (reference/mutation columns), or ``None`` when the token is
+    not a mixed anchor-change indel.
+    """
+    lowered = mutation_raw.lower()
+    if (
+        lowered.endswith('del')
+        or 'ins' in lowered
+        or 'frameshift' in lowered
+        or 'stop' in lowered
+    ):
+        return None
+
+    match = _RE_REWRITE_TOKEN.fullmatch(mutation_raw.upper())
+    if match is None:
+        return None
+
+    left, _, right = match.groups()
+    if (
+        right.startswith('DEL')
+        or right.startswith('INS')
+        or right.startswith('FS')
+        or right.startswith('STOP')
+    ):
+        return None
+
+    if len(left) == len(right):
+        return None
+    if left[0] == right[0]:
+        return None
+
+    left_tail = left[1:]
+    right_tail = right[1:]
+
+    # Simple insertion/deletion around a changed anchor: after removing the
+    # first AA, one side must be a strict prefix extension of the other.
+    if not (
+        (right_tail.startswith(left_tail) and len(right_tail) > len(left_tail))
+        or (left_tail.startswith(right_tail) and len(left_tail) > len(right_tail))
+    ):
+        return None
+
+    sub_ref = left[0]
+    sub_mut = right[0]
+    indel_ref = left
+    indel_mut = left[0] + right_tail
+    return sub_ref, sub_mut, indel_ref, indel_mut
+
+
+def _expand_anchor_changed_indel_rules(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """
+    Expand mixed anchor-change indel rows into explicit two-member combo rows.
+
+    Rows that cannot be split safely are returned unchanged and continue through
+    normal validation.
+    """
+    expanded_rows: list[dict[str, str]] = []
+    split_count = 0
+
+    for row_number, row in enumerate(rows, start=2):
+        mutation_raw = _get_value(row, 'mutation')
+        position_raw = _get_value(row, 'position')
+        reference_raw = _get_value(row, 'reference').upper()
+
+        split = _split_anchor_changed_indel_token(mutation_raw)
+        if split is None:
+            expanded_rows.append(row)
+            continue
+
+        rewrite_match = _RE_REWRITE_TOKEN.fullmatch(mutation_raw.upper())
+        if rewrite_match is None:
+            expanded_rows.append(row)
+            continue
+        left, token_pos_text, _ = rewrite_match.groups()
+
+        try:
+            token_pos = int(token_pos_text)
+            row_pos = int(position_raw)
+        except ValueError:
+            expanded_rows.append(row)
+            continue
+
+        if token_pos != row_pos:
+            expanded_rows.append(row)
+            continue
+
+        if reference_raw and reference_raw not in {left, left[0]}:
+            expanded_rows.append(row)
+            continue
+
+        sub_ref, sub_mut, indel_ref, indel_mut = split
+        group_name = _get_value(row, 'rule_group') or f'{_AUTO_SPLIT_GROUP_PREFIX}{row_number}'
+
+        substitution_row = dict(row)
+        substitution_row['reference'] = sub_ref
+        substitution_row['mutation'] = sub_mut
+        substitution_row['rule_group'] = group_name
+
+        indel_row = dict(row)
+        indel_row['reference'] = indel_ref
+        indel_row['mutation'] = indel_mut
+        indel_row['rule_group'] = group_name
+
+        expanded_rows.extend([substitution_row, indel_row])
+        split_count += 1
+
+    if split_count:
+        logger.info(
+            'Expanded %d mixed anchor-change indel rule(s) into explicit combo members',
+            split_count,
+        )
+
+    return expanded_rows
 
 
 def _resolve_rule_gene_id(candidates: list[sqlite3.Row], reference_identifier: str) -> int | None:
@@ -995,7 +1121,7 @@ def _load_resistance_rules(
 
     with open(rules_tsv, newline='') as fh:
         reader = csv.DictReader(fh, delimiter='\t')
-        all_rows = list(reader)
+        all_rows = _expand_anchor_changed_indel_rules(list(reader))
 
     header_columns = {col.strip() for col in (reader.fieldnames or []) if col}
     present_ic50 = sorted(header_columns & {'ic50', 'ic_50'})

@@ -291,10 +291,28 @@ def _annotate_variant_in_gene(
         return _annotate_snp(var, gene, cds_codons, codon_idx, frame_offset, mut)
 
     if _is_insertion(var.ref, var.alt):
-        return _annotate_insertion(var, gene, coding_nt, codon_idx, frame_offset)
+        indel_anchor_pos = _indel_anchor_coding_pos(coding_variant_pos, len(var.ref), gene.strand)
+        if indel_anchor_pos < 0:
+            return AnnotatedVariant(variant=var, gene_name=gene.name)
+        return _annotate_insertion(
+            var,
+            gene,
+            coding_nt,
+            indel_anchor_pos // 3,
+            indel_anchor_pos % 3,
+        )
 
     if _is_deletion(var.ref, var.alt):
-        return _annotate_deletion(var, gene, coding_nt, codon_idx, frame_offset)
+        indel_anchor_pos = _indel_anchor_coding_pos(coding_variant_pos, len(var.ref), gene.strand)
+        if indel_anchor_pos < 0:
+            return AnnotatedVariant(variant=var, gene_name=gene.name)
+        return _annotate_deletion(
+            var,
+            gene,
+            coding_nt,
+            indel_anchor_pos // 3,
+            indel_anchor_pos % 3,
+        )
 
     return None
 
@@ -317,9 +335,7 @@ def _annotate_snp(
     internal_codon = ''.join(cds_codons[mut_codon_idx])
     ref_aa = translate_codon(internal_codon)
 
-    query_codon = var.query_ref_codon.upper()
-    # Keep rule anchoring stable (internal ref) while allowing query-context AA prediction.
-    affected_codon = query_codon if len(query_codon) == 3 else internal_codon
+    affected_codon = _resolve_anchor_codon(var, internal_codon)
 
     alt_codon_bases = list(affected_codon)
     alt_codon_bases[codon_pos] = mut
@@ -374,8 +390,7 @@ def _annotate_frameshift(
     :return: AnnotatedVariant with consequence='frameshift'
     """
     internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
-    query_codon = var.query_ref_codon.upper()
-    anchor_codon = query_codon if len(query_codon) == 3 else internal_codon
+    anchor_codon = _resolve_anchor_codon(var, internal_codon)
     anchor_aa = translate_codon(anchor_codon)
     return AnnotatedVariant(
         variant=var,
@@ -415,24 +430,23 @@ def _annotate_insertion(
     if not _is_inframe(var.ref, var.alt):
         return _annotate_frameshift(var, gene, coding_nt, codon_idx)
 
-    if frame_offset != 0:
+    if not _is_vcf_anchor_at_codon_boundary(frame_offset, gene.strand):
         internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
-        query_codon = var.query_ref_codon.upper()
-        anchor_codon = query_codon if len(query_codon) == 3 else internal_codon
+        anchor_codon = _resolve_anchor_codon(var, internal_codon)
+        anchor_aa = translate_codon(anchor_codon)
         return AnnotatedVariant(
             variant=var,
             gene_name=gene.name,
             codon_pos=codon_idx,
             ref_codon=anchor_codon,
             alt_codon='',
-            ref_aa='?',
+            ref_aa=anchor_aa,
             alt_aa='?',
             consequence='inframe_complex',
         )
 
     internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
-    query_codon = var.query_ref_codon.upper()
-    anchor_codon = query_codon if len(query_codon) == 3 else internal_codon
+    anchor_codon = _resolve_anchor_codon(var, internal_codon)
     anchor_aa = translate_codon(anchor_codon)
     inserted_bases = var.alt[1:]  # strip anchor base
     inserted_aas = _translate_indel_bases(inserted_bases, gene.strand)
@@ -475,24 +489,23 @@ def _annotate_deletion(
     if not _is_inframe(var.ref, var.alt):
         return _annotate_frameshift(var, gene, coding_nt, codon_idx)
 
-    if frame_offset != 0:
+    if not _is_vcf_anchor_at_codon_boundary(frame_offset, gene.strand):
         internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
-        query_codon = var.query_ref_codon.upper()
-        anchor_codon = query_codon if len(query_codon) == 3 else internal_codon
+        anchor_codon = _resolve_anchor_codon(var, internal_codon)
+        anchor_aa = translate_codon(anchor_codon)
         return AnnotatedVariant(
             variant=var,
             gene_name=gene.name,
             codon_pos=codon_idx,
             ref_codon=anchor_codon,
             alt_codon='',
-            ref_aa='?',
+            ref_aa=anchor_aa,
             alt_aa='?',
             consequence='inframe_complex',
         )
 
     internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
-    query_codon = var.query_ref_codon.upper()
-    anchor_codon = query_codon if len(query_codon) == 3 else internal_codon
+    anchor_codon = _resolve_anchor_codon(var, internal_codon)
     anchor_aa = translate_codon(anchor_codon)
     deleted_bases = var.ref[1:]  # strip anchor base
     deleted_aas = _translate_indel_bases(deleted_bases, gene.strand)
@@ -507,6 +520,35 @@ def _annotate_deletion(
         alt_aa=anchor_aa,
         consequence='deletion',
     )
+
+
+def _resolve_anchor_codon(var: VariantCall, internal_codon: str) -> str:
+    """Use query codon context when valid, otherwise use internal CDS codon."""
+    query_codon = var.query_ref_codon.upper()
+    return query_codon if len(query_codon) == 3 else internal_codon
+
+
+def _is_vcf_anchor_at_codon_boundary(frame_offset: int, strand: str) -> bool:
+    """
+    Return True when a VCF anchor sits on a codon boundary in coding orientation.
+
+    VCF stores the nucleotide immediately before an indel in genomic 5'->3' order.
+    In coding orientation this corresponds to frame offset 2 for '+' genes and 0 for '-' genes.
+    """
+    return frame_offset == 2
+
+
+def _indel_anchor_coding_pos(coding_variant_pos: int, ref_len: int, strand: str) -> int:
+    """
+    Return coding-position anchor for VCF indels.
+
+    On '+' genes, VCF anchor already refers to the coding-preceding nucleotide.
+    On '-' genes, genomic 5'->3' VCF anchors are downstream in coding orientation,
+    so the coding anchor shifts left by the REF length.
+    """
+    if strand == '+':
+        return coding_variant_pos
+    return coding_variant_pos - ref_len
 
 
 def normalize_mutation(

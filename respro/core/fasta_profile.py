@@ -23,7 +23,7 @@ from itertools import product as itertools_product
 
 from Bio.Seq import Seq
 
-from respro.core.annotation import translate_codon
+from respro.core.annotation import reverse_complement, translate_codon
 from respro.db.models import AnnotatedVariant, CoverageGap, GeneMatch, GeneRecord, VariantCall
 
 logger = logging.getLogger(__name__)
@@ -180,18 +180,28 @@ def _annotate_from_alignment(
     in the alignment (i.e., at positions where ref is '-').
 
     Codons are defined by triplets of consecutive ref positions after the frame offset.
-    SNPs are emitted only for ungapped codons. Codons affected by insertions or
-    deletions are treated as non-assessable and reported as CoverageGaps.
+    Mutation consequences:
 
-    A codon where all three query positions are 'N' is treated as non-covered and
-    recorded as a CoverageGap instead of being IUPAC-expanded.
+    - Boundary insertion only (ins_before, no mid-codon insertions, no query gaps):
+      annotated as insertion (in-frame, 3n) or frameshift (non-3n).
+    - Mid-codon insertion (before position 1 or 2 of codon), or ins_before combined with
+      query gaps: annotated as inframe_complex.
+    - All three query positions are gaps (full-codon deletion): annotated as deletion
+      (consecutive fully-deleted codons are merged into one annotation). If no valid
+      preceding codon is available, treated as a coverage gap.
+    - One or two query gaps (partial deletion): annotated as frameshift.
+    - All three query positions are 'N': non-covered codon, reported as CoverageGap.
+    - Ungapped, non-insertion codon: IUPAC-expanded SNP comparison.
+
+    The anchor amino acid for insertions and deletions uses the query codon context
+    (not the internal reference), matching the VCF annotation convention.
 
     :param aligned_ref: reference CDS with gap characters
     :param aligned_query: query CDS with gap characters
     :param gene: gene record with stored nt_sequence and codon_start
     :param covered_cds_start: optional CDS nt start (inclusive) of the aligned/assessable region
     :param covered_cds_end: optional CDS nt end (exclusive) of the aligned/assessable region
-    :return: (annotated variants, coverage gaps) — non-synonymous changes and non-covered codons
+    :return: (annotated variants, coverage gaps) — amino acid changes and non-covered codons
     """
     frame = gene.codon_start
 
@@ -204,13 +214,16 @@ def _annotate_from_alignment(
         else:
             ref_positions.append((r, q, pending_ins))
             pending_ins = ''
-    # Trailing query insertions beyond the reference end are ignored
 
+    # Trailing query insertions beyond the reference end are ignored
     coding = ref_positions[frame:]  # skip leading non-coding frame offset
     annotations: list[AnnotatedVariant] = []
     gap_codon_indices: list[int] = []
     codon_idx = 0
     i = 0
+    last_valid_codon_idx: int = -1
+    last_valid_ref_codon = ''
+    last_valid_query_codon = ''
 
     while i < len(coding):
         codon_nt_start = frame + codon_idx * 3
@@ -228,29 +241,112 @@ def _annotate_from_alignment(
             break  # incomplete codon at end of CDS
 
         codon_triples = coding[i:i + 3]
-
-        # Insertions embedded within this codon (before positions 1 or 2)
         mid_insertions = codon_triples[1][2] + codon_triples[2][2]
-        if ins_before or mid_insertions:
+        ref_codon = ''.join(r for r, q, ins in codon_triples)
+        query_codon = ''.join(q for r, q, ins in codon_triples)
+
+        if ins_before:
+            if mid_insertions or '-' in query_codon:
+                # Boundary insertion combined with mid-codon insertion or gap -> inframe_complex.
+                annotations.append(
+                    _annotate_fasta_inframe_complex_codon(gene, codon_idx, ref_codon, query_codon)
+                )
+            elif last_valid_query_codon and last_valid_codon_idx >= 0:
+                n_ins = len(ins_before)
+                if n_ins % 3 != 0:
+                    annotations.append(
+                        _annotate_fasta_frameshift_codon(
+                            gene,
+                            last_valid_codon_idx,
+                            last_valid_ref_codon,
+                            last_valid_query_codon,
+                        )
+                    )
+                else:
+                    annotations.append(
+                        _annotate_fasta_insertion_codon(
+                            gene,
+                            last_valid_codon_idx,
+                            last_valid_ref_codon,
+                            last_valid_query_codon,
+                            ins_before,
+                            codon_idx * 3,
+                            query_codon[0],
+                        )
+                    )
+            else:
+                # No preceding anchor codon available (insertion before first codon): non-assessable.
+                gap_codon_indices.append(codon_idx)
+            i += 3
+            codon_idx += 1
+            continue
+
+        if mid_insertions:
+            annotations.append(
+                _annotate_fasta_inframe_complex_codon(gene, codon_idx, ref_codon, query_codon)
+            )
+            i += 3
+            codon_idx += 1
+            continue
+
+        if '-' in query_codon:
+            if query_codon == '---':
+                # Full codon deletion: collect consecutive all-gap codons
+                gap_start_idx = codon_idx
+                deleted_ref_codons = [ref_codon]
+                j = i + 3
+                next_c_idx = codon_idx + 1
+                while j + 3 <= len(coding):
+                    nxt = coding[j:j + 3]
+                    if nxt[0][2] or nxt[1][2] + nxt[2][2]:
+                        break  # insertion in next gap codon → stop run
+                    nxt_qc = ''.join(q for r, q, ins in nxt)
+                    if nxt_qc != '---':
+                        break
+                    # Honour coverage boundaries when extending the run
+                    nxt_nt_start = frame + next_c_idx * 3
+                    nxt_nt_end = nxt_nt_start + 3
+                    if covered_cds_start is not None and covered_cds_end is not None:
+                        if nxt_nt_start < covered_cds_start or nxt_nt_end > covered_cds_end:
+                            break
+                    deleted_ref_codons.append(''.join(r for r, q, ins in nxt))
+                    j += 3
+                    next_c_idx += 1
+
+                if last_valid_query_codon:
+                    annotations.append(
+                        _annotate_fasta_deletion_codons(
+                            gene, last_valid_codon_idx, last_valid_query_codon, deleted_ref_codons,
+                        )
+                    )
+                else:
+                    # Deletion at gene start with no preceding anchor → coverage gap
+                    gap_codon_indices.extend(range(gap_start_idx, next_c_idx))
+                i = j
+                codon_idx = next_c_idx
+            else:
+                # Partial deletion (1–2 gaps) → frameshift; anchor from internal ref codon
+                annotations.append(
+                    _annotate_fasta_frameshift_codon(gene, codon_idx, ref_codon, ref_codon)
+                )
+                i += 3
+                codon_idx += 1
+            continue
+
+        if query_codon.upper() == 'NNN':
+            # Full-codon N-stretch: no coverage → do not IUPAC-expand
             gap_codon_indices.append(codon_idx)
             i += 3
             codon_idx += 1
             continue
 
-        ref_codon = ''.join(r for r, q, ins in codon_triples)
-        query_codon = ''.join(q for r, q, ins in codon_triples)
+        # No gaps, no insertions: expand IUPAC ambiguity and emit non-synonymous changes
         ref_aa = translate_codon(ref_codon)
-
-        if '-' in query_codon:
-            gap_codon_indices.append(codon_idx)
-        elif query_codon.upper() == 'NNN':
-            # Full-codon N-stretch: no coverage → do not IUPAC-expand
-            gap_codon_indices.append(codon_idx)
-        else:
-            # No gaps — expand IUPAC ambiguity and emit non-synonymous changes
-            anns = _annotate_snp_codon(ref_codon, query_codon, ref_aa, codon_idx, gene)
-            annotations.extend(anns)
-
+        anns = _annotate_snp_codon(ref_codon, query_codon, ref_aa, codon_idx, gene)
+        annotations.extend(anns)
+        last_valid_codon_idx = codon_idx
+        last_valid_ref_codon = ref_codon
+        last_valid_query_codon = query_codon
         i += 3
         codon_idx += 1
 
@@ -298,6 +394,20 @@ def _codon_genomic_pos(gene: GeneRecord, codon_idx: int) -> int:
     return (gene.end - 1) - nt_offset
 
 
+def _coding_nt_genomic_pos(gene: GeneRecord, coding_nt_idx: int) -> int:
+    """
+    Return the 0-based internal genomic position of one coding nucleotide index.
+
+    :param gene: gene record
+    :param coding_nt_idx: 0-based nucleotide index in coding orientation (after codon_start)
+    :return: 0-based genomic position on the internal reference
+    """
+    nt_offset = gene.codon_start + coding_nt_idx
+    if gene.strand == '+':
+        return gene.start + nt_offset
+    return (gene.end - 1) - nt_offset
+
+
 def _make_variant(
     gene: GeneRecord,
     codon_idx: int,
@@ -309,6 +419,25 @@ def _make_variant(
     return VariantCall(
         chrom=gene.name,
         pos=_codon_genomic_pos(gene, codon_idx),
+        ref=ref,
+        alt=alt,
+        allele_freq=af,
+        depth=0,
+        filter_status='PASS',
+    )
+
+
+def _make_variant_from_coding_nt(
+    gene: GeneRecord,
+    coding_nt_idx: int,
+    ref: str,
+    alt: str,
+    af: float = 1.0,
+) -> VariantCall:
+    """Build a synthetic VariantCall anchored at one coding nucleotide position."""
+    return VariantCall(
+        chrom=gene.name,
+        pos=_coding_nt_genomic_pos(gene, coding_nt_idx),
         ref=ref,
         alt=alt,
         allele_freq=af,
@@ -347,10 +476,15 @@ def _annotate_snp_codon(
         return []
 
     af_each = 1.0 / len(possible_aas)
+    changed_offsets = [idx for idx, (r, q) in enumerate(zip(ref_codon, query_codon)) if r != q]
+    diff_offset = changed_offsets[0] if changed_offsets else 0
+    var_ref = ref_codon[diff_offset]
+    var_alt = query_codon[diff_offset]
+    coding_nt_idx = codon_idx * 3 + diff_offset
     annotations = []
     for alt_aa in non_ref:
         consequence = _snp_consequence(ref_aa, alt_aa, codon_idx)
-        var = _make_variant(gene, codon_idx, ref_codon, query_codon, af=af_each)
+        var = _make_variant_from_coding_nt(gene, coding_nt_idx, var_ref, var_alt, af=af_each)
         annotations.append(AnnotatedVariant(
             variant=var,
             gene_name=gene.name,
@@ -399,4 +533,177 @@ def _snp_consequence(ref_aa: str, alt_aa: str, codon_idx: int) -> str:
     if ref_aa == '*':
         return 'stop_loss'
     return 'missense'
+
+
+def _annotate_fasta_insertion_codon(
+    gene: GeneRecord,
+    codon_idx: int,
+    ref_codon: str,
+    anchor_codon: str,
+    inserted_bases: str,
+    current_coding_nt_idx: int,
+    boundary_query_nt: str,
+) -> AnnotatedVariant:
+    """
+    Annotate an in-frame insertion detected in a FASTA alignment.
+
+    The anchor codon (the ref codon following the insertion in query context) provides the
+    anchor amino acid. The inserted bases are in CDS orientation (already RC'd by the caller
+    for minus-strand genes).
+
+    :param gene: gene record
+    :param codon_idx: 0-based codon index of the anchor codon (directly after the insertion)
+    :param ref_codon: internal reference codon at codon_idx
+    :param anchor_codon: query bases at codon_idx (CDS orientation, length 3)
+    :param inserted_bases: inserted query bases (CDS orientation, length multiple of 3)
+    :param current_coding_nt_idx: coding NT index of the first base in the codon after insertion
+    :param boundary_query_nt: mapped query NT at the insertion boundary (coding orientation)
+    :return: AnnotatedVariant with consequence='insertion'
+    """
+    anchor_aa = translate_codon(anchor_codon)
+    inserted_aas = str(Seq(inserted_bases).translate())
+    if gene.strand == '+':
+        anchor_nt = anchor_codon[-1]
+        inserted_nt = inserted_bases
+        anchor_nt_idx = codon_idx * 3 + 2
+    else:
+        # For '-' strand, report NT alleles in genomic 5'->3' orientation.
+        # The genomic anchor is the NT mapped at the right codon boundary.
+        anchor_nt = reverse_complement(boundary_query_nt)
+        inserted_nt = reverse_complement(inserted_bases)
+        anchor_nt_idx = current_coding_nt_idx
+    var = _make_variant_from_coding_nt(
+        gene,
+        anchor_nt_idx,
+        anchor_nt,
+        anchor_nt + inserted_nt,
+    )
+    return AnnotatedVariant(
+        variant=var,
+        gene_name=gene.name,
+        codon_pos=codon_idx,
+        ref_codon=ref_codon,
+        alt_codon='',
+        ref_aa=anchor_aa,
+        alt_aa=anchor_aa + inserted_aas,
+        consequence='insertion',
+        is_fasta_mode=True,
+    )
+
+
+def _annotate_fasta_deletion_codons(
+    gene: GeneRecord,
+    anchor_codon_idx: int,
+    anchor_query_codon: str,
+    deleted_ref_codons: list[str],
+) -> AnnotatedVariant:
+    """
+    Annotate a contiguous run of fully deleted codons detected in a FASTA alignment.
+
+    The last valid query codon preceding the deletion provides the anchor amino acid.
+    Deleted amino acids are translated from the internal reference codons (coordinate anchor).
+
+    :param gene: gene record
+    :param anchor_codon_idx: 0-based codon index of the anchor codon (last valid before deletion)
+    :param anchor_query_codon: query codon immediately before the deletion (CDS orientation)
+    :param deleted_ref_codons: internal reference nucleotide codon(s) for each deleted position
+    :return: AnnotatedVariant with consequence='deletion'
+    """
+    anchor_aa = translate_codon(anchor_query_codon)
+    deleted_aas = ''.join(translate_codon(c) for c in deleted_ref_codons)
+    deleted_nt = ''.join(deleted_ref_codons)
+    anchor_nt = anchor_query_codon[-1]
+    anchor_nt_idx = anchor_codon_idx * 3 + 2
+    # ref = anchor + deleted (VCF anchor convention); alt = anchor only.
+    var = _make_variant_from_coding_nt(
+        gene,
+        anchor_nt_idx,
+        anchor_nt + deleted_nt,
+        anchor_nt,
+    )
+    return AnnotatedVariant(
+        variant=var,
+        gene_name=gene.name,
+        codon_pos=anchor_codon_idx,
+        ref_codon=deleted_ref_codons[0],
+        alt_codon='',
+        ref_aa=anchor_aa + deleted_aas,
+        alt_aa=anchor_aa,
+        consequence='deletion',
+        is_fasta_mode=True,
+    )
+
+
+def _annotate_fasta_frameshift_codon(
+    gene: GeneRecord,
+    codon_idx: int,
+    ref_codon: str,
+    anchor_codon: str,
+) -> AnnotatedVariant:
+    """
+    Annotate a frameshift indel detected in a FASTA alignment.
+
+    :param gene: gene record
+    :param codon_idx: 0-based codon index where the frameshift starts
+    :param ref_codon: internal reference codon at codon_idx
+    :param anchor_codon: codon used to derive the anchor amino acid (CDS orientation)
+    :return: AnnotatedVariant with consequence='frameshift'
+    """
+    anchor_aa = translate_codon(anchor_codon)
+    anchor_nt = anchor_codon[-1]
+    anchor_nt_idx = codon_idx * 3 + 2
+    var = _make_variant_from_coding_nt(gene, anchor_nt_idx, anchor_nt, anchor_nt)
+    return AnnotatedVariant(
+        variant=var,
+        gene_name=gene.name,
+        codon_pos=codon_idx,
+        ref_codon=ref_codon,
+        alt_codon='',
+        ref_aa=anchor_aa,
+        alt_aa='fsX',
+        consequence='frameshift',
+        is_fasta_mode=True,
+    )
+
+
+def _annotate_fasta_inframe_complex_codon(
+    gene: GeneRecord,
+    codon_idx: int,
+    ref_codon: str,
+    query_codon: str,
+) -> AnnotatedVariant:
+    """
+    Annotate a mid-codon indel as inframe_complex.
+
+    Used when an insertion is embedded within a codon (not at a clean boundary)
+    or when both a boundary insertion and a mid-codon insertion overlap, making
+    the amino acid consequence non-resolvable to a canonical token.
+
+    :param gene: gene record
+    :param codon_idx: 0-based codon index of the affected codon
+    :param ref_codon: internal reference codon at codon_idx
+    :param query_codon: query codon at codon_idx (may include gaps)
+    :return: AnnotatedVariant with consequence='inframe_complex'
+    """
+    var = _make_variant(gene, codon_idx, ref_codon, ref_codon)
+    anchor_codon = _resolve_fasta_anchor_codon(ref_codon, query_codon)
+    anchor_aa = translate_codon(anchor_codon)
+    return AnnotatedVariant(
+        variant=var,
+        gene_name=gene.name,
+        codon_pos=codon_idx,
+        ref_codon=anchor_codon,
+        alt_codon='',
+        ref_aa=anchor_aa,
+        alt_aa='?',
+        consequence='inframe_complex',
+        is_fasta_mode=True,
+    )
+
+
+def _resolve_fasta_anchor_codon(ref_codon: str, query_codon: str) -> str:
+    """Return query anchor codon when valid, otherwise internal reference codon."""
+    if len(query_codon) == 3 and '-' not in query_codon:
+        return query_codon
+    return ref_codon
 

@@ -412,6 +412,58 @@ class TestComboRuleParsing:
         conn.close()
         assert set_count == 1
 
+    def test_single_mixed_anchor_change_insertion_is_split_to_combo(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            gag\ttiny_ref\t2\tK\tK2EW\tDrugA\tresistant
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                     rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        conn.row_factory = sqlite3.Row
+        single_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
+        set_row = conn.execute(
+            'SELECT id, group_name FROM resistance_rule_set'
+        ).fetchone()
+        members = conn.execute(
+            'SELECT reference, mutation FROM resistance_rule_set_member ORDER BY reference, mutation'
+        ).fetchall()
+        conn.close()
+
+        assert single_count == 0
+        assert set_row is not None
+        assert set_row['group_name'].startswith('__auto_anchor_split_row_')
+        assert [(m['reference'], m['mutation']) for m in members] == [('K', 'E'), ('K', 'KW')]
+
+    def test_single_mixed_anchor_change_deletion_is_split_to_combo(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            gag\ttiny_ref\t5\tGP\tGP5A\tDrugA\tresistant
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                     rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        conn.row_factory = sqlite3.Row
+        single_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
+        set_row = conn.execute(
+            'SELECT id, group_name FROM resistance_rule_set'
+        ).fetchone()
+        members = conn.execute(
+            'SELECT reference, mutation FROM resistance_rule_set_member ORDER BY reference, mutation'
+        ).fetchall()
+        conn.close()
+
+        assert single_count == 0
+        assert set_row is not None
+        assert set_row['group_name'].startswith('__auto_anchor_split_row_')
+        assert [(m['reference'], m['mutation']) for m in members] == [('G', 'A'), ('GP', 'G')]
+
     def test_single_rule_publication_doi_is_stored_in_publication_table(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
