@@ -937,6 +937,7 @@ def _insert_combo_rule_sets(
 
         # --- per-member validation (pre-validate before any DB write) ---
         valid_members: list[tuple] = []
+        seen_member_signatures: set[tuple[int, int, str]] = set()
         group_ok = True
         for row in rows:
             gene_name = _get_value(row, 'gene')
@@ -1044,6 +1045,17 @@ def _insert_combo_rule_sets(
                 )
                 group_ok = False
                 continue
+
+            member_signature = (gene_id, position_0based, mutation)
+            if member_signature in seen_member_signatures:
+                errors.append(
+                    f'Combo rule group {group_id!r}: duplicate member '
+                    f'gene {gene_name!r} pos {position_raw!r} mutation {mutation!r}'
+                )
+                group_ok = False
+                continue
+
+            seen_member_signatures.add(member_signature)
 
             valid_members.append((gene_id, reference_identifier, position_0based, reference_aa, mutation))
 

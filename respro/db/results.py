@@ -10,10 +10,13 @@ from pathlib import Path
 
 from respro.db.models import (
     AnnotatedVariant,
+    ComboRuleHit,
     CoverageGap,
     ProfilingResult,
     Publication,
     ResistanceRule,
+    ResistanceRuleSet,
+    ResistanceRuleSetMember,
     VariantCall,
 )
 
@@ -108,6 +111,12 @@ def save_run(
             (run_id, gap.gene_name, gap.codon_start, gap.codon_end),
         )
 
+    for combo_hit in result.combo_hits:
+        results_conn.execute(
+            'INSERT INTO combo_rule_hit (run_id, hit_json) VALUES (?, ?)',
+            (run_id, json.dumps(combo_hit.to_dict())),
+        )
+
     results_conn.commit()
     return run_id
 
@@ -183,6 +192,30 @@ def load_coverage_gaps(
     ]
 
 
+def load_combo_rule_hits(results_conn: sqlite3.Connection, run_id: int) -> list[dict]:
+    """
+    Load persisted combination-rule hits for a run.
+
+    :param results_conn: open results DB connection
+    :param run_id: id of the run to load combo hits for
+    :return: list of combo_rule_hit row dicts ordered by insertion
+    """
+    tables = {
+        row['name']
+        for row in results_conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    if 'combo_rule_hit' not in tables:
+        return []
+
+    rows = results_conn.execute(
+        'SELECT id, run_id, hit_json FROM combo_rule_hit WHERE run_id = ? ORDER BY id',
+        (run_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
     """
     Reconstruct AnnotatedVariant objects from stored variant_result rows.
@@ -221,6 +254,29 @@ def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
     return annotations
 
 
+def reconstruct_combo_rule_hits(
+    combo_rows: list[dict],
+    annotations: list[AnnotatedVariant],
+) -> list[ComboRuleHit]:
+    """
+    Reconstruct ComboRuleHit objects from persisted combo_rule_hit rows.
+
+    :param combo_rows: list of combo_rule_hit row dicts
+    :param annotations: reconstructed annotations for the same run
+    :return: list of ComboRuleHit objects
+    """
+    if not combo_rows:
+        return []
+
+    hits: list[ComboRuleHit] = []
+    for row in combo_rows:
+        payload = json.loads(row.get('hit_json') or '{}')
+        rule_set = _rule_set_from_combo_hit(payload)
+        matched_variants = _match_combo_variants(payload.get('matched_variants', []), annotations)
+        hits.append(ComboRuleHit(rule_set=rule_set, matched_variants=matched_variants))
+    return hits
+
+
 def _rule_from_hit(hit: dict, gene_name: str) -> ResistanceRule:
     """Reconstruct a ResistanceRule shell from a stored drug_hits JSON entry."""
     publications = [
@@ -250,4 +306,101 @@ def _rule_from_hit(hit: dict, gene_name: str) -> ResistanceRule:
         publications=publications,
         pubchem_url=hit.get('pubchem_url', ''),
     )
+
+
+def _rule_set_from_combo_hit(payload: dict) -> ResistanceRuleSet:
+    """Build a ResistanceRuleSet shell from a persisted combo hit payload."""
+    publications = [
+        Publication(
+            id=0,
+            doi=p.get('doi', ''),
+            title=p.get('title', ''),
+            pubmed_id=p.get('pubmed_id', ''),
+            raw_input=p.get('raw_input', ''),
+        )
+        for p in payload.get('publications', [])
+    ]
+    rule_set = ResistanceRuleSet(
+        id=0,
+        drug_name=payload.get('drug', ''),
+        drug_id=0,
+        phenotype=payload.get('phenotype', ''),
+        clinical_phenotype=payload.get('clinical_phenotype', 'unknown'),
+        ic50=payload.get('ic50', ''),
+        fold_ic50=payload.get('fold_ic50', ''),
+        source=payload.get('source', ''),
+        group_name=payload.get('rule_group', ''),
+        pubchem_url=payload.get('pubchem_url', ''),
+        publications=publications,
+    )
+    for idx, member in enumerate(payload.get('members', []), start=1):
+        position_1based = int(member.get('position', 1) or 1)
+        rule_set.members.append(
+            ResistanceRuleSetMember(
+                id=idx,
+                rule_set_id=0,
+                gene_name=member.get('gene', ''),
+                gene_id=0,
+                reference_identifier='',
+                position=max(0, position_1based - 1),
+                reference=member.get('reference', ''),
+                mutation=member.get('mutation', ''),
+            )
+        )
+    return rule_set
+
+
+def _match_combo_variants(
+    variant_payloads: list[dict],
+    annotations: list[AnnotatedVariant],
+) -> list[AnnotatedVariant]:
+    """Match persisted combo-variant summaries back to reconstructed annotations."""
+    by_key: dict[tuple, AnnotatedVariant] = {}
+    by_key_weak: dict[tuple, AnnotatedVariant] = {}
+    for ann in annotations:
+        key = (
+            ann.gene_name,
+            ann.codon_pos + 1,
+            ann.ref_aa,
+            ann.alt_aa,
+            round(ann.variant.allele_freq, 6),
+        )
+        weak_key = (ann.gene_name, ann.codon_pos + 1, ann.ref_aa, ann.alt_aa)
+        by_key.setdefault(key, ann)
+        by_key_weak.setdefault(weak_key, ann)
+
+    matched: list[AnnotatedVariant] = []
+    for item in variant_payloads:
+        af = float(item.get('allele_freq', 0.0) or 0.0)
+        codon_pos_1based = int(item.get('codon_pos', 1) or 1)
+        key = (
+            item.get('gene', ''),
+            codon_pos_1based,
+            item.get('ref_aa', ''),
+            item.get('alt_aa', ''),
+            round(af, 6),
+        )
+        weak_key = (
+            item.get('gene', ''),
+            codon_pos_1based,
+            item.get('ref_aa', ''),
+            item.get('alt_aa', ''),
+        )
+        ann = by_key.get(key) or by_key_weak.get(weak_key)
+        if ann is not None:
+            matched.append(ann)
+            continue
+
+        # Fall back to a synthetic shell if exact annotation matching is unavailable.
+        matched.append(
+            AnnotatedVariant(
+                variant=VariantCall(chrom='', pos=0, ref='', alt='', allele_freq=af, depth=0),
+                gene_name=item.get('gene', ''),
+                codon_pos=max(0, codon_pos_1based - 1),
+                ref_aa=item.get('ref_aa', ''),
+                alt_aa=item.get('alt_aa', ''),
+                consequence='',
+            )
+        )
+    return matched
 

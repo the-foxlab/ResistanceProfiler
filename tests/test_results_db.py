@@ -11,12 +11,22 @@ from pathlib import Path
 
 import pytest
 
-from respro.db.models import AnnotatedVariant, CoverageGap, ResistanceRule, VariantCall
+from respro.db.models import (
+    AnnotatedVariant,
+    ComboRuleHit,
+    CoverageGap,
+    ResistanceRule,
+    ResistanceRuleSet,
+    ResistanceRuleSetMember,
+    VariantCall,
+)
 from respro.db.results import (
     list_runs,
+    load_combo_rule_hits,
     load_coverage_gaps,
     load_run,
     project_fingerprint,
+    reconstruct_combo_rule_hits,
     reconstruct_annotations,
     save_run,
 )
@@ -214,6 +224,7 @@ class TestResultsDbSchema:
         assert 'run' in tables
         assert 'variant_result' in tables
         assert 'coverage_gap' in tables
+        assert 'combo_rule_hit' in tables
 
     def test_init_results_db_validates_existing_compatible_db(self, tmp_path: Path) -> None:
         db_path = tmp_path / 'results_existing.db'
@@ -348,7 +359,7 @@ class TestResultsPersistence:
         yield conn
         conn.close()
 
-    def _make_result(self, annotated: bool = True) -> ProfilingResult:
+    def _make_result(self, annotated: bool = True, with_combo_hit: bool = False) -> ProfilingResult:
         v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
         rule = ResistanceRule(
             id=1, gene_name='gag', gene_id=1, drug_name='drugx', drug_id=1,
@@ -367,6 +378,39 @@ class TestResultsPersistence:
             af_bin='high',
             rule_matches=[rule] if annotated else [],
         )
+        combo_hits: list[ComboRuleHit] = []
+        if with_combo_hit:
+            rule_set = ResistanceRuleSet(
+                id=1,
+                drug_name='drugx',
+                drug_id=1,
+                phenotype='resistant',
+                group_name='combo_1',
+            )
+            rule_set.members = [
+                ResistanceRuleSetMember(
+                    id=1,
+                    rule_set_id=1,
+                    gene_name='gag',
+                    gene_id=1,
+                    reference_identifier='ref1',
+                    position=1,
+                    reference='K',
+                    mutation='E',
+                ),
+                ResistanceRuleSetMember(
+                    id=2,
+                    rule_set_id=1,
+                    gene_name='gag',
+                    gene_id=1,
+                    reference_identifier='ref1',
+                    position=5,
+                    reference='A',
+                    mutation='V',
+                ),
+            ]
+            combo_hits = [ComboRuleHit(rule_set=rule_set, matched_variants=[ann])]
+
         return ProfilingResult(
             project_name='Test Project',
             reference_name='ref1',
@@ -376,6 +420,7 @@ class TestResultsPersistence:
             variants_in_cds=1,
             resistance_hits=1 if annotated else 0,
             annotations=[ann],
+            combo_hits=combo_hits,
         )
 
     def test_save_run_inserts_run_row(self, results_conn, minimal_project_conn, tmp_path) -> None:
@@ -437,6 +482,49 @@ class TestResultsPersistence:
         assert ann.ref_aa == 'K'
         assert ann.is_resistance_hit
         assert ann.rule_matches[0].drug_name == 'drugx'
+
+    def test_save_run_persists_combo_rule_hits(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        save_run(
+            results_conn,
+            tmp_path / 'project.db',
+            minimal_project_conn,
+            self._make_result(with_combo_hit=True),
+        )
+
+        row = results_conn.execute(
+            'SELECT run_id, hit_json FROM combo_rule_hit WHERE run_id = 1'
+        ).fetchone()
+        assert row is not None
+        assert row['run_id'] == 1
+        payload = json.loads(row['hit_json'])
+        assert payload['rule_group'] == 'combo_1'
+        assert payload['drug'] == 'drugx'
+
+    def test_reconstruct_combo_rule_hits_restores_combo_data(
+        self,
+        results_conn,
+        minimal_project_conn,
+        tmp_path,
+    ) -> None:
+        save_run(
+            results_conn,
+            tmp_path / 'project.db',
+            minimal_project_conn,
+            self._make_result(with_combo_hit=True),
+        )
+        _, variant_rows = load_run(results_conn, 1)
+        annotations = reconstruct_annotations(variant_rows)
+        combo_rows = load_combo_rule_hits(results_conn, 1)
+
+        combo_hits = reconstruct_combo_rule_hits(combo_rows, annotations)
+
+        assert len(combo_hits) == 1
+        hit = combo_hits[0]
+        assert hit.rule_set.group_name == 'combo_1'
+        assert hit.rule_set.drug_name == 'drugx'
+        assert len(hit.rule_set.members) == 2
+        assert len(hit.matched_variants) == 1
+        assert hit.matched_variants[0].gene_name == 'gag'
 
     def test_project_fingerprint_is_deterministic(self, minimal_project_conn) -> None:
         fp1 = project_fingerprint(minimal_project_conn)
@@ -574,7 +662,7 @@ class TestCoverageGapPersistence:
         conn.close()
 
     def test_init_results_db_adds_coverage_gap_table_to_existing_db(self, tmp_path: Path) -> None:
-        """Existing results DB without coverage_gap gets the table added on open."""
+        """Existing results DB without optional tables gets them added on open."""
         db_path = tmp_path / 'old_results.db'
         conn = sqlite3.connect(str(db_path))
         conn.execute('CREATE TABLE results_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
@@ -600,5 +688,6 @@ class TestCoverageGapPersistence:
         }
         migrated.close()
         assert 'coverage_gap' in tables
+        assert 'combo_rule_hit' in tables
 
 

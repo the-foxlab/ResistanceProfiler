@@ -112,6 +112,8 @@ CREATE TABLE IF NOT EXISTS resistance_rule_set_member (
 CREATE INDEX IF NOT EXISTS idx_rule_set_drug ON resistance_rule_set(drug_id);
 CREATE INDEX IF NOT EXISTS idx_rule_set_member_set ON resistance_rule_set_member(rule_set_id);
 CREATE INDEX IF NOT EXISTS idx_rule_set_member_gene_pos ON resistance_rule_set_member(gene_id, position);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_set_member_unique
+ON resistance_rule_set_member(rule_set_id, gene_id, position, mutation);
 
 -- Publications (deduped; doi is the natural key when available)
 CREATE TABLE IF NOT EXISTS publication (
@@ -221,6 +223,14 @@ CREATE TABLE IF NOT EXISTS coverage_gap (
 );
 
 CREATE INDEX IF NOT EXISTS idx_cg_run ON coverage_gap(run_id);
+
+CREATE TABLE IF NOT EXISTS combo_rule_hit (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES run(id),
+    hit_json    TEXT    NOT NULL DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_crh_run ON combo_rule_hit(run_id);
 """
 
 
@@ -239,6 +249,13 @@ CREATE TABLE IF NOT EXISTS coverage_gap (
     codon_end   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cg_run ON coverage_gap(run_id);
+
+CREATE TABLE IF NOT EXISTS combo_rule_hit (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id      INTEGER NOT NULL REFERENCES run(id),
+    hit_json    TEXT    NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_crh_run ON combo_rule_hit(run_id);
 """
 
 _OPTIONAL_RESULTS_COLUMN_DEFS = {

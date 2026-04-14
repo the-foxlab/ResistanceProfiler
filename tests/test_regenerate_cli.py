@@ -11,9 +11,16 @@ import pytest
 from typer.testing import CliRunner
 
 from respro.cli import app
-from respro.db.results import save_run, project_fingerprint
+from respro.db.results import save_run
 from respro.db.schema import init_results_db, open_project_db
-from respro.db.models import ProfilingResult
+from respro.db.models import (
+    AnnotatedVariant,
+    ComboRuleHit,
+    ProfilingResult,
+    ResistanceRuleSet,
+    ResistanceRuleSetMember,
+    VariantCall,
+)
 
 
 def _run_profile(project_db: Path, sample_vcf: Path, sample_ref_fasta: Path, results_db: Path, tmp_path: Path) -> None:
@@ -200,4 +207,85 @@ class TestRegenerateByIdentifier:
 
         assert result.exit_code != 0
         assert 'fingerprint' in result.output.lower()
+
+    def test_regenerate_restores_persisted_combo_rule_hits(
+        self,
+        project_db: Path,
+        tmp_path: Path,
+    ) -> None:
+        results_db = tmp_path / 'results.db'
+        results_conn = init_results_db(results_db)
+        project_conn = open_project_db(project_db)
+
+        variant = VariantCall(chrom='tiny_ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=100)
+        ann = AnnotatedVariant(
+            variant=variant,
+            gene_name='gag',
+            codon_pos=1,
+            ref_codon='AAA',
+            alt_codon='GAA',
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            af_bin='high',
+        )
+        rule_set = ResistanceRuleSet(
+            id=1,
+            drug_name='TestDrug',
+            drug_id=1,
+            phenotype='resistant',
+            group_name='combo_regen_test',
+        )
+        rule_set.members = [
+            ResistanceRuleSetMember(
+                id=1,
+                rule_set_id=1,
+                gene_name='gag',
+                gene_id=1,
+                reference_identifier='tiny_ref',
+                position=1,
+                reference='K',
+                mutation='E',
+            ),
+            ResistanceRuleSetMember(
+                id=2,
+                rule_set_id=1,
+                gene_name='gag',
+                gene_id=1,
+                reference_identifier='tiny_ref',
+                position=5,
+                reference='A',
+                mutation='V',
+            ),
+        ]
+        result_obj = ProfilingResult(
+            project_name='Test Project',
+            reference_name='tiny_ref',
+            sample_name='sample_combo',
+            vcf_name='sample.vcf',
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=0,
+            annotations=[ann],
+            combo_hits=[ComboRuleHit(rule_set=rule_set, matched_variants=[ann])],
+        )
+        save_run(results_conn, project_db.resolve(), project_conn, result_obj)
+        project_conn.close()
+        results_conn.close()
+
+        out_dir = tmp_path / 'regenerated_combo'
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--result-db', str(results_db),
+            '--identifier', '1',
+            '--project', str(project_db),
+            '--out', str(out_dir),
+        ])
+
+        assert result.exit_code == 0, result.output
+        html_files = list(out_dir.glob('*.html'))
+        assert len(html_files) == 1
+        html = html_files[0].read_text()
+        assert 'combo_regen_test' in html
+        assert 'TestDrug' in html
 

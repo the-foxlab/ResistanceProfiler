@@ -3,6 +3,7 @@ Tests for resistance rule loading and matching.
 """
 
 import sqlite3
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,9 @@ from respro.core.rules import load_rules, load_rule_sets, match_rules, match_rul
 from respro.db.models import (
     AnnotatedVariant, ResistanceRule, ResistanceRuleSet, ResistanceRuleSetMember, VariantCall,
 )
+from respro.db.project import init_project
 from respro.db.schema import open_project_db
+from conftest import TINY_REF_SEQ, write_genbank
 
 
 class TestLoadRules:
@@ -402,6 +405,45 @@ class TestMatchRuleSets:
         hits = match_rule_sets(annotations, [rs1, rs2])
         assert len(hits) == 2
 
+    def test_shared_member_all_members_present_both_rule_sets_fire(self):
+        # Shared member: gag K2E (0-based codon_pos=1) is present in both sets.
+        rs1 = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
+        rs1.id = 1
+        rs2 = _make_rule_set([('gag', 1, 'E'), ('gag', 8, 'I')])
+        rs2.id = 2
+
+        shared = _make_ann('gag', 1, 'K', 'E')
+        unique_rs1 = _make_ann('gag', 5, 'A', 'V')
+        unique_rs2 = _make_ann('gag', 8, 'L', 'I')
+        annotations = [shared, unique_rs1, unique_rs2]
+
+        hits = match_rule_sets(annotations, [rs1, rs2])
+
+        assert len(hits) == 2
+        hit_by_id = {hit.rule_set.id: hit for hit in hits}
+        assert 1 in hit_by_id
+        assert 2 in hit_by_id
+        assert shared in hit_by_id[1].matched_variants
+        assert shared in hit_by_id[2].matched_variants
+
+    def test_shared_member_only_fully_satisfied_rule_set_fires(self):
+        # Shared member present, but rs2 unique member is missing.
+        rs1 = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
+        rs1.id = 1
+        rs2 = _make_rule_set([('gag', 1, 'E'), ('gag', 8, 'I')])
+        rs2.id = 2
+
+        shared = _make_ann('gag', 1, 'K', 'E')
+        unique_rs1 = _make_ann('gag', 5, 'A', 'V')
+        annotations = [shared, unique_rs1]
+
+        hits = match_rule_sets(annotations, [rs1, rs2])
+
+        assert len(hits) == 1
+        assert hits[0].rule_set.id == 1
+        assert shared in hits[0].matched_variants
+        assert unique_rs1 in hits[0].matched_variants
+
     def test_to_dict_is_serializable(self):
         rule_set = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
         annotations = [_make_ann('gag', 1, 'K', 'E'), _make_ann('gag', 5, 'A', 'V')]
@@ -477,6 +519,51 @@ class TestLoadRuleSets:
         rule_sets = load_rule_sets(conn, reference_id=1)
         conn.close()
         assert rule_sets == []
+
+    def test_loads_combo_rules_from_tsv_init_path(self, tmp_path: Path) -> None:
+        genbank_path = tmp_path / 'tiny.gb'
+        write_genbank(
+            genbank_path,
+            [
+                {
+                    'id': 'tiny_ref',
+                    'accession': 'tiny_ref',
+                    'sequence': TINY_REF_SEQ,
+                    'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+                }
+            ],
+        )
+        rules_tsv = tmp_path / 'rules.tsv'
+        rules_tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tcombo_KE_PV
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_KE_PV
+        """))
+
+        project_db = tmp_path / 'project.db'
+        init_project(
+            db_path=project_db,
+            name='test',
+            genbank_paths=[genbank_path],
+            rules_tsv=rules_tsv,
+            additional_info=False,
+        )
+
+        conn = open_project_db(project_db)
+        ref_id = conn.execute(
+            'SELECT id FROM reference WHERE name = ?',
+            ('tiny_ref',),
+        ).fetchone()['id']
+        rule_sets = load_rule_sets(conn, reference_id=ref_id)
+        conn.close()
+
+        assert len(rule_sets) == 1
+        rule_set = rule_sets[0]
+        assert rule_set.group_name == 'combo_KE_PV'
+        assert rule_set.drug_name == 'druga'
+        assert len(rule_set.members) == 2
+        positions = {member.position for member in rule_set.members}
+        assert positions == {1, 5}
 
 
 @pytest.fixture()

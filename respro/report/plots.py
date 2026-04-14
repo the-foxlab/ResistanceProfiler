@@ -13,7 +13,7 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 
-from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord
+from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord, ProfilingResult
 from respro.report.palette import (
     GENE_BASELINE_COLOUR,
     GENE_DEFAULT_COLOUR,
@@ -24,7 +24,6 @@ from respro.report.palette import (
     NON_COVERED_COLOUR,
     mutation_legend_patches,
 )
-from respro.db.models import ProfilingResult
 
 matplotlib.use('Agg')
 logger = logging.getLogger(__name__)

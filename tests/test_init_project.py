@@ -4,12 +4,13 @@ Tests for project initialization — coordinate base detection and reference AA 
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import textwrap
+from unittest.mock import patch
 
 import pytest
-import logging
-from unittest.mock import patch
+from conftest import TINY_REF_SEQ, write_genbank
 
 from respro.db.project import init_project
 from respro.db.project.genes import _is_ncbi_protein_accession
@@ -19,7 +20,6 @@ from respro.db.project.rules import (
     _validate_reference_amino_acids,
 )
 from respro.db.schema import create_schema
-from conftest import write_genbank, TINY_REF_SEQ
 
 # Amino acid sequence used across tests:
 #   index:  0  1  2  3  4  5
@@ -300,6 +300,46 @@ class TestSchemaCombinedRuleSets:
         assert 'resistance_rule_set' in tables
         assert 'resistance_rule_set_member' in tables
 
+    def test_schema_rejects_duplicate_combo_members_within_one_set(self, tmp_path) -> None:
+        db_path = tmp_path / 'schema_unique.db'
+        conn = create_schema(db_path)
+        conn.execute(
+            'INSERT INTO project (name, schema_version) VALUES (?, ?)',
+            ('test', 1),
+        )
+        conn.execute(
+            'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
+            (1, 'ref1', 100),
+        )
+        conn.execute(
+            'INSERT INTO gene (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
+            (1, 'gag', 0, 90, '+'),
+        )
+        conn.execute(
+            'INSERT INTO drug (project_id, name) VALUES (?, ?)',
+            (1, 'druga'),
+        )
+        conn.execute(
+            'INSERT INTO resistance_rule_set (drug_id, phenotype, group_name) VALUES (?, ?, ?)',
+            (1, 'resistant', 'combo_1'),
+        )
+        conn.execute(
+            'INSERT INTO resistance_rule_set_member '
+            '(rule_set_id, gene_id, reference_identifier, position, reference, mutation) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (1, 1, 'ref1', 1, 'K', 'E'),
+        )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                'INSERT INTO resistance_rule_set_member '
+                '(rule_set_id, gene_id, reference_identifier, position, reference, mutation) '
+                'VALUES (?, ?, ?, ?, ?, ?)',
+                (1, 1, 'ref1', 1, 'K', 'E'),
+            )
+
+        conn.close()
+
 
 class TestComboRuleParsing:
     """Verify that rule_group rows in the TSV are loaded as combination rule sets."""
@@ -390,6 +430,19 @@ class TestComboRuleParsing:
         """))
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='inconsistent antiviral'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                         rules_tsv=tsv, additional_info=False)
+
+    def test_combo_group_duplicate_member_raises(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tdup_group
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tdup_group
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tdup_group
+        """))
+        db = tmp_path / 'proj.db'
+        with pytest.raises(ValueError, match='duplicate member'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=False)
 

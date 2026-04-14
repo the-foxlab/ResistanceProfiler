@@ -70,6 +70,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Single-mutation rule matching — explicit per-position allele matching only (no wildcard token support)
 - [X] Combination rule matching (`match_rule_sets`) — all members must co-occur to fire
 - [X] BLOSUM62 similarity scoring for matched substitutions (`core/similarity.py`)
+- [X] End-to-end combo rule loading via TSV `init` path — `init_project` + `rule_group` rows tested through `load_rule_sets` (no manual SQL setup)
 
 ### Reporting and export
 
@@ -93,6 +94,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] `load_run` — reconstruct a run from `results.db`
 - [X] `list_runs` — tabular CLI listing of all stored runs
 - [X] `reconstruct_annotations` — rebuild `AnnotatedVariant` objects from stored rows
+- [X] Persist combo rule hits to `results.db` and restore them on `regenerate` via `combo_rule_hit` rows + reconstruction
 - [X] `respro regenerate` — re-export report from stored run with project-fingerprint validation
 
 ### Code quality and testing
@@ -127,6 +129,8 @@ Mark items done and update priorities after each completed milestone.
 - [X] Add short CLI option aliases alongside existing long options — `-n`/`-g`/`-r` for `init`; `-g`/`-r` for `init-add`; `-f`/`-r`/`-s`/`-d`/`-c` for `profile-vcf`; `-f`/`-s`/`-d`/`-c` for `profile-fasta`; `-d`/`-l`/`-i` for `regenerate`; long options and behavior unchanged
 - [X] Lenient rule loading — rules whose reference AA does not match the GenBank gene sequence are skipped with a warning instead of aborting; unknown gene names are also silently skipped with a warning; applies to single rules and combination rule group members
 - [X] Canonical VCF orientation acceptance suite (E1-E7) — full matrix coverage for +/+ , +/- , -/+ , -/- constellations plus query insertion/deletion and mismatch-column projection cases
+- [X] Combo-rule shared-substitution regression tests — `TestMatchRuleSets` verifies that two rule sets sharing one mutation both fire when complete (shared `AnnotatedVariant` appears in both hits), and only the fully satisfied set fires when one unique member is absent
+- [X] Combo member uniqueness enforcement — duplicate `resistance_rule_set_member` entries are rejected via DB-level unique index `(rule_set_id, gene_id, position, mutation)` and pre-insert duplicate validation in `_insert_combo_rule_sets`
 
 ---
 
@@ -176,25 +180,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Combination rules
 
-- 🔴 Persist combo rule hits to `results.db` — extend `save_run` so combination rule hits survive
-  `regenerate`; regenerated reports currently silently drop all combo hits; add a
-  `combo_rule_hit` table or JSON column in the results schema and restore hits in
-  `reconstruct_annotations`
-- 🔴 End-to-end test for combo rules via TSV `init` path — existing tests build combo rules
-  manually in SQLite; add a test that runs `init_project` from a TSV with `rule_group` entries
-  and verifies the loaded rule sets match expectations; required before extending combo rule
-  persistence
-- 🟡 Regression tests for combo rules with shared substitutions — no test currently verifies
-  that a variant shared between two rule sets causes both to fire independently with the shared
-  `AnnotatedVariant` appearing in both `ComboRuleHit.matched_variants`; add focused tests in
-  `TestMatchRuleSets` covering: (a) two rule sets that share one member mutation both fire when
-  all members are present, (b) only the rule set whose unique member is present fires when the
-  shared mutation is present but one rule set's unique member is absent
-- 🟢 Uniqueness constraint on `resistance_rule_set_member` — the schema lacks a UNIQUE
-  constraint on `(rule_set_id, gene_id, position, mutation)`; a malformed rule set with
-  duplicate members would allow a single variant to satisfy multiple member slots,
-  letting a rule fire with fewer distinct mutations than intended; add a DB-level UNIQUE
-  constraint and dedup validation in `_insert_combo_rule_sets` before inserting members
 - 🟢 N-of-M / OR-logic for combination rules — current AND-only semantics cannot express
   "at least 2 of these 3 mutations"; add an optional `min_members` field to the rule set so
   curators can describe partial co-occurrence resistance
