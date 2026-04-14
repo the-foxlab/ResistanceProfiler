@@ -90,6 +90,83 @@ td { padding: .45rem .7rem; border-bottom: 1px solid #e1e4e8; white-space: nowra
 tr:hover td { background: #f0f4f8; }
 .hit-row { background: #fdf2f2; }
 .hit-row:hover td { background: #fce8e8; }
+.expandable-row { cursor: pointer; }
+.expandable-row td:first-child::before {
+  content: '▸';
+  color: #94a3b8;
+  margin-right: .4rem;
+}
+.expandable-row.expanded td:first-child::before {
+  content: '▾';
+}
+.detail-row { display: none; }
+.detail-row.open { display: table-row; }
+.detail-row td {
+  background: #f8fafc;
+  border-top: 1px dashed #d7dee7;
+  border-bottom: 1px solid #d7dee7;
+}
+.row-detail-title {
+  font-size: .76rem;
+  color: #64748b;
+  margin-bottom: .4rem;
+  font-weight: 600;
+}
+.aln-block {
+  border: 1px solid #dbe3ea;
+  border-radius: 6px;
+  padding: .45rem .6rem;
+  background: #ffffff;
+}
+.aln-meta {
+  font-size: .7rem;
+  color: #64748b;
+  margin-bottom: .35rem;
+}
+.aln-line {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  margin: .08rem 0;
+}
+.aln-label {
+  width: 2.1rem;
+  font-size: .72rem;
+  color: #64748b;
+  font-weight: 700;
+}
+.aln-seq {
+  font-family: 'Courier New', Courier, 'Liberation Mono', monospace;
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0, 'calt' 0;
+  font-size: .78rem;
+  line-height: 1.25;
+  color: #334155;
+  white-space: nowrap;
+  overflow: visible;
+}
+.aln-cell {
+  display: inline-block;
+  width: 0.72em;
+  min-height: 1.15em;
+  box-sizing: border-box;
+  text-align: center;
+  vertical-align: middle;
+}
+.aln-sep {
+  display: inline-block;
+  width: 0.5em;
+}
+.aln-mutation {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-radius: 2px;
+  font-weight: 700;
+}
+.aln-affected {
+  background: #fecaca;
+  box-shadow: inset 0 -2px 0 #991b1b;
+}
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
 .drug-badge {
   display: inline-block;

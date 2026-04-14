@@ -27,6 +27,7 @@ from respro.report.palette import (
     SIMILARITY_COLOURS,
     badge_text_colour,
 )
+from respro.report.alignment_visualization import GeneAlignment, build_alignment_html, build_gene_alignments
 from respro.report.plots import render_lollipop_plot_bytes
 
 logger = logging.getLogger(__name__)
@@ -146,7 +147,15 @@ def _effective_phenotype(row: dict) -> str:
     return p if p and p != 'unknown' else row.get('clinical_phenotype', 'unknown')
 
 
-def _build_db_hit_rows(result: ProfilingResult) -> list[dict]:
+def _alignment_title(ann: AnnotatedVariant) -> str:
+    """Return report label for row-level alignment visualization."""
+    return 'Alignment' if ann.is_fasta_mode else 'Pseudo alignment'
+
+
+def _build_db_hit_rows(
+    result: ProfilingResult,
+    gene_alignments: dict[str, GeneAlignment],
+) -> list[dict]:
     """
     Build one row per drug per annotated variant that matched a resistance rule.
 
@@ -160,6 +169,9 @@ def _build_db_hit_rows(result: ProfilingResult) -> list[dict]:
 
         aa_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
         nt_change = _format_nt_change(ann)
+        alignment_html = None
+        if ann.gene_name in gene_alignments:
+            alignment_html = build_alignment_html(ann, gene_alignments[ann.gene_name])
 
         for rule in ann.rule_matches:
             rows.append({
@@ -177,6 +189,9 @@ def _build_db_hit_rows(result: ProfilingResult) -> list[dict]:
                 'comment': rule.comment,
                 'publications': rule.publications,
                 'pub_citations': [],
+                'alignment_html': alignment_html,
+                'has_alignment': alignment_html is not None,
+                'alignment_title': _alignment_title(ann),
             })
     return rows
 
@@ -246,7 +261,10 @@ def _attach_drug_badges(rows: list[dict], drug_colours: dict[str, str]) -> None:
         row['drug_badge_fg'] = badge_text_colour(bg)
 
 
-def _build_cds_rows(result: ProfilingResult) -> list[dict]:
+def _build_cds_rows(
+    result: ProfilingResult,
+    gene_alignments: dict[str, GeneAlignment],
+) -> list[dict]:
     """
     Build rows for the all-CDS-variants table.
 
@@ -256,6 +274,9 @@ def _build_cds_rows(result: ProfilingResult) -> list[dict]:
     rows: list[dict] = []
     for ann in result.cds_annotations:
         nt_change = _format_nt_change(ann)
+        alignment_html = None
+        if ann.gene_name in gene_alignments:
+            alignment_html = build_alignment_html(ann, gene_alignments[ann.gene_name])
         if ann.consequence == 'inframe_complex':
             aa_change = '?'
             display_consequence = 'complex'
@@ -271,6 +292,9 @@ def _build_cds_rows(result: ProfilingResult) -> list[dict]:
             'allele_freq': ann.variant.allele_freq,
             'af_bin': ann.af_bin,
             'database_hit': ann.is_resistance_hit,
+            'alignment_html': alignment_html,
+            'has_alignment': alignment_html is not None,
+            'alignment_title': _alignment_title(ann),
         })
     return rows
 
@@ -278,6 +302,7 @@ def _build_cds_rows(result: ProfilingResult) -> list[dict]:
 def _build_potential_effects_rows(
     result: ProfilingResult,
     rules: list[ResistanceRule],
+    gene_alignments: dict[str, GeneAlignment] | None = None,
 ) -> list[dict]:
     """
     Find detected mutations at known resistance positions with a different AA change.
@@ -293,6 +318,9 @@ def _build_potential_effects_rows(
     """
     if not rules:
         return []
+
+    if gene_alignments is None:
+        gene_alignments = {}
 
     # Index rules by (gene_name, position) for position-based lookup
     rules_by_pos: dict[tuple[str, int], list[ResistanceRule]] = {}
@@ -340,6 +368,11 @@ def _build_potential_effects_rows(
             else:
                 similarity = classify_similarity(ann.alt_aa, rule.mutation)
 
+            potential_alignment = (
+                build_alignment_html(ann, gene_alignments[ann.gene_name])
+                if ann.gene_name in gene_alignments else None
+            )
+
             rows.append({
                 'gene': ann.gene_name,
                 'codon_pos': ann.codon_pos,
@@ -356,6 +389,9 @@ def _build_potential_effects_rows(
                 'allele_freq': ann.variant.allele_freq,
                 'publications': rule.publications,
                 'pub_citations': [],
+                'alignment_html': potential_alignment,
+                'has_alignment': potential_alignment is not None,
+                'alignment_title': _alignment_title(ann),
             })
 
     return rows
@@ -542,11 +578,13 @@ def build_report_context(
     summary = result.summary_dict()
     summary['database_hits'] = summary.pop('resistance_hits', 0)
 
-    db_hit_rows = _build_db_hit_rows(result)
+    gene_alignments = build_gene_alignments(result.query_sequence, result.gene_matches)
+
+    db_hit_rows = _build_db_hit_rows(result, gene_alignments)
     summary['db_hit_rules'] = len(db_hit_rows)
     combo_hit_rows = _build_combo_hit_rows(result)
-    cds_rows = _build_cds_rows(result)
-    potential_rows = _build_potential_effects_rows(result, rules or [])
+    cds_rows = _build_cds_rows(result, gene_alignments)
+    potential_rows = _build_potential_effects_rows(result, rules or [], gene_alignments)
     coverage_assessment_available = bool(result.coverage_gaps) or any(
         ann.is_fasta_mode for ann in result.annotations
     )

@@ -113,7 +113,7 @@
 <h2 class='section-toggle'>Mutations in database <span class='toggle-arrow'>&#9654;</span></h2>
 <div class='section-body'>
 <div class='table-wrapper'>
-<table class='sortable'>
+<table class='sortable expandable-table'>
 <thead><tr>
   <th>Gene</th><th>AA change</th><th>Frequency classification</th><th>Underlying nt change</th><th>Drug</th>
   {% if db_cols.ic50 %}<th>IC50</th>{% endif %}
@@ -126,7 +126,7 @@
 </tr></thead>
 <tbody>
 {% for r in db_hit_rows %}
-<tr class='hit-row'>
+<tr class='hit-row data-row{% if r.has_alignment %} expandable-row{% endif %}' data-row-id='db-{{ loop.index }}'>
   <td>{{ r.gene }}</td>
   <td><strong>{{ r.aa_change }}</strong></td>
   <td data-sort-value='{{ r.af_bin }}'><span class='badge badge-{{ r.af_bin }}'>{{ r.af_bin }}</span></td>
@@ -148,6 +148,14 @@
   {% if db_cols.comment %}<td>{{ r.comment or '—' }}</td>{% endif %}
   {% if db_cols.publication %}<td>{% for n in r.pub_citations %}<a href='#ref-{{ n }}'>[{{ n }}]</a> {% endfor %}</td>{% endif %}
 </tr>
+{% if r.has_alignment %}
+<tr class='detail-row' data-for='db-{{ loop.index }}'>
+  <td colspan='99'>
+    <div class='row-detail-title'>{{ r.alignment_title }}</div>
+    {{ r.alignment_html }}
+  </td>
+</tr>
+{% endif %}
 {% endfor %}
 </tbody>
 </table>
@@ -161,7 +169,7 @@
 <h2 class='section-toggle'>Combination rule hits <span class='toggle-arrow'>&#9654;</span></h2>
 <div class='section-body'>
 <div class='table-wrapper'>
-<table class='sortable'>
+<table class='sortable expandable-table'>
 <thead><tr>
   <th>Group</th><th>Member mutations</th><th>Drug</th>
   {% if combo_cols.ic50 %}<th>IC50</th>{% endif %}
@@ -173,7 +181,7 @@
 </tr></thead>
 <tbody>
 {% for r in combo_hit_rows %}
-<tr class='hit-row'>
+<tr class='hit-row data-row'>
   <td>{{ r.group_name }}</td>
   <td>{{ r.members }}</td>
   <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
@@ -219,7 +227,7 @@
 </tr></thead>
 <tbody>
 {% for r in potential_rows %}
-<tr>
+<tr class='data-row{% if r.has_alignment %} expandable-row{% endif %}' data-row-id='pot-{{ loop.index }}'>
   <td>{{ r.gene }}</td>
   <td><strong>{{ r.observed_change }}</strong></td>
   <td>{{ r.rule_change }}</td>
@@ -242,6 +250,14 @@
   <td data-sort-value='{{ '%.6f'|format(r.allele_freq) }}'>{{ '%.3f'|format(r.allele_freq) }}</td>
   {% if pot_cols.publication %}<td>{% for n in r.pub_citations %}<a href='#ref-{{ n }}'>[{{ n }}]</a> {% endfor %}</td>{% endif %}
 </tr>
+{% if r.has_alignment %}
+<tr class='detail-row' data-for='pot-{{ loop.index }}'>
+  <td colspan='99'>
+    <div class='row-detail-title'>{{ r.alignment_title }}</div>
+    {{ r.alignment_html }}
+  </td>
+</tr>
+{% endif %}
 {% endfor %}
 </tbody>
 </table>
@@ -254,13 +270,13 @@
 <h2 class='section-toggle'>All CDS variants <span class='toggle-arrow'>&#9654;</span></h2>
 <div class='section-body'>
 <div class='table-wrapper'>
-<table class='sortable'>
+<table class='sortable expandable-table'>
 <thead><tr>
   <th>Gene</th><th>Nt change</th><th>AA change</th><th>Consequence</th><th>Frequency</th><th>Frequency classification</th><th>In database</th>
 </tr></thead>
 <tbody>
 {% for r in cds_rows %}
-<tr class='{{ 'hit-row' if r.database_hit else '' }}'>
+<tr class='{{ 'hit-row ' if r.database_hit else '' }}data-row{% if r.has_alignment %} expandable-row{% endif %}' data-row-id='cds-{{ loop.index }}'>
   <td>{{ r.gene }}</td>
   <td>{{ r.nt_change }}</td>
   <td>{% if r.aa_change %}{{ r.aa_change }}{% endif %}</td>
@@ -269,6 +285,14 @@
   <td data-sort-value='{{ r.af_bin }}'><span class='badge badge-{{ r.af_bin }}'>{{ r.af_bin }}</span></td>
   <td data-sort-value='{{ 1 if r.database_hit else 0 }}'><span class='db-indicator {{ 'db-yes' if r.database_hit else 'db-no' }}' title='{{ 'Yes' if r.database_hit else 'No' }}' aria-label='{{ 'Yes' if r.database_hit else 'No' }}'></span></td>
 </tr>
+{% if r.has_alignment %}
+<tr class='detail-row' data-for='cds-{{ loop.index }}'>
+  <td colspan='99'>
+    <div class='row-detail-title'>{{ r.alignment_title }}</div>
+    {{ r.alignment_html }}
+  </td>
+</tr>
+{% endif %}
 {% endfor %}
 </tbody>
 </table>

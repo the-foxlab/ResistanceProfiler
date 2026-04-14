@@ -4,8 +4,9 @@ Tests for report output generation.
 
 import sqlite3
 
-from respro.db.models import AnnotatedVariant, CoverageGap, GeneRecord, Publication, ResistanceRule, VariantCall
+from respro.db.models import AnnotatedVariant, CoverageGap, GeneMatch, GeneRecord, Publication, ResistanceRule, VariantCall
 from respro.db.models import ProfilingResult
+from respro.report.alignment_visualization import build_alignment_html, build_gene_alignments
 from respro.report.html import build_report_context
 from respro.report.html import _build_potential_effects_rows
 from respro.report.html import _load_gene_cards
@@ -36,12 +37,37 @@ def _make_result() -> ProfilingResult:
         consequence='missense', af_bin='high',
         rule_matches=[rule],
     )
+    gene = GeneRecord(
+        id=1,
+        reference_id=1,
+        name='gag',
+        protein='Gag',
+        start=0,
+        end=12,
+        strand='+',
+        codon_start=0,
+        nt_sequence='ATGAAAGCTTAA',
+    )
     return ProfilingResult(
         project_name='Test', organism='test',
         reference_name='ref', reference_length_nt=12000, sample_name='S1',
         vcf_name='test.vcf',
         total_variants=1, variants_in_cds=1, resistance_hits=1,
         annotations=[ann],
+        query_sequence='ATGAAAGCTTAA',
+        gene_matches=[
+            GeneMatch(
+                gene=gene,
+                identity=1.0,
+                cds_coverage=1.0,
+                query_coverage=1.0,
+                query_start=0,
+                query_end=12,
+                strand='+',
+                cigar='12M',
+                cds_start=0,
+            )
+        ],
     )
 
 
@@ -499,6 +525,58 @@ class TestBuildReportContext:
         assert 'Filter:' in html
         assert 'installTableFilterControls' in html
 
+    def test_render_html_includes_expandable_alignment_rows(self) -> None:
+        r = _make_result()
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE reference (id INTEGER, name TEXT)')
+        conn.execute(
+            'CREATE TABLE gene ('
+            'name TEXT, start INTEGER, end INTEGER, strand TEXT, codon_start INTEGER, nt_sequence TEXT, reference_id INTEGER'
+            ')'
+        )
+        conn.execute('INSERT INTO reference (id, name) VALUES (?, ?)', (1, 'ref'))
+        conn.execute(
+            'INSERT INTO gene (name, start, end, strand, codon_start, nt_sequence, reference_id) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            ('gag', 0, 12, '+', 0, 'ATGAAAGCTTAA', 1),
+        )
+        conn.commit()
+
+        html = render_html(r, project_conn=conn)
+
+        assert 'expandable-row' in html
+        assert 'detail-row' in html
+        assert 'Pseudo alignment' in html
+        assert 'aln-block' in html
+        assert 'aln-affected' in html
+        assert "aln-cell aln-mutation" not in html
+        assert 'Coding orientation:' in html
+
+    def test_render_html_uses_alignment_title_for_fasta_mode(self) -> None:
+        r = _make_result()
+        r.annotations[0].is_fasta_mode = True
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE reference (id INTEGER, name TEXT)')
+        conn.execute(
+            'CREATE TABLE gene ('
+            'name TEXT, start INTEGER, end INTEGER, strand TEXT, codon_start INTEGER, nt_sequence TEXT, reference_id INTEGER'
+            ')'
+        )
+        conn.execute('INSERT INTO reference (id, name) VALUES (?, ?)', (1, 'ref'))
+        conn.execute(
+            'INSERT INTO gene (name, start, end, strand, codon_start, nt_sequence, reference_id) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            ('gag', 0, 12, '+', 0, 'ATGAAAGCTTAA', 1),
+        )
+        conn.commit()
+
+        html = render_html(r, project_conn=conn)
+        assert 'Alignment' in html
+
     def test_lollipop_svg_contains_non_covered_legend(self):
         from respro.report.plots import render_lollipop_plot_bytes
 
@@ -522,4 +600,161 @@ class TestBuildReportContext:
         assert svg is not None
         assert b'#6b7280' in svg
         assert b'opacity: 0.12' in svg
+
+
+class TestAlignmentVisualization:
+    def test_highlight_uses_real_cigar_alignment_window(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='UL23',
+            protein='UL23',
+            start=0,
+            end=15,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATGACCCCCAAGGCC',
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=15,
+            strand='+',
+            cigar='8M1D6M',
+            cds_start=0,
+        )
+        alignments = build_gene_alignments('ATGACCCC AAGGCC'.replace(' ', ''), [match])
+
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=7, ref='CC', alt='C'),
+            gene_name='UL23',
+            codon_pos=2,
+            consequence='deletion',
+            ref_codon='CCC',
+            ref_aa='P',
+            alt_aa='P',
+        )
+
+        html = str(build_alignment_html(ann, alignments['UL23'], context_codons=2))
+        assert "aln-cell aln-affected" in html
+        assert "aln-mutation" not in html
+        assert "<span class='aln-cell aln-affected'>C</span>" in html
+        assert "<span class='aln-cell aln-affected'>-</span>" in html
+
+    def test_reverse_gene_codon_spacing_follows_cds_direction(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='REV',
+            protein='REV',
+            start=0,
+            end=9,
+            strand='-',
+            codon_start=0,
+            nt_sequence='AAACCCGGG',
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=9,
+            strand='+',
+            cigar='9M',
+            cds_start=0,
+        )
+        alignments = build_gene_alignments('AAACCCGGG', [match])
+
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='C', alt='T'),
+            gene_name='REV',
+            codon_pos=1,
+            consequence='missense',
+            ref_codon='CCC',
+            alt_codon='CTC',
+            ref_aa='P',
+            alt_aa='L',
+        )
+
+        html = str(build_alignment_html(ann, alignments['REV'], context_codons=1))
+        assert (
+            "<span class='aln-cell'>C</span><span class='aln-cell'>C</span>"
+            "<span class='aln-cell'>C</span><span class='aln-sep'></span>"
+        ) in html
+
+    def test_vcf_snp_overlay_switches_base_and_highlights_anchor(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='G',
+            protein='G',
+            start=100,
+            end=109,
+            strand='+',
+            codon_start=0,
+            nt_sequence='AAACCCGGG',
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=9,
+            strand='+',
+            cigar='9M',
+            cds_start=0,
+        )
+        alignment = build_gene_alignments('AAACCCGGG', [match])['G']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=103, ref='C', alt='T'),
+            gene_name='G',
+            codon_pos=1,
+            consequence='missense',
+            is_fasta_mode=False,
+        )
+
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        assert "<span class='aln-label'>Query</span>" in html
+        assert "<span class='aln-cell aln-affected'>T</span>" in html
+
+    def test_vcf_deletion_overlay_places_gap_after_anchor(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='D',
+            protein='D',
+            start=0,
+            end=12,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATGCCCAAAGGG',
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=12,
+            strand='+',
+            cigar='12M',
+            cds_start=0,
+        )
+        alignment = build_gene_alignments('ATGCCCAAAGGG', [match])['D']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='CC', alt='C'),
+            gene_name='D',
+            codon_pos=1,
+            consequence='deletion',
+            is_fasta_mode=False,
+        )
+
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        assert "<span class='aln-cell aln-affected'>C</span>" in html
+        assert "<span class='aln-cell aln-affected'>-</span>" in html
 

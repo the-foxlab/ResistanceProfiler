@@ -24,7 +24,7 @@
 
   const allTableBadges = () => Array.from(document.querySelectorAll('table .badge'));
 
-  const allTableRows = () => Array.from(document.querySelectorAll('table tbody tr'));
+  const allTableRows = () => Array.from(document.querySelectorAll('table tbody tr.data-row'));
 
   const rowHasBadgeKey = (row, key) => Array.from(row.querySelectorAll('.badge')).some(
     (badge) => resolveBadgeKey(badge) === key,
@@ -89,9 +89,15 @@
     const applyFilter = () => {
       const query = normalize(input.value);
       const selected = Number(select.value);
-      Array.from(tbody.querySelectorAll('tr')).forEach((row) => {
+      Array.from(tbody.querySelectorAll('tr.data-row')).forEach((row) => {
+        const rowId = row.dataset.rowId || '';
+        const detailRow = rowId ? tbody.querySelector(`tr.detail-row[data-for="${rowId}"]`) : null;
+
         if (!query) {
           row.style.display = '';
+          if (detailRow && !row.classList.contains('expanded')) {
+            detailRow.style.display = 'none';
+          }
           return;
         }
 
@@ -108,7 +114,15 @@
           );
         }
 
-        row.style.display = haystack.includes(query) ? '' : 'none';
+        const matches = haystack.includes(query);
+        row.style.display = matches ? '' : 'none';
+        if (detailRow) {
+          if (!matches) {
+            detailRow.style.display = 'none';
+          } else if (row.classList.contains('expanded')) {
+            detailRow.style.display = '';
+          }
+        }
       });
     };
 
@@ -206,7 +220,7 @@
     table.querySelectorAll('th').forEach((th, idx) => {
       th.classList.add('sortable-col');
       th.addEventListener('click', () => {
-        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const rows = Array.from(tbody.querySelectorAll('tr.data-row'));
         const asc = th.dataset.order !== 'asc';
         table.querySelectorAll('th').forEach((head) => delete head.dataset.order);
         th.dataset.order = asc ? 'asc' : 'desc';
@@ -226,8 +240,43 @@
           return 0;
         });
 
-        rows.forEach((row) => tbody.appendChild(row));
+        rows.forEach((row) => {
+          tbody.appendChild(row);
+          const rowId = row.dataset.rowId || '';
+          const detailRow = rowId ? tbody.querySelector(`tr.detail-row[data-for="${rowId}"]`) : null;
+          if (detailRow) {
+            tbody.appendChild(detailRow);
+          }
+        });
       });
+    });
+
+    tbody.addEventListener('click', (event) => {
+      if (!(event.target instanceof Element)) {
+        return;
+      }
+      if (event.target.closest('.badge, a, button, input, select')) {
+        return;
+      }
+
+      const row = event.target.closest('tr.expandable-row');
+      if (!row) {
+        return;
+      }
+      const rowId = row.dataset.rowId || '';
+      if (!rowId) {
+        return;
+      }
+
+      const detailRow = tbody.querySelector(`tr.detail-row[data-for="${rowId}"]`);
+      if (!detailRow) {
+        return;
+      }
+
+      const nextState = !row.classList.contains('expanded');
+      row.classList.toggle('expanded', nextState);
+      detailRow.classList.toggle('open', nextState);
+      detailRow.style.display = nextState ? '' : 'none';
     });
   });
   document.querySelectorAll('.section-toggle').forEach((heading) => {

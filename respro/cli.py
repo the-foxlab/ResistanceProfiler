@@ -443,6 +443,8 @@ def profile_vcf(
             results_conn=results_conn,
             project_path=project,
             logger=logger,
+            query_sequence=query_seq,
+            gene_matches=fasta_matches,
         )
 
         _print_completion_panel(console, '✓ Profiling complete', result, outputs)
@@ -584,6 +586,8 @@ def profile_fasta(
             logger=logger,
             af_bins=fasta_af_bins,
             coverage_gaps=coverage_gaps,
+            query_sequence=query_seq,
+            gene_matches=fasta_matches,
         )
 
         _print_completion_panel(console, '✓ Profiling complete', result, outputs)

@@ -15,7 +15,7 @@ import click
 
 from respro.core.query import pick_best_reference_id, select_matches_for_reference
 from respro.core.rules import load_rule_sets, load_rules, match_rule_sets, match_rules
-from respro.db.models import AnnotatedVariant, CoverageGap, ProfilingResult
+from respro.db.models import AnnotatedVariant, CoverageGap, GeneMatch, ProfilingResult
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.results import save_run
 from respro.db.schema import init_results_db
@@ -144,6 +144,8 @@ def _finalize_and_export(
     logger: logging.Logger,
     af_bins: dict[str, tuple[float, float]] | None = None,
     coverage_gaps: list[CoverageGap] | None = None,
+    query_sequence: str = '',
+    gene_matches: list[GeneMatch] | None = None,
 ) -> tuple[ProfilingResult, dict]:
     """
     Apply rule matching and AF binning, build the result object, export, and optionally persist.
@@ -167,6 +169,8 @@ def _finalize_and_export(
     :param logger: logger instance
     :param af_bins: optional custom AF bin thresholds; defaults to VCF-mode bins
     :param coverage_gaps: optional list of non-covered codon positions (FASTA mode)
+    :param query_sequence: query FASTA sequence used during profiling
+    :param gene_matches: gene alignment matches used during profiling
     :return: (ProfilingResult, export path dict)
     """
     annotations = match_rules(annotations, rules)
@@ -192,6 +196,8 @@ def _finalize_and_export(
         annotations=annotations,
         combo_hits=combo_hits,
         coverage_gaps=coverage_gaps or [],
+        query_sequence=query_sequence,
+        gene_matches=gene_matches or [],
     )
 
     outputs = export_results(
