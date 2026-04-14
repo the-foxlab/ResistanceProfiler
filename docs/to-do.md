@@ -147,18 +147,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🔴 Switch VCF parsing to `pysam.VariantFile` once pysam is a dependency — removes our own
   edge-case handling and delegates to a well-maintained library; do this in the same change as
   the BAM coverage work to avoid adding pysam twice
-- 🟡 Sequence-matching performance follow-up — after the `pysam` coverage/VCF changes land,
-  benchmark end-to-end `profile-vcf` runtime on multi-reference projects and decide whether
-  mappy-based reference preselection should become default instead of optional
-- 🟢 Within-codon quasi-species phasing via BAM — once BAM support is in place, for codons that
-  carry two or three VCF-called SNPs check whether those mutations co-occur on the same reads
-  using `pysam.AlignmentFile.fetch()` over the codon window (≤3 nt, always on a single read);
-  mark multi-SNP codon events as "co-occurring confirmed" when read evidence supports all
-  substitutions simultaneously, or "possibly separate haplotypes" when reads show the mutations
-  in mutually exclusive sets; do not attempt long-range phasing beyond codon boundaries —
-  complexity grows unbounded and the within-codon case already covers the clinically relevant
-  combined-codon-effect scenario; the existing AF-based combined codon annotation must remain
-  the default and BAM phasing is applied only when `--bam` is provided
 
 ### Traceability
 
@@ -232,7 +220,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   (`--ab1-min-signal`, `--ab1-ambiguity-cutoff`) with conservative defaults; Phred quality
   (`letter_annotations['phred_quality']`) can serve as a fast pre-filter (Phred < 20 → ambiguous)
   before the trace-peak analysis for positions that passed Phred but still show secondary peaks
-- 🟢 Summary / batch report — aggregate results across multiple runs stored in one `results.db`
 
 ### Code quality and maintainability
 
@@ -269,9 +256,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   bioconda-recipes; Bioconda is the standard distribution channel for bioinformatics CLI tools
   and avoids requiring users to have a working pip/Python setup; dependency on pysam makes
   Bioconda the natural distribution path once pysam is a requirement
-- 🟡 Add `CHANGELOG.md` — document version history with a Keep-a-Changelog format entry for each
-  release; required for PyPI credibility and for users tracking what changed between database
-  snapshots
 - 🟢 README header badges — add coverage, Python version, license, PyPI version, and
   Bioconda/conda version badges to the README header; coverage badge requires a codecov or
   coveralls integration in CI; PyPI and Bioconda badges are available once packages are published

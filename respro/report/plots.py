@@ -161,7 +161,7 @@ def _build_lollipop_figure(
         )
         _draw_gene_track(track_ax, gene)
 
-    gene_pair_axes[0].legend(handles=handles, loc='upper right', fontsize=7, ncol=len(handles), frameon=False, bbox_to_anchor=(1, 1.15), borderaxespad=0.0)
+    gene_pair_axes[0].legend(handles=handles, loc='upper right', fontsize=7, ncol=len(handles), frameon=False, bbox_to_anchor=(1, 1.25), borderaxespad=0.0)
     plt.tight_layout()
     return fig
 
@@ -412,7 +412,6 @@ def _draw_gene_panel(
     _draw_non_covered_regions(ax, gene, coverage_gaps or [])
 
     jittered = _apply_top_jitter(annotations, gene_length=gene.end - gene.start)
-    text_to_move = 1
     for ann, x_top in jittered:
         x_base = ann.variant.pos + 1
         y_top = ann.variant.allele_freq
@@ -435,7 +434,6 @@ def _draw_gene_panel(
         if ann.is_resistance_hit:
             label = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             # Alternate text alignment left/right to reduce label overlap
-            is_even = text_to_move % 2 == 0
             ax.annotate(
                 label,
                 (x_top, y_top),
@@ -444,9 +442,9 @@ def _draw_gene_panel(
                 fontsize=7,
                 color=colour,
                 fontweight='bold',
-                ha='left' if is_even else 'right',
+                rotation=90,
+                ha='center',
             )
-            text_to_move += 1
 
     pad = max(10, int((gene.end - gene.start) * 0.03))
     ax.hlines(0.0, gene.start + 1 - pad, gene.end + pad, color='black', linewidth=1.0, zorder=1, linestyle='--')
@@ -457,7 +455,7 @@ def _draw_gene_panel(
         f'{gene.name} variants',
         fontsize=9,
         loc='left',
-        pad=10,
+        pad=25,
         fontweight='bold',
     )
     ax.grid(axis='y', color='#eef2f6', linewidth=0.8)
