@@ -41,6 +41,39 @@ a.stat-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,
   border-radius: 6px;
   scrollbar-gutter: stable;
 }
+.table-controls {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  padding: .55rem .65rem;
+  border-bottom: 1px solid #e1e4e8;
+  background: #f8fafc;
+  flex-wrap: wrap;
+}
+.table-controls label {
+  font-size: .78rem;
+  color: #4b5563;
+  font-weight: 600;
+}
+.table-controls select,
+.table-controls input {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: .25rem .45rem;
+  font-size: .8rem;
+  background: #fff;
+}
+.table-controls button {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  padding: .25rem .5rem;
+  font-size: .78rem;
+  cursor: pointer;
+}
+.table-controls button:hover {
+  background: #eef2f7;
+}
 .table-wrapper::-webkit-scrollbar { height: 10px; }
 .table-wrapper::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 6px; }
 .table-wrapper::-webkit-scrollbar-thumb { background: #9aa3ad; border-radius: 6px; }
@@ -58,6 +91,14 @@ tr:hover td { background: #f0f4f8; }
 .hit-row { background: #fdf2f2; }
 .hit-row:hover td { background: #fce8e8; }
 .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
+.drug-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: .74rem;
+  font-weight: 700;
+  letter-spacing: .01em;
+}
 /* Click-to-highlight behavior for table badges */
 .badge-interactive { cursor: pointer; transition: opacity .15s ease, transform .12s ease, box-shadow .15s ease; }
 .badge-interactive:hover { transform: translateY(-1px); }

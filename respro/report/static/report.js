@@ -9,7 +9,13 @@
   };
 
   const resolveBadgeKey = (badge) => {
-    const classKey = Array.from(badge.classList).find((cls) => cls.startsWith('badge-') && cls !== 'badge');
+    if (badge.classList.contains('drug-badge')) {
+      return `drug:${(badge.textContent || '').trim().toLowerCase()}`;
+    }
+
+    const classKey = Array.from(badge.classList).find(
+      (cls) => cls.startsWith('badge-') && cls !== 'badge' && cls !== 'badge-interactive',
+    );
     if (classKey) {
       return classKey;
     }
@@ -23,6 +29,97 @@
   const rowHasBadgeKey = (row, key) => Array.from(row.querySelectorAll('.badge')).some(
     (badge) => resolveBadgeKey(badge) === key,
   );
+
+  const normalize = (text) => (text || '').trim().toLowerCase();
+  const NON_FILTERABLE_COLUMNS = new Set(['ref', 'in database']);
+
+  const installTableFilterControls = (table) => {
+    const wrapper = table.closest('.table-wrapper');
+    const tbody = table.tBodies[0];
+    if (!wrapper || !tbody) {
+      return;
+    }
+
+    const headerCells = Array.from(table.querySelectorAll('thead th'));
+    if (!headerCells.length) {
+      return;
+    }
+
+    const controls = document.createElement('div');
+    controls.className = 'table-controls';
+
+    const label = document.createElement('label');
+    label.textContent = 'Filter:';
+
+    const select = document.createElement('select');
+    const allOption = document.createElement('option');
+    allOption.value = '-1';
+    allOption.textContent = 'All columns';
+    select.appendChild(allOption);
+
+    const filterableColumnIndexes = [];
+
+    headerCells.forEach((th, idx) => {
+      const headerText = normalize(th.textContent);
+      if (NON_FILTERABLE_COLUMNS.has(headerText)) {
+        return;
+      }
+
+      const option = document.createElement('option');
+      option.value = String(idx);
+      option.textContent = normalize(th.textContent) ? th.textContent.trim() : `Column ${idx + 1}`;
+      select.appendChild(option);
+      filterableColumnIndexes.push(idx);
+    });
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'contains...';
+
+    const reset = document.createElement('button');
+    reset.type = 'button';
+    reset.textContent = 'Reset';
+
+    controls.appendChild(label);
+    controls.appendChild(select);
+    controls.appendChild(input);
+    controls.appendChild(reset);
+    wrapper.insertBefore(controls, table);
+
+    const applyFilter = () => {
+      const query = normalize(input.value);
+      const selected = Number(select.value);
+      Array.from(tbody.querySelectorAll('tr')).forEach((row) => {
+        if (!query) {
+          row.style.display = '';
+          return;
+        }
+
+        const cells = Array.from(row.children);
+        let haystack = '';
+        if (selected >= 0 && selected < cells.length) {
+          haystack = normalize(cells[selected].textContent);
+        } else {
+          haystack = normalize(
+            filterableColumnIndexes
+              .filter((idx) => idx >= 0 && idx < cells.length)
+              .map((idx) => cells[idx].textContent)
+              .join(' '),
+          );
+        }
+
+        row.style.display = haystack.includes(query) ? '' : 'none';
+      });
+    };
+
+    select.addEventListener('change', applyFilter);
+    input.addEventListener('input', applyFilter);
+    reset.addEventListener('click', () => {
+      select.value = '-1';
+      input.value = '';
+      applyFilter();
+    });
+  };
 
   const clearBadgeHighlight = () => {
     allTableBadges().forEach((badge) => {
@@ -100,6 +197,8 @@
   });
 
   document.querySelectorAll('table.sortable').forEach((table) => {
+    installTableFilterControls(table);
+
     const tbody = table.tBodies[0];
     if (!tbody) {
       return;

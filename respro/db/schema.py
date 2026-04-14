@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS drug (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id  INTEGER NOT NULL REFERENCES project(id),
     name        TEXT    NOT NULL,
+    badge_color TEXT    DEFAULT '',
     pubchem_cid TEXT    DEFAULT '',  -- PubChem compound ID (integer stored as text)
     pubchem_url TEXT    DEFAULT '',  -- canonical PubChem compound URL
     description TEXT    DEFAULT '',  -- short human-readable description from PubChem
@@ -305,6 +306,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'aa_sequence': "TEXT NOT NULL DEFAULT ''",
     },
     'drug': {
+        'badge_color': "TEXT DEFAULT ''",
         'pubchem_cid': "TEXT DEFAULT ''",
         'pubchem_url': "TEXT DEFAULT ''",
         'description': "TEXT DEFAULT ''",

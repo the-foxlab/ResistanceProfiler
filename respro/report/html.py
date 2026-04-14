@@ -212,6 +212,40 @@ def _build_combo_hit_rows(result: ProfilingResult) -> list[dict]:
     return rows
 
 
+def _load_drug_badge_colours(
+    project_conn: sqlite3.Connection | None,
+    detected_drug_names: set[str],
+) -> dict[str, str]:
+    """Load persisted drug badge colours from the project DB for detected drugs."""
+    if project_conn is None or not detected_drug_names:
+        return {}
+
+    try:
+        rows = project_conn.execute(
+            'SELECT name, badge_color FROM drug ORDER BY name'
+        ).fetchall()
+    except Exception:
+        return {}
+
+    colours: dict[str, str] = {}
+    for row in rows:
+        name = (row['name'] or '').lower()
+        colour = (row['badge_color'] or '').strip().lower()
+        if name in detected_drug_names and re.fullmatch(r'#[0-9a-f]{6}', colour):
+            colours[name] = colour
+    return colours
+
+
+def _attach_drug_badges(rows: list[dict], drug_colours: dict[str, str]) -> None:
+    """Attach per-row badge colors for drug labels in report tables."""
+    fallback_colour = '#475569'
+    for row in rows:
+        key = (row.get('drug') or '').lower()
+        bg = drug_colours.get(key, fallback_colour)
+        row['drug_badge_bg'] = bg
+        row['drug_badge_fg'] = badge_text_colour(bg)
+
+
 def _build_cds_rows(result: ProfilingResult) -> list[dict]:
     """
     Build rows for the all-CDS-variants table.
@@ -424,7 +458,8 @@ def _load_drug_cards(
         return []
     try:
         rows = project_conn.execute(
-            'SELECT name, pubchem_cid, pubchem_url, description, structure_url FROM drug ORDER BY name'
+            'SELECT name, badge_color, pubchem_cid, pubchem_url, description, structure_url '
+            'FROM drug ORDER BY name'
         ).fetchall()
     except Exception:
         return []
@@ -439,6 +474,7 @@ def _load_drug_cards(
 
         cards.append({
             'name': r['name'],
+            'badge_color': r['badge_color'] or '',
             'pubchem_url': r['pubchem_url'] or '',
             'description': r['description'] or '',
             'structure_url': r['structure_url'] or '',
@@ -572,6 +608,11 @@ def build_report_context(
             detected_drug_names.add(rule.drug_name.lower())
     for combo in result.combo_hits:
         detected_drug_names.add(combo.rule_set.drug_name.lower())
+
+    drug_colours = _load_drug_badge_colours(project_conn, detected_drug_names)
+    _attach_drug_badges(db_hit_rows, drug_colours)
+    _attach_drug_badges(combo_hit_rows, drug_colours)
+    _attach_drug_badges(potential_rows, drug_colours)
 
     drug_cards = _load_drug_cards(project_conn, detected_drug_names)
     detected_gene_names = {

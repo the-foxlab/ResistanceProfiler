@@ -30,6 +30,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Phenotype and clinical phenotype normalization
 - [X] IC50 column support — `ic50`/`ic_50` and `fold_ic50`/`fold_ic_50` stored separately; both may coexist in one file; report columns shown only when values are present; empty optional columns (ic50, fold_ic50, clinical_phenotype, source) hidden per table section
 - [X] Drug deduplication — case-insensitive; biological duplicate detection for `init-add`
+- [X] Stable drug badge colors persisted in `drug.badge_color` during rules import for consistent report styling across runs/regeneration
 - [X] Combination rule sets — `resistance_rule_set` + `resistance_rule_set_member` tables; TSV `rule_group` column
 - [X] `init-add` — extend existing project with new rules and optional additional GenBank annotations
 - [X] PubChem integration — best-effort drug CID, canonical URL, short description; fully non-fatal
@@ -77,6 +78,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Mutation colour palette — consequence-typed, reused across plot and table
 - [X] NT change column with changed-position highlighting (bold + underline) in FASTA mode
 - [X] Client-side sortable table
+- [X] Client-side table column filter controls (dropdown column selector + text filter)
 - [X] Drug metadata in report — PubChem URL as clickable link
 - [X] Combo rule hits displayed in report
 - [X] GitHub logo linked to repository; star badge shown

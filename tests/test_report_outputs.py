@@ -488,6 +488,17 @@ class TestBuildReportContext:
         assert 'of 2 total positions (missing coverage)' in html
         assert 'id=\'section-unassessed\'' not in html
 
+    def test_render_html_includes_drug_badges(self) -> None:
+        r = _make_result()
+        html = render_html(r)
+        assert 'class=\'badge drug-badge\'' in html
+
+    def test_render_html_includes_table_filter_controls_js(self) -> None:
+        r = _make_result()
+        html = render_html(r)
+        assert 'Filter:' in html
+        assert 'installTableFilterControls' in html
+
     def test_lollipop_svg_contains_non_covered_legend(self):
         from respro.report.plots import render_lollipop_plot_bytes
 

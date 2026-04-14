@@ -4,12 +4,48 @@ Drug resolution — get-or-create drug records, deduplication, and PubChem enric
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import sqlite3
 
 from respro.io.pubchem import lookup_drug
 
 logger = logging.getLogger(__name__)
+
+
+def _drug_badge_color(name: str) -> str:
+    """
+    Return a deterministic badge color for a normalized drug name.
+
+    The mapping is stable across runs and machines so repeated imports keep
+    consistent visual identity in generated reports.
+    """
+    digest = hashlib.sha1(name.encode('utf-8')).hexdigest()
+    hue = int(digest[0:2], 16) * 360 // 255
+    saturation = 58 + (int(digest[2:4], 16) % 21)  # 58..78
+    lightness = 38 + (int(digest[4:6], 16) % 14)   # 38..51
+
+    c = (1 - abs(2 * lightness / 100 - 1)) * (saturation / 100)
+    x = c * (1 - abs((hue / 60) % 2 - 1))
+    m = lightness / 100 - c / 2
+
+    if hue < 60:
+        r1, g1, b1 = c, x, 0
+    elif hue < 120:
+        r1, g1, b1 = x, c, 0
+    elif hue < 180:
+        r1, g1, b1 = 0, c, x
+    elif hue < 240:
+        r1, g1, b1 = 0, x, c
+    elif hue < 300:
+        r1, g1, b1 = x, 0, c
+    else:
+        r1, g1, b1 = c, 0, x
+
+    r = round((r1 + m) * 255)
+    g = round((g1 + m) * 255)
+    b = round((b1 + m) * 255)
+    return f'#{r:02x}{g:02x}{b:02x}'
 
 
 def _get_or_create_drug_id(
@@ -32,22 +68,24 @@ def _get_or_create_drug_id(
         return drug_cache[normalized_name]
 
     conn.row_factory = sqlite3.Row
+    badge_color = _drug_badge_color(normalized_name)
+
     row = conn.execute(
-        'SELECT id, name FROM drug WHERE project_id = ? AND LOWER(name) = ? ORDER BY id LIMIT 1',
+        'SELECT id, name, badge_color FROM drug WHERE project_id = ? AND LOWER(name) = ? ORDER BY id LIMIT 1',
         (project_id, normalized_name),
     ).fetchone()
     if row is not None:
-        if row['name'] != normalized_name:
+        if row['name'] != normalized_name or not (row['badge_color'] or '').strip():
             conn.execute(
-                'UPDATE drug SET name = ? WHERE id = ?',
-                (normalized_name, row['id']),
+                'UPDATE drug SET name = ?, badge_color = ? WHERE id = ?',
+                (normalized_name, badge_color, row['id']),
             )
         drug_cache[normalized_name] = int(row['id'])
         return int(row['id'])
 
     cur = conn.execute(
-        'INSERT OR IGNORE INTO drug (project_id, name) VALUES (?, ?)',
-        (project_id, normalized_name),
+        'INSERT OR IGNORE INTO drug (project_id, name, badge_color) VALUES (?, ?, ?)',
+        (project_id, normalized_name, badge_color),
     )
     drug_id = cur.lastrowid
     if drug_id:

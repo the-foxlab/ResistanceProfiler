@@ -126,12 +126,12 @@
 </tr></thead>
 <tbody>
 {% for r in db_hit_rows %}
-<tr class='hit-row' style='border-left: 4px solid {{ mutation_colours.get(r.consequence, mutation_colours['unknown']) }};'>
+<tr class='hit-row'>
   <td>{{ r.gene }}</td>
   <td><strong>{{ r.aa_change }}</strong></td>
   <td data-sort-value='{{ r.af_bin }}'><span class='badge badge-{{ r.af_bin }}'>{{ r.af_bin }}</span></td>
   <td>{{ r.nt_change }}</td>
-  <td>{{ r.drug }}</td>
+  <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
   {% if db_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
   {% if db_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
   <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
@@ -176,7 +176,7 @@
 <tr class='hit-row'>
   <td>{{ r.group_name }}</td>
   <td>{{ r.members }}</td>
-  <td>{{ r.drug }}</td>
+  <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
   {% if combo_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
   {% if combo_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
   <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
@@ -224,7 +224,7 @@
   <td><strong>{{ r.observed_change }}</strong></td>
   <td>{{ r.rule_change }}</td>
   <td><span class='badge badge-sim-{{ r.similarity }}'>{{ r.similarity }}</span></td>
-  <td>{{ r.drug }}</td>
+  <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
   {% if pot_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
   {% if pot_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
   <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
@@ -311,7 +311,7 @@
 <div class='drug-card'>
   {% if d.structure_url %}<img src='{{ d.structure_url }}' alt='{{ d.name }} structure'>{% endif %}
   <div class='drug-info'>
-    <div class='drug-name'>{{ d.name }}</div>
+    <div class='drug-name'><span class='badge drug-badge'{% if d.badge_color %} style='background: {{ d.badge_color }}; color: {{ badge_text_colour(d.badge_color) }};'{% endif %}>{{ d.name }}</span></div>
     {% if d.description %}<div class='drug-desc'>{{ d.description }}</div>{% endif %}
     {% if d.pubchem_url %}<a href='{{ d.pubchem_url }}' target='_blank'>PubChem ↗</a>{% endif %}
   </div>
