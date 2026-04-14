@@ -5,9 +5,10 @@ Tests for the CLI profile-vcf command — end-to-end integration.
 import sqlite3
 from pathlib import Path
 
+import pysam
+from conftest import TINY_REF_SEQ, write_genbank
 from typer.testing import CliRunner
 
-from conftest import write_genbank
 from respro.cli import app
 from respro.db.schema import create_schema, init_results_db
 
@@ -196,6 +197,63 @@ class TestProfileCli:
 
         assert result.exit_code != 0
         assert 'no cds matches above thresholds' in result.output.lower()
+
+    def test_profile_vcf_with_bam_persists_coverage_gaps(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        bam_path = tmp_path / 'query.bam'
+        _write_partial_coverage_bam(bam_path)
+
+        results_db = tmp_path / 'results.db'
+        output_dir = tmp_path / 'bam_results'
+        result = CliRunner().invoke(app, [
+            'profile-vcf',
+            '--project', str(project_db),
+            '--vcf', str(sample_vcf),
+            '--ref-fasta', str(sample_ref_fasta),
+            '--bam', str(bam_path),
+            '--results-db', str(results_db),
+            '--output', str(output_dir),
+            '--min-af', '0.01',
+            '--min-depth', '10',
+        ])
+
+        assert result.exit_code == 0, result.output
+        conn = sqlite3.connect(results_db)
+        count = conn.execute('SELECT COUNT(*) FROM coverage_gap').fetchone()[0]
+        conn.close()
+        assert count > 0
+
+
+def _write_partial_coverage_bam(bam_path: Path) -> None:
+    """Write a BAM with high depth only over the first 30 nt of tiny_ref."""
+    header = {
+        'HD': {'VN': '1.0'},
+        'SQ': [{'SN': 'tiny_ref', 'LN': len(TINY_REF_SEQ)}],
+    }
+    with pysam.AlignmentFile(str(bam_path), 'wb', header=header) as bam:
+        read_seq = TINY_REF_SEQ[:30]
+        qualities = pysam.qualitystring_to_array('I' * len(read_seq))
+        for idx in range(20):
+            read = pysam.AlignedSegment()
+            read.query_name = f'read_{idx}'
+            read.query_sequence = read_seq
+            read.flag = 0
+            read.reference_id = 0
+            read.reference_start = 0
+            read.mapping_quality = 60
+            read.cigar = ((0, len(read_seq)),)
+            read.next_reference_id = -1
+            read.next_reference_start = -1
+            read.template_length = 0
+            read.query_qualities = qualities
+            bam.write(read)
+
+    pysam.index(str(bam_path))
 
 
 class TestInitCli:

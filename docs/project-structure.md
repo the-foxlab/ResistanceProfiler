@@ -239,6 +239,9 @@ Pure profiling logic. Changes here should usually come with focused regression t
   REF bases against the query FASTA, and transforms REF/ALT bases to the internal
   forward strand (`remap_variants`). Also contains `_build_query_to_cds_map` and
   `_cds_pos_to_genomic_pos`.
+- `vcf_coverage.py`: BAM coverage projection for VCF mode — computes per-query depth
+  from BAM and projects it to internal codon coordinates via CIGAR mappings,
+  emitting `CoverageGap` stretches for low-depth or non-projectable codons.
 - `fasta_profile.py`: FASTA consensus profiling — orchestrates per-gene alignment
   reconstruction via `profile_fasta_consensus`, and contains all alignment-walking
   codon annotation helpers: `_annotate_from_alignment`, `_gapped_strings_from_cigar`,

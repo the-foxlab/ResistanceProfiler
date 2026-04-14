@@ -686,6 +686,27 @@ class TestAlignmentVisualization:
             "<span class='aln-cell'>C</span><span class='aln-sep'></span>"
         ) in html
 
+
+class TestCoverageGapPlotBounds:
+    def test_reverse_strand_gap_bounds_include_full_terminal_codons(self) -> None:
+        from respro.report.plots import _coverage_gap_nt_bounds
+
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='REV',
+            protein='Rev',
+            start=100,
+            end=130,
+            strand='-',
+            codon_start=0,
+            nt_sequence='A' * 30,
+        )
+        gap = CoverageGap(gene_name='REV', codon_start=0, codon_end=2)
+
+        start, end = _coverage_gap_nt_bounds(gene, gap)
+        assert (start, end) == (121, 130)
+
     def test_vcf_snp_overlay_switches_base_and_highlights_anchor(self) -> None:
         gene = GeneRecord(
             id=1,
@@ -757,4 +778,74 @@ class TestAlignmentVisualization:
         html = str(build_alignment_html(ann, alignment, context_codons=1))
         assert "<span class='aln-cell aln-affected'>C</span>" in html
         assert "<span class='aln-cell aln-affected'>-</span>" in html
+
+    def test_vcf_long_deletion_expands_alignment_context(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='DLONG',
+            protein='D',
+            start=0,
+            end=30,
+            strand='+',
+            codon_start=0,
+            nt_sequence='A' * 30,
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=30,
+            strand='+',
+            cigar='30M',
+            cds_start=0,
+        )
+        alignment = build_gene_alignments('A' * 30, [match])['DLONG']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='AAAAAAAAAA', alt='A'),
+            gene_name='DLONG',
+            codon_pos=1,
+            consequence='deletion',
+            is_fasta_mode=False,
+        )
+
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        assert html.count("<span class='aln-cell aln-affected'>-</span>") == 9
+
+    def test_vcf_long_deletion_expands_alignment_context_reverse_strand(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='DLONGREV',
+            protein='D',
+            start=100,
+            end=130,
+            strand='-',
+            codon_start=0,
+            nt_sequence='A' * 30,
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=30,
+            strand='+',
+            cigar='30M',
+            cds_start=0,
+        )
+        alignment = build_gene_alignments('A' * 30, [match])['DLONGREV']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=120, ref='AAAAAAAAAA', alt='A'),
+            gene_name='DLONGREV',
+            codon_pos=3,
+            consequence='deletion',
+            is_fasta_mode=False,
+        )
+
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        assert html.count("<span class='aln-cell aln-affected'>-</span>") == 9
 

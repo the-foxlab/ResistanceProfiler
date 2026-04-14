@@ -123,6 +123,8 @@ Mark items done and update priorities after each completed milestone.
 - [X] Unassessed rule-position reporting — cross-reference resistance-rule codon positions with FASTA `CoverageGap` entries in the HTML report summary and per-gene section; lollipop plots now shade non-covered codon spans with low alpha and include a `non covered` legend item
 - [X] Persist non-covered regions to `results.db` — `coverage_gap` table (gene_name, codon_pos per run) added to results schema; `save_run` writes gaps from `ProfilingResult.coverage_gaps`; `load_coverage_gaps` restores them; `regenerate` passes gaps into the reconstructed `ProfilingResult` so regenerated reports show the same unassessable-position warnings; existing databases are migrated automatically on open
 - [X] Codon stretches for coverage gaps — `CoverageGap` now stores `codon_start`/`codon_end` (inclusive range) instead of individual `codon_pos`; consecutive non-covered codons are merged into one stretch in `annotate_fasta.py`; DB schema updated to `codon_start`/`codon_end` columns; `_count_unassessed_rule_positions` uses range-based lookup; plot drawing simplified by removing `_merge_consecutive_positions`
+- [X] BAM-based VCF coverage projection — `profile-vcf` supports `--bam` and projects query BAM depth to internal codon coordinates via CIGAR mappings; codons with missing projection or depth below `--min-depth` are emitted as `CoverageGap` stretches and rendered/reported like FASTA non-covered regions
+- [X] VCF parser migration to `pysam.VariantFile` — custom parser removed; VCF ingestion now uses pysam exclusively for multi-allelic records, AF extraction, and depth extraction
 
 ### Usability and workflow
 
@@ -138,15 +140,6 @@ Mark items done and update priorities after each completed milestone.
 
 Items are grouped by theme and ordered by priority within each group.
 Priority: 🔴 high · 🟡 medium · 🟢 low
-
-### Coverage analysis (introduce together)
-
-- 🔴 BAM-based coverage — introduce `pysam` and add a `--bam` option to `profile-vcf`; compute
-  per-position depth and pass it to the gene-panel plot to shade non-covered regions below
-  `--min-depth`
-- 🔴 Switch VCF parsing to `pysam.VariantFile` once pysam is a dependency — removes our own
-  edge-case handling and delegates to a well-maintained library; do this in the same change as
-  the BAM coverage work to avoid adding pysam twice
 
 ### Traceability
 

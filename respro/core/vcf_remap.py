@@ -45,7 +45,7 @@ def remap_variants(
     for match in matches:
         q2c = _build_query_to_cds_map(
             match.cigar, match.query_start, match.query_end,
-            match.strand, query_len,
+            match.strand, query_len, match.cds_start,
         )
         match_maps.append((match, q2c))
 
@@ -298,6 +298,7 @@ def _build_query_to_cds_map(
     query_end: int,
     strand: str,
     query_len: int,
+    cds_start: int = 0,
 ) -> dict[int, int]:
     """
     Invert a CIGAR-based coordinate map to query-position → CDS-position.
@@ -310,6 +311,7 @@ def _build_query_to_cds_map(
     :param query_end: 0-based forward-strand end (from GeneMatch)
     :param strand: alignment strand ('+' or '-')
     :param query_len: total query sequence length
+    :param cds_start: 0-based CDS offset where this alignment starts
     :return: mapping {forward_query_pos: cds_pos}
     """
     if strand == '+':
@@ -324,6 +326,9 @@ def _build_query_to_cds_map(
                 cds_to_query[cds_pos] = query_len - 1 - rc_pos
             else:
                 cds_to_query[cds_pos] = None
+
+    if cds_start:
+        cds_to_query = {cds_pos + cds_start: qpos for cds_pos, qpos in cds_to_query.items()}
 
     # Invert: query_pos → cds_pos; skip deletions (None values)
     query_to_cds: dict[int, int] = {}

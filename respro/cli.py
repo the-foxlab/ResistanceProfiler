@@ -33,6 +33,7 @@ from respro.core.annotation import annotate_variants
 from respro.core.fasta_profile import profile_fasta_consensus
 from respro.core.query import resolve_cached_query_reference, resolve_fasta_query
 from respro.core.rules import load_rules
+from respro.core.vcf_coverage import compute_coverage_gaps_from_bam
 from respro.core.vcf_remap import remap_variants
 from respro.db.models import ProfilingResult
 from respro.db.project import add_to_project, init_project
@@ -357,6 +358,16 @@ def profile_vcf(
             help='Minimum read depth filter.')
     ] = 10,
 
+    bam: Annotated[
+        Path | None,
+        typer.Option(
+            '--bam',
+            exists=True,
+            help='Optional BAM aligned against the same query reference as the VCF. '
+                 'Used to mark non-covered codon stretches below --min-depth.',
+        ),
+    ] = None,
+
     cores: Annotated[
         int,
         typer.Option(
@@ -428,6 +439,26 @@ def profile_vcf(
             logger.warning(warning)
         logger.info('%d variant(s) after FASTA remapping', len(variants))
 
+        coverage_gaps = []
+        if bam is not None:
+            with err_console.status('[dim]Projecting BAM depth to internal CDS coordinates…[/dim]'):
+                coverage_gaps = compute_coverage_gaps_from_bam(
+                    bam_path=bam,
+                    query_name=query_name,
+                    query_sequence=query_seq,
+                    matches=fasta_matches,
+                    min_depth=min_depth,
+                )
+            if coverage_gaps:
+                total_non_covered = sum(gap.codon_end - gap.codon_start + 1 for gap in coverage_gaps)
+                logger.warning(
+                    '%d codon position(s) could not be assessed due to missing/low BAM coverage '
+                    '(%d stretch(es), threshold=min-depth=%d)',
+                    total_non_covered,
+                    len(coverage_gaps),
+                    min_depth,
+                )
+            print(coverage_gaps)
         annotations = annotate_variants(variants, genes)
         total_variants = len(variants)
         variants_in_cds = sum(1 for a in annotations if a.gene_name)
@@ -452,6 +483,7 @@ def profile_vcf(
             logger=logger,
             query_sequence=query_seq,
             gene_matches=fasta_matches,
+            coverage_gaps=coverage_gaps,
         )
 
         _print_completion_panel(console, '✓ Profiling complete', result, outputs)

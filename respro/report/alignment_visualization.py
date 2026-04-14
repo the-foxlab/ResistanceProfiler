@@ -366,8 +366,19 @@ def build_alignment_html(
     if codon_nt_end > alignment.gene_length:
         return None
 
-    codon_window_start = max(0, center_codon - context_codons)
-    codon_window_end = min(total_coding_codons, center_codon + context_codons + 1)
+    left_context_codons = context_codons
+    right_context_codons = context_codons
+    deleted_nt = _deleted_nt_length(ann)
+    if deleted_nt > 0:
+        # Ensure the pseudo-alignment window can show the full deleted block.
+        extra_context_codons = (deleted_nt + 2) // 3
+        if alignment.strand == '-':
+            left_context_codons += extra_context_codons
+        else:
+            right_context_codons += extra_context_codons
+
+    codon_window_start = max(0, center_codon - left_context_codons)
+    codon_window_end = min(total_coding_codons, center_codon + right_context_codons + 1)
     window_nt_start = alignment.codon_start + codon_window_start * 3
     window_nt_end = alignment.codon_start + codon_window_end * 3
     if window_nt_start >= window_nt_end:
@@ -431,3 +442,8 @@ def build_alignment_html(
         f"{query_fmt}</span></div>"
         "</div>"
     )
+
+
+def _deleted_nt_length(ann: AnnotatedVariant) -> int:
+    """Return deleted nucleotide count for one event, or zero for non-deletions."""
+    return max(0, len(ann.variant.ref) - len(ann.variant.alt))

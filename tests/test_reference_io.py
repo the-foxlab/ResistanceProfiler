@@ -3,6 +3,7 @@ Tests for reference resolution.
 """
 
 from pathlib import Path
+
 from respro.db.schema import open_project_db
 from respro.io.reference import (
     load_genes_for_reference,
@@ -67,3 +68,31 @@ class TestParseVcfRnaNormalisation:
         variants = parse_vcf(vcf)
         assert variants[0].ref == 'A'
         assert variants[0].alt == 'T'
+
+    def test_extracts_af_and_depth_from_format_fields(self, tmp_path: Path) -> None:
+        vcf = tmp_path / 'format_fields.vcf'
+        vcf.write_text(
+            '##fileformat=VCFv4.2\n'
+            '##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">\n'
+            '##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Allele depths">\n'
+            '##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read depth">\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tSAMPLE\n'
+            'seq1\t10\t.\tA\tT\t.\tPASS\t.\tGT:AD:DP\t0/1:3,9:12\n'
+        )
+        variants = parse_vcf(vcf)
+
+        assert len(variants) == 1
+        assert abs(variants[0].allele_freq - 0.75) < 1e-9
+        assert variants[0].depth == 12
+
+    def test_depth_missing_uses_sentinel_minus_one(self, tmp_path: Path) -> None:
+        vcf = tmp_path / 'no_depth.vcf'
+        vcf.write_text(
+            '##fileformat=VCFv4.2\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'seq1\t10\t.\tA\tT\t.\tPASS\tAF=0.2\n'
+        )
+        variants = parse_vcf(vcf)
+
+        assert len(variants) == 1
+        assert variants[0].depth == -1

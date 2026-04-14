@@ -5,7 +5,10 @@ VCF parsing — extract variant calls from VCF files.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
+
+import pysam
 
 from respro.db.models import VariantCall
 
@@ -16,8 +19,7 @@ def parse_vcf(vcf_path: Path) -> list[VariantCall]:
     """
     Parse a VCF file and return a list of VariantCall objects.
 
-    Uses a lightweight built-in parser to avoid hard pysam dependency
-    for VCF-only workflows. Handles VCF 4.x format.
+    Uses pysam.VariantFile as the single supported VCF parsing backend.
 
     :param vcf_path: path to VCF file
     :return: list of VariantCall objects with 0-based positions
@@ -25,117 +27,92 @@ def parse_vcf(vcf_path: Path) -> list[VariantCall]:
     vcf_path = Path(vcf_path)
     variants: list[VariantCall] = []
 
-    with open(vcf_path) as fh:
-        for line in fh:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            parts = line.split('\t')
-            if len(parts) < 8:
+    with pysam.VariantFile(str(vcf_path)) as vcf:
+        for record in vcf.fetch():
+            ref = (record.ref or '').upper().replace('U', 'T')
+            if not ref:
                 continue
 
-            chrom = parts[0]
-            pos = int(parts[1]) - 1
-            ref = parts[3].upper().replace('U', 'T')
-            alt_field = parts[4].upper().replace('U', 'T')
-            filt = parts[6]
-            info_str = parts[7]
+            alts = list(record.alts or [])
+            if not alts:
+                continue
 
-            # Parse INFO field
-            info = _parse_info(info_str)
-
-            # Handle multi-allelic sites by splitting on comma
-            for alt in alt_field.split(','):
-                alt = alt.strip()
-                if alt in ('.', '*', '<*>'):
+            filter_status = _extract_filter_status(record)
+            depth = _extract_depth(record)
+            for alt_idx, alt_raw in enumerate(alts):
+                alt = (alt_raw or '').upper().replace('U', 'T')
+                if not alt or alt in {'.', '*', '<*>'}:
                     continue
 
-                af = _extract_af(info, parts, alt_field, alt)
-                depth = _extract_depth(info, parts)
-
+                af = _extract_af(record, alt_idx)
                 variants.append(VariantCall(
-                    chrom=chrom,
-                    pos=pos,
+                    chrom=record.contig,
+                    pos=record.pos - 1,
                     ref=ref,
                     alt=alt,
                     allele_freq=af,
                     depth=depth,
-                    filter_status=filt,
+                    filter_status=filter_status,
                 ))
 
     logger.info('Parsed %d variant(s) from %s', len(variants), vcf_path.name)
     return variants
 
 
-def _parse_info(info_str: str) -> dict[str, str]:
-    """
-    Parse a VCF INFO column into a dict.
-
-    :param info_str: INFO field string
-    :return: dict of INFO key-value pairs
-    """
-    info: dict[str, str] = {}
-    if info_str == '.':
-        return info
-    for entry in info_str.split(';'):
-        if '=' in entry:
-            key, val = entry.split('=', 1)
-            info[key] = val
-        else:
-            info[entry] = ''
-    return info
+def _extract_filter_status(record: pysam.VariantRecord) -> str:
+    """Return canonical filter status string for one VCF record."""
+    if not record.filter.keys():
+        return 'PASS'
+    return ';'.join(str(key) for key in record.filter.keys())
 
 
 def _extract_af(
-    info: dict[str, str],
-    parts: list[str],
-    alt_field: str,
-    current_alt: str,
+    record: pysam.VariantRecord,
+    alt_idx: int,
 ) -> float:
     """
     Best-effort extraction of allele frequency.
 
-    :param info: parsed INFO field
-    :param parts: VCF record parts
-    :param alt_field: ALT field string
-    :param current_alt: current ALT allele
+    :param record: pysam variant record
+    :param alt_idx: zero-based index of ALT allele in this record
     :return: allele frequency value
     """
-    # Try INFO/AF
     for key in ('AF', 'VAF', 'FREQ'):
-        if key in info:
-            try:
-                vals = info[key].split(',')
-                alt_idx = alt_field.split(',').index(current_alt)
-                return float(vals[min(alt_idx, len(vals) - 1)])
-            except (ValueError, IndexError):
-                pass
+        value = _record_info_get(record, key)
+        if value is None:
+            continue
 
-    # Try FORMAT/AD -> compute AF
-    if len(parts) >= 10:
-        fmt_keys = parts[8].split(':')
-        fmt_vals = parts[9].split(':')
-        fmt = dict(zip(fmt_keys, fmt_vals))
-        if 'AD' in fmt:
-            try:
-                ads = [int(x) for x in fmt['AD'].split(',')]
+        vals = _normalize_to_str_sequence(value)
+        if not vals:
+            continue
+        parsed = _to_float(vals[min(alt_idx, len(vals) - 1)])
+        if parsed is not None:
+            return parsed
+
+    sample = _first_sample(record)
+    if sample is not None:
+        sample_af = sample.get('AF')
+        if sample_af is not None:
+            vals = _normalize_to_str_sequence(sample_af)
+            if vals:
+                parsed = _to_float(vals[min(alt_idx, len(vals) - 1)])
+                if parsed is not None:
+                    return parsed
+
+        sample_ad = sample.get('AD')
+        if sample_ad is not None:
+            ads = _normalize_to_int_sequence(sample_ad)
+            if len(ads) >= 2:
                 total = sum(ads)
                 if total > 0:
-                    alt_idx = alt_field.split(',').index(current_alt) + 1
-                    return ads[min(alt_idx, len(ads) - 1)] / total
-            except (ValueError, IndexError):
-                pass
-        if 'AF' in fmt:
-            try:
-                return float(fmt['AF'].split(',')[0])
-            except (ValueError, IndexError):
-                pass
+                    sample_alt_idx = min(alt_idx + 1, len(ads) - 1)
+                    return ads[sample_alt_idx] / total
 
     # A called variant with no extractable AF is assumed fully present
     return 1.0
 
 
-def _extract_depth(info: dict[str, str], parts: list[str]) -> int:
+def _extract_depth(record: pysam.VariantRecord) -> int:
     """
     Best-effort extraction of read depth.
 
@@ -143,25 +120,92 @@ def _extract_depth(info: dict[str, str], parts: list[str]) -> int:
     Callers should treat -1 as "no depth data" and skip depth-based filtering
     for those variants rather than silently discarding them.
 
-    :param info: parsed INFO field
-    :param parts: VCF record parts
+    :param record: pysam variant record
     :return: read depth value, or -1 if unavailable
     """
     for key in ('DP', 'DEPTH'):
-        if key in info:
-            try:
-                return int(info[key])
-            except ValueError:
-                pass
-    # Try FORMAT/DP
-    if len(parts) >= 10:
-        fmt_keys = parts[8].split(':')
-        fmt_vals = parts[9].split(':')
-        fmt = dict(zip(fmt_keys, fmt_vals))
-        if 'DP' in fmt:
-            try:
-                return int(fmt['DP'])
-            except ValueError:
-                pass
+        value = _record_info_get(record, key)
+        parsed = _to_int(value)
+        if parsed is not None:
+            return parsed
+
+    sample = _first_sample(record)
+    if sample is not None:
+        parsed_dp = _to_int(sample.get('DP'))
+        if parsed_dp is not None:
+            return parsed_dp
+
+        sample_ad = sample.get('AD')
+        if sample_ad is not None:
+            ads = _normalize_to_int_sequence(sample_ad)
+            if ads:
+                return sum(ads)
+
     # Sentinel: no depth information found
     return -1
+
+
+def _first_sample(record: pysam.VariantRecord):
+    """Return the first sample call in a record, if present."""
+    sample_names = list(record.samples)
+    if not sample_names:
+        return None
+    return record.samples[sample_names[0]]
+
+
+def _record_info_get(record: pysam.VariantRecord, key: str) -> object | None:
+    """Safely read one INFO value from pysam record, tolerating incomplete VCF headers."""
+    try:
+        return record.info.get(key)
+    except ValueError:
+        return None
+
+
+def _normalize_to_str_sequence(value: object) -> list[str]:
+    """Normalize scalar or tuple-like values to a list of strings."""
+    if isinstance(value, (tuple, list)):
+        return [str(v) for v in value if v is not None]
+    return [str(value)]
+
+
+def _normalize_to_int_sequence(value: object) -> list[int]:
+    """Normalize scalar or tuple-like values to a list of ints where possible."""
+    values = _normalize_to_str_sequence(value)
+    parsed: list[int] = []
+    for token in values:
+        parsed_int = _to_int(token)
+        if parsed_int is not None:
+            parsed.append(parsed_int)
+    return parsed
+
+
+def _to_int(value: object) -> int | None:
+    """Parse an integer from a VCF INFO/FORMAT value."""
+    if value is None:
+        return None
+    token = str(value).strip()
+    if not token or token == '.':
+        return None
+    try:
+        return int(float(token))
+    except ValueError:
+        return None
+
+
+def _to_float(value: object) -> float | None:
+    """Parse a float value, accepting optional percent suffixes."""
+    if value is None:
+        return None
+    token = str(value).strip()
+    if not token or token == '.':
+        return None
+    percent = token.endswith('%')
+    if percent:
+        token = token[:-1]
+    match = re.search(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?', token)
+    if match is None:
+        return None
+    parsed = float(match.group(0))
+    if percent:
+        return parsed / 100.0
+    return parsed

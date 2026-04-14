@@ -509,8 +509,7 @@ def _group_coverage_gaps_by_gene(coverage_gaps: list[CoverageGap]) -> dict[str, 
 def _draw_non_covered_regions(ax, gene: GeneRecord, coverage_gaps: list[CoverageGap]) -> None:
     """Draw pre-merged non-covered codon stretches as a low-alpha background overlay."""
     for gap in coverage_gaps:
-        left_start, _ = _codon_nt_span(gene, gap.codon_start)
-        _, right_end = _codon_nt_span(gene, gap.codon_end)
+        left_start, right_end = _coverage_gap_nt_bounds(gene, gap)
         ax.axvspan(
             left_start + 0.5,
             right_end + 0.5,
@@ -534,6 +533,12 @@ def _codon_nt_span(gene: GeneRecord, codon_pos: int) -> tuple[int, int]:
     genomic_start = genomic_high - 2
     return genomic_start, genomic_high + 1
 
+
+def _coverage_gap_nt_bounds(gene: GeneRecord, gap: CoverageGap) -> tuple[int, int]:
+    """Return genomic 0-based half-open bounds for one codon gap across both strands."""
+    start_a, end_a = _codon_nt_span(gene, gap.codon_start)
+    start_b, end_b = _codon_nt_span(gene, gap.codon_end)
+    return min(start_a, start_b), max(end_a, end_b)
 
 
 def adjust_array_min_distance(
