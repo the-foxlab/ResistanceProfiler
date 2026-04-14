@@ -143,6 +143,7 @@ def match_rules(
         rule_index.setdefault(key, []).append(rule)
 
     hit_count = 0
+    anchor_warning_cache: set[str] = set()
     for ann in annotations:
         if not ann.gene_name or not ann.alt_aa or ann.consequence == 'synonymous':
             continue
@@ -150,11 +151,25 @@ def match_rules(
         key = (ann.gene_name, ann.codon_pos)
         candidates = rule_index.get(key, [])
         for rule in candidates:
+            anchor_warning = _indel_anchor_mismatch_warning(
+                rule_reference=rule.reference,
+                rule_mutation=rule.mutation,
+                ann_ref=ann.ref_aa,
+                ann_alt=ann.alt_aa,
+                ann_consequence=ann.consequence,
+                gene_name=ann.gene_name,
+                codon_pos=ann.codon_pos,
+            )
+            if anchor_warning and anchor_warning not in anchor_warning_cache:
+                logger.warning(anchor_warning)
+                anchor_warning_cache.add(anchor_warning)
+
             if _matches_rule_alleles(
                 reference=rule.reference,
                 mutation=rule.mutation,
                 ann_ref=ann.ref_aa,
                 ann_alt=ann.alt_aa,
+                ann_consequence=ann.consequence,
             ):
                 ann.rule_matches.append(rule)
                 hit_count += 1
@@ -194,6 +209,7 @@ def match_rule_sets(
         present.setdefault((ann.gene_name, ann.codon_pos), []).append(ann)
 
     hits: list[ComboRuleHit] = []
+    anchor_warning_cache: set[str] = set()
     for rule_set in rule_sets:
         contributing: list[AnnotatedVariant] = []
         all_matched = True
@@ -202,6 +218,9 @@ def match_rule_sets(
                 present.get((member.gene_name, member.position), []),
                 member.reference,
                 member.mutation,
+                member.gene_name,
+                member.position,
+                anchor_warning_cache,
             )
             if ann is None:
                 all_matched = False
@@ -345,8 +364,17 @@ def _matches_rule_alleles(
     mutation: str,
     ann_ref: str,
     ann_alt: str,
+    ann_consequence: str = '',
 ) -> bool:
     """Compare one rule allele pair with one annotation allele pair."""
+    # In-frame insertion-like rules are matched by inserted payload only.
+    if ann_consequence == 'insertion' and len(mutation) > len(reference):
+        return _insertion_payload(reference, mutation) == _insertion_payload(ann_ref, ann_alt)
+
+    # In-frame deletion-like rules are matched by deleted payload only.
+    if ann_consequence == 'deletion' and len(reference) > len(mutation):
+        return _deletion_payload(reference, mutation) == _deletion_payload(ann_ref, ann_alt)
+
     # SNP-like rules: compare resulting state (alt AA).
     if len(reference) == 1 and len(mutation) == 1:
         return ann_alt == mutation
@@ -363,27 +391,93 @@ def _matches_rule_alleles(
     return ann_ref == reference and ann_alt == mutation
 
 
+def _insertion_payload(reference: str, mutation: str) -> str:
+    """Return insertion payload from an anchor+payload allele pair."""
+    payload_len = len(mutation) - len(reference)
+    if payload_len <= 0:
+        return ''
+    if mutation.startswith(reference):
+        return mutation[len(reference):]
+    return mutation[-payload_len:]
+
+
+def _deletion_payload(reference: str, mutation: str) -> str:
+    """Return deleted payload from an anchor+payload allele pair."""
+    payload_len = len(reference) - len(mutation)
+    if payload_len <= 0:
+        return ''
+    if reference.startswith(mutation):
+        return reference[len(mutation):]
+    return reference[-payload_len:]
+
+
+def _indel_anchor_mismatch_warning(
+    *,
+    rule_reference: str,
+    rule_mutation: str,
+    ann_ref: str,
+    ann_alt: str,
+    ann_consequence: str,
+    gene_name: str,
+    codon_pos: int,
+) -> str | None:
+    """Return a warning text when a matched-position indel has a different anchor AA."""
+    if ann_consequence == 'insertion' and len(rule_mutation) > len(rule_reference):
+        if ann_ref != rule_reference:
+            return (
+                f'Indel anchor mismatch at {gene_name}:{codon_pos + 1} (insertion): '
+                f'rule anchor {rule_reference!r} vs observed anchor {ann_ref!r}. '
+                'Matching by inserted payload only.'
+            )
+        return None
+
+    if ann_consequence == 'deletion' and len(rule_reference) > len(rule_mutation):
+        if ann_alt != rule_mutation:
+            return (
+                f'Indel anchor mismatch at {gene_name}:{codon_pos + 1} (deletion): '
+                f'rule anchor {rule_mutation!r} vs observed anchor {ann_alt!r}. '
+                'Matching by deleted payload only.'
+            )
+        return None
+
+    return None
+
+
 def _pick_matching_member_annotation(
     candidates: list[AnnotatedVariant],
     reference: str,
     mutation: str,
+    gene_name: str,
+    codon_pos: int,
+    anchor_warning_cache: set[str],
 ) -> AnnotatedVariant | None:
     """Return one candidate annotation satisfying one combo-rule member."""
     if not candidates:
         return None
 
-    return next(
-        (
-            ann
-            for ann in candidates
-            if _matches_rule_alleles(
-                reference=reference,
-                mutation=mutation,
-                ann_ref=ann.ref_aa,
-                ann_alt=ann.alt_aa,
-            )
-        ),
-        None,
-    )
+    for ann in candidates:
+        anchor_warning = _indel_anchor_mismatch_warning(
+            rule_reference=reference,
+            rule_mutation=mutation,
+            ann_ref=ann.ref_aa,
+            ann_alt=ann.alt_aa,
+            ann_consequence=ann.consequence,
+            gene_name=gene_name,
+            codon_pos=codon_pos,
+        )
+        if anchor_warning and anchor_warning not in anchor_warning_cache:
+            logger.warning(anchor_warning)
+            anchor_warning_cache.add(anchor_warning)
+
+        if _matches_rule_alleles(
+            reference=reference,
+            mutation=mutation,
+            ann_ref=ann.ref_aa,
+            ann_alt=ann.alt_aa,
+            ann_consequence=ann.consequence,
+        ):
+            return ann
+
+    return None
 
 

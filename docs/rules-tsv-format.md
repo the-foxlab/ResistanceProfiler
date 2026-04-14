@@ -158,7 +158,11 @@ Behavior:
 
 #### Matching and validation behavior
 
-- Rule matching is explicit allele matching only.
+- Substitution and stop rules use explicit allele matching.
+- In-frame insertion and deletion rules are matched by codon position plus inserted/deleted
+  payload, independent of anchor amino acid identity.
+- When an in-frame indel payload matches but the anchor AA differs between rule and observation,
+  `respro` emits a warning for debugging (for example to spot coordinate or anchoring issues).
 - `*` is a specific stop event, not wildcard.
 - No-op entries are rejected (`mutation` equals `reference`).
 - Unsupported mutation tokens are skipped with warning during import.

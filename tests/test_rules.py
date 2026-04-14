@@ -229,6 +229,62 @@ class TestMatchRules:
         assert len(result[0].rule_matches) == 1
         assert result[0].rule_matches[0].drug_name == 'DrugA'
 
+    def test_insertion_rule_matches_by_payload_when_anchor_differs(self, caplog):
+        caplog.set_level('WARNING')
+        rule = ResistanceRule(
+            id=1,
+            gene_name='gag',
+            gene_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='',
+            position=4,
+            reference='A',
+            mutation='AG',
+            phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=12, ref='A', alt='T', allele_freq=0.9, depth=100),
+            gene_name='gag',
+            codon_pos=4,
+            ref_aa='R',
+            alt_aa='RG',
+            consequence='insertion',
+        )
+
+        result = match_rules([ann], [rule])
+
+        assert len(result[0].rule_matches) == 1
+        assert 'Indel anchor mismatch' in caplog.text
+
+    def test_deletion_rule_matches_by_payload_when_anchor_differs(self, caplog):
+        caplog.set_level('WARNING')
+        rule = ResistanceRule(
+            id=1,
+            gene_name='gag',
+            gene_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='',
+            position=4,
+            reference='AG',
+            mutation='A',
+            phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=12, ref='A', alt='T', allele_freq=0.9, depth=100),
+            gene_name='gag',
+            codon_pos=4,
+            ref_aa='RG',
+            alt_aa='R',
+            consequence='deletion',
+        )
+
+        result = match_rules([ann], [rule])
+
+        assert len(result[0].rule_matches) == 1
+        assert 'Indel anchor mismatch' in caplog.text
+
 
 # ─── Helpers for combo rule tests ────────────────────────────────────────────
 
