@@ -30,7 +30,7 @@ def resolve_fasta_query(
     min_identity: float = 0.80,
     min_coverage: float = 0.90,
     use_cache: bool = True,
-    cores: int = 1,
+    threads: int = 1,
     aligner: Literal['pairwise', 'mappy'] = 'pairwise',
 ) -> tuple[str, str, list[GeneMatch]]:
     """
@@ -41,7 +41,7 @@ def resolve_fasta_query(
     :param min_identity: minimum nucleotide identity
     :param min_coverage: minimum CDS coverage fraction
     :param use_cache: if True, reuse/store mapping cache in project DB
-    :param cores: number of worker processes for parallel gene alignment (pairwise only)
+    :param threads: number of worker processes for parallel gene alignment (pairwise only)
     :param aligner: alignment backend (``'pairwise'`` or ``'mappy'``)
     :return: (query_name, query_sequence, gene_matches)
     """
@@ -74,7 +74,7 @@ def resolve_fasta_query(
         query_seq, genes,
         min_identity=min_identity,
         min_coverage=min_coverage,
-        cores=cores,
+        threads=threads,
         aligner=aligner,
     )
     if not matches:

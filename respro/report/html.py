@@ -20,6 +20,11 @@ from respro.db.models import (
     ProfilingResult,
     ResistanceRule,
 )
+from respro.report.alignment_visualization import (
+    GeneAlignment,
+    build_alignment_html,
+    build_gene_alignments,
+)
 from respro.report.palette import (
     AF_BIN_COLOURS,
     MUTATION_COLOURS,
@@ -27,7 +32,6 @@ from respro.report.palette import (
     SIMILARITY_COLOURS,
     badge_text_colour,
 )
-from respro.report.alignment_visualization import GeneAlignment, build_alignment_html, build_gene_alignments
 from respro.report.plots import render_lollipop_plot_bytes
 
 logger = logging.getLogger(__name__)
@@ -53,11 +57,11 @@ def _format_nt_change(ann: AnnotatedVariant) -> Markup:
     pos = ann.variant.pos + 1  # 1-based for display
 
     if not ann.is_fasta_mode:
-        return Markup(f'{escape(ref)}{pos}{escape(alt)}')
+        return _format_positioned_change(ref, pos, alt)
 
     # FASTA mode — ref is always the 3-base reference codon
     if ann.consequence == 'frameshift':
-        return Markup(f'{escape(ref)}{pos}fsX')
+        return Markup(f'{escape(ref)}{pos}<u><strong>fsX</strong></u>')
 
     if ann.consequence == 'insertion':
         # alt = ref_codon + inserted (anchor style set in profile_fasta.py)
@@ -67,12 +71,12 @@ def _format_nt_change(ann: AnnotatedVariant) -> Markup:
 
     if ann.consequence == 'deletion':
         # ref = 3-base codon, alt = remaining bases after deletion
-        alt_html = str(escape(alt)) if alt and alt != '-' else '<em>del</em>'
+        alt_html = f'<u><strong>{escape(alt)}</strong></u>' if alt and alt != '-' else '<u><strong><em>del</em></strong></u>'
         return Markup(f'{escape(ref)}{pos}{alt_html}')
 
     # SNP / synonymous / stop changes — highlight positions that differ
     if len(ref) == 3 and len(alt) == 3:
-        ref_html = _highlight_codon_diff(ref, alt)
+        ref_html = str(escape(ref))
         alt_html = _highlight_codon_diff(alt, ref)
         return Markup(f'{ref_html}{pos}{alt_html}')
 
@@ -94,6 +98,79 @@ def _highlight_codon_diff(seq: str, other: str) -> str:
         else:
             parts.append(str(escape(base)))
     return ''.join(parts)
+
+
+def _split_change_blocks(ref: str, alt: str) -> tuple[str, str, str, str]:
+    """
+    Split two strings into shared prefix/suffix and differing cores.
+
+    :param ref: reference token
+    :param alt: alternate token
+    :return: (prefix, ref_core, alt_core, suffix)
+    """
+    prefix_len = 0
+    max_prefix = min(len(ref), len(alt))
+    while prefix_len < max_prefix and ref[prefix_len] == alt[prefix_len]:
+        prefix_len += 1
+
+    suffix_len = 0
+    max_suffix = min(len(ref) - prefix_len, len(alt) - prefix_len)
+    while suffix_len < max_suffix and ref[-(suffix_len + 1)] == alt[-(suffix_len + 1)]:
+        suffix_len += 1
+
+    if suffix_len > 0:
+        prefix = ref[:prefix_len]
+        ref_core = ref[prefix_len:len(ref) - suffix_len]
+        alt_core = alt[prefix_len:len(alt) - suffix_len]
+        suffix = ref[len(ref) - suffix_len:]
+    else:
+        prefix = ref[:prefix_len]
+        ref_core = ref[prefix_len:]
+        alt_core = alt[prefix_len:]
+        suffix = ''
+
+    return prefix, ref_core, alt_core, suffix
+
+
+def _highlight_change_token(ref: str, alt: str) -> tuple[str, str]:
+    """
+    Highlight changed substring(s) between ref and alt tokens.
+
+    :param ref: reference token
+    :param alt: alternate token
+    :return: (reference_html_without_highlighting, highlighted_alt_html)
+    """
+    ref_html = str(escape(ref))
+    if ref == alt:
+        return ref_html, str(escape(alt))
+
+    prefix, ref_core, alt_core, suffix = _split_change_blocks(ref, alt)
+
+    def _fmt(core: str) -> str:
+        if not core:
+            return ''
+        return f'<u><strong>{escape(core)}</strong></u>'
+
+    alt_html = f'{escape(prefix)}{_fmt(alt_core)}{escape(suffix)}'
+    return ref_html, alt_html
+
+
+def _format_positioned_change(ref: str, pos_1based: int, alt: str) -> Markup:
+    """Format one change token as ref{pos}alt with highlighted changed segments."""
+    ref_html, alt_html = _highlight_change_token(ref, alt)
+    return Markup(f'{ref_html}{pos_1based}{alt_html}')
+
+
+def _format_aa_change(ann: AnnotatedVariant) -> Markup:
+    """
+    Format AA change with highlighted changed residue(s).
+
+    :param ann: annotated variant
+    :return: Markup-safe AA change string
+    """
+    if not ann.ref_aa or not ann.alt_aa:
+        return Markup('')
+    return _format_positioned_change(ann.ref_aa, ann.codon_pos + 1, ann.alt_aa)
 
 def _load_template_text() -> str:
     """Load the HTML Jinja template text from the package template file."""
@@ -167,7 +244,7 @@ def _build_db_hit_rows(
         if not ann.is_resistance_hit:
             continue
 
-        aa_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+        aa_change = _format_aa_change(ann)
         nt_change = _format_nt_change(ann)
         alignment_html = None
         if ann.gene_name in gene_alignments:
@@ -278,10 +355,10 @@ def _build_cds_rows(
         if ann.gene_name in gene_alignments:
             alignment_html = build_alignment_html(ann, gene_alignments[ann.gene_name])
         if ann.consequence == 'inframe_complex':
-            aa_change = '?'
+            aa_change = Markup('?')
             display_consequence = 'complex'
         else:
-            aa_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}' if ann.ref_aa and ann.alt_aa else ''
+            aa_change = _format_aa_change(ann)
             display_consequence = ann.consequence
 
         rows.append({
@@ -359,8 +436,8 @@ def _build_potential_effects_rows(
                 continue
             seen.add(dedup_key)
 
-            observed_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
-            rule_change = f'{rule.reference}{rule.position + 1}{rule.mutation}'
+            observed_change = _format_positioned_change(ann.ref_aa, ann.codon_pos + 1, ann.alt_aa)
+            rule_change = _format_positioned_change(rule.reference, rule.position + 1, rule.mutation)
 
             # For indels: report presence without BLOSUM scoring
             if ann_is_indel:

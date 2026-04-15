@@ -554,6 +554,13 @@ class TestBuildReportContext:
         assert "aln-cell aln-mutation" not in html
         assert 'Coding orientation:' in html
 
+    def test_render_html_highlights_nt_and_aa_changed_segments(self) -> None:
+        r = _make_result()
+        html = render_html(r)
+
+        assert 'A4<u><strong>G</strong></u>' in html
+        assert 'K3<u><strong>E</strong></u>' in html
+
     def test_render_html_uses_alignment_title_for_fasta_mode(self) -> None:
         r = _make_result()
         r.annotations[0].is_fasta_mode = True
@@ -717,7 +724,6 @@ class TestAlignmentVisualization:
         html = str(build_alignment_html(ann, alignments['UL23'], context_codons=2))
         assert "aln-cell aln-affected" in html
         assert "aln-mutation" not in html
-        assert "<span class='aln-cell aln-affected'>C</span>" in html
         assert "<span class='aln-cell aln-affected'>-</span>" in html
 
     def test_reverse_gene_codon_spacing_follows_cds_direction(self) -> None:
@@ -852,8 +858,79 @@ class TestCoverageGapPlotBounds:
         )
 
         html = str(build_alignment_html(ann, alignment, context_codons=1))
-        assert "<span class='aln-cell aln-affected'>C</span>" in html
         assert "<span class='aln-cell aln-affected'>-</span>" in html
+
+    def test_vcf_deletion_does_not_highlight_anchor_cell(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='DANCHOR',
+            protein='D',
+            start=0,
+            end=12,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATGCCCAAAGGG',
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=12,
+            strand='+',
+            cigar='12M',
+            cds_start=0,
+        )
+        alignment = build_gene_alignments('ATGCCCAAAGGG', [match])['DANCHOR']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='CC', alt='C'),
+            gene_name='DANCHOR',
+            codon_pos=1,
+            consequence='deletion',
+            is_fasta_mode=False,
+        )
+
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        # One affected alignment column (deleted base) rendered on Query line only.
+        assert html.count('aln-cell aln-affected') == 1
+
+    def test_vcf_insertion_does_not_highlight_anchor_cell(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='IANCHOR',
+            protein='I',
+            start=0,
+            end=12,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATGCCCAAAGGG',
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=12,
+            strand='+',
+            cigar='12M',
+            cds_start=0,
+        )
+        alignment = build_gene_alignments('ATGCCCAAAGGG', [match])['IANCHOR']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='C', alt='CG'),
+            gene_name='IANCHOR',
+            codon_pos=1,
+            consequence='insertion',
+            is_fasta_mode=False,
+        )
+
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        # One affected alignment column (inserted base) rendered on Query line only.
+        assert html.count('aln-cell aln-affected') == 1
 
     def test_vcf_long_deletion_expands_alignment_context(self) -> None:
         gene = GeneRecord(

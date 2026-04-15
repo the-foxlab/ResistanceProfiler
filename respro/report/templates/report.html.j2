@@ -128,7 +128,7 @@
 {% for r in db_hit_rows %}
 <tr class='hit-row data-row{% if r.has_alignment %} expandable-row{% endif %}' data-row-id='db-{{ loop.index }}'>
   <td>{{ r.gene }}</td>
-  <td><strong>{{ r.aa_change }}</strong></td>
+  <td>{{ r.aa_change }}</td>
   <td data-sort-value='{{ r.af_bin }}'><span class='badge badge-{{ r.af_bin }}'>{{ r.af_bin }}</span></td>
   <td>{{ r.nt_change }}</td>
   <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
@@ -229,7 +229,7 @@
 {% for r in potential_rows %}
 <tr class='data-row{% if r.has_alignment %} expandable-row{% endif %}' data-row-id='pot-{{ loop.index }}'>
   <td>{{ r.gene }}</td>
-  <td><strong>{{ r.observed_change }}</strong></td>
+  <td>{{ r.observed_change }}</td>
   <td>{{ r.rule_change }}</td>
   <td><span class='badge badge-sim-{{ r.similarity }}'>{{ r.similarity }}</span></td>
   <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
