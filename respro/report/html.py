@@ -64,10 +64,7 @@ def _format_nt_change(ann: AnnotatedVariant) -> Markup:
         return Markup(f'{escape(ref)}{pos}<u><strong>fsX</strong></u>')
 
     if ann.consequence == 'insertion':
-        # alt = ref_codon + inserted (anchor style set in profile_fasta.py)
-        anchor = str(escape(ref))
-        inserted = str(escape(alt[len(ref):] if len(alt) > len(ref) else alt))
-        return Markup(f'{anchor}{pos}{anchor}<u><strong>{inserted}</strong></u>')
+        return _format_positioned_change(ref, pos, alt)
 
     if ann.consequence == 'deletion':
         # ref = 3-base codon, alt = remaining bases after deletion
@@ -150,6 +147,11 @@ def _highlight_change_token(ref: str, alt: str) -> tuple[str, str]:
         if not core:
             return ''
         return f'<u><strong>{escape(core)}</strong></u>'
+
+    if ref_core and not alt_core:
+        ref_html = f'{escape(prefix)}{_fmt(ref_core)}{escape(suffix)}'
+        alt_html = str(escape(alt))
+        return ref_html, alt_html
 
     alt_html = f'{escape(prefix)}{_fmt(alt_core)}{escape(suffix)}'
     return ref_html, alt_html

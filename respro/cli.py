@@ -426,7 +426,7 @@ def profile_vcf(
         if ref_fasta is not None:
             with err_console.status('[dim]Aligning reference to internal references…[/dim]'):
                 query_name, query_seq, fasta_matches = resolve_fasta_query(
-                    project_conn, ref_fasta, use_cache=use_cache, cores=threads,
+                    project_conn, ref_fasta, use_cache=use_cache, threads=threads,
                     aligner=aligner,  # type: ignore[arg-type]
                 )
         else:
@@ -562,12 +562,12 @@ def profile_fasta(
         )
     ] = None,
 
-    cores: Annotated[
+    threads: Annotated[
         int,
         typer.Option(
-            '--cores',
-            '-c',
-            help='Alignment parallelism: process count for pairwise, thread count for mappy.'
+            '--threads',
+            '-th',
+            help='Thread count for alignment calculations.'
         )
     ] = 1,
 
@@ -604,7 +604,7 @@ def profile_fasta(
 
         with err_console.status('[dim]Aligning fasta sequence to internal references…[/dim]'):
             query_name, query_seq, fasta_matches = resolve_fasta_query(
-                project_conn, consensus_fasta, use_cache=False, cores=cores,
+                project_conn, consensus_fasta, use_cache=False, threads=threads,
                 aligner=aligner,  # type: ignore[arg-type]
             )
 

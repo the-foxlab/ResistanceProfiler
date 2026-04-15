@@ -367,6 +367,9 @@ def _matches_rule_alleles(
     ann_consequence: str = '',
 ) -> bool:
     """Compare one rule allele pair with one annotation allele pair."""
+    if ann_consequence == 'frameshift':
+        return _is_frameshift_token(mutation) and _is_frameshift_token(ann_alt)
+
     # In-frame insertion-like rules are matched by inserted payload only.
     if ann_consequence == 'insertion' and len(mutation) > len(reference):
         return _insertion_payload(reference, mutation) == _insertion_payload(ann_ref, ann_alt)
@@ -409,6 +412,12 @@ def _deletion_payload(reference: str, mutation: str) -> str:
     if reference.startswith(mutation):
         return reference[len(mutation):]
     return reference[-payload_len:]
+
+
+def _is_frameshift_token(token: str) -> bool:
+    """Return True for canonical or anchored frameshift tokens (``fsX`` / ``KfsX``)."""
+    token_upper = token.upper()
+    return token_upper == 'FSX' or (token_upper.endswith('FSX') and len(token_upper) == 4)
 
 
 def _indel_anchor_mismatch_warning(

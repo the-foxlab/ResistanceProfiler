@@ -380,8 +380,8 @@ def _annotate_frameshift(
     """
     Annotate a frameshift indel.
 
-    Records the anchor codon amino acid; the alt_aa sentinel 'fsX' identifies
-    the variant as a frameshift for rule matching.
+    Records the anchor codon amino acid; alt_aa follows anchored frameshift
+    nomenclature (e.g. ``KfsX``).
 
     :param var: variant call
     :param gene: gene record
@@ -399,7 +399,7 @@ def _annotate_frameshift(
         ref_codon=anchor_codon,
         alt_codon='',
         ref_aa=anchor_aa,
-        alt_aa='fsX',
+        alt_aa=f'{anchor_aa}fsX',
         consequence='frameshift',
     )
 

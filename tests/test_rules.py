@@ -288,6 +288,56 @@ class TestMatchRules:
         assert len(result[0].rule_matches) == 1
         assert 'Indel anchor mismatch' in caplog.text
 
+    def test_frameshift_rule_matches_when_anchor_differs(self):
+        rule = ResistanceRule(
+            id=1,
+            gene_name='gag',
+            gene_id=1,
+            drug_name='DrugFs',
+            drug_id=1,
+            reference_identifier='',
+            position=4,
+            reference='K',
+            mutation='KfsX',
+            phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=12, ref='AA', alt='A', allele_freq=0.9, depth=100),
+            gene_name='gag',
+            codon_pos=4,
+            ref_aa='R',
+            alt_aa='RfsX',
+            consequence='frameshift',
+        )
+
+        result = match_rules([ann], [rule])
+        assert len(result[0].rule_matches) == 1
+
+    def test_frameshift_rule_does_not_match_non_frameshift(self):
+        rule = ResistanceRule(
+            id=1,
+            gene_name='gag',
+            gene_id=1,
+            drug_name='DrugFs',
+            drug_id=1,
+            reference_identifier='',
+            position=4,
+            reference='K',
+            mutation='KfsX',
+            phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=12, ref='A', alt='G', allele_freq=0.9, depth=100),
+            gene_name='gag',
+            codon_pos=4,
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+        )
+
+        result = match_rules([ann], [rule])
+        assert len(result[0].rule_matches) == 0
+
 
 # ─── Helpers for combo rule tests ────────────────────────────────────────────
 

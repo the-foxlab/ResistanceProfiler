@@ -561,6 +561,66 @@ class TestBuildReportContext:
         assert 'A4<u><strong>G</strong></u>' in html
         assert 'K3<u><strong>E</strong></u>' in html
 
+    def test_render_html_highlights_insertion_segments_in_table(self) -> None:
+        var = VariantCall(chrom='ref', pos=3, ref='C', alt='CG', allele_freq=0.9, depth=300)
+        ann = AnnotatedVariant(
+            variant=var,
+            gene_name='gag',
+            codon_pos=2,
+            ref_codon='AAA',
+            alt_codon='AAAGGG',
+            ref_aa='K',
+            alt_aa='KG',
+            consequence='insertion',
+            af_bin='high',
+        )
+        r = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=0,
+            annotations=[ann],
+        )
+
+        html = render_html(r)
+        assert 'C4C<u><strong>G</strong></u>' in html
+        assert 'K3K<u><strong>G</strong></u>' in html
+
+    def test_render_html_highlights_frameshift_indel_segments_in_table(self) -> None:
+        ins = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='A', alt='AG', allele_freq=0.9, depth=300),
+            gene_name='gag',
+            codon_pos=2,
+            ref_aa='K',
+            alt_aa='KfsX',
+            consequence='frameshift',
+            af_bin='high',
+        )
+        dele = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=6, ref='AC', alt='A', allele_freq=0.8, depth=250),
+            gene_name='gag',
+            codon_pos=3,
+            ref_aa='P',
+            alt_aa='PfsX',
+            consequence='frameshift',
+            af_bin='high',
+        )
+        r = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=2,
+            variants_in_cds=2,
+            resistance_hits=0,
+            annotations=[ins, dele],
+        )
+
+        html = render_html(r)
+        assert 'A4A<u><strong>G</strong></u>' in html
+        assert 'A<u><strong>C</strong></u>7A' in html
+
     def test_render_html_uses_alignment_title_for_fasta_mode(self) -> None:
         r = _make_result()
         r.annotations[0].is_fasta_mode = True

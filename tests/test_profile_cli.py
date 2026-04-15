@@ -490,7 +490,7 @@ class TestInitCli:
         observed = {row['drug_name']: row['mutation'] for row in rows}
         assert observed == {
             'drugdel': 'K',
-            'drugfs': 'fsX',
+            'drugfs': 'KfsX',
             'drugstop': '*',
         }
 

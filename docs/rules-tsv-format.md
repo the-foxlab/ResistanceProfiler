@@ -85,7 +85,7 @@ Canonical internal tokens are:
 
 - single AA (`A`..`Y` from the 20 standard residues)
 - `*` (stop)
-- `fsX` (frameshift)
+- `KfsX` (anchored frameshift; anchor AA + `fsX`)
 - insertion token like `F50FGG`
 - deletion token like `FGG50F`
 
@@ -120,10 +120,10 @@ Stored as canonical `*`.
 
 | Status | Forms |
 |---|---|
-| Allowed | `fs`, `fsX`, `frameshift`, `F67fs`, `F67frameshift`, `F67fsATFF*` |
+| Allowed | `fs`, `fsX`, `frameshift`, `F67fs`, `F67frameshift`, `F67fsATFF*`, `F67Ffs`, `FfsX` |
 | Not allowed | malformed tokens that do not start with frameshift notation |
 
-Stored as canonical `fsX`. Any downstream sequence after `fs` is discarded.
+Stored as canonical anchored form `REFERENCE_AA + fsX` (e.g. `KfsX`). Any downstream sequence after `fs` is discarded.
 
 #### 4) Insertion
 
@@ -159,6 +159,8 @@ Behavior:
 #### Matching and validation behavior
 
 - Substitution and stop rules use explicit allele matching.
+- Frameshift rules are matched by frameshift state only (`*fsX`) and intentionally
+  ignore anchor amino-acid identity.
 - In-frame insertion and deletion rules are matched by codon position plus inserted/deleted
   payload, independent of anchor amino acid identity.
 - When an in-frame indel payload matches but the anchor AA differs between rule and observation,
@@ -177,7 +179,7 @@ The table below shows how `reference_identifier` (spelling in TSV), `position`, 
 | Substitution (canonical) | `NC_001806` | `67` | `F` | `L` | `66` | `F` | `L` |
 | Substitution (rewrite form) | `NC_001806` | `67` | `F` | `F67L` | `66` | `F` | `L` |
 | Stop | `NC_001806` | `67` | `F` | `F67stop` | `66` | `F` | `*` |
-| Frameshift | `NC_001806` | `67` | `F` | `F67fsATFF*` | `66` | `F` | `fsX` |
+| Frameshift | `NC_001806` | `67` | `F` | `F67fsATFF*` | `66` | `F` | `FfsX` |
 | Insertion (canonical) | `NC_001806` | `50` | `F` | `F50FGG` | `49` | `F` | `FGG` |
 | Insertion (HGVS-like) | `NC_001806` | `50` | `F` | `F50_F51insGG` | `49` | `F` | `FGG` |
 | Deletion (canonical) | `NC_001806` | `50` | `FGG` | `FGG50F` | `49` | `FGG` | `F` |

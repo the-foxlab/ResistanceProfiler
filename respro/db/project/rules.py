@@ -323,7 +323,7 @@ def _is_supported_mutation_token(mutation: str) -> bool:
     token = mutation.upper()
     if token == 'ANY':
         return False
-    if token in {'FSX', '*'}:
+    if token in {'FSX', '*'} or (token.endswith('FSX') and len(token) == 4):
         return True
     if re.fullmatch(r'[A-Z]+', token):
         return set(token) <= aa_letters
@@ -367,7 +367,9 @@ def _normalize_rule_alleles_for_storage(
         if token_upper in {'*', 'STOP'}:
             mutation = '*'
         elif token_upper.startswith('FS') or token_upper.startswith('FRAMESHIFT'):
-            mutation = 'fsX'
+            mutation = f'{reference}fsX'
+        elif token_upper.endswith('FSX') and len(token_upper) == 4:
+            mutation = f'{reference}fsX'
         else:
             mutation = token_upper
     else:
@@ -379,6 +381,9 @@ def _normalize_rule_alleles_for_storage(
         if mutation is None:
             errors.append(f'{context}: unrecognised mutation {mutation_raw!r}')
             return None
+
+    if mutation == 'fsX':
+        mutation = f'{reference}fsX'
 
     rewrite_match = _RE_REWRITE_TOKEN.fullmatch(mutation.upper())
     if rewrite_match is None:

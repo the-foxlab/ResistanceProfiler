@@ -61,7 +61,7 @@ def _assert_aa_token(ann, expected: str) -> None:
     if expected.endswith('fsX'):
         assert ann.ref_aa == expected[0]
         assert ann.codon_pos == int(expected[1:-3])
-        assert ann.alt_aa == 'fsX'
+        assert ann.alt_aa == f'{ann.ref_aa}fsX'
         assert ann.consequence == 'frameshift'
         return
     if expected.endswith('?'):

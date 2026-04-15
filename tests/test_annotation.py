@@ -186,7 +186,7 @@ class TestAnnotateVariantsForward:
         assert ann.gene_name == 'gag'
         assert ann.codon_pos == 1
         assert ann.ref_aa == 'K'
-        assert ann.alt_aa == 'fsX'
+        assert ann.alt_aa == 'KfsX'
         assert ann.consequence == 'frameshift'
 
     def test_combines_two_high_af_snps_in_same_codon(self, tiny_gene, tiny_ref_seq):
@@ -500,7 +500,7 @@ class TestInsertionAnnotation:
 
         assert ann is not None
         assert ann.ref_aa == 'M'
-        assert ann.alt_aa == 'fsX'
+        assert ann.alt_aa == 'MfsX'
         assert ann.consequence == 'frameshift'
 
     def test_inframe_insertion_at_mid_codon_is_complex(self) -> None:
@@ -524,7 +524,7 @@ class TestInsertionAnnotation:
 
         assert ann is not None
         assert ann.ref_aa == 'M'
-        assert ann.alt_aa == 'fsX'
+        assert ann.alt_aa == 'MfsX'
         assert ann.consequence == 'frameshift'
 
     def test_inframe_insertion_negative_strand(self) -> None:
@@ -622,7 +622,7 @@ class TestDeletionAnnotation:
 
         assert ann is not None
         assert ann.ref_aa == 'M'
-        assert ann.alt_aa == 'fsX'
+        assert ann.alt_aa == 'MfsX'
         assert ann.consequence == 'frameshift'
 
     def test_inframe_deletion_at_mid_codon_is_complex(self) -> None:
@@ -646,7 +646,7 @@ class TestDeletionAnnotation:
 
         assert ann is not None
         assert ann.ref_aa == 'M'
-        assert ann.alt_aa == 'fsX'
+        assert ann.alt_aa == 'MfsX'
         assert ann.consequence == 'frameshift'
 
     def test_inframe_deletion_negative_strand(self) -> None:
@@ -702,7 +702,7 @@ class TestDeletionAnnotation:
 # ─── Frameshift annotation ────────────────────────────────────────────
 
 class TestFrameshiftAnnotation:
-    """Frameshift annotations store anchor AA; alt_aa is 'fsX'."""
+    """Frameshift annotations store anchor AA and use anchored alt_aa token (e.g. GfsX)."""
 
     def _fwd_gene(self) -> GeneRecord:
         return GeneRecord(
@@ -718,7 +718,7 @@ class TestFrameshiftAnnotation:
         assert ann is not None
         assert ann.codon_pos == 1
         assert ann.ref_aa == 'G'   # codon GGG → G
-        assert ann.alt_aa == 'fsX'
+        assert ann.alt_aa == 'GfsX'
         assert ann.consequence == 'frameshift'
         assert ann.ref_codon == 'GGG'
 
@@ -729,7 +729,7 @@ class TestFrameshiftAnnotation:
 
         assert ann is not None
         assert ann.ref_aa == 'G'
-        assert ann.alt_aa == 'fsX'
+        assert ann.alt_aa == 'GfsX'
         assert ann.consequence == 'frameshift'
 
     def test_frameshift_through_annotate_variants(self) -> None:
@@ -753,5 +753,5 @@ class TestFrameshiftAnnotation:
 
         assert ann is not None
         assert ann.ref_aa == 'R'   # from query, not internal G
-        assert ann.alt_aa == 'fsX'
+        assert ann.alt_aa == 'RfsX'
         assert ann.consequence == 'frameshift'
