@@ -603,6 +603,82 @@ class TestBuildReportContext:
 
 
 class TestAlignmentVisualization:
+    def test_fasta_alignment_renders_match_bars_from_aligned_query(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='FASTA',
+            protein='F',
+            start=0,
+            end=9,
+            strand='+',
+            codon_start=0,
+            nt_sequence='AAACCCGGG',
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=9,
+            strand='+',
+            cigar='9M',
+            cds_start=0,
+        )
+        alignment = build_gene_alignments('AAATCCGGG', [match])['FASTA']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='CCC', alt='TCC'),
+            gene_name='FASTA',
+            codon_pos=1,
+            ref_codon='CCC',
+            alt_codon='TCC',
+            ref_aa='P',
+            alt_aa='S',
+            consequence='missense',
+            af_bin='high',
+            is_fasta_mode=True,
+        )
+
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        assert html.count("<span class='aln-cell aln-match-cell'>|</span>") == 8
+
+    def test_vcf_alignment_renders_match_bars_from_overlay_query(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='VCF',
+            protein='V',
+            start=100,
+            end=109,
+            strand='+',
+            codon_start=0,
+            nt_sequence='AAACCCGGG',
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=9,
+            strand='+',
+            cigar='9M',
+            cds_start=0,
+        )
+        alignment = build_gene_alignments('AAACCCGGG', [match])['VCF']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=103, ref='C', alt='T'),
+            gene_name='VCF',
+            codon_pos=1,
+            consequence='missense',
+            af_bin='high',
+            is_fasta_mode=False,
+        )
+
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        assert html.count("<span class='aln-cell aln-match-cell'>|</span>") == 8
+
     def test_highlight_uses_real_cigar_alignment_window(self) -> None:
         gene = GeneRecord(
             id=1,

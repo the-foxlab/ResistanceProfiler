@@ -81,6 +81,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Client-side sortable table
 - [X] Client-side table column filter controls (dropdown column selector + text filter)
 - [X] Expandable per-row local coding-direction alignment snippets in HTML report tables with mutation highlighting
+- [X] `|` match bars restored in row-level FASTA/VCF alignment snippets based on the final displayed ref/query rows
 - [X] Drug metadata in report — PubChem URL as clickable link
 - [X] Combo rule hits displayed in report
 - [X] GitHub logo linked to repository; star badge shown

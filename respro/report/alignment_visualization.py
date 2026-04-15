@@ -213,6 +213,28 @@ def _render_spaced_line(
     return ''.join(parts)
 
 
+def _build_match_line(
+    ref_seq: str,
+    query_seq: str,
+    coding_positions: list[int | None],
+    codon_start: int,
+    strand: str,
+) -> str:
+    """Render a `|` guide line for exact non-gap matches in the displayed snippet."""
+    match_chars = [
+        '|' if ref_base == query_base and ref_base != '-' else ' '
+        for ref_base, query_base in zip(ref_seq, query_seq)
+    ]
+    rendered = _render_spaced_line(
+        ''.join(match_chars),
+        [False] * len(match_chars),
+        coding_positions,
+        codon_start,
+        strand,
+    )
+    return rendered.replace("<span class='aln-cell'>|</span>", "<span class='aln-cell aln-match-cell'>|</span>")
+
+
 def _variant_coding_pos(ann: AnnotatedVariant, alignment: GeneAlignment) -> int:
     """Return coding-sequence nucleotide position for the variant anchor."""
     if alignment.strand == '+':
@@ -423,6 +445,13 @@ def build_alignment_html(
     ref_fmt = _render_spaced_line(
         ref_window, affected_mask, coding_positions, alignment.codon_start, alignment.strand,
     )
+    match_fmt = _build_match_line(
+        ref_window,
+        query_window,
+        coding_positions,
+        alignment.codon_start,
+        alignment.strand,
+    )
     query_fmt = _render_spaced_line(
         query_window, affected_mask, coding_positions, alignment.codon_start, alignment.strand,
     )
@@ -438,6 +467,8 @@ def build_alignment_html(
         f"<div class='aln-meta'>{escape(orientation_note)}</div>"
         "<div class='aln-line'><span class='aln-label'>Ref</span><span class='aln-seq'>"
         f"{ref_fmt}</span></div>"
+        f"<div class='aln-line aln-line-match'><span class='aln-label'></span><span class='aln-seq'>"
+        f"{match_fmt}</span></div>"
         f"<div class='aln-line'><span class='aln-label'>{escape(query_label)}</span><span class='aln-seq'>"
         f"{query_fmt}</span></div>"
         "</div>"

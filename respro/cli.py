@@ -458,7 +458,6 @@ def profile_vcf(
                     len(coverage_gaps),
                     min_depth,
                 )
-            print(coverage_gaps)
         annotations = annotate_variants(variants, genes)
         total_variants = len(variants)
         variants_in_cds = sum(1 for a in annotations if a.gene_name)

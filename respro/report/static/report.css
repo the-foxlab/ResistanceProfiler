@@ -129,6 +129,9 @@ tr:hover td { background: #f0f4f8; }
   gap: .5rem;
   margin: .08rem 0;
 }
+.aln-line-match {
+  color: #94a3b8;
+}
 .aln-label {
   width: 2.1rem;
   font-size: .72rem;
@@ -152,6 +155,9 @@ tr:hover td { background: #f0f4f8; }
   box-sizing: border-box;
   text-align: center;
   vertical-align: middle;
+}
+.aln-match-cell {
+  color: #64748b;
 }
 .aln-sep {
   display: inline-block;

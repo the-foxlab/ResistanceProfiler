@@ -43,7 +43,6 @@ def compute_coverage_gaps_from_bam(
     with pysam.AlignmentFile(str(bam_path), 'rb') as bam:
         contig = _resolve_bam_contig(bam, query_name)
         depths = _depth_array_from_bam(bam, contig, query_len)
-        print(depths)
     return compute_coverage_gaps_from_depth(depths, matches, min_depth=min_depth, query_len=query_len)
 
 
