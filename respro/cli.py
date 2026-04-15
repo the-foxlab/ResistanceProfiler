@@ -368,12 +368,12 @@ def profile_vcf(
         ),
     ] = None,
 
-    cores: Annotated[
+    threads: Annotated[
         int,
         typer.Option(
-            '--cores',
-            '-c',
-            help='Number of parallel worker processes for gene alignment.'
+            '--threads',
+            '-th',
+            help='Used number of threads for alignment (default: 1).'
         )
     ] = 1,
 
@@ -383,7 +383,16 @@ def profile_vcf(
             '--cache/--no-cache',
             help='Reuse/store FASTA reference mapping cache in the project database (default: on).'
         )
-    ] = True
+    ] = True,
+
+    aligner: Annotated[
+        str,
+        typer.Option(
+            '--aligner',
+            '-a',
+            help="Alignment backend for query FASTA matching: 'pairwise' (Biopython, default) or 'mappy' (minimap2). Mappy is faster for long references.",
+        )
+    ] = 'pairwise',
 
 ) -> None:
     """
@@ -402,6 +411,9 @@ def profile_vcf(
                 'Provide exactly one of --ref-fasta or --query-ref-header.'
             )
 
+        if aligner not in ('pairwise', 'mappy'):
+            raise click.ClickException(f"Unknown aligner {aligner!r}; choose 'pairwise' or 'mappy'.")
+
         project_conn = open_project_db(project)
         project_row = project_conn.execute('SELECT name FROM project LIMIT 1').fetchone()
         if project_row is None:
@@ -414,7 +426,8 @@ def profile_vcf(
         if ref_fasta is not None:
             with err_console.status('[dim]Aligning reference to internal references…[/dim]'):
                 query_name, query_seq, fasta_matches = resolve_fasta_query(
-                    project_conn, ref_fasta, use_cache=use_cache, cores=cores,
+                    project_conn, ref_fasta, use_cache=use_cache, cores=threads,
+                    aligner=aligner,  # type: ignore[arg-type]
                 )
         else:
             query_name, query_seq, fasta_matches = resolve_cached_query_reference(
@@ -554,9 +567,19 @@ def profile_fasta(
         typer.Option(
             '--cores',
             '-c',
-            help='Number of parallel worker processes for gene alignment.'
+            help='Alignment parallelism: process count for pairwise, thread count for mappy.'
         )
-    ] = 1
+    ] = 1,
+
+    aligner: Annotated[
+        str,
+        typer.Option(
+            '--aligner',
+            '-a',
+            help="Alignment backend for query FASTA matching: 'pairwise' (Biopython, default) or 'mappy' (minimap2).",
+        )
+    ] = 'pairwise',
+
 ) -> None:
     """
     Run resistance profiling on a consensus FASTA sequence.
@@ -567,6 +590,9 @@ def profile_fasta(
     results_conn = None
 
     try:
+        if aligner not in ('pairwise', 'mappy'):
+            raise click.ClickException(f"Unknown aligner {aligner!r}; choose 'pairwise' or 'mappy'.")
+
         project_conn = open_project_db(project)
         project_row = project_conn.execute('SELECT name FROM project LIMIT 1').fetchone()
         if project_row is None:
@@ -579,6 +605,7 @@ def profile_fasta(
         with err_console.status('[dim]Aligning fasta sequence to internal references…[/dim]'):
             query_name, query_seq, fasta_matches = resolve_fasta_query(
                 project_conn, consensus_fasta, use_cache=False, cores=cores,
+                aligner=aligner,  # type: ignore[arg-type]
             )
 
         ref_id, ref_name, fasta_matches = _resolve_reference(

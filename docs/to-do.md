@@ -113,6 +113,9 @@ Mark items done and update priorities after each completed milestone.
 - [X] Move shared profiling orchestration helpers out of `respro/cli.py` into `respro/cli_helpers.py` — `_init_results_db_connection`, `_resolve_reference`, `_load_reference_data`, and `_finalize_and_export`; behavior unchanged
 - [X] Split `respro/core/profile.py` — shared helpers (CIGAR inversion, query-sequence resolution) moved to `respro/core/profile_helpers.py`; VCF-specific remapping kept in `respro/core/vcf_profile.py`
 - [X] Split FASTA annotation helpers into `respro/core/annotate_fasta.py` — orchestration (`profile_fasta_consensus`, `_profile_gene`) in `profile_fasta.py`; codon/indel annotation, IUPAC expansion, and consequence helpers extracted; VCF remapping in `annotate_vcf.py`
+- [X] mappy alignment backend — `_match_with_mappy` and `_match_with_pairwise` extracted as backend
+  functions; `match_query_to_genes` accepts `aligner='pairwise'|'mappy'`; mappy CIGAR I/D swap verified;
+  coordinate convention proven equivalent; 16 new tests in `TestMappyBackend` and `TestMappyPairwiseEquivalence`
 - [X] Add `markupsafe>=2.1` as an explicit dependency in `pyproject.toml`
 - [X] VCF depth fallback — `_extract_depth` now returns `-1` sentinel when no depth field is found; depth filter in `profile-vcf` skips depth checking for sentinel variants so depth-free VCFs are not silently discarded
 - [X] Parallel gene alignment — `match_query_to_genes` now accepts `cores` parameter; per-gene alignment extracted into picklable `_align_gene_worker`; `--cores` added to both `profile-vcf` and `profile-fasta` (default 1)
@@ -180,14 +183,14 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Reference selection performance (multi-reference)
 
-- 🔴 mappy-backed reference preselection — in projects with multiple references, avoid full
-  per-gene alignment across every reference by first selecting likely candidate references with
-  mappy/minimizer mapping, then run the existing detailed alignment only on selected candidates;
-  prioritize this directly after `pysam` integration to prevent multi-reference runtime blowups;
-  reassess whether multiprocessing remains useful after moving to mappy
-- 🟢 Aligner policy after `pysam` adoption — once `pysam` is required for coverage and VCF
-  parsing, reassess C-extension footprint and packaging path (PyPI/Bioconda) and keep `--aligner`
-  behavior explicit while transitioning toward a mappy-first default if benchmarks support it
+- [x] Dual alignment backend — added `mappy` (minimap2) as an optional alternative to `PairwiseAligner`;
+  benchmarked on HSV whole-genome (152 KB) and partial FASTAs; all 8 resistance genes found with equivalent
+  identity scores; 440×–14 000× faster on large sequences; `--aligner pairwise|mappy` added to
+  `profile-vcf` and `profile-fasta`; CIGAR convention verified compatible with downstream VCF remap and
+  coordinate mapping; `mappy>=2.24` added as a dependency
+- 🟢 Make mappy the default aligner — once field validation confirms equivalence across diverse samples,
+  flip the default from `'pairwise'` to `'mappy'` and deprecate the `--cores` option for the alignment
+  phase (mappy handles threading internally)
 
 ### Usability and workflow
 

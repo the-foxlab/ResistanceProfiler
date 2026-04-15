@@ -1,10 +1,14 @@
 """
 Sequence alignment — align user-provided sequences against internal CDS annotations.
 
-Uses Biopython's C-accelerated PairwiseAligner for semi-global alignment of each
-candidate CDS against the query sequence, computes identity/coverage, builds a
-CIGAR string for coordinate mapping, and optionally caches results in the project
-database for fast re-runs with the same reference.
+Supports two alignment backends, selectable via the ``aligner`` parameter:
+
+- ``'pairwise'`` (default) — Biopython's C-accelerated PairwiseAligner; semi-global
+  alignment per CDS, exact CIGAR, works for any sequence length.
+- ``'mappy'`` — minimap2 via the ``mappy`` Python bindings; indexes the query once and
+  maps all CDS sequences against it; substantially faster for large (≥ 5 KB) reference
+  FASTAs while producing equivalent CIGAR-based coordinate maps compatible with all
+  downstream pipeline stages.
 """
 
 from __future__ import annotations
@@ -15,7 +19,9 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from multiprocessing import Pool
+from typing import Literal
 
+import mappy
 from Bio.Align import PairwiseAligner
 from Bio.Seq import Seq
 
@@ -35,13 +41,10 @@ def match_query_to_genes(
     min_identity: float = 0.80,
     min_coverage: float = 0.90,
     cores: int = 1,
+    aligner: Literal['pairwise', 'mappy'] = 'pairwise',
 ) -> list[GeneMatch]:
     """
     Match a query nucleotide sequence against internal gene CDS sequences.
-
-    Each gene's ``nt_sequence`` (coding orientation) is aligned against both
-    strands of the query.  Matches that meet the identity and coverage
-    thresholds are returned, sorted by identity descending.
 
     A match is accepted when ``identity >= min_identity`` AND at least one of:
 
@@ -51,42 +54,40 @@ def match_query_to_genes(
       by the alignment (correct for short partial sequences such as Sanger reads
       or amplicons that span only part of a gene)
 
-    When ``cores > 1`` each gene is aligned in a separate worker process via
-    ``multiprocessing.Pool``, which bypasses the GIL for the C-accelerated
-    ``PairwiseAligner`` and scales well with a large gene panel.
+    The ``aligner`` parameter selects the alignment backend:
+
+    - ``'pairwise'`` — Biopython's C-accelerated ``PairwiseAligner``; each gene is
+      aligned independently, ``cores > 1`` dispatches to a ``multiprocessing.Pool``.
+        - ``'mappy'`` — minimap2 via ``mappy``; indexes the query once and maps all CDS
+            sequences against it in a single pass; substantially faster for large reference
+            FASTAs; ``cores`` is forwarded to mappy as ``n_threads``.
+
+    Both backends produce identical ``GeneMatch`` objects and are fully interchangeable
+    in the downstream pipeline.
 
     :param query_sequence: user-provided nucleotide sequence
     :param genes: gene records to screen (typically only those with rules)
     :param min_identity: minimum nucleotide identity to accept
     :param min_coverage: minimum CDS or query coverage fraction required
-    :param cores: number of worker processes (1 = serial)
+    :param cores: number of workers; used as process count for ``'pairwise'`` and as
+        thread count (``n_threads``) for ``'mappy'``
+    :param aligner: alignment backend to use (``'pairwise'`` or ``'mappy'``)
     :return: accepted GeneMatch list sorted by identity descending
     """
-    query_upper = query_sequence.upper()
-    query_rc = str(Seq(query_upper).reverse_complement())
-
-    args = [(gene, query_upper, query_rc, min_identity, min_coverage) for gene in genes]
-
-    if cores > 1:
-        with Pool(processes=cores) as pool:
-            raw: list[GeneMatch | None] = pool.map(_align_gene_worker, args)
+    if aligner == 'mappy':
+        matches = _match_with_mappy(query_sequence, genes, min_identity, min_coverage, cores)
     else:
-        raw = [_align_gene_worker(a) for a in args]
+        matches = _match_with_pairwise(query_sequence, genes, min_identity, min_coverage, cores)
 
-    matches: list[GeneMatch] = []
-    for gene, result in zip(genes, raw):
-        ref = gene.reference_accession or str(gene.reference_id)
-        if result is None:
-            logger.debug('%s — Gene %r: no qualifying match', ref, gene.name)
-        else:
-            logger.info(
-                '%s — Gene %r matched: identity=%.1f%%, cds_coverage=%.1f%%, '
-                'query_coverage=%.1f%%, strand=%s',
-                ref, result.gene.name, result.identity * 100,
-                result.cds_coverage * 100, result.query_coverage * 100, result.strand,
-            )
-            matches.append(result)
-    # select the internal ref with the highest identity
+    for m in matches:
+        ref = m.gene.reference_accession or str(m.gene.reference_id)
+        logger.info(
+            '%s — Gene %r matched: identity=%.1f%%, cds_coverage=%.1f%%, '
+            'query_coverage=%.1f%%, strand=%s',
+            ref, m.gene.name, m.identity * 100,
+            m.cds_coverage * 100, m.query_coverage * 100, m.strand,
+        )
+
     matches.sort(key=lambda m: -m.identity)
     return matches
 
@@ -140,6 +141,132 @@ def load_genes_with_rules(
         )
         for r in rows
     ]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Alignment backends
+# ──────────────────────────────────────────────────────────────────────
+
+def _match_with_pairwise(
+    query_sequence: str,
+    genes: list[GeneRecord],
+    min_identity: float,
+    min_coverage: float,
+    cores: int,
+) -> list[GeneMatch]:
+    """Run PairwiseAligner-based gene matching."""
+    query_upper = query_sequence.upper()
+    query_rc = str(Seq(query_upper).reverse_complement())
+
+    args = [(gene, query_upper, query_rc, min_identity, min_coverage) for gene in genes]
+
+    if cores > 1:
+        with Pool(processes=cores) as pool:
+            raw: list[GeneMatch | None] = pool.map(_align_gene_worker, args)
+    else:
+        raw = [_align_gene_worker(a) for a in args]
+
+    matches: list[GeneMatch] = []
+    for gene, result in zip(genes, raw):
+        ref = gene.reference_accession or str(gene.reference_id)
+        if result is None:
+            logger.debug('%s — Gene %r: no qualifying match', ref, gene.name)
+        else:
+            matches.append(result)
+    return matches
+
+
+def _match_with_mappy(
+    query_sequence: str,
+    genes: list[GeneRecord],
+    min_identity: float,
+    min_coverage: float,
+    cores: int,
+) -> list[GeneMatch]:
+    """
+    Run mappy (minimap2) gene matching.
+
+    Indexes the query once using an adaptive k-mer size, then maps each CDS
+    against the index.  The mappy CIGAR (gene=query, genome=reference) is
+    converted to the pipeline convention (genome=query, CDS=reference) by
+    swapping I and D operations.  Coordinate fields ``query_start``/``query_end``
+    and ``cds_start`` are mapped from mappy's ``r_st``/``r_en`` and ``q_st``
+    directly, compatible with ``cigar_to_coordinate_map`` and
+    ``_build_query_to_cds_map`` for both strand orientations.
+    """
+    query_upper = query_sequence.upper()
+    # Adaptive k: smaller sequences require smaller k-mers to seed alignments.
+    # k=15 works for any query >= ~500 bp; k=5 is the practical minimum.
+    k = min(15, max(5, len(query_upper) // 50))
+
+    aligner = mappy.Aligner(seq=query_upper, preset='map-ont', k=k, n_threads=max(1, cores))
+    if not aligner:
+        raise RuntimeError('mappy: failed to build index for query sequence')
+
+    matches: list[GeneMatch] = []
+    for gene in genes:
+        if not gene.nt_sequence:
+            continue
+
+        cds = gene.nt_sequence.upper()
+        hits = list(aligner.map(cds))
+        primary = [h for h in hits if h.is_primary]
+
+        if not primary:
+            logger.debug(
+                '%s — Gene %r: no mappy hit',
+                gene.reference_accession or str(gene.reference_id), gene.name,
+            )
+            continue
+
+        h = primary[0]
+        identity = h.mlen / h.blen if h.blen else 0.0
+        cds_coverage = (h.q_en - h.q_st) / len(cds)
+        query_coverage = (h.r_en - h.r_st) / len(query_upper)
+
+        if identity < min_identity:
+            logger.debug('%s — Gene %r: identity %.2f below threshold', gene.reference_accession, gene.name, identity)
+            continue
+        if cds_coverage < min_coverage and query_coverage < min_coverage:
+            logger.debug('%s — Gene %r: coverage %.2f/%.2f below threshold', gene.reference_accession, gene.name, cds_coverage, query_coverage)
+            continue
+
+        strand = '+' if h.strand == 1 else '-'
+        # mappy CIGAR convention (gene=query, genome=reference): I means gene has extra
+        # bases relative to the genome; D means genome has extra.  The pipeline convention
+        # is the inverse (CDS=reference, genome=query), so I and D are swapped.
+        cigar = _swap_cigar_indels(h.cigar_str)
+
+        matches.append(GeneMatch(
+            gene=gene,
+            identity=identity,
+            cds_coverage=cds_coverage,
+            query_coverage=query_coverage,
+            query_start=h.r_st,
+            query_end=h.r_en,
+            strand=strand,
+            cigar=cigar,
+            cds_start=h.q_st,
+        ))
+
+    return matches
+
+
+def _swap_cigar_indels(cigar: str) -> str:
+    """
+    Swap I and D operations in a CIGAR string.
+
+    Converts from mappy convention (gene=query, genome=reference) to the
+    pipeline convention (CDS=reference, genome=query).
+
+    :param cigar: CIGAR string with I/D in mappy orientation
+    :return: CIGAR string with I and D swapped
+    """
+    return re.sub(
+        r'(\d+)([ID])',
+        lambda m: m.group(1) + ('D' if m.group(2) == 'I' else 'I'),
+        cigar,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────

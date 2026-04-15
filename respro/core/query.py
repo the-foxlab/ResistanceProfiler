@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from pathlib import Path
+from typing import Literal
 
 from respro.core.alignment import (
     load_cached_mappings,
@@ -30,6 +31,7 @@ def resolve_fasta_query(
     min_coverage: float = 0.90,
     use_cache: bool = True,
     cores: int = 1,
+    aligner: Literal['pairwise', 'mappy'] = 'pairwise',
 ) -> tuple[str, str, list[GeneMatch]]:
     """
     Read a user FASTA and align to internal CDS annotations.
@@ -39,7 +41,8 @@ def resolve_fasta_query(
     :param min_identity: minimum nucleotide identity
     :param min_coverage: minimum CDS coverage fraction
     :param use_cache: if True, reuse/store mapping cache in project DB
-    :param cores: number of worker processes for parallel gene alignment (1 = serial)
+    :param cores: number of worker processes for parallel gene alignment (pairwise only)
+    :param aligner: alignment backend (``'pairwise'`` or ``'mappy'``)
     :return: (query_name, query_sequence, gene_matches)
     """
     seqs = read_fasta(fasta_path)
@@ -72,6 +75,7 @@ def resolve_fasta_query(
         min_identity=min_identity,
         min_coverage=min_coverage,
         cores=cores,
+        aligner=aligner,
     )
     if not matches:
         raise ValueError(
