@@ -488,7 +488,7 @@ class TestResolveCachedQueryReference:
 # ──────────────────────────────────────────────────────────────────────
 
 class TestProfileFastaCli:
-    def test_profile_requires_one_query_reference_source(self, fasta_db: Path, tmp_path: Path) -> None:
+    def test_profile_requires_ref_fasta(self, fasta_db: Path, tmp_path: Path) -> None:
         vcf_path = tmp_path / 'sample.vcf'
         vcf_path.write_text(
             '##fileformat=VCFv4.2\n'
@@ -504,29 +504,8 @@ class TestProfileFastaCli:
         ])
 
         assert result.exit_code != 0
-        assert 'exactly one of --ref-fasta or --query-ref-header' in result.output
-
-    def test_profile_rejects_both_query_reference_sources(self, fasta_db: Path, tmp_path: Path) -> None:
-        fasta_path = tmp_path / 'user_ref.fasta'
-        fasta_path.write_text(f'>user_ref\n{TINY_REF_SEQ}\n')
-        vcf_path = tmp_path / 'sample.vcf'
-        vcf_path.write_text(
-            '##fileformat=VCFv4.2\n'
-            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
-            'user_ref\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
-        )
-
-        result = CliRunner().invoke(app, [
-            'profile-vcf',
-            '--project', str(fasta_db),
-            '--vcf', str(vcf_path),
-            '--ref-fasta', str(fasta_path),
-            '--query-ref-header', 'user_ref',
-            '--output', str(tmp_path / 'out'),
-        ])
-
-        assert result.exit_code != 0
-        assert 'exactly one of --ref-fasta or --query-ref-header' in result.output
+        assert 'Missing option' in result.output
+        assert '--ref-fasta' in result.output
 
     def test_fasta_profile_uses_metadata_of_matched_reference(
         self, fasta_db_multi_reference: Path, tmp_path: Path,
@@ -559,69 +538,6 @@ class TestProfileFastaCli:
         html = (output_dir / f'{vcf_path.stem}.report.html').read_text()
         assert 'refB' in html
         assert 'Organism B' in html
-
-    def test_header_only_profile_reuses_stored_query_reference(
-        self, fasta_db: Path, tmp_path: Path,
-    ) -> None:
-        fasta_path = tmp_path / 'user_ref.fasta'
-        query = 'NNNNN' + TINY_REF_SEQ + 'NNNNN'
-        fasta_path.write_text(f'>user_ref\n{query}\n')
-
-        conn = open_project_db(fasta_db)
-        resolve_fasta_query(conn, fasta_path)
-        conn.close()
-
-        vcf_path = tmp_path / 'header_hit.vcf'
-        vcf_path.write_text(
-            '##fileformat=VCFv4.2\n'
-            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
-            'user_ref\t9\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
-        )
-
-        output_dir = tmp_path / 'header_results'
-        result = CliRunner().invoke(app, [
-            'profile-vcf',
-            '--project', str(fasta_db),
-            '--vcf', str(vcf_path),
-            '--query-ref-header', 'user_ref',
-            '--output', str(output_dir),
-            '--min-af', '0.01',
-            '--min-depth', '0',
-        ])
-
-        assert result.exit_code == 0, result.output
-        assert '1 database hit' in result.output
-        assert (output_dir / f'{vcf_path.stem}.report.html').exists()
-
-    def test_header_only_profile_reports_available_headers(
-        self, fasta_db: Path, tmp_path: Path,
-    ) -> None:
-        fasta_path = tmp_path / 'user_ref.fasta'
-        fasta_path.write_text(f'>stored_ref\n{TINY_REF_SEQ}\n')
-
-        conn = open_project_db(fasta_db)
-        resolve_fasta_query(conn, fasta_path)
-        conn.close()
-
-        vcf_path = tmp_path / 'missing_header.vcf'
-        vcf_path.write_text(
-            '##fileformat=VCFv4.2\n'
-            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
-            'stored_ref\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
-        )
-
-        result = CliRunner().invoke(app, [
-            'profile-vcf',
-            '--project', str(fasta_db),
-            '--vcf', str(vcf_path),
-            '--query-ref-header', 'missing_ref',
-            '--output', str(tmp_path / 'out'),
-        ])
-
-        assert result.exit_code != 0
-        normalized = ' '.join(result.output.split())
-        assert 'Available cached' in normalized
-        assert 'headers: stored_ref' in normalized
 
     def test_fasta_profile_detects_resistance_hit(
         self, fasta_db: Path, tmp_path: Path,

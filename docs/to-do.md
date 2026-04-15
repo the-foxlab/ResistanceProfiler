@@ -43,7 +43,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Reference FASTA alignment via Biopython `PairwiseAligner` with CIGAR maps
 - [X] CIGAR-based coordinate remapping — VCF variants from user-reference to internal CDS coordinates
 - [X] Alignment result caching in `project.db` (`query_reference`, `query_gene_mapping`)
-- [X] `--query-ref-header` — reuse a previously cached reference alignment
+- [X] Query-reference cache reuse on repeated FASTA inputs
 - [X] `--cache` / `--no-cache` flag to control caching behaviour
 - [X] REF allele verification against active query sequence during remap
 - [X] Strand-aware VCF remap anchor model — nucleotide anchor projection and amino-acid anchor context are handled separately; reverse-orientation indels now switch anchor side correctly during remap
@@ -57,6 +57,14 @@ Mark items done and update priorities after each completed milestone.
 - [X] SNP-only annotation mode — removed INDEL annotation paths from VCF/FASTA workflows and related tests
 - [X] VCF in-frame insertion, in-frame deletion, and frameshift annotation — `_annotate_insertion`, `_annotate_deletion`, `_annotate_frameshift` added to `annotate_vcf.py`; mid-codon indels are non-assessable (return None); frameshift uses `alt_aa='fsX'` sentinel for rule matching
 - [X] VCF indel strand-aware query anchor — `remap_variants` now passes all variant types through (non-SNP skip removed); allele strand-flip uses `_transform_allele` (anchor complement + payload RC); `query_ref_codon` populated for all variant types; indel annotation handlers use query codon as anchor AA when available
+
+### Alignment performance
+
+- [X] Dual alignment backend — added `mappy` (minimap2) as an optional alternative to `PairwiseAligner`;
+  benchmarked on HSV whole-genome (152 KB) and partial FASTAs; all 8 resistance genes found with equivalent
+  identity scores; 440×–14 000× faster on large sequences; `--aligner pairwise|mappy` added to
+  `profile-vcf` and `profile-fasta`; CIGAR convention verified compatible with downstream VCF remap and
+  coordinate mapping; `mappy>=2.24` added as a dependency
 
 ### Codon-aware annotation
 
@@ -183,11 +191,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Reference selection performance (multi-reference)
 
-- [x] Dual alignment backend — added `mappy` (minimap2) as an optional alternative to `PairwiseAligner`;
-  benchmarked on HSV whole-genome (152 KB) and partial FASTAs; all 8 resistance genes found with equivalent
-  identity scores; 440×–14 000× faster on large sequences; `--aligner pairwise|mappy` added to
-  `profile-vcf` and `profile-fasta`; CIGAR convention verified compatible with downstream VCF remap and
-  coordinate mapping; `mappy>=2.24` added as a dependency
 - 🟢 Make mappy the default aligner — once field validation confirms equivalence across diverse samples,
   flip the default from `'pairwise'` to `'mappy'` and deprecate the `--cores` option for the alignment
   phase (mappy handles threading internally)
@@ -238,9 +241,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 Reproducibility gate in CI — run the same example profiling command twice in a fresh
   environment and assert deterministic outputs (`results.json` and report payload fields) to catch
   accidental nondeterminism before release
-- 🟡 Signed release artifacts and provenance — publish wheel/sdist with SHA256 checksums and
-  Sigstore attestation in GitHub Releases/PyPI release flow so users can verify artifact integrity
-  and build provenance; depends on CI being in place
 - 🟡 Example data for new users — add a small, self-contained example dataset (GenBank file,
   rules TSV, and a matching VCF or consensus FASTA) to the repository so users can follow the
   quick-start guide end-to-end without sourcing their own data; keep the files small enough to

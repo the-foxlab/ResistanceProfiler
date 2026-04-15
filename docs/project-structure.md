@@ -335,8 +335,7 @@ The test suite mirrors the major backend responsibilities.
 - `test_annotation.py`: codon translation and consequence behavior (`annotate_vcf.py`).
 - `test_sequence_matching.py`: CDS alignment, CIGAR coordinate mapping, and DB caching.
 - `test_profile_fasta.py`: FASTA-based profiling — coordinate remapping, cached
-  query-header reuse, sanity checks, and CLI end-to-end with `--ref-fasta` or
-  `--query-ref-header`.
+  query-header resolution, sanity checks, and CLI end-to-end with `--ref-fasta`.
 - `test_reference_io.py`: reference matching and normalization expectations.
 - `test_reference_resolution.py`: query-to-gene reference resolution correctness.
 - `test_rules.py`: resistance rule matching behavior.

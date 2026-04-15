@@ -31,7 +31,7 @@ from respro.cli_helpers import (
 )
 from respro.core.annotation import annotate_variants
 from respro.core.fasta_profile import profile_fasta_consensus
-from respro.core.query import resolve_cached_query_reference, resolve_fasta_query
+from respro.core.query import resolve_fasta_query
 from respro.core.rules import load_rules
 from respro.core.vcf_coverage import compute_coverage_gaps_from_bam
 from respro.core.vcf_remap import remap_variants
@@ -302,16 +302,7 @@ def profile_vcf(
             '--ref-fasta',
             '-r',
             exists=True,
-            help='Reference FASTA the VCF was called against (mutually exclusive with --query-ref-header).'
-        )
-    ] = None,
-
-    query_ref_header: Annotated[
-        str | None,
-        typer.Option(
-            '--query-ref-header',
-            '-q',
-            help='Reuse a previously cached query reference by its stored FASTA header (mutually exclusive with --ref-fasta).'
+            help='Reference FASTA the VCF was called against.'
         )
     ] = None,
 
@@ -397,8 +388,6 @@ def profile_vcf(
 ) -> None:
     """
     Run resistance profiling on a VCF file.
-
-    Provide exactly one of --ref-fasta or --query-ref-header to specify the query reference.
     """
     logger = logging.getLogger('respro')
     console = Console(highlight=False)
@@ -406,10 +395,8 @@ def profile_vcf(
     results_conn = None
 
     try:
-        if bool(ref_fasta) == bool(query_ref_header):
-            raise click.ClickException(
-                'Provide exactly one of --ref-fasta or --query-ref-header.'
-            )
+        if ref_fasta is None:
+            raise click.ClickException('Missing option --ref-fasta.')
 
         if aligner not in ('pairwise', 'mappy'):
             raise click.ClickException(f"Unknown aligner {aligner!r}; choose 'pairwise' or 'mappy'.")
@@ -423,15 +410,10 @@ def profile_vcf(
             str(results_db) if results_db else None, project_conn, logger,
         )
 
-        if ref_fasta is not None:
-            with err_console.status('[dim]Aligning reference to internal references…[/dim]'):
-                query_name, query_seq, fasta_matches = resolve_fasta_query(
-                    project_conn, ref_fasta, use_cache=use_cache, threads=threads,
-                    aligner=aligner,  # type: ignore[arg-type]
-                )
-        else:
-            query_name, query_seq, fasta_matches = resolve_cached_query_reference(
-                project_conn, query_ref_header or '',
+        with err_console.status('[dim]Aligning reference to internal references…[/dim]'):
+            query_name, query_seq, fasta_matches = resolve_fasta_query(
+                project_conn, ref_fasta, use_cache=use_cache, threads=threads,
+                aligner=aligner,  # type: ignore[arg-type]
             )
 
         ref_id, ref_name, fasta_matches = _resolve_reference(
