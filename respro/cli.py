@@ -304,7 +304,7 @@ def profile_vcf(
             exists=True,
             help='Reference FASTA the VCF was called against.'
         )
-    ] = None,
+    ],
 
     sample: Annotated[
         str,

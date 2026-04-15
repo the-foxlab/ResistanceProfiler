@@ -189,12 +189,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   variant falling inside two genes simultaneously produces correct, independent annotations for
   both; add tests for both the VCF and FASTA profiling paths
 
-### Reference selection performance (multi-reference)
-
-- 🟢 Make mappy the default aligner — once field validation confirms equivalence across diverse samples,
-  flip the default from `'pairwise'` to `'mappy'` and deprecate the `--cores` option for the alignment
-  phase (mappy handles threading internally)
-
 ### Usability and workflow
 
 - 🟡 Multi-VCF / multi-FASTA support — accept multiple `--vcf` / `--fasta` inputs in one
