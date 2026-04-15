@@ -15,20 +15,30 @@ from respro.db.models import VariantCall
 logger = logging.getLogger(__name__)
 
 
-def parse_vcf(vcf_path: Path) -> list[VariantCall]:
+def parse_vcf(
+    vcf_path: Path,
+    expected_query_name: str | None = None,
+) -> list[VariantCall]:
     """
     Parse a VCF file and return a list of VariantCall objects.
 
     Uses pysam.VariantFile as the single supported VCF parsing backend.
 
     :param vcf_path: path to VCF file
+    :param expected_query_name: optional query reference name; when set,
+        records with CHROM/contig != this value are dropped
     :return: list of VariantCall objects with 0-based positions
     """
     vcf_path = Path(vcf_path)
     variants: list[VariantCall] = []
+    dropped_contig_mismatch = 0
 
     with pysam.VariantFile(str(vcf_path)) as vcf:
         for record in vcf.fetch():
+            if expected_query_name is not None and record.contig != expected_query_name:
+                dropped_contig_mismatch += 1
+                continue
+
             ref = (record.ref or '').upper().replace('U', 'T')
             if not ref:
                 continue
@@ -55,7 +65,13 @@ def parse_vcf(vcf_path: Path) -> list[VariantCall]:
                     filter_status=filter_status,
                 ))
 
-    logger.info('Parsed %d variant(s) from %s', len(variants), vcf_path.name)
+    if expected_query_name is None:
+        logger.info('Parsed %d variant(s) from %s', len(variants), vcf_path.name)
+    else:
+        logger.info(
+            'Parsed %d variant(s) from %s (dropped %d due to CHROM != %r)',
+            len(variants), vcf_path.name, dropped_contig_mismatch, expected_query_name,
+        )
     return variants
 
 

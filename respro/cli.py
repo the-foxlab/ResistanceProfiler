@@ -439,7 +439,7 @@ def profile_vcf(
         )
         genes, rules, rule_sets, rule_gene_names = _load_reference_data(project_conn, ref_id)
 
-        variants = parse_vcf(vcf)
+        variants = parse_vcf(vcf, expected_query_name=query_name)
         logger.info('Parsed %d variant(s)', len(variants))
         variants = [
             v for v in variants

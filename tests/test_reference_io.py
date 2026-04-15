@@ -96,3 +96,18 @@ class TestParseVcfRnaNormalisation:
 
         assert len(variants) == 1
         assert variants[0].depth == -1
+
+    def test_drops_variants_with_non_matching_chrom(self, tmp_path: Path) -> None:
+        vcf = tmp_path / 'mixed_chrom.vcf'
+        vcf.write_text(
+            '##fileformat=VCFv4.2\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'seq1\t10\t.\tA\tT\t.\tPASS\tAF=0.6\n'
+            'other_ref\t12\t.\tA\tG\t.\tPASS\tAF=0.7\n'
+        )
+
+        variants = parse_vcf(vcf, expected_query_name='seq1')
+
+        assert len(variants) == 1
+        assert variants[0].chrom == 'seq1'
+        assert variants[0].pos == 9

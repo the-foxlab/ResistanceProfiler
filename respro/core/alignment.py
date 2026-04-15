@@ -40,7 +40,7 @@ def match_query_to_genes(
     *,
     min_identity: float = 0.80,
     min_coverage: float = 0.90,
-    cores: int = 1,
+    threads: int = 1,
     aligner: Literal['pairwise', 'mappy'] = 'pairwise',
 ) -> list[GeneMatch]:
     """
@@ -69,15 +69,15 @@ def match_query_to_genes(
     :param genes: gene records to screen (typically only those with rules)
     :param min_identity: minimum nucleotide identity to accept
     :param min_coverage: minimum CDS or query coverage fraction required
-    :param cores: number of workers; used as process count for ``'pairwise'`` and as
+    :param threads: number of workers; used as process count for ``'pairwise'`` and as
         thread count (``n_threads``) for ``'mappy'``
     :param aligner: alignment backend to use (``'pairwise'`` or ``'mappy'``)
     :return: accepted GeneMatch list sorted by identity descending
     """
     if aligner == 'mappy':
-        matches = _match_with_mappy(query_sequence, genes, min_identity, min_coverage, cores)
+        matches = _match_with_mappy(query_sequence, genes, min_identity, min_coverage, threads)
     else:
-        matches = _match_with_pairwise(query_sequence, genes, min_identity, min_coverage, cores)
+        matches = _match_with_pairwise(query_sequence, genes, min_identity, min_coverage, threads)
 
     for m in matches:
         ref = m.gene.reference_accession or str(m.gene.reference_id)
@@ -152,7 +152,7 @@ def _match_with_pairwise(
     genes: list[GeneRecord],
     min_identity: float,
     min_coverage: float,
-    cores: int,
+    threads: int,
 ) -> list[GeneMatch]:
     """Run PairwiseAligner-based gene matching."""
     query_upper = query_sequence.upper()
@@ -160,8 +160,8 @@ def _match_with_pairwise(
 
     args = [(gene, query_upper, query_rc, min_identity, min_coverage) for gene in genes]
 
-    if cores > 1:
-        with Pool(processes=cores) as pool:
+    if threads > 1:
+        with Pool(processes=threads) as pool:
             raw: list[GeneMatch | None] = pool.map(_align_gene_worker, args)
     else:
         raw = [_align_gene_worker(a) for a in args]
@@ -181,7 +181,7 @@ def _match_with_mappy(
     genes: list[GeneRecord],
     min_identity: float,
     min_coverage: float,
-    cores: int,
+    threads: int,
 ) -> list[GeneMatch]:
     """
     Run mappy (minimap2) gene matching.
@@ -199,7 +199,7 @@ def _match_with_mappy(
     # k=15 works for any query >= ~500 bp; k=5 is the practical minimum.
     k = min(15, max(5, len(query_upper) // 50))
 
-    aligner = mappy.Aligner(seq=query_upper, preset='map-ont', k=k, n_threads=max(1, cores))
+    aligner = mappy.Aligner(seq=query_upper, preset='map-ont', k=k, n_threads=max(1, threads))
     if not aligner:
         raise RuntimeError('mappy: failed to build index for query sequence')
 

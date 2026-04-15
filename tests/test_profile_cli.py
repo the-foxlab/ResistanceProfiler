@@ -96,6 +96,35 @@ class TestProfileCli:
         assert result.exit_code == 0, result.output
         assert '1 database hit' in result.output
 
+    def test_profile_drops_variants_with_non_matching_vcf_chrom(
+        self,
+        project_db: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ):
+        """A CHROM mismatch must not be remapped against the active query reference."""
+        vcf_path = tmp_path / 'wrong_chrom.vcf'
+        vcf_path.write_text(
+            '##fileformat=VCFv4.2\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            # This would trigger the K2E rule if CHROM were ignored.
+            'other_ref\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
+        )
+        output_dir = tmp_path / 'wrong_chrom_results'
+        runner = CliRunner()
+        result = runner.invoke(app, [
+            'profile-vcf',
+            '--project', str(project_db),
+            '--vcf', str(vcf_path),
+            '--ref-fasta', str(sample_ref_fasta),
+            '--output', str(output_dir),
+            '--min-af', '0.01',
+            '--min-depth', '0',
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert '0 database hit(s)' in result.output
+
     def test_profile_with_results_db_creates_new_db(
         self,
         project_db: Path,
