@@ -12,6 +12,12 @@ from conftest import TINY_REF_NAME, TINY_REF_SEQ
 from typer.testing import CliRunner
 
 from respro.cli.main import app
+from respro.core.alignment import (
+    _align_cds_to_query,
+    match_query_to_genes,
+    sequence_checksum,
+    store_mappings,
+)
 from respro.core.fasta_profile import (
     _annotate_from_alignment,
     _expand_iupac_codon,
@@ -26,14 +32,7 @@ from respro.core.vcf_remap import (
     _cds_pos_to_genomic_pos,
     remap_variants,
 )
-from respro.core.alignment import (
-    _align_cds_to_query,
-    match_query_to_genes,
-    sequence_checksum,
-    store_mappings,
-)
-from respro.db.models import GeneMatch
-from respro.db.models import GeneRecord, VariantCall
+from respro.db.models import GeneMatch, GeneRecord, VariantCall
 from respro.db.schema import create_schema, open_project_db
 
 # ──────────────────────────────────────────────────────────────────────

@@ -435,7 +435,6 @@ class TestAssignAfBins:
 
 def _make_gene(nt_sequence: str, strand: str = '+') -> GeneRecord:
     end = len(nt_sequence)
-    seq = nt_sequence if strand == '+' else reverse_complement(nt_sequence)
     return GeneRecord(
         id=1, reference_id=1, name='gene', protein='P',
         start=0, end=end, strand=strand, codon_start=0,

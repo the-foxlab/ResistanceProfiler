@@ -4,13 +4,23 @@ Tests for report output generation.
 
 import sqlite3
 
-from respro.db.models import AnnotatedVariant, CoverageGap, GeneMatch, GeneRecord, Publication, ResistanceRule, VariantCall
-from respro.db.models import ProfilingResult
+from respro.db.models import (
+    AnnotatedVariant,
+    CoverageGap,
+    GeneMatch,
+    GeneRecord,
+    ProfilingResult,
+    Publication,
+    ResistanceRule,
+    VariantCall,
+)
 from respro.report.alignment_visualization import build_alignment_html, build_gene_alignments
-from respro.report.html import build_report_context
-from respro.report.html import _build_potential_effects_rows
-from respro.report.html import _load_gene_cards
-from respro.report.html import render_html
+from respro.report.html import (
+    _build_potential_effects_rows,
+    _load_gene_cards,
+    build_report_context,
+    render_html,
+)
 
 
 def _make_result() -> ProfilingResult:

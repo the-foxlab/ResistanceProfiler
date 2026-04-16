@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 from conftest import TINY_REF_SEQ, write_genbank
 
-from respro.cli.init import add_to_project, init_project
+from respro.cli.init import init_project
 from respro.db.genes import _is_ncbi_protein_accession
 from respro.db.rules_import import (
     _detect_coordinate_base,

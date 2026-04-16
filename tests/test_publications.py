@@ -8,8 +8,7 @@ import json
 import urllib.error
 from unittest.mock import MagicMock, patch
 
-from respro.io.publications import fetch_pubmed_metadata, fetch_publication_metadata
-
+from respro.io.publications import fetch_publication_metadata, fetch_pubmed_metadata
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

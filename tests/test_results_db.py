@@ -15,6 +15,7 @@ from respro.db.models import (
     AnnotatedVariant,
     ComboRuleHit,
     CoverageGap,
+    ProfilingResult,
     ResistanceRule,
     ResistanceRuleSet,
     ResistanceRuleSetMember,
@@ -26,12 +27,11 @@ from respro.db.results import (
     load_coverage_gaps,
     load_run,
     project_fingerprint,
-    reconstruct_combo_rule_hits,
     reconstruct_annotations,
+    reconstruct_combo_rule_hits,
     save_run,
 )
 from respro.db.schema import create_schema, init_results_db, open_project_db
-from respro.db.models import ProfilingResult
 
 
 class TestProjectSchemaBoundary:

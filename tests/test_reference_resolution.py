@@ -9,6 +9,7 @@ from respro.io.reference import (
     load_genes_for_reference,
 )
 
+
 class TestLoadGenes:
     def test_loads_genes(self, project_db: Path):
         conn = open_project_db(project_db)

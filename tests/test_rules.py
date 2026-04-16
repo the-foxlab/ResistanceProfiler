@@ -7,14 +7,18 @@ import textwrap
 from pathlib import Path
 
 import pytest
-
-from respro.core.rules import load_rules, load_rule_sets, match_rules, match_rule_sets
-from respro.db.models import (
-    AnnotatedVariant, ResistanceRule, ResistanceRuleSet, ResistanceRuleSetMember, VariantCall,
-)
-from respro.cli.init import init_project
-from respro.db.schema import open_project_db
 from conftest import TINY_REF_SEQ, write_genbank
+
+from respro.cli.init import init_project
+from respro.core.rules import load_rule_sets, load_rules, match_rule_sets, match_rules
+from respro.db.models import (
+    AnnotatedVariant,
+    ResistanceRule,
+    ResistanceRuleSet,
+    ResistanceRuleSetMember,
+    VariantCall,
+)
+from respro.db.schema import open_project_db
 
 
 class TestLoadRules:

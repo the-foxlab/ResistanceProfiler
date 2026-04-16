@@ -7,22 +7,10 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
 
 from respro.cli.main import app
 from respro.core.rules import load_rules
-from respro.db.results import save_run
-from respro.db.results import (
-    load_classifications,
-    load_combo_rule_hits,
-    load_coverage_gaps,
-    load_run,
-    reconstruct_annotations,
-    reconstruct_combo_rule_hits,
-)
-from respro.db.schema import init_results_db, open_project_db
-from respro.db.schema import open_results_db
 from respro.db.models import (
     AnnotatedVariant,
     ComboRuleHit,
@@ -31,6 +19,16 @@ from respro.db.models import (
     ResistanceRuleSetMember,
     VariantCall,
 )
+from respro.db.results import (
+    load_classifications,
+    load_combo_rule_hits,
+    load_coverage_gaps,
+    load_run,
+    reconstruct_annotations,
+    reconstruct_combo_rule_hits,
+    save_run,
+)
+from respro.db.schema import init_results_db, open_project_db, open_results_db
 from respro.io.reference import load_genes_for_reference
 from respro.report.html import export_results
 

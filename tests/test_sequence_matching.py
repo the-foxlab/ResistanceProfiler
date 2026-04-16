@@ -4,7 +4,6 @@ Tests for sequence alignment — CDS alignment, CIGAR mapping, and DB caching.
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -21,10 +20,8 @@ from respro.core.alignment import (
     sequence_checksum,
     store_mappings,
 )
-from respro.db.models import GeneMatch
 from respro.db.models import GeneRecord
 from respro.db.schema import create_schema
-
 
 # ──────────────────────────────────────────────────────────────────────
 # Fixtures

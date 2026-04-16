@@ -10,9 +10,9 @@ import sqlite3
 import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-from respro.io.pubchem import PubChemRecord, _fetch_cid, _fetch_description, lookup_drug
-from respro.db.drugs import _get_drugs_from_pubchem
 
+from respro.db.drugs import _get_drugs_from_pubchem
+from respro.io.pubchem import PubChemRecord, _fetch_cid, _fetch_description, lookup_drug
 
 # ──────────────────────────────────────────────────────────────────────
 # Helpers
@@ -179,8 +179,9 @@ class TestAddPubchemData:
     """Test _get_drugs_from_pubchem with a real in-memory SQLite DB."""
 
     def _make_db(self) -> sqlite3.Connection:
-        from respro.db.schema import create_schema
         import tempfile
+
+        from respro.db.schema import create_schema
         conn = create_schema(Path(tempfile.mktemp(suffix='.db')))
         conn.row_factory = sqlite3.Row
         conn.execute("INSERT INTO project (name, schema_version) VALUES ('Test', 7)")
