@@ -76,15 +76,15 @@ def _profile_vcf_command(
     use_cache: Annotated[
         bool, typer.Option(
             '--cache/--no-cache',
-            help='Reuse/store FASTA reference mapping cache in the project database (default: on).',
+            help='Reuse/store FASTA reference mapping cache in the project database (default: off).',
         )
-    ] = True,
+    ] = False,
     aligner: Annotated[
         str, typer.Option(
             '--aligner', '-a',
-            help="Alignment backend for query FASTA matching: 'pairwise' (Biopython, default) or 'mappy' (minimap2). Mappy is faster for long references.",
+            help="Alignment backend for query FASTA matching: 'pairwise' (Biopython) or 'mappy' (minimap2, default). Mappy is faster for long references.",
         )
-    ] = 'pairwise',
+    ] = 'mappy',
 ) -> None:
     """
     Run resistance profiling on a VCF file.

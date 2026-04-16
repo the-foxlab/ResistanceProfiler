@@ -57,13 +57,13 @@ def _profile_fasta_command(
             '--cache/--no-cache',
             help='Cache FASTA reference mapping in the project database for report regeneration (default: on).',
         )
-    ] = True,
+    ] = False,
     aligner: Annotated[
         str, typer.Option(
             '--aligner', '-a',
             help="Alignment backend for query FASTA matching: 'pairwise' (Biopython, default) or 'mappy' (minimap2).",
         )
-    ] = 'pairwise',
+    ] = 'mappy',
 ) -> None:
     """
     Run resistance profiling on a consensus FASTA sequence.

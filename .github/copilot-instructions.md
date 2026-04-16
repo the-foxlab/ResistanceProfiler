@@ -28,15 +28,15 @@ Keep this file focused on how code should be written in this repository.
 
 ## Code style
 
-| Element             | Convention                          |
-|---------------------|-------------------------------------|
-| Functions/variables | `snake_case`                        |
-| Classes             | `PascalCase`                        |
-| Constants           | `UPPER_SNAKE_CASE`                  |
-| Internal helpers    | prefix with `_`                     |
-| Strings             | single quotes (`'...'`)             |
-| Docstrings          | triple double quotes (`"""..."""`)  |
-| Line length         | 100                                 |
+| Element             | Convention                           |
+| ------------------- | ------------------------------------ |
+| Functions/variables | `snake_case`                       |
+| Classes             | `PascalCase`                       |
+| Constants           | `UPPER_SNAKE_CASE`                 |
+| Internal helpers    | prefix with `_`                    |
+| Strings             | single quotes (`'...'`)            |
+| Docstrings          | triple double quotes (`"""..."""`) |
+| Line length         | 100                                  |
 
 ### Constants
 
@@ -249,11 +249,12 @@ When reviewing code, check the whole repository for:
 - Check for proper use of type hints and docstrings
 - Check for proper test coverage and quality of test cases
 - Remove any behaviour that is intended for backward compatibility if not
-being explicitly requested by the user
+  being explicitly requested by the user
+- Check for functions that are only called by tests and remove them including tests
 
 ## Testing
 
-Mimic a test-driven environment and write test cases first for non-trivial tasks. 
+Mimic a test-driven environment and write test cases first for non-trivial tasks.
 Organize tests in classes when grouping related scenarios:
 
 ```python
@@ -293,4 +294,3 @@ Testing expectations:
 - Prefer focused scenario tests over broad smoke tests.
 - When fixing ambiguous interpretation, add a test that would fail without the fix.
 - Keep outputs deterministic so report/export tests stay stable.
-
