@@ -9,7 +9,7 @@ import pysam
 from conftest import TINY_REF_SEQ, write_genbank
 from typer.testing import CliRunner
 
-from respro.cli import app
+from respro.cli.main import app
 from respro.db.schema import create_schema, init_results_db
 
 
@@ -27,7 +27,7 @@ class TestProfileCli:
         output_dir = tmp_path / 'results'
         runner = CliRunner()
         result = runner.invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -54,7 +54,7 @@ class TestProfileCli:
         output_dir = tmp_path / 'html_results'
         runner = CliRunner()
         result = runner.invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -85,7 +85,7 @@ class TestProfileCli:
         output_dir = tmp_path / 'hit_results'
         runner = CliRunner()
         result = runner.invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(project_db),
             '--vcf', str(vcf_path),
             '--ref-fasta', str(sample_ref_fasta),
@@ -113,7 +113,7 @@ class TestProfileCli:
         output_dir = tmp_path / 'wrong_chrom_results'
         runner = CliRunner()
         result = runner.invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(project_db),
             '--vcf', str(vcf_path),
             '--ref-fasta', str(sample_ref_fasta),
@@ -135,7 +135,7 @@ class TestProfileCli:
         output_dir = tmp_path / 'results_with_db'
         results_db = tmp_path / 'run_results.db'
         result = CliRunner().invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -167,7 +167,7 @@ class TestProfileCli:
         conn.close()
 
         result = CliRunner().invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -193,7 +193,7 @@ class TestProfileCli:
         conn.close()
 
         result = CliRunner().invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -215,7 +215,7 @@ class TestProfileCli:
         bad_fasta.write_text('>unrelated\nGATTACAGATTACAGATTACAGATTACA\n')
 
         result = CliRunner().invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(bad_fasta),
@@ -240,7 +240,7 @@ class TestProfileCli:
         results_db = tmp_path / 'results.db'
         output_dir = tmp_path / 'bam_results'
         result = CliRunner().invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),
@@ -535,7 +535,7 @@ class TestInitCli:
         )
 
         append_result = runner.invoke(app, [
-            'init-add',
+            'add',
             '--project', str(db_path),
             '--rules', str(rules_append),
             '--no-additional-info',
@@ -583,7 +583,7 @@ class TestInitCli:
         )
 
         result = CliRunner().invoke(app, [
-            'init-add',
+            'add',
             '--project', str(tmp_path / 'missing.db'),
             '--genbank', str(genbank_path),
             '--rules', str(rules_tsv),
@@ -606,7 +606,7 @@ class TestInitCli:
         )
 
         result = CliRunner().invoke(app, [
-            'init-add',
+            'add',
             '--project', str(db_path),
             '--rules', str(rules_tsv),
             '--no-additional-info',
@@ -632,7 +632,7 @@ class TestInitCli:
         )
 
         result = CliRunner().invoke(app, [
-            'init-add',
+            'add',
             '--project', str(db_path),
             '--rules', str(rules_tsv),
             '--no-additional-info',
@@ -722,7 +722,7 @@ class TestInitCli:
         """After profiling with --results-db, a run row and variant rows must be stored."""
         results_db = tmp_path / 'populated.db'
         result = CliRunner().invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(project_db),
             '--vcf', str(sample_vcf),
             '--ref-fasta', str(sample_ref_fasta),

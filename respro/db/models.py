@@ -291,6 +291,7 @@ class ProfilingResult:
     annotations: list[AnnotatedVariant] = field(default_factory=list)
     combo_hits: list[ComboRuleHit] = field(default_factory=list)
     coverage_gaps: list[CoverageGap] = field(default_factory=list)
+    sample_classifications: list[dict] = field(default_factory=list)
     query_sequence: str = ''
     gene_matches: list[GeneMatch] = field(default_factory=list)
 

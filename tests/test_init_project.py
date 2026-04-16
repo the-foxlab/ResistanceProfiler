@@ -12,9 +12,9 @@ from unittest.mock import patch
 import pytest
 from conftest import TINY_REF_SEQ, write_genbank
 
-from respro.db.project import init_project
-from respro.db.project.genes import _is_ncbi_protein_accession
-from respro.db.project.rules import (
+from respro.cli.init import add_to_project, init_project
+from respro.db.genes import _is_ncbi_protein_accession
+from respro.db.rules_import import (
     _detect_coordinate_base,
     _resolve_anchorless_deletion,
     _validate_reference_amino_acids,
@@ -194,7 +194,7 @@ class TestValidateReferenceAminoAcids:
 
         # pos=1 (1-based) → aa_seq[0]='M', rule says 'K' → mismatch; must warn, not raise
         rows = [_rule('gX', position=1, reference='K')]
-        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
             mismatch_keys = _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
         assert ('gX', '1', '', 'K') in mismatch_keys
         assert any('mismatch' in r.message.lower() for r in caplog.records)
@@ -206,7 +206,7 @@ class TestValidateReferenceAminoAcids:
         # Must warn but NOT raise — the rule is simply skipped.
         import logging
         rows = [_rule('gX', position=10, reference='M')]
-        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
             _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
         assert any('out of range' in r.message for r in caplog.records)
 
@@ -215,7 +215,7 @@ class TestValidateReferenceAminoAcids:
         # Must warn but NOT raise.
         import logging
         rows = [_rule('gX', position=6, reference='M')]
-        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
             _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=0)
         assert any('out of range' in r.message for r in caplog.records)
 
@@ -227,7 +227,7 @@ class TestValidateReferenceAminoAcids:
             _rule('gX', position=2, reference='Z'),  # mismatch 2
             _rule('gX', position=3, reference='Z'),  # mismatch 3
         ]
-        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
             mismatch_keys = _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
         assert len(mismatch_keys) == 3
         assert any('3' in r.message and 'mismatch' in r.message.lower() for r in caplog.records)
@@ -279,7 +279,7 @@ class TestValidateReferenceAminoAcids:
         }
         # Pointing to ACC1 which has 'Q' at pos 1, not 'M' — must warn, not raise
         rows = [_rule('gX', position=1, reference='M', reference_identifier='ACC1')]
-        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
             mismatch_keys = _validate_reference_amino_acids(rows, genes_by_name, coord_base=1)
         assert ('gX', '1', 'ACC1', 'M') in mismatch_keys
         assert any('mismatch' in r.message.lower() for r in caplog.records)
@@ -457,7 +457,7 @@ class TestComboRuleParsing:
         init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                      rules_tsv=tsv, additional_info=False)
         # init-add with the same TSV must not create a second copy
-        from respro.db.project import add_to_project
+        from respro.cli.init import add_to_project
         add_to_project(db_path=db, rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
@@ -609,7 +609,7 @@ class TestComboRuleParsing:
         db = tmp_path / 'proj.db'
         call_count = 0
         # Patch the name as it exists in rules.py's namespace.
-        with patch('respro.db.project.rules.fetch_pubmed_metadata', side_effect=_fake_fetch):
+        with patch('respro.db.rules_import.fetch_pubmed_metadata', side_effect=_fake_fetch):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=True)
 
@@ -877,7 +877,7 @@ class TestPhenotypeNormalization:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
@@ -898,7 +898,7 @@ class TestPhenotypeNormalization:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
@@ -919,7 +919,7 @@ class TestPhenotypeNormalization:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
@@ -942,7 +942,7 @@ class TestPhenotypeNormalization:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
@@ -982,7 +982,7 @@ class TestRefAaMismatchSkip:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=False)
 
@@ -1010,7 +1010,7 @@ class TestRefAaMismatchSkip:
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.db.project.rules'):
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=False)
 

@@ -228,6 +228,50 @@
 </div>
 {% endif %}
 
+{% if sample_classification_rows %}
+<div class='section open'>
+<h2 class='section-toggle'>Manual classifications <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
+<div class='table-wrapper'>
+<table class='sortable'>
+<thead><tr>
+  <th>Drug</th>
+  <th>Phenotype</th>
+  {% if sample_classification_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
+  {% if sample_classification_cols.ic50 %}<th>IC50</th>{% endif %}
+  {% if sample_classification_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
+  {% if sample_classification_cols.note %}<th>Note</th>{% endif %}
+  {% if sample_classification_cols.source %}<th>Source</th>{% endif %}
+  <th>Timestamp</th>
+</tr></thead>
+<tbody>
+{% for r in sample_classification_rows %}
+<tr class='data-row'>
+  <td>{{ r.drug or '—' }}</td>
+  <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
+      {% elif r.phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
+      {% elif r.phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% else %}<span class='badge badge-unknown'>{{ r.phenotype }}</span>{% endif %}</td>
+  {% if sample_classification_cols.clinical_phenotype %}
+  <td>{% if r.clinical_phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
+      {% elif r.clinical_phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
+      {% elif r.clinical_phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
+  {% endif %}
+  {% if sample_classification_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
+  {% if sample_classification_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
+  {% if sample_classification_cols.note %}<td>{{ r.note or '—' }}</td>{% endif %}
+  {% if sample_classification_cols.source %}<td>{{ r.source or '—' }}</td>{% endif %}
+  <td>{{ r.created_at or '—' }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+</div>
+{% endif %}
+
 {% if potential_rows %}
 <div class='section open' id='section-similarity'>
 <h2 class='section-toggle'>Similarity to database entries <span class='toggle-arrow'>&#9654;</span></h2>

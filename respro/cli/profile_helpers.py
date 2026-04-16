@@ -1,5 +1,5 @@
 """
-Shared profiling orchestration helpers for the CLI layer.
+Shared profiling orchestration helpers and output utilities for the CLI layer.
 
 These functions depend on Click, DB wiring, persistence, and report export —
 they belong to the CLI layer and must not be moved into respro/core/.
@@ -12,6 +12,8 @@ import sqlite3
 from pathlib import Path
 
 import click
+from rich.console import Console
+from rich.panel import Panel
 
 from respro.core.query import pick_best_reference_id, select_matches_for_reference
 from respro.core.rules import load_rule_sets, load_rules, match_rule_sets, match_rules
@@ -246,3 +248,14 @@ def assign_af_bins(
                 ann.af_bin = label
 
     return annotations
+
+
+def _print_completion_panel(console: Console, title: str, result: ProfilingResult, outputs: dict) -> None:
+    """Render a summary panel after a profiling run."""
+    hit_line = f'{result.resistance_hits} database hit(s)'
+    if hasattr(result, 'combo_hits') and result.combo_hits:
+        hit_line += f'  ·  {len(result.combo_hits)} combo rule hit(s)'
+    lines = [hit_line, '']
+    for fmt, path in outputs.items():
+        lines.append(f'[dim]{fmt}[/dim]   {path}')
+    console.print(Panel('\n'.join(lines), title=f'[green]{title}[/green]', border_style='green'))

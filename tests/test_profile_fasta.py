@@ -11,7 +11,7 @@ import pytest
 from conftest import TINY_REF_NAME, TINY_REF_SEQ
 from typer.testing import CliRunner
 
-from respro.cli import app
+from respro.cli.main import app
 from respro.core.fasta_profile import (
     _annotate_from_alignment,
     _expand_iupac_codon,
@@ -497,7 +497,7 @@ class TestProfileFastaCli:
         )
 
         result = CliRunner().invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
             '--output', str(tmp_path / 'out'),
@@ -525,7 +525,7 @@ class TestProfileFastaCli:
         output_dir = tmp_path / 'fasta_ref_b_results'
         runner = CliRunner()
         result = runner.invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(fasta_db_multi_reference),
             '--vcf', str(vcf_path),
             '--ref-fasta', str(fasta_path),
@@ -557,7 +557,7 @@ class TestProfileFastaCli:
         output_dir = tmp_path / 'fasta_results'
         runner = CliRunner()
         result = runner.invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
             '--ref-fasta', str(fasta_path),
@@ -587,7 +587,7 @@ class TestProfileFastaCli:
         output_dir = tmp_path / 'outside_results'
         runner = CliRunner()
         result = runner.invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
             '--ref-fasta', str(fasta_path),
@@ -616,7 +616,7 @@ class TestProfileFastaCli:
         output_dir = tmp_path / 'json_results'
         runner = CliRunner()
         result = runner.invoke(app, [
-            'profile-vcf',
+            'vcf',
             '--project', str(fasta_db),
             '--vcf', str(vcf_path),
             '--ref-fasta', str(fasta_path),
@@ -881,7 +881,7 @@ class TestFastaConsensusCli:
 
         output_dir = tmp_path / 'out'
         result = CliRunner().invoke(app, [
-            'profile-fasta',
+            'fasta',
             '--project', str(fasta_db),
             '--fasta', str(fasta_path),
             '--output', str(output_dir),
@@ -899,7 +899,7 @@ class TestFastaConsensusCli:
 
         output_dir = tmp_path / 'out'
         result = CliRunner().invoke(app, [
-            'profile-fasta',
+            'fasta',
             '--project', str(fasta_db),
             '--fasta', str(fasta_path),
             '--output', str(output_dir),

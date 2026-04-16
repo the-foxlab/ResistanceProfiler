@@ -37,6 +37,22 @@ def project_fingerprint(project_conn: sqlite3.Connection) -> str:
     return row['uuid']
 
 
+def project_updated_at(project_conn: sqlite3.Connection) -> str:
+    """
+    Return the last-updated timestamp of the project database.
+
+    Falls back to an empty string for older DBs that lack the column.
+
+    :param project_conn: open project DB connection
+    :return: ISO timestamp string or empty string
+    """
+    try:
+        row = project_conn.execute('SELECT updated_at FROM project LIMIT 1').fetchone()
+        return row['updated_at'] or '' if row else ''
+    except Exception:
+        return ''
+
+
 def save_run(
     results_conn: sqlite3.Connection,
     project_db_path: Path,
@@ -53,17 +69,19 @@ def save_run(
     :return: the new run id
     """
     fingerprint = project_fingerprint(project_conn)
+    updated_at = project_updated_at(project_conn)
 
     cursor = results_conn.execute(
         'INSERT INTO run '
-        '(project_name, project_db_path, project_fingerprint, reference_name, '
+        '(project_name, project_db_path, project_fingerprint, project_updated_at, reference_name, '
         'sample_name, vcf_path, total_variants, variants_in_cds, '
         'resistance_hits, combo_hits, status) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         (
             result.project_name,
             str(project_db_path),
             fingerprint,
+            updated_at,
             result.reference_name,
             result.sample_name,
             result.vcf_name,
@@ -404,3 +422,67 @@ def _match_combo_variants(
         )
     return matched
 
+
+def save_classification(
+    results_conn: sqlite3.Connection,
+    run_id: int,
+    *,
+    drug: str = '',
+    phenotype: str = 'unknown',
+    clinical_phenotype: str = 'unknown',
+    ic50: str = '',
+    fold_ic50: str = '',
+    note: str = '',
+    source: str = '',
+) -> int:
+    """
+    Append a manual sample classification row for a stored run.
+
+    :param results_conn: open results DB connection
+    :param run_id: id of the run to classify
+    :param drug: optional drug name this classification applies to
+    :param phenotype: clinical resistance phenotype
+    :param clinical_phenotype: externally verified clinical phenotype
+    :param ic50: IC50 value string
+    :param fold_ic50: fold-IC50 value string
+    :param note: free-text note
+    :param source: source or reference for this classification
+    :return: id of the new classification row
+    """
+    cursor = results_conn.execute(
+        'INSERT INTO sample_classification '
+        '(run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        (run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source),
+    )
+    results_conn.commit()
+    return cursor.lastrowid  # type: ignore[return-value]
+
+
+def load_classifications(
+    results_conn: sqlite3.Connection,
+    run_id: int,
+) -> list[dict]:
+    """
+    Load all manual sample classifications for a run.
+
+    :param results_conn: open results DB connection
+    :param run_id: id of the run
+    :return: list of classification row dicts ordered by id
+    """
+    tables = {
+        row['name']
+        for row in results_conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    if 'sample_classification' not in tables:
+        return []
+
+    rows = results_conn.execute(
+        'SELECT id, run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, '
+        'note, source, created_at '
+        'FROM sample_classification WHERE run_id = ? ORDER BY id',
+        (run_id,),
+    ).fetchall()
+    return [dict(row) for row in rows]

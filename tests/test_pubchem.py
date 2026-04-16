@@ -11,7 +11,7 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from respro.io.pubchem import PubChemRecord, _fetch_cid, _fetch_description, lookup_drug
-from respro.db.project.drugs import _get_drugs_from_pubchem
+from respro.db.drugs import _get_drugs_from_pubchem
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -172,7 +172,7 @@ class TestAddPubchemData:
         conn = self._make_db()
         record = PubChemRecord(cid=135398513, url='https://pubchem.ncbi.nlm.nih.gov/compound/135398513',
                                description='Antiviral drug.')
-        with patch('respro.db.project.drugs.lookup_drug', return_value=record):
+        with patch('respro.db.drugs.lookup_drug', return_value=record):
             _get_drugs_from_pubchem(conn, project_id=1)
 
         row = conn.execute("SELECT pubchem_cid, pubchem_url, description FROM drug WHERE name='Aciclovir'").fetchone()
@@ -191,7 +191,7 @@ class TestAddPubchemData:
         )
         conn.commit()
 
-        with patch('respro.db.project.drugs.lookup_drug', return_value=None) as mocked_lookup:
+        with patch('respro.db.drugs.lookup_drug', return_value=None) as mocked_lookup:
             _get_drugs_from_pubchem(conn, project_id=1)
 
         # Only the still-missing drug should be queried.
@@ -205,8 +205,8 @@ class TestAddPubchemData:
             url='https://pubchem.ncbi.nlm.nih.gov/compound/135398513',
             description='Antiviral drug.',
         )
-        with caplog.at_level(logging.INFO, logger='respro.db.project.drugs'):
-            with patch('respro.db.project.drugs.lookup_drug', return_value=record):
+        with caplog.at_level(logging.INFO, logger='respro.db.drugs'):
+            with patch('respro.db.drugs.lookup_drug', return_value=record):
                 _get_drugs_from_pubchem(conn, project_id=1)
 
         assert any('PubChem: added data for' in entry.message for entry in caplog.records)
@@ -215,7 +215,7 @@ class TestAddPubchemData:
     def test_skips_unrecognised_drug_without_failing(self) -> None:
 
         conn = self._make_db()
-        with patch('respro.db.project.drugs.lookup_drug', return_value=None):
+        with patch('respro.db.drugs.lookup_drug', return_value=None):
             # Must not raise
             _get_drugs_from_pubchem(conn, project_id=1)
 
@@ -226,7 +226,7 @@ class TestAddPubchemData:
     def test_skips_network_error_without_failing(self) -> None:
         conn = self._make_db()
         # Re-test with lookup_drug returning None (as it would after catching OSError)
-        with patch('respro.db.project.drugs.lookup_drug', return_value=None):
+        with patch('respro.db.drugs.lookup_drug', return_value=None):
             _get_drugs_from_pubchem(conn, project_id=1)
 
         row = conn.execute("SELECT pubchem_cid FROM drug WHERE name='Aciclovir'").fetchone()
@@ -244,7 +244,7 @@ class TestAddPubchemData:
         def _side_effect(name: str) -> PubChemRecord | None:
             return aciclovir_record if name == 'Aciclovir' else None
 
-        with patch('respro.db.project.drugs.lookup_drug', side_effect=_side_effect):
+        with patch('respro.db.drugs.lookup_drug', side_effect=_side_effect):
             _get_drugs_from_pubchem(conn, project_id=1)
 
         aciclovir = conn.execute("SELECT pubchem_cid FROM drug WHERE name='Aciclovir'").fetchone()

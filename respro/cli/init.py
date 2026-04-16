@@ -1,5 +1,5 @@
 """
-Project orchestration — create and extend project databases.
+Project initialisation commands and orchestration — respro init, respro add.
 """
 
 from __future__ import annotations
@@ -8,16 +8,26 @@ import logging
 import sqlite3
 import uuid
 from pathlib import Path
+from typing import Annotated
 
-from respro.db.project.drugs import _consolidate_drug_names_to_lowercase, _get_drugs_from_pubchem
-from respro.db.project.genes import _load_genbank_records
-from respro.db.project.rules import _load_resistance_rules
+import click
+import typer
+from rich.console import Console
+
+from respro.db.drugs import _consolidate_drug_names_to_lowercase, _get_drugs_from_pubchem
+from respro.db.genes import _load_genbank_records
+from respro.db.rules_import import _load_resistance_rules
 from respro.db.schema import PROJECT_SCHEMA_VERSION, create_schema, open_project_db
 from respro.io.genbank import ParsedGenBankReference, parse_genbank_sources
 from respro.utils.files import require_file
+from respro.utils.logging import err_console
 
 logger = logging.getLogger(__name__)
 
+
+# ──────────────────────────────────────────────────────────────────────
+# Orchestration
+# ──────────────────────────────────────────────────────────────────────
 
 def init_project(
     *,
@@ -149,3 +159,100 @@ def _ensure_project_has_reference_annotations(conn: sqlite3.Connection) -> None:
             'Existing database has no stored references/genes. '
             'Provide --genbank or rebuild the project with respro init.'
         )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# CLI commands
+# ──────────────────────────────────────────────────────────────────────
+
+def _init_command(
+    name: Annotated[
+        str, typer.Option('--name', '-n', help='Project name.')
+    ],
+    rules: Annotated[
+        Path, typer.Option('--rules', '-r', help='Resistance rules TSV.')
+    ],
+    genbank_paths: Annotated[
+        list[Path] | None, typer.Option(
+            '--genbank', '-g', exists=True,
+            help='GenBank file(s). Repeat for multiple files.',
+        )
+    ] = None,
+    output: Annotated[
+        Path, typer.Option('--output', '-o', help='Output SQLite database path.')
+    ] = Path('project.db'),
+    overwrite: Annotated[
+        bool, typer.Option('--overwrite', help='Overwrite existing database.')
+    ] = False,
+    additional_info: Annotated[
+        bool, typer.Option(
+            '--additional-info/--no-additional-info',
+            help='Query PubChem for drug metadata and resolve publications via NCBI/CrossRef.',
+        )
+    ] = True,
+) -> None:
+    """
+    Initialise a project database from one or more GenBank reference records and resistance rules provided in TSV.
+    """
+    if not genbank_paths:
+        raise click.UsageError('At least one --genbank file is required.')
+
+    console = Console(highlight=False)
+    try:
+        with err_console.status('[dim]Initialising project database…[/dim]'):
+            db_path = init_project(
+                db_path=output,
+                name=name,
+                genbank_paths=list(genbank_paths),
+                rules_tsv=rules,
+                overwrite=overwrite,
+                additional_info=additional_info,
+            )
+    except (FileExistsError, FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    console.print(f'[green]✓[/green] Project initialised: [cyan]{db_path}[/cyan]')
+
+
+def _init_add_command(
+    project: Annotated[
+        Path, typer.Option('--project', '-p', exists=True, help='Existing project SQLite database.')
+    ],
+    rules: Annotated[
+        Path, typer.Option('--rules', '-r', exists=True, help='Resistance rules TSV to add.')
+    ],
+    genbank_paths: Annotated[
+        list[Path] | None, typer.Option(
+            '--genbank', '-g', exists=True,
+            help='Optional GenBank file(s) with additional references/genes.',
+        )
+    ] = None,
+    additional_info: Annotated[
+        bool, typer.Option(
+            '--additional-info/--no-additional-info',
+            help='Query PubChem for drug metadata and resolve publications via NCBI/CrossRef.',
+        )
+    ] = True,
+) -> None:
+    """
+    Add curated rules and optional GenBank annotations to an existing project database.
+    """
+    console = Console(highlight=False)
+    try:
+        with err_console.status('[dim]Updating project database…[/dim]'):
+            db_path = add_to_project(
+                db_path=project,
+                genbank_paths=list(genbank_paths or []),
+                rules_tsv=rules,
+                additional_info=additional_info,
+            )
+    except (FileExistsError, FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    console.print(f'[green]✓[/green] Project updated: [cyan]{db_path}[/cyan]')
+
+
+def register(app: typer.Typer) -> None:
+    """Register init and add commands on the given Typer app."""
+    app.command('init')(_init_command)
+    app.command('add')(_init_add_command)

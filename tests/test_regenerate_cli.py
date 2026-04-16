@@ -1,18 +1,29 @@
 """
-Tests for the CLI regenerate command.
+Tests for the CLI runs commands (regenerate, classify, sync) and explore run listing.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
-from respro.cli import app
+from respro.cli.main import app
+from respro.core.rules import load_rules
 from respro.db.results import save_run
+from respro.db.results import (
+    load_classifications,
+    load_combo_rule_hits,
+    load_coverage_gaps,
+    load_run,
+    reconstruct_annotations,
+    reconstruct_combo_rule_hits,
+)
 from respro.db.schema import init_results_db, open_project_db
+from respro.db.schema import open_results_db
 from respro.db.models import (
     AnnotatedVariant,
     ComboRuleHit,
@@ -21,12 +32,14 @@ from respro.db.models import (
     ResistanceRuleSetMember,
     VariantCall,
 )
+from respro.io.reference import load_genes_for_reference
+from respro.report.html import export_results
 
 
 def _run_profile(project_db: Path, sample_vcf: Path, sample_ref_fasta: Path, results_db: Path, tmp_path: Path) -> None:
-    """Helper: run profile-vcf with --results-db and assert success."""
+    """Helper: run vcf with --results-db and assert success."""
     result = CliRunner().invoke(app, [
-        'profile-vcf',
+        'vcf',
         '--project', str(project_db),
         '--vcf', str(sample_vcf),
         '--ref-fasta', str(sample_ref_fasta),
@@ -38,8 +51,8 @@ def _run_profile(project_db: Path, sample_vcf: Path, sample_ref_fasta: Path, res
     assert result.exit_code == 0, result.output
 
 
-class TestRegenerateListCommand:
-    def test_list_shows_stored_runs(
+class TestExploreRuns:
+    def test_explore_shows_stored_runs(
         self,
         project_db: Path,
         sample_vcf: Path,
@@ -50,58 +63,39 @@ class TestRegenerateListCommand:
         _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
 
         result = CliRunner().invoke(app, [
-            'regenerate',
-            '--result-db', str(results_db),
-            '--list',
+            'explore', '--results', str(results_db),
         ])
 
         assert result.exit_code == 0, result.output
         assert '1' in result.output
         assert 'tiny_ref' in result.output
 
-    def test_list_with_empty_db_reports_no_results(self, tmp_path: Path) -> None:
+    def test_explore_empty_db_reports_no_results(self, tmp_path: Path) -> None:
         results_db = tmp_path / 'empty.db'
         conn = init_results_db(results_db)
         conn.close()
 
         result = CliRunner().invoke(app, [
-            'regenerate',
-            '--result-db', str(results_db),
-            '--list',
+            'explore', '--results', str(results_db),
         ])
 
         assert result.exit_code == 0, result.output
         assert 'No stored results found' in result.output
 
-    def test_list_and_identifier_together_is_an_error(self, tmp_path: Path) -> None:
-        results_db = tmp_path / 'db.db'
-        conn = init_results_db(results_db)
-        conn.close()
-
+    def test_explore_missing_result_db_is_an_error(self, tmp_path: Path) -> None:
         result = CliRunner().invoke(app, [
-            'regenerate',
-            '--result-db', str(results_db),
-            '--list',
-            '--identifier', '1',
-        ])
-
-        assert result.exit_code != 0
-        assert 'either' in result.output.lower() or 'not both' in result.output.lower()
-
-    def test_no_action_flag_is_an_error(self, tmp_path: Path) -> None:
-        results_db = tmp_path / 'db.db'
-        conn = init_results_db(results_db)
-        conn.close()
-
-        result = CliRunner().invoke(app, [
-            'regenerate',
-            '--result-db', str(results_db),
+            'explore', '--results', str(tmp_path / 'nonexistent.db'),
         ])
 
         assert result.exit_code != 0
 
+    def test_explore_no_flag_is_an_error(self, tmp_path: Path) -> None:
+        result = CliRunner().invoke(app, ['explore'])
 
-class TestRegenerateByIdentifier:
+        assert result.exit_code != 0
+
+
+class TestRegenerate:
     def test_regenerate_generates_html_report(
         self,
         project_db: Path,
@@ -116,7 +110,7 @@ class TestRegenerateByIdentifier:
         result = CliRunner().invoke(app, [
             'regenerate',
             '--result-db', str(results_db),
-            '--identifier', '1',
+            '--run-id', '1',
             '--project', str(project_db),
             '--out', str(out_dir),
         ])
@@ -135,7 +129,7 @@ class TestRegenerateByIdentifier:
         result = CliRunner().invoke(app, [
             'regenerate',
             '--result-db', str(results_db),
-            '--identifier', '1',
+            '--run-id', '1',
             '--out', str(tmp_path / 'out'),
         ])
 
@@ -154,7 +148,7 @@ class TestRegenerateByIdentifier:
         result = CliRunner().invoke(app, [
             'regenerate',
             '--result-db', str(results_db),
-            '--identifier', '1',
+            '--run-id', '1',
             '--project', str(project_db),
         ])
 
@@ -173,7 +167,7 @@ class TestRegenerateByIdentifier:
         result = CliRunner().invoke(app, [
             'regenerate',
             '--result-db', str(results_db),
-            '--identifier', '999',
+            '--run-id', '999',
             '--project', str(project_db),
             '--out', str(tmp_path / 'out'),
         ])
@@ -200,7 +194,7 @@ class TestRegenerateByIdentifier:
         result = CliRunner().invoke(app, [
             'regenerate',
             '--result-db', str(results_db),
-            '--identifier', '1',
+            '--run-id', '1',
             '--project', str(project_db),
             '--out', str(tmp_path / 'out'),
         ])
@@ -277,7 +271,7 @@ class TestRegenerateByIdentifier:
         result = CliRunner().invoke(app, [
             'regenerate',
             '--result-db', str(results_db),
-            '--identifier', '1',
+            '--run-id', '1',
             '--project', str(project_db),
             '--out', str(out_dir),
         ])
@@ -288,4 +282,239 @@ class TestRegenerateByIdentifier:
         html = html_files[0].read_text()
         assert 'combo_regen_test' in html
         assert 'TestDrug' in html
+
+    def test_regenerate_surfaces_manual_classifications_in_html_and_json(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        results_db = tmp_path / 'results.db'
+        _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
+
+        classify_result = CliRunner().invoke(app, [
+            'classify',
+            '--result-db', str(results_db),
+            '--run-id', '1',
+            '--drug', 'Acyclovir',
+            '--phenotype', 'resistant',
+            '--note', 'manual review',
+            '--source', 'lab report',
+        ])
+        assert classify_result.exit_code == 0, classify_result.output
+
+        results_conn = open_results_db(results_db)
+        run_dict, variant_rows = load_run(results_conn, 1)
+        coverage_gaps = load_coverage_gaps(results_conn, 1)
+        combo_rows = load_combo_rule_hits(results_conn, 1)
+        sample_classifications = load_classifications(results_conn, 1)
+
+        project_conn = open_project_db(project_db)
+        ref_row = project_conn.execute(
+            'SELECT id, organism, length FROM reference WHERE name = ?',
+            (run_dict['reference_name'],),
+        ).fetchone()
+        assert ref_row is not None
+
+        annotations = reconstruct_annotations(variant_rows)
+        combo_hits = reconstruct_combo_rule_hits(combo_rows, annotations)
+        profiling_result = ProfilingResult(
+            project_name=run_dict['project_name'],
+            organism=ref_row['organism'] or '',
+            reference_name=run_dict['reference_name'],
+            reference_length_nt=int(ref_row['length'] or 0),
+            sample_name=run_dict.get('sample_name', ''),
+            vcf_name=run_dict['vcf_path'],
+            run_timestamp=run_dict.get('created_at', ''),
+            total_variants=run_dict.get('total_variants', 0),
+            variants_in_cds=run_dict.get('variants_in_cds', 0),
+            resistance_hits=run_dict.get('resistance_hits', 0),
+            annotations=annotations,
+            combo_hits=combo_hits,
+            coverage_gaps=coverage_gaps,
+            sample_classifications=sample_classifications,
+        )
+
+        out_dir = tmp_path / 'regenerated_with_classification'
+        rules = load_rules(project_conn, int(ref_row['id']))
+        genes = load_genes_for_reference(project_conn, int(ref_row['id']))
+        outputs = export_results(
+            profiling_result,
+            out_dir,
+            genes=genes,
+            rule_gene_names={rule.gene_name for rule in rules},
+            project_conn=project_conn,
+            rules=rules,
+        )
+        results_conn.close()
+        project_conn.close()
+
+        assert 'html' in outputs
+        assert 'json' in outputs
+
+        html_files = list(out_dir.glob('*.html'))
+        assert len(html_files) == 1
+        html = html_files[0].read_text()
+        assert 'Manual classifications' in html
+        assert 'Acyclovir' in html
+        assert 'manual review' in html
+
+        json_files = list(out_dir.glob('*.results.json'))
+        assert len(json_files) == 1
+        payload = json.loads(json_files[0].read_text())
+        assert 'sample_classifications' in payload
+        assert len(payload['sample_classifications']) == 1
+        assert payload['sample_classifications'][0]['drug'] == 'Acyclovir'
+        assert payload['sample_classifications'][0]['note'] == 'manual review'
+
+
+class TestClassify:
+    def test_classify_appends_row(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        results_db = tmp_path / 'results.db'
+        _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
+
+        result = CliRunner().invoke(app, [
+            'classify',
+            '--result-db', str(results_db),
+            '--run-id', '1',
+            '--phenotype', 'resistant',
+            '--drug', 'Acyclovir',
+            '--note', 'manual review',
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert 'Classification #1 saved' in result.output
+
+    def test_classify_requires_at_least_one_value(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        results_db = tmp_path / 'results.db'
+        _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
+
+        result = CliRunner().invoke(app, [
+            'classify',
+            '--result-db', str(results_db),
+            '--run-id', '1',
+            '--drug', 'Acyclovir',
+        ])
+
+        assert result.exit_code != 0
+        assert 'at least one' in result.output.lower() or 'required' in result.output.lower()
+
+    def test_classify_unknown_run_id_raises_error(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        results_db = tmp_path / 'empty.db'
+        conn = init_results_db(results_db)
+        conn.close()
+
+        result = CliRunner().invoke(app, [
+            'classify',
+            '--result-db', str(results_db),
+            '--run-id', '999',
+            '--drug', 'Acyclovir',
+            '--phenotype', 'resistant',
+        ])
+
+        assert result.exit_code != 0
+        assert '999' in result.output
+
+
+class TestSync:
+    def test_sync_updates_all_runs_when_no_run_id(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        results_db = tmp_path / 'results.db'
+        _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
+
+        result = CliRunner().invoke(app, [
+            'sync',
+            '--result-db', str(results_db),
+            '--project', str(project_db),
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert 'synced' in result.output.lower()
+
+    def test_sync_fingerprint_mismatch_raises_error(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        results_db = tmp_path / 'results.db'
+        _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
+
+        conn = sqlite3.connect(results_db)
+        conn.execute("UPDATE run SET project_fingerprint = 'deadbeef' WHERE id = 1")
+        conn.commit()
+        conn.close()
+
+        result = CliRunner().invoke(app, [
+            'sync',
+            '--result-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(project_db),
+        ])
+
+        assert result.exit_code != 0
+        assert 'fingerprint' in result.output.lower()
+
+
+class TestExploreRules:
+    def test_rules_shows_rules(
+        self,
+        project_db: Path,
+    ) -> None:
+        result = CliRunner().invoke(app, [
+            'explore', '--rules', str(project_db),
+        ])
+
+        assert result.exit_code == 0, result.output
+        # project_db is built from conftest fixtures; should have at least one rule.
+        # Verify table output contains expected columns and at least one rule
+        assert 'Reference' in result.output
+        assert 'Gene' in result.output
+        assert 'Drug' in result.output
+        assert 'TestDrug' in result.output
+
+    def test_rules_with_reference_filter(
+        self,
+        project_db: Path,
+    ) -> None:
+        result = CliRunner().invoke(app, [
+            'explore', '--rules', str(project_db),
+            '--reference', 'tiny_ref',
+        ])
+
+        assert result.exit_code == 0, result.output
+
+    def test_rules_unknown_reference_raises_error(
+        self,
+        project_db: Path,
+    ) -> None:
+        result = CliRunner().invoke(app, [
+            'explore', '--rules', str(project_db),
+            '--reference', 'nonexistent_genome',
+        ])
+
+        assert result.exit_code != 0
+        assert 'No reference matching' in result.output
 

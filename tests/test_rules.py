@@ -12,7 +12,7 @@ from respro.core.rules import load_rules, load_rule_sets, match_rules, match_rul
 from respro.db.models import (
     AnnotatedVariant, ResistanceRule, ResistanceRuleSet, ResistanceRuleSetMember, VariantCall,
 )
-from respro.db.project import init_project
+from respro.cli.init import init_project
 from respro.db.schema import open_project_db
 from conftest import TINY_REF_SEQ, write_genbank
 

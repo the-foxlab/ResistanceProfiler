@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import re
 import sqlite3
@@ -302,6 +303,28 @@ def _build_combo_hit_rows(result: ProfilingResult) -> list[dict]:
             'comment': rs.comment,
             'publications': rs.publications,
             'pub_citations': [],
+        })
+    return rows
+
+
+def _build_sample_classification_rows(result: ProfilingResult) -> list[dict]:
+    """
+    Build rows for manual sample classifications.
+
+    :param result: profiling result
+    :return: list of dict rows for the manual classification section
+    """
+    rows: list[dict] = []
+    for row in result.sample_classifications:
+        rows.append({
+            'drug': row.get('drug', ''),
+            'phenotype': row.get('phenotype', 'unknown'),
+            'clinical_phenotype': row.get('clinical_phenotype', 'unknown'),
+            'ic50': row.get('ic50', ''),
+            'fold_ic50': row.get('fold_ic50', ''),
+            'note': row.get('note', ''),
+            'source': row.get('source', ''),
+            'created_at': row.get('created_at', ''),
         })
     return rows
 
@@ -878,6 +901,7 @@ def build_report_context(
     db_hit_rows = _build_db_hit_rows(result, gene_alignments)
     summary['db_hit_rules'] = len(db_hit_rows)
     combo_hit_rows = _build_combo_hit_rows(result)
+    sample_classification_rows = _build_sample_classification_rows(result)
     cds_rows = _build_cds_rows(result, gene_alignments)
     potential_rows = _build_potential_effects_rows(result, rules or [], gene_alignments)
     coverage_assessment_available = bool(result.coverage_gaps) or any(
@@ -927,6 +951,10 @@ def build_report_context(
     db_cols = _col_visibility(db_hit_rows, _optional_cols)
     combo_cols = _col_visibility(combo_hit_rows, ['ic50', 'fold_ic50', 'clinical_phenotype', 'comment', 'publication'])
     pot_cols = _col_visibility(potential_rows, _optional_cols)
+    sample_classification_cols = _col_visibility(
+        sample_classification_rows,
+        ['clinical_phenotype', 'ic50', 'fold_ic50', 'note', 'source'],
+    )
 
     # Unify clinical_phenotype visibility across all hit sections: if any section has
     # meaningful values, all sections show the column so the report is consistent.
@@ -982,12 +1010,14 @@ def build_report_context(
         'summary_text_en': summary_text,
         'db_hit_rows': db_hit_rows,
         'combo_hit_rows': combo_hit_rows,
+        'sample_classification_rows': sample_classification_rows,
         'cds_rows': cds_rows,
         'potential_rows': potential_rows,
         'drug_cards': drug_cards,
         'gene_cards': gene_cards,
         'db_cols': db_cols,
         'combo_cols': combo_cols,
+        'sample_classification_cols': sample_classification_cols,
         'pot_cols': pot_cols,
         'bibliography': bibliography,
     }
@@ -1077,6 +1107,84 @@ def _build_output_stem(result: ProfilingResult) -> str:
     return safe_stem or 'profile'
 
 
+def _build_results_json_payload(result: ProfilingResult) -> dict:
+    """
+    Build a JSON-serializable export payload for one profiling result.
+
+    :param result: profiling result
+    :return: results payload dict
+    """
+    variants = []
+    for ann in result.cds_annotations:
+        variants.append({
+            'chrom': ann.variant.chrom,
+            'position': ann.variant.pos + 1,
+            'reference_nt': ann.variant.ref,
+            'alternate_nt': ann.variant.alt,
+            'allele_freq': ann.variant.allele_freq,
+            'depth': ann.variant.depth,
+            'gene': ann.gene_name,
+            'codon_pos': ann.codon_pos + 1,
+            'reference_codon': ann.ref_codon,
+            'alternate_codon': ann.alt_codon,
+            'reference_aa': ann.ref_aa,
+            'alternate_aa': ann.alt_aa,
+            'consequence': ann.consequence,
+            'af_bin': ann.af_bin,
+            'drug_hits': ann.drug_hits_json(),
+            'is_combined_codon_event': ann.is_combined_codon_event,
+            'combined_member_count': ann.combined_member_count,
+            'is_fasta_mode': ann.is_fasta_mode,
+        })
+
+    coverage_gaps = [
+        {
+            'gene': gap.gene_name,
+            'codon_start': gap.codon_start + 1,
+            'codon_end': gap.codon_end + 1,
+        }
+        for gap in result.coverage_gaps
+    ]
+
+    sample_classifications = [
+        {
+            'id': row.get('id', 0),
+            'drug': row.get('drug', ''),
+            'phenotype': row.get('phenotype', 'unknown'),
+            'clinical_phenotype': row.get('clinical_phenotype', 'unknown'),
+            'ic50': row.get('ic50', ''),
+            'fold_ic50': row.get('fold_ic50', ''),
+            'note': row.get('note', ''),
+            'source': row.get('source', ''),
+            'created_at': row.get('created_at', ''),
+        }
+        for row in result.sample_classifications
+    ]
+
+    return {
+        'summary': result.summary_dict(),
+        'variants': variants,
+        'combo_rule_hits': [hit.to_dict() for hit in result.combo_hits],
+        'coverage_gaps': coverage_gaps,
+        'sample_classifications': sample_classifications,
+    }
+
+
+def write_results_json(result: ProfilingResult, output_path: Path) -> Path:
+    """
+    Write results JSON for one profiling result.
+
+    :param result: profiling result
+    :param output_path: path to write JSON file to
+    :return: path to written JSON file
+    """
+    payload = _build_results_json_payload(result)
+    output_path = Path(output_path)
+    output_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+    logger.info('Results JSON written to %s', output_path)
+    return output_path
+
+
 def export_results(
     result: ProfilingResult,
     output_dir: Path,
@@ -1110,6 +1218,7 @@ def export_results(
         )
 
     html_path = output_dir / f'{stem}.report.html'
+    json_path = output_dir / f'{stem}.results.json'
     write_html(
         result,
         html_path,
@@ -1118,8 +1227,9 @@ def export_results(
         project_conn=project_conn,
         rules=rules,
     )
+    write_results_json(result, json_path)
 
-    outputs: dict[str, Path] = {'html': html_path}
+    outputs: dict[str, Path] = {'html': html_path, 'json': json_path}
     logger.info('Exported %d format(s) to %s', len(outputs), output_dir)
     return outputs
 

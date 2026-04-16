@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS project (
     name        TEXT    NOT NULL,
     uuid        TEXT    NOT NULL DEFAULT '',
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     schema_version INTEGER NOT NULL DEFAULT 1
 );
 
@@ -179,6 +180,7 @@ CREATE TABLE IF NOT EXISTS run (
     project_name    TEXT    NOT NULL,
     project_db_path TEXT    NOT NULL,
     project_fingerprint TEXT DEFAULT '',
+    project_updated_at  TEXT DEFAULT '',
     reference_name  TEXT    NOT NULL,
     sample_name     TEXT    DEFAULT '',
     vcf_path        TEXT    NOT NULL,
@@ -231,6 +233,21 @@ CREATE TABLE IF NOT EXISTS combo_rule_hit (
 );
 
 CREATE INDEX IF NOT EXISTS idx_crh_run ON combo_rule_hit(run_id);
+
+CREATE TABLE IF NOT EXISTS sample_classification (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id              INTEGER NOT NULL REFERENCES run(id),
+    drug                TEXT    DEFAULT '',
+    phenotype           TEXT    NOT NULL DEFAULT 'unknown',
+    clinical_phenotype  TEXT    NOT NULL DEFAULT 'unknown',
+    ic50                TEXT    DEFAULT '',
+    fold_ic50           TEXT    DEFAULT '',
+    note                TEXT    DEFAULT '',
+    source              TEXT    DEFAULT '',
+    created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_sc_run ON sample_classification(run_id);
 """
 
 
@@ -256,11 +273,27 @@ CREATE TABLE IF NOT EXISTS combo_rule_hit (
     hit_json    TEXT    NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_crh_run ON combo_rule_hit(run_id);
+
+CREATE TABLE IF NOT EXISTS sample_classification (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id              INTEGER NOT NULL REFERENCES run(id),
+    drug                TEXT    DEFAULT '',
+    phenotype           TEXT    NOT NULL DEFAULT 'unknown',
+    clinical_phenotype  TEXT    NOT NULL DEFAULT 'unknown',
+    ic50                TEXT    DEFAULT '',
+    fold_ic50           TEXT    DEFAULT '',
+    note                TEXT    DEFAULT '',
+    source              TEXT    DEFAULT '',
+    created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_sc_run ON sample_classification(run_id);
 """
 
 _OPTIONAL_RESULTS_COLUMN_DEFS = {
     'run': {
         'project_fingerprint': "TEXT DEFAULT ''",
+        'project_updated_at': "TEXT DEFAULT ''",
         'sample_name': "TEXT DEFAULT ''",
         'total_variants': 'INTEGER NOT NULL DEFAULT 0',
         'variants_in_cds': 'INTEGER NOT NULL DEFAULT 0',
@@ -306,6 +339,8 @@ _REQUIRED_PROJECT_COLUMNS = {
 _OPTIONAL_PROJECT_COLUMN_DEFS = {
     'project': {
         'uuid': "TEXT NOT NULL DEFAULT ''",
+        # Use static default for ALTER TABLE compatibility (no datetime() in ADD COLUMN).
+        'updated_at': "TEXT NOT NULL DEFAULT ''",
     },
     'reference': {
         'accession': "TEXT DEFAULT ''",

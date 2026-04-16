@@ -64,10 +64,19 @@ respro init \
 ### 2. Profile a sample
 
 ```bash
-respro profile \
+respro vcf \
     --project project.db \
     --vcf sample.vcf \
     --ref-fasta sample_ref.fasta \
+    --output report/
+```
+
+For consensus FASTA input, use:
+
+```bash
+respro fasta \
+    --project project.db \
+    --fasta sample_consensus.fasta \
     --output report/
 ```
 
@@ -80,7 +89,7 @@ If the project database already contains the relevant reference and gene
 annotations, you can add more rules without supplying another GenBank file:
 
 ```bash
-respro init-add \
+respro add \
     --project project.db \
     --rules more_rules.tsv
 ```
@@ -89,13 +98,13 @@ If you are adding rules together with new references/genes, you can also provide
 additional GenBank input:
 
 ```bash
-respro init-add \
+respro add \
     --project project.db \
     --genbank additional_refs.gb \
     --rules more_rules.tsv
 ```
 
-During `init-add`, rule duplicates are detected biologically rather than by
+During `add`, rule duplicates are detected biologically rather than by
 comment fields. A rule is treated as already present if the same reference,
 position, reference amino acid, mutation, and drug already exist in the
 database. Existing rows are kept; incoming `ic50`, `publication`, `source`, or

@@ -39,7 +39,7 @@ dependencies = [
 dev = ['pytest>=7.4', 'pytest-cov>=4.1', 'ruff>=0.1']
 
 [project.scripts]
-respro = 'respro.cli:app'
+respro = 'respro.cli.main:app'
 
 [tool.pytest.ini_options]
 testpaths = ['tests']

@@ -12,7 +12,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] SQLite-backed project database (`project.db`) with versioned schema (`PROJECT_SCHEMA_VERSION`)
 - [X] SQLite-backed results database (`results.db`) for persisting runs and regenerating reports
 - [X] Project fingerprint (UUID) for cross-database run validation
-- [X] CLI entry points: `respro init`, `respro init-add`, `respro profile-vcf`, `respro profile-fasta`, `respro regenerate`
+- [X] CLI entry points: `respro init`, `respro add`, `respro vcf`, `respro fasta`, `respro regenerate`
 - [X] Verbosity control via `-v` / `-vv` flags
 - [X] No functions in `__init__.py` — only module docstrings; functions in named submodules
 - [X] File validation helper (`utils/files.py` → `require_file`)
@@ -29,10 +29,10 @@ Mark items done and update priorities after each completed milestone.
 - [X] INDEL rule storage model switched to explicit `position` + `reference` + `mutation` alleles (legacy rewrite notation still accepted on import)
 - [X] Phenotype and clinical phenotype normalization
 - [X] IC50 column support — `ic50`/`ic_50` and `fold_ic50`/`fold_ic_50` stored separately; both may coexist in one file; report columns shown only when values are present; empty optional columns (ic50, fold_ic50, clinical_phenotype, source) hidden per table section
-- [X] Drug deduplication — case-insensitive; biological duplicate detection for `init-add`
+- [X] Drug deduplication — case-insensitive; biological duplicate detection for `add`
 - [X] Stable drug badge colors persisted in `drug.badge_color` during rules import for consistent report styling across runs/regeneration
 - [X] Combination rule sets — `resistance_rule_set` + `resistance_rule_set_member` tables; TSV `rule_group` column
-- [X] `init-add` — extend existing project with new rules and optional additional GenBank annotations
+- [X] `add` — extend existing project with new rules and optional additional GenBank annotations
 - [X] PubChem integration — best-effort drug CID, canonical URL, short description; fully non-fatal
 - [X] Publication table — deduplicated `publication` table + `rule_publication` / `rule_set_publication` join tables; all publications from all combo-group members collected; PMID resolved to DOI via NCBI E-utilities; title fetched from CrossRef; `--drug-info` renamed to `--additional-info` covering both drugs and publications; citation-number bibliography section in HTML report
 
@@ -147,6 +147,18 @@ Mark items done and update priorities after each completed milestone.
 - [X] Combo-rule shared-substitution regression tests — `TestMatchRuleSets` verifies that two rule sets sharing one mutation both fire when complete (shared `AnnotatedVariant` appears in both hits), and only the fully satisfied set fires when one unique member is absent
 - [X] Combo member uniqueness enforcement — duplicate `resistance_rule_set_member` entries are rejected via DB-level unique index `(rule_set_id, gene_id, position, mutation)` and pre-insert duplicate validation in `_insert_combo_rule_sets`
 
+### CLI restructure and results management
+
+- [X] Flat CLI structure — `respro explore --rules`/`--results`, `respro regenerate`, `respro classify`, `respro sync` as top-level commands (not nested sub-apps); old `respro/cli/runs.py` and `respro/cli/rules.py` deleted; new `respro/cli/explore.py`, `respro/cli/regenerate.py`, `respro/cli/classify.py`, `respro/cli/sync.py` modules created; each module has a `register(app)` function that registers directly to the root app
+- [X] `respro explore --rules` — browse resistance rules in project database with optional `--reference` filter; smart column hiding (only show columns with at least one non-empty value)
+- [X] `respro explore --results` — browse stored profiling runs with stale indicator (yellow if project was updated after run creation)
+- [X] Project `updated_at` tracking — `updated_at` added to `project` table; bumped on `init-add`; `project_updated_at` snapshot stored on `run`; stale indicator in `explore --results` when project was updated after the run was recorded
+- [X] `sample_classification` table in `results.db` — `run_id`, `drug`, `phenotype`, `clinical_phenotype`, `ic50`, `fold_ic50`, `note`, `source`, `created_at`; auto-migration on DB open; `save_classification` / `load_classifications` in `respro/db/results.py`
+- [X] `respro classify` — top-level command; `--run-id`, optional `--drug`, `--phenotype` / `--clinical-phenotype` / `--ic50` / `--fold-ic50`; at least one value required; appends `sample_classification` row
+- [X] `respro regenerate` — top-level command; re-exports report from stored run with project-fingerprint validation
+- [X] `respro sync` — top-level command; re-annotates stored run against current project DB; replaces variant_result and combo-hit rows; updates resistance_hits; requires fingerprint match; optional `--out` re-exports HTML report
+- [X] Surface sample classifications in report and JSON — dedicated "Manual classifications" section in HTML report and `sample_classifications` key in exported JSON, clearly separated from rule-based hits
+
 ---
 
 ## Next
@@ -183,37 +195,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   both; add tests for both the VCF and FASTA profiling paths
 
 ### CLI restructure and results management
-
-- 🔴 Restructure CLI into `respro runs` and `respro rules` sub-apps — introduce
-  `respro/cli/runs.py` and `respro/cli/rules.py` as Typer sub-apps registered from `cli.py`;
-  move `respro regenerate` into `respro runs regenerate`; remove old `respro regenerate`; split
-  `--list` out of `regenerate` into `respro runs list`; keep `respro profile-vcf` and
-  `respro profile-fasta` as top-level commands unchanged
-- 🔴 `respro rules list` — add `list_rules_for_display(conn, ref_id)` in a new
-  `respro/db/rules_queries.py` module returning plain dicts; render as a Rich table in
-  `respro/cli/rules.py`; the data-access function must be reusable by a future web layer without
-  any CLI dependency
-- 🔴 Project `updated_at` tracking — add `updated_at` column to the `project` table
-  (default current timestamp, bumped on every `init-add`); store a `project_updated_at` snapshot
-  on the `run` row at profiling time; `respro runs list` shows a stale indicator when the
-  project DB has been updated after a run was recorded
-- 🔴 `sample_classification` table in `results.db` — new table with columns `run_id`,
-  `drug` (nullable), `phenotype`, `clinical_phenotype`, `ic50`, `fold_ic50`, `note`, `source`,
-  `created_at`; automatic migration on DB open; `save_classification` / `load_classifications`
-  helpers in `respro/db/results.py`
-- 🔴 `respro runs classify` — accepts `--run-id`, optional `--drug`, and any combination of
-  `--phenotype` / `--clinical-phenotype` / `--ic50` / `--fold-ic50`; optional `--note` and
-  `--source`; at least one of the value flags must be provided; appends a new
-  `sample_classification` row to the results DB; does not touch rule-based annotation rows
-- 🔴 `respro runs sync` — re-annotates a stored run against the current project DB; loads raw
-  `VariantCall` rows from results DB, re-runs `annotate_variants` + `match_rules` against the
-  live project DB, replaces stored `variant_result` and combo-hit rows, and updates
-  `resistance_hits`; requires project fingerprint match (fail-fast, no fallback); optionally
-  re-exports the HTML report with `--out`; useful after `init-add` adds new rules to a project
-- 🟡 Surface sample classifications in report and JSON — add a dedicated "Manual classifications"
-  section to the HTML report and a `sample_classifications` key to `results.json`; classifications
-  are clearly separated from rule-based hits and include drug, phenotype fields, note, source,
-  and timestamp
 
 ### Usability and workflow
 

@@ -32,8 +32,16 @@ ReistanceProfiler/
 │   ├── rules-tsv-format.md
 │   └── to-do.md
 ├── respro/
-│   ├── cli.py
-│   ├── cli_helpers.py
+│   ├── cli/
+│   │   ├── main.py
+│   │   ├── init.py
+│   │   ├── profile_vcf.py
+│   │   ├── profile_fasta.py
+│   │   ├── profile_helpers.py
+│   │   ├── explore.py
+│   │   ├── regenerate.py
+│   │   ├── classify.py
+│   │   └── sync.py
 │   ├── core/
 │   ├── db/
 │   ├── io/
@@ -70,11 +78,11 @@ flowchart TD
     end
 
     %% ── CLI layer ────────────────────────────────────────────────────
-    subgraph CLI["⌨️  CLI  ·  respro/cli.py · respro/cli_helpers.py"]
+    subgraph CLI["⌨️  CLI  ·  respro/cli/"]
         direction LR
-        c_init["init / init-add"]
-        c_pvcf["profile-vcf"]
-        c_pfas["profile-fasta"]
+        c_init["init / add"]
+        c_pvcf["vcf"]
+        c_pfas["fasta"]
         c_regen["regenerate"]
     end
 
@@ -114,7 +122,7 @@ flowchart TD
     c_init --> io_gb & io_pc
     io_gb & io_pc --> db_ip --> db_pj
 
-    %% ── profile-vcf pipeline ─────────────────────────────────────────
+    %% ── vcf pipeline ─────────────────────────────────────────────────
     i_vcf & i_rfasta --> c_pvcf
     c_pvcf --> io_vcf --> co_pr
     c_pvcf --> co_sm
@@ -122,7 +130,7 @@ flowchart TD
     co_sm --> co_pr
     co_pr --> co_an
 
-    %% ── profile-fasta pipeline ───────────────────────────────────────
+    %% ── fasta pipeline ───────────────────────────────────────────────
     i_cfasta --> c_pfas --> co_sm
     co_sm --> co_fp --> co_an
 
@@ -155,16 +163,16 @@ flowchart TD
     style REP  fill:#f0f9ff,stroke:#bae6fd,stroke-width:1px
 ```
 
-**Init pipeline** (`respro init` / `respro init-add`): GenBank records and a rules TSV
+**Init pipeline** (`respro init` / `respro add`): GenBank records and a rules TSV
 are parsed by `respro/io/`, optionally enriched with PubChem drug metadata, and written
 to a versioned `project.db`.
 
-**VCF pipeline** (`respro profile-vcf`): a user reference FASTA is aligned to internal
+**VCF pipeline** (`respro vcf`): a user reference FASTA is aligned to internal
 CDS annotations via CIGAR maps (cached in `project.db`). VCF variants are remapped from
 user-reference to internal coordinates, then annotated codon-by-codon and matched against
 curated resistance rules.
 
-**FASTA pipeline** (`respro profile-fasta`): a consensus FASTA replaces VCF input.
+**FASTA pipeline** (`respro fasta`): a consensus FASTA replaces VCF input.
 CIGAR maps from sequence matching are reused directly (no second alignment) to reconstruct
 gapped alignment strings, which are walked in reading frame to detect SNPs, in-frame
 INDELs, frameshifts, and IUPAC-ambiguous positions.
@@ -179,36 +187,42 @@ the project fingerprint, and re-exports the report without re-running profiling.
 The main Python package. Keep it independently usable from the command line and from
 future integrations.
 
-#### `respro/cli.py`
+#### `respro/cli/`
+
+CLI package. `main.py` defines the root Typer `app` and registers all commands via
+`register(app)` helpers — it contains no command logic itself.
+
+Command modules:
+- `init.py` — `respro init`, `respro add`; also contains `init_project` and
+  `add_to_project` orchestration functions
+- `profile_vcf.py` — `respro vcf`
+- `profile_fasta.py` — `respro fasta`
+- `explore.py` — `respro explore --rules` (browse resistance rules) or `respro explore --results` (browse stored runs)
+- `regenerate.py` — `respro regenerate` (re-export a stored run's report)
+- `classify.py` — `respro classify` (add manual classification to a run)
+- `sync.py` — `respro sync` (re-annotate a stored run against current project DB)
+- `profile_helpers.py` — shared profiling orchestration helpers (`_finalize_and_export`,
+  `_init_results_db_connection`, `_resolve_reference`, `_load_reference_data`,
+  `_print_completion_panel`) used by `profile_vcf.py`, `profile_fasta.py`, and run mutation commands
 
 Defines the public CLI entry points:
 
 - `respro init`
-- `respro init-add`
-- `respro profile-vcf`
-- `respro profile-fasta`
+- `respro add`
+- `respro vcf`
+- `respro fasta`
+- `respro explore --rules *db_path` (with optional `--reference` filter)
+- `respro explore --results *db_path`
 - `respro regenerate`
+- `respro classify`
+- `respro sync`
 
 CLI code should coordinate the pipeline and input/output handling, but avoid embedding
 heavy biological logic directly in argument handlers. `respro init` is for fresh
-project creation, while `respro init-add` extends an existing DB with additional
-rules and optional new GenBank annotations. Both `profile-vcf` and `profile-fasta`
+project creation, while `respro add` extends an existing DB with additional
+rules and optional new GenBank annotations. Both `vcf` and `fasta`
 optionally accept `--results-db`: if the path does not exist it is created, if it
-exists it is validated before profiling continues. `respro regenerate` reads from an
-existing results database; `--list` shows all stored runs, `--identifier` with
-`--project` and `--out` regenerates the full report for a specific run after
-validating that the project database fingerprint matches.
-
-#### `respro/cli_helpers.py`
-
-Shared profiling orchestration helpers used by `profile-vcf`, `profile-fasta`, and
-`regenerate`. These helpers live in the CLI layer (not `respro/core/`) because they
-depend on Click, DB wiring, persistence, and report export:
-
-- `_init_results_db_connection` — open or create a results DB and validate the
-  project fingerprint before appending a new run.
-- `_resolve_reference` — pick the best matching internal reference from alignment
-  results and log matched gene names.
+exists it is validated before profiling continues.
 - `_load_reference_data` — load genes, rules, rule sets, and the set of gene names
   covered by any resistance rule for a resolved reference id.
 - `_finalize_and_export` — apply rule matching and AF binning, assemble the
@@ -257,14 +271,13 @@ SQLite schema and project/results database initialization logic.
 - `models.py`: central domain model and database-facing data structures, including
   `GeneMatch`, `ProfilingResult`, `Publication`, combined rule-set containers, and
   `drug_hits_json` serialization.
-- `project/`: project creation, validation, and curated data loading subpackage;
-  enforces the rules TSV schema documented in `docs/rules-tsv-format.md`.
-  - `core.py`: `init_project` and `add_to_project` orchestration; project-row helpers.
-  - `genes.py`: GenBank reference and CDS gene loading; NCBI protein URL resolution.
-  - `drugs.py`: drug get-or-create, case deduplication, and PubChem enrichment.
-  - `rules.py`: TSV parsing, coordinate-base detection, AA validation, combo rule sets,
-    publication token normalization, and `publication` / `rule_publication` / `rule_set_publication`
-    row insertion.
+- `genes.py`: GenBank reference and CDS gene loading; NCBI protein URL resolution.
+- `drugs.py`: drug get-or-create, case deduplication, and PubChem enrichment.
+- `rules_import.py`: TSV parsing, coordinate-base detection, AA validation, combo rule sets,
+  publication token normalization, and `publication` / `rule_publication` / `rule_set_publication`
+  row insertion.
+- `rules_queries.py`: read-only rule query helpers (`list_rules_for_display`,
+  `list_references_for_display`) used by the `rules` CLI sub-app.
 - `results.py`: profiling run persistence — `save_run`, `load_run`, `list_runs`,
   `reconstruct_annotations`, and `project_fingerprint` for cross-DB validation.
 
@@ -340,7 +353,8 @@ The test suite mirrors the major backend responsibilities.
 - `test_reference_resolution.py`: query-to-gene reference resolution correctness.
 - `test_rules.py`: resistance rule matching behavior.
 - `test_profile_cli.py`: CLI-level workflow coverage.
-- `test_regenerate_cli.py`: `respro regenerate` — listing, report regeneration, and
+- `test_regenerate_cli.py`: `respro explore`, `respro regenerate`, `respro classify`, and `respro sync`
+  command coverage.
   fingerprint mismatch rejection.
 - `test_report_outputs.py`: deterministic report/export behavior.
 - `test_results_db.py`: results DB schema, save/load round-trips, and fingerprint behavior.
@@ -377,7 +391,7 @@ that affects where contributors should place code.
 
 A typical `respro profile` run flows through the repository like this:
 
-1. CLI argument handling in `respro/cli.py`.
+1. CLI argument handling in `respro/cli/main.py`.
 2. Input loading in `respro/io/`.
 3. Reference resolution and variant processing in `respro/core/`.
 4. Rule matching in `respro/core/resistance_rules.py`.
