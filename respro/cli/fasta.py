@@ -55,13 +55,13 @@ def _profile_fasta_command(
     cache: Annotated[
         bool, typer.Option(
             '--cache/--no-cache',
-            help='Cache FASTA reference mapping in the project database for report regeneration (default: on).',
+            help='Cache FASTA reference mapping in the project database for report regeneration (default: off).',
         )
     ] = False,
     aligner: Annotated[
         str, typer.Option(
             '--aligner', '-a',
-            help="Alignment backend for query FASTA matching: 'pairwise' (Biopython, default) or 'mappy' (minimap2).",
+            help="Alignment backend for query FASTA matching: 'pairwise' (Biopython) or 'mappy' (minimap2, default). Mappy is faster for long references.",
         )
     ] = 'mappy',
 ) -> None:
