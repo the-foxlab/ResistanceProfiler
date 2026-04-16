@@ -155,21 +155,19 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Traceability
 
-- 🟡 Per-run manifest and deduplication — store an immutable `run_manifest` JSON blob on the
-  `run` row in `results.db`; the manifest captures everything needed to reproduce and deduplicate
-  a run: input checksums (VCF/FASTA SHA-256, project DB SHA-256), effective CLI parameters,
-  `respro` version, Python version, and a ruleset snapshot hash (SHA-256 of all canonical rule
-  rows for the resolved reference); derive a stable `run_fingerprint` (SHA-256 of the canonical
-  manifest) and store it alongside the manifest; on `save_run`, query for an existing row with the
-  same fingerprint — if found, skip the insert and automatically regenerate the report from the
-  stored run (same output as a fresh run, zero re-profiling cost) instead of just returning the
-  `run_id` silently; surface the manifest in `results.json` and in the HTML report metadata so
-  every exported artefact is self-describing and auditable
-- 🟢 Results database UUID — assign a stable UUID to each `results.db` at creation time
-  (analogous to the project fingerprint); store it in a `results_db` metadata table; prerequisite
-  for run provenance in the HTML report
-- 🟢 Show run provenance in HTML report — embed the results-DB UUID and run ID in the report
-  header so the report is self-describing; depends on results database UUID
+- 🟡 Per-run manifest and duplicate detection — store an immutable `run_manifest` JSON blob on the
+  `run` row in `results.db`; the manifest captures everything needed to reproduce a run: input
+  checksums (VCF/FASTA SHA-256, project DB SHA-256), effective CLI parameters, `respro` version,
+  Python version, project fingerprint, and the `project.updated_at` snapshot used at profiling
+  time; derive a stable `run_fingerprint` (SHA-256 of the canonical manifest) and store it
+  alongside the manifest; use this fingerprint to detect duplicate profiling inputs and surface
+  that information to the user, but do not silently reuse or overwrite mutable run rows because
+  later `runs sync` and manual `runs classify` operations make a stored run diverge from its
+  original profiling state; surface the manifest in `results.json` and in the HTML report metadata
+  so every exported artefact is self-describing and auditable
+- 🟢 Show run provenance in HTML report — embed the run ID, run fingerprint, project fingerprint,
+  and project-updated-at snapshot in the report metadata/header so the report is self-describing
+  without requiring a separate results-database UUID
 
 ### Combination rules
 
@@ -189,11 +187,59 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   variant falling inside two genes simultaneously produces correct, independent annotations for
   both; add tests for both the VCF and FASTA profiling paths
 
+### CLI restructure and results management
+
+- 🔴 Restructure CLI into `respro runs` and `respro rules` sub-apps — introduce
+  `respro/cli/runs.py` and `respro/cli/rules.py` as Typer sub-apps registered from `cli.py`;
+  move `respro regenerate` into `respro runs regenerate`; remove old `respro regenerate`; split
+  `--list` out of `regenerate` into `respro runs list`; keep `respro profile-vcf` and
+  `respro profile-fasta` as top-level commands unchanged
+- 🔴 `respro rules list` — add `list_rules_for_display(conn, ref_id)` in a new
+  `respro/db/rules_queries.py` module returning plain dicts; render as a Rich table in
+  `respro/cli/rules.py`; the data-access function must be reusable by a future web layer without
+  any CLI dependency
+- 🔴 Project `updated_at` tracking — add `updated_at` column to the `project` table
+  (default current timestamp, bumped on every `init-add`); store a `project_updated_at` snapshot
+  on the `run` row at profiling time; `respro runs list` shows a stale indicator when the
+  project DB has been updated after a run was recorded
+- 🔴 `sample_classification` table in `results.db` — new table with columns `run_id`,
+  `drug` (nullable), `phenotype`, `clinical_phenotype`, `ic50`, `fold_ic50`, `note`, `source`,
+  `created_at`; automatic migration on DB open; `save_classification` / `load_classifications`
+  helpers in `respro/db/results.py`
+- 🔴 `respro runs classify` — accepts `--run-id`, optional `--drug`, and any combination of
+  `--phenotype` / `--clinical-phenotype` / `--ic50` / `--fold-ic50`; optional `--note` and
+  `--source`; at least one of the value flags must be provided; appends a new
+  `sample_classification` row to the results DB; does not touch rule-based annotation rows
+- 🔴 `respro runs sync` — re-annotates a stored run against the current project DB; loads raw
+  `VariantCall` rows from results DB, re-runs `annotate_variants` + `match_rules` against the
+  live project DB, replaces stored `variant_result` and combo-hit rows, and updates
+  `resistance_hits`; requires project fingerprint match (fail-fast, no fallback); optionally
+  re-exports the HTML report with `--out`; useful after `init-add` adds new rules to a project
+- 🟡 Surface sample classifications in report and JSON — add a dedicated "Manual classifications"
+  section to the HTML report and a `sample_classifications` key to `results.json`; classifications
+  are clearly separated from rule-based hits and include drug, phenotype fields, note, source,
+  and timestamp
+
 ### Usability and workflow
 
-- 🟡 Multi-VCF / multi-FASTA support — accept multiple `--vcf` / `--fasta` inputs in one
-  invocation; run profiling per file and write one output directory per sample; useful for
-  batch runs without shell scripting
+- 🟡 Multi-chrom VCF and multi-record query FASTA support — a single VCF may carry variants
+  across multiple CHROM identifiers (e.g. segmented viruses, amplicon panels spanning disjoint
+  regions); the `--ref-fasta` supplied to `profile-vcf` must then be a multi-record FASTA with
+  one sequence per CHROM; `parse_vcf` already stores the CHROM field per variant; the alignment
+  step in `resolve_fasta_query` must be extended to accept a multi-record FASTA and return one
+  set of CIGAR mappings per record; `remap_variants` routes each variant to the CIGAR map whose
+  query name matches the variant's CHROM; all remapped variants from all chroms are then fed into
+  the existing `annotate_variants` + rule-matching pipeline unchanged and aggregated into a single
+  `ProfilingResult`; the report should note the number of distinct chroms processed
+- 🟡 Regression tests for multi-chrom VCF correctness — must be written before and validated
+  after the multi-chrom implementation to ensure no breakage of existing single-chrom behaviour;
+  required coverage: (1) per-variant local alignment snippets (mini-alignments) rendered in the
+  HTML report are correctly anchored to the right query sequence and CDS when multiple CHROM
+  entries are present; (2) BAM-based coverage gaps (`compute_coverage_gaps_from_bam`) project
+  depth per CHROM and emit `CoverageGap` entries correctly for each gene regardless of which
+  chrom the gene's query FASTA record came from; (3) a single-chrom VCF with the existing test
+  reference still produces byte-identical report output as before the change (guard against
+  inadvertent regression)
 - 🟢 Sanger AB1 input — add `respro profile-ab1` that reads an AB1 trace file via
   `SeqIO.read(..., 'abi')` and derives a quality-aware consensus sequence that feeds directly into
   the existing FASTA profiling pipeline; the quality model uses raw trace peak data
@@ -279,9 +325,38 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Deferred
 
-- 🟢 User-curated phenotype labels, edit-history provenance, and `respro edit` command group —
-  deferred together; these three items form a coherent edit workflow that should be designed as
-  a unit; not needed during core build-out and adds significant schema and UX complexity; revisit
-  once the core profiling and reporting pipeline is stable and released
-- 🟢 Web UI / app layer — deferred; must depend on stable backend APIs without moving domain
-  logic out of `respro/`
+- 🟢 Web UI architecture scaffold — add a separate top-level `web/` folder inside the same repo
+  with a FastAPI backend and a React frontend; the web layer must call existing `respro/` domain
+  logic rather than reimplement profiling or report-building behavior; React is acceptable here
+  because the app is expected to grow beyond a few static forms/tables, but the frontend should
+  stay thin and avoid heavy client-state frameworks unless a real need appears
+- 🟢 Workspace selection flow for local databases — define a local-only workspace concept that
+  captures `project.db`, `results.db`, and output directory paths; the UI must support opening an
+  existing results DB or creating a new one, and must not rely on hidden module-global state in
+  the backend so the same abstraction can later support multiple browser sessions cleanly
+- 🟢 FastAPI profiling endpoints — add backend routes for `profile-fasta` and `profile-vcf`
+  submissions (VCF + reference FASTA + optional BAM) that delegate to the existing profiling
+  pipeline and store outputs in the chosen results DB; return a run identifier and report path so
+  the frontend can offer an "Open results" button immediately after completion
+- 🟢 Results and rules browser API — add FastAPI endpoints for browsing stored runs and project
+  rules using the same display-oriented query helpers planned for `respro runs list` and
+  `respro rules list`; this keeps CLI and web views backed by the same data-shaping layer
+- 🟢 Report integration in the web app — do not rebuild the report UI in React; continue
+  generating the existing HTML report and expose it through the web layer so the frontend can open
+  the rendered result directly while keeping styling and output identical to the current Jinja/CSS
+  template
+- 🟢 Frontend styling parity with existing report template — derive the web UI visual language
+  from `respro/report/templates/report.html.j2` and `respro/report/static/report.css`; reuse the
+  same colours, table treatment, cards, and typography where practical so the web app feels like a
+  native extension of the current report rather than a separate product
+- 🟢 Local file/path UX for large inputs — design the web workflow around local path selection or
+  controlled server-side file browsing rather than browser uploads by default, because BAM/VCF/
+  FASTA inputs can be large; the app should bind to localhost only unless explicit authentication
+  and deployment hardening are added later
+- 🟢 Web install/start workflow — document a two-mode developer workflow (`uvicorn` backend + Vite
+  frontend in dev) and a simple local-user workflow where the FastAPI app serves the built React
+  assets directly; add optional dependency groups and one startup entry point so users can install
+  and launch the web layer without manual backend/frontend orchestration in the common case
+- 🟢 Web-layer tests — add API tests for workspace selection, runs list, rules list, and profiling
+  submission; add one browser-level smoke test that opens an existing report through the web UI;
+  the web layer must not weaken existing CLI regression coverage
