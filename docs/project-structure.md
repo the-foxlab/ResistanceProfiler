@@ -35,8 +35,8 @@ ReistanceProfiler/
 │   ├── cli/
 │   │   ├── main.py
 │   │   ├── init.py
-│   │   ├── profile_vcf.py
-│   │   ├── profile_fasta.py
+│   │   ├── vcf.py
+│   │   ├── fasta.py
 │   │   ├── profile_helpers.py
 │   │   ├── explore.py
 │   │   ├── regenerate.py
@@ -104,7 +104,7 @@ flowchart TD
 
     %% ── Databases ────────────────────────────────────────────────────
     subgraph DB["Databases  ·  respro/db/"]
-        db_ip["project/\nbuild / extend project DB"]
+        db_ip["init_project.py + drugs.py\nbuild / extend project DB"]
         db_pj[("project.db\nreferences · genes · rules · drugs")]
         db_rs[("results.db\nruns · variant results")]
     end
@@ -195,15 +195,15 @@ CLI package. `main.py` defines the root Typer `app` and registers all commands v
 Command modules:
 - `init.py` — `respro init`, `respro add`; also contains `init_project` and
   `add_to_project` orchestration functions
-- `profile_vcf.py` — `respro vcf`
-- `profile_fasta.py` — `respro fasta`
+- `vcf.py` — `respro vcf`
+- `fasta.py` — `respro fasta`
 - `explore.py` — `respro explore --rules` (browse resistance rules) or `respro explore --results` (browse stored runs)
 - `regenerate.py` — `respro regenerate` (re-export a stored run's report)
 - `classify.py` — `respro classify` (add manual classification to a run)
 - `sync.py` — `respro sync` (re-annotate a stored run against current project DB)
 - `profile_helpers.py` — shared profiling orchestration helpers (`_finalize_and_export`,
   `_init_results_db_connection`, `_resolve_reference`, `_load_reference_data`,
-  `_print_completion_panel`) used by `profile_vcf.py`, `profile_fasta.py`, and run mutation commands
+  `_print_completion_panel`) used by `vcf.py`, `fasta.py`, and run mutation commands
 
 Defines the public CLI entry points:
 

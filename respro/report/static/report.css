@@ -65,6 +65,31 @@ a.stat-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,
   font-size: .92rem;
   line-height: 1.55;
 }
+.manual-classification-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: .55rem 1rem;
+}
+.manual-label {
+  display: block;
+  color: #64748b;
+  font-size: .72rem;
+  font-weight: 700;
+  margin-bottom: .12rem;
+}
+.manual-value {
+  color: #1f2937;
+  font-size: .86rem;
+}
+.manual-note {
+  margin-top: .65rem;
+  font-size: .85rem;
+  color: #374151;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: .5rem .6rem;
+}
 .table-wrapper {
   max-width: 100%;
   overflow-x: auto;

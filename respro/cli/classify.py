@@ -1,5 +1,5 @@
 """
-`respro classify` command — add a manual sample classification to a stored run.
+`respro classify` command — set a manual sample classification for a stored run.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ def classify(
     result_db: Annotated[
         Path,
         typer.Option(
-            '--result-db',
+            '--results-db',
             '-d',
             exists=True,
             help='Results database.',
@@ -86,7 +86,7 @@ def classify(
         ),
     ] = '',
 ) -> None:
-    """Append a manual sample classification to a stored run."""
+    """Set one manual sample classification for a stored run."""
     if not any([phenotype, clinical_phenotype, ic50, fold_ic50]):
         raise click.UsageError(
             'At least one of --phenotype, --clinical-phenotype, --ic50, or --fold-ic50 must be provided.'
@@ -98,7 +98,7 @@ def classify(
         results_conn = open_results_db(result_db)
         # Verify run exists.
         load_run(results_conn, run_id)
-        cls_id = save_classification(
+        save_classification(
             results_conn,
             run_id,
             drug=drug,
@@ -110,7 +110,7 @@ def classify(
             source=source,
         )
         console.print(
-            f'[green]✓[/green] Classification #{cls_id} saved for run #{run_id}.'
+            f'[green]✓[/green] Classification saved for run #{run_id}.'
         )
     except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

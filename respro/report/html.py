@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import re
 import sqlite3
@@ -307,26 +306,28 @@ def _build_combo_hit_rows(result: ProfilingResult) -> list[dict]:
     return rows
 
 
-def _build_sample_classification_rows(result: ProfilingResult) -> list[dict]:
+def _build_sample_classification(result: ProfilingResult) -> dict | None:
     """
-    Build rows for manual sample classifications.
+    Build a single manual sample classification payload.
 
     :param result: profiling result
-    :return: list of dict rows for the manual classification section
+    :return: classification dict or None
     """
-    rows: list[dict] = []
-    for row in result.sample_classifications:
-        rows.append({
-            'drug': row.get('drug', ''),
-            'phenotype': row.get('phenotype', 'unknown'),
-            'clinical_phenotype': row.get('clinical_phenotype', 'unknown'),
-            'ic50': row.get('ic50', ''),
-            'fold_ic50': row.get('fold_ic50', ''),
-            'note': row.get('note', ''),
-            'source': row.get('source', ''),
-            'created_at': row.get('created_at', ''),
-        })
-    return rows
+    if not result.sample_classifications:
+        return None
+
+    # Prefer the newest entry in case legacy runs contain multiple rows.
+    row = result.sample_classifications[-1]
+    return {
+        'drug': row.get('drug', ''),
+        'phenotype': row.get('phenotype', 'unknown'),
+        'clinical_phenotype': row.get('clinical_phenotype', 'unknown'),
+        'ic50': row.get('ic50', ''),
+        'fold_ic50': row.get('fold_ic50', ''),
+        'note': row.get('note', ''),
+        'source': row.get('source', ''),
+        'created_at': row.get('created_at', ''),
+    }
 
 
 def _load_drug_badge_colours(
@@ -711,20 +712,23 @@ def _build_summary_text(
     organism: str = '',
     affected_genes: list[str] | None = None,
     high_impact_genes: list[str] | None = None,
+    coverage_gap_genes: list[str] | None = None,
 ) -> Markup:
     """
     Build a concise, grammatically natural English narrative for the report header.
 
     The text reads like a clinical interpretation note: it describes resistance evidence
     per drug, phenotype distribution, clinical verification status, quantitative ranges,
-    similarity hints, and any structural-impact warnings.
+    similarity hints, structural-impact warnings, and any unassessed coverage gaps.
 
     :param db_hit_rows: direct database hit rows
     :param combo_hit_rows: combination rule hit rows
     :param potential_rows: similarity-based potential effect rows
     :param summary: report summary metrics
     :param organism: organism name from the profiling result
+    :param affected_genes: gene names with resistance hits
     :param high_impact_genes: gene names that carry at least one high-impact variant
+    :param coverage_gap_genes: gene names with coverage gaps
     :return: HTML Markup narrative string
     """
     evidence_rows = [*db_hit_rows, *combo_hit_rows]
@@ -877,6 +881,14 @@ def _build_summary_text(
             f"and should be interpreted with caution."
         )
 
+    if coverage_gap_genes:
+        gene_list = _join_english_list([f'<em>{escape(g.upper())}</em>' for g in sorted(coverage_gap_genes)])
+        n_genes = len(coverage_gap_genes)
+        part = 'part' if n_genes == 1 else 'parts'
+        sentences.append(
+            f"Due to coverage gaps, {part} of {gene_list} could not be fully assessed for resistance mutations."
+        )
+
     return Markup(' '.join(sentences))
 
 
@@ -901,7 +913,7 @@ def build_report_context(
     db_hit_rows = _build_db_hit_rows(result, gene_alignments)
     summary['db_hit_rules'] = len(db_hit_rows)
     combo_hit_rows = _build_combo_hit_rows(result)
-    sample_classification_rows = _build_sample_classification_rows(result)
+    sample_classification = _build_sample_classification(result)
     cds_rows = _build_cds_rows(result, gene_alignments)
     potential_rows = _build_potential_effects_rows(result, rules or [], gene_alignments)
     coverage_assessment_available = bool(result.coverage_gaps) or any(
@@ -951,10 +963,6 @@ def build_report_context(
     db_cols = _col_visibility(db_hit_rows, _optional_cols)
     combo_cols = _col_visibility(combo_hit_rows, ['ic50', 'fold_ic50', 'clinical_phenotype', 'comment', 'publication'])
     pot_cols = _col_visibility(potential_rows, _optional_cols)
-    sample_classification_cols = _col_visibility(
-        sample_classification_rows,
-        ['clinical_phenotype', 'ic50', 'fold_ic50', 'note', 'source'],
-    )
 
     # Unify clinical_phenotype visibility across all hit sections: if any section has
     # meaningful values, all sections show the column so the report is consistent.
@@ -998,26 +1006,30 @@ def build_report_context(
         for ann in result.cds_annotations
         if ann.consequence in _high_impact and ann.gene_name
     }
+    coverage_gap_gene_names = {
+        gap.gene_name
+        for gap in result.coverage_gaps
+    }
     summary_text = _build_summary_text(
         db_hit_rows, combo_hit_rows, potential_rows, summary,
         organism=summary.get('organism') or '',
         affected_genes=sorted(hit_gene_names),
         high_impact_genes=sorted(high_impact_gene_names),
+        coverage_gap_genes=sorted(coverage_gap_gene_names),
     )
 
     return {
         'summary': summary,
         'summary_text_en': summary_text,
+        'sample_classification': sample_classification,
         'db_hit_rows': db_hit_rows,
         'combo_hit_rows': combo_hit_rows,
-        'sample_classification_rows': sample_classification_rows,
         'cds_rows': cds_rows,
         'potential_rows': potential_rows,
         'drug_cards': drug_cards,
         'gene_cards': gene_cards,
         'db_cols': db_cols,
         'combo_cols': combo_cols,
-        'sample_classification_cols': sample_classification_cols,
         'pot_cols': pot_cols,
         'bibliography': bibliography,
     }
@@ -1107,84 +1119,6 @@ def _build_output_stem(result: ProfilingResult) -> str:
     return safe_stem or 'profile'
 
 
-def _build_results_json_payload(result: ProfilingResult) -> dict:
-    """
-    Build a JSON-serializable export payload for one profiling result.
-
-    :param result: profiling result
-    :return: results payload dict
-    """
-    variants = []
-    for ann in result.cds_annotations:
-        variants.append({
-            'chrom': ann.variant.chrom,
-            'position': ann.variant.pos + 1,
-            'reference_nt': ann.variant.ref,
-            'alternate_nt': ann.variant.alt,
-            'allele_freq': ann.variant.allele_freq,
-            'depth': ann.variant.depth,
-            'gene': ann.gene_name,
-            'codon_pos': ann.codon_pos + 1,
-            'reference_codon': ann.ref_codon,
-            'alternate_codon': ann.alt_codon,
-            'reference_aa': ann.ref_aa,
-            'alternate_aa': ann.alt_aa,
-            'consequence': ann.consequence,
-            'af_bin': ann.af_bin,
-            'drug_hits': ann.drug_hits_json(),
-            'is_combined_codon_event': ann.is_combined_codon_event,
-            'combined_member_count': ann.combined_member_count,
-            'is_fasta_mode': ann.is_fasta_mode,
-        })
-
-    coverage_gaps = [
-        {
-            'gene': gap.gene_name,
-            'codon_start': gap.codon_start + 1,
-            'codon_end': gap.codon_end + 1,
-        }
-        for gap in result.coverage_gaps
-    ]
-
-    sample_classifications = [
-        {
-            'id': row.get('id', 0),
-            'drug': row.get('drug', ''),
-            'phenotype': row.get('phenotype', 'unknown'),
-            'clinical_phenotype': row.get('clinical_phenotype', 'unknown'),
-            'ic50': row.get('ic50', ''),
-            'fold_ic50': row.get('fold_ic50', ''),
-            'note': row.get('note', ''),
-            'source': row.get('source', ''),
-            'created_at': row.get('created_at', ''),
-        }
-        for row in result.sample_classifications
-    ]
-
-    return {
-        'summary': result.summary_dict(),
-        'variants': variants,
-        'combo_rule_hits': [hit.to_dict() for hit in result.combo_hits],
-        'coverage_gaps': coverage_gaps,
-        'sample_classifications': sample_classifications,
-    }
-
-
-def write_results_json(result: ProfilingResult, output_path: Path) -> Path:
-    """
-    Write results JSON for one profiling result.
-
-    :param result: profiling result
-    :param output_path: path to write JSON file to
-    :return: path to written JSON file
-    """
-    payload = _build_results_json_payload(result)
-    output_path = Path(output_path)
-    output_path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
-    logger.info('Results JSON written to %s', output_path)
-    return output_path
-
-
 def export_results(
     result: ProfilingResult,
     output_dir: Path,
@@ -1218,7 +1152,6 @@ def export_results(
         )
 
     html_path = output_dir / f'{stem}.report.html'
-    json_path = output_dir / f'{stem}.results.json'
     write_html(
         result,
         html_path,
@@ -1227,10 +1160,9 @@ def export_results(
         project_conn=project_conn,
         rules=rules,
     )
-    write_results_json(result, json_path)
 
-    outputs: dict[str, Path] = {'html': html_path, 'json': json_path}
-    logger.info('Exported %d format(s) to %s', len(outputs), output_dir)
+    outputs: dict[str, Path] = {'html': html_path}
+    logger.info('Exported report to %s', html_path)
     return outputs
 
 

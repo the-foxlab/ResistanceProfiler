@@ -4,7 +4,6 @@ Tests for the CLI runs commands (regenerate, classify, sync) and explore run lis
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 
@@ -109,10 +108,10 @@ class TestRegenerate:
         out_dir = tmp_path / 'regenerated'
         result = CliRunner().invoke(app, [
             'regenerate',
-            '--result-db', str(results_db),
+            '--results-db', str(results_db),
             '--run-id', '1',
             '--project', str(project_db),
-            '--out', str(out_dir),
+            '--output', str(out_dir),
         ])
 
         assert result.exit_code == 0, result.output
@@ -128,9 +127,9 @@ class TestRegenerate:
 
         result = CliRunner().invoke(app, [
             'regenerate',
-            '--result-db', str(results_db),
+            '--results-db', str(results_db),
             '--run-id', '1',
-            '--out', str(tmp_path / 'out'),
+            '--output', str(tmp_path / 'out'),
         ])
 
         assert result.exit_code != 0
@@ -147,13 +146,13 @@ class TestRegenerate:
 
         result = CliRunner().invoke(app, [
             'regenerate',
-            '--result-db', str(results_db),
+            '--results-db', str(results_db),
             '--run-id', '1',
             '--project', str(project_db),
         ])
 
         assert result.exit_code != 0
-        assert '--out' in result.output
+        assert '--output' in result.output
 
     def test_regenerate_unknown_run_id_raises_error(
         self,
@@ -166,10 +165,10 @@ class TestRegenerate:
 
         result = CliRunner().invoke(app, [
             'regenerate',
-            '--result-db', str(results_db),
+            '--results-db', str(results_db),
             '--run-id', '999',
             '--project', str(project_db),
-            '--out', str(tmp_path / 'out'),
+            '--output', str(tmp_path / 'out'),
         ])
 
         assert result.exit_code != 0
@@ -193,10 +192,10 @@ class TestRegenerate:
 
         result = CliRunner().invoke(app, [
             'regenerate',
-            '--result-db', str(results_db),
+            '--results-db', str(results_db),
             '--run-id', '1',
             '--project', str(project_db),
-            '--out', str(tmp_path / 'out'),
+            '--output', str(tmp_path / 'out'),
         ])
 
         assert result.exit_code != 0
@@ -270,10 +269,10 @@ class TestRegenerate:
         out_dir = tmp_path / 'regenerated_combo'
         result = CliRunner().invoke(app, [
             'regenerate',
-            '--result-db', str(results_db),
+            '--results-db', str(results_db),
             '--run-id', '1',
             '--project', str(project_db),
-            '--out', str(out_dir),
+            '--output', str(out_dir),
         ])
 
         assert result.exit_code == 0, result.output
@@ -283,7 +282,7 @@ class TestRegenerate:
         assert 'combo_regen_test' in html
         assert 'TestDrug' in html
 
-    def test_regenerate_surfaces_manual_classifications_in_html_and_json(
+    def test_regenerate_surfaces_manual_classifications_in_html(
         self,
         project_db: Path,
         sample_vcf: Path,
@@ -295,7 +294,7 @@ class TestRegenerate:
 
         classify_result = CliRunner().invoke(app, [
             'classify',
-            '--result-db', str(results_db),
+            '--results-db', str(results_db),
             '--run-id', '1',
             '--drug', 'Acyclovir',
             '--phenotype', 'resistant',
@@ -351,22 +350,15 @@ class TestRegenerate:
         project_conn.close()
 
         assert 'html' in outputs
-        assert 'json' in outputs
 
         html_files = list(out_dir.glob('*.html'))
         assert len(html_files) == 1
         html = html_files[0].read_text()
-        assert 'Manual classifications' in html
+        assert 'Manual classification' in html
         assert 'Acyclovir' in html
+        assert 'User comment:' in html
         assert 'manual review' in html
-
-        json_files = list(out_dir.glob('*.results.json'))
-        assert len(json_files) == 1
-        payload = json.loads(json_files[0].read_text())
-        assert 'sample_classifications' in payload
-        assert len(payload['sample_classifications']) == 1
-        assert payload['sample_classifications'][0]['drug'] == 'Acyclovir'
-        assert payload['sample_classifications'][0]['note'] == 'manual review'
+        assert html.index('Interpretation summary') < html.index('Manual classification')
 
 
 class TestClassify:
@@ -382,7 +374,7 @@ class TestClassify:
 
         result = CliRunner().invoke(app, [
             'classify',
-            '--result-db', str(results_db),
+            '--results-db', str(results_db),
             '--run-id', '1',
             '--phenotype', 'resistant',
             '--drug', 'Acyclovir',
@@ -390,7 +382,7 @@ class TestClassify:
         ])
 
         assert result.exit_code == 0, result.output
-        assert 'Classification #1 saved' in result.output
+        assert 'Classification saved for run #1' in result.output
 
     def test_classify_requires_at_least_one_value(
         self,
@@ -404,7 +396,7 @@ class TestClassify:
 
         result = CliRunner().invoke(app, [
             'classify',
-            '--result-db', str(results_db),
+            '--results-db', str(results_db),
             '--run-id', '1',
             '--drug', 'Acyclovir',
         ])
@@ -422,7 +414,7 @@ class TestClassify:
 
         result = CliRunner().invoke(app, [
             'classify',
-            '--result-db', str(results_db),
+            '--results-db', str(results_db),
             '--run-id', '999',
             '--drug', 'Acyclovir',
             '--phenotype', 'resistant',
@@ -430,6 +422,44 @@ class TestClassify:
 
         assert result.exit_code != 0
         assert '999' in result.output
+
+    def test_classify_replaces_existing_classification(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        results_db = tmp_path / 'results.db'
+        _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
+
+        first = CliRunner().invoke(app, [
+            'classify',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--drug', 'Acyclovir',
+            '--phenotype', 'resistant',
+            '--note', 'first note',
+        ])
+        assert first.exit_code == 0, first.output
+
+        second = CliRunner().invoke(app, [
+            'classify',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--drug', 'Acyclovir',
+            '--phenotype', 'sensitive',
+            '--note', 'updated note',
+        ])
+        assert second.exit_code == 0, second.output
+
+        conn = open_results_db(results_db)
+        rows = load_classifications(conn, 1)
+        conn.close()
+
+        assert len(rows) == 1
+        assert rows[0]['phenotype'] == 'sensitive'
+        assert rows[0]['note'] == 'updated note'
 
 
 class TestSync:
@@ -445,7 +475,7 @@ class TestSync:
 
         result = CliRunner().invoke(app, [
             'sync',
-            '--result-db', str(results_db),
+            '--results-db', str(results_db),
             '--project', str(project_db),
         ])
 
@@ -469,7 +499,7 @@ class TestSync:
 
         result = CliRunner().invoke(app, [
             'sync',
-            '--result-db', str(results_db),
+            '--results-db', str(results_db),
             '--run-id', '1',
             '--project', str(project_db),
         ])

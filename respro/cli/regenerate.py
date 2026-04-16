@@ -34,7 +34,7 @@ def regenerate(
     result_db: Annotated[
         Path,
         typer.Option(
-            '--result-db',
+            '--results-db',
             '-d',
             exists=True,
             help='Results database.',
@@ -60,7 +60,7 @@ def regenerate(
     out: Annotated[
         Path,
         typer.Option(
-            '--out',
+            '--output',
             '-o',
             help='Output directory.',
         ),

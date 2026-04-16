@@ -194,8 +194,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   variant falling inside two genes simultaneously produces correct, independent annotations for
   both; add tests for both the VCF and FASTA profiling paths
 
-### CLI restructure and results management
-
 ### Usability and workflow
 
 - 🟡 Multi-chrom VCF and multi-record query FASTA support — a single VCF may carry variants

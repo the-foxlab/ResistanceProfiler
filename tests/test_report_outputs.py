@@ -633,6 +633,38 @@ class TestBuildReportContext:
         assert 'Human alphaherpesvirus 1' in text
         assert 'GAG' in text
 
+    def test_build_report_context_mentions_coverage_gaps(self) -> None:
+        hit_ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=10, ref='A', alt='T', allele_freq=0.8, depth=100),
+            gene_name='pol',
+            codon_pos=1,
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            af_bin='high',
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            organism='Test organism',
+            annotations=[hit_ann],
+            coverage_gaps=[
+                CoverageGap(gene_name='gag', codon_start=5, codon_end=10),
+                CoverageGap(gene_name='rt', codon_start=20, codon_end=25),
+            ],
+        )
+
+        context = build_report_context(result)
+        text = context['summary_text_en']
+        assert 'coverage gaps' in text
+        assert 'could not be fully assessed' in text
+        assert 'GAG' in text
+        assert 'RT' in text
+
     def test_render_html_includes_summary_translation_controls(self) -> None:
         html = render_html(_make_result())
         assert 'Interpretation summary' in html

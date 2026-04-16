@@ -164,10 +164,11 @@ def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
     if not drug_rows:
         return
 
-    # A non-empty pubchem_cid means the drug was already resolved; description
-    # may legitimately be absent for some compounds and must not trigger a retry.
+    # Query unresolved drugs and entries missing a description so we can
+    # backfill title-based text for compounds where PubChem has no description.
     drugs_to_query = [
-        drug for drug in drug_rows if not (drug['pubchem_cid'] or '').strip()
+        drug for drug in drug_rows
+        if not (drug['pubchem_cid'] or '').strip() or not (drug['description'] or '').strip()
     ]
 
     already_present = len(drug_rows) - len(drugs_to_query)

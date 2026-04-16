@@ -21,11 +21,11 @@ import typer
 from respro import __version__
 from respro.cli import classify as _classify_module
 from respro.cli import explore as _explore_module
+from respro.cli import fasta as _fasta_module
 from respro.cli import init as _init_module
-from respro.cli import profile_fasta as _profile_fasta_module
-from respro.cli import profile_vcf as _profile_vcf_module
 from respro.cli import regenerate as _regenerate_module
 from respro.cli import sync as _sync_module
+from respro.cli import vcf as _vcf_module
 from respro.utils.logging import setup_logging
 
 app = typer.Typer(
@@ -35,8 +35,8 @@ app = typer.Typer(
 )
 
 _init_module.register(app)
-_profile_vcf_module.register(app)
-_profile_fasta_module.register(app)
+_vcf_module.register(app)
+_fasta_module.register(app)
 _explore_module.register(app)
 _regenerate_module.register(app)
 _classify_module.register(app)

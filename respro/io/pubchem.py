@@ -93,17 +93,24 @@ def _fetch_cid(name: str, timeout: int) -> int | None:
 
 def _fetch_description(cid: int, timeout: int) -> str:
     """
-    Fetch the first available human-readable description for a PubChem compound.
+    Fetch a human-readable description for a PubChem compound.
+
+    Prefers the Description endpoint, but falls back to a title if no
+    description text is available.
 
     :param cid: PubChem compound ID
     :param timeout: HTTP request timeout in seconds
     :return: description string, empty string if unavailable
     """
-    url = f'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/description/JSON'
+    description_url = f'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/description/JSON'
+    first_title = ''
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with urllib.request.urlopen(description_url, timeout=timeout) as resp:
             data = json.loads(resp.read())
             for entry in data.get('InformationList', {}).get('Information', []):
+                title = entry.get('Title', '').strip()
+                if title and not first_title:
+                    first_title = title
                 desc = entry.get('Description', '').strip()
                 if desc:
                     return desc
@@ -111,5 +118,22 @@ def _fetch_description(cid: int, timeout: int) -> str:
         logger.debug('PubChem description lookup failed for CID %s (network): %s', cid, exc)
     except Exception as exc:
         logger.debug('PubChem description lookup failed for CID %s: %s', cid, exc)
+
+    if first_title:
+        return first_title
+
+    title_url = f'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/property/Title/JSON'
+    try:
+        with urllib.request.urlopen(title_url, timeout=timeout) as resp:
+            data = json.loads(resp.read())
+            for entry in data.get('PropertyTable', {}).get('Properties', []):
+                title = entry.get('Title', '').strip()
+                if title:
+                    return title
+    except OSError as exc:
+        logger.debug('PubChem title lookup failed for CID %s (network): %s', cid, exc)
+    except Exception as exc:
+        logger.debug('PubChem title lookup failed for CID %s: %s', cid, exc)
+
     return ''
 

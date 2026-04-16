@@ -436,7 +436,10 @@ def save_classification(
     source: str = '',
 ) -> int:
     """
-    Append a manual sample classification row for a stored run.
+    Save one manual sample classification row per stored run.
+
+    If a classification already exists for the run, it is updated in place and
+    any legacy duplicate rows are removed.
 
     :param results_conn: open results DB connection
     :param run_id: id of the run to classify
@@ -447,16 +450,35 @@ def save_classification(
     :param fold_ic50: fold-IC50 value string
     :param note: free-text note
     :param source: source or reference for this classification
-    :return: id of the new classification row
+    :return: id of the stored classification row
     """
-    cursor = results_conn.execute(
-        'INSERT INTO sample_classification '
-        '(run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        (run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source),
-    )
+    existing = results_conn.execute(
+        'SELECT id FROM sample_classification WHERE run_id = ? ORDER BY id LIMIT 1',
+        (run_id,),
+    ).fetchone()
+    if existing is None:
+        cursor = results_conn.execute(
+            'INSERT INTO sample_classification '
+            '(run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source),
+        )
+        row_id = cursor.lastrowid  # type: ignore[assignment]
+    else:
+        row_id = int(existing['id'])
+        results_conn.execute(
+            'UPDATE sample_classification '
+            'SET drug = ?, phenotype = ?, clinical_phenotype = ?, ic50 = ?, fold_ic50 = ?, '
+            'note = ?, source = ?, created_at = datetime(\'now\') '
+            'WHERE id = ?',
+            (drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source, row_id),
+        )
+        results_conn.execute(
+            'DELETE FROM sample_classification WHERE run_id = ? AND id != ?',
+            (run_id, row_id),
+        )
     results_conn.commit()
-    return cursor.lastrowid  # type: ignore[return-value]
+    return int(row_id)
 
 
 def load_classifications(

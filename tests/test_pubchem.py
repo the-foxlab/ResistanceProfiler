@@ -102,6 +102,28 @@ class TestFetchDescription:
             result = _fetch_description(1, timeout=5)
         assert result == 'Valid description.'
 
+    def test_returns_title_when_description_missing(self) -> None:
+        payload = {
+            'InformationList': {
+                'Information': [
+                    {'CID': 1, 'Title': 'Brivudine', 'Description': ''},
+                ]
+            }
+        }
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
+            result = _fetch_description(1, timeout=5)
+        assert result == 'Brivudine'
+
+    def test_returns_title_from_property_endpoint_when_descriptions_missing(self) -> None:
+        description_payload = {'InformationList': {'Information': [{'CID': 1}]}}
+        title_payload = {'PropertyTable': {'Properties': [{'CID': 1, 'Title': 'Brivudine'}]}}
+        with patch('urllib.request.urlopen', side_effect=[
+            _mock_response(description_payload),
+            _mock_response(title_payload),
+        ]):
+            result = _fetch_description(1, timeout=5)
+        assert result == 'Brivudine'
+
     def test_returns_empty_string_when_no_descriptions(self) -> None:
         payload = {'InformationList': {'Information': [{'CID': 1}]}}
         with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
@@ -196,6 +218,30 @@ class TestAddPubchemData:
 
         # Only the still-missing drug should be queried.
         mocked_lookup.assert_called_once_with('Foscarnet')
+        conn.close()
+
+    def test_queries_existing_cid_when_description_missing(self) -> None:
+        conn = self._make_db()
+        conn.execute(
+            "UPDATE drug SET pubchem_cid = '123', pubchem_url = 'https://pubchem.ncbi.nlm.nih.gov/compound/123', "
+            "description = '' WHERE name = 'Aciclovir'"
+        )
+        conn.commit()
+
+        record = PubChemRecord(
+            cid=123,
+            url='https://pubchem.ncbi.nlm.nih.gov/compound/123',
+            description='Nucleoside analog antiviral',
+        )
+
+        def _side_effect(name: str) -> PubChemRecord | None:
+            return record if name == 'Aciclovir' else None
+
+        with patch('respro.db.drugs.lookup_drug', side_effect=_side_effect):
+            _get_drugs_from_pubchem(conn, project_id=1)
+
+        row = conn.execute("SELECT description FROM drug WHERE name='Aciclovir'").fetchone()
+        assert row['description'] == 'Nucleoside analog antiviral'
         conn.close()
 
     def test_logs_added_data_wording(self, caplog) -> None:

@@ -18,7 +18,8 @@ from respro.cli.profile_helpers import (
     _finalize_and_export,
     _load_reference_data,
 )
-from respro.db.models import AnnotatedVariant, VariantCall
+from respro.core.query import resolve_cached_query_reference
+from respro.db.models import AnnotatedVariant, GeneMatch, VariantCall
 from respro.db.results import (
     list_runs,
     load_coverage_gaps,
@@ -89,6 +90,18 @@ def _sync_single_run(
             af_bin=row.get('af_bin', ''),
         ))
 
+    # Try to recover query sequence and gene matches for FASTA-mode runs.
+    query_sequence = ''
+    gene_matches: list[GeneMatch] = []
+    sample_name = run_dict.get('sample_name', '')
+    if sample_name:
+        try:
+            _, query_sequence, gene_matches = resolve_cached_query_reference(
+                project_conn, sample_name,
+            )
+        except ValueError:
+            pass  # VCF run or mapping cache missing — mini alignments won't be rendered
+
     with err_console.status(f'[dim]Re-annotating run #{run_id}…[/dim]'):
         result, _outputs = _finalize_and_export(
             annotations=raw_annotations,
@@ -97,8 +110,10 @@ def _sync_single_run(
             ref_id=ref_id,
             project_name=run_dict['project_name'],
             ref_name=run_dict['reference_name'],
-            sample=run_dict.get('sample_name', ''),
+            sample=sample_name,
             input_basename=run_dict['vcf_path'],
+            query_sequence=query_sequence,
+            gene_matches=gene_matches,
             total_variants=run_dict.get('total_variants', 0),
             variants_in_cds=run_dict.get('variants_in_cds', 0),
             output_dir=Path('.'),
@@ -163,7 +178,7 @@ def sync(
     result_db: Annotated[
         Path,
         typer.Option(
-            '--result-db',
+            '--results-db',
             '-d',
             exists=True,
             help='Results database.',
