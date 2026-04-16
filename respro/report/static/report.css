@@ -32,6 +32,39 @@ a.stat-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,
 .stat-pill.zero { opacity: .28; }
 .stat-note { font-size: .72rem; color: #999; margin-top: .25rem; }
 .table-note { font-size: .85rem; color: #666; margin-bottom: .5rem; }
+.summary-text-box {
+  background: #fff;
+  border: 1px solid #e1e4e8;
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  margin-top: .4rem;
+  margin-bottom: .9rem;
+}
+.summary-lang-controls {
+  display: flex;
+  gap: .45rem;
+  margin-bottom: .6rem;
+}
+.summary-lang-btn {
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  padding: .2rem .7rem;
+  background: #f8fafc;
+  color: #334155;
+  font-size: .78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.summary-lang-btn.active {
+  background: #1e3a8a;
+  border-color: #1e3a8a;
+  color: #fff;
+}
+.summary-text {
+  color: #334155;
+  font-size: .92rem;
+  line-height: 1.55;
+}
 .table-wrapper {
   max-width: 100%;
   overflow-x: auto;

@@ -97,6 +97,26 @@
   {% endif %}
 </div>
 
+{% if summary_text_en %}
+<div class='section open' id='section-summary-text'>
+<h2 class='section-toggle'>Interpretation summary <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
+  <div class='summary-text-box' data-summary-lang='en' data-auto-translate='true'>
+    <div class='summary-lang-controls'>
+      <button type='button' class='summary-lang-btn active' data-lang='en'>English</button>
+      <button type='button' class='summary-lang-btn' data-lang='de'>Deutsch (Google Translate)</button>
+      <button type='button' class='summary-lang-btn' data-lang='fr'>Français (Google Translate)</button>
+      <button type='button' class='summary-lang-btn' data-lang='es'>Español (Google Translate)</button>
+    </div>
+    <p class='summary-text' data-lang='en'>{{ summary_text_en | safe }}</p>
+    <p class='summary-text' data-lang='de' hidden>Translation loading...</p>
+    <p class='summary-text' data-lang='fr' hidden>Translation loading...</p>
+    <p class='summary-text' data-lang='es' hidden>Translation loading...</p>
+  </div>
+</div>
+</div>
+{% endif %}
+
 {% if plot_data %}
 <div class='section open'>
 <h2 class='section-toggle'>Mutation overview <span class='toggle-arrow'>&#9654;</span></h2>

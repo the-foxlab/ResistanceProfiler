@@ -554,6 +554,95 @@ class TestBuildReportContext:
         assert "aln-cell aln-mutation" not in html
         assert 'Coding orientation:' in html
 
+    def test_build_report_context_includes_summary_text(self) -> None:
+        hit_rule = ResistanceRule(
+            id=1,
+            gene_name='gag',
+            gene_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='tiny_ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+            clinical_phenotype='resistant',
+            fold_ic50='>10x',
+        )
+        hit_ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+            gene_name='gag',
+            codon_pos=2,
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            af_bin='high',
+            rule_matches=[hit_rule],
+        )
+
+        sim_ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.5, depth=100),
+            gene_name='gag',
+            codon_pos=5,
+            ref_aa='L',
+            alt_aa='V',
+            consequence='missense',
+            af_bin='high',
+        )
+        high_impact_ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=10, ref='A', alt='AG', allele_freq=0.8, depth=120),
+            gene_name='gag',
+            codon_pos=6,
+            ref_aa='P',
+            alt_aa='PfsX',
+            consequence='frameshift',
+            af_bin='high',
+        )
+        sim_rule = ResistanceRule(
+            id=2,
+            gene_name='gag',
+            gene_id=1,
+            drug_name='DrugB',
+            drug_id=2,
+            reference_identifier='tiny_ref',
+            position=5,
+            reference='L',
+            mutation='I',
+            phenotype='intermediate',
+            clinical_phenotype='resistant',
+            ic50='5-10 uM',
+        )
+
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=3,
+            variants_in_cds=3,
+            resistance_hits=1,
+            organism='Human alphaherpesvirus 1',
+            annotations=[hit_ann, sim_ann, high_impact_ann],
+        )
+
+        context = build_report_context(result, rules=[hit_rule, sim_rule])
+        text = context['summary_text_en']
+        assert 'database hit' in text
+        assert 'DrugA' in text
+        assert 'biochemical similarity' in text
+        assert 'high-impact variant' in text
+        assert 'Human alphaherpesvirus 1' in text
+        assert 'GAG' in text
+
+    def test_render_html_includes_summary_translation_controls(self) -> None:
+        html = render_html(_make_result())
+        assert 'Interpretation summary' in html
+        assert 'data-lang=\'en\'' in html
+        assert 'data-lang=\'de\'' in html
+        assert 'data-lang=\'fr\'' in html
+        assert 'data-lang=\'es\'' in html
+        assert 'English' in html
+        assert 'Google Translate' in html
+
     def test_render_html_highlights_nt_and_aa_changed_segments(self) -> None:
         r = _make_result()
         html = render_html(r)

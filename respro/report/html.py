@@ -641,6 +641,222 @@ def _load_gene_cards(
     return cards
 
 
+def _join_english_list(items: list[str]) -> str:
+    """Join a list of strings with commas and a final Oxford 'and'."""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f'{items[0]} and {items[1]}'
+    return ', '.join(items[:-1]) + f', and {items[-1]}'
+
+
+def _phenotype_sentence(stats: dict) -> str:
+    """
+    Build a concise phenotype-distribution sentence for one drug.
+
+    Returns an empty string when all evidence is of unknown phenotype.
+    """
+    parts: list[str] = []
+    if stats['resistant']:
+        n = stats['resistant']
+        parts.append(f"{n} {'mutation' if n == 1 else 'mutations'} associated with resistance")
+    if stats['intermediate']:
+        n = stats['intermediate']
+        parts.append(f"{n} with an intermediate phenotype")
+    if stats['sensitive']:
+        n = stats['sensitive']
+        parts.append(f"{n} associated with drug sensitivity")
+    if not parts:
+        return ''
+    return _join_english_list(parts)
+
+
+def _range_sentence(ranges: dict[str, int]) -> str:
+    """Format IC50/fold-IC50 range data as a short parenthetical phrase."""
+    if not ranges:
+        return ''
+    ordered = sorted(ranges.items(), key=lambda item: (-item[1], item[0].lower()))
+    labels = [label for label, _ in ordered[:3]]
+    return f"quantitative values: {_join_english_list(labels)}"
+
+
+def _build_summary_text(
+    db_hit_rows: list[dict],
+    combo_hit_rows: list[dict],
+    potential_rows: list[dict],
+    summary: dict,
+    organism: str = '',
+    affected_genes: list[str] | None = None,
+    high_impact_genes: list[str] | None = None,
+) -> Markup:
+    """
+    Build a concise, grammatically natural English narrative for the report header.
+
+    The text reads like a clinical interpretation note: it describes resistance evidence
+    per drug, phenotype distribution, clinical verification status, quantitative ranges,
+    similarity hints, and any structural-impact warnings.
+
+    :param db_hit_rows: direct database hit rows
+    :param combo_hit_rows: combination rule hit rows
+    :param potential_rows: similarity-based potential effect rows
+    :param summary: report summary metrics
+    :param organism: organism name from the profiling result
+    :param high_impact_genes: gene names that carry at least one high-impact variant
+    :return: HTML Markup narrative string
+    """
+    evidence_rows = [*db_hit_rows, *combo_hit_rows]
+    by_drug: dict[str, dict] = {}
+    for row in evidence_rows:
+        drug = row.get('drug') or 'Unknown'
+        entry = by_drug.setdefault(drug, {
+            'total': 0,
+            'resistant': 0,
+            'intermediate': 0,
+            'sensitive': 0,
+            'unknown': 0,
+            'clinical': 0,
+            'ranges': {},
+        })
+        entry['total'] += 1
+        phenotype = _effective_phenotype(row)
+        if phenotype in ('resistant', 'intermediate', 'sensitive'):
+            entry[phenotype] += 1
+        else:
+            entry['unknown'] += 1
+        if row.get('clinical_phenotype', 'unknown') != 'unknown':
+            entry['clinical'] += 1
+
+        fold_value = (row.get('fold_ic50') or '').strip()
+        ic50_value = (row.get('ic50') or '').strip()
+        if fold_value:
+            label = f'fold-IC50 {fold_value}'
+        elif ic50_value:
+            label = f'IC50 {ic50_value}'
+        else:
+            label = ''
+        if label:
+            entry['ranges'][label] = entry['ranges'].get(label, 0) + 1
+
+    sentences: list[str] = []
+
+    if by_drug:
+        drug_names = sorted(by_drug)
+        n_drugs = len(drug_names)
+        n_hits = len(evidence_rows)
+
+        # Opening sentence — qualifier depends on the overall phenotype picture.
+        total_resistant = sum(s['resistant'] for s in by_drug.values())
+        total_intermediate = sum(s['intermediate'] for s in by_drug.values())
+        total_sensitive = sum(s['sensitive'] for s in by_drug.values())
+
+        drug_list = _join_english_list(drug_names)
+        hit_noun = 'database hit' if n_hits == 1 else 'database hits'
+        drug_noun = 'drug' if n_drugs == 1 else 'drugs'
+
+        # Build opening sentence: "Resistance-associated mutations in gene UL23 of Human alphaherpesvirus 1 were detected ..."
+        if total_resistant or total_intermediate:
+            subject = 'Resistance-associated mutations'
+        elif total_sensitive:
+            subject = 'Sensitivity-associated mutations'
+        else:
+            subject = 'Mutations with no resistance phenotype classification'
+
+        location_parts: list[str] = []
+        if affected_genes:
+            gene_list = _join_english_list([f'<em>{escape(g.upper())}</em>' for g in sorted(affected_genes)])
+            location_parts.append(f'in {gene_list}')
+        if organism:
+            location_parts.append(f'of {escape(organism)}')
+        location_clause = (' ' + ' '.join(location_parts)) if location_parts else ''
+
+        sentences.append(
+            f"{subject}{location_clause} were detected "
+            f"for {n_drugs} {drug_noun} ({drug_list}), with {n_hits} {hit_noun} in total."
+        )
+
+        # Per-drug sentences — split into two short sentences to avoid chained relative clauses.
+        for drug_name in drug_names:
+            stats = by_drug[drug_name]
+            n = stats['total']
+            pheno = _phenotype_sentence(stats)
+            range_note = _range_sentence(stats['ranges'])
+
+            sentence = f"For {drug_name}, {n} database {'hit was' if n == 1 else 'hits were'} identified"
+            if pheno:
+                sentence += f", including {pheno}"
+            sentence += '.'
+            sentences.append(sentence)
+
+            if stats['clinical'] or range_note:
+                if stats['clinical'] and range_note:
+                    c = stats['clinical']
+                    followup = (
+                        f"For {drug_name}, clinical phenotype data are available for "
+                        f"{c} of {'this hit' if n == 1 else 'these hits'} ({range_note})."
+                    )
+                elif stats['clinical']:
+                    c = stats['clinical']
+                    followup = (
+                        f"For {drug_name}, clinical phenotype data are available for "
+                        f"{c} of {'this hit' if n == 1 else 'these hits'}."
+                    )
+                else:
+                    followup = f"Reported quantitative data for {drug_name}: {range_note}."
+                sentences.append(followup)
+    else:
+        sentences.append(
+            'No resistance mutations matching database entries were identified in this sample.'
+        )
+
+    high_sim = sum(1 for row in potential_rows if row.get('similarity') == 'high')
+    moderate_sim = sum(1 for row in potential_rows if row.get('similarity') == 'moderate')
+    similar_total = high_sim + moderate_sim
+    if similar_total:
+        sim_parts: list[str] = []
+        if high_sim:
+            sim_parts.append(f"{high_sim} with high amino acid similarity")
+        if moderate_sim:
+            sim_parts.append(f"{moderate_sim} with moderate amino acid similarity")
+        sentences.append(
+            f"In addition, {similar_total} substitution{'s' if similar_total != 1 else ''} "
+            f"at known resistance positions {'were' if similar_total != 1 else 'was'} detected "
+            f"that do not exactly match a database entry but show biochemical similarity "
+            f"to a known resistance mutation ({_join_english_list(sim_parts)}). "
+            f"Further evaluation of {'these variants' if similar_total != 1 else 'this variant'} is recommended."
+        )
+
+    high_impact_count = int(summary.get('high_impact_count', 0) or 0)
+    if high_impact_count:
+        n = high_impact_count
+        # Build a list of which types were actually observed and how many.
+        _consequence_labels = {
+            'frameshift': 'frameshift',
+            'stop_gained': 'premature stop',
+            'stop_lost': 'stop loss',
+            'start_lost': 'start loss',
+            'insertion': 'in-frame insertion',
+            'deletion': 'in-frame deletion',
+        }
+        by_consequence = summary.get('high_impact_by_consequence', {})
+        type_parts = [
+            f"{cnt} {_consequence_labels[c]}{'s' if cnt != 1 else ''}"
+            for c in _consequence_labels
+            if (cnt := by_consequence.get(c, 0))
+        ]
+        type_list = _join_english_list(type_parts) if type_parts else 'high-impact'
+        gene_clause = ''
+        if high_impact_genes:
+            hi_gene_list = _join_english_list([f'<em>{escape(g.upper())}</em>' for g in sorted(high_impact_genes)])
+            gene_clause = f' in {hi_gene_list}'
+        sentences.append(
+            f"Moreover, {'one' if n == 1 else n} high-impact variant{'s were' if n != 1 else ' was'} "
+            f"identified{gene_clause} ({type_list}) that may disrupt protein structure or function "
+            f"and should be interpreted with caution."
+        )
+
+    return Markup(' '.join(sentences))
+
+
 def build_report_context(
     result: ProfilingResult,
     project_conn: sqlite3.Connection | None = None,
@@ -689,6 +905,10 @@ def build_report_context(
     summary['high_impact_count'] = sum(
         1 for ann in result.cds_annotations if ann.consequence in _high_impact
     )
+    summary['high_impact_by_consequence'] = {
+        c: sum(1 for ann in result.cds_annotations if ann.consequence == c)
+        for c in _high_impact
+    }
     summary['missense_count'] = sum(
         1 for ann in result.cds_annotations if ann.consequence == 'missense'
     )
@@ -739,8 +959,27 @@ def build_report_context(
     }
     gene_cards = _load_gene_cards(project_conn, result.reference_name, detected_gene_names)
 
+    # Genes that carry at least one direct resistance hit.
+    hit_gene_names = {
+        ann.gene_name
+        for ann in result.cds_annotations
+        if ann.is_resistance_hit and ann.gene_name
+    }
+    high_impact_gene_names = {
+        ann.gene_name
+        for ann in result.cds_annotations
+        if ann.consequence in _high_impact and ann.gene_name
+    }
+    summary_text = _build_summary_text(
+        db_hit_rows, combo_hit_rows, potential_rows, summary,
+        organism=summary.get('organism') or '',
+        affected_genes=sorted(hit_gene_names),
+        high_impact_genes=sorted(high_impact_gene_names),
+    )
+
     return {
         'summary': summary,
+        'summary_text_en': summary_text,
         'db_hit_rows': db_hit_rows,
         'combo_hit_rows': combo_hit_rows,
         'cds_rows': cds_rows,

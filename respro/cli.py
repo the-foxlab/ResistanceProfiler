@@ -153,14 +153,6 @@ def init(
         )
     ],
 
-    output: Annotated[
-        Path, typer.Option(
-            '--output',
-            '-o',
-            help='Output SQLite database path.'
-        )
-    ],
-
     genbank_paths: Annotated[
         list[Path] | None, typer.Option(
             '--genbank',
@@ -169,6 +161,14 @@ def init(
             help='GenBank file(s). Repeat for multiple files.',
         )
     ] = None,
+
+        output: Annotated[
+        Path, typer.Option(
+            '--output',
+            '-o',
+            help='Output SQLite database path.'
+        )
+    ] = Path('project.db'),
 
     overwrite: Annotated[
         bool, typer.Option(

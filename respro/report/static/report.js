@@ -301,5 +301,90 @@
       section.classList.add('open');
     }
   });
+
+  document.querySelectorAll('.summary-text-box').forEach((box) => {
+    const buttons = Array.from(box.querySelectorAll('.summary-lang-btn'));
+    const paragraphs = Array.from(box.querySelectorAll('.summary-text[data-lang]'));
+    if (!buttons.length || !paragraphs.length) {
+      return;
+    }
+
+    const translationCache = {};
+    const enParagraph = paragraphs.find((paragraph) => paragraph.dataset.lang === 'en');
+
+    const loadTranslation = async (lang) => {
+      const targetParagraph = paragraphs.find((paragraph) => paragraph.dataset.lang === lang);
+      if (!enParagraph || !targetParagraph) {
+        return;
+      }
+
+      if (translationCache[lang]) {
+        targetParagraph.textContent = translationCache[lang];
+        return;
+      }
+
+      const source = (enParagraph.textContent || '').trim();
+      if (!source) {
+        targetParagraph.textContent = 'No source text available for translation.';
+        return;
+      }
+
+      targetParagraph.textContent = 'Translation loading...';
+
+      const endpoint = 'https://translate.googleapis.com/translate_a/single';
+      const params = new URLSearchParams({
+        client: 'gtx',
+        sl: 'en',
+        tl: lang,
+        dt: 't',
+        q: source,
+      });
+
+      try {
+        const response = await fetch(`${endpoint}?${params.toString()}`);
+        if (!response.ok) {
+          throw new Error(`Translation request failed with status ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const segments = Array.isArray(payload) && Array.isArray(payload[0]) ? payload[0] : [];
+        const translated = segments
+          .map((segment) => (Array.isArray(segment) ? segment[0] : ''))
+          .join('')
+          .trim();
+
+        if (!translated) {
+          throw new Error('Translation response was empty');
+        }
+
+        translationCache[lang] = translated;
+        targetParagraph.textContent = translated;
+      } catch (error) {
+        targetParagraph.textContent = 'Automatic translation unavailable. Please retry later.';
+      }
+    };
+
+    const setLanguage = async (lang) => {
+      if (lang !== 'en') {
+        await loadTranslation(lang);
+      }
+
+      buttons.forEach((button) => {
+        button.classList.toggle('active', button.dataset.lang === lang);
+      });
+      paragraphs.forEach((paragraph) => {
+        paragraph.hidden = paragraph.dataset.lang !== lang;
+      });
+      box.dataset.summaryLang = lang;
+    };
+
+    buttons.forEach((button) => {
+      button.addEventListener('click', () => {
+        void setLanguage(button.dataset.lang || 'en');
+      });
+    });
+
+    void setLanguage(box.dataset.summaryLang || 'en');
+  });
 })();
 

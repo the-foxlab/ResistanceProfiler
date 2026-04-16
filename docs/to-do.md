@@ -96,6 +96,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] JSON export — full variant + combo rule hit data (`results.json`)
 - [X] TSV export removed — dead code, never exposed in CLI; `write_tsv` / `to_tsv_string` and `export.py` deleted
 - [X] Deterministic output filenames — safe stem derived from input VCF/FASTA name
+- [X] Bilingual interpretation summary section in HTML report — concise EN/DE "Befundtext" above mutation overview with phenotype/clinical evidence counts per drug, IC50/Fold-IC50 range mentions, similarity evidence summary, and high-impact variant warning
 
 ### Results database and regeneration
 
@@ -168,12 +169,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟢 Show run provenance in HTML report — embed the run ID, run fingerprint, project fingerprint,
   and project-updated-at snapshot in the report metadata/header so the report is self-describing
   without requiring a separate results-database UUID
-
-### Combination rules
-
-- 🟢 N-of-M / OR-logic for combination rules — current AND-only semantics cannot express
-  "at least 2 of these 3 mutations"; add an optional `min_members` field to the rule set so
-  curators can describe partial co-occurrence resistance
 
 ### Overlapping ORFs
 
@@ -261,12 +256,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   (`letter_annotations['phred_quality']`) can serve as a fast pre-filter (Phred < 20 → ambiguous)
   before the trace-peak analysis for positions that passed Phred but still show secondary peaks
 
-### Code quality and maintainability
-
-- 🟢 Add mypy or pyright to the dev toolchain — type hints are comprehensive throughout the
-  codebase; a type checker run in CI would catch drift and wrong annotations before they reach tests
-- 🟢 Increase test coverage for `respro/io/vcf.py` (currently 57%)
-
 ### Public release
 
 - 🔴 GitHub Actions CI — run the full test suite against all supported Python versions on every
@@ -297,6 +286,8 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   Bioconda/conda version badges to the README header; coverage badge requires a codecov or
   coveralls integration in CI; PyPI and Bioconda badges are available once packages are published
 - 🟢 PyPI release — changelog, version bump, and hatch-based build after CI and docs are in place
+- 🟢 Add mypy or pyright to the dev toolchain — type hints are comprehensive throughout the
+  codebase; a type checker run in CI would catch drift and wrong annotations before they reach tests
 
 ### Databases
 
@@ -322,8 +313,9 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   `respro/io/databases.py` module using stdlib `urllib.request` to avoid new heavy dependencies;
   depends on the companion database repository existing and following a consistent asset naming
   convention that encodes `PROJECT_SCHEMA_VERSION`
+- 🟡 For Jaki et al report all weird columns and send to Theo/Lena
 
-### Deferred
+### WebUI
 
 - 🟢 Web UI architecture scaffold — add a separate top-level `web/` folder inside the same repo
   with a FastAPI backend and a React frontend; the web layer must call existing `respro/` domain
