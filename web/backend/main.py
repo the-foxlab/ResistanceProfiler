@@ -21,12 +21,14 @@ from web.backend.models import (
     JobSubmitResponse,
     ProfileFastaPayload,
     ProfileVcfPayload,
+    SessionCleanupPayload,
+    SessionCleanupResponse,
     UploadResponse,
 )
 from web.backend.queue import get_queue
-from web.backend.services.browse import list_rules
+from web.backend.services.browse import list_databases, list_rules
 from web.backend.services.fs_browser import list_directory
-from web.backend.services.upload import save_upload
+from web.backend.services.upload import cleanup_session_files, save_upload
 from web.backend.startup_config import (
     StartupConfig,
     is_path_within_allowed_roots,
@@ -103,6 +105,25 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f'Upload failed: {str(exc)}') from exc
 
+    @app.post('/api/upload/bam', response_model=UploadResponse)
+    async def upload_bam(
+        file: UploadFile = File(...),
+        _auth: None = Depends(require_api_token),
+    ) -> UploadResponse:
+        try:
+            file_data = await file.read()
+            upload_dir = config.output_dir / '.uploads'
+            saved_path = save_upload(file_data, 'bam', upload_dir)
+            return UploadResponse(
+                file_path=str(saved_path),
+                file_type='bam',
+                size_bytes=len(file_data),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f'Upload failed: {str(exc)}') from exc
+
     @app.get('/api/rules', response_model=ApiEnvelope)
     def rules(
         reference: str | None = Query(default=None),
@@ -113,6 +134,39 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             return ApiEnvelope(data=data)
         except (FileNotFoundError, ValueError, OSError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get('/api/mutations', response_model=ApiEnvelope)
+    def mutations(
+        reference: str | None = Query(default=None),
+        _auth: None = Depends(require_api_token),
+    ) -> ApiEnvelope:
+        try:
+            data = list_rules(config.project_db, reference_filter=reference)
+            return ApiEnvelope(data=data)
+        except (FileNotFoundError, ValueError, OSError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get('/api/databases', response_model=ApiEnvelope)
+    def databases(_auth: None = Depends(require_api_token)) -> ApiEnvelope:
+        try:
+            data = list_databases(config.project_db)
+            return ApiEnvelope(data=data)
+        except (FileNotFoundError, ValueError, OSError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post('/api/session/cleanup', response_model=SessionCleanupResponse)
+    def cleanup_session_uploads(
+        payload: SessionCleanupPayload,
+        _auth: None = Depends(require_api_token),
+    ) -> SessionCleanupResponse:
+        upload_dir = config.output_dir / '.uploads'
+        deleted_count = cleanup_session_files(
+            payload.upload_paths,
+            payload.report_paths,
+            upload_dir,
+            config.output_dir,
+        )
+        return SessionCleanupResponse(deleted_count=deleted_count)
 
     @app.get('/api/fs/list', response_model=ApiEnvelope)
     def fs_list(

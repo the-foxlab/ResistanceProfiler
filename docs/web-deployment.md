@@ -79,13 +79,7 @@ Frontend dev server runs on `http://127.0.0.1:5173`.
 
 ## Option 2: Self-hosted local runtime with Docker
 
-### 1. Build image
-
-```bash
-docker build -f Dockerfile.web -t respro-web:prototype .
-```
-
-### 2. Run container
+### 1. Run container
 
 ```bash
 docker run --rm \
@@ -99,7 +93,7 @@ docker run --rm \
 Note: this single-container approach runs the web API but has no Redis or worker. Use Docker
 Compose for a complete setup.
 
-### 3. Open app
+### 2. Open app
 
 Open `http://127.0.0.1:8000/app`.
 
@@ -124,3 +118,4 @@ This starts the API, an RQ worker, and Redis together on `http://127.0.0.1:8000`
   the RQ worker.
 - Startup path configuration is enforced at backend startup; invalid project DB paths fail fast.
 - `results.db` is initialized automatically at startup.
+- Session-scoped temporary uploads and generated HTML reports are cleaned automatically when the browser tab is closed (`pagehide` cleanup call).

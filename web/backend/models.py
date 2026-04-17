@@ -58,3 +58,16 @@ class UploadResponse(BaseModel):
     file_path: str
     file_type: str  # 'fasta' or 'vcf'
     size_bytes: int
+
+
+class SessionCleanupPayload(BaseModel):
+    """Client-provided upload file paths to delete at session end."""
+
+    upload_paths: list[str] = Field(default_factory=list)
+    report_paths: list[str] = Field(default_factory=list)
+
+
+class SessionCleanupResponse(BaseModel):
+    """Summary of session upload cleanup."""
+
+    deleted_count: int

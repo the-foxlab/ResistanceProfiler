@@ -40,6 +40,10 @@ body {
   font-family: 'Merriweather', Georgia, serif;
 }
 
+.hero-actions {
+  margin-top: 0.8rem;
+}
+
 .card {
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -104,14 +108,6 @@ button:hover,
   background: #0a5a53;
 }
 
-.table-wrap {
-  overflow: auto;
-  max-height: 280px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fff;
-}
-
 table {
   width: 100%;
   border-collapse: collapse;
@@ -136,9 +132,153 @@ th {
   padding-left: 1rem;
 }
 
+.inline-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  align-items: center;
+}
+
+.database-meta {
+  margin: 0.75rem 0;
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.database-meta p {
+  margin: 0.25rem 0;
+}
+
 .status {
   font-size: 0.9rem;
   color: #4f4a41;
+}
+
+.spinner {
+  display: inline-block;
+  width: 1.2em;
+  height: 1.2em;
+  margin-right: 0.4em;
+  vertical-align: middle;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.progress-bar-container {
+  position: relative;
+  height: 24px;
+  background: #f0f0f0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 0.5rem 0;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #0a5a53);
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #333;
+  pointer-events: none;
+}
+
+.table-controls-container {
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 10px 10px 0 0;
+  padding: 0.5rem;
+}
+
+.table-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.table-controls label {
+  font-size: 0.78rem;
+  color: #4b5563;
+  font-weight: 600;
+}
+
+.table-controls select,
+.table-controls input {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.8rem;
+  background: #fff;
+}
+
+.table-controls button {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.table-controls button:hover {
+  background: #eef2f7;
+}
+
+.table-wrap {
+  overflow: auto;
+  max-height: 280px;
+  border: 1px solid var(--line);
+  border-radius: 0 0 10px 10px;
+  background: #fff;
+}
+
+th.sortable-col {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+
+th.sortable-col::after {
+  content: ' ↕';
+  opacity: 0.6;
+  font-weight: 400;
+  font-size: 0.8em;
+}
+
+th.sortable-col[data-order='asc']::after {
+  content: ' ↑';
+  opacity: 1;
+}
+
+th.sortable-col[data-order='desc']::after {
+  content: ' ↓';
+  opacity: 1;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .picker-overlay {
@@ -212,6 +352,10 @@ th {
 
 @media (max-width: 900px) {
   .two-col {
+    grid-template-columns: 1fr;
+  }
+
+  .inline-actions {
     grid-template-columns: 1fr;
   }
 }

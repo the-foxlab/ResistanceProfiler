@@ -1,10 +1,30 @@
 FROM node:22-alpine AS frontend-build
 
 WORKDIR /app/web/frontend
-COPY web/frontend/package.json ./
-RUN npm install
+COPY web/frontend/package.json web/frontend/package-lock.json ./
+RUN npm ci
 COPY web/frontend/ ./
 RUN npm run build
+
+FROM python:3.12-slim AS python-build
+
+WORKDIR /app
+ENV PIP_NO_CACHE_DIR=1 \
+	PIP_DISABLE_PIP_VERSION_CHECK=1 \
+	PYTHONDONTWRITEBYTECODE=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3-dev && rm -rf /var/lib/apt/lists/*
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY pyproject.toml README.md ./
+COPY respro ./respro
+COPY web/__init__.py ./web/__init__.py
+COPY web/backend ./web/backend
+
+RUN pip install --upgrade pip setuptools wheel
+RUN pip install .
+RUN pip install -r web/backend/requirements.txt
 
 FROM python:3.12-slim AS runtime
 
@@ -14,15 +34,11 @@ ENV PYTHONUNBUFFERED=1
 ENV RESPRO_WEB_HOST=0.0.0.0
 ENV RESPRO_WEB_PORT=8000
 ENV RESPRO_FRONTEND_DIST=/app/web/frontend/dist
+ENV PATH="/opt/venv/bin:$PATH"
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3-dev && rm -rf /var/lib/apt/lists/*
-
-COPY pyproject.toml README.md ./
-COPY respro ./respro
-COPY web ./web
-
-RUN pip install --no-cache-dir .
-RUN pip install --no-cache-dir -r web/backend/requirements.txt
+COPY --from=python-build /opt/venv /opt/venv
+COPY --from=python-build /app/web/__init__.py /app/web/__init__.py
+COPY --from=python-build /app/web/backend /app/web/backend
 COPY --from=frontend-build /app/web/frontend/dist /app/web/frontend/dist
 
 EXPOSE 8000

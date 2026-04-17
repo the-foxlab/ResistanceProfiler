@@ -67,6 +67,22 @@ class TestWebApi:
         assert len(rules) >= 1
         assert rules[0]['gene'] == 'gag'
 
+    def test_databases_endpoint(self, client: TestClient, auth_headers: dict[str, str]) -> None:
+        response = client.get('/api/databases', headers=auth_headers)
+        assert response.status_code == 200
+        payload = response.json()['data']
+        assert payload['count'] == 1
+        database = payload['items'][0]
+        assert database['display_name']
+        assert 'created_at' in database
+        assert 'supported_organisms' in database
+
+    def test_mutations_endpoint_alias(self, client: TestClient, auth_headers: dict[str, str]) -> None:
+        response = client.get('/api/mutations', headers=auth_headers)
+        assert response.status_code == 200
+        payload = response.json()['data']
+        assert payload['count'] >= 1
+
     def test_rules_endpoint_ignores_undefined_reference_filter(
         self,
         client: TestClient,
@@ -220,6 +236,30 @@ class TestWebApi:
         assert uploaded_path.parent == startup_config.data_dir / '.uploads'
         assert uploaded_path.read_bytes() == vcf_data
 
+    def test_upload_bam_success(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        auth_headers: dict[str, str],
+    ) -> None:
+        # BAM magic bytes (BAM\x01) followed by minimal valid BAM content
+        bam_data = b'BAM\x01' + b'\x00' * 100
+        response = client.post(
+            '/api/upload/bam',
+            files={'file': ('sample.bam', bam_data, 'application/octet-stream')},
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['file_type'] == 'bam'
+        assert payload['size_bytes'] == len(bam_data)
+        assert payload['file_path']
+        # Verify file is in upload directory
+        uploaded_path = Path(payload['file_path'])
+        assert uploaded_path.exists()
+        assert uploaded_path.parent == startup_config.data_dir / '.uploads'
+        assert uploaded_path.read_bytes() == bam_data
+
     def test_upload_fasta_with_empty_file_rejected(
         self,
         client: TestClient,
@@ -249,6 +289,21 @@ class TestWebApi:
         payload = response.json()
         assert 'valid' in payload['detail'].lower()
 
+    def test_upload_bam_with_invalid_magic_bytes_rejected(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        invalid_bam = b'NOTBAM' + b'\x00' * 100
+        response = client.post(
+            '/api/upload/bam',
+            files={'file': ('invalid.bam', invalid_bam, 'application/octet-stream')},
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+        payload = response.json()
+        assert 'magic' in payload['detail'].lower()
+
     def test_upload_fasta_requires_auth(self, client: TestClient) -> None:
         response = client.post(
             '/api/upload/fasta',
@@ -262,4 +317,36 @@ class TestWebApi:
             files={'file': ('sample.vcf', b'##fileformat=VCFv4.2\n', 'text/plain')},
         )
         assert response.status_code == 401
+
+    def test_session_cleanup_deletes_uploaded_and_report_files(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        auth_headers: dict[str, str],
+    ) -> None:
+        upload_response = client.post(
+            '/api/upload/fasta',
+            files={'file': ('sample.fasta', b'>seq\nATCG\n', 'text/plain')},
+            headers=auth_headers,
+        )
+        assert upload_response.status_code == 200
+        uploaded_path = Path(upload_response.json()['file_path'])
+        assert uploaded_path.exists()
+
+        report_path = startup_config.data_dir / 'session-result.report.html'
+        report_path.write_text('<html><body>report</body></html>')
+        assert report_path.exists()
+
+        cleanup_response = client.post(
+            '/api/session/cleanup',
+            json={
+                'upload_paths': [str(uploaded_path)],
+                'report_paths': [str(report_path)],
+            },
+            headers=auth_headers,
+        )
+        assert cleanup_response.status_code == 200
+        assert cleanup_response.json()['deleted_count'] == 2
+        assert not uploaded_path.exists()
+        assert not report_path.exists()
 

@@ -8,6 +8,38 @@ from respro.db.rules_queries import list_references_for_display, list_rules_for_
 from respro.db.schema import open_project_db
 
 
+def list_databases(project_db: Path) -> dict:
+    """Return available database metadata for the web UI catalog dropdown."""
+    project_conn = open_project_db(project_db)
+    try:
+        project_row = project_conn.execute(
+            'SELECT id, name, created_at, schema_version FROM project ORDER BY id LIMIT 1'
+        ).fetchone()
+        if project_row is None:
+            raise ValueError('Project DB contains no project metadata.')
+
+        organisms = [
+            row['organism']
+            for row in project_conn.execute(
+                "SELECT DISTINCT organism FROM reference WHERE organism IS NOT NULL AND organism != '' ORDER BY organism"
+            ).fetchall()
+        ]
+        mutation_count_row = project_conn.execute('SELECT COUNT(*) AS count FROM resistance_rule').fetchone()
+        mutation_count = int(mutation_count_row['count']) if mutation_count_row else 0
+
+        item = {
+            'id': str(project_row['id']),
+            'display_name': project_row['name'],
+            'created_at': project_row['created_at'],
+            'schema_version': project_row['schema_version'],
+            'supported_organisms': organisms,
+            'mutation_count': mutation_count,
+        }
+        return {'items': [item], 'count': 1}
+    finally:
+        project_conn.close()
+
+
 def list_rules(project_db: Path, reference_filter: str | None = None) -> dict:
     """Return rule rows with optional reference-name filtering."""
     project_conn = open_project_db(project_db)
