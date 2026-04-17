@@ -142,7 +142,7 @@ export function App() {
 
   const selectedDatabase = databases.find((item) => item.id === selectedDatabaseId) || null;
 
-  // Auto-load databases and first mutation set on mount
+  // Auto-load databases on mount
   useEffect(() => {
     const initData = async () => {
       try {
@@ -151,14 +151,7 @@ export function App() {
         const items = payload.data.items || [];
         setDatabases(items);
         if (items.length > 0) {
-          const firstDb = items[0];
-          setSelectedDatabaseId(firstDb.id);
-          setStatus(`Loaded ${items.length} database(s). Loading mutations from ${firstDb.display_name}...`);
-          // Load mutations for the first database
-          const mutPayload = await apiGet('/api/mutations');
-          setRules(mutPayload.data.items);
-          setMutationsLoaded(true);
-          setStatus(`Loaded. Ready to browse ${mutPayload.data.count} mutation(s).`);
+          setSelectedDatabaseId(items[0].id);
           return;
         }
         setStatus('No databases available');
@@ -169,34 +162,26 @@ export function App() {
     initData();
   }, []);
 
-  const loadMutations = async () => {
-    setStatus('Loading mutations from database...');
-    try {
-      const payload = await apiGet('/api/mutations');
-      setRules(payload.data.items);
-      setMutationsLoaded(true);
-      setStatus(`Loaded ${payload.data.count} mutation(s)`);
-    } catch (error) {
-      setStatus(`Error: ${error.message}`);
+  // Reload mutations whenever selected database changes
+  useEffect(() => {
+    if (!selectedDatabaseId) {
+      return;
     }
-  };
-
-  const loadDatabases = async () => {
-    setStatus('Loading available databases...');
-    try {
-      const payload = await apiGet('/api/databases');
-      const items = payload.data.items || [];
-      setDatabases(items);
-      if (items.length > 0) {
-        setSelectedDatabaseId(items[0].id);
-        setStatus(`Loaded ${items.length} database(s)`);
-        return;
+    const loadMutationsForDb = async () => {
+      setStatus('Loading mutations from database...');
+      try {
+        const payload = await apiGet('/api/mutations');
+        setRules(payload.data.items);
+        setMutationsLoaded(true);
+        setStatus(`Loaded. Ready to browse ${payload.data.count} mutation(s).`);
+      } catch (error) {
+        setStatus(`Error loading mutations: ${error.message}`);
       }
-      setStatus('No databases available');
-    } catch (error) {
-      setStatus(`Error: ${error.message}`);
-    }
-  };
+    };
+    loadMutationsForDb();
+  }, [selectedDatabaseId]);
+
+
 
   const parseValue = (text) => {
     const raw = (text || '').trim();
@@ -632,21 +617,18 @@ export function App() {
 
       <section className="card">
         <h2>Browse Mutations In Database</h2>
-        <div className="inline-actions">
-          <button type="button" onClick={() => loadDatabases().catch((error) => setStatus(error.message))}>
-            Reload Databases
-          </button>
-          <select
-            value={selectedDatabaseId}
-            onChange={(event) => setSelectedDatabaseId(event.target.value)}
-            disabled={databases.length === 0}
-          >
-            <option value="">Select database</option>
-            {databases.map((database) => (
-              <option key={database.id} value={database.id}>{database.display_name}</option>
-            ))}
-          </select>
-        </div>
+        {databases.length > 1 && (
+          <div className="inline-actions" style={{ marginBottom: '0.5rem' }}>
+            <select
+              value={selectedDatabaseId}
+              onChange={(event) => setSelectedDatabaseId(event.target.value)}
+            >
+              {databases.map((database) => (
+                <option key={database.id} value={database.id}>{database.display_name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         {selectedDatabase ? (
           <div className="database-meta">
             <p><strong>Created:</strong> {selectedDatabase.created_at || 'n/a'}</p>

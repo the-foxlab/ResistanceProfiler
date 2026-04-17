@@ -18,6 +18,8 @@ body {
     radial-gradient(circle at 20% 0%, #ece4d3 0%, transparent 35%),
     linear-gradient(180deg, #f8f4ea, #efe7d6);
   font-family: 'Source Sans 3', 'Segoe UI', sans-serif;
+  min-width: 640px;
+  overflow-x: auto;
 }
 
 .layout {
