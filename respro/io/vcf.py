@@ -32,11 +32,13 @@ def parse_vcf(
     vcf_path = Path(vcf_path)
     variants: list[VariantCall] = []
     dropped_contig_mismatch = 0
+    mismatched_contigs: set[str] = set()
 
     with pysam.VariantFile(str(vcf_path)) as vcf:
         for record in vcf.fetch():
             if expected_query_name is not None and record.contig != expected_query_name:
                 dropped_contig_mismatch += 1
+                mismatched_contigs.add(record.contig)
                 continue
 
             ref = (record.ref or '').upper().replace('U', 'T')
@@ -72,6 +74,13 @@ def parse_vcf(
             'Parsed %d variant(s) from %s (dropped %d due to CHROM != %r)',
             len(variants), vcf_path.name, dropped_contig_mismatch, expected_query_name,
         )
+        if dropped_contig_mismatch > 0 and not variants:
+            found = ', '.join(sorted(mismatched_contigs))
+            raise ValueError(
+                'VCF contig names do not match the uploaded reference FASTA. '
+                f'Expected {expected_query_name!r}, found {found}. '
+                'Use files derived from the same reference sequence.'
+            )
     return variants
 
 

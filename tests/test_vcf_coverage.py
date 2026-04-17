@@ -4,7 +4,11 @@ Tests for BAM-to-internal-reference coverage projection in VCF mode.
 
 from __future__ import annotations
 
-from respro.core.vcf_coverage import compute_coverage_gaps_from_depth
+from pathlib import Path
+
+import pytest
+
+from respro.core.vcf_coverage import _ensure_bam_index, compute_coverage_gaps_from_depth
 from respro.db.models import GeneMatch, GeneRecord
 
 
@@ -95,3 +99,62 @@ class TestVcfCoverageProjection:
         assert len(gaps) == 1
         assert gaps[0].codon_start == 1
         assert gaps[0].codon_end == 2
+
+
+class TestBamIndexHandling:
+    def test_ensure_bam_index_skips_when_bai_exists(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        bam_path = tmp_path / 'sample.bam'
+        bam_path.write_bytes(b'\x1f\x8b\x00\x00')
+        bam_path.with_suffix('.bam.bai').write_bytes(b'index')
+
+        called = {'value': False}
+
+        def _fake_index(_: str) -> None:
+            called['value'] = True
+
+        monkeypatch.setattr('respro.core.vcf_coverage.pysam.index', _fake_index)
+
+        _ensure_bam_index(bam_path)
+
+        assert called['value'] is False
+
+    def test_ensure_bam_index_creates_missing_index(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        bam_path = tmp_path / 'sample.bam'
+        bam_path.write_bytes(b'\x1f\x8b\x00\x00')
+
+        called = {'value': False}
+
+        def _fake_index(path: str) -> None:
+            called['value'] = True
+            Path(f'{path}.bai').write_bytes(b'index')
+
+        monkeypatch.setattr('respro.core.vcf_coverage.pysam.index', _fake_index)
+
+        _ensure_bam_index(bam_path)
+
+        assert called['value'] is True
+        assert bam_path.with_suffix('.bam.bai').exists()
+
+    def test_ensure_bam_index_raises_actionable_error_on_failure(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        bam_path = tmp_path / 'sample.bam'
+        bam_path.write_bytes(b'\x1f\x8b\x00\x00')
+
+        def _fake_index(_: str) -> None:
+            raise RuntimeError('cannot index unsorted BAM')
+
+        monkeypatch.setattr('respro.core.vcf_coverage.pysam.index', _fake_index)
+
+        with pytest.raises(ValueError, match='coordinate-sorted'):
+            _ensure_bam_index(bam_path)

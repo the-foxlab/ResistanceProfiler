@@ -33,45 +33,36 @@ def validate_upload(
         if len(file_data) > max_size:
             raise ValueError(f'FASTA file exceeds maximum size of {max_size // (1024 * 1024)} MB')
         # Check basic FASTA format (starts with > or contains ATCG)
-        try:
-            content = file_data.decode('utf-8', errors='ignore')
-            if not content.strip():
-                raise ValueError('FASTA file is empty')
-            if not (content.startswith('>') or any(c in 'ATCGNatcgn' for c in content)):
-                raise ValueError('FASTA file does not appear to contain valid sequence data')
-        except Exception as exc:
-            raise ValueError(f'FASTA file validation failed: {exc}') from exc
+        content = file_data.decode('utf-8', errors='ignore')
+        if not content.strip():
+            raise ValueError('FASTA file is empty')
+        if not (content.startswith('>') or any(c in 'ATCGNatcgn' for c in content)):
+            raise ValueError('FASTA file does not appear to contain valid sequence data')
     elif file_type == 'vcf':
         max_size = MAX_VCF_SIZE
         # Check size
         if len(file_data) > max_size:
             raise ValueError(f'VCF file exceeds maximum size of {max_size // (1024 * 1024)} MB')
         # Check basic VCF format (should contain header)
-        try:
-            content = file_data.decode('utf-8', errors='ignore')
-            if not content.strip():
-                raise ValueError('VCF file is empty')
-            lines = content.split('\n')
-            # VCF must have header lines starting with #
-            has_vcf_header = any(line.startswith('##fileformat=VCF') for line in lines)
-            has_column_header = any(line.startswith('#CHROM') for line in lines)
-            if not (has_vcf_header or has_column_header):
-                raise ValueError('VCF file does not appear to have valid VCF headers')
-        except Exception as exc:
-            raise ValueError(f'VCF file validation failed: {exc}') from exc
+        content = file_data.decode('utf-8', errors='ignore')
+        if not content.strip():
+            raise ValueError('VCF file is empty')
+        lines = content.split('\n')
+        # VCF must have header lines starting with #
+        has_vcf_header = any(line.startswith('##fileformat=VCF') for line in lines)
+        has_column_header = any(line.startswith('#CHROM') for line in lines)
+        if not (has_vcf_header or has_column_header):
+            raise ValueError('VCF file does not appear to have valid VCF headers')
     elif file_type == 'bam':
         max_size = MAX_BAM_SIZE
         # Check size
         if len(file_data) > max_size:
             raise ValueError(f'BAM file exceeds maximum size of {max_size // (1024 * 1024 * 1024)} GB')
-        # Check basic BAM format (starts with BAM magic bytes: BAM\x01)
-        try:
-            if len(file_data) < 4:
-                raise ValueError('BAM file is too small')
-            if file_data[:4] != b'BAM\x01':
-                raise ValueError('BAM file does not have valid BAM magic signature')
-        except Exception as exc:
-            raise ValueError(f'BAM file validation failed: {exc}') from exc
+        # BAM files are BGZF-compressed; they start with the gzip/BGZF magic bytes \x1f\x8b
+        if len(file_data) < 2:
+            raise ValueError('BAM file is too small')
+        if file_data[:2] != b'\x1f\x8b':
+            raise ValueError('BAM file does not have valid BGZF/gzip magic signature')
     else:
         raise ValueError(f'Unknown file type: {file_type}')
 
@@ -149,6 +140,22 @@ def _delete_paths(paths: list[str], *, allowed_root: Path, html_only: bool) -> i
         if not candidate.is_file():
             continue
         candidate.unlink(missing_ok=True)
+        deleted_count += 1
+        if not html_only and candidate.suffix.lower() == '.bam':
+            deleted_count += _delete_bam_index_sidecars(candidate, resolved_allowed_root)
+    return deleted_count
+
+
+def _delete_bam_index_sidecars(bam_path: Path, allowed_root: Path) -> int:
+    """Delete .bam.bai / .bai sidecar files for one BAM path when present."""
+    deleted_count = 0
+    sidecars = [bam_path.with_suffix(f'{bam_path.suffix}.bai'), bam_path.with_suffix('.bai')]
+    for sidecar in sidecars:
+        if not _is_within_root(sidecar, allowed_root):
+            continue
+        if not sidecar.is_file():
+            continue
+        sidecar.unlink(missing_ok=True)
         deleted_count += 1
     return deleted_count
 

@@ -70,6 +70,12 @@ label {
   margin-bottom: 0.6rem;
 }
 
+.field-hint {
+  margin: -0.25rem 0 0.75rem;
+  color: #665a48;
+  font-size: 0.83rem;
+}
+
 input {
   width: 100%;
   border: 1px solid var(--line);

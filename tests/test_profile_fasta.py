@@ -531,6 +531,7 @@ class TestProfileFastaCli:
             '--output', str(output_dir),
             '--min-af', '0.01',
             '--min-depth', '0',
+            '--aligner', 'pairwise',
         ])
 
         assert result.exit_code == 0, result.output

@@ -40,10 +40,25 @@ def compute_coverage_gaps_from_bam(
     if query_len == 0 or not matches:
         return []
 
+    _ensure_bam_index(bam_path)
     with pysam.AlignmentFile(str(bam_path), 'rb') as bam:
         contig = _resolve_bam_contig(bam, query_name)
         depths = _depth_array_from_bam(bam, contig, query_len)
     return compute_coverage_gaps_from_depth(depths, matches, min_depth=min_depth, query_len=query_len)
+
+
+def _ensure_bam_index(bam_path: Path) -> None:
+    """Create a BAM index in place when it is missing."""
+    bai_path = bam_path.with_suffix(f'{bam_path.suffix}.bai')
+    if bai_path.exists():
+        return
+
+    try:
+        pysam.index(str(bam_path))
+    except Exception as exc:
+        raise ValueError(
+            f'Failed to create BAM index for {bam_path.name!r}. Ensure the BAM is coordinate-sorted.'
+        ) from exc
 
 
 def compute_coverage_gaps_from_depth(

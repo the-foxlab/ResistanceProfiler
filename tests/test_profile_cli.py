@@ -122,8 +122,8 @@ class TestProfileCli:
             '--min-depth', '0',
         ])
 
-        assert result.exit_code == 0, result.output
-        assert '0 database hit(s)' in result.output
+        assert result.exit_code != 0
+        assert 'VCF contig names do not match the uploaded reference FASTA' in result.output
 
     def test_profile_with_results_db_creates_new_db(
         self,

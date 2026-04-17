@@ -100,26 +100,6 @@ class TestWebApi:
         payload = response.json()['data']
         assert payload['count'] >= 1
 
-    def test_fs_list_endpoint(
-        self,
-        client: TestClient,
-        tmp_path: Path,
-        auth_headers: dict[str, str],
-    ) -> None:
-        nested_dir = tmp_path / 'nested'
-        nested_dir.mkdir()
-        test_file = tmp_path / 'sample.vcf'
-        test_file.write_text('##fileformat=VCFv4.2\n')
-
-        response = client.get('/api/fs/list', params={'path': str(tmp_path)}, headers=auth_headers)
-
-        assert response.status_code == 200
-        payload = response.json()['data']
-        assert payload['path'] == str(tmp_path)
-        item_paths = {item['path'] for item in payload['items']}
-        assert str(nested_dir) in item_paths
-        assert str(test_file) in item_paths
-
     def test_profile_fasta(
         self,
         client: TestClient,
@@ -178,17 +158,42 @@ class TestWebApi:
         assert result['report_html_path'].endswith('.report.html')
         assert Path(result['report_html_path']).is_file()
 
+    def test_profile_vcf_reports_reference_mismatch_clearly(
+        self,
+        client: TestClient,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        mismatch_vcf = tmp_path / 'mismatch.vcf'
+        mismatch_vcf.write_text(
+            '##fileformat=VCFv4.2\n'
+            '##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">\n'
+            '##INFO=<ID=DP,Number=1,Type=Integer,Description="Read Depth">\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'other_ref\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
+        )
+
+        submit = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(mismatch_vcf),
+                'ref_fasta_path': str(sample_ref_fasta),
+                'sample': 'web-vcf-mismatch',
+            },
+            headers=auth_headers,
+        )
+        assert submit.status_code == 200
+
+        status = client.get(f"/api/jobs/{submit.json()['job_id']}", headers=auth_headers)
+        assert status.status_code == 200
+        payload = status.json()
+        assert payload['status'] == 'failed'
+        assert payload['error'] == 'VCF and reference FASTA do not match. Use files derived from the same reference sequence.'
+
     def test_protected_route_requires_auth(self, client: TestClient) -> None:
         response = client.get('/api/rules')
         assert response.status_code == 401
-
-    def test_fs_list_rejects_path_outside_allowed_roots(
-        self,
-        client: TestClient,
-        auth_headers: dict[str, str],
-    ) -> None:
-        response = client.get('/api/fs/list', params={'path': '/'}, headers=auth_headers)
-        assert response.status_code == 400
 
     def test_upload_fasta_success(
         self,
@@ -242,8 +247,8 @@ class TestWebApi:
         startup_config: StartupConfig,
         auth_headers: dict[str, str],
     ) -> None:
-        # BAM magic bytes (BAM\x01) followed by minimal valid BAM content
-        bam_data = b'BAM\x01' + b'\x00' * 100
+        # BAM files are BGZF-compressed; use gzip/BGZF magic bytes
+        bam_data = b'\x1f\x8b' + b'\x00' * 100
         response = client.post(
             '/api/upload/bam',
             files={'file': ('sample.bam', bam_data, 'application/octet-stream')},
@@ -287,14 +292,14 @@ class TestWebApi:
         )
         assert response.status_code == 400
         payload = response.json()
-        assert 'valid' in payload['detail'].lower()
+        assert payload['detail'] == 'Unsupported VCF format. Upload a VCF with standard headers such as ##fileformat and #CHROM.'
 
     def test_upload_bam_with_invalid_magic_bytes_rejected(
         self,
         client: TestClient,
         auth_headers: dict[str, str],
     ) -> None:
-        invalid_bam = b'NOTBAM' + b'\x00' * 100
+        invalid_bam = b'\xff\xff' + b'\x00' * 100
         response = client.post(
             '/api/upload/bam',
             files={'file': ('invalid.bam', invalid_bam, 'application/octet-stream')},
@@ -302,7 +307,7 @@ class TestWebApi:
         )
         assert response.status_code == 400
         payload = response.json()
-        assert 'magic' in payload['detail'].lower()
+        assert payload['detail'] == 'Unsupported BAM format. Upload a BGZF-compressed BAM file.'
 
     def test_upload_fasta_requires_auth(self, client: TestClient) -> None:
         response = client.post(
@@ -349,4 +354,38 @@ class TestWebApi:
         assert cleanup_response.json()['deleted_count'] == 2
         assert not uploaded_path.exists()
         assert not report_path.exists()
+
+    def test_session_cleanup_deletes_generated_bam_index_sidecar(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        auth_headers: dict[str, str],
+    ) -> None:
+        bam_data = b'\x1f\x8b' + b'\x00' * 100
+        upload_response = client.post(
+            '/api/upload/bam',
+            files={'file': ('sample.bam', bam_data, 'application/octet-stream')},
+            headers=auth_headers,
+        )
+        assert upload_response.status_code == 200
+        bam_path = Path(upload_response.json()['file_path'])
+        assert bam_path.exists()
+
+        bam_index_path = bam_path.with_suffix('.bam.bai')
+        bam_index_path.write_bytes(b'index')
+        assert bam_index_path.exists()
+        assert bam_index_path.parent == startup_config.data_dir / '.uploads'
+
+        cleanup_response = client.post(
+            '/api/session/cleanup',
+            json={
+                'upload_paths': [str(bam_path)],
+                'report_paths': [],
+            },
+            headers=auth_headers,
+        )
+        assert cleanup_response.status_code == 200
+        assert cleanup_response.json()['deleted_count'] == 2
+        assert not bam_path.exists()
+        assert not bam_index_path.exists()
 

@@ -27,7 +27,6 @@ from web.backend.models import (
 )
 from web.backend.queue import get_queue
 from web.backend.services.browse import list_databases, list_rules
-from web.backend.services.fs_browser import list_directory
 from web.backend.services.upload import cleanup_session_files, save_upload
 from web.backend.startup_config import (
     StartupConfig,
@@ -82,9 +81,9 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 size_bytes=len(file_data),
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=_user_facing_error_message(str(exc))) from exc
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f'Upload failed: {str(exc)}') from exc
+            raise HTTPException(status_code=500, detail=_user_facing_error_message(str(exc))) from exc
 
     @app.post('/api/upload/vcf', response_model=UploadResponse)
     async def upload_vcf(
@@ -101,9 +100,9 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 size_bytes=len(file_data),
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=_user_facing_error_message(str(exc))) from exc
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f'Upload failed: {str(exc)}') from exc
+            raise HTTPException(status_code=500, detail=_user_facing_error_message(str(exc))) from exc
 
     @app.post('/api/upload/bam', response_model=UploadResponse)
     async def upload_bam(
@@ -120,9 +119,9 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 size_bytes=len(file_data),
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=_user_facing_error_message(str(exc))) from exc
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=f'Upload failed: {str(exc)}') from exc
+            raise HTTPException(status_code=500, detail=_user_facing_error_message(str(exc))) from exc
 
     @app.get('/api/rules', response_model=ApiEnvelope)
     def rules(
@@ -167,18 +166,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             config.output_dir,
         )
         return SessionCleanupResponse(deleted_count=deleted_count)
-
-    @app.get('/api/fs/list', response_model=ApiEnvelope)
-    def fs_list(
-        path: str | None = Query(default=None),
-        _auth: None = Depends(require_api_token),
-    ) -> ApiEnvelope:
-        try:
-            browse_path = Path(path) if path else None
-            data = list_directory(browse_path, allowed_roots=config.allowed_roots)
-            return ApiEnvelope(data=data)
-        except (FileNotFoundError, ValueError, OSError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post('/api/profile/fasta', response_model=JobSubmitResponse)
     def profile_fasta_route(
@@ -234,7 +221,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         rq_status = job.get_status()
         status = _map_job_status(rq_status)
         result = job.return_value() if status == 'succeeded' else None
-        error = str(job.exc_info).strip() if status == 'failed' and job.exc_info else None
+        error = _user_facing_error_message(job.exc_info) if status == 'failed' and job.exc_info else None
         return JobStatusResponse(job_id=job_id, status=status, result=result, error=error)
 
     @app.get('/api/report')
@@ -264,6 +251,38 @@ def _map_job_status(rq_status) -> str:
     if rq_status in failed_statuses:
         return 'failed'
     return 'queued'
+
+
+def _user_facing_error_message(raw_message: str | None) -> str:
+    """Return a short user-facing message for API and job failures."""
+    if not raw_message:
+        return 'The operation failed on the server.'
+
+    lines = [line.strip() for line in raw_message.splitlines() if line.strip()]
+    message = lines[-1] if lines else raw_message.strip()
+    for prefix in ('ValueError: ', 'RuntimeError: ', 'Exception: ', 'OSError: '):
+        if message.startswith(prefix):
+            message = message[len(prefix):]
+            break
+
+    lowered = message.lower()
+    if 'fasta file does not appear to contain valid sequence data' in lowered:
+        return 'Unsupported FASTA format. Upload a text FASTA file with a header line starting with >.'
+    if 'vcf file does not appear to have valid vcf headers' in lowered:
+        return 'Unsupported VCF format. Upload a VCF with standard headers such as ##fileformat and #CHROM.'
+    if 'bam file does not have valid bgzf/gzip magic signature' in lowered or 'bam file is too small' in lowered:
+        return 'Unsupported BAM format. Upload a BGZF-compressed BAM file.'
+    if 'vcf contig names do not match the uploaded reference fasta' in lowered:
+        return 'VCF and reference FASTA do not match. Use files derived from the same reference sequence.'
+    if 'failed to create bam index' in lowered:
+        return 'Coverage annotation needs a coordinate-sorted BAM. The server could not create an index for this file.'
+    if 'bam reference' in lowered and 'not found' in lowered:
+        return 'BAM and reference FASTA do not match. Use files derived from the same reference sequence.'
+    if 'unknown aligner' in lowered:
+        return 'Unsupported aligner selection.'
+    if message.startswith('Upload failed:'):
+        return 'The upload failed on the server.'
+    return message
 
 
 def get_startup_config(request: Request) -> StartupConfig:

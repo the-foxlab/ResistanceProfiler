@@ -23,6 +23,52 @@ function buildHeaders(baseHeaders = {}) {
   };
 }
 
+function formatUserError(message) {
+  const lines = String(message || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  let normalized = lines.length > 0 ? lines[lines.length - 1] : 'The operation failed.';
+  normalized = normalized.replace(/^(ValueError|RuntimeError|Exception|OSError):\s*/, '');
+
+  const lowered = normalized.toLowerCase();
+  if (lowered.includes('unsupported fasta format')) {
+    return 'Unsupported FASTA format. Upload a text FASTA file with a header line starting with >.';
+  }
+  if (lowered.includes('unsupported vcf format')) {
+    return 'Unsupported VCF format. Upload a VCF with standard headers such as ##fileformat and #CHROM.';
+  }
+  if (lowered.includes('unsupported bam format')) {
+    return 'Unsupported BAM format. Upload a BGZF-compressed BAM file.';
+  }
+  if (lowered.includes('vcf and reference fasta do not match') || lowered.includes('vcf contig names do not match')) {
+    return 'VCF and reference FASTA do not match. Use files derived from the same reference sequence.';
+  }
+  if (lowered.includes('coverage annotation needs a coordinate-sorted bam')) {
+    return 'Coverage annotation needs a coordinate-sorted BAM. The server could not create an index for this file.';
+  }
+  if (lowered.includes('bam and reference fasta do not match')) {
+    return 'BAM and reference FASTA do not match. Use files derived from the same reference sequence.';
+  }
+  if (normalized.startsWith('Request failed:')) {
+    return 'The request failed.';
+  }
+  return normalized;
+}
+
+function formatResultTimestamp(timestamp) {
+  if (!timestamp) {
+    return 'n/a';
+  }
+
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) {
+    return timestamp;
+  }
+
+  return parsed.toLocaleString();
+}
+
 async function apiGet(path, params = {}) {
   const filteredParams = Object.fromEntries(
     Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
@@ -33,7 +79,7 @@ async function apiGet(path, params = {}) {
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.detail || `Request failed: ${response.status}`);
+    throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
   }
   return response.json();
 }
@@ -46,7 +92,7 @@ async function apiPost(path, body) {
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.detail || `Request failed: ${response.status}`);
+    throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
   }
   return response.json();
 }
@@ -74,24 +120,24 @@ async function uploadWithProgress(file, path, onProgress) {
           const response = JSON.parse(xhr.responseText);
           resolve(response);
         } catch (error) {
-          reject(new Error('Failed to parse upload response'));
+          reject(new Error(formatUserError('Failed to parse upload response')));
         }
       } else {
         try {
           const error = JSON.parse(xhr.responseText);
-          reject(new Error(error.detail || `Upload failed: ${xhr.status}`));
+          reject(new Error(formatUserError(error.detail || `Upload failed: ${xhr.status}`)));
         } catch {
-          reject(new Error(`Upload failed: ${xhr.status}`));
+          reject(new Error(formatUserError(`Upload failed: ${xhr.status}`)));
         }
       }
     });
 
     xhr.addEventListener('error', () => {
-      reject(new Error('Upload failed: network error'));
+      reject(new Error(formatUserError('Upload failed: network error')));
     });
 
     xhr.addEventListener('abort', () => {
-      reject(new Error('Upload cancelled'));
+      reject(new Error(formatUserError('Upload cancelled')));
     });
 
     xhr.open('POST', `${API_BASE}${path}`);
@@ -333,7 +379,7 @@ export function App() {
       await new Promise((resolve) => setTimeout(resolve, 2000));
       const payload = await apiGet(`/api/jobs/${jobId}`);
       if (payload.status === 'succeeded') return payload.result;
-      if (payload.status === 'failed') throw new Error(payload.error || 'Job failed');
+      if (payload.status === 'failed') throw new Error(formatUserError(payload.error || 'Job failed'));
       setStatus(`Job running (${jobId.slice(0, 8)}...)`);
     }
   };
@@ -344,7 +390,7 @@ export function App() {
     try {
       const submitResponse = await apiPost('/api/profile/fasta', {
         ...fastaInput,
-        aligner: 'pairwise',
+        aligner: 'mappy',
         threads: 1,
       });
       setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
@@ -358,7 +404,7 @@ export function App() {
         setStatus('FASTA profiling finished. Database matches were found.');
       }
     } catch (error) {
-      setStatus(`Error: ${error.message}`);
+      setStatus(formatUserError(error.message));
     } finally {
       setIsProcessingFasta(false);
     }
@@ -370,7 +416,7 @@ export function App() {
     try {
       const submitResponse = await apiPost('/api/profile/vcf', {
         ...vcfInput,
-        aligner: 'pairwise',
+        aligner: 'mappy',
         threads: 1,
         min_af: 0.01,
         min_depth: 10,
@@ -386,7 +432,7 @@ export function App() {
         setStatus('VCF profiling finished. Database matches were found.');
       }
     } catch (error) {
-      setStatus(`Error: ${error.message}`);
+      setStatus(formatUserError(error.message));
     } finally {
       setIsProcessingVcf(false);
     }
@@ -405,7 +451,7 @@ export function App() {
       setStatus(`${fileType.toUpperCase()} file uploaded: ${response.file_path}`);
     } catch (error) {
       setUploadProgress((prev) => ({ ...prev, [fileType]: null }));
-      setStatus(`Upload error: ${error.message}`);
+      setStatus(formatUserError(error.message));
     }
   };
 
@@ -493,7 +539,7 @@ export function App() {
               <option value="">Session FASTA results</option>
               {fastaResults.map((result) => (
                 <option key={result.report_html_path} value={result.report_html_path}>
-                  {result.sample_name} ({result.reference_name})
+                  {result.sample_name} ({result.reference_name}) - {formatResultTimestamp(result.created_at)}
                 </option>
               ))}
             </select>
@@ -560,6 +606,7 @@ export function App() {
               }}
             />
           </label>
+          <p className="field-hint">BAI is generated automatically on the server. The BAM must be coordinate-sorted.</p>
           {uploadProgress.bam !== null && (
             <div className="progress-bar-container">
               <div className="progress-bar" style={{ width: `${uploadProgress.bam}%` }} />
@@ -594,7 +641,7 @@ export function App() {
               <option value="">Session VCF results</option>
               {vcfResults.map((result) => (
                 <option key={result.report_html_path} value={result.report_html_path}>
-                  {result.sample_name} ({result.reference_name})
+                  {result.sample_name} ({result.reference_name}) - {formatResultTimestamp(result.created_at)}
                 </option>
               ))}
             </select>
@@ -617,7 +664,7 @@ export function App() {
 
       <section className="card">
         <h2>Browse Mutations In Database</h2>
-        {databases.length > 1 && (
+        {databases.length > 0 && (
           <div className="inline-actions" style={{ marginBottom: '0.5rem' }}>
             <select
               value={selectedDatabaseId}
