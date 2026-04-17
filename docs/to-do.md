@@ -175,6 +175,11 @@ Mark items done and update priorities after each completed milestone.
 - [X] Web-layer tests for startup-only mode — startup-config fixture, auth header coverage, 14 tests passing
 - [X] Prototype distribution path for bundled DB — `data/project.db` is the canonical location; mounted via `./data:/data` in Docker; documented in web-deployment.md
 - [X] Multipart file upload endpoints — `POST /api/upload/fasta` and `POST /api/upload/vcf` with validation, temp storage in `data/.uploads/`, auth enforcement
+- [X] Autoload first database and mutations on app startup — frontend loads database list on mount, selects first DB automatically, triggers mutations load to avoid manual "Load" button click
+- [X] Filter/sort mutations table with client-side search — column selector dropdown, text search input, reset button; compatible with report UI filter pattern; click headers to sort (↕ ↑ ↓ indicators)
+- [X] Processing spinner during profiling jobs — animated spinner SVG appears on Run button while job is queued/running; disabled button state prevents secondary submissions
+- [X] Upload progress tracking — XMLHttpRequest-based progress events display percentage bar during file uploads (FASTA/VCF/BAM); smooth transitions to 100% on completion
+- [X] BAM file upload support — new `/api/upload/bam` endpoint with BAM magic byte validation (BAM\x01); supports files up to 1GB; integrated into VCF profiling card as optional coverage input
 
 ---
 
