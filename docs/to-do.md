@@ -159,6 +159,23 @@ Mark items done and update priorities after each completed milestone.
 - [X] `respro sync` — top-level command; re-annotates stored run against current project DB; replaces variant_result and combo-hit rows; updates resistance_hits; requires fingerprint match; optional `--out` re-exports HTML report
 - [X] Surface sample classifications in report and JSON — dedicated "Manual classifications" section in HTML report and `sample_classifications` key in exported JSON, clearly separated from rule-based hits
 
+### WebUI
+
+- [X] FastAPI profiling endpoints with async job queue — `POST /api/profile/fasta` and `POST /api/profile/vcf` enqueue RQ jobs and return a `job_id`; `GET /api/jobs/{job_id}` exposes status/result; RQ worker executes jobs using `respro/` domain logic; Redis is the broker; `fakeredis` + `Queue(is_async=False)` used for test isolation
+- [X] Rules browser API — `GET /api/rules` with optional reference filter backed by `respro.db.rules_queries.list_rules_for_display`
+- [X] Report integration — existing HTML report served via `GET /api/report?path=...`; frontend opens it in a new tab
+- [X] Frontend styling parity with existing report template
+- [X] Local file/path UX — `/api/fs/list` filesystem browser; Browse buttons on all path inputs; app binds to localhost by default
+- [X] Web install/start workflow — `web/backend/requirements.txt` for web deps; Docker Compose with `redis`, `respro-web`, and `respro-worker` services
+- [X] Web UI architecture scaffold — FastAPI backend + React frontend in `web/`; web layer decoupled from PyPI packaging
+- [X] Startup workspace bootstrap — `RESPRO_WEB_DATA_DIR` as single root; `project.db` and `results.db` resolved from it at startup; no runtime workspace selection
+- [X] Startup results DB initialization — `results.db` created/opened at backend startup from data directory
+- [X] Remove workspace tile flow end-to-end — workspace form/UI, `/api/workspace/open`, and workspace payload fields removed
+- [X] Wire startup config into profiling routes/jobs — startup config used by `/api/rules`, `/api/profile/fasta`, `/api/profile/vcf`; request bodies contain only analysis inputs
+- [X] Web-layer tests for startup-only mode — startup-config fixture, auth header coverage, 14 tests passing
+- [X] Prototype distribution path for bundled DB — `data/project.db` is the canonical location; mounted via `./data:/data` in Docker; documented in web-deployment.md
+- [X] Multipart file upload endpoints — `POST /api/upload/fasta` and `POST /api/upload/vcf` with validation, temp storage in `data/.uploads/`, auth enforcement
+
 ---
 
 ## Next
@@ -243,6 +260,7 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   Markdown pages for installation, database preparation (GenBank + TSV format), profiling (VCF and
   FASTA), regeneration, and output formats; follow the style of varVAMP
   (https://github.com/jonas-fuchs/varVAMP)
+- 🟡 Github action for building a docker image and storing it on github (open - so no pricing)
 - 🟡 Dependabot for dependencies and GitHub Actions — add `.github/dependabot.yml` with weekly
   update checks for `pip` and `github-actions`, grouped PRs where sensible, and automatic security
   update PRs enabled to reduce CVE exposure and dependency drift
@@ -296,38 +314,13 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### WebUI
 
-- 🟢 Web UI architecture scaffold — add a separate top-level `web/` folder inside the same repo
-  with a FastAPI backend and a React frontend; the web layer must call existing `respro/` domain
-  logic rather than reimplement profiling or report-building behavior; React is acceptable here
-  because the app is expected to grow beyond a few static forms/tables, but the frontend should
-  stay thin and avoid heavy client-state frameworks unless a real need appears
-- 🟢 Workspace selection flow for local databases — define a local-only workspace concept that
-  captures `project.db`, `results.db`, and output directory paths; the UI must support opening an
-  existing results DB or creating a new one, and must not rely on hidden module-global state in
-  the backend so the same abstraction can later support multiple browser sessions cleanly
-- 🟢 FastAPI profiling endpoints — add backend routes for `profile-fasta` and `profile-vcf`
-  submissions (VCF + reference FASTA + optional BAM) that delegate to the existing profiling
-  pipeline and store outputs in the chosen results DB; return a run identifier and report path so
-  the frontend can offer an "Open results" button immediately after completion
-- 🟢 Results and rules browser API — add FastAPI endpoints for browsing stored runs and project
-  rules using the same display-oriented query helpers planned for `respro runs list` and
-  `respro rules list`; this keeps CLI and web views backed by the same data-shaping layer
-- 🟢 Report integration in the web app — do not rebuild the report UI in React; continue
-  generating the existing HTML report and expose it through the web layer so the frontend can open
-  the rendered result directly while keeping styling and output identical to the current Jinja/CSS
-  template
-- 🟢 Frontend styling parity with existing report template — derive the web UI visual language
-  from `respro/report/templates/report.html.j2` and `respro/report/static/report.css`; reuse the
-  same colours, table treatment, cards, and typography where practical so the web app feels like a
-  native extension of the current report rather than a separate product
-- 🟢 Local file/path UX for large inputs — design the web workflow around local path selection or
-  controlled server-side file browsing rather than browser uploads by default, because BAM/VCF/
-  FASTA inputs can be large; the app should bind to localhost only unless explicit authentication
-  and deployment hardening are added later
-- 🟢 Web install/start workflow — document a two-mode developer workflow (`uvicorn` backend + Vite
-  frontend in dev) and a simple local-user workflow where the FastAPI app serves the built React
-  assets directly; add optional dependency groups and one startup entry point so users can install
-  and launch the web layer without manual backend/frontend orchestration in the common case
-- 🟢 Web-layer tests — add API tests for workspace selection, runs list, rules list, and profiling
-  submission; add one browser-level smoke test that opens an existing report through the web UI;
-  the web layer must not weaken existing CLI regression coverage
+- 🟡 Project DB download via web (future) — add a CLI or startup-time mechanism to pull a versioned `project.db` from a companion release URL (GitHub Releases API) instead of requiring manual placement in `data/`; depends on the `respro databases` CLI work and a published release asset convention
+- 🟡 Job status contract hardening — standardize and test queued/running/succeeded/failed mapping plus consistent error payloads for failed jobs and missing `job_id`
+- 🟡 Queue runtime safeguards — add worker timeout/retry defaults and explicit logging for enqueue/start/fail/finish transitions to improve debuggability
+- 🟡 API readiness checks — extend health/readiness behavior to surface Redis connectivity and startup DB path readiness for operational diagnostics
+- 🟡 Frontend TypeScript migration — convert `web/frontend/src/` from JavaScript to TypeScript with typed API client models for job submit/status and profiling forms
+- 🟡 Dev startup ergonomics — add one-command local startup scripts (backend + worker + frontend + Redis) to reduce manual terminal orchestration during development
+- 🟡 Compose integration tests — add compose-backed smoke/integration tests for submit → poll → report retrieval using startup-configured paths
+- 🟢 CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
+- 🟢 Project DB catalog support (post-prototype) — support multiple project DBs with startup catalog metadata and runtime selection
+- 🟢 Results retention and portability (post-prototype) — add TTL cleanup policy for central results plus explicit export/import endpoints for user portability

@@ -28,6 +28,7 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 output/
+data/
 reports/
 example/
 sample.report.html

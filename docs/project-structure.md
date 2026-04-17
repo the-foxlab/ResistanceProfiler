@@ -30,6 +30,7 @@ ReistanceProfiler/
 │   ├── annotation-algorithms.md
 │   ├── project-structure.md
 │   ├── rules-tsv-format.md
+│   ├── web-deployment.md
 │   └── to-do.md
 ├── respro/
 │   ├── cli/
@@ -47,8 +48,17 @@ ReistanceProfiler/
 │   ├── io/
 │   ├── report/
 │   └── utils/
+├── web/
+│   ├── backend/
+│   │   ├── main.py
+│   │   ├── models.py
+│   │   └── services/
+│   └── frontend/
+│       └── src/
 ├── tests/
 ├── README.md
+├── docker-compose.web.yml
+├── Dockerfile.web
 └── pyproject.toml
 ```
 
@@ -423,6 +433,16 @@ This separation helps keep logic testable and output generation consistent.
 
 - the change affects schema, curated project initialization, or bundle persistence.
 
+### Add code to `web/backend/` when
+
+- the work is API transport, request validation, workspace path handling, or HTTP wiring;
+- existing `respro/` domain logic is reused as-is and only orchestrated for UI access.
+
+### Add code to `web/frontend/` when
+
+- the change concerns browser-facing UI workflows;
+- the implementation can stay thin and delegate all scientific logic to backend endpoints.
+
 ### Add tests when
 
 - behavior changes in any user-visible or scientifically relevant way;
@@ -431,10 +451,10 @@ This separation helps keep logic testable and output generation consistent.
 
 ## Current repository boundaries
 
-- The current repository is backend- and CLI-focused.
+- The repository now contains a prototype web layer (`web/`) in addition to CLI.
 - Keep the core package usable without assuming a UI layer.
-- If a future app layer is added, it should depend on stable backend APIs rather than
-  moving domain logic out of `respro/`.
+- The web layer must depend on stable backend/domain APIs rather than moving domain logic out of
+  `respro/`.
 
 ## Maintenance rule
 
