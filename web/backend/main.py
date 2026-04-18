@@ -54,6 +54,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     if frontend_dist.is_dir():
         app.mount('/app', StaticFiles(directory=str(frontend_dist), html=True), name='frontend')
 
+    branding_dir = Path(__file__).resolve().parents[2] / 'respro' / 'report' / 'static'
+
     @app.get('/api/health', response_model=ApiEnvelope)
     def health() -> ApiEnvelope:
         return ApiEnvelope(
@@ -235,6 +237,20 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         if not report_path.is_file():
             raise HTTPException(status_code=404, detail='Report not found.')
         return FileResponse(str(report_path), media_type='text/html')
+
+    @app.get('/api/branding/logo.svg')
+    def branding_logo() -> FileResponse:
+        logo_path = branding_dir / 'logo.svg'
+        if not logo_path.is_file():
+            raise HTTPException(status_code=404, detail='Logo not found.')
+        return FileResponse(str(logo_path), media_type='image/svg+xml')
+
+    @app.get('/api/branding/favicon.svg')
+    def branding_favicon() -> FileResponse:
+        favicon_path = branding_dir / 'favicon.svg'
+        if not favicon_path.is_file():
+            raise HTTPException(status_code=404, detail='Favicon not found.')
+        return FileResponse(str(favicon_path), media_type='image/svg+xml')
 
     return app
 

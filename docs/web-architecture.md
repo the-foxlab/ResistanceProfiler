@@ -151,9 +151,14 @@ functions. These are the functions enqueued by the profile routes.
 | `POST` | `/api/profile/vcf` | Enqueue VCF profiling job, return `{job_id, status}` |
 | `GET` | `/api/jobs/{job_id}` | Poll job status; `result` populated when `status == "succeeded"` |
 | `GET` | `/api/report` | Serve a saved HTML report file by path |
+| `GET` | `/api/branding/logo.svg` | Serve dashboard/report logo asset |
+| `GET` | `/api/branding/favicon.svg` | Serve dashboard/report favicon asset |
 
 Profile routes return `JobSubmitResponse` immediately. The frontend polls `/api/jobs/{job_id}`
 every 2 seconds until the status is `succeeded` or `failed`.
+
+`GET /api/report` is consumed by the frontend in an in-app modal (`iframe`) so reports stay in
+the same dashboard window.
 
 All other responses use `ApiEnvelope`:
 
@@ -173,16 +178,18 @@ Errors return HTTP 400 with the exception message in the FastAPI `detail` field.
 
 ## Frontend
 
-The frontend is a single React component file (`App.jsx`). All screens are rendered by
-conditional show/hide inside one `App` function — no router is used in this prototype.
+The frontend is a single React component file (`App.jsx`) with one active mode shown at a time.
+Mode selection is handled by a left sidebar, and no URL router is used in this prototype.
 
-### Screens
+### Screens and modes
 
-1. **Profile FASTA** — path input for a FASTA file, sample name, submits to
-   `POST /api/profile/fasta` and polls `GET /api/jobs/{job_id}` until complete.
-2. **Profile VCF** — paths for VCF and reference FASTA, sample name, min AF/depth, submits to
-   `POST /api/profile/vcf` and polls `GET /api/jobs/{job_id}` until complete.
-3. **Rules** — reference filter input, "Load Rules" button, table of rules from `GET /api/rules`.
+1. **Profile VCF** — upload/run flow for `POST /api/profile/vcf` + `GET /api/jobs/{job_id}`.
+2. **Profile FASTA** — upload/run flow for `POST /api/profile/fasta` + `GET /api/jobs/{job_id}`.
+3. **Browse mutations** — sortable/filterable mutations table from `GET /api/mutations`.
+4. **Report** — in-app report selector that opens the selected report in a same-window modal.
+
+A global top card holds database selection and metadata (active DB, schema version, mutation
+count, supported organisms) and remains visible across all modes.
 
 ### API client helpers
 

@@ -192,18 +192,6 @@ def _load_js_text() -> str:
     return js_path.read_text(encoding='utf-8')
 
 
-def _load_logo_svg_text() -> str:
-    """Load report logo SVG markup from the package static file."""
-    logo_path = Path(__file__).resolve().parent / 'static' / 'logo.svg'
-    return logo_path.read_text(encoding='utf-8')
-
-
-def _load_favicon_svg_text() -> str:
-    """Load report favicon SVG markup from the package static file."""
-    favicon_path = Path(__file__).resolve().parent / 'static' / 'favicon.svg'
-    return favicon_path.read_text(encoding='utf-8')
-
-
 def _phenotype_badge_class(value: str) -> str:
     """Map a phenotype string to a CSS badge class suffix."""
     if value in ('resistant', 'intermediate', 'sensitive'):
@@ -1055,11 +1043,6 @@ def render_html(
     template = env.from_string(_load_template_text())
     css_text = _load_css_text()
     js_text = _load_js_text()
-    logo_svg = _load_logo_svg_text()
-    favicon_svg = _load_favicon_svg_text()
-    favicon_data_uri = 'data:image/svg+xml;base64,' + base64.b64encode(
-        favicon_svg.encode('utf-8')
-    ).decode('ascii')
 
     context = build_report_context(result, project_conn=project_conn, rules=rules)
 
@@ -1070,8 +1053,6 @@ def render_html(
     return template.render(
         **context,
         plot_data=plot_data,
-        logo_svg=logo_svg,
-        favicon_data_uri=favicon_data_uri,
         css=css_text,
         js=js_text,
         mutation_colours=MUTATION_COLOURS,

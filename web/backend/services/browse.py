@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from respro.db.rules_queries import list_references_for_display, list_rules_for_display
+from respro.db.rules_queries import (
+    list_plot_metadata_for_display,
+    list_references_for_display,
+    list_rules_for_display,
+)
 from respro.db.schema import open_project_db
 
 
@@ -62,9 +66,13 @@ def list_rules(project_db: Path, reference_filter: str | None = None) -> dict:
             ref_id = int(matches[0]['id'])
 
         rows = list_rules_for_display(project_conn, ref_id=ref_id)
+        columns = list(rows[0].keys()) if rows else []
+        plot_meta = list_plot_metadata_for_display(project_conn, ref_id=ref_id)
         return {
             'items': rows,
             'count': len(rows),
+            'columns': columns,
+            'plot_meta': plot_meta,
         }
     finally:
         project_conn.close()

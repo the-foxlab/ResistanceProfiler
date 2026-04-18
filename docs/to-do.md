@@ -180,6 +180,8 @@ Mark items done and update priorities after each completed milestone.
 - [X] Processing spinner during profiling jobs — animated spinner SVG appears on Run button while job is queued/running; disabled button state prevents secondary submissions
 - [X] Upload progress tracking — XMLHttpRequest-based progress events display percentage bar during file uploads (FASTA/VCF/BAM); smooth transitions to 100% on completion
 - [X] BAM file upload support — new `/api/upload/bam` endpoint with BAM magic byte validation (BAM\x01); supports files up to 1GB; integrated into VCF profiling card as optional coverage input
+- [X] Unified dashboard shell and in-app report integration — frontend now uses a cohesive scientific dashboard with global database card, left mode sidebar (Profile VCF, Profile FASTA, Browse mutations, Report), app-level branding links/logo/favicon, and report viewing in an in-app modal instead of opening new browser tabs; report CSS harmonized with web app styling tokens
+- [X] Database analytics tiles in Web UI — Database tab now shows structured metadata cards plus a responsive 2-column plot grid with per-reference/gene mutation-position charts and optional IC50/drug summary plots derived from the loaded rules
 
 ---
 
@@ -280,6 +282,8 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   release that runs `respro` against the example data, renders the HTML report, and publishes it
   to GitHub Pages; gives prospective users a live, always-current preview of the report output
   without downloading anything
+- 🟡 Add a --information option to init and init--add (should then overwrite) where we can store some 
+  arbitary information with metadata - maybe also a json ? would then be more structured
 - 🟡 Bioconda package — write a Bioconda recipe (`meta.yaml`) and submit a PR to
   bioconda-recipes; Bioconda is the standard distribution channel for bioinformatics CLI tools
   and avoids requiring users to have a working pip/Python setup; dependency on pysam makes
