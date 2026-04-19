@@ -175,6 +175,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Web-layer tests for startup-only mode — startup-config fixture, auth header coverage, 14 tests passing
 - [X] Prototype distribution path for bundled DB — `data/project.db` is the canonical location; mounted via `./data:/data` in Docker; documented in web-deployment.md
 - [X] Multipart file upload endpoints — `POST /api/upload/fasta` and `POST /api/upload/vcf` with validation, temp storage in `data/.uploads/`, auth enforcement
+- [X] Streamed upload persistence in web backend — `/api/upload/fasta`, `/api/upload/vcf`, and `/api/upload/bam` now validate and persist uploads chunk-by-chunk to avoid loading whole files into memory; existing size caps and user-facing validation errors preserved
 - [X] Autoload first database and mutations on app startup — frontend loads database list on mount, selects first DB automatically, triggers mutations load to avoid manual "Load" button click
 - [X] Filter/sort mutations table with client-side search — column selector dropdown, text search input, reset button; compatible with report UI filter pattern; click headers to sort (↕ ↑ ↓ indicators)
 - [X] Processing spinner during profiling jobs — animated spinner SVG appears on Run button while job is queued/running; disabled button state prevents secondary submissions

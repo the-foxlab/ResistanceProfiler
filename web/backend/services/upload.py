@@ -1,9 +1,11 @@
 """File upload handling with validation."""
 
+from __future__ import annotations
+
 import os
 import tempfile
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 # Maximum allowed file sizes (in bytes)
 MAX_FASTA_SIZE = 50 * 1024 * 1024  # 50 MB
@@ -14,6 +16,161 @@ MAX_BAM_SIZE = 1 * 1024 * 1024 * 1024  # 1 GB
 ALLOWED_FASTA_TYPES = {'text/plain', 'application/octet-stream'}
 ALLOWED_VCF_TYPES = {'text/plain', 'text/x-vcf', 'application/octet-stream'}
 ALLOWED_BAM_TYPES = {'application/octet-stream'}
+
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+class UploadStream(Protocol):
+    """Minimal async file API required for streamed uploads."""
+
+    async def read(self, size: int = -1) -> bytes:
+        """Read up to size bytes from upload stream."""
+
+
+def _max_size_for_type(file_type: Literal['fasta', 'vcf', 'bam']) -> int:
+    if file_type == 'fasta':
+        return MAX_FASTA_SIZE
+    if file_type == 'vcf':
+        return MAX_VCF_SIZE
+    return MAX_BAM_SIZE
+
+
+def _extension_for_type(file_type: Literal['fasta', 'vcf', 'bam']) -> str:
+    if file_type == 'fasta':
+        return '.fa'
+    if file_type == 'vcf':
+        return '.vcf'
+    return '.bam'
+
+
+def _validate_stream_chunk(
+    state: dict[str, object],
+    chunk: bytes,
+    file_type: Literal['fasta', 'vcf', 'bam'],
+) -> None:
+    if file_type == 'fasta':
+        if state['starts_with_header'] is None and chunk:
+            state['starts_with_header'] = chunk[:1] == b'>'
+        text = chunk.decode('utf-8', errors='ignore')
+        if text.strip():
+            state['has_non_whitespace'] = True
+        if not state['has_sequence_char'] and any(char in 'ATCGNatcgn' for char in text):
+            state['has_sequence_char'] = True
+        return
+
+    if file_type == 'vcf':
+        text = chunk.decode('utf-8', errors='ignore')
+        if text.strip():
+            state['has_non_whitespace'] = True
+        combined_text = f"{state['line_buffer']}{text}"
+        lines = combined_text.split('\n')
+        state['line_buffer'] = lines.pop() if lines else combined_text
+        for line in lines:
+            if not state['has_vcf_header'] and line.startswith('##fileformat=VCF'):
+                state['has_vcf_header'] = True
+            if not state['has_column_header'] and line.startswith('#CHROM'):
+                state['has_column_header'] = True
+        return
+
+    if len(state['first_bytes']) < 2:
+        missing = 2 - len(state['first_bytes'])
+        state['first_bytes'] = state['first_bytes'] + chunk[:missing]
+
+
+def _validate_stream_complete(
+    state: dict[str, object],
+    file_type: Literal['fasta', 'vcf', 'bam'],
+) -> None:
+    if file_type == 'fasta':
+        if not state['has_non_whitespace']:
+            raise ValueError('FASTA file is empty')
+        if not (state['starts_with_header'] or state['has_sequence_char']):
+            raise ValueError('FASTA file does not appear to contain valid sequence data')
+        return
+
+    if file_type == 'vcf':
+        if not state['has_non_whitespace']:
+            raise ValueError('VCF file is empty')
+        buffered_line = str(state['line_buffer'])
+        has_vcf_header = bool(state['has_vcf_header']) or buffered_line.startswith('##fileformat=VCF')
+        has_column_header = bool(state['has_column_header']) or buffered_line.startswith('#CHROM')
+        if not (has_vcf_header or has_column_header):
+            raise ValueError('VCF file does not appear to have valid VCF headers')
+        return
+
+    if len(state['first_bytes']) < 2:
+        raise ValueError('BAM file is too small')
+    if state['first_bytes'][:2] != b'\x1f\x8b':
+        raise ValueError('BAM file does not have valid BGZF/gzip magic signature')
+
+
+def _new_stream_validation_state(file_type: Literal['fasta', 'vcf', 'bam']) -> dict[str, object]:
+    if file_type == 'fasta':
+        return {
+            'starts_with_header': None,
+            'has_non_whitespace': False,
+            'has_sequence_char': False,
+        }
+    if file_type == 'vcf':
+        return {
+            'line_buffer': '',
+            'has_non_whitespace': False,
+            'has_vcf_header': False,
+            'has_column_header': False,
+        }
+    return {
+        'first_bytes': b'',
+    }
+
+
+async def save_upload_stream(
+    upload_file: UploadStream,
+    file_type: Literal['fasta', 'vcf', 'bam'],
+    upload_dir: Path,
+    *,
+    chunk_size: int = UPLOAD_CHUNK_SIZE,
+) -> tuple[Path, int]:
+    """
+    Validate and save uploaded content incrementally.
+
+    :param upload_file: async upload stream object
+    :param file_type: 'fasta', 'vcf', or 'bam'
+    :param upload_dir: directory to save uploads to
+    :param chunk_size: bytes per read operation
+    :return: saved path and total size in bytes
+    :raises ValueError: if file validation fails
+    """
+    max_size = _max_size_for_type(file_type)
+    validation_state = _new_stream_validation_state(file_type)
+
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(suffix=_extension_for_type(file_type), dir=str(upload_dir))
+
+    total_size = 0
+    try:
+        with os.fdopen(fd, 'wb') as handle:
+            while True:
+                chunk = await upload_file.read(chunk_size)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > max_size:
+                    if file_type == 'bam':
+                        raise ValueError(
+                            f'BAM file exceeds maximum size of {max_size // (1024 * 1024 * 1024)} GB'
+                        )
+                    raise ValueError(
+                        f'{file_type.upper()} file exceeds maximum size of {max_size // (1024 * 1024)} MB'
+                    )
+                _validate_stream_chunk(validation_state, chunk, file_type)
+                handle.write(chunk)
+
+        _validate_stream_complete(validation_state, file_type)
+    except Exception:
+        Path(temp_path).unlink(missing_ok=True)
+        raise
+
+    return Path(temp_path), total_size
 
 
 def validate_upload(

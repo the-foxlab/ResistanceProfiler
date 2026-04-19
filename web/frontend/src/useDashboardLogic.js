@@ -170,20 +170,52 @@ async function apiPost(path, body) {
   return response.json();
 }
 
-async function apiUpload(path, file) {
-  // Uploads use FormData and do not set JSON headers.
+async function apiUpload(path, file, onProgress = null) {
+  // Use XHR so upload progress events can be surfaced in the UI.
   const formData = new FormData();
   formData.append('file', file);
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    headers: buildHeaders(),
-    body: formData,
+
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open('POST', `${API_BASE}${path}`);
+
+    const headers = buildHeaders();
+    Object.entries(headers).forEach(([key, value]) => {
+      request.setRequestHeader(key, value);
+    });
+
+    if (onProgress) {
+      request.upload.onprogress = (event) => {
+        if (!event.lengthComputable) {
+          return;
+        }
+        const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+        onProgress(percent);
+      };
+    }
+
+    request.onload = () => {
+      let payload = {};
+      if (request.responseText) {
+        try {
+          payload = JSON.parse(request.responseText);
+        } catch {
+          payload = {};
+        }
+      }
+      if (request.status >= 200 && request.status < 300) {
+        resolve(payload);
+        return;
+      }
+      reject(new Error(formatUserError(payload.detail || `Upload failed: ${request.status}`)));
+    };
+
+    request.onerror = () => {
+      reject(new Error('Upload failed: network error'));
+    };
+
+    request.send(formData);
   });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(formatUserError(payload.detail || `Upload failed: ${response.status}`));
-  }
-  return response.json();
 }
 
 export function useDashboardLogic() {
@@ -220,6 +252,10 @@ export function useDashboardLogic() {
   const [activeProfileMode, setActiveProfileMode] = useState('vcf');
   const [inlineReportPath, setInlineReportPath] = useState('');
   const [inlineReportLabel, setInlineReportLabel] = useState('');
+  const [uploadProgress, setUploadProgress] = useState({
+    percent: 0,
+    fileName: '',
+  });
 
   // Resolve currently selected database once for all consumers.
   const selectedDatabase = databases.find((item) => item.id === selectedDatabaseId) || null;
@@ -494,10 +530,23 @@ export function useDashboardLogic() {
   const uploadFile = async (file, fileType, onSuccess) => {
     // Shared upload path for FASTA/VCF/reference/BAM inputs.
     setStatus(`Uploading ${fileType.toUpperCase()} file (${file.name})...`);
+    setUploadProgress({
+      percent: 0,
+      fileName: `${fileType.toUpperCase()} - ${file.name}`,
+    });
     try {
-      const response = await apiUpload(`/api/upload/${fileType}`, file);
+      const response = await apiUpload(`/api/upload/${fileType}`, file, (percent) => {
+        setUploadProgress((prev) => ({
+          ...prev,
+          percent,
+        }));
+      });
       onSuccess(response.file_path);
       addUploadedPath(response.file_path);
+      setUploadProgress((prev) => ({
+        ...prev,
+        percent: 100,
+      }));
       setStatus(`${fileType.toUpperCase()} file uploaded successfully.`);
     } catch (error) {
       setStatus(formatUserError(error.message));
@@ -612,5 +661,6 @@ export function useDashboardLogic() {
     uploadReferenceFile,
     uploadBamFile,
     downloadMutationsAsTsv,
+    uploadProgress,
   };
 }

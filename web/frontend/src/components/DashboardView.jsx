@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import logoSrc from '../assets/logo.svg';
-import websiteIconSrc from '../assets/website.svg';
 import aboutIconSrc from '../assets/icon-about.svg';
 import analyzeIconSrc from '../assets/icon-analyze.svg';
 import aboutScopeIconSrc from '../assets/icon-scope.svg';
@@ -82,6 +81,7 @@ export function DashboardView({
   uploadReferenceFile,
   uploadBamFile,
   downloadMutationsAsTsv,
+  uploadProgress,
 }) {
   // These controls only affect database charts, not mutation browsing or profiling.
   const [requestedPhenotypeMode, setRequestedPhenotypeMode] = useState('auto');
@@ -130,15 +130,12 @@ export function DashboardView({
 
       <div className="dashboard-main">
         <div className="top-bar">
-          <a className="brand-logo-wrap" href="/app" aria-label="ResistanceProfiler dashboard">
+          <div className="brand-logo-wrap" aria-label="ResistanceProfiler dashboard">
             <img className="brand-logo" src={logoSrc} alt="ResistanceProfiler logo" />
-          </a>
+          </div>
           <div className="page-links" aria-label="Project links">
             <a href="https://github.com/jonas-fuchs/ResistanceProfiler" target="_blank" rel="noreferrer" title="ResistanceProfiler on GitHub" aria-label="ResistanceProfiler on GitHub">
               <img className="page-link-icon" src={githubIconSrc} alt="" aria-hidden="true" />
-            </a>
-            <a href="https://www.uniklinik-freiburg.de/virologie-en/research/research-teams/jonas-fuchs-team.html" target="_blank" rel="noreferrer" title="Fuchs & Team website" aria-label="Fuchs & Team website">
-              <img className="page-link-icon website-link-icon" src={websiteIconSrc} alt="" aria-hidden="true" />
             </a>
           </div>
         </div>
@@ -177,6 +174,18 @@ export function DashboardView({
                             ))}
                           </select>
                         </label>
+                        <div className="upload-progress" aria-label="Upload progress">
+                          <div className="upload-progress-head">
+                            <span>Upload progress</span>
+                            <span>{uploadProgress.percent}%</span>
+                          </div>
+                          <div className="upload-progress-track" aria-hidden="true">
+                            <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
+                          </div>
+                          <p className="upload-progress-file" title={uploadProgress.fileName || 'No upload yet'}>
+                            {uploadProgress.fileName || 'No upload yet'}
+                          </p>
+                        </div>
                       </div>
 
                       <div className="profile-upload-row profile-upload-row-vcf">
@@ -240,6 +249,18 @@ export function DashboardView({
                             ))}
                           </select>
                         </label>
+                        <div className="upload-progress" aria-label="Upload progress">
+                          <div className="upload-progress-head">
+                            <span>Upload progress</span>
+                            <span>{uploadProgress.percent}%</span>
+                          </div>
+                          <div className="upload-progress-track" aria-hidden="true">
+                            <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
+                          </div>
+                          <p className="upload-progress-file" title={uploadProgress.fileName || 'No upload yet'}>
+                            {uploadProgress.fileName || 'No upload yet'}
+                          </p>
+                        </div>
                       </div>
 
                       <div className="profile-upload-row profile-upload-row-fasta">

@@ -27,7 +27,7 @@ from web.backend.models import (
 )
 from web.backend.queue import get_queue
 from web.backend.services.browse import list_databases, list_rules
-from web.backend.services.upload import cleanup_session_files, save_upload
+from web.backend.services.upload import cleanup_session_files, save_upload_stream
 from web.backend.startup_config import (
     StartupConfig,
     is_path_within_allowed_roots,
@@ -74,18 +74,19 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         _auth: None = Depends(require_api_token),
     ) -> UploadResponse:
         try:
-            file_data = await file.read()
             upload_dir = config.output_dir / '.uploads'
-            saved_path = save_upload(file_data, 'fasta', upload_dir)
+            saved_path, size_bytes = await save_upload_stream(file, 'fasta', upload_dir)
             return UploadResponse(
                 file_path=str(saved_path),
                 file_type='fasta',
-                size_bytes=len(file_data),
+                size_bytes=size_bytes,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=_user_facing_error_message(str(exc))) from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=_user_facing_error_message(str(exc))) from exc
+        finally:
+            await file.close()
 
     @app.post('/api/upload/vcf', response_model=UploadResponse)
     async def upload_vcf(
@@ -93,18 +94,19 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         _auth: None = Depends(require_api_token),
     ) -> UploadResponse:
         try:
-            file_data = await file.read()
             upload_dir = config.output_dir / '.uploads'
-            saved_path = save_upload(file_data, 'vcf', upload_dir)
+            saved_path, size_bytes = await save_upload_stream(file, 'vcf', upload_dir)
             return UploadResponse(
                 file_path=str(saved_path),
                 file_type='vcf',
-                size_bytes=len(file_data),
+                size_bytes=size_bytes,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=_user_facing_error_message(str(exc))) from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=_user_facing_error_message(str(exc))) from exc
+        finally:
+            await file.close()
 
     @app.post('/api/upload/bam', response_model=UploadResponse)
     async def upload_bam(
@@ -112,18 +114,19 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         _auth: None = Depends(require_api_token),
     ) -> UploadResponse:
         try:
-            file_data = await file.read()
             upload_dir = config.output_dir / '.uploads'
-            saved_path = save_upload(file_data, 'bam', upload_dir)
+            saved_path, size_bytes = await save_upload_stream(file, 'bam', upload_dir)
             return UploadResponse(
                 file_path=str(saved_path),
                 file_type='bam',
-                size_bytes=len(file_data),
+                size_bytes=size_bytes,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=_user_facing_error_message(str(exc))) from exc
         except Exception as exc:
             raise HTTPException(status_code=500, detail=_user_facing_error_message(str(exc))) from exc
+        finally:
+            await file.close()
 
     @app.get('/api/rules', response_model=ApiEnvelope)
     def rules(
