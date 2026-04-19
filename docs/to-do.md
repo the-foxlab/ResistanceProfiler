@@ -159,6 +159,12 @@ Mark items done and update priorities after each completed milestone.
 - [X] `respro sync` — top-level command; re-annotates stored run against current project DB; replaces variant_result and combo-hit rows; updates resistance_hits; requires fingerprint match; optional `--out` re-exports HTML report
 - [X] Surface sample classifications in report and JSON — dedicated "Manual classifications" section in HTML report and `sample_classifications` key in exported JSON, clearly separated from rule-based hits
 
+### Web deployment and security (done)
+
+- [X] Configurable CORS origins — `RESPRO_WEB_CORS_ORIGINS` now accepts a comma-separated origin list at startup; backend defaults to localhost development origins when no API token is set and to `*` only when `RESPRO_WEB_API_TOKEN` is configured; compose and deployment docs include configuration guidance
+- [X] Upload rate limiting — web uploads are now rate limited via `slowapi`; `RESPRO_WEB_UPLOAD_RATE_LIMIT` configures the limit, token-authenticated requests are keyed by token, unauthenticated requests fall back to client IP, and deployment docs/compose include configuration guidance
+- [X] Upload input validation hardening — FASTA/VCF upload validation now rejects binary content, enforces structural checks and line-length caps, and requires both `##fileformat` + `#CHROM` headers for VCF; BAM validation now verifies BGZF header structure (not just two-byte magic); parser-heavy profiling steps wrap FASTA/VCF/BAM parser failures into explicit user-facing errors
+
 ### WebUI
 
 - [X] FastAPI profiling endpoints with async job queue — `POST /api/profile/fasta` and `POST /api/profile/vcf` enqueue RQ jobs and return a `job_id`; `GET /api/jobs/{job_id}` exposes status/result; RQ worker executes jobs using `respro/` domain logic; Redis is the broker; `fakeredis` + `Queue(is_async=False)` used for test isolation
@@ -221,6 +227,29 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Usability and workflow
 
+- 🟡 `respro info` command — new read-only CLI command that opens `project.db` and prints a
+  human-readable summary of the current project: project name, created-at, schema version,
+  number of references, genes, rules, rule sets, drugs, and publications; implement in
+  `respro/cli/info.py` and register on the Typer app; useful as a quick sanity check after
+  `init` or `init-add` without needing to open the database directly
+- 🟡 `respro runs delete` subcommand — add a `runs delete <run_id>` subcommand under the `explore`
+  or a new `runs` command group that removes a single run row (plus its `variant_result`,
+  `coverage_gap`, `combo_rule_hit`, and `sample_classification` rows) from `results.db`; accept
+  the 8-character run-ID prefix shown by `explore --results` as well as the full UUID; print a
+  confirmation line showing the deleted run ID and sample name; add `--force` to skip the
+  interactive prompt; add a `runs prune --older-than <days>` variant that bulk-deletes runs
+  older than N days for housekeeping on long-running installations; implement deletion in
+  `respro/db/results.py` as `delete_run(db_path, run_id)` and test in `tests/test_results_db.py`
+- 🟡 `--validate` / dry-run flag for `init-add` — add `--validate` to `respro init-add` that
+  parses the rules TSV and runs all validation checks (column presence, mutation syntax, phenotype
+  normalisation) without writing anything to the database; print a per-rule summary with any
+  validation warnings or errors; exit non-zero if hard errors are found; implement the validation
+  pass as a re-entrant step in `respro/core/rules.py` so the same logic is exercised in both
+  `--validate` mode and the real import; add a test in `tests/test_rules.py`
+- 🟡 `--json` output for `respro explore` — add a `--json` flag to the `explore` subcommands
+  (`--rules`, `--results`) that serialises the same data to stdout as a JSON array instead of the
+  human-readable table; useful for programmatic consumption and scripting; the JSON schema should
+  mirror the existing `results.json` export structure where applicable
 - 🟡 Multi-chrom VCF and multi-record query FASTA support — a single VCF may carry variants
   across multiple CHROM identifiers (e.g. segmented viruses, amplicon panels spanning disjoint
   regions); the `--ref-fasta` supplied to `profile-vcf` must then be a multi-record FASTA with
@@ -260,8 +289,61 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   (`letter_annotations['phred_quality']`) can serve as a fast pre-filter (Phred < 20 → ambiguous)
   before the trace-peak analysis for positions that passed Phred but still show secondary peaks
 
+### Web deployment and security
+
+- 🔴 Results lifecycle and data-protection strategy — decide whether the web deployment stores
+  patient/sample data across sessions: (a) **ephemeral mode** (recommended for shared/public
+  instances) — `results.db` only records in-session run metadata; uploaded files and generated
+  reports are deleted immediately after the browser session ends via the existing
+  `/api/session/cleanup` endpoint; add a server-side TTL-based sweep (cron/startup) that deletes
+  uploads and reports older than `RESPRO_WEB_RESULT_TTL` (default 24 h) as a safety net for
+  sessions that did not call cleanup; `results.db` row counts stay bounded and no genomic data
+  accumulates on disk; (b) **persistent mode** — requires user authentication (see login item
+  below) so that stored results are accessible only to the submitting user; without auth,
+  persistent mode is incompatible with data-protection regulations (GDPR/HIPAA) because any
+  session can query another session's reports via `/api/report`; for the current architecture
+  the safest default is ephemeral mode with no results database persistence between server
+  restarts
+- 🟡 Configurable worker concurrency and resource limits in Docker Compose — currently one
+  `respro-worker` container handles all profiling jobs serially with no CPU or memory cap; two
+  independent improvements are needed: (1) **scaling** — document `docker compose up --scale respro-worker=N` so multiple worker containers drain the same `profiling` RQ queue from Redis;
+  each replica needs the same `/data` volume mount so output files written by a worker are visible
+  to the web process; (2) **per-container resource limits** — add `deploy.resources.limits` to
+  the `respro-worker` service in `docker-compose.web.yml` so each worker is bounded; example:
+  `cpus: '2.0'` (two CPU cores) and `memory: 4G` (4 GB RAM); these values should be tunable via
+  environment variables `RESPRO_WORKER_CPU_LIMIT` and `RESPRO_WORKER_MEM_LIMIT` with sensible
+  defaults; without limits a rogue job can starve the web API and Redis on the same host;
+  `deploy.resources` requires Docker Compose v3.8+ with `docker compose` (not `docker-compose`
+  v1) and has no effect outside Swarm unless the `--compatibility` flag is passed; for Kubernetes
+  the equivalent is `resources.limits` in the container spec; document both the scale and the
+  resource-limit approach in `docs/web-deployment.md` with ready-to-copy snippets
+- 🟡 HTTPS / reverse-proxy guidance — the current Docker Compose setup binds the web service to
+  `127.0.0.1:8000`, which is safe for local use but cannot be reached from outside the host; for
+  a broader deployment add guidance in `docs/web-deployment.md` for placing an nginx or Caddy
+  reverse proxy in front of the container that terminates TLS; provide an example Caddy config
+  (Caddy auto-provisions Let's Encrypt certificates) with the correct `proxy_pass` and
+  `proxy_set_header` directives; add `RESPRO_WEB_TRUSTED_PROXIES` as an optional env variable
+  read by uvicorn (`--proxy-headers`, `--forwarded-allow-ips`) so that `X-Forwarded-For` is
+  trusted for rate-limiting purposes
+- 🟡 Optional user authentication for persistent results — if persistent per-user results are
+  required, implement a simple token or session-based login layer; a lightweight option is
+  institution-level single sign-on via OIDC (e.g. Keycloak, GitHub OAuth); run IDs in `results.db`
+  would be associated with a `user_id`; `/api/report` and job-status endpoints enforce ownership;
+  without SSO, a single shared API token with role-based scopes (read-only vs. submit) is a
+  minimal first step; this item should only be implemented if ephemeral mode is not acceptable
+  for the target deployment context
+
 ### Public release
 
+- 🟡 `project.db` schema migration strategy — `results.db` already embeds `results_schema_version`
+  and has a one-time UUID migration helper; `project.db` stores `schema_version = 1` in its
+  `project` table but has no migration path documented or implemented; before incrementing
+  `PROJECT_SCHEMA_VERSION`, add a `migrate_project_db(db_path)` function in `respro/db/schema.py`
+  that detects the stored version, applies each incremental ALTER TABLE / INSERT step in order, and
+  bumps the stored version atomically; call it at the start of `init-add`, `profile-vcf`,
+  `profile-fasta`, and `explore` before any other DB access; document the migration contract in
+  `docs/project-structure.md` so future schema changes follow the same pattern; add a test that
+  opens a v1 fixture database, runs migration, and confirms the new schema is present
 - 🔴 GitHub Actions CI — run the full test suite against all supported Python versions on every
   push to `main`; include a ruff lint check; add a PyPI publish workflow triggered by version tags
 - 🔴 Professional documentation — concise README with a quick-start section; link out to separate
@@ -283,7 +365,7 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   release that runs `respro` against the example data, renders the HTML report, and publishes it
   to GitHub Pages; gives prospective users a live, always-current preview of the report output
   without downloading anything
-- 🟡 Add a --information option to init and init--add (should then overwrite) where we can store some 
+- 🟡 Add a --information option to init and init--add (should then overwrite) where we can store some
   arbitary information with metadata - maybe also a json ? would then be more structured
 - 🟡 Bioconda package — write a Bioconda recipe (`meta.yaml`) and submit a PR to
   bioconda-recipes; Bioconda is the standard distribution channel for bioinformatics CLI tools
@@ -324,6 +406,22 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### WebUI
 
+- 🟡 Job cancel endpoint — add `DELETE /api/jobs/{job_id}` that cancels a queued or running RQ
+  job; for queued jobs call `job.cancel()` on the RQ `Job` object; for running jobs send a
+  `SIGTERM` to the worker process via `job.kill_worker()` (RQ ≥ 1.16) or instruct RQ to set the
+  job to failed; return 204 on success or 404 if the job ID is unknown; expose a cancel button in
+  the frontend that appears while the job is in `queued` or `started` state and is hidden once
+  the job reaches a terminal state
+- 🟡 Persistent job history in the frontend — currently submitted job IDs live only in React
+  component state and are lost on page reload; persist the list of job IDs and their last-known
+  status to `localStorage` (keyed by session token or a browser-generated UUID stored in
+  `sessionStorage`); on page load, rehydrate the list and poll for current status for any
+  non-terminal jobs; cap stored history to the last 20 entries to bound storage use; add a
+  "Clear history" button
+- 🟢 Frontend tests — add a Vitest + React Testing Library setup to `web/frontend/`; cover the
+  critical user flows: file selection and upload flow (mocked XHR), job polling until completion,
+  and report display; the test runner should be invokable via `npm test` inside `web/frontend/`
+  and should run in CI alongside the Python tests
 - 🟡 Project DB download via web (future) — add a CLI or startup-time mechanism to pull a versioned `project.db` from a companion release URL (GitHub Releases API) instead of requiring manual placement in `data/`; depends on the `respro databases` CLI work and a published release asset convention
 - 🟡 Job status contract hardening — standardize and test queued/running/succeeded/failed mapping plus consistent error payloads for failed jobs and missing `job_id`
 - 🟡 Queue runtime safeguards — add worker timeout/retry defaults and explicit logging for enqueue/start/fail/finish transitions to improve debuggability

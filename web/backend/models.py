@@ -1,4 +1,4 @@
-"""Pydantic models for the prototype web API."""
+"""Pydantic models for the web API."""
 
 from __future__ import annotations
 

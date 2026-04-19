@@ -7,7 +7,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
-    image: respro-web:prototype
+    image: respro-web:latest
     ports:
       - '127.0.0.1:8000:8000'
     volumes:
@@ -16,11 +16,13 @@ services:
       - RESPRO_WEB_HOST=0.0.0.0
       - RESPRO_WEB_PORT=8000
       - REDIS_URL=redis://redis:6379/0
+      # - RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
+      # - RESPRO_WEB_UPLOAD_RATE_LIMIT=5/minute
     depends_on:
       - redis
 
   respro-worker:
-    image: respro-web:prototype
+    image: respro-web:latest
     command: rq worker --url redis://redis:6379/0 profiling
     volumes:
       - ./data:/data:rw

@@ -39,13 +39,18 @@ def profile_fasta(
     results_conn = init_results_db(results_db)
     try:
         project_name = _project_name(project_conn)
-        query_name, query_seq, fasta_matches = resolve_fasta_query(
-            project_conn,
-            fasta_path,
-            use_cache=False,
-            threads=threads,
-            aligner=aligner,  # type: ignore[arg-type]
-        )
+        try:
+            query_name, query_seq, fasta_matches = resolve_fasta_query(
+                project_conn,
+                fasta_path,
+                use_cache=False,
+                threads=threads,
+                aligner=aligner,  # type: ignore[arg-type]
+            )
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError(f'Failed to parse FASTA input: {exc}') from exc
         ref_id = pick_best_reference_id(fasta_matches)
         selected_matches = select_matches_for_reference(fasta_matches, ref_id)
         ref_name = _reference_name(project_conn, ref_id)
@@ -124,20 +129,30 @@ def profile_vcf(
     results_conn = init_results_db(results_db)
     try:
         project_name = _project_name(project_conn)
-        query_name, query_seq, fasta_matches = resolve_fasta_query(
-            project_conn,
-            ref_fasta_path,
-            use_cache=False,
-            threads=threads,
-            aligner=aligner,  # type: ignore[arg-type]
-        )
+        try:
+            query_name, query_seq, fasta_matches = resolve_fasta_query(
+                project_conn,
+                ref_fasta_path,
+                use_cache=False,
+                threads=threads,
+                aligner=aligner,  # type: ignore[arg-type]
+            )
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError(f'Failed to parse reference FASTA input: {exc}') from exc
         ref_id = pick_best_reference_id(fasta_matches)
         selected_matches = select_matches_for_reference(fasta_matches, ref_id)
         ref_name = _reference_name(project_conn, ref_id)
 
         genes, rules, rule_sets, rule_gene_names = _load_reference_data(project_conn, ref_id)
 
-        variants = parse_vcf(vcf_path, expected_query_name=query_name)
+        try:
+            variants = parse_vcf(vcf_path, expected_query_name=query_name)
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError(f'Failed to parse VCF input: {exc}') from exc
         variants = [
             variant for variant in variants
             if variant.allele_freq >= min_af and (variant.depth < 0 or variant.depth >= min_depth)
@@ -146,13 +161,18 @@ def profile_vcf(
 
         coverage_gaps: list[CoverageGap] = []
         if bam_path is not None:
-            coverage_gaps = compute_coverage_gaps_from_bam(
-                bam_path=bam_path,
-                query_name=query_name,
-                query_sequence=query_seq,
-                matches=selected_matches,
-                min_depth=min_depth,
-            )
+            try:
+                coverage_gaps = compute_coverage_gaps_from_bam(
+                    bam_path=bam_path,
+                    query_name=query_name,
+                    query_sequence=query_seq,
+                    matches=selected_matches,
+                    min_depth=min_depth,
+                )
+            except ValueError:
+                raise
+            except Exception as exc:
+                raise ValueError(f'Failed to parse BAM coverage input: {exc}') from exc
 
         annotations = annotate_variants(variants, genes)
         result = _build_result(

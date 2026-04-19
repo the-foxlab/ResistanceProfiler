@@ -20,11 +20,6 @@ class StartupConfig:
     allowed_roots: tuple[Path, ...]
     api_token: str
 
-    @property
-    def output_dir(self) -> Path:
-        """Alias kept for backwards compatibility with routes that use output_dir."""
-        return self.data_dir
-
 
 def load_startup_config() -> StartupConfig:
     """

@@ -3,3 +3,4 @@ uvicorn>=0.30
 rq>=1.16
 redis>=5.0
 python-multipart>=0.0.26
+slowapi>=0.1.9

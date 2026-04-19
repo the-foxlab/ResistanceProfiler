@@ -1,4 +1,4 @@
-"""API tests for the prototype web backend."""
+"""API tests for the web backend."""
 
 from __future__ import annotations
 
@@ -50,6 +50,88 @@ def client(sync_queue: Queue, startup_config: StartupConfig):
 
 
 class TestWebApi:
+    def test_cors_uses_wildcard_when_token_is_configured(self, startup_config: StartupConfig) -> None:
+        client = TestClient(create_app(startup_config=startup_config))
+        response = client.options(
+            '/api/health',
+            headers={
+                'Origin': 'https://respro.example.com',
+                'Access-Control-Request-Method': 'GET',
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers['access-control-allow-origin'] == '*'
+
+    def test_cors_uses_localhost_defaults_without_token(
+        self,
+        startup_config: StartupConfig,
+    ) -> None:
+        no_token_config = StartupConfig(
+            project_db=startup_config.project_db,
+            results_db=startup_config.results_db,
+            data_dir=startup_config.data_dir,
+            allowed_roots=startup_config.allowed_roots,
+            api_token='',
+        )
+        client = TestClient(create_app(startup_config=no_token_config))
+
+        allowed = client.options(
+            '/api/health',
+            headers={
+                'Origin': 'http://localhost:5173',
+                'Access-Control-Request-Method': 'GET',
+            },
+        )
+        blocked = client.options(
+            '/api/health',
+            headers={
+                'Origin': 'https://respro.example.com',
+                'Access-Control-Request-Method': 'GET',
+            },
+        )
+
+        assert allowed.status_code == 200
+        assert allowed.headers['access-control-allow-origin'] == 'http://localhost:5173'
+        assert blocked.status_code == 400
+
+    def test_cors_uses_env_override_when_configured(
+        self,
+        startup_config: StartupConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(
+            'RESPRO_WEB_CORS_ORIGINS',
+            'https://respro.example.com, https://lab.example.com',
+        )
+        no_token_config = StartupConfig(
+            project_db=startup_config.project_db,
+            results_db=startup_config.results_db,
+            data_dir=startup_config.data_dir,
+            allowed_roots=startup_config.allowed_roots,
+            api_token='',
+        )
+        client = TestClient(create_app(startup_config=no_token_config))
+
+        allowed = client.options(
+            '/api/health',
+            headers={
+                'Origin': 'https://lab.example.com',
+                'Access-Control-Request-Method': 'GET',
+            },
+        )
+        blocked = client.options(
+            '/api/health',
+            headers={
+                'Origin': 'http://localhost:5173',
+                'Access-Control-Request-Method': 'GET',
+            },
+        )
+
+        assert allowed.status_code == 200
+        assert allowed.headers['access-control-allow-origin'] == 'https://lab.example.com'
+        assert blocked.status_code == 400
+
     def test_health_endpoint(self, startup_config: StartupConfig) -> None:
         client = TestClient(create_app(startup_config=startup_config))
         response = client.get('/api/health')
@@ -247,8 +329,8 @@ class TestWebApi:
         startup_config: StartupConfig,
         auth_headers: dict[str, str],
     ) -> None:
-        # BAM files are BGZF-compressed; use gzip/BGZF magic bytes
-        bam_data = b'\x1f\x8b' + b'\x00' * 100
+        # Minimal valid BGZF block header plus EOF payload.
+        bam_data = bytes.fromhex('1f8b08040000000000ff0600424302001b000300000000000000')
         response = client.post(
             '/api/upload/bam',
             files={'file': ('sample.bam', bam_data, 'application/octet-stream')},
@@ -294,6 +376,67 @@ class TestWebApi:
         payload = response.json()
         assert payload['detail'] == 'Unsupported VCF format. Upload a VCF with standard headers such as ##fileformat and #CHROM.'
 
+    def test_upload_fasta_with_binary_content_rejected(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        invalid_fasta = b'>seq\nATCG\x00ATCG\n'
+        response = client.post(
+            '/api/upload/fasta',
+            files={'file': ('invalid.fasta', invalid_fasta, 'text/plain')},
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+        payload = response.json()
+        assert payload['detail'] == 'Unsupported FASTA format. Upload a plain-text FASTA file.'
+
+    def test_upload_vcf_without_chrom_header_rejected(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        invalid_vcf = b'##fileformat=VCFv4.2\n1\t10\t.\tA\tG\n'
+        response = client.post(
+            '/api/upload/vcf',
+            files={'file': ('invalid.vcf', invalid_vcf, 'text/plain')},
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+        payload = response.json()
+        assert payload['detail'] == 'Unsupported VCF format. Upload a VCF with standard headers such as ##fileformat and #CHROM.'
+
+    def test_upload_vcf_with_binary_content_rejected(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        invalid_vcf = b'##fileformat=VCFv4.2\n#CHROM\tPOS\x00\n'
+        response = client.post(
+            '/api/upload/vcf',
+            files={'file': ('invalid.vcf', invalid_vcf, 'text/plain')},
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+        payload = response.json()
+        assert payload['detail'] == 'Unsupported VCF format. Upload a plain-text VCF file.'
+
+    def test_upload_vcf_with_excessive_line_length_rejected(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        long_alt = 'A' * 100_001
+        invalid_vcf = f'##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\n1\t10\t.\tA\t{long_alt}\n'.encode()
+        response = client.post(
+            '/api/upload/vcf',
+            files={'file': ('invalid.vcf', invalid_vcf, 'text/plain')},
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+        payload = response.json()
+        assert payload['detail'] == 'Unsupported VCF format. Input contains an excessively long line.'
+
     def test_upload_bam_with_invalid_magic_bytes_rejected(
         self,
         client: TestClient,
@@ -303,6 +446,21 @@ class TestWebApi:
         response = client.post(
             '/api/upload/bam',
             files={'file': ('invalid.bam', invalid_bam, 'application/octet-stream')},
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+        payload = response.json()
+        assert payload['detail'] == 'Unsupported BAM format. Upload a BGZF-compressed BAM file.'
+
+    def test_upload_bam_with_invalid_bgzf_structure_rejected(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        invalid_bam = b'\x1f\x8b\x08\x00' + b'\x00' * 64
+        response = client.post(
+            '/api/upload/bam',
+            files={'file': ('invalid-structure.bam', invalid_bam, 'application/octet-stream')},
             headers=auth_headers,
         )
         assert response.status_code == 400
@@ -322,6 +480,67 @@ class TestWebApi:
             files={'file': ('sample.vcf', b'##fileformat=VCFv4.2\n', 'text/plain')},
         )
         assert response.status_code == 401
+
+    def test_upload_rate_limit_applies_per_ip_without_token(
+        self,
+        startup_config: StartupConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_UPLOAD_RATE_LIMIT', '1/minute')
+        no_token_config = StartupConfig(
+            project_db=startup_config.project_db,
+            results_db=startup_config.results_db,
+            data_dir=startup_config.data_dir,
+            allowed_roots=startup_config.allowed_roots,
+            api_token='',
+        )
+        client = TestClient(create_app(startup_config=no_token_config))
+
+        first = client.post(
+            '/api/upload/fasta',
+            files={'file': ('sample.fasta', b'>seq\nATCG\n', 'text/plain')},
+        )
+        second = client.post(
+            '/api/upload/fasta',
+            files={'file': ('sample.fasta', b'>seq\nATCG\n', 'text/plain')},
+        )
+
+        assert first.status_code == 200
+        assert second.status_code == 429
+        assert second.json()['detail'] == 'Upload rate limit exceeded. Try again later.'
+
+    def test_upload_rate_limit_applies_per_token(
+        self,
+        startup_config: StartupConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_UPLOAD_RATE_LIMIT', '1/minute')
+        no_token_config = StartupConfig(
+            project_db=startup_config.project_db,
+            results_db=startup_config.results_db,
+            data_dir=startup_config.data_dir,
+            allowed_roots=startup_config.allowed_roots,
+            api_token='',
+        )
+        client = TestClient(create_app(startup_config=no_token_config))
+
+        first = client.post(
+            '/api/upload/fasta?token=token-a',
+            files={'file': ('sample.fasta', b'>seq\nATCG\n', 'text/plain')},
+        )
+        second = client.post(
+            '/api/upload/fasta?token=token-a',
+            files={'file': ('sample.fasta', b'>seq\nATCG\n', 'text/plain')},
+        )
+        third = client.post(
+            '/api/upload/fasta?token=token-b',
+            files={'file': ('sample.fasta', b'>seq\nATCG\n', 'text/plain')},
+        )
+
+        assert first.status_code == 200
+        assert second.status_code == 429
+        assert second.json()['detail'] == 'Upload rate limit exceeded. Try again later.'
+        assert third.status_code == 200
 
     def test_session_cleanup_deletes_uploaded_and_report_files(
         self,
@@ -361,7 +580,7 @@ class TestWebApi:
         startup_config: StartupConfig,
         auth_headers: dict[str, str],
     ) -> None:
-        bam_data = b'\x1f\x8b' + b'\x00' * 100
+        bam_data = bytes.fromhex('1f8b08040000000000ff0600424302001b000300000000000000')
         upload_response = client.post(
             '/api/upload/bam',
             files={'file': ('sample.bam', bam_data, 'application/octet-stream')},

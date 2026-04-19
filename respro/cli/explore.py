@@ -18,6 +18,23 @@ from respro.db.rules_queries import list_references_for_display, list_rules_for_
 from respro.db.schema import open_project_db, open_results_db
 
 
+RULE_COLUMN_LABELS = {
+    'reference_name': 'Reference',
+    'gene': 'Gene',
+    'position': 'Pos',
+    'reference': 'Reference AA',
+    'mutation': 'Mutation',
+    'drug': 'Drug',
+    'phenotype': 'Phenotype',
+    'clinical_phenotype': 'Clinical phenotype',
+    'ic50': 'IC50',
+    'fold_ic50': 'Fold IC50',
+    'publication': 'DOI',
+    'source': 'Source',
+    'comment': 'Comment',
+}
+
+
 def explore(
     rules: Annotated[
         Path | None,
@@ -63,7 +80,7 @@ def explore(
 
 def _explore_rules(project_db: Path, reference: str | None) -> None:
     """List resistance rules in a project database."""
-    console = Console(highlight=False)
+    console = Console(highlight=False, width=220)
     project_conn = None
     try:
         project_conn = open_project_db(project_db)
@@ -90,51 +107,18 @@ def _explore_rules(project_db: Path, reference: str | None) -> None:
             console.print('No resistance rules found.')
             return
 
-        # Only render columns that have at least one non-empty value.
-        def _has_values(key: str) -> bool:
-            return any(row.get(key) for row in rows)
-
+        columns = list(rows[0].keys())
         table = Table(box=box.SIMPLE, header_style='bold cyan', show_edge=False)
-        table.add_column('Reference')
-        table.add_column('Gene')
-        table.add_column('Pos', justify='right')
-        table.add_column('Ref')
-        table.add_column('Mut')
-        table.add_column('Drug')
-        table.add_column('Phenotype')
-
-        show_ic50 = _has_values('ic50')
-        show_fold = _has_values('fold_ic50')
-        show_clinical = _has_values('clinical_phenotype')
-        show_source = _has_values('source')
-
-        if show_ic50:
-            table.add_column('IC50')
-        if show_fold:
-            table.add_column('Fold-IC50')
-        if show_clinical:
-            table.add_column('Clinical phenotype')
-        if show_source:
-            table.add_column('Source')
+        for column_key in columns:
+            label = RULE_COLUMN_LABELS.get(column_key, column_key)
+            justify = 'right' if column_key == 'position' else 'left'
+            table.add_column(label, justify=justify)
 
         for row in rows:
-            cells = [
-                row.get('reference_name', ''),
-                row['gene'],
-                str(row['position'] + 1),
-                row['reference'] or '',
-                row['mutation'],
-                row['drug'],
-                row['phenotype'],
-            ]
-            if show_ic50:
-                cells.append(row['ic50'] or '')
-            if show_fold:
-                cells.append(row['fold_ic50'] or '')
-            if show_clinical:
-                cells.append(row['clinical_phenotype'] or '')
-            if show_source:
-                cells.append(row['source'] or '')
+            cells = []
+            for column_key in columns:
+                value = row.get(column_key)
+                cells.append('' if value is None else str(value))
             table.add_row(*cells)
 
         console.print(table)

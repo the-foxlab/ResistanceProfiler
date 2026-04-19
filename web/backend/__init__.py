@@ -1,1 +1,1 @@
-"""FastAPI backend for the ResistanceProfiler prototype UI."""
+"""FastAPI backend for the ResistanceProfiler web UI."""

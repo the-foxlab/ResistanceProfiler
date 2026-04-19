@@ -1,1 +1,1 @@
-"""Web layer package for the ResistanceProfiler prototype UI."""
+"""Web layer package for the ResistanceProfiler web UI."""

@@ -1,4 +1,4 @@
-"""FastAPI application for the prototype web backend."""
+"""FastAPI application for the web backend."""
 
 from __future__ import annotations
 
@@ -8,11 +8,14 @@ from pathlib import Path
 import uvicorn
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from rq import Queue
 from rq.exceptions import NoSuchJobError
 from rq.job import Job
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from web.backend.jobs import run_profile_fasta, run_profile_vcf
 from web.backend.models import (
@@ -40,10 +43,16 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     app = FastAPI(title='ResistanceProfiler Web API', version='0.1.0')
     config = startup_config or load_startup_config()
     app.state.startup_config = config
+    cors_origins = _resolve_cors_origins(config.api_token)
+    limiter = _create_rate_limiter()
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _handle_rate_limit_exceeded)
+
+    upload_rate_limit = _resolve_upload_rate_limit()
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=['http://127.0.0.1:5173', 'http://localhost:5173'],
+        allow_origins=cors_origins,
         allow_credentials=False,
         allow_methods=['*'],
         allow_headers=['*'],
@@ -63,18 +72,21 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 'service': 'respro-web-api',
                 'project_db': str(config.project_db),
                 'results_db': str(config.results_db),
-                'output_dir': str(config.output_dir),
+                'output_dir': str(config.data_dir),
             },
             status='ok',
         )
 
     @app.post('/api/upload/fasta', response_model=UploadResponse)
+    @limiter.limit(upload_rate_limit)
     async def upload_fasta(
+        request: Request,
         file: UploadFile = File(...),
         _auth: None = Depends(require_api_token),
     ) -> UploadResponse:
+        del request
         try:
-            upload_dir = config.output_dir / '.uploads'
+            upload_dir = config.data_dir / '.uploads'
             saved_path, size_bytes = await save_upload_stream(file, 'fasta', upload_dir)
             return UploadResponse(
                 file_path=str(saved_path),
@@ -89,12 +101,15 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             await file.close()
 
     @app.post('/api/upload/vcf', response_model=UploadResponse)
+    @limiter.limit(upload_rate_limit)
     async def upload_vcf(
+        request: Request,
         file: UploadFile = File(...),
         _auth: None = Depends(require_api_token),
     ) -> UploadResponse:
+        del request
         try:
-            upload_dir = config.output_dir / '.uploads'
+            upload_dir = config.data_dir / '.uploads'
             saved_path, size_bytes = await save_upload_stream(file, 'vcf', upload_dir)
             return UploadResponse(
                 file_path=str(saved_path),
@@ -109,12 +124,15 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             await file.close()
 
     @app.post('/api/upload/bam', response_model=UploadResponse)
+    @limiter.limit(upload_rate_limit)
     async def upload_bam(
+        request: Request,
         file: UploadFile = File(...),
         _auth: None = Depends(require_api_token),
     ) -> UploadResponse:
+        del request
         try:
-            upload_dir = config.output_dir / '.uploads'
+            upload_dir = config.data_dir / '.uploads'
             saved_path, size_bytes = await save_upload_stream(file, 'bam', upload_dir)
             return UploadResponse(
                 file_path=str(saved_path),
@@ -163,12 +181,12 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         payload: SessionCleanupPayload,
         _auth: None = Depends(require_api_token),
     ) -> SessionCleanupResponse:
-        upload_dir = config.output_dir / '.uploads'
+        upload_dir = config.data_dir / '.uploads'
         deleted_count = cleanup_session_files(
             payload.upload_paths,
             payload.report_paths,
             upload_dir,
-            config.output_dir,
+            config.data_dir,
         )
         return SessionCleanupResponse(deleted_count=deleted_count)
 
@@ -182,7 +200,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             run_profile_fasta,
             project_db=str(config.project_db),
             results_db=str(config.results_db),
-            output_dir=str(config.output_dir),
+            output_dir=str(config.data_dir),
             fasta_path=payload.fasta_path,
             sample=payload.sample,
             threads=payload.threads,
@@ -200,7 +218,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             run_profile_vcf,
             project_db=str(config.project_db),
             results_db=str(config.results_db),
-            output_dir=str(config.output_dir),
+            output_dir=str(config.data_dir),
             vcf_path=payload.vcf_path,
             ref_fasta_path=payload.ref_fasta_path,
             sample=payload.sample,
@@ -235,7 +253,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         _auth: None = Depends(require_api_token),
     ) -> FileResponse:
         report_path = Path(path).expanduser().resolve()
-        if not is_path_within_allowed_roots(report_path, (config.output_dir,)):
+        if not is_path_within_allowed_roots(report_path, (config.data_dir,)):
             raise HTTPException(status_code=400, detail='Report path is outside allowed output directory.')
         if not report_path.is_file():
             raise HTTPException(status_code=404, detail='Report not found.')
@@ -287,10 +305,32 @@ def _user_facing_error_message(raw_message: str | None) -> str:
     lowered = message.lower()
     if 'fasta file does not appear to contain valid sequence data' in lowered:
         return 'Unsupported FASTA format. Upload a text FASTA file with a header line starting with >.'
+    if 'fasta file contains non-text/binary bytes' in lowered:
+        return 'Unsupported FASTA format. Upload a plain-text FASTA file.'
+    if 'fasta file contains invalid sequence characters' in lowered:
+        return 'Unsupported FASTA format. Sequence lines contain unsupported characters.'
+    if 'fasta file contains line' in lowered and 'longer than' in lowered:
+        return 'Unsupported FASTA format. Input contains an excessively long line.'
     if 'vcf file does not appear to have valid vcf headers' in lowered:
         return 'Unsupported VCF format. Upload a VCF with standard headers such as ##fileformat and #CHROM.'
+    if 'vcf file contains non-text/binary bytes' in lowered:
+        return 'Unsupported VCF format. Upload a plain-text VCF file.'
+    if 'vcf file contains data rows before #chrom header' in lowered:
+        return 'Unsupported VCF format. Upload a VCF with standard headers such as ##fileformat and #CHROM.'
+    if 'vcf file contains line' in lowered and 'longer than' in lowered:
+        return 'Unsupported VCF format. Input contains an excessively long line.'
+    if 'vcf file exceeds maximum data row count' in lowered:
+        return 'Unsupported VCF format. Input contains too many variant rows.'
     if 'bam file does not have valid bgzf/gzip magic signature' in lowered or 'bam file is too small' in lowered:
         return 'Unsupported BAM format. Upload a BGZF-compressed BAM file.'
+    if 'failed to parse fasta input' in lowered:
+        return 'Unsupported FASTA format. The FASTA file could not be parsed.'
+    if 'failed to parse reference fasta input' in lowered:
+        return 'Unsupported FASTA reference format. The reference FASTA file could not be parsed.'
+    if 'failed to parse vcf input' in lowered:
+        return 'Unsupported VCF format. The VCF file could not be parsed.'
+    if 'failed to parse bam coverage input' in lowered:
+        return 'Unsupported BAM format. The BAM file could not be parsed for coverage analysis.'
     if 'vcf contig names do not match the uploaded reference fasta' in lowered:
         return 'VCF and reference FASTA do not match. Use files derived from the same reference sequence.'
     if 'failed to create bam index' in lowered:
@@ -302,6 +342,58 @@ def _user_facing_error_message(raw_message: str | None) -> str:
     if message.startswith('Upload failed:'):
         return 'The upload failed on the server.'
     return message
+
+
+def _resolve_cors_origins(api_token: str) -> list[str]:
+    """Resolve CORS origins from env with secure defaults for local development."""
+    configured = os.getenv('RESPRO_WEB_CORS_ORIGINS', '').strip()
+    if configured:
+        origins = [value.strip() for value in configured.split(',') if value.strip()]
+        if origins:
+            return origins
+
+    if api_token:
+        return ['*']
+
+    return ['http://127.0.0.1:5173', 'http://localhost:5173']
+
+
+def _resolve_upload_rate_limit() -> str:
+    """Return the configured upload rate limit string."""
+    return os.getenv('RESPRO_WEB_UPLOAD_RATE_LIMIT', '5/minute').strip() or '5/minute'
+
+
+def _rate_limit_key(request: Request) -> str:
+    """Use token identity when present, otherwise fall back to client IP."""
+    authorization = request.headers.get('Authorization', '').strip()
+    if authorization:
+        return f'token:{authorization}'
+
+    token = request.query_params.get('token', '').strip()
+    if token:
+        return f'token:{token}'
+
+    client_host = request.client.host if request.client else ''
+    if client_host:
+        return f'ip:{client_host}'
+
+    return f'ip:{get_remote_address(request)}'
+
+
+def _create_rate_limiter() -> Limiter:
+    """Create the shared upload limiter, using Redis storage when configured."""
+    redis_url = os.getenv('REDIS_URL', '').strip()
+    if redis_url:
+        return Limiter(key_func=_rate_limit_key, storage_uri=redis_url)
+    return Limiter(key_func=_rate_limit_key)
+
+
+def _handle_rate_limit_exceeded(_: Request, __: RateLimitExceeded) -> JSONResponse:
+    """Return a clear rate-limit error response for upload endpoints."""
+    return JSONResponse(
+        status_code=429,
+        content={'detail': 'Upload rate limit exceeded. Try again later.'},
+    )
 
 
 def get_startup_config(request: Request) -> StartupConfig:

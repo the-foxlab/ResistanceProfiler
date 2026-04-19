@@ -1,8 +1,8 @@
-# ResistanceProfiler Web Prototype Deployment
+# ResistanceProfiler Web Deployment
 
-This document describes how to run the prototype Web UI in self-hosted mode.
+This document describes how to run the Web UI in self-hosted mode.
 
-## Scope of this prototype
+## Scope
 
 - FastAPI backend accepts profiling requests and enqueues them as RQ jobs.
 - An RQ worker process executes the jobs using `respro/` domain logic.
@@ -13,7 +13,7 @@ This document describes how to run the prototype Web UI in self-hosted mode.
 
 ## Should this be packaged as Docker now?
 
-Yes. Packaging this prototype in Docker is recommended now because it avoids local dependency drift
+Yes. Packaging this Web UI stack in Docker is recommended because it avoids local dependency drift
 between Python and Node environments and gives a reproducible local deployment path for non-expert
 users.
 
@@ -50,6 +50,8 @@ Optional startup configuration environment variables:
 - `RESPRO_WEB_RESULTS_DB` — override absolute path to `results.db` (created automatically; default: `data/results.db`)
 - `RESPRO_WEB_ALLOWED_ROOTS` — comma-separated allowed filesystem roots for path browsing (default: `RESPRO_WEB_DATA_DIR`)
 - `RESPRO_WEB_API_TOKEN` — bearer token for protected endpoints
+- `RESPRO_WEB_CORS_ORIGINS` — comma-separated list of allowed CORS origins (for example `https://respro.example.com,https://lab.example.com`); if unset, defaults to localhost frontend origins for unauthenticated mode and `*` when `RESPRO_WEB_API_TOKEN` is set
+- `RESPRO_WEB_UPLOAD_RATE_LIMIT` — upload request limit applied per token when authenticated or per client IP otherwise; defaults to `5/minute`
 - `RESPRO_WEB_JOB_TIMEOUT` — default RQ job timeout in seconds
 
 When `RESPRO_WEB_API_TOKEN` is set, the frontend must send it as bearer token.
@@ -87,7 +89,7 @@ docker run --rm \
   -v "$PWD/data:/data" \
   -e RESPRO_WEB_HOST=0.0.0.0 \
   -e RESPRO_WEB_PORT=8000 \
-  respro-web:prototype
+  respro-web:latest
 ```
 
 Note: this single-container approach runs the web API but has no Redis or worker. Use Docker
@@ -118,4 +120,5 @@ This starts the API, an RQ worker, and Redis together on `http://127.0.0.1:8000`
   the RQ worker.
 - Startup path configuration is enforced at backend startup; invalid project DB paths fail fast.
 - `results.db` is initialized automatically at startup.
+- Upload endpoints reject binary/text-mismatched payloads, malformed VCF headers, oversized lines, and invalid BGZF BAM headers before files are handed to downstream parsers.
 - Session-scoped temporary uploads and generated HTML reports are cleaned automatically when the browser tab is closed (`pagehide` cleanup call).

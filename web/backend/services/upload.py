@@ -18,6 +18,32 @@ ALLOWED_VCF_TYPES = {'text/plain', 'text/x-vcf', 'application/octet-stream'}
 ALLOWED_BAM_TYPES = {'application/octet-stream'}
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
+MAX_FASTA_LINE_LENGTH = 500_000
+MAX_VCF_LINE_LENGTH = 100_000
+MAX_VCF_DATA_LINES = 2_000_000
+_ALLOWED_TEXT_CONTROL_BYTES = {9, 10, 13}
+_ALLOWED_FASTA_SEQUENCE_BYTES = {
+    ord('A'),
+    ord('C'),
+    ord('G'),
+    ord('T'),
+    ord('U'),
+    ord('R'),
+    ord('Y'),
+    ord('K'),
+    ord('M'),
+    ord('S'),
+    ord('W'),
+    ord('B'),
+    ord('D'),
+    ord('H'),
+    ord('V'),
+    ord('N'),
+    ord('-'),
+    ord('.'),
+    ord('*'),
+}
+_BGZF_HEADER_BYTES = 18
 
 
 class UploadStream(Protocol):
@@ -49,31 +75,21 @@ def _validate_stream_chunk(
     file_type: Literal['fasta', 'vcf', 'bam'],
 ) -> None:
     if file_type == 'fasta':
-        if state['starts_with_header'] is None and chunk:
-            state['starts_with_header'] = chunk[:1] == b'>'
-        text = chunk.decode('utf-8', errors='ignore')
-        if text.strip():
+        _validate_text_chunk(chunk, 'FASTA')
+        if chunk.strip():
             state['has_non_whitespace'] = True
-        if not state['has_sequence_char'] and any(char in 'ATCGNatcgn' for char in text):
-            state['has_sequence_char'] = True
+        _process_fasta_chunk(state, chunk)
         return
 
     if file_type == 'vcf':
-        text = chunk.decode('utf-8', errors='ignore')
-        if text.strip():
+        _validate_text_chunk(chunk, 'VCF')
+        if chunk.strip():
             state['has_non_whitespace'] = True
-        combined_text = f"{state['line_buffer']}{text}"
-        lines = combined_text.split('\n')
-        state['line_buffer'] = lines.pop() if lines else combined_text
-        for line in lines:
-            if not state['has_vcf_header'] and line.startswith('##fileformat=VCF'):
-                state['has_vcf_header'] = True
-            if not state['has_column_header'] and line.startswith('#CHROM'):
-                state['has_column_header'] = True
+        _process_vcf_chunk(state, chunk)
         return
 
-    if len(state['first_bytes']) < 2:
-        missing = 2 - len(state['first_bytes'])
+    if len(state['first_bytes']) < _BGZF_HEADER_BYTES:
+        missing = _BGZF_HEADER_BYTES - len(state['first_bytes'])
         state['first_bytes'] = state['first_bytes'] + chunk[:missing]
 
 
@@ -82,6 +98,7 @@ def _validate_stream_complete(
     file_type: Literal['fasta', 'vcf', 'bam'],
 ) -> None:
     if file_type == 'fasta':
+        _finalize_fasta_lines(state)
         if not state['has_non_whitespace']:
             raise ValueError('FASTA file is empty')
         if not (state['starts_with_header'] or state['has_sequence_char']):
@@ -89,19 +106,20 @@ def _validate_stream_complete(
         return
 
     if file_type == 'vcf':
+        _finalize_vcf_lines(state)
         if not state['has_non_whitespace']:
             raise ValueError('VCF file is empty')
-        buffered_line = str(state['line_buffer'])
-        has_vcf_header = bool(state['has_vcf_header']) or buffered_line.startswith('##fileformat=VCF')
-        has_column_header = bool(state['has_column_header']) or buffered_line.startswith('#CHROM')
-        if not (has_vcf_header or has_column_header):
+        has_vcf_header = bool(state['has_vcf_header'])
+        has_column_header = bool(state['has_column_header'])
+        if not (has_vcf_header and has_column_header):
             raise ValueError('VCF file does not appear to have valid VCF headers')
         return
 
-    if len(state['first_bytes']) < 2:
+    if len(state['first_bytes']) < _BGZF_HEADER_BYTES:
         raise ValueError('BAM file is too small')
     if state['first_bytes'][:2] != b'\x1f\x8b':
         raise ValueError('BAM file does not have valid BGZF/gzip magic signature')
+    _validate_bgzf_header(state['first_bytes'])
 
 
 def _new_stream_validation_state(file_type: Literal['fasta', 'vcf', 'bam']) -> dict[str, object]:
@@ -110,17 +128,141 @@ def _new_stream_validation_state(file_type: Literal['fasta', 'vcf', 'bam']) -> d
             'starts_with_header': None,
             'has_non_whitespace': False,
             'has_sequence_char': False,
+            'line_buffer': b'',
+            'line_number': 0,
         }
     if file_type == 'vcf':
         return {
-            'line_buffer': '',
+            'line_buffer': b'',
             'has_non_whitespace': False,
             'has_vcf_header': False,
             'has_column_header': False,
+            'line_number': 0,
+            'data_lines': 0,
         }
     return {
         'first_bytes': b'',
     }
+
+
+def _validate_text_chunk(chunk: bytes, label: str) -> None:
+    if b'\x00' in chunk:
+        raise ValueError(f'{label} file contains non-text/binary bytes')
+
+    for byte in chunk:
+        if byte > 127:
+            raise ValueError(f'{label} file contains non-text/binary bytes')
+        if byte < 32 and byte not in _ALLOWED_TEXT_CONTROL_BYTES:
+            raise ValueError(f'{label} file contains non-text/binary bytes')
+
+
+def _process_fasta_chunk(state: dict[str, object], chunk: bytes) -> None:
+    combined = state['line_buffer'] + chunk
+    lines = combined.split(b'\n')
+    state['line_buffer'] = lines.pop() if lines else combined
+    for line in lines:
+        _validate_fasta_line(state, line.rstrip(b'\r'))
+
+
+def _finalize_fasta_lines(state: dict[str, object]) -> None:
+    trailing = state['line_buffer']
+    if trailing:
+        _validate_fasta_line(state, trailing.rstrip(b'\r'))
+    state['line_buffer'] = b''
+
+
+def _validate_fasta_line(state: dict[str, object], raw_line: bytes) -> None:
+    state['line_number'] = int(state['line_number']) + 1
+    line_number = int(state['line_number'])
+
+    if len(raw_line) > MAX_FASTA_LINE_LENGTH:
+        raise ValueError(
+            f'FASTA file contains line {line_number} longer than {MAX_FASTA_LINE_LENGTH} characters'
+        )
+
+    stripped = raw_line.strip()
+    if not stripped:
+        return
+
+    if state['starts_with_header'] is None:
+        state['starts_with_header'] = stripped.startswith(b'>')
+
+    if stripped.startswith(b'>'):
+        return
+
+    compact = stripped.replace(b' ', b'').replace(b'\t', b'').upper()
+    if not compact:
+        return
+    if any(byte not in _ALLOWED_FASTA_SEQUENCE_BYTES for byte in compact):
+        raise ValueError('FASTA file contains invalid sequence characters')
+    if not state['has_sequence_char'] and any(base in compact for base in (b'A', b'C', b'G', b'T', b'N')):
+        state['has_sequence_char'] = True
+
+
+def _process_vcf_chunk(state: dict[str, object], chunk: bytes) -> None:
+    combined = state['line_buffer'] + chunk
+    lines = combined.split(b'\n')
+    state['line_buffer'] = lines.pop() if lines else combined
+    for line in lines:
+        _validate_vcf_line(state, line.rstrip(b'\r'))
+
+
+def _finalize_vcf_lines(state: dict[str, object]) -> None:
+    trailing = state['line_buffer']
+    if trailing:
+        _validate_vcf_line(state, trailing.rstrip(b'\r'))
+    state['line_buffer'] = b''
+
+
+def _validate_vcf_line(state: dict[str, object], raw_line: bytes) -> None:
+    state['line_number'] = int(state['line_number']) + 1
+    line_number = int(state['line_number'])
+
+    if len(raw_line) > MAX_VCF_LINE_LENGTH:
+        raise ValueError(f'VCF file contains line {line_number} longer than {MAX_VCF_LINE_LENGTH} characters')
+
+    stripped = raw_line.strip()
+    if not stripped:
+        return
+
+    if stripped.startswith(b'##fileformat=VCF'):
+        state['has_vcf_header'] = True
+        return
+
+    if stripped.startswith(b'#CHROM'):
+        state['has_column_header'] = True
+        return
+
+    if stripped.startswith(b'#'):
+        return
+
+    if not state['has_column_header']:
+        raise ValueError('VCF file contains data rows before #CHROM header')
+
+    state['data_lines'] = int(state['data_lines']) + 1
+    if int(state['data_lines']) > MAX_VCF_DATA_LINES:
+        raise ValueError(f'VCF file exceeds maximum data row count of {MAX_VCF_DATA_LINES}')
+
+
+def _validate_bgzf_header(first_bytes: bytes) -> None:
+    if len(first_bytes) < _BGZF_HEADER_BYTES:
+        raise ValueError('BAM file is too small')
+
+    compression_method = first_bytes[2]
+    flags = first_bytes[3]
+    if compression_method != 8 or (flags & 0x04) == 0:
+        raise ValueError('BAM file does not have valid BGZF/gzip magic signature')
+
+    extra_length = int.from_bytes(first_bytes[10:12], byteorder='little')
+    if extra_length < 6:
+        raise ValueError('BAM file does not have valid BGZF/gzip magic signature')
+
+    if first_bytes[12:14] != b'BC' or first_bytes[14:16] != b'\x02\x00':
+        raise ValueError('BAM file does not have valid BGZF/gzip magic signature')
+
+    block_size = int.from_bytes(first_bytes[16:18], byteorder='little') + 1
+    if block_size < 26 or block_size > 65536:
+        raise ValueError('BAM file does not have valid BGZF/gzip magic signature')
 
 
 async def save_upload_stream(
@@ -184,44 +326,20 @@ def validate_upload(
     :param file_type: 'fasta', 'vcf', or 'bam'
     :raises ValueError: if file is invalid
     """
-    if file_type == 'fasta':
-        max_size = MAX_FASTA_SIZE
-        # Check size
-        if len(file_data) > max_size:
-            raise ValueError(f'FASTA file exceeds maximum size of {max_size // (1024 * 1024)} MB')
-        # Check basic FASTA format (starts with > or contains ATCG)
-        content = file_data.decode('utf-8', errors='ignore')
-        if not content.strip():
-            raise ValueError('FASTA file is empty')
-        if not (content.startswith('>') or any(c in 'ATCGNatcgn' for c in content)):
-            raise ValueError('FASTA file does not appear to contain valid sequence data')
-    elif file_type == 'vcf':
-        max_size = MAX_VCF_SIZE
-        # Check size
-        if len(file_data) > max_size:
-            raise ValueError(f'VCF file exceeds maximum size of {max_size // (1024 * 1024)} MB')
-        # Check basic VCF format (should contain header)
-        content = file_data.decode('utf-8', errors='ignore')
-        if not content.strip():
-            raise ValueError('VCF file is empty')
-        lines = content.split('\n')
-        # VCF must have header lines starting with #
-        has_vcf_header = any(line.startswith('##fileformat=VCF') for line in lines)
-        has_column_header = any(line.startswith('#CHROM') for line in lines)
-        if not (has_vcf_header or has_column_header):
-            raise ValueError('VCF file does not appear to have valid VCF headers')
-    elif file_type == 'bam':
-        max_size = MAX_BAM_SIZE
-        # Check size
-        if len(file_data) > max_size:
-            raise ValueError(f'BAM file exceeds maximum size of {max_size // (1024 * 1024 * 1024)} GB')
-        # BAM files are BGZF-compressed; they start with the gzip/BGZF magic bytes \x1f\x8b
-        if len(file_data) < 2:
-            raise ValueError('BAM file is too small')
-        if file_data[:2] != b'\x1f\x8b':
-            raise ValueError('BAM file does not have valid BGZF/gzip magic signature')
-    else:
+    if file_type not in ('fasta', 'vcf', 'bam'):
         raise ValueError(f'Unknown file type: {file_type}')
+
+    max_size = _max_size_for_type(file_type)
+    if len(file_data) > max_size:
+        if file_type == 'bam':
+            raise ValueError(f'BAM file exceeds maximum size of {max_size // (1024 * 1024 * 1024)} GB')
+        raise ValueError(f'{file_type.upper()} file exceeds maximum size of {max_size // (1024 * 1024)} MB')
+
+    state = _new_stream_validation_state(file_type)
+    for offset in range(0, len(file_data), UPLOAD_CHUNK_SIZE):
+        chunk = file_data[offset : offset + UPLOAD_CHUNK_SIZE]
+        _validate_stream_chunk(state, chunk, file_type)
+    _validate_stream_complete(state, file_type)
 
 
 def save_upload(
@@ -285,7 +403,9 @@ def cleanup_session_files(
 
 
 def _delete_paths(paths: list[str], *, allowed_root: Path, html_only: bool) -> int:
-    """Delete existing files under allowed root, optionally restricting to HTML files."""
+    """
+    Delete existing files under allowed root, optionally restricting to HTML files.
+    """
     resolved_allowed_root = allowed_root.expanduser().resolve()
     deleted_count = 0
     for candidate_path in paths:
@@ -304,7 +424,9 @@ def _delete_paths(paths: list[str], *, allowed_root: Path, html_only: bool) -> i
 
 
 def _delete_bam_index_sidecars(bam_path: Path, allowed_root: Path) -> int:
-    """Delete .bam.bai / .bai sidecar files for one BAM path when present."""
+    """
+    Delete .bam.bai / .bai sidecar files for one BAM path when present.
+    """
     deleted_count = 0
     sidecars = [bam_path.with_suffix(f'{bam_path.suffix}.bai'), bam_path.with_suffix('.bai')]
     for sidecar in sidecars:
@@ -318,5 +440,7 @@ def _delete_bam_index_sidecars(bam_path: Path, allowed_root: Path) -> int:
 
 
 def _is_within_root(path: Path, root: Path) -> bool:
-    """Return whether path is root or contained within root."""
+    """
+    Return whether path is root or contained within root.
+    """
     return path == root or root in path.parents

@@ -249,8 +249,8 @@ function _buildMutationsPerGenePie(rules) {
   return {
     key: 'mutations-per-gene',
     title: 'Mutations / Gene',
-    total: rules.length,
-    centerLabel: 'mutations',
+    total: counts.size,
+    centerLabel: 'unique genes',
     slices: _limitPieSlices(ordered),
   };
 }
@@ -281,8 +281,8 @@ function _buildEntriesPerOrganismPie(rules, plotMeta) {
   return {
     key: 'entries-per-organism',
     title: 'Entries / Organism',
-    total: rules.length,
-    centerLabel: 'entries',
+    total: counts.size,
+    centerLabel: 'unique organisms',
     slices: _limitPieSlices(ordered),
   };
 }

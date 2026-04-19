@@ -1,9 +1,9 @@
-# Web Prototype
+# Web UI
 
-This folder contains the prototype Web UI stack:
+This folder contains the Web UI stack:
 
 - `backend/`: FastAPI API layer that wraps existing `respro` domain logic.
-- `frontend/`: React UI for workspace selection, profiling submission, and browsing endpoints.
+- `frontend/`: React UI for profiling submission, database analytics, report viewing, and browsing endpoints.
 
 The backend is intentionally thin and keeps CLI behavior untouched.
 

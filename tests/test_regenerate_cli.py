@@ -546,3 +546,25 @@ class TestExploreRules:
         assert result.exit_code != 0
         assert 'No reference matching' in result.output
 
+    def test_rules_output_includes_browse_compatible_optional_columns(
+        self,
+        project_db: Path,
+    ) -> None:
+        conn = sqlite3.connect(project_db)
+        conn.execute(
+            "UPDATE resistance_rule SET publication = ?, comment = ? WHERE id = 1",
+            ('10.1000/example-doi', 'example-comment'),
+        )
+        conn.commit()
+        conn.close()
+
+        result = CliRunner().invoke(app, [
+            'explore', '--rules', str(project_db),
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert 'DOI' in result.output
+        assert 'Comment' in result.output
+        assert '10.1000/example-doi' in result.output
+        assert 'example-comment' in result.output
+
