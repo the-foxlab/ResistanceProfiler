@@ -33,6 +33,7 @@ function SummaryPieCard({ pie }) {
                   <Label
                     position="center"
                     content={({ viewBox }) => {
+                      // Draw custom center text so every pie consistently shows total + metric label.
                       if (!viewBox) {
                         return null;
                       }
@@ -77,6 +78,7 @@ function SummaryPieCard({ pie }) {
 
 export function DatabasePieSummaryRow({ tile }) {
   return (
+    // The row adapts responsively; each card receives one already-built pie payload.
     <div className="database-summary-row">
       {tile.pies.map((pie) => (
         <SummaryPieCard key={pie.key} pie={pie} />

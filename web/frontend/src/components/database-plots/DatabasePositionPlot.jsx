@@ -28,6 +28,7 @@ export function DatabasePositionPlot({ plot }) {
                 dataKey="label"
                 tick={axisStyle}
                 minTickGap={18}
+                // Reduce label crowding for long genes by only keeping start/end ticks.
                 interval={plot.positions.length > 24 ? 'preserveStartEnd' : 0}
                 label={{ value: plot.xAxisLabel || 'Amino-acid position', position: 'insideBottom', offset: -4, ...axisStyle }}
               />
@@ -44,6 +45,7 @@ export function DatabasePositionPlot({ plot }) {
                   fill={CLASSIFICATION_COLORS[tone] || CLASSIFICATION_COLORS.count}
                   radius={[4, 4, 0, 0]}
                   barSize={12}
+                  // Short animation keeps visual feedback without heavy render cost.
                   isAnimationActive
                   animationDuration={320}
                   animationEasing="ease-out"

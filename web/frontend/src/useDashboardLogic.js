@@ -44,6 +44,7 @@ const MUTATION_COLUMN_ORDER = [
 ];
 
 function _mutationColumnSortIndex(columnKey) {
+  // Unknown columns are still shown, but pushed behind the known stable order.
   const idx = MUTATION_COLUMN_ORDER.indexOf(columnKey);
   return idx === -1 ? MUTATION_COLUMN_ORDER.length + 100 : idx;
 }
@@ -54,6 +55,7 @@ function _buildMutationColumns(columnKeys) {
     .map((columnKey) => {
       const label = MUTATION_COLUMN_LABELS[columnKey] || columnKey;
       const accessor = (rule) => {
+        // Rule positions are stored 0-based in the backend and displayed 1-based in the UI.
         if (columnKey === 'position') {
           const positionValue = Number(rule.position);
           if (Number.isFinite(positionValue)) {
@@ -75,6 +77,7 @@ function _buildMutationColumns(columnKeys) {
 }
 
 function buildHeaders(baseHeaders = {}) {
+  // Attach auth header only when a token exists; local dev can run without auth.
   if (!API_TOKEN) {
     return baseHeaders;
   }
@@ -85,6 +88,7 @@ function buildHeaders(baseHeaders = {}) {
 }
 
 function buildApiUrl(path, params = {}) {
+  // Drop empty query params so generated URLs stay compact and predictable.
   const filteredParams = Object.fromEntries(
     Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
   );
@@ -94,6 +98,7 @@ function buildApiUrl(path, params = {}) {
 }
 
 function formatUserError(message) {
+  // Convert backend/internal error wording into actionable UI-friendly messages.
   const lines = String(message || '')
     .split('\n')
     .map((line) => line.trim())
@@ -140,6 +145,7 @@ function formatResultTimestamp(timestamp) {
 }
 
 async function apiGet(path, params = {}) {
+  // Shared fetch helper keeps all GET error handling consistent.
   const response = await fetch(buildApiUrl(path, params), {
     headers: buildHeaders(),
   });
@@ -151,6 +157,7 @@ async function apiGet(path, params = {}) {
 }
 
 async function apiPost(path, body) {
+  // Shared POST helper centralizes auth/error handling.
   const response = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: buildHeaders({ 'Content-Type': 'application/json' }),
@@ -164,6 +171,7 @@ async function apiPost(path, body) {
 }
 
 async function apiUpload(path, file) {
+  // Uploads use FormData and do not set JSON headers.
   const formData = new FormData();
   formData.append('file', file);
   const response = await fetch(`${API_BASE}${path}`, {
@@ -179,6 +187,7 @@ async function apiUpload(path, file) {
 }
 
 export function useDashboardLogic() {
+  // Profile input state for each supported workflow mode.
   const [vcfInput, setVcfInput] = useState({
     vcf_path: '',
     ref_fasta_path: '',
@@ -212,6 +221,7 @@ export function useDashboardLogic() {
   const [inlineReportPath, setInlineReportPath] = useState('');
   const [inlineReportLabel, setInlineReportLabel] = useState('');
 
+  // Resolve currently selected database once for all consumers.
   const selectedDatabase = databases.find((item) => item.id === selectedDatabaseId) || null;
 
   useEffect(() => {
@@ -238,6 +248,7 @@ export function useDashboardLogic() {
       return;
     }
     const loadMutationsForDb = async () => {
+      // Mutation browser + database charts both read from this payload.
       setStatus('Loading mutations from database...');
       try {
         const payload = await apiGet('/api/mutations');
@@ -258,6 +269,7 @@ export function useDashboardLogic() {
   }, [selectedDatabase, selectedDatabaseId]);
 
   const parseValue = (text) => {
+    // Sorting prefers numeric comparison when possible, otherwise case-insensitive text.
     const raw = (text || '').trim();
     const num = Number(raw);
     if (!Number.isNaN(num) && raw !== '') {
@@ -273,6 +285,7 @@ export function useDashboardLogic() {
   );
 
   const filterMutations = (rulesList) => {
+    // Column filter supports either one selected column or "search in all columns".
     if (!mutationFilter) {
       return rulesList;
     }
@@ -321,6 +334,7 @@ export function useDashboardLogic() {
 
   const displayedRules = sortMutations(filterMutations(rules));
 
+  // Reports are shown newest first for quick access after job completion.
   const reportOptions = sessionResults
     .map((result) => ({
       path: result.report_html_path,
@@ -339,6 +353,7 @@ export function useDashboardLogic() {
   };
 
   const addUploadedPath = (path) => {
+    // Track uploaded files so they can be cleaned up when the page closes.
     setUploadedPaths((prev) => {
       if (prev.includes(path)) {
         return prev;
@@ -348,6 +363,7 @@ export function useDashboardLogic() {
   };
 
   const addReportPath = (path) => {
+    // Track generated reports for the same cleanup endpoint.
     setReportPaths((prev) => {
       if (prev.includes(path)) {
         return prev;
@@ -370,6 +386,7 @@ export function useDashboardLogic() {
       if (uploadedPaths.length === 0 && reportPaths.length === 0) {
         return;
       }
+      // Use sendBeacon during unload when available to avoid dropped cleanup requests.
       const payload = JSON.stringify({ upload_paths: uploadedPaths, report_paths: reportPaths });
       if (navigator.sendBeacon) {
         const blob = new Blob([payload], { type: 'application/json' });
@@ -393,6 +410,7 @@ export function useDashboardLogic() {
   }, [uploadedPaths, reportPaths]);
 
   useEffect(() => {
+    // Ensure the app uses the bundled SVG favicon in all entry modes.
     let link = document.querySelector('link[rel="icon"]');
     if (!link) {
       link = document.createElement('link');
@@ -404,6 +422,7 @@ export function useDashboardLogic() {
   }, []);
 
   const pollJob = async (jobId) => {
+    // Profiling runs asynchronously on the backend, so poll until final state.
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
       const payload = await apiGet(`/api/jobs/${jobId}`);
@@ -424,6 +443,7 @@ export function useDashboardLogic() {
       });
       setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
       const result = await pollJob(submitResponse.job_id);
+      // Keep a local history of run results for the report selector.
       setSessionResults((prev) => [...prev, result]);
       addReportPath(result.report_html_path);
       setSelectedProfileReportPath(result.report_html_path);
@@ -472,6 +492,7 @@ export function useDashboardLogic() {
   };
 
   const uploadFile = async (file, fileType, onSuccess) => {
+    // Shared upload path for FASTA/VCF/reference/BAM inputs.
     setStatus(`Uploading ${fileType.toUpperCase()} file (${file.name})...`);
     try {
       const response = await apiUpload(`/api/upload/${fileType}`, file);
@@ -510,6 +531,7 @@ export function useDashboardLogic() {
   const isProfileBusy = activeProfileMode === 'fasta' ? isProcessingFasta : isProcessingVcf;
 
   const runSelectedProfile = async () => {
+    // Dispatch to the selected profiling workflow from one button handler.
     if (activeProfileMode === 'fasta') {
       await submitFasta();
       return;
@@ -526,6 +548,7 @@ export function useDashboardLogic() {
   };
 
   const downloadMutationsAsTsv = () => {
+    // Export exactly what is currently visible (after filter/sort), not raw backend order.
     const headers = mutationColumns.map((column) => column.label);
     const lines = [headers.join('\t')];
     displayedRules.forEach((rule) => {
@@ -546,6 +569,7 @@ export function useDashboardLogic() {
   };
 
   return {
+    // Expose one stable object so the view component stays presentation-focused.
     API_BASE,
     PROFILE_MODES,
     vcfInput,

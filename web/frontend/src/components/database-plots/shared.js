@@ -1,3 +1,4 @@
+// Shared color tokens so all chart components use the same phenotype semantics.
 export const CLASSIFICATION_COLORS = {
   count: '#0f766e',
   resistant: '#c2410c',
@@ -6,8 +7,10 @@ export const CLASSIFICATION_COLORS = {
   unknown: '#c3ccd6',
 };
 
+// Default palette for pie slices; order matters for stable legend color mapping.
 export const PIE_COLORS = ['#0f766e', '#1d4ed8', '#c2410c', '#7c3aed', '#ca8a04', '#0f4c5c', '#64748b'];
 
+// Human-readable legend labels for stacked bars and summary plots.
 export const CLASSIFICATION_LABELS = {
   count: 'Mutations',
   resistant: 'Resistant',
@@ -17,6 +20,7 @@ export const CLASSIFICATION_LABELS = {
 };
 
 export function chartLabelStyle() {
+  // Small axis label helper keeps font settings consistent across charts.
   return {
     fontSize: 12,
     fill: '#4c6072',

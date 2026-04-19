@@ -39,6 +39,7 @@ function _hasUsableAnnotation(value) {
 }
 
 function _resolvePhenotypeMode(rules, requestedMode) {
+  // Determine which annotation namespace can be displayed meaningfully.
   const hasPhenotype = rules.some((rule) => _hasUsableAnnotation(rule.phenotype));
   const hasClinical = rules.some((rule) => _hasUsableAnnotation(rule.clinical_phenotype));
 
@@ -87,6 +88,7 @@ function _resolvePhenotypeMode(rules, requestedMode) {
 }
 
 function _getRuleAnnotationByMode(rule, mode) {
+  // Ignore "unknown" annotations so bars represent interpretable classifications only.
   const value = mode === 'clinical' ? rule.clinical_phenotype : rule.phenotype;
   if (!_hasUsableAnnotation(value)) {
     return '';
@@ -95,6 +97,7 @@ function _getRuleAnnotationByMode(rule, mode) {
 }
 
 function _classificationTone(label) {
+  // Normalize free-text phenotypes into a small color/legend vocabulary.
   const lowered = String(label || '').toLowerCase();
   if (!lowered) {
     return 'unknown';
@@ -130,6 +133,7 @@ function _hasTypedClassification(toneCounts) {
 }
 
 function _limitPieSlices(entries) {
+  // Keep pies readable by limiting legend size and aggregating the tail into "Other".
   const visible = entries.slice(0, 6).map(([label, count], index) => ({
     label,
     count,
@@ -149,6 +153,7 @@ function _limitPieSlices(entries) {
 }
 
 function _dominantTone(toneCounts) {
+  // Used for a quick dominant-color hint when multiple tones occur in one bin.
   const priority = { resistant: 4, intermediate: 3, susceptible: 2, unknown: 1 };
   const entries = Array.from(toneCounts.entries());
   if (entries.length === 0) {
@@ -175,6 +180,7 @@ function _extractDoiTokens(value) {
 }
 
 function _buildRulesPerDrugPie(rules) {
+  // Counts raw rule rows per drug (not unique mutations).
   const counts = new Map();
 
   rules.forEach((rule) => {
@@ -197,6 +203,7 @@ function _buildRulesPerDrugPie(rules) {
 }
 
 function _buildDoiPerDrugPie(rules) {
+  // Counts unique publication identifiers per drug.
   const counts = new Map();
 
   rules.forEach((rule) => {
@@ -226,6 +233,7 @@ function _buildDoiPerDrugPie(rules) {
 }
 
 function _buildMutationsPerGenePie(rules) {
+  // Counts rule rows grouped by gene.
   const counts = new Map();
 
   rules.forEach((rule) => {
@@ -248,6 +256,7 @@ function _buildMutationsPerGenePie(rules) {
 }
 
 function _buildEntriesPerOrganismPie(rules, plotMeta) {
+  // Map rule reference -> organism using metadata from the backend plot payload.
   const references = Array.isArray(plotMeta?.references) ? plotMeta.references : [];
   const organismByReference = new Map();
 
@@ -279,6 +288,7 @@ function _buildEntriesPerOrganismPie(rules, plotMeta) {
 }
 
 function _buildSummaryPies(rules, plotMeta) {
+  // Compose all headline pies shown in the summary row.
   const pies = [
     _buildRulesPerDrugPie(rules),
     _buildDoiPerDrugPie(rules),
@@ -297,6 +307,7 @@ function _buildSummaryPies(rules, plotMeta) {
 }
 
 function _buildReferenceLookup(plotMeta) {
+  // Provides stable display labels for section headers.
   const references = Array.isArray(plotMeta?.references) ? plotMeta.references : [];
   const lookup = new Map();
   references.forEach((reference) => {
@@ -310,6 +321,7 @@ function _buildReferenceLookup(plotMeta) {
 }
 
 function _buildGeneLengthLookup(plotMeta) {
+  // Amino-acid lengths are used to build bins with consistent x-axis semantics.
   const genes = Array.isArray(plotMeta?.genes) ? plotMeta.genes : [];
   const lookup = new Map();
   genes.forEach((gene) => {
@@ -325,6 +337,7 @@ function _buildGeneLengthLookup(plotMeta) {
 }
 
 function _buildGenePositionSections(rules, plotMeta, phenotypeMode, binSize) {
+  // Build per-reference/per-gene datasets for stacked mutation-position bars.
   const groupMap = new Map();
   const referenceLookup = _buildReferenceLookup(plotMeta);
   const geneLengthLookup = _buildGeneLengthLookup(plotMeta);
@@ -384,6 +397,7 @@ function _buildGenePositionSections(rules, plotMeta, phenotypeMode, binSize) {
   const groups = Array.from(groupMap.values()).map((group) => {
     const aaLength = Math.max(group.aaLength, 1);
     const binCount = Math.ceil(aaLength / binSize);
+    // Pre-create bins so empty regions still exist on the axis for context.
     const positions = Array.from({ length: binCount }, (_, index) => {
       const binStart = index * binSize + 1;
       const binEnd = Math.min(aaLength, binStart + binSize - 1);
@@ -493,6 +507,7 @@ export function buildDatabasePlots(
   requestedPhenotypeMode = 'auto',
   requestedBinSize = 10
 ) {
+  // Clamp bin size to a safe UI range and return fully prepared chart sections.
   const parsedBinSize = Number(requestedBinSize);
   const binSize = Number.isFinite(parsedBinSize) ? Math.min(100, Math.max(1, Math.floor(parsedBinSize))) : 10;
   const phenotypeMode = _resolvePhenotypeMode(rules, requestedPhenotypeMode);

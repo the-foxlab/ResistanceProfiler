@@ -108,6 +108,127 @@ th {
   min-height: 0;
 }
 
+.about-tile {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.about-header {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.about-header h2,
+.about-header p {
+  margin: 0;
+}
+
+.about-header p {
+  color: var(--muted);
+}
+
+.about-notice {
+  border: 1px solid #c8d9e6;
+  border-left: 4px solid #0f766e;
+  border-radius: var(--radius-md);
+  padding: 0.65rem 0.75rem;
+  background: linear-gradient(180deg, #f4fbf8, #f8fbfe);
+  color: #1b3044;
+  font-size: 0.9rem;
+}
+
+.about-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.about-section-card {
+  display: grid;
+  gap: 0.45rem;
+  border: 1px solid #dbe6ee;
+  border-radius: var(--radius-md);
+  padding: 0.8rem;
+  background: linear-gradient(180deg, #ffffff, #f8fbfe);
+}
+
+.about-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.about-section-title h3 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.about-section-icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+}
+
+.about-section-card p,
+.about-section-card ul {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #23384b;
+}
+
+.about-section-card ul {
+  padding-left: 1.05rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.about-command-block {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.about-command-block code {
+  display: block;
+  font-family: 'Fira Code', 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 0.78rem;
+  background: #eef4f9;
+  border: 1px solid #d1deea;
+  border-radius: 6px;
+  padding: 0.35rem 0.45rem;
+  color: #14334f;
+  overflow-wrap: anywhere;
+}
+
+.about-mini-heading {
+  margin-top: 0.2rem;
+  font-weight: 700;
+  color: #1a3347;
+}
+
+.about-section-card-contact {
+  background: linear-gradient(180deg, #f9fcff, #f2f8fb);
+}
+
+.about-contact-list {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.about-contact-list a {
+  color: #1f4f8a;
+  text-decoration: none;
+  font-size: 0.87rem;
+}
+
+.about-contact-list a:hover {
+  text-decoration: underline;
+}
+
+.about-backend-note {
+  margin-top: 0.1rem;
+  color: var(--muted);
+}
+
 .analyze-primary {
   min-width: 118px;
 }
@@ -970,7 +1091,8 @@ th.sortable-col {
   .database-meta-grid,
   .database-summary-grid,
   .database-summary-row,
-  .database-reference-plot-grid {
+  .database-reference-plot-grid,
+  .about-grid {
     grid-template-columns: 1fr;
   }
 
