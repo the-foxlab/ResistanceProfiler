@@ -18,8 +18,10 @@ In the end you get a informative html report that highlights these results. The 
 
 > [!TIP]
 > ResPro is strongest when the same curated project database is reused across runs. Treat `project.db` as your internal reference contract.
+
 > [!CAUTION]
 > Rule quality still depends on the quality of the curated TSV source. ResPro validates and normalizes rule entries, but it does not replace biological curation.
+
 > [!IMPORTANT]
 > This tool relies on already curated and maintained databases and provides a compatibility layer for users to maintained database like [HerpesDRG](https://github.com/ojcharles/herpesdrg-db).
 
