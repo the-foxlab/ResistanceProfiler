@@ -107,6 +107,8 @@ Mark items done and update priorities after each completed milestone.
 - [X] `reconstruct_annotations` — rebuild `AnnotatedVariant` objects from stored rows
 - [X] Persist combo rule hits to `results.db` and restore them on `regenerate` via `combo_rule_hit` rows + reconstruction
 - [X] `respro regenerate` — re-export report from stored run with project-fingerprint validation
+- [X] `respro regenerate --json` — regenerate report artifacts directly from exported `*.results.json` with strict JSON validation and UUID mismatch guardrails
+- [X] `respro regenerate --export json|tabular` — parity export options when regenerating from stored runs or JSON input
 
 ### Code quality and testing
 
@@ -151,17 +153,17 @@ Mark items done and update priorities after each completed milestone.
 
 ### CLI restructure and results management
 
-- [X] Flat CLI structure — `respro explore --rules`/`--results`, `respro regenerate`, `respro classify`, `respro sync` as top-level commands (not nested sub-apps); old `respro/cli/runs.py` and `respro/cli/rules.py` deleted; new `respro/cli/explore.py`, `respro/cli/regenerate.py`, `respro/cli/classify.py`, `respro/cli/sync.py` modules created; each module has a `register(app)` function that registers directly to the root app
-- [X] `respro explore --rules` — browse resistance rules in project database with optional `--reference` filter; smart column hiding (only show columns with at least one non-empty value)
-- [X] `respro explore --results` — browse stored profiling runs with stale indicator (yellow if project was updated after run creation)
-- [X] Project `updated_at` tracking — `updated_at` added to `project` table; bumped on `init-add`; `project_updated_at` snapshot stored on `run`; stale indicator in `explore --results` when project was updated after the run was recorded
+- [X] Flat CLI structure — `respro manage database`/`results`, `respro regenerate`, and `respro classify` as top-level commands; sync moved under `respro manage results --sync`; old `respro/cli/runs.py` and `respro/cli/rules.py` deleted; new `respro/cli/explore.py`, `respro/cli/regenerate.py`, `respro/cli/classify.py`, `respro/cli/sync.py` modules created
+- [X] `respro manage database <db_path> --rules` — browse resistance rules in project database with optional `--reference` filter; smart column hiding (only show columns with at least one non-empty value)
+- [X] `respro manage results <results_db_path> --list` — browse stored profiling runs with stale indicator (yellow if project was updated after run creation)
+- [X] Project `updated_at` tracking — `updated_at` added to `project` table; bumped on `init-add`; `project_updated_at` snapshot stored on `run`; stale indicator in `manage results --list` when project was updated after the run was recorded
 - [X] `sample_classification` table in `results.db` — `run_id`, `drug`, `phenotype`, `clinical_phenotype`, `ic50`, `fold_ic50`, `note`, `source`, `created_at`; auto-migration on DB open; `save_classification` / `load_classifications` in `respro/db/results.py`
 - [X] `respro classify` — top-level command; `--run-id`, optional `--drug`, `--phenotype` / `--clinical-phenotype` / `--ic50` / `--fold-ic50`; at least one value required; appends `sample_classification` row
 - [X] `respro regenerate` — top-level command; re-exports report from stored run with project-fingerprint validation
-- [X] `respro sync` — top-level command; re-annotates stored run against current project DB; replaces variant_result and combo-hit rows; updates resistance_hits; requires fingerprint match; optional `--out` re-exports HTML report
+- [X] `respro manage results <results_db_path> --sync <project_db_path>` — re-annotates all stored runs against current project DB; replaces variant_result and combo-hit rows; updates resistance_hits; runs with fingerprint mismatches are skipped and reported
 - [X] Surface sample classifications in report and JSON — dedicated "Manual classifications" section in HTML report and `sample_classifications` key in exported JSON, clearly separated from rule-based hits
 - [X] Optional database metadata in `respro init` — `--metadata` accepts validated JSON with fixed keys (`maintainers`, `contact`, `publication_pmid`, `website`, `description`, `maintainer_update`, `license`, `tsv_checksum`); PMID values are DOI-enriched best-effort at creation time and stored on the project row
-- [X] `respro explore --info` — added project metadata inspection mode that prints non-empty project identity and curated metadata fields
+- [X] `respro manage database <db_path> --info` — added project metadata inspection mode that prints non-empty project identity and curated metadata fields
 
 ### Web deployment and security (done)
 
@@ -194,6 +196,10 @@ Mark items done and update priorities after each completed milestone.
 - [X] Unified dashboard shell and in-app report integration — frontend now uses a cohesive scientific dashboard with global database card, left mode sidebar (Profile VCF, Profile FASTA, Browse mutations, Report), app-level branding links/logo/favicon, and report viewing in an in-app modal instead of opening new browser tabs; report CSS harmonized with web app styling tokens
 - [X] Database analytics tiles in Web UI — Database tab now shows structured metadata cards plus a responsive 2-column plot grid with per-reference/gene mutation-position charts and optional IC50/drug summary plots derived from the loaded rules
 - [X] Report artifact downloads in web app — profiling jobs now emit HTML + JSON + tabular outputs; report panel adds direct JSON/tabular download buttons and backend `/api/artifact` serves non-HTML files from the allowed data directory
+- [X] Regenerate-from-JSON web flow — `POST /api/upload/json` + `POST /api/regenerate/json` with JSON schema validation, UUID mismatch feedback, and shared report artifact payloads
+- [X] Dedicated "Regenerate from JSON" frontend tab — simple JSON upload + regenerate action; output rendered in the same report tile with JSON/tabular downloads
+- [X] `respro manage results <results_db_path> --delete <run_id>` — delete one stored run (including `variant_result`, `coverage_gap`, `combo_rule_hit`, and `sample_classification` rows) from `results.db` with optional `--force` confirmation bypass
+- [X] `respro add --validate` dry-run mode — execute full rules parsing/validation pipeline without persisting DB changes
 
 ---
 
@@ -216,24 +222,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Usability and workflow
 
-- 🟡 `respro runs delete` subcommand — add a `runs delete <run_id>` subcommand under the `explore`
-  or a new `runs` command group that removes a single run row (plus its `variant_result`,
-  `coverage_gap`, `combo_rule_hit`, and `sample_classification` rows) from `results.db`; accept
-  the 8-character run-ID prefix shown by `explore --results` as well as the full UUID; print a
-  confirmation line showing the deleted run ID and sample name; add `--force` to skip the
-  interactive prompt; add a `runs prune --older-than <days>` variant that bulk-deletes runs
-  older than N days for housekeeping on long-running installations; implement deletion in
-  `respro/db/results.py` as `delete_run(db_path, run_id)` and test in `tests/test_results_db.py`
-- 🟡 `--validate` / dry-run flag for `init-add` — add `--validate` to `respro init-add` that
-  parses the rules TSV and runs all validation checks (column presence, mutation syntax, phenotype
-  normalisation) without writing anything to the database; print a per-rule summary with any
-  validation warnings or errors; exit non-zero if hard errors are found; implement the validation
-  pass as a re-entrant step in `respro/core/rules.py` so the same logic is exercised in both
-  `--validate` mode and the real import; add a test in `tests/test_rules.py`
-- 🟡 `--json` output for `respro explore` — add a `--json` flag to the `explore` subcommands
-  (`--rules`, `--results`) that serialises the same data to stdout as a JSON array instead of the
-  human-readable table; useful for programmatic consumption and scripting; the JSON schema should
-  mirror the existing `results.json` export structure where applicable
 - 🟡 Multi-chrom VCF and multi-record query FASTA support — a single VCF may carry variants
   across multiple CHROM identifiers (e.g. segmented viruses, amplicon panels spanning disjoint
   regions); the `--ref-fasta` supplied to `profile-vcf` must then be a multi-record FASTA with
@@ -350,15 +338,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Public release
 
-- 🟡 `project.db` schema migration strategy — `results.db` already embeds `results_schema_version`
-  and has a one-time UUID migration helper; `project.db` stores `schema_version = 1` in its
-  `project` table but has no migration path documented or implemented; before incrementing
-  `PROJECT_SCHEMA_VERSION`, add a `migrate_project_db(db_path)` function in `respro/db/schema.py`
-  that detects the stored version, applies each incremental ALTER TABLE / INSERT step in order, and
-  bumps the stored version atomically; call it at the start of `init-add`, `profile-vcf`,
-  `profile-fasta`, and `explore` before any other DB access; document the migration contract in
-  `docs/project-structure.md` so future schema changes follow the same pattern; add a test that
-  opens a v1 fixture database, runs migration, and confirms the new schema is present
 - 🔴 GitHub Actions CI — run the full test suite against all supported Python versions on every
   push to `main`; include a ruff lint check; add a PyPI publish workflow triggered by version tags
 - 🔴 Professional documentation — concise README with a quick-start section; link out to separate
@@ -444,5 +423,3 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟢 CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
 - 🟢 Project DB catalog support (post-prototype) — support multiple project DBs with startup catalog metadata and runtime selection
 - 🟢 Results retention and portability (post-prototype) — add TTL cleanup policy for central results plus explicit export/import endpoints for user portability
-- 🟢 Visualize results
-- 🟢 Dark mode

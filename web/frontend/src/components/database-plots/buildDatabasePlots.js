@@ -195,9 +195,9 @@ function _buildRulesPerDrugPie(rules) {
   const ordered = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
   return {
     key: 'rules-per-drug',
-    title: 'Database Entries',
-    total: rules.length,
-    centerLabel: 'entries',
+    title: 'Mutations per Drug',
+    total: counts.size,
+    centerLabel: 'drugs',
     slices: _limitPieSlices(ordered),
   };
 }

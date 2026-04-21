@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from pathlib import Path
 
 from respro.db.models import (
     AnnotatedVariant,
@@ -15,8 +16,72 @@ from respro.db.models import (
     ResistanceRuleSet,
     ResistanceRuleSetMember,
 )
+from respro.db.rules_import import _load_resistance_rules
 
 logger = logging.getLogger(__name__)
+
+
+def import_rules_with_summary(
+    conn: sqlite3.Connection,
+    project_id: int,
+    rules_tsv: Path,
+    *,
+    additional_info: bool,
+) -> dict[str, int]:
+    """
+    Import rules TSV and return inserted row counts.
+
+    :param conn: open project DB connection
+    :param project_id: current project id
+    :param rules_tsv: rules TSV path
+    :param additional_info: enable external metadata lookups during import
+    :return: summary counts for inserted rows
+    """
+    before_sets = int(conn.execute('SELECT COUNT(*) FROM resistance_rule_set').fetchone()[0])
+    before_members = int(conn.execute('SELECT COUNT(*) FROM resistance_rule_set_member').fetchone()[0])
+
+    single_rules = _load_resistance_rules(
+        conn,
+        project_id,
+        rules_tsv,
+        additional_info=additional_info,
+    )
+
+    after_sets = int(conn.execute('SELECT COUNT(*) FROM resistance_rule_set').fetchone()[0])
+    after_members = int(conn.execute('SELECT COUNT(*) FROM resistance_rule_set_member').fetchone()[0])
+
+    return {
+        'single_rules': int(single_rules),
+        'combo_rule_sets': max(0, after_sets - before_sets),
+        'combo_rule_set_members': max(0, after_members - before_members),
+    }
+
+
+def validate_rules_tsv(
+    conn: sqlite3.Connection,
+    project_id: int,
+    rules_tsv: Path,
+) -> dict[str, int]:
+    """
+    Validate a rules TSV by running the real import pipeline in a rolled-back savepoint.
+
+    :param conn: open project DB connection
+    :param project_id: current project id
+    :param rules_tsv: rules TSV path
+    :return: summary counts produced by the validation pass
+    """
+    conn.execute('SAVEPOINT rules_validate')
+    try:
+        summary = import_rules_with_summary(
+            conn,
+            project_id,
+            rules_tsv,
+            additional_info=False,
+        )
+    finally:
+        conn.execute('ROLLBACK TO SAVEPOINT rules_validate')
+        conn.execute('RELEASE SAVEPOINT rules_validate')
+    return summary
 
 
 def load_rules(conn: sqlite3.Connection, reference_id: int) -> list[ResistanceRule]:

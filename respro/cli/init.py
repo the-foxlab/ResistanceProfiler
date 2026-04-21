@@ -14,10 +14,10 @@ import click
 import typer
 from rich.console import Console
 
+from respro.core.rules import import_rules_with_summary, validate_rules_tsv
 from respro.db.drugs import _consolidate_drug_names_to_lowercase, _get_drugs_from_pubchem
 from respro.db.genes import _load_genbank_records
 from respro.db.project_metadata import load_metadata_json, store_project_metadata
-from respro.db.rules_import import _load_resistance_rules
 from respro.db.schema import PROJECT_SCHEMA_VERSION, create_schema, open_project_db
 from respro.io.genbank import ParsedGenBankReference, parse_genbank_sources
 from respro.utils.files import require_file
@@ -73,7 +73,12 @@ def init_project(
     try:
         project_id = _insert_project(conn, name)
         _load_genbank_records(conn, project_id, genbank_records)
-        _load_resistance_rules(conn, project_id, rules_tsv, additional_info=additional_info)
+        import_rules_with_summary(
+            conn,
+            project_id,
+            rules_tsv,
+            additional_info=additional_info,
+        )
         store_project_metadata(conn, project_id, metadata_payload)
         if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
@@ -94,6 +99,7 @@ def add_to_project(
     rules_tsv: Path,
     genbank_paths: list[Path] | None = None,
     additional_info: bool = True,
+    validate_only: bool = False,
 ) -> Path:
     """
     Add curated rules and optional GenBank annotations to an existing project.
@@ -102,6 +108,7 @@ def add_to_project(
     :param rules_tsv: tab-separated rules file to add
     :param genbank_paths: optional GenBank files with additional references/genes
     :param additional_info: if True, query PubChem for new drugs and resolve publication metadata
+    :param validate_only: if True, run full rules validation/import path and roll back all DB changes
     :return: path to the updated database
     """
     require_file(db_path, 'Project database')
@@ -120,7 +127,18 @@ def add_to_project(
         _consolidate_drug_names_to_lowercase(conn, project_id)
         if records:
             _load_genbank_records(conn, project_id, records)
-        _load_resistance_rules(conn, project_id, rules_tsv, additional_info=additional_info)
+        if validate_only:
+            validate_rules_tsv(conn, project_id, rules_tsv)
+            conn.rollback()
+            logger.info('Rules validation passed: %s', rules_tsv)
+            return db_path
+
+        import_rules_with_summary(
+            conn,
+            project_id,
+            rules_tsv,
+            additional_info=additional_info,
+        )
         if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
         conn.execute(
@@ -242,6 +260,9 @@ def _init_add_command(
             help='Query PubChem for drug metadata and resolve publications via NCBI/CrossRef.',
         )
     ] = True,
+    validate: Annotated[
+        bool, typer.Option('--validate', help='Validate rules and exit without writing DB changes.')
+    ] = False,
 ) -> None:
     """
     Add curated rules and optional GenBank annotations to an existing project database.
@@ -254,9 +275,14 @@ def _init_add_command(
                 genbank_paths=list(genbank_paths or []),
                 rules_tsv=rules,
                 additional_info=additional_info,
+                validate_only=validate,
             )
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
+
+    if validate:
+        console.print(f'[green]✓[/green] Rules validation passed: [cyan]{db_path}[/cyan]')
+        return
 
     console.print(f'[green]✓[/green] Project updated: [cyan]{db_path}[/cyan]')
 

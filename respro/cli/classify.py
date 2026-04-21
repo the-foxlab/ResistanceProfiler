@@ -87,7 +87,7 @@ def classify(
     ] = '',
 ) -> None:
     """
-    Set one manual sample classification for a stored run in a local results database.
+    Set a manual sample classification for a stored run in a local results database.
 
     If the result is regenerated from the same results DB later, this classification will be preserved and
     shown in the report html.

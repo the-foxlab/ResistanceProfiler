@@ -22,6 +22,7 @@ from respro.db.models import (
     VariantCall,
 )
 from respro.db.results import (
+    delete_run,
     list_runs,
     load_combo_rule_hits,
     load_coverage_gaps,
@@ -689,5 +690,50 @@ class TestCoverageGapPersistence:
         migrated.close()
         assert 'coverage_gap' in tables
         assert 'combo_rule_hit' in tables
+
+
+class TestDeleteRun:
+    def test_delete_run_removes_run_and_related_rows(self, tmp_path: Path) -> None:
+        conn = init_results_db(tmp_path / 'results.db')
+        conn.execute(
+            'INSERT INTO run (project_name, project_db_path, reference_name, sample_name, vcf_path) '
+            'VALUES (?, ?, ?, ?, ?)',
+            ('project', '/tmp/project.db', 'ref', 'sampleA', '/tmp/sample.vcf'),
+        )
+        run_id = int(conn.execute('SELECT last_insert_rowid()').fetchone()[0])
+        conn.execute(
+            'INSERT INTO variant_result (run_id, chrom, pos, ref, alt) VALUES (?, ?, ?, ?, ?)',
+            (run_id, 'ref', 10, 'A', 'G'),
+        )
+        conn.execute(
+            'INSERT INTO coverage_gap (run_id, gene_name, codon_start, codon_end) VALUES (?, ?, ?, ?)',
+            (run_id, 'gag', 1, 3),
+        )
+        conn.execute(
+            'INSERT INTO combo_rule_hit (run_id, hit_json) VALUES (?, ?)',
+            (run_id, json.dumps({'drug': 'x'})),
+        )
+        conn.execute(
+            'INSERT INTO sample_classification (run_id, drug, phenotype) VALUES (?, ?, ?)',
+            (run_id, 'DrugA', 'resistant'),
+        )
+        conn.commit()
+
+        deleted = delete_run(conn, str(run_id))
+
+        assert int(deleted['id']) == run_id
+        assert deleted['sample_name'] == 'sampleA'
+        assert conn.execute('SELECT COUNT(*) FROM run WHERE id = ?', (run_id,)).fetchone()[0] == 0
+        assert conn.execute('SELECT COUNT(*) FROM variant_result WHERE run_id = ?', (run_id,)).fetchone()[0] == 0
+        assert conn.execute('SELECT COUNT(*) FROM coverage_gap WHERE run_id = ?', (run_id,)).fetchone()[0] == 0
+        assert conn.execute('SELECT COUNT(*) FROM combo_rule_hit WHERE run_id = ?', (run_id,)).fetchone()[0] == 0
+        assert conn.execute('SELECT COUNT(*) FROM sample_classification WHERE run_id = ?', (run_id,)).fetchone()[0] == 0
+        conn.close()
+
+    def test_delete_run_raises_on_missing_id(self, tmp_path: Path) -> None:
+        conn = init_results_db(tmp_path / 'results.db')
+        with pytest.raises(ValueError, match='No run found'):
+            delete_run(conn, '999')
+        conn.close()
 
 

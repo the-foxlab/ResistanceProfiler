@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from web.backend.services.profile import profile_fasta, profile_vcf
+from web.backend.services.regenerate import regenerate_from_json
 
 
 def run_profile_fasta(
@@ -62,4 +63,18 @@ def run_profile_vcf(
         bam_path=Path(bam_path) if bam_path else None,
         threads=threads,
         aligner=aligner,
+    )
+
+
+def run_regenerate_json(
+    *,
+    project_db: str,
+    output_dir: str,
+    json_path: str,
+) -> dict:
+    """RQ job wrapper for regenerating report artifacts from result JSON."""
+    return regenerate_from_json(
+        project_db=Path(project_db),
+        output_dir=Path(output_dir),
+        json_path=Path(json_path),
     )

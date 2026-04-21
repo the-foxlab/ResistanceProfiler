@@ -27,6 +27,12 @@ class ProfileVcfPayload(BaseModel):
     aligner: str | None = None
 
 
+class RegenerateJsonPayload(BaseModel):
+    """Payload for regenerating reports from uploaded JSON artifacts."""
+
+    json_path: str
+
+
 class ApiEnvelope(BaseModel):
     """Simple stable response envelope."""
 
@@ -56,7 +62,7 @@ class UploadResponse(BaseModel):
     """Response returned after a file is successfully uploaded."""
 
     file_path: str
-    file_type: str  # 'fasta' or 'vcf'
+    file_type: str  # 'fasta', 'vcf', 'bam', or 'json'
     size_bytes: int
 
 

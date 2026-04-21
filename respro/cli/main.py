@@ -6,10 +6,10 @@ Commands:
 - respro add           — add rules and optional GenBank annotations to an existing project
 - respro vcf           — run resistance profiling on a VCF file
 - respro fasta         — run resistance profiling on a consensus FASTA
-- respro explore       — browse resistance rules or stored profiling runs
+- respro manage        — inspect project/results databases and delete stored runs
 - respro regenerate    — regenerate a report from a stored run
 - respro classify      — add manual classification data to a stored run
-- respro sync          — sync stored run annotations with the project database
+- respro manage results --sync — sync stored run annotations with a project database
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from respro.cli import explore as _explore_module
 from respro.cli import fasta as _fasta_module
 from respro.cli import init as _init_module
 from respro.cli import regenerate as _regenerate_module
-from respro.cli import sync as _sync_module
 from respro.cli import vcf as _vcf_module
 from respro.utils.logging import setup_logging
 
@@ -40,7 +39,6 @@ _fasta_module.register(app)
 _explore_module.register(app)
 _regenerate_module.register(app)
 _classify_module.register(app)
-_sync_module.register(app)
 
 
 def _version_callback(value: bool) -> None:

@@ -124,6 +124,15 @@ function formatUserError(message) {
   if (lowered.includes('bam and reference fasta do not match')) {
     return 'BAM and reference FASTA do not match. Use files derived from the same reference sequence.';
   }
+  if (lowered.includes('unsupported json format')) {
+    return 'Unsupported JSON format. Upload a valid ResistanceProfiler results JSON file.';
+  }
+  if (lowered.includes('project database uuid mismatch')) {
+    return (
+      'Project database UUID mismatch. Database updates currently do not allow regeneration '
+      + 'of reports from older database versions.'
+    );
+  }
   if (normalized.startsWith('Request failed:')) {
     return 'The request failed.';
   }
@@ -231,6 +240,7 @@ export function useDashboardLogic() {
     fasta_path: '',
     sample: FRONTEND_CONFIG.defaults.sampleName,
   });
+  const [jsonInputPath, setJsonInputPath] = useState('');
   const [rules, setRules] = useState([]);
   const [databases, setDatabases] = useState([]);
   const [selectedDatabaseId, setSelectedDatabaseId] = useState('');
@@ -241,6 +251,7 @@ export function useDashboardLogic() {
   const [selectedProfileReportPath, setSelectedProfileReportPath] = useState('');
   const [isProcessingFasta, setIsProcessingFasta] = useState(false);
   const [isProcessingVcf, setIsProcessingVcf] = useState(false);
+  const [isProcessingRegenerate, setIsProcessingRegenerate] = useState(false);
 
   const [mutationFilter, setMutationFilter] = useState('');
   const [mutationFilterColumn, setMutationFilterColumn] = useState('-1');
@@ -592,6 +603,39 @@ export function useDashboardLogic() {
     });
   };
 
+  const uploadJsonFile = async (file) => {
+    await uploadFile(file, 'json', (path) => {
+      setJsonInputPath(path);
+    });
+  };
+
+  const runRegenerateFromJson = async () => {
+    if (!jsonInputPath) {
+      setStatus('Upload a valid results JSON file first.');
+      return;
+    }
+
+    setIsProcessingRegenerate(true);
+    setStatus('Submitting regenerate-from-JSON job...');
+    try {
+      const submitResponse = await apiPost('/api/regenerate/json', {
+        json_path: jsonInputPath,
+      });
+      setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
+      const result = await pollJob(submitResponse.job_id);
+      setSessionResults((prev) => [...prev, result]);
+      addReportPath(result.report_html_path);
+      setSelectedProfileReportPath(result.report_html_path);
+      setInlineReportPath(result.report_html_path);
+      setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);
+      setStatus('JSON regeneration finished successfully.');
+    } catch (error) {
+      setStatus(formatUserError(error.message));
+    } finally {
+      setIsProcessingRegenerate(false);
+    }
+  };
+
   const isProfileBusy = activeProfileMode === 'fasta' ? isProcessingFasta : isProcessingVcf;
 
   const runSelectedProfile = async () => {
@@ -676,6 +720,10 @@ export function useDashboardLogic() {
     uploadVcfFile,
     uploadReferenceFile,
     uploadBamFile,
+    uploadJsonFile,
+    jsonInputPath,
+    isRegenerateBusy: isProcessingRegenerate,
+    runRegenerateFromJson,
     downloadMutationsAsTsv,
     uploadProgress,
   };

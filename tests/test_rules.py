@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 from conftest import TINY_REF_SEQ, write_genbank
+from typer.testing import CliRunner
 
+from respro.cli.main import app
 from respro.cli.init import init_project
 from respro.core.rules import load_rule_sets, load_rules, match_rule_sets, match_rules
 from respro.db.models import (
@@ -643,5 +645,60 @@ def project_db_with_combo(project_db: Path) -> Path:
     conn.commit()
     conn.close()
     return project_db
+
+
+class TestInitAddValidate:
+    def test_add_validate_checks_rules_without_writing(self, tmp_path: Path) -> None:
+        genbank_path = tmp_path / 'tiny.gb'
+        write_genbank(
+            genbank_path,
+            [
+                {
+                    'id': 'tiny_ref',
+                    'accession': 'tiny_ref',
+                    'sequence': TINY_REF_SEQ,
+                    'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+                }
+            ],
+        )
+
+        base_rules = tmp_path / 'base.tsv'
+        base_rules.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant
+        """))
+
+        project_db = tmp_path / 'project.db'
+        init_project(
+            db_path=project_db,
+            name='test',
+            genbank_paths=[genbank_path],
+            rules_tsv=base_rules,
+            additional_info=False,
+        )
+
+        add_rules = tmp_path / 'add.tsv'
+        add_rules.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant
+        """))
+
+        result = CliRunner().invoke(
+            app,
+            [
+                'add',
+                '--project', str(project_db),
+                '--rules', str(add_rules),
+                '--validate',
+                '--no-additional-info',
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert 'Rules validation passed' in result.output
+
+        conn = open_project_db(project_db)
+        count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
+        conn.close()
+        assert count == 1
 
 

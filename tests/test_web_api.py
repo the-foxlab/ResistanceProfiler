@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -376,6 +377,159 @@ class TestWebApi:
         assert uploaded_path.exists()
         assert uploaded_path.parent == startup_config.data_dir / '.uploads'
         assert uploaded_path.read_bytes() == bam_data
+
+    def test_upload_json_success(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        auth_headers: dict[str, str],
+    ) -> None:
+        payload = {
+            'run': {
+                'project_name': 'demo',
+                'reference_name': 'tiny_ref',
+                'sample_name': 'sample1',
+                'vcf_path': 'sample.vcf',
+                'total_variants': 0,
+                'variants_in_cds': 0,
+                'resistance_hits': 0,
+                'created_at': '2026-04-21T10:00:00',
+            },
+            'variant_result': [],
+            'coverage_gap': [],
+            'combo_rule_hit': [],
+            'sample_classification': [],
+        }
+        response = client.post(
+            '/api/upload/json',
+            files={
+                'file': (
+                    'sample.results.json',
+                    json.dumps(payload).encode('utf-8'),
+                    'application/json',
+                )
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        upload_payload = response.json()
+        assert upload_payload['file_type'] == 'json'
+        uploaded_path = Path(upload_payload['file_path'])
+        assert uploaded_path.is_file()
+        assert uploaded_path.parent == startup_config.data_dir / '.uploads'
+
+    def test_upload_json_invalid_payload_rejected(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        response = client.post(
+            '/api/upload/json',
+            files={'file': ('invalid.results.json', b'{"run": {}}', 'application/json')},
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+        payload = response.json()
+        assert 'Unsupported JSON format' in payload['detail']
+
+    def test_upload_json_requires_auth(self, client: TestClient) -> None:
+        response = client.post(
+            '/api/upload/json',
+            files={'file': ('sample.results.json', b'{}', 'application/json')},
+        )
+        assert response.status_code == 401
+
+    def test_regenerate_from_json(
+        self,
+        client: TestClient,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        submit_profile = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(sample_vcf),
+                'ref_fasta_path': str(sample_ref_fasta),
+                'sample': 'regen-web-vcf',
+            },
+            headers=auth_headers,
+        )
+        assert submit_profile.status_code == 200
+        profile_job_id = submit_profile.json()['job_id']
+
+        profile_status = client.get(f'/api/jobs/{profile_job_id}', headers=auth_headers)
+        assert profile_status.status_code == 200
+        profile_payload = profile_status.json()
+        assert profile_payload['status'] == 'succeeded'
+        json_path = profile_payload['result']['report_json_path']
+
+        submit_regen = client.post(
+            '/api/regenerate/json',
+            json={'json_path': json_path},
+            headers=auth_headers,
+        )
+        assert submit_regen.status_code == 200
+        regen_job_id = submit_regen.json()['job_id']
+
+        regen_status = client.get(f'/api/jobs/{regen_job_id}', headers=auth_headers)
+        assert regen_status.status_code == 200
+        regen_payload = regen_status.json()
+        assert regen_payload['status'] == 'succeeded'
+        result = regen_payload['result']
+        assert result['mode'] == 'regenerate-json'
+        assert result['report_html_path'].endswith('.report.html')
+        assert result['report_json_path'].endswith('.results.json')
+        assert result['report_tabular_path'].endswith('.mutations.tsv')
+        assert Path(result['report_html_path']).is_file()
+        assert Path(result['report_json_path']).is_file()
+        assert Path(result['report_tabular_path']).is_file()
+
+    def test_regenerate_from_json_uuid_mismatch_fails(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        submit_profile = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(sample_vcf),
+                'ref_fasta_path': str(sample_ref_fasta),
+                'sample': 'regen-web-vcf-mismatch',
+            },
+            headers=auth_headers,
+        )
+        assert submit_profile.status_code == 200
+        profile_job_id = submit_profile.json()['job_id']
+        profile_status = client.get(f'/api/jobs/{profile_job_id}', headers=auth_headers)
+        assert profile_status.status_code == 200
+        profile_payload = profile_status.json()
+        assert profile_payload['status'] == 'succeeded'
+
+        source_json = Path(profile_payload['result']['report_json_path'])
+        tampered_json = startup_config.data_dir / 'tampered.results.json'
+        tampered_payload = json.loads(source_json.read_text(encoding='utf-8'))
+        tampered_payload['run']['project_fingerprint'] = 'mismatching-uuid'
+        tampered_json.write_text(json.dumps(tampered_payload), encoding='utf-8')
+
+        submit_regen = client.post(
+            '/api/regenerate/json',
+            json={'json_path': str(tampered_json)},
+            headers=auth_headers,
+        )
+        assert submit_regen.status_code == 200
+        regen_status = client.get(f"/api/jobs/{submit_regen.json()['job_id']}", headers=auth_headers)
+        assert regen_status.status_code == 200
+        payload = regen_status.json()
+        assert payload['status'] == 'failed'
+        assert 'UUID mismatch' in payload['error']
+
+    def test_regenerate_json_requires_auth(self, client: TestClient) -> None:
+        response = client.post('/api/regenerate/json', json={'json_path': '/tmp/foo.results.json'})
+        assert response.status_code == 401
 
     def test_upload_fasta_with_empty_file_rejected(
         self,

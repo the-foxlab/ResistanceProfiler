@@ -11,6 +11,9 @@
   --radius-lg: 10px;
   --radius-md: 8px;
   --shadow: 0 10px 28px rgba(12, 34, 49, 0.08);
+  --topbar-logo-width: 300px;
+  --topbar-logo-height: 52px;
+  --topbar-link-icon-size: 32px;
 }
 
 * {
@@ -277,10 +280,15 @@ th {
 }
 
 .brand-logo {
-  width: min(300px, 100%);
+  width: var(--topbar-logo-width);
+  height: var(--topbar-logo-height);
+  max-width: 100%;
+  object-fit: contain;
 }
 
 .brand-logo-wrap {
+  width: var(--topbar-logo-width);
+  height: var(--topbar-logo-height);
   min-width: 0;
   flex: 1 1 auto;
 }
@@ -737,8 +745,10 @@ th {
 }
 
 .page-link-icon {
-  width: 32px;
-  height: 32px;
+  width: var(--topbar-link-icon-size);
+  height: var(--topbar-link-icon-size);
+  object-fit: contain;
+  display: block;
   opacity: 0.75;
   transition: opacity 0.18s ease, color 0.18s ease;
 }
@@ -754,8 +764,11 @@ th {
 }
 
 .page-links a {
-  width: auto;
-  height: auto;
+  width: var(--topbar-link-icon-size);
+  height: var(--topbar-link-icon-size);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: none;
   border-radius: 0;
   padding: 0;
@@ -1228,10 +1241,6 @@ th.sortable-col {
 }
 
 @media (max-width: 620px) {
-  .brand-logo {
-    width: min(170px, 100%);
-  }
-
   .header-db-select {
     min-width: 120px;
   }
@@ -1290,11 +1299,6 @@ th.sortable-col {
   .page-links {
     margin-left: auto;
     justify-content: flex-end;
-  }
-
-  .page-link-icon {
-    width: 120px;
-    height: 120px;
   }
 
   .workspace-frame {

@@ -1,5 +1,5 @@
 """
-`respro explore` command — browse resistance rules or stored profiling runs.
+`respro manage` command group — browse databases and manage stored run results.
 """
 
 from __future__ import annotations  # noqa: I001
@@ -13,7 +13,8 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
-from respro.db.results import list_runs
+from respro.cli.sync import sync_results_database
+from respro.db.results import delete_run, list_runs
 from respro.db.rules_queries import (
     get_project_summary_for_display,
     list_references_for_display,
@@ -55,57 +56,108 @@ PROJECT_INFO_LABELS = {
 }
 
 
-def explore(
+manage_app = typer.Typer(
+    help='Manage project and results databases.',
+    no_args_is_help=True,
+)
+
+
+@manage_app.command('database')
+def manage_database(
+    db_path: Annotated[
+        Path,
+        typer.Argument(exists=True, help='Project database path.'),
+    ],
     rules: Annotated[
-        Path | None,
-        typer.Option(
-            '--rules',
-            '-r',
-            exists=True,
-            help='Project database to explore resistance rules.',
-        ),
-    ] = None,
-    results: Annotated[
-        Path | None,
-        typer.Option(
-            '--results',
-            '-s',
-            exists=True,
-            help='Results database to explore stored profiling runs.',
-        ),
-    ] = None,
+        bool,
+        typer.Option('--rules', help='Show resistance rules from the project database.'),
+    ] = False,
     info: Annotated[
-        Path | None,
-        typer.Option(
-            '--info',
-            '-i',
-            exists=True,
-            help='Project database to inspect project and curated metadata.',
-        ),
-    ] = None,
+        bool,
+        typer.Option('--info', help='Show project metadata from the project database.'),
+    ] = False,
     reference: Annotated[
         str | None,
-        typer.Option(
-            '--reference',
-            help='(With --rules) Filter by reference name (partial match, case-insensitive).',
-        ),
+        typer.Option('--reference', help='Optional reference filter (partial, case-insensitive).'),
     ] = None,
 ) -> None:
-    """
-    Browse resistance rules in a project database or stored profiling runs in a results database.
-
-    Use exactly one of --rules, --results, or --info.
-    """
-    selected_modes = [rules is not None, results is not None, info is not None]
-    if sum(selected_modes) != 1:
-        raise click.UsageError('Specify exactly one of --rules, --results, or --info.')
+    """Manage a project database via --rules or --info mode."""
+    if rules == info:
+        raise click.UsageError('Specify exactly one of --rules or --info.')
 
     if rules:
-        _explore_rules(rules, reference)
-    elif results:
-        _explore_runs(results)  # type: ignore[arg-type]
-    else:
-        _explore_info(info)  # type: ignore[arg-type]
+        _explore_rules(db_path, reference)
+        return
+
+    _explore_info(db_path)
+
+
+@manage_app.command('results')
+def manage_results(
+    results_db: Annotated[
+        Path,
+        typer.Argument(exists=True, help='Results database path.'),
+    ],
+    list_mode: Annotated[
+        bool,
+        typer.Option('--list', help='List stored profiling runs.'),
+    ] = False,
+    delete_run_id: Annotated[
+        str | None,
+        typer.Option('--delete', help='Delete one run by id.'),
+    ] = None,
+    sync_project_db: Annotated[
+        Path | None,
+        typer.Option('--sync', exists=True, help='Sync all stored runs against this project DB.'),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option('--force', '-f', help='Skip delete confirmation prompt.'),
+    ] = False,
+) -> None:
+    """Manage a results database via --list, --delete, or --sync."""
+    selected_modes = (
+        int(list_mode)
+        + int(delete_run_id is not None)
+        + int(sync_project_db is not None)
+    )
+    if selected_modes != 1:
+        raise click.UsageError('Specify exactly one of --list, --delete, or --sync.')
+
+    if list_mode:
+        _explore_runs(results_db)
+        return
+
+    if sync_project_db is not None:
+        sync_results_database(results_db_path=results_db, project_db_path=sync_project_db)
+        return
+
+    results_conn = None
+    try:
+        results_conn = open_results_db(results_db)
+        run_row = results_conn.execute(
+            'SELECT id, sample_name FROM run WHERE id = ? OR CAST(id AS TEXT) = ?',
+            (delete_run_id, delete_run_id),
+        ).fetchone()
+        label = (
+            delete_run_id
+            if run_row is None
+            else f"{run_row['id']} ({run_row['sample_name'] or 'sample: n/a'})"
+        )
+
+        if not force:
+            confirmed = typer.confirm(f'Delete run {label}?', default=False)
+            if not confirmed:
+                raise click.ClickException('Deletion cancelled.')
+
+        deleted = delete_run(results_conn, delete_run_id or '')
+        sample_name = str(deleted['sample_name']) or 'n/a'
+        typer.echo(f"Deleted run {deleted['id']} (sample: {sample_name})")
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    finally:
+        if results_conn is not None:
+            results_conn.close()
 
 
 def _explore_rules(project_db: Path, reference: str | None) -> None:
@@ -257,5 +309,5 @@ def _explore_info(project_db: Path) -> None:
 
 
 def register(app: typer.Typer) -> None:
-    """Register the explore command on the given Typer app."""
-    app.command()(explore)
+    """Register the manage command group on the given Typer app."""
+    app.add_typer(manage_app, name='manage')

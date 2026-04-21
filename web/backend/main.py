@@ -22,13 +22,14 @@ from web.backend.config import (
     WEB_BACKEND_CONFIG,
     WEB_ENV,
 )
-from web.backend.jobs import run_profile_fasta, run_profile_vcf
+from web.backend.jobs import run_profile_fasta, run_profile_vcf, run_regenerate_json
 from web.backend.models import (
     ApiEnvelope,
     JobStatusResponse,
     JobSubmitResponse,
     ProfileFastaPayload,
     ProfileVcfPayload,
+    RegenerateJsonPayload,
     SessionCleanupPayload,
     SessionCleanupResponse,
     UploadResponse,
@@ -155,6 +156,29 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         finally:
             await file.close()
 
+    @app.post('/api/upload/json', response_model=UploadResponse)
+    @limiter.limit(upload_rate_limit)
+    async def upload_json(
+        request: Request,
+        file: UploadFile = File(...),
+        _auth: None = Depends(require_api_token),
+    ) -> UploadResponse:
+        del request
+        try:
+            upload_dir = config.data_dir / '.uploads'
+            saved_path, size_bytes = await save_upload_stream(file, 'json', upload_dir)
+            return UploadResponse(
+                file_path=str(saved_path),
+                file_type='json',
+                size_bytes=size_bytes,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=_user_facing_error_message(str(exc))) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=_user_facing_error_message(str(exc))) from exc
+        finally:
+            await file.close()
+
     @app.get('/api/rules', response_model=ApiEnvelope)
     def rules(
         reference: str | None = Query(default=None),
@@ -238,6 +262,26 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             bam_path=payload.bam_path,
             threads=payload.threads if payload.threads is not None else profile_defaults.threads,
             aligner=payload.aligner or profile_defaults.aligner,
+        )
+        return JobSubmitResponse(job_id=job.id)
+
+    @app.post('/api/regenerate/json', response_model=JobSubmitResponse)
+    def regenerate_json_route(
+        payload: RegenerateJsonPayload,
+        queue: Queue = Depends(get_queue),
+        _auth: None = Depends(require_api_token),
+    ) -> JobSubmitResponse:
+        json_path = Path(payload.json_path).expanduser().resolve()
+        if not is_path_within_allowed_roots(json_path, (config.data_dir,)):
+            raise HTTPException(status_code=400, detail='JSON path is outside allowed upload/output directory.')
+        if not json_path.is_file():
+            raise HTTPException(status_code=404, detail='JSON file not found.')
+
+        job = queue.enqueue(
+            run_regenerate_json,
+            project_db=str(config.project_db),
+            output_dir=str(config.data_dir),
+            json_path=str(json_path),
         )
         return JobSubmitResponse(job_id=job.id)
 
@@ -342,6 +386,20 @@ def _user_facing_error_message(raw_message: str | None) -> str:
         return 'Unsupported FASTA format. Input contains an excessively long line.'
     if 'vcf file does not appear to have valid vcf headers' in lowered:
         return 'Unsupported VCF format. Upload a VCF with standard headers such as ##fileformat and #CHROM.'
+    if 'json upload is empty' in lowered:
+        return 'Unsupported JSON format. Upload a non-empty results JSON file.'
+    if 'json upload must be valid utf-8 text' in lowered:
+        return 'Unsupported JSON format. Upload a UTF-8 encoded JSON file.'
+    if 'invalid results json' in lowered:
+        return (
+            'Unsupported JSON format. Upload a valid ResistanceProfiler results JSON '
+            'with run, variant_result, coverage_gap, combo_rule_hit, and sample_classification sections.'
+        )
+    if 'project database uuid mismatch' in lowered:
+        return (
+            'Project database UUID mismatch. Database updates currently do not allow '
+            'regeneration of reports from older database versions.'
+        )
     if 'vcf file contains non-text/binary bytes' in lowered:
         return 'Unsupported VCF format. Upload a plain-text VCF file.'
     if 'vcf file contains data rows before #chrom header' in lowered:

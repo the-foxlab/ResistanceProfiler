@@ -1,9 +1,10 @@
 """
-Tests for the CLI runs commands (regenerate, classify, sync) and explore run listing.
+Tests for CLI commands (regenerate, classify) and manage database/results flows.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -60,7 +61,7 @@ class TestExploreRuns:
         _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
 
         result = CliRunner().invoke(app, [
-            'explore', '--results', str(results_db),
+            'manage', 'results', str(results_db), '--list',
         ])
 
         assert result.exit_code == 0, result.output
@@ -73,7 +74,7 @@ class TestExploreRuns:
         conn.close()
 
         result = CliRunner().invoke(app, [
-            'explore', '--results', str(results_db),
+            'manage', 'results', str(results_db), '--list',
         ])
 
         assert result.exit_code == 0, result.output
@@ -81,13 +82,13 @@ class TestExploreRuns:
 
     def test_explore_missing_result_db_is_an_error(self, tmp_path: Path) -> None:
         result = CliRunner().invoke(app, [
-            'explore', '--results', str(tmp_path / 'nonexistent.db'),
+            'manage', 'results', str(tmp_path / 'nonexistent.db'), '--list',
         ])
 
         assert result.exit_code != 0
 
     def test_explore_no_flag_is_an_error(self, tmp_path: Path) -> None:
-        result = CliRunner().invoke(app, ['explore'])
+        result = CliRunner().invoke(app, ['manage'])
 
         assert result.exit_code != 0
 
@@ -107,7 +108,7 @@ class TestExploreRuns:
         conn.commit()
         conn.close()
 
-        result = CliRunner().invoke(app, ['explore', '--info', str(project_db)])
+        result = CliRunner().invoke(app, ['manage', 'database', str(project_db), '--info'])
 
         assert result.exit_code == 0, result.output
         assert 'Metadata Test DB' in result.output
@@ -116,6 +117,21 @@ class TestExploreRuns:
         assert 'team@example.org' in result.output
         assert 'MIT' in result.output
         assert 'Website' not in result.output
+
+    def test_explore_runs_delete_removes_run(self, project_db: Path, sample_vcf: Path, sample_ref_fasta: Path, tmp_path: Path) -> None:
+        results_db = tmp_path / 'results.db'
+        _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
+
+        delete_result = CliRunner().invoke(
+            app,
+            ['manage', 'results', str(results_db), '--delete', '1', '--force'],
+        )
+        assert delete_result.exit_code == 0, delete_result.output
+        assert 'Deleted run 1' in delete_result.output
+
+        list_result = CliRunner().invoke(app, ['manage', 'results', str(results_db), '--list'])
+        assert list_result.exit_code == 0, list_result.output
+        assert 'No stored results found' in list_result.output
 
 
 class TestRegenerate:
@@ -223,7 +239,105 @@ class TestRegenerate:
         ])
 
         assert result.exit_code != 0
-        assert 'fingerprint' in result.output.lower()
+        assert 'uuid mismatch' in result.output.lower()
+
+    def test_regenerate_from_json_generates_html_report(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        profile_out = tmp_path / 'profile_out'
+        results_db = tmp_path / 'results.db'
+        profile_result = CliRunner().invoke(app, [
+            'vcf',
+            '--project', str(project_db),
+            '--vcf', str(sample_vcf),
+            '--ref-fasta', str(sample_ref_fasta),
+            '--results-db', str(results_db),
+            '--output', str(profile_out),
+            '--min-af', '0.01',
+            '--min-depth', '0',
+            '--export', 'json',
+        ])
+        assert profile_result.exit_code == 0, profile_result.output
+
+        json_files = list(profile_out.glob('*.results.json'))
+        assert len(json_files) == 1
+
+        out_dir = tmp_path / 'regenerated_from_json'
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--json', str(json_files[0]),
+            '--project', str(project_db),
+            '--output', str(out_dir),
+            '--export', 'tabular',
+        ])
+
+        assert result.exit_code == 0, result.output
+        html_files = list(out_dir.glob('*.html'))
+        tabular_files = list(out_dir.glob('*.mutations.tsv'))
+        assert len(html_files) == 1
+        assert len(tabular_files) == 1
+
+    def test_regenerate_from_json_rejects_invalid_json(
+        self,
+        project_db: Path,
+        tmp_path: Path,
+    ) -> None:
+        invalid_json = tmp_path / 'invalid.results.json'
+        invalid_json.write_text('{"run": {"project_name": "x"}}', encoding='utf-8')
+
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--json', str(invalid_json),
+            '--project', str(project_db),
+            '--output', str(tmp_path / 'out'),
+        ])
+
+        assert result.exit_code != 0
+        assert 'invalid results json' in result.output.lower()
+
+    def test_regenerate_from_json_uuid_mismatch_raises_error(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        profile_out = tmp_path / 'profile_out'
+        results_db = tmp_path / 'results.db'
+        profile_result = CliRunner().invoke(app, [
+            'vcf',
+            '--project', str(project_db),
+            '--vcf', str(sample_vcf),
+            '--ref-fasta', str(sample_ref_fasta),
+            '--results-db', str(results_db),
+            '--output', str(profile_out),
+            '--min-af', '0.01',
+            '--min-depth', '0',
+            '--export', 'json',
+        ])
+        assert profile_result.exit_code == 0, profile_result.output
+
+        json_path = list(profile_out.glob('*.results.json'))[0]
+        payload = json.loads(json_path.read_text(encoding='utf-8'))
+        payload['run']['project_fingerprint'] = 'not-the-active-uuid'
+        tampered_path = tmp_path / 'tampered.results.json'
+        tampered_path.write_text(json.dumps(payload), encoding='utf-8')
+
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--json', str(tampered_path),
+            '--project', str(project_db),
+            '--output', str(tmp_path / 'out'),
+        ])
+
+        assert result.exit_code != 0
+        output_lower = result.output.lower()
+        assert 'uuid mismatch' in output_lower
+        assert 'database updates currently do not allow' in output_lower
 
     def test_regenerate_restores_persisted_combo_rule_hits(
         self,
@@ -487,7 +601,7 @@ class TestClassify:
 
 
 class TestSync:
-    def test_sync_updates_all_runs_when_no_run_id(
+    def test_sync_updates_all_runs_via_manage_results_sync(
         self,
         project_db: Path,
         sample_vcf: Path,
@@ -498,15 +612,14 @@ class TestSync:
         _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
 
         result = CliRunner().invoke(app, [
-            'sync',
-            '--results-db', str(results_db),
-            '--project', str(project_db),
+            'manage', 'results', str(results_db),
+            '--sync', str(project_db),
         ])
 
         assert result.exit_code == 0, result.output
         assert 'synced' in result.output.lower()
 
-    def test_sync_fingerprint_mismatch_raises_error(
+    def test_sync_fingerprint_mismatch_is_reported_and_skipped(
         self,
         project_db: Path,
         sample_vcf: Path,
@@ -522,13 +635,11 @@ class TestSync:
         conn.close()
 
         result = CliRunner().invoke(app, [
-            'sync',
-            '--results-db', str(results_db),
-            '--run-id', '1',
-            '--project', str(project_db),
+            'manage', 'results', str(results_db),
+            '--sync', str(project_db),
         ])
 
-        assert result.exit_code != 0
+        assert result.exit_code == 0, result.output
         assert 'fingerprint' in result.output.lower()
 
 
@@ -538,7 +649,7 @@ class TestExploreRules:
         project_db: Path,
     ) -> None:
         result = CliRunner().invoke(app, [
-            'explore', '--rules', str(project_db),
+            'manage', 'database', str(project_db), '--rules',
         ])
 
         assert result.exit_code == 0, result.output
@@ -554,7 +665,7 @@ class TestExploreRules:
         project_db: Path,
     ) -> None:
         result = CliRunner().invoke(app, [
-            'explore', '--rules', str(project_db),
+            'manage', 'database', str(project_db), '--rules',
             '--reference', 'tiny_ref',
         ])
 
@@ -565,7 +676,7 @@ class TestExploreRules:
         project_db: Path,
     ) -> None:
         result = CliRunner().invoke(app, [
-            'explore', '--rules', str(project_db),
+            'manage', 'database', str(project_db), '--rules',
             '--reference', 'nonexistent_genome',
         ])
 
@@ -585,7 +696,7 @@ class TestExploreRules:
         conn.close()
 
         result = CliRunner().invoke(app, [
-            'explore', '--rules', str(project_db),
+            'manage', 'database', str(project_db), '--rules',
         ])
 
         assert result.exit_code == 0, result.output

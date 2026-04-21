@@ -14,9 +14,10 @@ FastAPI (web/backend/main.py)
   ├── /app/*              → static React SPA (built frontend dist)
   ├── /api/health
   ├── /api/rules
-  ├── /api/fs/list
+  ├── /api/upload/json
   ├── /api/profile/fasta  → enqueue RQ job → return {job_id}
   ├── /api/profile/vcf    → enqueue RQ job → return {job_id}
+  ├── /api/regenerate/json → enqueue RQ job → return {job_id}
   ├── /api/jobs/{job_id}  → poll job status and result
   └── /api/report
         │
@@ -42,11 +43,12 @@ web/
 │   ├── models.py        — Pydantic request/response models
 │   ├── queue.py         — RQ queue factory (FastAPI dependency)
 │   ├── startup_config.py — validated startup path/auth configuration
-│   ├── jobs.py          — RQ job functions for FASTA and VCF profiling
+│   ├── jobs.py          — RQ job functions for FASTA/VCF profiling and JSON regeneration
 │   └── services/
 │       ├── __init__.py
 │       ├── browse.py    — read-only rules queries
-│       └── profile.py   — FASTA and VCF profiling orchestration (called by jobs)
+│       ├── profile.py   — FASTA and VCF profiling orchestration (called by jobs)
+│       └── regenerate.py — JSON-based report regeneration orchestration
 └── frontend/
     ├── package.json     — pinned to vite@2.9.18 (Node ≥12.22 compat)
     ├── vite.config.js   — base='/app' so built asset paths match mount point
@@ -90,6 +92,7 @@ All API payloads are Pydantic `BaseModel` subclasses.
 |---|---|---|
 | `ProfileFastaPayload` | `POST /api/profile/fasta` | `fasta_path`, `sample`, `threads`, `aligner` |
 | `ProfileVcfPayload` | `POST /api/profile/vcf` | `vcf_path`, `ref_fasta_path`, `sample`, `min_af`, `min_depth`, `bam_path`, `threads`, `aligner` |
+| `RegenerateJsonPayload` | `POST /api/regenerate/json` | `json_path` |
 | `ApiEnvelope` | health, rules, fs | `status`, `data`, `error` |
 | `JobSubmitResponse` | profile routes | `job_id`, `status` |
 | `JobStatusResponse` | `/api/jobs/{job_id}` | `job_id`, `status`, `result`, `error` |
@@ -136,9 +139,9 @@ dependency with a `fakeredis`-backed synchronous queue.
 
 #### `jobs.py` — RQ job wrappers
 
-`run_profile_fasta()` and `run_profile_vcf()` are top-level picklable functions that translate
+`run_profile_fasta()`, `run_profile_vcf()`, and `run_regenerate_json()` are top-level picklable functions that translate
 string arguments (RQ-serializable) to `Path` objects and call the corresponding service
-functions. These are the functions enqueued by the profile routes.
+functions. These are the functions enqueued by the profile and regenerate routes.
 
 ### API endpoints
 
@@ -149,6 +152,8 @@ functions. These are the functions enqueued by the profile routes.
 | `GET` | `/api/fs/list` | List files/directories for in-app path picker |
 | `POST` | `/api/profile/fasta` | Enqueue FASTA profiling job, return `{job_id, status}` |
 | `POST` | `/api/profile/vcf` | Enqueue VCF profiling job, return `{job_id, status}` |
+| `POST` | `/api/upload/json` | Upload and validate a `*.results.json` artifact for regeneration |
+| `POST` | `/api/regenerate/json` | Enqueue regenerate-from-JSON job, return `{job_id, status}` |
 | `GET` | `/api/jobs/{job_id}` | Poll job status; `result` populated when `status == "succeeded"` |
 | `GET` | `/api/report` | Serve a saved HTML report file by path |
 | `GET` | `/api/branding/logo.svg` | Serve dashboard/report logo asset |
@@ -185,8 +190,9 @@ Mode selection is handled by a left sidebar, and no URL router is used in this p
 
 1. **Profile VCF** — upload/run flow for `POST /api/profile/vcf` + `GET /api/jobs/{job_id}`.
 2. **Profile FASTA** — upload/run flow for `POST /api/profile/fasta` + `GET /api/jobs/{job_id}`.
-3. **Browse mutations** — sortable/filterable mutations table from `GET /api/mutations`.
-4. **Report** — in-app report selector that opens the selected report in a same-window modal.
+3. **Regenerate from JSON** — upload a `*.results.json` file and run `POST /api/regenerate/json`, with explicit UUID mismatch feedback.
+4. **Browse mutations** — sortable/filterable mutations table from `GET /api/mutations`.
+5. **Report** — shared in-app report tile for profile and regenerate outputs.
 
 A global top card holds database selection and metadata (active DB, schema version, mutation
 count, supported organisms) and remains visible across all modes.

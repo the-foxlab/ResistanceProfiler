@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Literal, Protocol
 
+from respro.db.results import load_run_from_json
 from web.backend.config import WEB_BACKEND_CONFIG
 
 _ALLOWED_TEXT_CONTROL_BYTES = {9, 10, 13}
@@ -40,27 +41,31 @@ class UploadStream(Protocol):
         """Read up to size bytes from upload stream."""
 
 
-def _max_size_for_type(file_type: Literal['fasta', 'vcf', 'bam']) -> int:
+def _max_size_for_type(file_type: Literal['fasta', 'vcf', 'bam', 'json']) -> int:
     upload_defaults = WEB_BACKEND_CONFIG.defaults.upload
     if file_type == 'fasta':
         return upload_defaults.max_fasta_size
     if file_type == 'vcf':
         return upload_defaults.max_vcf_size
+    if file_type == 'json':
+        return upload_defaults.max_vcf_size
     return upload_defaults.max_bam_size
 
 
-def _extension_for_type(file_type: Literal['fasta', 'vcf', 'bam']) -> str:
+def _extension_for_type(file_type: Literal['fasta', 'vcf', 'bam', 'json']) -> str:
     if file_type == 'fasta':
         return '.fa'
     if file_type == 'vcf':
         return '.vcf'
+    if file_type == 'json':
+        return '.json'
     return '.bam'
 
 
 def _validate_stream_chunk(
     state: dict[str, object],
     chunk: bytes,
-    file_type: Literal['fasta', 'vcf', 'bam'],
+    file_type: Literal['fasta', 'vcf', 'bam', 'json'],
 ) -> None:
     if file_type == 'fasta':
         _validate_text_chunk(chunk, 'FASTA')
@@ -76,6 +81,14 @@ def _validate_stream_chunk(
         _process_vcf_chunk(state, chunk)
         return
 
+    if file_type == 'json':
+        if b'\x00' in chunk:
+            raise ValueError('JSON upload must be valid UTF-8 text')
+        if chunk.strip():
+            state['has_non_whitespace'] = True
+        state['chunks'].append(chunk)
+        return
+
     bgzf_header_bytes = WEB_BACKEND_CONFIG.defaults.upload.bgzf_header_bytes
     if len(state['first_bytes']) < bgzf_header_bytes:
         missing = bgzf_header_bytes - len(state['first_bytes'])
@@ -84,7 +97,7 @@ def _validate_stream_chunk(
 
 def _validate_stream_complete(
     state: dict[str, object],
-    file_type: Literal['fasta', 'vcf', 'bam'],
+    file_type: Literal['fasta', 'vcf', 'bam', 'json'],
 ) -> None:
     if file_type == 'fasta':
         _finalize_fasta_lines(state)
@@ -104,6 +117,15 @@ def _validate_stream_complete(
             raise ValueError('VCF file does not appear to have valid VCF headers')
         return
 
+    if file_type == 'json':
+        if not state['has_non_whitespace']:
+            raise ValueError('JSON upload is empty')
+        try:
+            b''.join(state['chunks']).decode('utf-8')
+        except UnicodeDecodeError as exc:
+            raise ValueError('JSON upload must be valid UTF-8 text') from exc
+        return
+
     if len(state['first_bytes']) < WEB_BACKEND_CONFIG.defaults.upload.bgzf_header_bytes:
         raise ValueError('BAM file is too small')
     if state['first_bytes'][:2] != b'\x1f\x8b':
@@ -111,7 +133,7 @@ def _validate_stream_complete(
     _validate_bgzf_header(state['first_bytes'])
 
 
-def _new_stream_validation_state(file_type: Literal['fasta', 'vcf', 'bam']) -> dict[str, object]:
+def _new_stream_validation_state(file_type: Literal['fasta', 'vcf', 'bam', 'json']) -> dict[str, object]:
     if file_type == 'fasta':
         return {
             'starts_with_header': None,
@@ -128,6 +150,11 @@ def _new_stream_validation_state(file_type: Literal['fasta', 'vcf', 'bam']) -> d
             'has_column_header': False,
             'line_number': 0,
             'data_lines': 0,
+        }
+    if file_type == 'json':
+        return {
+            'has_non_whitespace': False,
+            'chunks': [],
         }
     return {
         'first_bytes': b'',
@@ -259,7 +286,7 @@ def _validate_bgzf_header(first_bytes: bytes) -> None:
 
 async def save_upload_stream(
     upload_file: UploadStream,
-    file_type: Literal['fasta', 'vcf', 'bam'],
+    file_type: Literal['fasta', 'vcf', 'bam', 'json'],
     upload_dir: Path,
     *,
     chunk_size: int | None = None,
@@ -301,6 +328,8 @@ async def save_upload_stream(
                 handle.write(chunk)
 
         _validate_stream_complete(validation_state, file_type)
+        if file_type == 'json':
+            load_run_from_json(Path(temp_path))
     except Exception:
         Path(temp_path).unlink(missing_ok=True)
         raise
@@ -310,16 +339,16 @@ async def save_upload_stream(
 
 def validate_upload(
     file_data: bytes,
-    file_type: Literal['fasta', 'vcf', 'bam'],
+    file_type: Literal['fasta', 'vcf', 'bam', 'json'],
 ) -> None:
     """
     Validate uploaded file data.
 
     :param file_data: raw file bytes
-    :param file_type: 'fasta', 'vcf', or 'bam'
+    :param file_type: 'fasta', 'vcf', 'bam', or 'json'
     :raises ValueError: if file is invalid
     """
-    if file_type not in ('fasta', 'vcf', 'bam'):
+    if file_type not in ('fasta', 'vcf', 'bam', 'json'):
         raise ValueError(f'Unknown file type: {file_type}')
 
     max_size = _max_size_for_type(file_type)
@@ -329,22 +358,23 @@ def validate_upload(
         raise ValueError(f'{file_type.upper()} file exceeds maximum size of {max_size // (1024 * 1024)} MB')
 
     state = _new_stream_validation_state(file_type)
-    for offset in range(0, len(file_data), UPLOAD_CHUNK_SIZE):
-        chunk = file_data[offset : offset + UPLOAD_CHUNK_SIZE]
+    chunk_size = WEB_BACKEND_CONFIG.defaults.upload.chunk_size
+    for offset in range(0, len(file_data), chunk_size):
+        chunk = file_data[offset : offset + chunk_size]
         _validate_stream_chunk(state, chunk, file_type)
     _validate_stream_complete(state, file_type)
 
 
 def save_upload(
     file_data: bytes,
-    file_type: Literal['fasta', 'vcf', 'bam'],
+    file_type: Literal['fasta', 'vcf', 'bam', 'json'],
     upload_dir: Path,
 ) -> Path:
     """
     Validate and save uploaded file to temp storage.
 
     :param file_data: raw file bytes
-    :param file_type: 'fasta', 'vcf', or 'bam'
+    :param file_type: 'fasta', 'vcf', 'bam', or 'json'
     :param upload_dir: directory to save uploads to
     :return: absolute path to saved file
     :raises ValueError: if file validation fails
@@ -360,6 +390,8 @@ def save_upload(
         ext = '.fa'
     elif file_type == 'vcf':
         ext = '.vcf'
+    elif file_type == 'json':
+        ext = '.json'
     else:  # bam
         ext = '.bam'
     fd, temp_path = tempfile.mkstemp(suffix=ext, dir=str(upload_dir))

@@ -1,5 +1,5 @@
 """
-`respro sync` command — re-annotate a stored run against the current project database.
+Results synchronization helpers for re-annotating stored runs against a project database.
 """
 
 from __future__ import annotations
@@ -7,10 +7,8 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Annotated
 
 import click
-import typer
 from rich.console import Console
 from rich.panel import Panel
 
@@ -174,33 +172,10 @@ def _sync_single_run(
     return result.resistance_hits, len(result.combo_hits)
 
 
-def sync(
-    result_db: Annotated[
-        Path,
-        typer.Option(
-            '--results-db',
-            '-d',
-            exists=True,
-            help='Results database.',
-        ),
-    ],
-    project: Annotated[
-        Path,
-        typer.Option(
-            '--project',
-            '-p',
-            exists=True,
-            help='Project database (must match the run\'s project fingerprint).',
-        ),
-    ],
-    run_id: Annotated[
-        int | None,
-        typer.Option(
-            '--run-id',
-            '-i',
-            help='Run ID to re-annotate. If omitted, all runs are synced when fingerprints match.',
-        ),
-    ] = None,
+def sync_results_database(
+    *,
+    results_db_path: Path,
+    project_db_path: Path,
 ) -> None:
     """
     Re-annotate a stored run in a local database against the current project database and update stored results.
@@ -210,8 +185,8 @@ def sync(
     updates resistance_hits and combo_hits counters. Requires a project fingerprint match.
     This is useful if the project database has been updated with new rules since the original run.
 
-    If --run-id is omitted, all runs in the results database are attempted; runs with a
-    fingerprint mismatch are skipped and reported.
+    All runs in the results database are attempted; runs with a fingerprint mismatch
+    are skipped and reported.
     """
     logger = logging.getLogger('respro')
     console = Console(highlight=False)
@@ -219,17 +194,14 @@ def sync(
     project_conn = None
 
     try:
-        results_conn = open_results_db(result_db)
-        project_conn = open_project_db(project)
+        results_conn = open_results_db(results_db_path)
+        project_conn = open_project_db(project_db_path)
 
-        if run_id is None:
-            runs = list_runs(results_conn)
-            if not runs:
-                console.print('No stored results found.')
-                return
-            run_ids = [int(run['id']) for run in runs]
-        else:
-            run_ids = [run_id]
+        runs = list_runs(results_conn)
+        if not runs:
+            console.print('No stored results found.')
+            return
+        run_ids = [int(run['id']) for run in runs]
 
         synced = 0
         skipped = 0
@@ -237,7 +209,7 @@ def sync(
             try:
                 hits, combo_hits = _sync_single_run(
                     run_id=current_run_id,
-                    project_path=project,
+                    project_path=project_db_path,
                     project_conn=project_conn,
                     results_conn=results_conn,
                     logger=logger,
@@ -248,8 +220,6 @@ def sync(
                     f'({hits} hit(s), {combo_hits} combo rule hit(s)).'
                 )
             except click.ClickException as exc:
-                if run_id is not None:
-                    raise
                 skipped += 1
                 console.print(f'[yellow]![/yellow] Skipped run #{current_run_id}: {exc}')
 
@@ -268,6 +238,6 @@ def sync(
             project_conn.close()
 
 
-def register(app: typer.Typer) -> None:
-    """Register the sync command on the given Typer app."""
-    app.command()(sync)
+def register(app: object) -> None:
+    """Deprecated: sync is now exposed via `respro manage results --sync`."""
+    _ = app

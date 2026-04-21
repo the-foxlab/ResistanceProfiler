@@ -17,9 +17,11 @@ import { DatabasePieSummaryRow } from './database-plots/DatabasePieSummaryTile';
 import { DatabasePositionPlot } from './database-plots/DatabasePositionPlot';
 import { DatabaseSelectorBar } from './DatabaseSelectorBar';
 import { Spinner } from './Spinner';
+import regenerateIconSrc from '../assets/icon-regenerate.svg';
 
 const MODES = [
   { id: 'profile', label: 'Analyze', iconSrc: analyzeIconSrc },
+  { id: 'regenerate', label: 'Regenerate', iconSrc: regenerateIconSrc },
   { id: 'database', label: 'Database', iconSrc: databaseIconSrc },
   { id: 'mutations', label: 'Browse mutations', iconSrc: mutationsIconSrc },
   { id: 'about', label: 'About', iconSrc: aboutIconSrc },
@@ -72,6 +74,10 @@ export function DashboardView({
   uploadVcfFile,
   uploadReferenceFile,
   uploadBamFile,
+  uploadJsonFile,
+  jsonInputPath,
+  isRegenerateBusy,
+  runRegenerateFromJson,
   downloadMutationsAsTsv,
   uploadProgress,
 }) {
@@ -365,6 +371,71 @@ export function DashboardView({
                 </div>
               </article>
 
+            </>
+          ) : null}
+
+          {/* REGENERATE TAB: upload results JSON and regenerate report artifacts */}
+          {activeMode === 'regenerate' ? (
+            <>
+              <article className="card profile-input-card tab-primary-tile">
+                <div className="workspace-output-header workspace-output-header-with-db section-header">
+                  <div>
+                    <h2>Regenerate from JSON</h2>
+                    <p>Upload a results JSON and regenerate report artifacts with the active database.</p>
+                  </div>
+                  <DatabaseSelectorBar
+                    databases={databases}
+                    selectedDatabase={selectedDatabase}
+                    selectedDatabaseId={selectedDatabaseId}
+                    onDatabaseChange={setSelectedDatabaseId}
+                    selectId="regenerate-db-select"
+                    className="profile-db-bar"
+                  />
+                </div>
+                <div className="profile-input-subtile section-subtile">
+                  <div className="profile-upload-row profile-upload-row-fasta">
+                    <label>
+                      Results JSON
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={(event) => {
+                          if (event.target.files && event.target.files[0]) {
+                            uploadJsonFile(event.target.files[0]);
+                          }
+                        }}
+                      />
+                    </label>
+                    <p className="status">
+                      If the JSON UUID does not match the selected database UUID, regeneration is blocked.
+                      Database updates currently do not allow regeneration of reports from older database versions.
+                    </p>
+                  </div>
+
+                  <div className="profile-analyze-row">
+                    <p className="status analyze-status-inline">{status}</p>
+                    <button
+                      type="button"
+                      className="analyze-primary"
+                      onClick={() => runRegenerateFromJson()}
+                      disabled={isRegenerateBusy || !jsonInputPath}
+                    >
+                      {isRegenerateBusy ? (
+                        <>
+                          <Spinner /> Regenerate
+                        </>
+                      ) : (
+                        'Regenerate'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </article>
+            </>
+          ) : null}
+
+          {(activeMode === 'profile' || activeMode === 'regenerate') ? (
+            <>
               <article className="card workspace-output-tile full-width-tile">
                 <div className="workspace-output-header">
                   <h2>Report</h2>
@@ -437,7 +508,7 @@ export function DashboardView({
                     className="workspace-frame"
                   />
                 ) : (
-                  <p className="status">Run profiling and the report will open here.</p>
+                  <p className="status">Run profiling or regenerate from JSON and the report will open here.</p>
                 )}
               </article>
             </>
@@ -733,9 +804,12 @@ export function DashboardView({
                   <div className="about-command-block">
                     <code>respro init --name "My Project" --genbank refs.gb --rules rules.tsv --output project.db</code>
                     <code>respro add --project project.db --rules more_rules.tsv</code>
-                    <code>respro vcf --project project.db --vcf sample.vcf --ref-fasta ref.fasta --output report/</code>
+                    <code>respro vcf --project project.db --vcf sample.vcf --ref-fasta ref.fasta --output report/ --export json</code>
                     <code>respro fasta --project project.db --fasta sample.fasta --output report/</code>
                   </div>
+                  <p>
+                    Profiling runs can also emit a JSON dump of the result payload, which can later be used to regenerate report artifacts.
+                  </p>
                   <p className="about-mini-heading">Start your own ResPro Explorer by cloning the repository</p>
                   <div className="about-command-block">
                     <code>docker compose -f docker-compose.web.yml up --build</code>

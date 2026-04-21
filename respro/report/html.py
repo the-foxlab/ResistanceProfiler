@@ -898,6 +898,13 @@ def build_report_context(
     """
     summary = result.summary_dict()
     summary['database_hits'] = summary.pop('resistance_hits', 0)
+    project_uuid = ''
+    if project_conn is not None:
+        try:
+            project_uuid = project_fingerprint(project_conn)
+        except Exception:
+            project_uuid = ''
+    summary['project_uuid'] = project_uuid
 
     gene_alignments = build_gene_alignments(result.query_sequence, result.gene_matches)
 

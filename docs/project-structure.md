@@ -216,12 +216,12 @@ Command modules:
   `--metadata` JSON for curated database metadata
 - `vcf.py` — `respro vcf`
 - `fasta.py` — `respro fasta`
-- `explore.py` — `respro explore --rules` (browse resistance rules),
-  `respro explore --results` (browse stored runs), or `respro explore --info`
+- `explore.py` — `respro manage database <db_path> --rules|--info` and
+  `respro manage results <results_db_path> --list|--delete <run_id>`
   (show non-empty project metadata)
 - `regenerate.py` — `respro regenerate` (re-export a stored run's report)
 - `classify.py` — `respro classify` (add manual classification to a run)
-- `sync.py` — `respro sync` (re-annotate a stored run against current project DB)
+- `sync.py` — helpers for `respro manage results --sync <project_db_path>`
 - `profile_helpers.py` — shared profiling orchestration helpers (`_finalize_and_export`,
   `_init_results_db_connection`, `_resolve_reference`, `_load_reference_data`,
   `_print_completion_panel`) used by `vcf.py`, `fasta.py`, and run mutation commands
@@ -232,11 +232,11 @@ Defines the public CLI entry points:
 - `respro add`
 - `respro vcf`
 - `respro fasta`
-- `respro explore --rules *db_path` (with optional `--reference` filter)
-- `respro explore --results *db_path`
+- `respro manage database *db_path --rules` (with optional `--reference` filter)
+- `respro manage results *results_db_path --list`
 - `respro regenerate`
 - `respro classify`
-- `respro sync`
+- `respro manage results <results_db_path> --sync <project_db_path>`
 
 CLI code should coordinate the pipeline and input/output handling, but avoid embedding
 heavy biological logic directly in argument handlers. `respro init` is for fresh
@@ -377,7 +377,7 @@ The test suite mirrors the major backend responsibilities.
 - `test_reference_resolution.py`: query-to-gene reference resolution correctness.
 - `test_rules.py`: resistance rule matching behavior.
 - `test_profile_cli.py`: CLI-level workflow coverage.
-- `test_regenerate_cli.py`: `respro explore`, `respro regenerate`, `respro classify`, and `respro sync`
+- `test_regenerate_cli.py`: `respro manage`, `respro regenerate`, and `respro classify`
   command coverage.
   fingerprint mismatch rejection.
 - `test_report_outputs.py`: deterministic report/export behavior.

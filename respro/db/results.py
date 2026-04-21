@@ -154,6 +154,36 @@ def list_runs(results_conn: sqlite3.Connection) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def delete_run(results_conn: sqlite3.Connection, run_identifier: str | int) -> dict[str, str | int]:
+    """
+    Delete one stored run and all dependent rows.
+
+    :param results_conn: open results DB connection
+    :param run_identifier: numeric run id (or string form)
+    :return: summary dict with deleted id and sample name
+    :raises ValueError: when run id is missing or ambiguous
+    """
+    run_id = _resolve_run_id(results_conn, run_identifier)
+    run_row = results_conn.execute(
+        'SELECT id, sample_name FROM run WHERE id = ?',
+        (run_id,),
+    ).fetchone()
+    if run_row is None:
+        raise ValueError(f'No run found for identifier {run_identifier!r}')
+
+    results_conn.execute('DELETE FROM variant_result WHERE run_id = ?', (run_id,))
+    results_conn.execute('DELETE FROM coverage_gap WHERE run_id = ?', (run_id,))
+    results_conn.execute('DELETE FROM combo_rule_hit WHERE run_id = ?', (run_id,))
+    results_conn.execute('DELETE FROM sample_classification WHERE run_id = ?', (run_id,))
+    results_conn.execute('DELETE FROM run WHERE id = ?', (run_id,))
+    results_conn.commit()
+
+    return {
+        'id': int(run_row['id']),
+        'sample_name': run_row['sample_name'] or '',
+    }
+
+
 def load_run(
     results_conn: sqlite3.Connection,
     run_id: int,
@@ -508,3 +538,155 @@ def load_classifications(
         (run_id,),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def load_run_from_json(
+    json_path: Path,
+) -> tuple[dict, list[dict], list[CoverageGap], list[dict], list[dict]]:
+    """
+    Load a stored run payload from a JSON export.
+
+    :param json_path: path to one `*.results.json` export file
+    :return: run metadata, variant rows, coverage gaps, combo rows, classification rows
+    :raises ValueError: if JSON is malformed or misses required keys
+    """
+    payload = _read_json_payload(json_path)
+    run_dict = _require_dict(payload, 'run')
+    variant_rows = _require_list_of_dicts(payload, 'variant_result')
+    coverage_rows = _require_list_of_dicts(payload, 'coverage_gap')
+    combo_rows = _require_list_of_dicts(payload, 'combo_rule_hit')
+    classification_rows = _require_list_of_dicts(payload, 'sample_classification')
+
+    required_run_keys = {
+        'project_name',
+        'reference_name',
+        'sample_name',
+        'vcf_path',
+        'total_variants',
+        'variants_in_cds',
+        'resistance_hits',
+        'created_at',
+    }
+    missing_run_keys = sorted(key for key in required_run_keys if key not in run_dict)
+    if missing_run_keys:
+        raise ValueError(
+            f'Invalid results JSON: missing run field(s): {", ".join(missing_run_keys)}'
+        )
+
+    run_dict = dict(run_dict)
+    run_dict.setdefault('project_db_path', '')
+    run_dict.setdefault('project_fingerprint', '')
+    run_dict.setdefault('project_updated_at', '')
+    run_dict.setdefault('combo_hits', len(combo_rows))
+    run_dict.setdefault('status', 'complete')
+
+    coverage_gaps: list[CoverageGap] = []
+    for idx, row in enumerate(coverage_rows, start=1):
+        for key in ('gene_name', 'codon_start', 'codon_end'):
+            if key not in row:
+                raise ValueError(f'Invalid results JSON: coverage_gap[{idx}] missing {key!r}')
+        coverage_gaps.append(
+            CoverageGap(
+                gene_name=str(row.get('gene_name', '')),
+                codon_start=int(row.get('codon_start', 0)),
+                codon_end=int(row.get('codon_end', 0)),
+            )
+        )
+
+    for idx, row in enumerate(variant_rows, start=1):
+        if 'drug_hits' not in row:
+            raise ValueError(f'Invalid results JSON: variant_result[{idx}] missing \'drug_hits\'')
+
+    for idx, row in enumerate(combo_rows, start=1):
+        if 'hit_json' not in row:
+            raise ValueError(f'Invalid results JSON: combo_rule_hit[{idx}] missing \'hit_json\'')
+
+    return run_dict, variant_rows, coverage_gaps, combo_rows, classification_rows
+
+
+def validate_project_fingerprint_match(
+    *,
+    stored_fingerprint: str,
+    current_fingerprint: str,
+    source_label: str,
+) -> None:
+    """
+    Validate that stored and active project UUID fingerprints match.
+
+    :param stored_fingerprint: UUID persisted with run/json payload
+    :param current_fingerprint: UUID of the active project database
+    :param source_label: short label for error context
+    :raises ValueError: if fingerprints do not match
+    """
+    if not stored_fingerprint:
+        return
+    if stored_fingerprint == current_fingerprint:
+        return
+
+    raise ValueError(
+        f'Project database UUID mismatch for {source_label}. '
+        'The provided project database does not match the database used to create this result JSON/run. '
+        'Database updates currently do not allow regeneration of reports from older database versions.'
+    )
+
+
+def _read_json_payload(json_path: Path) -> dict:
+    """Load and validate a result JSON payload root object."""
+    path = Path(json_path)
+    try:
+        raw = path.read_text(encoding='utf-8')
+    except FileNotFoundError as exc:
+        raise ValueError(f'Results JSON file not found: {path}') from exc
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f'Invalid results JSON: {exc.msg}') from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError('Invalid results JSON: top-level payload must be an object')
+    return payload
+
+
+def _require_dict(payload: dict, key: str) -> dict:
+    """Return one required object field from a JSON payload."""
+    value = payload.get(key)
+    if not isinstance(value, dict):
+        raise ValueError(f'Invalid results JSON: key {key!r} must be an object')
+    return value
+
+
+def _require_list_of_dicts(payload: dict, key: str) -> list[dict]:
+    """Return one required list[object] field from a JSON payload."""
+    value = payload.get(key)
+    if not isinstance(value, list):
+        raise ValueError(f'Invalid results JSON: key {key!r} must be an array')
+    for idx, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f'Invalid results JSON: {key}[{idx}] must be an object')
+    return value
+
+
+def _resolve_run_id(results_conn: sqlite3.Connection, run_identifier: str | int) -> int:
+    """Resolve an id-like run identifier to one run row id."""
+    token = str(run_identifier).strip().lstrip('#')
+    if token == '':
+        raise ValueError('Run identifier must not be empty')
+
+    if token.isdigit():
+        run_id = int(token)
+        exists = results_conn.execute('SELECT 1 FROM run WHERE id = ?', (run_id,)).fetchone()
+        if exists is None:
+            raise ValueError(f'No run found with id {token}')
+        return run_id
+
+    # Fallback: allow string-prefix matching on textual run ids for interactive workflows.
+    rows = results_conn.execute(
+        'SELECT id FROM run WHERE CAST(id AS TEXT) LIKE ? ORDER BY id',
+        (f'{token}%',),
+    ).fetchall()
+    if not rows:
+        raise ValueError(f'No run found for identifier {run_identifier!r}')
+    if len(rows) > 1:
+        raise ValueError(f'Ambiguous run identifier {run_identifier!r} matched {len(rows)} runs')
+    return int(rows[0]['id'])

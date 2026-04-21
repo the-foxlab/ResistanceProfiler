@@ -20,8 +20,10 @@ from respro.db.results import (
     load_combo_rule_hits,
     load_coverage_gaps,
     load_run,
+    load_run_from_json,
     reconstruct_annotations,
     reconstruct_combo_rule_hits,
+    validate_project_fingerprint_match,
 )
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.schema import open_project_db, open_results_db
@@ -31,23 +33,6 @@ from respro.utils.logging import err_console
 
 
 def regenerate(
-    result_db: Annotated[
-        Path,
-        typer.Option(
-            '--results-db',
-            '-d',
-            exists=True,
-            help='Results database.',
-        ),
-    ],
-    run_id: Annotated[
-        int,
-        typer.Option(
-            '--run-id',
-            '-i',
-            help='Run ID to regenerate.',
-        ),
-    ],
     project: Annotated[
         Path,
         typer.Option(
@@ -65,6 +50,39 @@ def regenerate(
             help='Output directory.',
         ),
     ],
+    result_db: Annotated[
+        Path | None,
+        typer.Option(
+            '--results-db',
+            '-d',
+            exists=True,
+            help='Results database.',
+        ),
+    ] = None,
+    run_id: Annotated[
+        int | None,
+        typer.Option(
+            '--run-id',
+            '-i',
+            help='Run ID to regenerate.',
+        ),
+    ] = None,
+    json_input: Annotated[
+        Path | None,
+        typer.Option(
+            '--json',
+            '-j',
+            exists=True,
+            help='Results JSON export to regenerate from.',
+        ),
+    ] = None,
+    export: Annotated[
+        str | None,
+        typer.Option(
+            '--export',
+            help='Optional extra export format in addition to HTML: json or tabular.',
+        ),
+    ] = None,
 ) -> None:
     """Regenerate a report from a stored run."""
     logger = logging.getLogger('respro')
@@ -73,25 +91,52 @@ def regenerate(
     project_conn = None
 
     try:
-        results_conn = open_results_db(result_db)
-        run_dict, variant_rows = load_run(results_conn, run_id)
-        coverage_gaps = load_coverage_gaps(results_conn, run_id)
-        combo_rows = load_combo_rule_hits(results_conn, run_id)
-        sample_classifications = load_classifications(results_conn, run_id)
+        extra_export_formats: set[str] = set()
+        if export is not None:
+            export_value = export.strip().lower()
+            if export_value not in ('json', 'tabular'):
+                raise click.ClickException('Invalid --export value. Choose one of: json, tabular.')
+            extra_export_formats.add(export_value)
+
+        if json_input is not None and (result_db is not None or run_id is not None):
+            raise click.ClickException(
+                'Use either --json OR (--results-db with --run-id), not both modes together.'
+            )
+
+        if json_input is None and (result_db is None or run_id is None):
+            raise click.ClickException(
+                'Missing input mode. Use --json or provide both --results-db and --run-id.'
+            )
+
+        if json_input is not None:
+            run_dict, variant_rows, coverage_gaps, combo_rows, sample_classifications = load_run_from_json(
+                json_input
+            )
+            run_label = f'JSON {json_input.name}'
+            status_label = f'Regenerating {json_input.name}…'
+        else:
+            assert result_db is not None
+            assert run_id is not None
+            results_conn = open_results_db(result_db)
+            run_dict, variant_rows = load_run(results_conn, run_id)
+            coverage_gaps = load_coverage_gaps(results_conn, run_id)
+            combo_rows = load_combo_rule_hits(results_conn, run_id)
+            sample_classifications = load_classifications(results_conn, run_id)
+            run_label = f'run #{run_id}'
+            status_label = f'Regenerating run #{run_id}…'
 
         project_conn = open_project_db(project)
 
         stored_fp = run_dict.get('project_fingerprint', '')
         if stored_fp:
             current_fp = compute_project_fingerprint(project_conn)
-            if stored_fp != current_fp:
-                raise click.ClickException(
-                    f'Project database fingerprint mismatch for run #{run_id}.\n'
-                    'The provided --project database does not match the one used for this run.\n'
-                    'Ensure you are using the same project database that was active during profiling.'
-                )
+            validate_project_fingerprint_match(
+                stored_fingerprint=stored_fp,
+                current_fingerprint=current_fp,
+                source_label=run_label,
+            )
         else:
-            logger.warning('Run #%d has no stored fingerprint — skipping project validation.', run_id)
+            logger.warning('%s has no stored fingerprint — skipping project validation.', run_label)
 
         ref_row = project_conn.execute(
             'SELECT id, organism, length FROM reference WHERE name = ?',
@@ -132,7 +177,7 @@ def regenerate(
             rules = load_rules(project_conn, ref_id)
             rule_gene_names = {rule.gene_name for rule in rules}
 
-        with err_console.status(f'[dim]Regenerating run #{run_id}…[/dim]'):
+        with err_console.status(f'[dim]{status_label}[/dim]'):
             outputs = export_results(
                 result,
                 out,
@@ -140,11 +185,12 @@ def regenerate(
                 rule_gene_names=rule_gene_names,
                 project_conn=project_conn,
                 rules=rules,
+                extra_export_formats=extra_export_formats,
             )
 
         console.print(Panel(
             f'{result.resistance_hits} database hit(s)',
-            title=f'[green]✓ Regenerated run #{run_id}[/green]',
+            title=f'[green]✓ Regenerated {run_label}[/green]',
             border_style='green',
         ))
         for fmt, path in outputs.items():
