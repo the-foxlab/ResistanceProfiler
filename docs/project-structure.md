@@ -33,6 +33,7 @@ ReistanceProfiler/
 │   ├── web-deployment.md
 │   └── to-do.md
 ├── respro/
+│   ├── config/
 │   ├── cli/
 │   │   ├── main.py
 │   │   ├── init.py
@@ -50,6 +51,7 @@ ReistanceProfiler/
 │   └── utils/
 ├── web/
 │   ├── backend/
+│   │   ├── defaults.toml
 │   │   ├── main.py
 │   │   ├── models.py
 │   │   └── services/
@@ -196,6 +198,12 @@ the project fingerprint, and re-exports the report without re-running profiling.
 
 The main Python package. Keep it independently usable from the command line and from
 future integrations.
+
+#### `respro/config/`
+
+Bundled configuration defaults for CLI/core integrations (for example external API URL
+templates and timeout values). These files are packaged with the distribution so CLI
+behavior remains deterministic in installed environments.
 
 #### `respro/cli/`
 

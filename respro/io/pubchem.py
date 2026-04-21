@@ -17,6 +17,8 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
+from respro.config.settings import CLI_CONFIG
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +35,7 @@ class PubChemRecord:
     structure_url: str = ''  # 2D structure image URL from PubChem
 
 
-def lookup_drug(name: str, timeout: int = 5) -> PubChemRecord | None:
+def lookup_drug(name: str, timeout: int = CLI_CONFIG.timeouts.pubchem) -> PubChemRecord | None:
     """
     Look up a drug by name on PubChem and return a minimal record.
 
@@ -51,9 +53,9 @@ def lookup_drug(name: str, timeout: int = 5) -> PubChemRecord | None:
     description = _fetch_description(cid, timeout)
     return PubChemRecord(
         cid=cid,
-        url=f'https://pubchem.ncbi.nlm.nih.gov/compound/{cid}',
+        url=CLI_CONFIG.urls.pubchem_compound_page.format(cid=cid),
         description=description,
-        structure_url=f'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/PNG',
+        structure_url=CLI_CONFIG.urls.pubchem_structure_png.format(cid=cid),
     )
 
 
@@ -70,7 +72,7 @@ def _fetch_cid(name: str, timeout: int) -> int | None:
     :return: integer CID if found, otherwise None
     """
     encoded = urllib.parse.quote(name)
-    url = f'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded}/cids/JSON'
+    url = CLI_CONFIG.urls.pubchem_cid_lookup.format(name=encoded)
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             data = json.loads(resp.read())
@@ -102,7 +104,7 @@ def _fetch_description(cid: int, timeout: int) -> str:
     :param timeout: HTTP request timeout in seconds
     :return: description string, empty string if unavailable
     """
-    description_url = f'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/description/JSON'
+    description_url = CLI_CONFIG.urls.pubchem_description.format(cid=cid)
     first_title = ''
     try:
         with urllib.request.urlopen(description_url, timeout=timeout) as resp:
@@ -122,7 +124,7 @@ def _fetch_description(cid: int, timeout: int) -> str:
     if first_title:
         return first_title
 
-    title_url = f'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/property/Title/JSON'
+    title_url = CLI_CONFIG.urls.pubchem_title.format(cid=cid)
     try:
         with urllib.request.urlopen(title_url, timeout=timeout) as resp:
             data = json.loads(resp.read())

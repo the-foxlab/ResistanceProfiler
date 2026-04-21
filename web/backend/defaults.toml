@@ -1,0 +1,37 @@
+[env]
+data_dir = 'RESPRO_WEB_DATA_DIR'
+project_db = 'RESPRO_WEB_PROJECT_DB'
+results_db = 'RESPRO_WEB_RESULTS_DB'
+api_token = 'RESPRO_WEB_API_TOKEN'
+allowed_roots = 'RESPRO_WEB_ALLOWED_ROOTS'
+frontend_dist = 'RESPRO_FRONTEND_DIST'
+cors_origins = 'RESPRO_WEB_CORS_ORIGINS'
+upload_rate_limit = 'RESPRO_WEB_UPLOAD_RATE_LIMIT'
+host = 'RESPRO_WEB_HOST'
+port = 'RESPRO_WEB_PORT'
+redis_url = 'REDIS_URL'
+job_timeout = 'RESPRO_WEB_JOB_TIMEOUT'
+
+[defaults]
+web_host = '127.0.0.1'
+web_port = 8000
+redis_url = 'redis://127.0.0.1:6379/0'
+job_timeout_seconds = 3600
+upload_rate_limit = '5/minute'
+cors_local_origins = ['http://127.0.0.1:5173', 'http://localhost:5173']
+profile_queue_name = 'profiling'
+frontend_base_path = '/app'
+service_name = 'respro-web-api'
+
+[defaults.upload]
+max_fasta_size = 52428800
+max_vcf_size = 209715200
+max_bam_size = 1073741824
+chunk_size = 1048576
+max_fasta_line_length = 500000
+max_vcf_line_length = 100000
+max_vcf_data_lines = 2000000
+bgzf_header_bytes = 18
+allowed_fasta_types = ['text/plain', 'application/octet-stream']
+allowed_vcf_types = ['text/plain', 'text/x-vcf', 'application/octet-stream']
+allowed_bam_types = ['application/octet-stream']

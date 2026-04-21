@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import faviconSrc from './assets/favicon.svg';
+import { FRONTEND_CONFIG } from './config';
 
-const DEFAULT_API_BASE =
-  typeof window !== 'undefined' && window.location.port === '5173' ? 'http://127.0.0.1:8000' : '';
-const API_BASE = import.meta.env.VITE_RESPRO_API_BASE || DEFAULT_API_BASE;
-const API_TOKEN = (import.meta.env.VITE_RESPRO_API_TOKEN || '').trim();
+const API_BASE = FRONTEND_CONFIG.apiBase;
+const API_TOKEN = FRONTEND_CONFIG.apiToken;
 
 export const PROFILE_MODES = [
   { id: 'vcf', label: 'VCF mode' },
@@ -224,11 +223,11 @@ export function useDashboardLogic() {
     vcf_path: '',
     ref_fasta_path: '',
     bam_path: null,
-    sample: 'sample',
+    sample: FRONTEND_CONFIG.defaults.sampleName,
   });
   const [fastaInput, setFastaInput] = useState({
     fasta_path: '',
-    sample: 'sample',
+    sample: FRONTEND_CONFIG.defaults.sampleName,
   });
   const [rules, setRules] = useState([]);
   const [databases, setDatabases] = useState([]);
@@ -460,7 +459,7 @@ export function useDashboardLogic() {
   const pollJob = async (jobId) => {
     // Profiling runs asynchronously on the backend, so poll until final state.
     for (;;) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, FRONTEND_CONFIG.profile.jobPollIntervalMs));
       const payload = await apiGet(`/api/jobs/${jobId}`);
       if (payload.status === 'succeeded') return payload.result;
       if (payload.status === 'failed') throw new Error(formatUserError(payload.error || 'Job failed'));
@@ -474,8 +473,8 @@ export function useDashboardLogic() {
     try {
       const submitResponse = await apiPost('/api/profile/fasta', {
         ...fastaInput,
-        aligner: 'mappy',
-        threads: 1,
+        aligner: FRONTEND_CONFIG.profile.aligner,
+        threads: FRONTEND_CONFIG.profile.threads,
       });
       setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
       const result = await pollJob(submitResponse.job_id);
@@ -503,10 +502,10 @@ export function useDashboardLogic() {
     try {
       const submitResponse = await apiPost('/api/profile/vcf', {
         ...vcfInput,
-        aligner: 'mappy',
-        threads: 1,
-        min_af: 0.01,
-        min_depth: 10,
+        aligner: FRONTEND_CONFIG.profile.aligner,
+        threads: FRONTEND_CONFIG.profile.threads,
+        min_af: FRONTEND_CONFIG.profile.vcf.minAf,
+        min_depth: FRONTEND_CONFIG.profile.vcf.minDepth,
       });
       setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
       const result = await pollJob(submitResponse.job_id);

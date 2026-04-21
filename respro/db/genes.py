@@ -8,6 +8,7 @@ import logging
 import re
 import sqlite3
 
+from respro.config.settings import CLI_CONFIG
 from respro.io.genbank import ParsedGenBankGene, ParsedGenBankReference, validate_strand
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ def _resolve_ncbi_protein_url(
         cache[token] = ''
         return ''
 
-    url = f'https://www.ncbi.nlm.nih.gov/protein/{token}/'
+    url = CLI_CONFIG.urls.ncbi_protein_page.format(protein_id=token)
     cache[token] = url
     return url
 

@@ -129,6 +129,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] VCF depth fallback — `_extract_depth` now returns `-1` sentinel when no depth field is found; depth filter in `profile-vcf` skips depth checking for sentinel variants so depth-free VCFs are not silently discarded
 - [X] Parallel gene alignment — `match_query_to_genes` now accepts `cores` parameter; per-gene alignment extracted into picklable `_align_gene_worker`; `--cores` added to both `profile-vcf` and `profile-fasta` (default 1)
 - [X] Coverage metric fix — `GeneMatch.coverage` split into `cds_coverage` and `query_coverage`; a match is accepted when identity passes AND either coverage meets the threshold; enables Sanger reads and amplicons (short queries that fully consume but cover only part of a CDS); DB column renamed `coverage` → `cds_coverage`; `query_coverage` added as optional migration column
+- [X] Centralize runtime literals into config modules — bundled CLI/core API URL + timeout defaults moved to `respro/config/defaults.toml` (packaged via `pyproject.toml`), web backend defaults moved to `web/backend/defaults.toml` with env-key + default loading in `web/backend/config.py`, and frontend API/profile defaults consolidated in `web/frontend/src/config.js`
 
 ### Coverage analysis
 
@@ -291,19 +292,29 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Web deployment and security
 
-- 🔴 Results lifecycle and data-protection strategy — decide whether the web deployment stores
-  patient/sample data across sessions: (a) **ephemeral mode** (recommended for shared/public
-  instances) — `results.db` only records in-session run metadata; uploaded files and generated
-  reports are deleted immediately after the browser session ends via the existing
-  `/api/session/cleanup` endpoint; add a server-side TTL-based sweep (cron/startup) that deletes
-  uploads and reports older than `RESPRO_WEB_RESULT_TTL` (default 24 h) as a safety net for
-  sessions that did not call cleanup; `results.db` row counts stay bounded and no genomic data
-  accumulates on disk; (b) **persistent mode** — requires user authentication (see login item
-  below) so that stored results are accessible only to the submitting user; without auth,
-  persistent mode is incompatible with data-protection regulations (GDPR/HIPAA) because any
-  session can query another session's reports via `/api/report`; for the current architecture
-  the safest default is ephemeral mode with no results database persistence between server
-  restarts
+- 🔴 Require explicit web API authentication in non-local deployments — enforce
+  `RESPRO_WEB_API_TOKEN` outside localhost-only development defaults and fail fast on insecure
+  startup configurations intended for shared or internet-reachable environments
+- 🔴 Restrict profiling input paths to trusted roots — validate `fasta_path`, `vcf_path`,
+  `ref_fasta_path`, and optional `bam_path` against startup-configured allowed roots before
+  enqueuing jobs so clients cannot request reads from arbitrary server filesystem paths
+- 🔴 Remove token transport via query string — accept auth only via `Authorization: Bearer ...`
+  for API routes and report access to avoid token leakage through URLs, logs, browser history,
+  and referrer headers
+- 🟡 Tighten authenticated CORS defaults — when token auth is enabled, require explicit
+  `RESPRO_WEB_CORS_ORIGINS` allowlists instead of permissive wildcard defaults
+- 🔴 Ephemeral web mode as the only default path (no login) — enforce session-scoped profiling
+  without cross-session result persistence: uploaded files and generated reports must be deleted
+  via `/api/session/cleanup`; add a server-side TTL-based safety sweep (`RESPRO_WEB_RESULT_TTL`,
+  default 24 h) for abandoned sessions; document that persistent multi-user history is deferred
+  until authentication exists
+- 🔴 Remove mandatory `results.db` dependency from web profiling — web profiling routes/jobs must
+  run without requiring a results database; make run persistence optional (disabled in ephemeral
+  mode), remove startup hard-fail when `results.db` is absent, and keep only the metadata needed
+  to return immediate job/report responses to the submitting browser session
+- 🟡 Optional lightweight run cache for active session UX — if needed for frontend refresh
+  resilience, keep a short-lived in-memory or Redis-backed session cache keyed by browser session
+  ID (no durable per-user storage)
 - 🟡 Configurable worker concurrency and resource limits in Docker Compose — currently one
   `respro-worker` container handles all profiling jobs serially with no CPU or memory cap; two
   independent improvements are needed: (1) **scaling** — document `docker compose up --scale respro-worker=N` so multiple worker containers drain the same `profiling` RQ queue from Redis;
@@ -325,13 +336,34 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   `proxy_set_header` directives; add `RESPRO_WEB_TRUSTED_PROXIES` as an optional env variable
   read by uvicorn (`--proxy-headers`, `--forwarded-allow-ips`) so that `X-Forwarded-For` is
   trusted for rate-limiting purposes
-- 🟡 Optional user authentication for persistent results — if persistent per-user results are
-  required, implement a simple token or session-based login layer; a lightweight option is
-  institution-level single sign-on via OIDC (e.g. Keycloak, GitHub OAuth); run IDs in `results.db`
-  would be associated with a `user_id`; `/api/report` and job-status endpoints enforce ownership;
-  without SSO, a single shared API token with role-based scopes (read-only vs. submit) is a
-  minimal first step; this item should only be implemented if ephemeral mode is not acceptable
-  for the target deployment context
+- 🟢 Deferred authentication for persistent results — implement only after ephemeral mode is
+  complete and stable; when revisited, use per-user ownership checks for all persisted artifacts
+  and reports
+
+### Deferred: Authorized lab access (persistent mode)
+
+- 🟢 Persistent-mode architecture decision record — add a short ADR in `docs/web-architecture.md`
+  defining scope as lab-internal multi-user deployment (no public signup), ownership model
+  (`user_id` bound to runs/artifacts), and explicit non-goals for MVP (no SSO/MFA/password reset)
+- 🟢 Auth data model and migrations — add `user`, `session_token`, `user_role`, and per-run
+  ownership fields (`run.user_id`, `artifact.user_id`) in `respro/db/results.py` migration path;
+  include indexes for `email`, `token_hash`, and `(user_id, created_at)` lookup patterns
+- 🟢 Login/session endpoints and middleware — add `/api/auth/login`, `/api/auth/logout`,
+  `/api/auth/me` with Argon2id password verification, httpOnly secure session cookie handling,
+  and request-scoped user identity dependency for protected routes in `web/backend/main.py`
+- 🟢 Ownership enforcement for all persisted objects — enforce `user_id` checks on
+  `/api/jobs/{job_id}`, `/api/report`, `/api/session/cleanup`, and any results listing endpoints;
+  unauthorized access must return 404/403 without leaking object existence
+- 🟢 Artifact persistence for regenerate-without-reupload — store uploaded FASTA/VCF/BAM and
+  generated reports as user-owned artifacts with checksum metadata (SHA-256) and TTL/retention
+  policy controls; re-use identical user-owned uploads instead of forcing re-upload
+- 🟢 Admin-only user lifecycle for lab setups — add CLI/admin endpoints to create/disable users,
+  rotate initial passwords, and list account status; keep MVP onboarding invitation-only
+- 🟢 Security hardening baseline — add auth rate limiting, structured security/audit logs
+  (login success/failure, logout, run created, report opened), and stricter cookie flags
+  (`Secure`, `HttpOnly`, `SameSite=Lax/Strict`) for production deployments
+- 🟢 Optional OIDC bridge (post-MVP) — add pluggable OIDC integration behind config flag for labs
+  that already run institutional identity providers; keep local user/password mode as default
 
 ### Public release
 
@@ -426,9 +458,10 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 Job status contract hardening — standardize and test queued/running/succeeded/failed mapping plus consistent error payloads for failed jobs and missing `job_id`
 - 🟡 Queue runtime safeguards — add worker timeout/retry defaults and explicit logging for enqueue/start/fail/finish transitions to improve debuggability
 - 🟡 API readiness checks — extend health/readiness behavior to surface Redis connectivity and startup DB path readiness for operational diagnostics
-- 🟡 Frontend TypeScript migration — convert `web/frontend/src/` from JavaScript to TypeScript with typed API client models for job submit/status and profiling forms
 - 🟡 Dev startup ergonomics — add one-command local startup scripts (backend + worker + frontend + Redis) to reduce manual terminal orchestration during development
 - 🟡 Compose integration tests — add compose-backed smoke/integration tests for submit → poll → report retrieval using startup-configured paths
 - 🟢 CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
 - 🟢 Project DB catalog support (post-prototype) — support multiple project DBs with startup catalog metadata and runtime selection
 - 🟢 Results retention and portability (post-prototype) — add TTL cleanup policy for central results plus explicit export/import endpoints for user portability
+- 🟢 Visualize results
+- 🟢 Dark mode

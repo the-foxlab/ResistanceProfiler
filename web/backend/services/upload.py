@@ -7,20 +7,24 @@ import tempfile
 from pathlib import Path
 from typing import Literal, Protocol
 
+from web.backend.config import WEB_BACKEND_CONFIG
+
+upload_defaults = WEB_BACKEND_CONFIG.defaults.upload
+
 # Maximum allowed file sizes (in bytes)
-MAX_FASTA_SIZE = 50 * 1024 * 1024  # 50 MB
-MAX_VCF_SIZE = 200 * 1024 * 1024  # 200 MB
-MAX_BAM_SIZE = 1 * 1024 * 1024 * 1024  # 1 GB
+MAX_FASTA_SIZE = upload_defaults.max_fasta_size
+MAX_VCF_SIZE = upload_defaults.max_vcf_size
+MAX_BAM_SIZE = upload_defaults.max_bam_size
 
 # MIME types to check (informational; not strictly enforced)
-ALLOWED_FASTA_TYPES = {'text/plain', 'application/octet-stream'}
-ALLOWED_VCF_TYPES = {'text/plain', 'text/x-vcf', 'application/octet-stream'}
-ALLOWED_BAM_TYPES = {'application/octet-stream'}
+ALLOWED_FASTA_TYPES = set(upload_defaults.allowed_fasta_types)
+ALLOWED_VCF_TYPES = set(upload_defaults.allowed_vcf_types)
+ALLOWED_BAM_TYPES = set(upload_defaults.allowed_bam_types)
 
-UPLOAD_CHUNK_SIZE = 1024 * 1024
-MAX_FASTA_LINE_LENGTH = 500_000
-MAX_VCF_LINE_LENGTH = 100_000
-MAX_VCF_DATA_LINES = 2_000_000
+UPLOAD_CHUNK_SIZE = upload_defaults.chunk_size
+MAX_FASTA_LINE_LENGTH = upload_defaults.max_fasta_line_length
+MAX_VCF_LINE_LENGTH = upload_defaults.max_vcf_line_length
+MAX_VCF_DATA_LINES = upload_defaults.max_vcf_data_lines
 _ALLOWED_TEXT_CONTROL_BYTES = {9, 10, 13}
 _ALLOWED_FASTA_SEQUENCE_BYTES = {
     ord('A'),
@@ -43,7 +47,7 @@ _ALLOWED_FASTA_SEQUENCE_BYTES = {
     ord('.'),
     ord('*'),
 }
-_BGZF_HEADER_BYTES = 18
+_BGZF_HEADER_BYTES = upload_defaults.bgzf_header_bytes
 
 
 class UploadStream(Protocol):

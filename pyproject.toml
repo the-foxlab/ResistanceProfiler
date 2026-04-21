@@ -56,6 +56,7 @@ extend-ignore = ['E501']  # line length enforced by editor convention, not CI
 [tool.hatch.build]
 include = [
     'respro/**/*.py',
+    'respro/config/*.toml',
     'respro/report/templates/*.j2',
     'respro/report/static/*.css',
     'respro/report/static/*.js',

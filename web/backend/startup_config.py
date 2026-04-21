@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from respro.db.schema import init_results_db, open_project_db
+from web.backend.config import WEB_ENV
 
 
 @dataclass(frozen=True)
@@ -30,13 +31,13 @@ def load_startup_config() -> StartupConfig:
     Individual paths can still be overridden via their own environment variables.
     """
     repo_data = Path('/data') if Path('/data').is_dir() else Path(__file__).resolve().parents[2] / 'data'
-    data_dir = Path(os.getenv('RESPRO_WEB_DATA_DIR', str(repo_data))).expanduser().resolve()
+    data_dir = Path(os.getenv(WEB_ENV.data_dir, str(repo_data))).expanduser().resolve()
 
-    project_db = Path(os.getenv('RESPRO_WEB_PROJECT_DB', str(data_dir / 'project.db'))).expanduser().resolve()
-    results_db = Path(os.getenv('RESPRO_WEB_RESULTS_DB', str(data_dir / 'results.db'))).expanduser().resolve()
-    api_token = os.getenv('RESPRO_WEB_API_TOKEN', '').strip()
+    project_db = Path(os.getenv(WEB_ENV.project_db, str(data_dir / 'project.db'))).expanduser().resolve()
+    results_db = Path(os.getenv(WEB_ENV.results_db, str(data_dir / 'results.db'))).expanduser().resolve()
+    api_token = os.getenv(WEB_ENV.api_token, '').strip()
 
-    allowed_roots_env = os.getenv('RESPRO_WEB_ALLOWED_ROOTS', '')
+    allowed_roots_env = os.getenv(WEB_ENV.allowed_roots, '')
     allowed_roots = _parse_allowed_roots(data_dir, allowed_roots_env)
 
     _validate_data_dir(data_dir)

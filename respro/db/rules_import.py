@@ -11,6 +11,7 @@ import sqlite3
 from pathlib import Path
 
 from respro.core.annotation import normalize_mutation
+from respro.config.settings import CLI_CONFIG
 from respro.db.drugs import _get_or_create_drug_id
 from respro.io.publications import fetch_publication_metadata, fetch_pubmed_metadata
 
@@ -46,7 +47,7 @@ def _normalize_publication_token(token: str) -> tuple[str, str, str]:
     if lower.startswith('pmid:'):
         return '', t[5:].strip(), t
 
-    for prefix in ('https://doi.org/', 'http://doi.org/'):
+    for prefix in CLI_CONFIG.parsing.doi_prefixes:
         if lower.startswith(prefix):
             return t[len(prefix):].strip(), '', t
 

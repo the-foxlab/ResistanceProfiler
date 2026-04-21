@@ -1,0 +1,17 @@
+[timeouts]
+pubchem = 5
+pubmed = 3
+crossref = 5
+
+[urls]
+pubchem_compound_page = 'https://pubchem.ncbi.nlm.nih.gov/compound/{cid}'
+pubchem_structure_png = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/PNG'
+pubchem_cid_lookup = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{name}/cids/JSON'
+pubchem_description = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/description/JSON'
+pubchem_title = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/property/Title/JSON'
+ncbi_pubmed_esummary = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={pmid}&retmode=json'
+crossref_works = 'https://api.crossref.org/works/{doi}'
+ncbi_protein_page = 'https://www.ncbi.nlm.nih.gov/protein/{protein_id}/'
+
+[parsing]
+doi_prefixes = ['https://doi.org/', 'http://doi.org/']

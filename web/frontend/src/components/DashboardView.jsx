@@ -9,7 +9,9 @@ import aboutCliIconSrc from '../assets/icon-cli.svg';
 import aboutCommunityIconSrc from '../assets/icon-community.svg';
 import databaseIconSrc from '../assets/icon-database.svg';
 import githubIconSrc from '../assets/icon-github.svg';
+import websiteIconSrc from '../assets/website.svg';
 import mutationsIconSrc from '../assets/icon-mutations.svg';
+import { FRONTEND_CONFIG } from '../config';
 import { buildDatabasePlots } from './database-plots/buildDatabasePlots';
 import { DatabasePieSummaryRow } from './database-plots/DatabasePieSummaryTile';
 import { DatabasePositionPlot } from './database-plots/DatabasePositionPlot';
@@ -136,6 +138,9 @@ export function DashboardView({
           <div className="page-links" aria-label="Project links">
             <a href="https://github.com/jonas-fuchs/ResistanceProfiler" target="_blank" rel="noreferrer" title="ResistanceProfiler on GitHub" aria-label="ResistanceProfiler on GitHub">
               <img className="page-link-icon" src={githubIconSrc} alt="" aria-hidden="true" />
+            </a>
+            <a href="https://www.uniklinik-freiburg.de/virologie-en/research/research-teams/jonas-fuchs-team.html" target="_blank" rel="noreferrer" title="Jonas Fuchs Team website" aria-label="Jonas Fuchs Team website">
+              <img className="page-link-icon website-link-icon" src={websiteIconSrc} alt="" aria-hidden="true" />
             </a>
           </div>
         </div>
@@ -620,7 +625,7 @@ export function DashboardView({
                   <div className="about-command-block">
                     <code>docker compose -f docker-compose.web.yml up --build</code>
                   </div>
-                  <p>Open <strong>http://127.0.0.1:8000/app</strong> after startup.</p>
+                  <p>Open <strong>{FRONTEND_CONFIG.ui.explorerUrl}</strong> after startup.</p>
                 </section>
 
                 <section className="about-section-card about-section-card-contact">

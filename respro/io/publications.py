@@ -21,10 +21,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from respro.config.settings import CLI_CONFIG
+
 logger = logging.getLogger(__name__)
 
 
-def fetch_pubmed_metadata(pmid: str, timeout: int = 3) -> dict | None:
+def fetch_pubmed_metadata(pmid: str, timeout: int = CLI_CONFIG.timeouts.pubmed) -> dict | None:
     """
     Fetch title and DOI (when available) for a PubMed article via NCBI E-utilities.
 
@@ -37,10 +39,7 @@ def fetch_pubmed_metadata(pmid: str, timeout: int = 3) -> dict | None:
     :return: dict with ``'title'`` (str) and ``'doi'`` (str, may be empty), or
              ``None`` on any network / parsing failure
     """
-    url = (
-        'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi'
-        f'?db=pubmed&id={urllib.parse.quote(pmid)}&retmode=json'
-    )
+    url = CLI_CONFIG.urls.ncbi_pubmed_esummary.format(pmid=urllib.parse.quote(pmid))
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             data = json.loads(resp.read())
@@ -63,7 +62,7 @@ def fetch_pubmed_metadata(pmid: str, timeout: int = 3) -> dict | None:
         return None
 
 
-def fetch_publication_metadata(doi: str, timeout: int = 5) -> dict | None:
+def fetch_publication_metadata(doi: str, timeout: int = CLI_CONFIG.timeouts.crossref) -> dict | None:
     """
     Fetch a publication title from the CrossRef API.
 
@@ -74,7 +73,7 @@ def fetch_publication_metadata(doi: str, timeout: int = 5) -> dict | None:
     :return: dict with key ``'title'`` or None if unavailable
     """
     encoded = urllib.parse.quote(doi, safe='')
-    url = f'https://api.crossref.org/works/{encoded}'
+    url = CLI_CONFIG.urls.crossref_works.format(doi=encoded)
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             data = json.loads(resp.read())

@@ -17,6 +17,10 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from web.backend.config import (
+    WEB_BACKEND_CONFIG,
+    WEB_ENV,
+)
 from web.backend.jobs import run_profile_fasta, run_profile_vcf
 from web.backend.models import (
     ApiEnvelope,
@@ -58,10 +62,14 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         allow_headers=['*'],
     )
 
-    _env_dist = os.environ.get('RESPRO_FRONTEND_DIST')
+    _env_dist = os.environ.get(WEB_ENV.frontend_dist)
     frontend_dist = Path(_env_dist) if _env_dist else Path(__file__).resolve().parents[1] / 'frontend' / 'dist'
     if frontend_dist.is_dir():
-        app.mount('/app', StaticFiles(directory=str(frontend_dist), html=True), name='frontend')
+        app.mount(
+            WEB_BACKEND_CONFIG.defaults.frontend_base_path,
+            StaticFiles(directory=str(frontend_dist), html=True),
+            name='frontend',
+        )
 
     branding_dir = Path(__file__).resolve().parents[2] / 'respro' / 'report' / 'static'
 
@@ -69,7 +77,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     def health() -> ApiEnvelope:
         return ApiEnvelope(
             data={
-                'service': 'respro-web-api',
+                'service': WEB_BACKEND_CONFIG.defaults.service_name,
                 'project_db': str(config.project_db),
                 'results_db': str(config.results_db),
                 'output_dir': str(config.data_dir),
@@ -346,7 +354,7 @@ def _user_facing_error_message(raw_message: str | None) -> str:
 
 def _resolve_cors_origins(api_token: str) -> list[str]:
     """Resolve CORS origins from env with secure defaults for local development."""
-    configured = os.getenv('RESPRO_WEB_CORS_ORIGINS', '').strip()
+    configured = os.getenv(WEB_ENV.cors_origins, '').strip()
     if configured:
         origins = [value.strip() for value in configured.split(',') if value.strip()]
         if origins:
@@ -355,12 +363,13 @@ def _resolve_cors_origins(api_token: str) -> list[str]:
     if api_token:
         return ['*']
 
-    return ['http://127.0.0.1:5173', 'http://localhost:5173']
+    return list(WEB_BACKEND_CONFIG.defaults.cors_local_origins)
 
 
 def _resolve_upload_rate_limit() -> str:
     """Return the configured upload rate limit string."""
-    return os.getenv('RESPRO_WEB_UPLOAD_RATE_LIMIT', '5/minute').strip() or '5/minute'
+    default = WEB_BACKEND_CONFIG.defaults.upload_rate_limit
+    return os.getenv(WEB_ENV.upload_rate_limit, default).strip() or default
 
 
 def _rate_limit_key(request: Request) -> str:
@@ -382,7 +391,7 @@ def _rate_limit_key(request: Request) -> str:
 
 def _create_rate_limiter() -> Limiter:
     """Create the shared upload limiter, using Redis storage when configured."""
-    redis_url = os.getenv('REDIS_URL', '').strip()
+    redis_url = os.getenv(WEB_ENV.redis_url, '').strip()
     if redis_url:
         return Limiter(key_func=_rate_limit_key, storage_uri=redis_url)
     return Limiter(key_func=_rate_limit_key)
@@ -418,8 +427,8 @@ def require_api_token(
 
 def run() -> None:
     """Run the web API with uvicorn."""
-    host = os.getenv('RESPRO_WEB_HOST', '127.0.0.1')
-    port = int(os.getenv('RESPRO_WEB_PORT', '8000'))
+    host = os.getenv(WEB_ENV.host, WEB_BACKEND_CONFIG.defaults.web_host)
+    port = int(os.getenv(WEB_ENV.port, str(WEB_BACKEND_CONFIG.defaults.web_port)))
     uvicorn.run(create_app(), host=host, port=port, reload=False)
 
 
