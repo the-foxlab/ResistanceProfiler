@@ -5,10 +5,10 @@
 
   <!-- Alignment blocks -->
   <g transform="translate(20,55)">
-    <rect x="0"  y="-18" width="40" height="8" fill="#111827"/>
+    <rect x="0"  y="-18" width="40" height="8" fill="#45577e"/>
     <rect x="10" y="-6"  width="40" height="8" fill="#0f766e"/>
-    <rect x="5"  y="6"   width="40" height="8" fill="#111827"/>
-    <rect x="15" y="18"  width="40" height="8" fill="#111827"/>
+    <rect x="5"  y="6"   width="40" height="8" fill="#45577e"/>
+    <rect x="15" y="18"  width="40" height="8" fill="#45577e"/>
   </g>
 
   <!-- Shifted box -->
@@ -16,5 +16,5 @@
 
   <!-- Text -->
   <text x="100" y="67" class="t" fill="white">Resistance</text>
-  <text x="280" y="67" class="t" fill="#111827">Profiler</text>
+  <text x="280" y="67" class="t" fill="#45577e">Profiler</text>
 </svg>
