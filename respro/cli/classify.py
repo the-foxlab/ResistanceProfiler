@@ -86,7 +86,12 @@ def classify(
         ),
     ] = '',
 ) -> None:
-    """Set one manual sample classification for a stored run."""
+    """
+    Set one manual sample classification for a stored run in a local results database.
+
+    If the result is regenerated from the same results DB later, this classification will be preserved and
+    shown in the report html.
+    """
     if not any([phenotype, clinical_phenotype, ic50, fold_ic50]):
         raise click.UsageError(
             'At least one of --phenotype, --clinical-phenotype, --ic50, or --fold-ic50 must be provided.'

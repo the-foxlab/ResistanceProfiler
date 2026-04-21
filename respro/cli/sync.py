@@ -203,11 +203,12 @@ def sync(
     ] = None,
 ) -> None:
     """
-    Re-annotate a stored run against the current project database and update stored results.
+    Re-annotate a stored run in a local database against the current project database and update stored results.
 
     Loads raw variant calls from the results database, re-runs annotation and rule matching
     against the live project DB, replaces stored variant_result and combo-hit rows, and
     updates resistance_hits and combo_hits counters. Requires a project fingerprint match.
+    This is useful if the project database has been updated with new rules since the original run.
 
     If --run-id is omitted, all runs in the results database are attempted; runs with a
     fingerprint mismatch are skipped and reported.

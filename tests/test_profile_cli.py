@@ -2,6 +2,7 @@
 Tests for the CLI profile-vcf command — end-to-end integration.
 """
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -43,6 +44,68 @@ class TestProfileCli:
         assert 'ResistanceProfiler' in html
         assert 'Test Project' in html
         assert 'tiny_ref' in html
+
+    def test_profile_vcf_writes_optional_json_export(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        output_dir = tmp_path / 'results_json'
+        results_db = tmp_path / 'results_json.db'
+        runner = CliRunner()
+        result = runner.invoke(app, [
+            'vcf',
+            '--project', str(project_db),
+            '--vcf', str(sample_vcf),
+            '--ref-fasta', str(sample_ref_fasta),
+            '--output', str(output_dir),
+            '--results-db', str(results_db),
+            '--export', 'json',
+            '--min-af', '0.01',
+            '--min-depth', '0',
+        ])
+        assert result.exit_code == 0, result.output
+
+        json_path = output_dir / f'{sample_vcf.stem}.results.json'
+        assert json_path.exists()
+        payload = json.loads(json_path.read_text(encoding='utf-8'))
+        assert set(payload.keys()) == {
+            'run',
+            'variant_result',
+            'coverage_gap',
+            'combo_rule_hit',
+            'sample_classification',
+        }
+        assert 'id' not in payload['run']
+        assert all('run_id' not in row for row in payload['variant_result'])
+
+    def test_profile_vcf_writes_optional_tabular_export(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        output_dir = tmp_path / 'results_tabular'
+        runner = CliRunner()
+        result = runner.invoke(app, [
+            'vcf',
+            '--project', str(project_db),
+            '--vcf', str(sample_vcf),
+            '--ref-fasta', str(sample_ref_fasta),
+            '--output', str(output_dir),
+            '--export', 'tabular',
+            '--min-af', '0.01',
+            '--min-depth', '0',
+        ])
+        assert result.exit_code == 0, result.output
+
+        tsv_path = output_dir / f'{sample_vcf.stem}.mutations.tsv'
+        assert tsv_path.exists()
+        first_line = tsv_path.read_text(encoding='utf-8').splitlines()[0]
+        assert first_line.startswith('gene\tnt_change\taa_change')
 
     def test_profile_produces_html(
         self,

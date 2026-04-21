@@ -93,8 +93,9 @@ Mark items done and update priorities after each completed milestone.
 - [X] Drug metadata in report — PubChem URL as clickable link
 - [X] Combo rule hits displayed in report
 - [X] GitHub logo linked to repository; star badge shown
-- [X] JSON export — full variant + combo rule hit data (`results.json`)
-- [X] TSV export removed — dead code, never exposed in CLI; `write_tsv` / `to_tsv_string` and `export.py` deleted
+- [X] Optional CLI exports — `respro vcf` and `respro fasta` now support `--export json|tabular` while always writing HTML
+- [X] JSON export — full report-context output (`*.results.json`) including summary tables, annotations, combo hits, and bibliography
+- [X] Tabular export — database-hit table as TSV (`*.mutations.tsv`) with one row per matched database rule hit
 - [X] Deterministic output filenames — safe stem derived from input VCF/FASTA name
 - [X] Bilingual interpretation summary section in HTML report — concise EN/DE "Befundtext" above mutation overview with phenotype/clinical evidence counts per drug, IC50/Fold-IC50 range mentions, similarity evidence summary, and high-impact variant warning
 
@@ -192,6 +193,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] BAM file upload support — new `/api/upload/bam` endpoint with BAM magic byte validation (BAM\x01); supports files up to 1GB; integrated into VCF profiling card as optional coverage input
 - [X] Unified dashboard shell and in-app report integration — frontend now uses a cohesive scientific dashboard with global database card, left mode sidebar (Profile VCF, Profile FASTA, Browse mutations, Report), app-level branding links/logo/favicon, and report viewing in an in-app modal instead of opening new browser tabs; report CSS harmonized with web app styling tokens
 - [X] Database analytics tiles in Web UI — Database tab now shows structured metadata cards plus a responsive 2-column plot grid with per-reference/gene mutation-position charts and optional IC50/drug summary plots derived from the loaded rules
+- [X] Report artifact downloads in web app — profiling jobs now emit HTML + JSON + tabular outputs; report panel adds direct JSON/tabular download buttons and backend `/api/artifact` serves non-HTML files from the allowed data directory
 
 ---
 
@@ -199,22 +201,6 @@ Mark items done and update priorities after each completed milestone.
 
 Items are grouped by theme and ordered by priority within each group.
 Priority: 🔴 high · 🟡 medium · 🟢 low
-
-### Traceability
-
-- 🟡 Per-run manifest and duplicate detection — store an immutable `run_manifest` JSON blob on the
-  `run` row in `results.db`; the manifest captures everything needed to reproduce a run: input
-  checksums (VCF/FASTA SHA-256, project DB SHA-256), effective CLI parameters, `respro` version,
-  Python version, project fingerprint, and the `project.updated_at` snapshot used at profiling
-  time; derive a stable `run_fingerprint` (SHA-256 of the canonical manifest) and store it
-  alongside the manifest; use this fingerprint to detect duplicate profiling inputs and surface
-  that information to the user, but do not silently reuse or overwrite mutable run rows because
-  later `runs sync` and manual `runs classify` operations make a stored run diverge from its
-  original profiling state; surface the manifest in `results.json` and in the HTML report metadata
-  so every exported artefact is self-describing and auditable
-- 🟢 Show run provenance in HTML report — embed the run ID, run fingerprint, project fingerprint,
-  and project-updated-at snapshot in the report metadata/header so the report is self-describing
-  without requiring a separate results-database UUID
 
 ### Overlapping ORFs
 

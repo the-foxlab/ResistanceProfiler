@@ -23,6 +23,13 @@ profile_queue_name = 'profiling'
 frontend_base_path = '/app'
 service_name = 'respro-web-api'
 
+[defaults.profile]
+sample_name = 'sample'
+threads = 1
+aligner = 'mappy'
+min_af = 0.01
+min_depth = 10
+
 [defaults.upload]
 max_fasta_size = 52428800
 max_vcf_size = 209715200

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import mimetypes
 import os
 from pathlib import Path
 
@@ -204,15 +205,16 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
+        profile_defaults = WEB_BACKEND_CONFIG.defaults.profile
         job = queue.enqueue(
             run_profile_fasta,
             project_db=str(config.project_db),
             results_db=str(config.results_db),
             output_dir=str(config.data_dir),
             fasta_path=payload.fasta_path,
-            sample=payload.sample,
-            threads=payload.threads,
-            aligner=payload.aligner,
+            sample=payload.sample or profile_defaults.sample_name,
+            threads=payload.threads if payload.threads is not None else profile_defaults.threads,
+            aligner=payload.aligner or profile_defaults.aligner,
         )
         return JobSubmitResponse(job_id=job.id)
 
@@ -222,6 +224,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
+        profile_defaults = WEB_BACKEND_CONFIG.defaults.profile
         job = queue.enqueue(
             run_profile_vcf,
             project_db=str(config.project_db),
@@ -229,12 +232,12 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             output_dir=str(config.data_dir),
             vcf_path=payload.vcf_path,
             ref_fasta_path=payload.ref_fasta_path,
-            sample=payload.sample,
-            min_af=payload.min_af,
-            min_depth=payload.min_depth,
+            sample=payload.sample or profile_defaults.sample_name,
+            min_af=payload.min_af if payload.min_af is not None else profile_defaults.min_af,
+            min_depth=payload.min_depth if payload.min_depth is not None else profile_defaults.min_depth,
             bam_path=payload.bam_path,
-            threads=payload.threads,
-            aligner=payload.aligner,
+            threads=payload.threads if payload.threads is not None else profile_defaults.threads,
+            aligner=payload.aligner or profile_defaults.aligner,
         )
         return JobSubmitResponse(job_id=job.id)
 
@@ -266,6 +269,24 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         if not report_path.is_file():
             raise HTTPException(status_code=404, detail='Report not found.')
         return FileResponse(str(report_path), media_type='text/html')
+
+    @app.get('/api/artifact')
+    def download_artifact(
+        path: str = Query(...),
+        _auth: None = Depends(require_api_token),
+    ) -> FileResponse:
+        artifact_path = Path(path).expanduser().resolve()
+        if not is_path_within_allowed_roots(artifact_path, (config.data_dir,)):
+            raise HTTPException(status_code=400, detail='Artifact path is outside allowed output directory.')
+        if not artifact_path.is_file():
+            raise HTTPException(status_code=404, detail='Artifact not found.')
+
+        media_type = mimetypes.guess_type(str(artifact_path))[0] or 'application/octet-stream'
+        return FileResponse(
+            str(artifact_path),
+            media_type=media_type,
+            filename=artifact_path.name,
+        )
 
     @app.get('/api/branding/logo.svg')
     def branding_logo() -> FileResponse:

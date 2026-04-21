@@ -78,6 +78,14 @@ respro fasta \
     --project project.db \
     --fasta sample_consensus.fasta \
     --output report/
+
+# Optional: emit one extra artifact in addition to HTML
+respro vcf \
+    --project project.db \
+    --vcf sample.vcf \
+    --ref-fasta sample_ref.fasta \
+    --output report/ \
+    --export json      # or: --export tabular
 ```
 
 Repeat runs automatically reuse cached query-reference mappings when the same

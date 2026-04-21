@@ -68,7 +68,7 @@ class TestSaveUploadStream:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(upload_service, 'MAX_FASTA_SIZE', 8)
+        monkeypatch.setattr(upload_service, '_max_size_for_type', lambda _file_type: 8)
         payload = b'>seq\nATCGATCG\n'
         upload = _FakeUploadFile(payload)
 

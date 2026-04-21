@@ -9,9 +9,9 @@ class ProfileFastaPayload(BaseModel):
     """Payload for FASTA profiling."""
 
     fasta_path: str
-    sample: str = 'sample'
-    threads: int = 1
-    aligner: str = 'mappy'
+    sample: str | None = None
+    threads: int | None = None
+    aligner: str | None = None
 
 
 class ProfileVcfPayload(BaseModel):
@@ -19,12 +19,12 @@ class ProfileVcfPayload(BaseModel):
 
     vcf_path: str
     ref_fasta_path: str
-    sample: str = 'sample'
-    min_af: float = 0.01
-    min_depth: int = 10
+    sample: str | None = None
+    min_af: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_depth: int | None = Field(default=None, ge=0)
     bam_path: str | None = None
-    threads: int = 1
-    aligner: str = 'mappy'
+    threads: int | None = None
+    aligner: str | None = None
 
 
 class ApiEnvelope(BaseModel):

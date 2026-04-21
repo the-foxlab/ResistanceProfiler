@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import click
 import typer
@@ -59,11 +59,19 @@ def _profile_fasta_command(
         )
     ] = False,
     aligner: Annotated[
+        Literal['mappy', 'pairwise'],
         str, typer.Option(
             '--aligner', '-a',
             help="Alignment backend for query FASTA matching: 'pairwise' (Biopython) or 'mappy' (minimap2, default). Mappy is faster for long references.",
         )
     ] = 'mappy',
+    export: Annotated[
+        Literal['json', 'tabular'] | None,
+        typer.Option(
+            '--export',
+            help='Optional extra export format in addition to HTML.',
+        ),
+    ] = None,
 ) -> None:
     """
     Run resistance profiling on a consensus FASTA sequence.
@@ -137,6 +145,7 @@ def _profile_fasta_command(
             coverage_gaps=coverage_gaps,
             query_sequence=query_seq,
             gene_matches=fasta_matches,
+            extra_export_format=export.lower() if export else None,
         )
 
         _print_completion_panel(console, '✓ Profiling complete', result, outputs)

@@ -908,6 +908,25 @@ class TestFastaConsensusCli:
         assert result.exit_code == 0, result.output
         assert '0 database hit' in result.output
 
+    def test_fasta_consensus_writes_optional_json_export(
+        self, fasta_db: Path, tmp_path: Path,
+    ) -> None:
+        fasta_path = tmp_path / 'identical_json.fasta'
+        fasta_path.write_text(f'>identical\n{TINY_REF_SEQ}\n')
+
+        output_dir = tmp_path / 'out_json'
+        result = CliRunner().invoke(app, [
+            'fasta',
+            '--project', str(fasta_db),
+            '--fasta', str(fasta_path),
+            '--output', str(output_dir),
+            '--export', 'json',
+        ])
+
+        assert result.exit_code == 0, result.output
+        json_path = output_dir / f'{fasta_path.stem}.results.json'
+        assert json_path.exists()
+
 
 # ──────────────────────────────────────────────────────────────────────
 # FASTA alignment: insertion annotation

@@ -230,7 +230,11 @@ class TestWebApi:
         assert result['sample_name'] == 'web-fasta'
         assert result['run_id'] >= 1
         assert result['report_html_path'].endswith('.report.html')
+        assert result['report_json_path'].endswith('.results.json')
+        assert result['report_tabular_path'].endswith('.mutations.tsv')
         assert Path(result['report_html_path']).is_file()
+        assert Path(result['report_json_path']).is_file()
+        assert Path(result['report_tabular_path']).is_file()
 
     def test_profile_vcf(
         self,
@@ -260,7 +264,11 @@ class TestWebApi:
         assert result['sample_name'] == 'web-vcf'
         assert result['run_id'] >= 1
         assert result['report_html_path'].endswith('.report.html')
+        assert result['report_json_path'].endswith('.results.json')
+        assert result['report_tabular_path'].endswith('.mutations.tsv')
         assert Path(result['report_html_path']).is_file()
+        assert Path(result['report_json_path']).is_file()
+        assert Path(result['report_tabular_path']).is_file()
 
     def test_profile_vcf_reports_reference_mismatch_clearly(
         self,

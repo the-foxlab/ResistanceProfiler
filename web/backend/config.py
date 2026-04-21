@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-import tomllib
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,19 @@ class WebDefaults:
     profile_queue_name: str
     frontend_base_path: str
     service_name: str
+    profile: 'WebProfileDefaults'
     upload: 'WebUploadDefaults'
+
+
+@dataclass(frozen=True)
+class WebProfileDefaults:
+    """Default profiling parameters for web API requests."""
+
+    sample_name: str
+    threads: int
+    aligner: str
+    min_af: float
+    min_depth: int
 
 
 @dataclass(frozen=True)
@@ -73,6 +85,7 @@ def _load_web_backend_config() -> WebBackendConfig:
     env_payload = payload['env']
     defaults_payload = payload['defaults']
     upload_payload = defaults_payload['upload']
+    profile_payload = defaults_payload['profile']
 
     env = WebEnvKeys(
         data_dir=str(env_payload['data_dir']),
@@ -99,6 +112,13 @@ def _load_web_backend_config() -> WebBackendConfig:
         profile_queue_name=str(defaults_payload['profile_queue_name']),
         frontend_base_path=str(defaults_payload['frontend_base_path']),
         service_name=str(defaults_payload['service_name']),
+        profile=WebProfileDefaults(
+            sample_name=str(profile_payload['sample_name']),
+            threads=int(profile_payload['threads']),
+            aligner=str(profile_payload['aligner']),
+            min_af=float(profile_payload['min_af']),
+            min_depth=int(profile_payload['min_depth']),
+        ),
         upload=WebUploadDefaults(
             max_fasta_size=int(upload_payload['max_fasta_size']),
             max_vcf_size=int(upload_payload['max_vcf_size']),

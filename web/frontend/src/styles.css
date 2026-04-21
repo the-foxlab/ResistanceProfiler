@@ -329,23 +329,25 @@ th {
   margin: 0.25rem 0;
 }
 
-.database-meta-grid {
+.database-meta-panel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-
-.database-meta-item {
-  display: grid;
-  gap: 0.2rem;
-  padding: 0.75rem 0.8rem;
+  gap: 0.45rem;
+  padding: 0.85rem 0.95rem;
   border: 1px solid #dbe6ee;
   border-radius: var(--radius-md);
   background: #ffffff;
-  min-width: 0;
+  margin-bottom: 0.8rem;
 }
 
-.database-meta-item {
+.database-meta-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 180px) minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: start;
+  padding: 0.2rem 0;
+}
+
+.database-meta-value {
   font-size: 0.95rem;
   line-height: 1.3;
   word-break: break-word;
@@ -365,10 +367,6 @@ th {
 }
 
 .database-plots-tile .workspace-output-header {
-  margin-bottom: 0.8rem;
-}
-
-.database-plots-tile .database-meta-grid {
   margin-bottom: 0.8rem;
 }
 
@@ -882,7 +880,7 @@ th {
 }
 
 .profile-upload-row-vcf {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .profile-upload-row label {
@@ -890,7 +888,35 @@ th {
 }
 
 .report-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.5rem;
   margin-top: 0;
+}
+
+.report-actions select {
+  flex: 1 1 auto;
+  min-width: 220px;
+}
+
+.report-actions .report-action-btn {
+  flex: 0 0 9.5rem;
+  min-width: 9.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.report-actions .download-action-btn {
+  background: #1f4f7a;
+  border-color: #1f4f7a;
+}
+
+.report-actions .download-action-btn:hover {
+  background: #173d5f;
+  border-color: #173d5f;
 }
 
 .sidebar-icon-mask {
@@ -1178,12 +1204,16 @@ th.sortable-col {
   }
 
   .database-plot-grid,
-  .database-meta-grid,
   .database-summary-grid,
   .database-summary-row,
   .database-reference-plot-grid,
   .about-grid {
     grid-template-columns: 1fr;
+  }
+
+  .database-meta-row {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
   }
 
   .database-phenotype-switch-row {

@@ -29,17 +29,6 @@ function _isPopulated(value) {
   return value !== null && value !== undefined && String(value).trim() !== '';
 }
 
-function _displayValue(value, fallback = 'n/a') {
-  return _isPopulated(value) ? String(value) : fallback;
-}
-
-function _listValue(values) {
-  if (!Array.isArray(values) || values.length === 0) {
-    return 'n/a';
-  }
-  return values.join(', ');
-}
-
 export function DashboardView({
   API_BASE,
   PROFILE_MODES,
@@ -78,6 +67,7 @@ export function DashboardView({
   runSelectedProfile,
   openSelectedReportInline,
   buildReportUrl,
+  buildArtifactUrl,
   uploadFastaFile,
   uploadVcfFile,
   uploadReferenceFile,
@@ -94,6 +84,10 @@ export function DashboardView({
     [rules, mutationPlotMeta, requestedPhenotypeMode, requestedBinSize]
   );
   const activePhenotypeMode = phenotypeMode.activeMode;
+  const selectedReportOption = useMemo(
+    () => reportOptions.find((option) => option.path === selectedProfileReportPath) || null,
+    [reportOptions, selectedProfileReportPath]
+  );
 
   const databaseInfoEntries = useMemo(() => {
     if (!selectedDatabase) {
@@ -106,8 +100,6 @@ export function DashboardView({
       { key: 'uuid', label: 'UUID', value: selectedDatabase.uuid },
       { key: 'created_at', label: 'Created at', value: selectedDatabase.created_at },
       { key: 'schema_version', label: 'Schema version', value: selectedDatabase.schema_version },
-      { key: 'supported_organisms', label: 'Organisms', value: _listValue(selectedDatabase.supported_organisms) },
-      { key: 'mutation_count', label: 'Mutation entries', value: selectedDatabase.mutation_count },
       { key: 'maintainers', label: 'Maintainers', value: metadata.maintainers },
       { key: 'contact', label: 'Contact', value: metadata.contact },
       { key: 'publication_pmid', label: 'Publication PMID', value: metadata.publication_pmid },
@@ -265,6 +257,39 @@ export function DashboardView({
                             onChange={(event) => setVcfInput({ ...vcfInput, sample: event.target.value })}
                           />
                         </label>
+                        <label>
+                          <span className="label-text">Frequency cutoff <span className="field-optional">(min AF)</span></span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="1"
+                            step="0.001"
+                            value={vcfInput.min_af}
+                            onChange={(event) => {
+                              const value = Number(event.target.value);
+                              if (!Number.isFinite(value)) {
+                                return;
+                              }
+                              setVcfInput({ ...vcfInput, min_af: value });
+                            }}
+                          />
+                        </label>
+                        <label>
+                          <span className="label-text">Coverage cutoff <span className="field-optional">(min depth)</span></span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={vcfInput.min_depth}
+                            onChange={(event) => {
+                              const value = Number(event.target.value);
+                              if (!Number.isFinite(value)) {
+                                return;
+                              }
+                              setVcfInput({ ...vcfInput, min_depth: Math.trunc(value) });
+                            }}
+                          />
+                        </label>
                       </div>
                     </>
                   ) : (
@@ -362,7 +387,7 @@ export function DashboardView({
                   </select>
                   <button
                     type="button"
-                    className="button-link"
+                    className="button-link report-action-btn"
                     onClick={openSelectedReportInline}
                     disabled={!selectedProfileReportPath}
                   >
@@ -370,7 +395,7 @@ export function DashboardView({
                   </button>
                   <button
                     type="button"
-                    className="button-link"
+                    className="button-link report-action-btn"
                     onClick={() => {
                       if (selectedProfileReportPath) {
                         window.open(buildReportUrl(selectedProfileReportPath), '_blank', 'noopener,noreferrer');
@@ -379,6 +404,30 @@ export function DashboardView({
                     disabled={!selectedProfileReportPath}
                   >
                     Open in new tab
+                  </button>
+                  <button
+                    type="button"
+                    className="button-link report-action-btn download-action-btn"
+                    onClick={() => {
+                      if (selectedReportOption?.jsonPath) {
+                        window.open(buildArtifactUrl(selectedReportOption.jsonPath), '_blank', 'noopener,noreferrer');
+                      }
+                    }}
+                    disabled={!selectedReportOption?.jsonPath}
+                  >
+                    Download JSON
+                  </button>
+                  <button
+                    type="button"
+                    className="button-link report-action-btn download-action-btn"
+                    onClick={() => {
+                      if (selectedReportOption?.tabularPath) {
+                        window.open(buildArtifactUrl(selectedReportOption.tabularPath), '_blank', 'noopener,noreferrer');
+                      }
+                    }}
+                    disabled={!selectedReportOption?.tabularPath}
+                  >
+                    Download tabular
                   </button>
                 </div>
                 {inlineReportPath ? (
@@ -516,22 +565,24 @@ export function DashboardView({
                 {selectedDatabase ? (
                   <>
                   {databaseInfoEntries.length > 0 ? (
-                    <div className="database-meta-grid">
+                    <section className="database-meta-panel" aria-label="Database information">
                       {databaseInfoEntries.map((entry) => (
-                        <div key={entry.key} className="database-meta-item">
+                        <div key={entry.key} className="database-meta-row">
                           <span className="database-meta-label">{entry.label}</span>
-                          {entry.key === 'website' ? (
-                            <a href={String(entry.value)} target="_blank" rel="noreferrer">{entry.value}</a>
-                          ) : entry.key === 'publication_doi' ? (
-                            <a href={`https://doi.org/${String(entry.value).replace(/^https?:\/\/doi\.org\//i, '')}`} target="_blank" rel="noreferrer">
-                              {entry.value}
-                            </a>
-                          ) : (
-                            <span>{entry.value}</span>
-                          )}
+                          <span className="database-meta-value">
+                            {entry.key === 'website' ? (
+                              <a href={String(entry.value)} target="_blank" rel="noreferrer">{entry.value}</a>
+                            ) : entry.key === 'publication_doi' ? (
+                              <a href={`https://doi.org/${String(entry.value).replace(/^https?:\/\/doi\.org\//i, '')}`} target="_blank" rel="noreferrer">
+                                {entry.value}
+                              </a>
+                            ) : (
+                              entry.value
+                            )}
+                          </span>
                         </div>
                       ))}
-                    </div>
+                    </section>
                   ) : null}
                   {summaryTile || detailSections.length > 0 ? (
                     <div className="database-plot-grid">

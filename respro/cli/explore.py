@@ -2,7 +2,7 @@
 `respro explore` command — browse resistance rules or stored profiling runs.
 """
 
-from __future__ import annotations
+from __future__ import annotations  # noqa: I001
 
 from pathlib import Path
 from typing import Annotated

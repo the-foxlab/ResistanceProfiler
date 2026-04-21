@@ -9,22 +9,6 @@ from typing import Literal, Protocol
 
 from web.backend.config import WEB_BACKEND_CONFIG
 
-upload_defaults = WEB_BACKEND_CONFIG.defaults.upload
-
-# Maximum allowed file sizes (in bytes)
-MAX_FASTA_SIZE = upload_defaults.max_fasta_size
-MAX_VCF_SIZE = upload_defaults.max_vcf_size
-MAX_BAM_SIZE = upload_defaults.max_bam_size
-
-# MIME types to check (informational; not strictly enforced)
-ALLOWED_FASTA_TYPES = set(upload_defaults.allowed_fasta_types)
-ALLOWED_VCF_TYPES = set(upload_defaults.allowed_vcf_types)
-ALLOWED_BAM_TYPES = set(upload_defaults.allowed_bam_types)
-
-UPLOAD_CHUNK_SIZE = upload_defaults.chunk_size
-MAX_FASTA_LINE_LENGTH = upload_defaults.max_fasta_line_length
-MAX_VCF_LINE_LENGTH = upload_defaults.max_vcf_line_length
-MAX_VCF_DATA_LINES = upload_defaults.max_vcf_data_lines
 _ALLOWED_TEXT_CONTROL_BYTES = {9, 10, 13}
 _ALLOWED_FASTA_SEQUENCE_BYTES = {
     ord('A'),
@@ -47,7 +31,6 @@ _ALLOWED_FASTA_SEQUENCE_BYTES = {
     ord('.'),
     ord('*'),
 }
-_BGZF_HEADER_BYTES = upload_defaults.bgzf_header_bytes
 
 
 class UploadStream(Protocol):
@@ -58,11 +41,12 @@ class UploadStream(Protocol):
 
 
 def _max_size_for_type(file_type: Literal['fasta', 'vcf', 'bam']) -> int:
+    upload_defaults = WEB_BACKEND_CONFIG.defaults.upload
     if file_type == 'fasta':
-        return MAX_FASTA_SIZE
+        return upload_defaults.max_fasta_size
     if file_type == 'vcf':
-        return MAX_VCF_SIZE
-    return MAX_BAM_SIZE
+        return upload_defaults.max_vcf_size
+    return upload_defaults.max_bam_size
 
 
 def _extension_for_type(file_type: Literal['fasta', 'vcf', 'bam']) -> str:
@@ -92,8 +76,9 @@ def _validate_stream_chunk(
         _process_vcf_chunk(state, chunk)
         return
 
-    if len(state['first_bytes']) < _BGZF_HEADER_BYTES:
-        missing = _BGZF_HEADER_BYTES - len(state['first_bytes'])
+    bgzf_header_bytes = WEB_BACKEND_CONFIG.defaults.upload.bgzf_header_bytes
+    if len(state['first_bytes']) < bgzf_header_bytes:
+        missing = bgzf_header_bytes - len(state['first_bytes'])
         state['first_bytes'] = state['first_bytes'] + chunk[:missing]
 
 
@@ -119,7 +104,7 @@ def _validate_stream_complete(
             raise ValueError('VCF file does not appear to have valid VCF headers')
         return
 
-    if len(state['first_bytes']) < _BGZF_HEADER_BYTES:
+    if len(state['first_bytes']) < WEB_BACKEND_CONFIG.defaults.upload.bgzf_header_bytes:
         raise ValueError('BAM file is too small')
     if state['first_bytes'][:2] != b'\x1f\x8b':
         raise ValueError('BAM file does not have valid BGZF/gzip magic signature')
@@ -179,9 +164,10 @@ def _validate_fasta_line(state: dict[str, object], raw_line: bytes) -> None:
     state['line_number'] = int(state['line_number']) + 1
     line_number = int(state['line_number'])
 
-    if len(raw_line) > MAX_FASTA_LINE_LENGTH:
+    max_fasta_line_length = WEB_BACKEND_CONFIG.defaults.upload.max_fasta_line_length
+    if len(raw_line) > max_fasta_line_length:
         raise ValueError(
-            f'FASTA file contains line {line_number} longer than {MAX_FASTA_LINE_LENGTH} characters'
+            f'FASTA file contains line {line_number} longer than {max_fasta_line_length} characters'
         )
 
     stripped = raw_line.strip()
@@ -222,8 +208,10 @@ def _validate_vcf_line(state: dict[str, object], raw_line: bytes) -> None:
     state['line_number'] = int(state['line_number']) + 1
     line_number = int(state['line_number'])
 
-    if len(raw_line) > MAX_VCF_LINE_LENGTH:
-        raise ValueError(f'VCF file contains line {line_number} longer than {MAX_VCF_LINE_LENGTH} characters')
+    max_vcf_line_length = WEB_BACKEND_CONFIG.defaults.upload.max_vcf_line_length
+    max_vcf_data_lines = WEB_BACKEND_CONFIG.defaults.upload.max_vcf_data_lines
+    if len(raw_line) > max_vcf_line_length:
+        raise ValueError(f'VCF file contains line {line_number} longer than {max_vcf_line_length} characters')
 
     stripped = raw_line.strip()
     if not stripped:
@@ -244,12 +232,12 @@ def _validate_vcf_line(state: dict[str, object], raw_line: bytes) -> None:
         raise ValueError('VCF file contains data rows before #CHROM header')
 
     state['data_lines'] = int(state['data_lines']) + 1
-    if int(state['data_lines']) > MAX_VCF_DATA_LINES:
-        raise ValueError(f'VCF file exceeds maximum data row count of {MAX_VCF_DATA_LINES}')
+    if int(state['data_lines']) > max_vcf_data_lines:
+        raise ValueError(f'VCF file exceeds maximum data row count of {max_vcf_data_lines}')
 
 
 def _validate_bgzf_header(first_bytes: bytes) -> None:
-    if len(first_bytes) < _BGZF_HEADER_BYTES:
+    if len(first_bytes) < WEB_BACKEND_CONFIG.defaults.upload.bgzf_header_bytes:
         raise ValueError('BAM file is too small')
 
     compression_method = first_bytes[2]
@@ -274,7 +262,7 @@ async def save_upload_stream(
     file_type: Literal['fasta', 'vcf', 'bam'],
     upload_dir: Path,
     *,
-    chunk_size: int = UPLOAD_CHUNK_SIZE,
+    chunk_size: int | None = None,
 ) -> tuple[Path, int]:
     """
     Validate and save uploaded content incrementally.
@@ -286,6 +274,7 @@ async def save_upload_stream(
     :return: saved path and total size in bytes
     :raises ValueError: if file validation fails
     """
+    effective_chunk_size = chunk_size or WEB_BACKEND_CONFIG.defaults.upload.chunk_size
     max_size = _max_size_for_type(file_type)
     validation_state = _new_stream_validation_state(file_type)
 
@@ -296,7 +285,7 @@ async def save_upload_stream(
     try:
         with os.fdopen(fd, 'wb') as handle:
             while True:
-                chunk = await upload_file.read(chunk_size)
+                chunk = await upload_file.read(effective_chunk_size)
                 if not chunk:
                     break
                 total_size += len(chunk)

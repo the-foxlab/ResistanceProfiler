@@ -89,6 +89,8 @@ def profile_fasta(
             rule_gene_names=rule_gene_names,
             project_conn=project_conn,
             rules=rules,
+            extra_export_formats={'json', 'tabular'},
+            project_db_path=project_db.resolve(),
         )
         run_id = save_run(results_conn, project_db.resolve(), project_conn, result)
 
@@ -100,6 +102,8 @@ def profile_fasta(
             'reference_name': result.reference_name,
             'query_name': query_name,
             'report_html_path': str(outputs['html']),
+            'report_json_path': str(outputs.get('json', '')),
+            'report_tabular_path': str(outputs.get('tabular', '')),
             'resistance_hits': result.resistance_hits,
             'total_variants': result.total_variants,
         }
@@ -199,6 +203,8 @@ def profile_vcf(
             rule_gene_names=rule_gene_names,
             project_conn=project_conn,
             rules=rules,
+            extra_export_formats={'json', 'tabular'},
+            project_db_path=project_db.resolve(),
         )
         run_id = save_run(results_conn, project_db.resolve(), project_conn, result)
 
@@ -210,6 +216,8 @@ def profile_vcf(
             'reference_name': result.reference_name,
             'query_name': query_name,
             'report_html_path': str(outputs['html']),
+            'report_json_path': str(outputs.get('json', '')),
+            'report_tabular_path': str(outputs.get('tabular', '')),
             'resistance_hits': result.resistance_hits,
             'total_variants': result.total_variants,
         }

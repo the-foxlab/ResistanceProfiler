@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import csv
+import json
 import logging
 import re
 import sqlite3
@@ -20,6 +22,7 @@ from respro.db.models import (
     ProfilingResult,
     ResistanceRule,
 )
+from respro.db.results import project_fingerprint, project_updated_at
 from respro.report.alignment_visualization import (
     GeneAlignment,
     build_alignment_html,
@@ -1093,6 +1096,160 @@ def write_html(
     return output_path
 
 
+def _strip_html(value: str) -> str:
+    """Collapse simple inline HTML markup used in report cells to plain text."""
+    return re.sub(r'<[^>]+>', '', value)
+
+
+def _format_publication(pub) -> str:
+    """Render one publication object into a compact TSV cell string."""
+    doi = (getattr(pub, 'doi', '') or '').strip()
+    pubmed_id = (getattr(pub, 'pubmed_id', '') or '').strip()
+    raw_input = (getattr(pub, 'raw_input', '') or '').strip()
+    if doi:
+        return f'DOI:{doi}'
+    if pubmed_id:
+        return f'PMID:{pubmed_id}'
+    return raw_input
+
+
+def write_json(
+    result: ProfilingResult,
+    output_path: Path,
+    project_conn: sqlite3.Connection | None = None,
+    project_db_path: Path | None = None,
+) -> Path:
+    """Write one-run JSON with the same information model as results.db rows."""
+    run_payload = {
+        'project_name': result.project_name,
+        'project_db_path': str(project_db_path) if project_db_path else '',
+        'project_fingerprint': project_fingerprint(project_conn) if project_conn is not None else '',
+        'project_updated_at': project_updated_at(project_conn) if project_conn is not None else '',
+        'reference_name': result.reference_name,
+        'sample_name': result.sample_name,
+        'vcf_path': result.vcf_name,
+        'total_variants': result.total_variants,
+        'variants_in_cds': result.variants_in_cds,
+        'resistance_hits': result.resistance_hits,
+        'combo_hits': len(result.combo_hits),
+        'status': 'complete',
+        'created_at': result.run_timestamp,
+    }
+
+    variant_rows = []
+    for ann in result.annotations:
+        v = ann.variant
+        variant_rows.append({
+            'id': None,
+            'chrom': v.chrom,
+            'pos': v.pos,
+            'ref': v.ref,
+            'alt': v.alt,
+            'allele_freq': v.allele_freq,
+            'depth': v.depth,
+            'gene_name': ann.gene_name,
+            'codon_pos': ann.codon_pos,
+            'ref_codon': ann.ref_codon,
+            'alt_codon': ann.alt_codon,
+            'ref_aa': ann.ref_aa,
+            'alt_aa': ann.alt_aa,
+            'consequence': ann.consequence,
+            'af_bin': ann.af_bin,
+            'rule_match': int(ann.is_resistance_hit),
+            'drug_hits': json.dumps(ann.drug_hits_json()),
+        })
+
+    coverage_rows = [
+        {
+            'id': None,
+            'gene_name': gap.gene_name,
+            'codon_start': gap.codon_start,
+            'codon_end': gap.codon_end,
+        }
+        for gap in result.coverage_gaps
+    ]
+
+    combo_rows = [
+        {
+            'id': None,
+            'hit_json': json.dumps(hit.to_dict()),
+        }
+        for hit in result.combo_hits
+    ]
+
+    classification_rows = [
+        {
+            'id': row.get('id'),
+            'drug': row.get('drug', ''),
+            'phenotype': row.get('phenotype', 'unknown'),
+            'clinical_phenotype': row.get('clinical_phenotype', 'unknown'),
+            'ic50': row.get('ic50', ''),
+            'fold_ic50': row.get('fold_ic50', ''),
+            'note': row.get('note', ''),
+            'source': row.get('source', ''),
+            'created_at': row.get('created_at', ''),
+        }
+        for row in result.sample_classifications
+    ]
+
+    payload = {
+        'run': run_payload,
+        'variant_result': variant_rows,
+        'coverage_gap': coverage_rows,
+        'combo_rule_hit': combo_rows,
+        'sample_classification': classification_rows,
+    }
+
+    output_path = Path(output_path)
+    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding='utf-8')
+    logger.info('JSON report written to %s', output_path)
+    return output_path
+
+
+def write_tabular(output_path: Path, db_hit_rows: list[dict]) -> Path:
+    """Write database-hit rows in a tab-separated table format."""
+    output_path = Path(output_path)
+    headers = [
+        'gene',
+        'nt_change',
+        'aa_change',
+        'consequence',
+        'af_bin',
+        'drug',
+        'ic50',
+        'fold_ic50',
+        'phenotype',
+        'clinical_phenotype',
+        'source',
+        'comment',
+        'publications',
+    ]
+    with output_path.open('w', encoding='utf-8', newline='') as handle:
+        writer = csv.writer(handle, delimiter='\t', lineterminator='\n')
+        writer.writerow(headers)
+        for row in db_hit_rows:
+            publications = '; '.join(
+                filter(None, (_format_publication(pub) for pub in row.get('publications', [])))
+            )
+            writer.writerow([
+                row.get('gene', ''),
+                _strip_html(str(row.get('nt_change', ''))),
+                _strip_html(str(row.get('aa_change', ''))),
+                row.get('consequence', ''),
+                row.get('af_bin', ''),
+                row.get('drug', ''),
+                row.get('ic50', ''),
+                row.get('fold_ic50', ''),
+                row.get('phenotype', ''),
+                row.get('clinical_phenotype', ''),
+                row.get('source', ''),
+                row.get('comment', ''),
+                publications,
+            ])
+    logger.info('Tabular report written to %s', output_path)
+    return output_path
+
+
 def _build_output_stem(result: ProfilingResult) -> str:
     """Return a safe basename derived from the profiled VCF/FASTA filename."""
     raw_stem = Path(result.vcf_name).stem.strip() or 'profile'
@@ -1107,6 +1264,8 @@ def export_results(
     rule_gene_names: set[str] | None = None,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
+    extra_export_formats: set[str] | None = None,
+    project_db_path: Path | None = None,
 ) -> dict[str, Path]:
     """
     Write all report outputs to a directory and return a format-to-path mapping.
@@ -1117,11 +1276,18 @@ def export_results(
     :param rule_gene_names: optional set of rule-backed gene names for focused plotting
     :param project_conn: optional project DB connection for drug overview in HTML
     :param rules: optional resistance rules for potential effects table in HTML
+    :param extra_export_formats: optional set of additional output formats ('json', 'tabular')
+    :param project_db_path: optional path to project database used for this run
     :return: dict mapping format names to output file paths
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = _build_output_stem(result)
+
+    requested_formats = set(extra_export_formats or set())
+    unknown_formats = requested_formats - {'json', 'tabular'}
+    if unknown_formats:
+        raise ValueError(f'Unsupported export format(s): {", ".join(sorted(unknown_formats))}')
 
     plot_svg_data: bytes | None = None
     if genes:
@@ -1143,6 +1309,24 @@ def export_results(
     )
 
     outputs: dict[str, Path] = {'html': html_path}
+
+    context: dict | None = None
+    if 'json' in requested_formats:
+        json_path = output_dir / f'{stem}.results.json'
+        write_json(
+            result,
+            json_path,
+            project_conn=project_conn,
+            project_db_path=project_db_path,
+        )
+        outputs['json'] = json_path
+
+    if 'tabular' in requested_formats:
+        context = build_report_context(result, project_conn=project_conn, rules=rules)
+        tabular_path = output_dir / f'{stem}.mutations.tsv'
+        write_tabular(tabular_path, context['db_hit_rows'])
+        outputs['tabular'] = tabular_path
+
     logger.info('Exported report to %s', html_path)
     return outputs
 

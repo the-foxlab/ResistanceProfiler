@@ -10,8 +10,8 @@ import re
 import sqlite3
 from pathlib import Path
 
-from respro.core.annotation import normalize_mutation
 from respro.config.settings import CLI_CONFIG
+from respro.core.annotation import normalize_mutation
 from respro.db.drugs import _get_or_create_drug_id
 from respro.io.publications import fetch_publication_metadata, fetch_pubmed_metadata
 

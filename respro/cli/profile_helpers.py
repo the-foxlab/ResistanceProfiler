@@ -148,6 +148,7 @@ def _finalize_and_export(
     coverage_gaps: list[CoverageGap] | None = None,
     query_sequence: str = '',
     gene_matches: list[GeneMatch] | None = None,
+    extra_export_format: str | None = None,
 ) -> tuple[ProfilingResult, dict]:
     """
     Apply rule matching and AF binning, build the result object, export, and optionally persist.
@@ -173,6 +174,7 @@ def _finalize_and_export(
     :param coverage_gaps: optional list of non-covered codon positions (FASTA mode)
     :param query_sequence: query FASTA sequence used during profiling
     :param gene_matches: gene alignment matches used during profiling
+    :param extra_export_format: optional additional output format ('json' or 'tabular')
     :return: (ProfilingResult, export path dict)
     """
     annotations = match_rules(annotations, rules)
@@ -202,6 +204,8 @@ def _finalize_and_export(
         gene_matches=gene_matches or [],
     )
 
+    requested_export_formats = {extra_export_format} if extra_export_format else set()
+
     outputs = export_results(
         result,
         output_dir,
@@ -209,6 +213,8 @@ def _finalize_and_export(
         rule_gene_names=rule_gene_names,
         project_conn=project_conn,
         rules=rules,
+        extra_export_formats=requested_export_formats if requested_export_formats else None,
+        project_db_path=project_path.resolve(),
     )
 
     if results_conn is not None:

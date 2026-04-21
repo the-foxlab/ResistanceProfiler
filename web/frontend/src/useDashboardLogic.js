@@ -224,6 +224,8 @@ export function useDashboardLogic() {
     ref_fasta_path: '',
     bam_path: null,
     sample: FRONTEND_CONFIG.defaults.sampleName,
+    min_af: FRONTEND_CONFIG.profile.vcf.minAf,
+    min_depth: FRONTEND_CONFIG.profile.vcf.minDepth,
   });
   const [fastaInput, setFastaInput] = useState({
     fasta_path: '',
@@ -373,6 +375,8 @@ export function useDashboardLogic() {
   const reportOptions = sessionResults
     .map((result) => ({
       path: result.report_html_path,
+      jsonPath: result.report_json_path || '',
+      tabularPath: result.report_tabular_path || '',
       label: `${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`,
       mode: result.mode,
     }))
@@ -383,6 +387,13 @@ export function useDashboardLogic() {
   const buildReportUrl = (reportPath) => {
     return buildApiUrl('/api/report', {
       path: reportPath,
+      token: API_TOKEN || undefined,
+    });
+  };
+
+  const buildArtifactUrl = (artifactPath) => {
+    return buildApiUrl('/api/artifact', {
+      path: artifactPath,
       token: API_TOKEN || undefined,
     });
   };
@@ -500,12 +511,17 @@ export function useDashboardLogic() {
     setIsProcessingVcf(true);
     setStatus('Submitting VCF profiling job...');
     try {
+      if (!Number.isFinite(vcfInput.min_af) || vcfInput.min_af < 0 || vcfInput.min_af > 1) {
+        throw new Error('Frequency cutoff (min AF) must be a number between 0 and 1.');
+      }
+      if (!Number.isInteger(vcfInput.min_depth) || vcfInput.min_depth < 0) {
+        throw new Error('Coverage cutoff (min depth) must be an integer greater than or equal to 0.');
+      }
+
       const submitResponse = await apiPost('/api/profile/vcf', {
         ...vcfInput,
         aligner: FRONTEND_CONFIG.profile.aligner,
         threads: FRONTEND_CONFIG.profile.threads,
-        min_af: FRONTEND_CONFIG.profile.vcf.minAf,
-        min_depth: FRONTEND_CONFIG.profile.vcf.minDepth,
       });
       setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
       const result = await pollJob(submitResponse.job_id);
@@ -655,6 +671,7 @@ export function useDashboardLogic() {
     runSelectedProfile,
     openSelectedReportInline,
     buildReportUrl,
+    buildArtifactUrl,
     uploadFastaFile,
     uploadVcfFile,
     uploadReferenceFile,
