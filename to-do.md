@@ -201,6 +201,10 @@ Mark items done and update priorities after each completed milestone.
 - [X] `respro manage results <results_db_path> --delete <run_id>` — delete one stored run (including `variant_result`, `coverage_gap`, `combo_rule_hit`, and `sample_classification` rows) from `results.db` with optional `--force` confirmation bypass
 - [X] `respro add --validate` dry-run mode — execute full rules parsing/validation pipeline without persisting DB changes
 
+### Public release (done)
+
+- [X] Professional documentation — rewritten README with tested CLI/web quickstarts, linked user guides (install, database preparation, TSV format, workflow explanation, basic/detailed CLI tutorials, detailed web hosting, troubleshooting/FAQ, output interpretation), and development architecture/contribution documentation
+
 ---
 
 ## Next
@@ -298,10 +302,10 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   `deploy.resources` requires Docker Compose v3.8+ with `docker compose` (not `docker-compose`
   v1) and has no effect outside Swarm unless the `--compatibility` flag is passed; for Kubernetes
   the equivalent is `resources.limits` in the container spec; document both the scale and the
-  resource-limit approach in `docs/web-deployment.md` with ready-to-copy snippets
+  resource-limit approach in `docs/user/webapp-hosting.md` with ready-to-copy snippets
 - 🟡 HTTPS / reverse-proxy guidance — the current Docker Compose setup binds the web service to
   `127.0.0.1:8000`, which is safe for local use but cannot be reached from outside the host; for
-  a broader deployment add guidance in `docs/web-deployment.md` for placing an nginx or Caddy
+  a broader deployment add guidance in `docs/user/webapp-hosting.md` for placing an nginx or Caddy
   reverse proxy in front of the container that terminates TLS; provide an example Caddy config
   (Caddy auto-provisions Let's Encrypt certificates) with the correct `proxy_pass` and
   `proxy_set_header` directives; add `RESPRO_WEB_TRUSTED_PROXIES` as an optional env variable
@@ -313,7 +317,7 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Deferred: Authorized lab access (persistent mode)
 
-- 🟢 Persistent-mode architecture decision record — add a short ADR in `docs/web-architecture.md`
+- 🟢 Persistent-mode architecture decision record — add a short ADR in `docs/development/contribution-and-architecture.md`
   defining scope as lab-internal multi-user deployment (no public signup), ownership model
   (`user_id` bound to runs/artifacts), and explicit non-goals for MVP (no SSO/MFA/password reset)
 - 🟢 Auth data model and migrations — add `user`, `session_token`, `user_role`, and per-run
@@ -340,10 +344,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 - 🔴 GitHub Actions CI — run the full test suite against all supported Python versions on every
   push to `main`; include a ruff lint check; add a PyPI publish workflow triggered by version tags
-- 🔴 Professional documentation — concise README with a quick-start section; link out to separate
-  Markdown pages for installation, database preparation (GenBank + TSV format), profiling (VCF and
-  FASTA), regeneration, and output formats; follow the style of varVAMP
-  (https://github.com/jonas-fuchs/varVAMP)
 - 🟡 Github action for building a docker image and storing it on github (open - so no pricing)
 - 🟡 Dependabot for dependencies and GitHub Actions — add `.github/dependabot.yml` with weekly
   update checks for `pip` and `github-actions`, grouped PRs where sensible, and automatic security

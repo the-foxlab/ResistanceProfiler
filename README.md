@@ -1,179 +1,113 @@
-# ResistanceProfiler
+![ResistanceProfiler logo](respro/report/static/logo.svg)
 
-A pathogen-agnostic framework for curated, codon-aware antiviral resistance profiling
-from Fasta sequence or NGS-derived variants.
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-2f6db3)
 
-## Installation
+Framework for broadly applicable antiviral resistance profiling from FASTA consensus sequences or VCF-derived variants.
+
+## Why ResistanceProfiler
+
+- Broadly applicable framework instead of a single pathogen- or database-specific workflow
+- Internal project references and curated rules stored in one reusable project database
+- Query sequences and VCF-linked references can be mapped back to internal references before comparison
+- Final profiling is performed on amino-acid mutations after reference normalization
+- CLI-first workflows for initialization, profiling, and regeneration, with an optional web application
+
+Many resistance tools already perform amino-acid or codon-based interpretation. The main value of ResPro is that it lets you curate rules once against internal references and then compare new samples against those rules. It provides a clear and structured framework that can be used for any pathogen. The database autocurates itself (so checks if rules are valid given the provided reference) and new sequences are automatically matched against all references. Afterwards, the best matching one is selected for resistance rule comparision. Its lightning fast. No need to specify which pathogen or using a specific reference. Everything goes automatically.
+
+In the end you get a informative html report that highlights these results. The good thing is that the CLI is made to be incoorporated into existing NGS sequencing workflows and the WebApp is made for non-bioinformatic users.
+
+> [!TIP]
+> ResPro is strongest when the same curated project database is reused across runs. Treat `project.db` as your internal reference contract.
+> [!CAUTION]
+> Rule quality still depends on the quality of the curated TSV source. ResPro validates and normalizes rule entries, but it does not replace biological curation.
+> [!IMPORTANT]
+> This tool relies on already curated and maintained databases and provides a compatibility layer for users to maintained database like [HerpesDRG](https://github.com/ojcharles/herpesdrg-db).
+
+## Quickstart (CLI)
+
+### 1) Install
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-## Quick start
-
-### 1. Initialize a project
+### 2) Initialize a project database
 
 ```bash
 respro init \
-    --name "My HIV Project" \
-    --genbank references.gb \
-    --rules rules.tsv \
-    --output project.db
+    --name "Docs Demo" \
+    --genbank data/demo-alpha/inputs/reference_hsv1.gb \
+    --rules data/demo-alpha/inputs/rules_hsv1.tsv \
+    --output data/demo-alpha/project/project.db \
+    --no-additional-info
 ```
 
-`--genbank` can be provided in two ways:
-
-- one GenBank file containing multiple records; or
-- multiple GenBank files by repeating `--genbank`.
-
-Example with two separate input files:
-
-```bash
-respro init \
-    --name "My HSV Project" \
-    --genbank ref_a.gb \
-    --genbank ref_b.gb \
-    --rules rules.tsv \
-    --output project.db
-```
-
-During initialization `respro` automatically queries
-[PubChem](https://pubchem.ncbi.nlm.nih.gov/) to attach a CID, a canonical URL,
-and a short description to every drug found in the rules file. This information
-is stored in the project database and surfaced in the resistance report as a
-clickable link. No API key is required.
-
-**PubChem lookup is best-effort and never blocks database creation:**
-
-- If a drug name is not recognised by PubChem, the drug is stored without
-  PubChem data and a warning is logged.
-- If the network is unavailable, all drugs are stored without PubChem data and
-  the project is built normally.
-
-To skip PubChem lookup entirely (e.g. in offline environments or CI pipelines):
-
-```bash
-respro init \
-    --name "My HIV Project" \
-    --genbank references.gb \
-    --rules rules.tsv \
-    --output project.db \
-    --no-drug-info
-```
-
-### 2. Profile a sample
-
-```bash
-respro vcf \
-    --project project.db \
-    --vcf sample.vcf \
-    --ref-fasta sample_ref.fasta \
-    --output report/
-```
-
-For consensus FASTA input, use:
+### 3) Run FASTA profiling
 
 ```bash
 respro fasta \
-    --project project.db \
-    --fasta sample_consensus.fasta \
-    --output report/
-
-# Optional: emit one extra artifact in addition to HTML
-respro vcf \
-    --project project.db \
-    --vcf sample.vcf \
-    --ref-fasta sample_ref.fasta \
-    --output report/ \
-    --export json      # or: --export tabular
+    --project data/demo-alpha/project/project.db \
+    --fasta data/demo-alpha/inputs/sample_consensus.fasta \
+    --output data/demo-alpha/output \
+    --results-db data/demo-alpha/results/results.db \
+    --export json
 ```
 
-Repeat runs automatically reuse cached query-reference mappings when the same
-FASTA header and sequence are provided again.
-
-### 3. Add rules to an existing project
-
-If the project database already contains the relevant reference and gene
-annotations, you can add more rules without supplying another GenBank file:
+### 4) Regenerate from stored run
 
 ```bash
-respro add \
-    --project project.db \
-    --rules more_rules.tsv
+respro regenerate \
+    --project data/demo-alpha/project/project.db \
+    --results-db data/demo-alpha/results/results.db \
+    --run-id 1 \
+    --output data/demo-alpha/output \
+    --export tabular
 ```
 
-If you are adding rules together with new references/genes, you can also provide
-additional GenBank input:
+## Quickstart (Web App)
+
+### 1) Install backend dependencies
 
 ```bash
-respro add \
-    --project project.db \
-    --genbank additional_refs.gb \
-    --rules more_rules.tsv
+pip install -r web/backend/requirements.txt
 ```
 
-During `add`, rule duplicates are detected biologically rather than by
-comment fields. A rule is treated as already present if the same reference,
-position, reference amino acid, mutation, and drug already exist in the
-database. Existing rows are kept; incoming `ic50`, `publication`, `source`, or
-other commentary fields do not overwrite them. Drug names are stored in
-lowercase to avoid case-only duplicates.
-
-### 4. Export a portable project bundle
+### 2) Build frontend assets
 
 ```bash
-respro export \
-    --project project.db \
-    --output project_bundle.zip
+npm --prefix web/frontend install
+npm --prefix web/frontend run build
 ```
 
-## Input formats
+### 3) Start the backend
 
-### GenBank input
+```bash
+RESPRO_WEB_PORT=8011 python -m web.backend.main
+```
 
-Project initialisation uses one or more GenBank inputs via `--genbank`.
-Each provided file may itself contain one or more records. For each record,
-`respro` stores:
+Quick smoke checks:
 
-- the reference identifier and accession;
-- the organism / species label where available from the GenBank metadata;
-- taxonomy where available from the GenBank metadata;
-- the reference length;
-- all CDS features as genes, including protein/product name, coordinates, strand,
-  `codon_start`, CDS nucleotide slices, and amino-acid translations.
+- `GET http://127.0.0.1:8011/api/health` returned status `ok`
+- `GET http://127.0.0.1:8011/app/` returned `200`
 
-The project itself is therefore not restricted to a single pathogen. Multi-record
-GenBank files or multiple separate GenBank files can represent multiple related
-pathogens or references in one database.
+## Documentation
 
-Gene identifiers used in the rules file must match the CDS identifiers extracted
-from the GenBank annotations for the corresponding reference.
+### User Documentation
 
-Quality checks during `respro init`:
+- [How to install ResPro](docs/user/install.md)
+- [How to prepare a database](docs/user/database-preparation.md)
+- [How to format the TSV](docs/user/rules-tsv-format.md)
+- [How ResPro works](docs/user/how-respro-works.md)
+- [Basic CLI tutorial](docs/user/cli-basic-tutorial.md)
+- [Detailed CLI tutorial](docs/user/cli-detailed-tutorial.md)
+- [How to run and host the web app (detailed)](docs/user/webapp-hosting.md)
+- [Troubleshooting and FAQ](docs/user/troubleshooting-faq.md)
+- [Output interpretation guide (HTML, JSON, TSV)](docs/user/output-interpretation.md)
 
-- every rules gene must exist in the GenBank CDS annotations;
-- for multi-record GenBank files, ambiguous genes require `reference_identifier`
-  in the rules TSV;
-- unsupported compound CDS locations fail fast.
+### Development Documentation
 
-### Rules TSV
-
-Rules are provided as a tab-separated file with one row per rule member.
-
-Required columns:
-`gene`, `reference_identifier`, `position`, `reference`, `mutation`, `antiviral`
-
-Optional columns:
-`phenotype`, `clinical_phenotype`, one IC50 column (`ic50` or `ic_50` or
-`fold_ic50`), `publication`, `source`, `rule_group`
-
-For the full source of truth, including allowed values per column, mutation
-notation, phenotype normalization, IC50 parsing, and combination-rule syntax,
-see:
-
-- `docs/rules-tsv-format.md`
+- [Detailed development/contribution guidelines and architecture](docs/development/contribution-and-architecture.md)
 
 ## License
 
 MIT
-

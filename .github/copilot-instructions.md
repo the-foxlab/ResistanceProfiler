@@ -4,9 +4,9 @@
 
 ## Primary references
 
-- Repository structure and module responsibilities: `docs/project-structure.md`
-- Planning source of truth and current priorities: `docs/to-do.md`
-- Rules TSV formatting, allowed column values, and mutation notation: `docs/rules-tsv-format.md`
+- Repository structure and module responsibilities: `docs/development/contribution-and-architecture.md`
+- Planning source of truth and current priorities: `to-do.md`
+- Rules TSV formatting, allowed column values, and mutation notation: `docs/user/rules-tsv-format.md`
 - Public project overview and usage examples: `README.md`
 
 Keep this file focused on how code should be written in this repository.
@@ -174,9 +174,13 @@ a collection.
 
 ## Editing guidance
 
-- Align implementation with `docs/to-do.md` priorities unless direct user instructions say otherwise.
+- Align implementation with `to-do.md` priorities unless direct user instructions say otherwise.
 - When changing repository layout or module responsibilities, update
-  `docs/project-structure.md` in the same change.
+  `docs/development/contribution-and-architecture.md` in the same change.
+- When behavior changes can make documentation inaccurate, update affected docs in the same
+  change (at minimum `README.md`, relevant `docs/user/*`, and `docs/development/*` pages).
+- In Markdown docs, do not introduce artificial manual line breaks in normal paragraphs.
+  Keep prose as natural paragraphs and only break lines where structure requires it.
 - Put format-specific parsing in `respro/io/`, domain interpretation in `respro/core/`,
   persistence concerns in `respro/db/`, and rendering/export concerns in `respro/report/`.
 - Keep CLI handlers thin: orchestration belongs in `respro/cli.py`, while reusable logic
@@ -184,7 +188,7 @@ a collection.
 
 ## Planning source of truth
 
-`docs/to-do.md` is the single planning source of truth. Review it before any substantial change.
+`to-do.md` is the single planning source of truth. Review it before any substantial change.
 
 ### Structure
 
