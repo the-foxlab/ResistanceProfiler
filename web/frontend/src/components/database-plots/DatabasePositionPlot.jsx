@@ -12,6 +12,16 @@ import { chartLabelStyle, CLASSIFICATION_COLORS, CLASSIFICATION_LABELS } from '.
 export function DatabasePositionPlot({ plot }) {
   const barGap = 6;
   const axisStyle = chartLabelStyle();
+  const yAxisLabel = {
+    value: 'Mutation count',
+    angle: -90,
+    position: 'left',
+    offset: 8,
+    style: {
+      ...axisStyle,
+      textAnchor: 'middle',
+    },
+  };
 
   return (
     <section className="database-plot-card">
@@ -22,7 +32,7 @@ export function DatabasePositionPlot({ plot }) {
       <div className="database-chart-scroll">
         <div className="database-plot-canvas">
           <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={plot.positions} margin={{ top: 8, right: 12, left: 0, bottom: 8 }} barCategoryGap={barGap}>
+            <BarChart data={plot.positions} margin={{ top: 8, right: 12, left: 24, bottom: 8 }} barCategoryGap={barGap}>
               <CartesianGrid vertical={false} stroke="#dbe6ee" strokeDasharray="3 3" />
               <XAxis
                 dataKey="label"
@@ -35,7 +45,8 @@ export function DatabasePositionPlot({ plot }) {
               <YAxis
                 allowDecimals={false}
                 tick={axisStyle}
-                label={{ value: 'Mutation count', angle: -90, position: 'insideLeft', ...axisStyle }}
+                width={48}
+                label={yAxisLabel}
               />
               {plot.tones.map((tone) => (
                 <Bar

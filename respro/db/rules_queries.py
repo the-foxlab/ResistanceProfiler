@@ -154,3 +154,23 @@ def list_plot_metadata_for_display(
         'references': references,
         'genes': genes,
     }
+
+
+def get_project_summary_for_display(conn: sqlite3.Connection) -> dict:
+    """
+    Return project-level summary and optional curator metadata.
+
+    :param conn: open project DB connection
+    :return: dict with project identity, creation metadata, and optional curated metadata fields
+    """
+    row = conn.execute(
+        'SELECT id, name, uuid, created_at, schema_version, '
+        'metadata_maintainers, metadata_contact, metadata_publication_pmid, '
+        'metadata_publication_doi, metadata_website, metadata_description, '
+        'metadata_maintainer_update, metadata_license, metadata_tsv_checksum '
+        'FROM project ORDER BY id LIMIT 1'
+    ).fetchone()
+    if row is None:
+        raise ValueError('Project DB contains no project metadata.')
+
+    return dict(row)

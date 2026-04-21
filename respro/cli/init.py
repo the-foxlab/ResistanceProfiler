@@ -16,6 +16,7 @@ from rich.console import Console
 
 from respro.db.drugs import _consolidate_drug_names_to_lowercase, _get_drugs_from_pubchem
 from respro.db.genes import _load_genbank_records
+from respro.db.project_metadata import load_metadata_json, store_project_metadata
 from respro.db.rules_import import _load_resistance_rules
 from respro.db.schema import PROJECT_SCHEMA_VERSION, create_schema, open_project_db
 from respro.io.genbank import ParsedGenBankReference, parse_genbank_sources
@@ -35,6 +36,7 @@ def init_project(
     name: str,
     genbank_paths: list[Path],
     rules_tsv: Path,
+    metadata_json: Path | None = None,
     overwrite: bool = False,
     additional_info: bool = True,
 ) -> Path:
@@ -45,6 +47,7 @@ def init_project(
     :param name: project name
     :param genbank_paths: one or more GenBank file paths
     :param rules_tsv: tab-separated resistance rules file
+    :param metadata_json: optional metadata JSON file with curated database metadata
     :param overwrite: if True, delete an existing database at db_path before creating a fresh one
     :param additional_info: if True (default), query PubChem for drug metadata and resolve
         publication DOIs/titles via NCBI and CrossRef; failures are non-fatal
@@ -56,6 +59,7 @@ def init_project(
     for genbank_path in genbank_paths:
         require_file(genbank_path, 'GenBank file')
     require_file(rules_tsv, 'Rules TSV')
+    metadata_payload = load_metadata_json(metadata_json) if metadata_json else {}
 
     genbank_records = parse_genbank_sources(genbank_paths)
 
@@ -70,6 +74,7 @@ def init_project(
         project_id = _insert_project(conn, name)
         _load_genbank_records(conn, project_id, genbank_records)
         _load_resistance_rules(conn, project_id, rules_tsv, additional_info=additional_info)
+        store_project_metadata(conn, project_id, metadata_payload)
         if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
         conn.commit()
@@ -181,6 +186,9 @@ def _init_command(
     output: Annotated[
         Path, typer.Option('--output', '-o', help='Output SQLite database path.')
     ] = Path('project.db'),
+    metadata: Annotated[
+        Path | None, typer.Option('--metadata', exists=True, help='Optional metadata JSON file.')
+    ] = None,
     overwrite: Annotated[
         bool, typer.Option('--overwrite', help='Overwrite existing database.')
     ] = False,
@@ -205,6 +213,7 @@ def _init_command(
                 name=name,
                 genbank_paths=list(genbank_paths),
                 rules_tsv=rules,
+                metadata_json=metadata,
                 overwrite=overwrite,
                 additional_info=additional_info,
             )

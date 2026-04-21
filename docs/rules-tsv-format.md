@@ -11,6 +11,48 @@ It defines:
 - how phenotype and IC50 inputs are normalized during `respro init` and
   `respro init-add`.
 
+## Optional database metadata JSON (`respro init --metadata`)
+
+During `respro init`, you can pass an optional metadata JSON file with
+`--metadata metadata.json`.
+
+The file must be a valid JSON object. All fields are optional, but unknown keys
+are rejected.
+
+Allowed keys:
+
+- `maintainers`
+- `contact`
+- `publication_pmid`
+- `website`
+- `description`
+- `maintainer_update`
+- `license`
+- `tsv_checksum`
+
+Notes:
+
+- `publication_pmid` must contain digits only.
+- When `publication_pmid` is provided, `respro` resolves the DOI best-effort at
+  creation time and stores it alongside the PMID.
+- `tsv_checksum` is intended for externally maintained official database
+  releases (not auto-generated during init).
+
+Boilerplate:
+
+```json
+{
+  "maintainers": ["Curator A", "Curator B"],
+  "contact": "team@example.org",
+  "publication_pmid": "12345678",
+  "website": "https://example.org/database",
+  "description": "Curated antiviral resistance database.",
+  "maintainer_update": "2026-04-21",
+  "license": "CC-BY-4.0",
+  "tsv_checksum": "sha256:..."
+}
+```
+
 ## One row = one rule member
 
 Each TSV row describes one amino-acid rule entry.

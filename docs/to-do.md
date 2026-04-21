@@ -159,6 +159,8 @@ Mark items done and update priorities after each completed milestone.
 - [X] `respro regenerate` — top-level command; re-exports report from stored run with project-fingerprint validation
 - [X] `respro sync` — top-level command; re-annotates stored run against current project DB; replaces variant_result and combo-hit rows; updates resistance_hits; requires fingerprint match; optional `--out` re-exports HTML report
 - [X] Surface sample classifications in report and JSON — dedicated "Manual classifications" section in HTML report and `sample_classifications` key in exported JSON, clearly separated from rule-based hits
+- [X] Optional database metadata in `respro init` — `--metadata` accepts validated JSON with fixed keys (`maintainers`, `contact`, `publication_pmid`, `website`, `description`, `maintainer_update`, `license`, `tsv_checksum`); PMID values are DOI-enriched best-effort at creation time and stored on the project row
+- [X] `respro explore --info` — added project metadata inspection mode that prints non-empty project identity and curated metadata fields
 
 ### Web deployment and security (done)
 
@@ -228,11 +230,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Usability and workflow
 
-- 🟡 `respro info` command — new read-only CLI command that opens `project.db` and prints a
-  human-readable summary of the current project: project name, created-at, schema version,
-  number of references, genes, rules, rule sets, drugs, and publications; implement in
-  `respro/cli/info.py` and register on the Typer app; useful as a quick sanity check after
-  `init` or `init-add` without needing to open the database directly
 - 🟡 `respro runs delete` subcommand — add a `runs delete <run_id>` subcommand under the `explore`
   or a new `runs` command group that removes a single run row (plus its `variant_result`,
   `coverage_gap`, `combo_rule_hit`, and `sample_classification` rows) from `results.db`; accept
@@ -397,8 +394,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   release that runs `respro` against the example data, renders the HTML report, and publishes it
   to GitHub Pages; gives prospective users a live, always-current preview of the report output
   without downloading anything
-- 🟡 Add a --information option to init and init--add (should then overwrite) where we can store some
-  arbitary information with metadata - maybe also a json ? would then be more structured
 - 🟡 Bioconda package — write a Bioconda recipe (`meta.yaml`) and submit a PR to
   bioconda-recipes; Bioconda is the standard distribution channel for bioinformatics CLI tools
   and avoids requiring users to have a working pip/Python setup; dependency on pysam makes

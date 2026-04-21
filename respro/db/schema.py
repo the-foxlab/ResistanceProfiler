@@ -19,6 +19,15 @@ CREATE TABLE IF NOT EXISTS project (
     uuid        TEXT    NOT NULL DEFAULT '',
     created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    metadata_maintainers TEXT NOT NULL DEFAULT '',
+    metadata_contact TEXT NOT NULL DEFAULT '',
+    metadata_publication_pmid TEXT NOT NULL DEFAULT '',
+    metadata_publication_doi TEXT NOT NULL DEFAULT '',
+    metadata_website TEXT NOT NULL DEFAULT '',
+    metadata_description TEXT NOT NULL DEFAULT '',
+    metadata_maintainer_update TEXT NOT NULL DEFAULT '',
+    metadata_license TEXT NOT NULL DEFAULT '',
+    metadata_tsv_checksum TEXT NOT NULL DEFAULT '',
     schema_version INTEGER NOT NULL DEFAULT 1
 );
 
@@ -341,6 +350,15 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'uuid': "TEXT NOT NULL DEFAULT ''",
         # Use static default for ALTER TABLE compatibility (no datetime() in ADD COLUMN).
         'updated_at': "TEXT NOT NULL DEFAULT ''",
+        'metadata_maintainers': "TEXT NOT NULL DEFAULT ''",
+        'metadata_contact': "TEXT NOT NULL DEFAULT ''",
+        'metadata_publication_pmid': "TEXT NOT NULL DEFAULT ''",
+        'metadata_publication_doi': "TEXT NOT NULL DEFAULT ''",
+        'metadata_website': "TEXT NOT NULL DEFAULT ''",
+        'metadata_description': "TEXT NOT NULL DEFAULT ''",
+        'metadata_maintainer_update': "TEXT NOT NULL DEFAULT ''",
+        'metadata_license': "TEXT NOT NULL DEFAULT ''",
+        'metadata_tsv_checksum': "TEXT NOT NULL DEFAULT ''",
     },
     'reference': {
         'accession': "TEXT DEFAULT ''",

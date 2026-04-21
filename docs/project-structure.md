@@ -212,10 +212,13 @@ CLI package. `main.py` defines the root Typer `app` and registers all commands v
 
 Command modules:
 - `init.py` — `respro init`, `respro add`; also contains `init_project` and
-  `add_to_project` orchestration functions
+  `add_to_project` orchestration functions; `respro init` accepts optional
+  `--metadata` JSON for curated database metadata
 - `vcf.py` — `respro vcf`
 - `fasta.py` — `respro fasta`
-- `explore.py` — `respro explore --rules` (browse resistance rules) or `respro explore --results` (browse stored runs)
+- `explore.py` — `respro explore --rules` (browse resistance rules),
+  `respro explore --results` (browse stored runs), or `respro explore --info`
+  (show non-empty project metadata)
 - `regenerate.py` — `respro regenerate` (re-export a stored run's report)
 - `classify.py` — `respro classify` (add manual classification to a run)
 - `sync.py` — `respro sync` (re-annotate a stored run against current project DB)
@@ -295,7 +298,10 @@ SQLite schema and project/results database initialization logic.
   publication token normalization, and `publication` / `rule_publication` / `rule_set_publication`
   row insertion.
 - `rules_queries.py`: read-only rule query helpers (`list_rules_for_display`,
-  `list_references_for_display`) used by the `rules` CLI sub-app.
+  `list_references_for_display`, `get_project_summary_for_display`) used by CLI
+  and web browse layers.
+- `project_metadata.py`: metadata JSON validation and project-row persistence for
+  curated database metadata, including best-effort PMID to DOI enrichment.
 - `results.py`: profiling run persistence — `save_run`, `load_run`, `list_runs`,
   `reconstruct_annotations`, and `project_fingerprint` for cross-DB validation.
 

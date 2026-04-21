@@ -91,6 +91,32 @@ class TestExploreRuns:
 
         assert result.exit_code != 0
 
+    def test_explore_info_shows_non_empty_project_metadata(self, project_db: Path) -> None:
+        conn = open_project_db(project_db)
+        conn.execute(
+            "UPDATE project SET name = ?, uuid = ?, metadata_maintainers = ?, metadata_contact = ?, "
+            "metadata_license = ?, metadata_website = '' WHERE id = 1",
+            (
+                'Metadata Test DB',
+                '123e4567-e89b-12d3-a456-426614174000',
+                'Alice; Bob',
+                'team@example.org',
+                'MIT',
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+        result = CliRunner().invoke(app, ['explore', '--info', str(project_db)])
+
+        assert result.exit_code == 0, result.output
+        assert 'Metadata Test DB' in result.output
+        assert '123e4567-e89b-12d3-a456-426614174000' in result.output
+        assert 'Alice; Bob' in result.output
+        assert 'team@example.org' in result.output
+        assert 'MIT' in result.output
+        assert 'Website' not in result.output
+
 
 class TestRegenerate:
     def test_regenerate_generates_html_report(

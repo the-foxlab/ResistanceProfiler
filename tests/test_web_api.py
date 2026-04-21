@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import fakeredis
@@ -158,6 +159,27 @@ class TestWebApi:
         assert database['display_name']
         assert 'created_at' in database
         assert 'supported_organisms' in database
+
+    def test_databases_endpoint_includes_project_metadata(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        auth_headers: dict[str, str],
+    ) -> None:
+        conn = sqlite3.connect(startup_config.project_db)
+        conn.execute(
+            'UPDATE project SET metadata_maintainers = ?, metadata_contact = ?, metadata_license = ? WHERE id = 1',
+            ('Alice; Bob', 'team@example.org', 'MIT'),
+        )
+        conn.commit()
+        conn.close()
+
+        response = client.get('/api/databases', headers=auth_headers)
+        assert response.status_code == 200
+        database = response.json()['data']['items'][0]
+        assert database['metadata']['maintainers'] == 'Alice; Bob'
+        assert database['metadata']['contact'] == 'team@example.org'
+        assert database['metadata']['license'] == 'MIT'
 
     def test_mutations_endpoint_alias(self, client: TestClient, auth_headers: dict[str, str]) -> None:
         response = client.get('/api/mutations', headers=auth_headers)

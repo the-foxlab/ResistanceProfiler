@@ -113,6 +113,11 @@ th {
   gap: 0.9rem;
 }
 
+.about-tile p,
+.about-tile li {
+  line-height: 1.55;
+}
+
 .about-header {
   display: grid;
   gap: 0.3rem;
@@ -125,6 +130,7 @@ th {
 
 .about-header p {
   color: var(--muted);
+  text-align: justify;
 }
 
 .about-notice {
@@ -138,18 +144,21 @@ th {
 }
 
 .about-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.8rem;
+  display: block;
 }
 
 .about-section-card {
-  display: grid;
-  gap: 0.45rem;
-  border: 1px solid #dbe6ee;
-  border-radius: var(--radius-md);
-  padding: 0.8rem;
-  background: linear-gradient(180deg, #ffffff, #f8fbfe);
+  display: block;
+  margin: 0;
+  padding: 0.95rem 0;
+  border: 0;
+  border-top: 1px solid #dbe6ee;
+  background: transparent;
+}
+
+.about-grid .about-section-card:first-child {
+  border-top: 0;
+  padding-top: 0.2rem;
 }
 
 .about-section-title {
@@ -174,12 +183,26 @@ th {
   margin: 0;
   font-size: 0.88rem;
   color: #23384b;
+  text-align: justify;
 }
 
 .about-section-card ul {
   padding-left: 1.05rem;
-  display: grid;
-  gap: 0.2rem;
+  display: block;
+}
+
+.about-section-card li + li {
+  margin-top: 0.25rem;
+}
+
+.about-section-card p + ul,
+.about-section-card ul + p,
+.about-section-card p + .about-command-block,
+.about-section-card .about-command-block + p,
+.about-section-card p + .about-contact-list,
+.about-section-card .about-contact-list + p,
+.about-section-card p + p {
+  margin-top: 0.45rem;
 }
 
 .about-command-block {
@@ -222,6 +245,20 @@ th {
 
 .about-contact-list a:hover {
   text-decoration: underline;
+}
+
+.about-sponsor {
+  margin-top: 0.5rem;
+}
+
+.about-sponsor-logo {
+  display: block;
+  width: min(100%, 320px);
+  height: auto;
+  border: 1px solid #dbe6ee;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 0.25rem;
 }
 
 .about-backend-note {

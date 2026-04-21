@@ -14,7 +14,11 @@ from rich.console import Console
 from rich.table import Table
 
 from respro.db.results import list_runs
-from respro.db.rules_queries import list_references_for_display, list_rules_for_display
+from respro.db.rules_queries import (
+    get_project_summary_for_display,
+    list_references_for_display,
+    list_rules_for_display,
+)
 from respro.db.schema import open_project_db, open_results_db
 
 
@@ -32,6 +36,22 @@ RULE_COLUMN_LABELS = {
     'publication': 'DOI',
     'source': 'Source',
     'comment': 'Comment',
+}
+
+PROJECT_INFO_LABELS = {
+    'name': 'Name',
+    'uuid': 'UUID',
+    'created_at': 'Created at',
+    'schema_version': 'Schema version',
+    'metadata_maintainers': 'Maintainers',
+    'metadata_contact': 'Contact',
+    'metadata_publication_pmid': 'Publication PMID',
+    'metadata_publication_doi': 'Publication DOI',
+    'metadata_website': 'Website',
+    'metadata_description': 'Description',
+    'metadata_maintainer_update': 'Maintainer update',
+    'metadata_license': 'License',
+    'metadata_tsv_checksum': 'TSV checksum',
 }
 
 
@@ -54,6 +74,15 @@ def explore(
             help='Results database to explore stored profiling runs.',
         ),
     ] = None,
+    info: Annotated[
+        Path | None,
+        typer.Option(
+            '--info',
+            '-i',
+            exists=True,
+            help='Project database to inspect project and curated metadata.',
+        ),
+    ] = None,
     reference: Annotated[
         str | None,
         typer.Option(
@@ -65,17 +94,18 @@ def explore(
     """
     Browse resistance rules in a project database or stored profiling runs in a results database.
 
-    Use either --rules (project DB) or --results (results DB), not both.
+    Use exactly one of --rules, --results, or --info.
     """
-    if not rules and not results:
-        raise click.UsageError('Specify either --rules or --results.')
-    if rules and results:
-        raise click.UsageError('Use either --rules or --results, not both.')
+    selected_modes = [rules is not None, results is not None, info is not None]
+    if sum(selected_modes) != 1:
+        raise click.UsageError('Specify exactly one of --rules, --results, or --info.')
 
     if rules:
         _explore_rules(rules, reference)
-    else:
+    elif results:
         _explore_runs(results)  # type: ignore[arg-type]
+    else:
+        _explore_info(info)  # type: ignore[arg-type]
 
 
 def _explore_rules(project_db: Path, reference: str | None) -> None:
@@ -172,6 +202,58 @@ def _explore_runs(results_db: Path) -> None:
     finally:
         if results_conn is not None:
             results_conn.close()
+
+
+def _explore_info(project_db: Path) -> None:
+    """Show non-empty project metadata fields from a project database."""
+    console = Console(highlight=False)
+    project_conn = None
+    try:
+        project_conn = open_project_db(project_db)
+        info = get_project_summary_for_display(project_conn)
+
+        ordered_keys = [
+            'name',
+            'uuid',
+            'created_at',
+            'schema_version',
+            'metadata_maintainers',
+            'metadata_contact',
+            'metadata_publication_pmid',
+            'metadata_publication_doi',
+            'metadata_website',
+            'metadata_description',
+            'metadata_maintainer_update',
+            'metadata_license',
+            'metadata_tsv_checksum',
+        ]
+
+        rows_to_show: list[tuple[str, str]] = []
+        for key in ordered_keys:
+            value = info.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text == '':
+                continue
+            rows_to_show.append((PROJECT_INFO_LABELS[key], text))
+
+        if not rows_to_show:
+            console.print('No project metadata found.')
+            return
+
+        table = Table(box=box.SIMPLE, header_style='bold cyan', show_edge=False)
+        table.add_column('Field', style='bold')
+        table.add_column('Value')
+        for label, value in rows_to_show:
+            table.add_row(label, value)
+        console.print(table)
+
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    finally:
+        if project_conn is not None:
+            project_conn.close()
 
 
 def register(app: typer.Typer) -> None:

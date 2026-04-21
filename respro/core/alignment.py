@@ -25,6 +25,7 @@ import mappy
 from Bio.Align import PairwiseAligner
 from Bio.Seq import Seq
 
+from respro.core.settings import CORE_CONFIG
 from respro.db.models import GeneMatch, GeneRecord
 
 logger = logging.getLogger(__name__)
@@ -38,8 +39,8 @@ def match_query_to_genes(
     query_sequence: str,
     genes: list[GeneRecord],
     *,
-    min_identity: float = 0.80,
-    min_coverage: float = 0.90,
+    min_identity: float = CORE_CONFIG.alignment.min_identity,
+    min_coverage: float = CORE_CONFIG.alignment.min_coverage,
     threads: int = 1,
     aligner: Literal['pairwise', 'mappy'] = 'pairwise',
 ) -> list[GeneMatch]:

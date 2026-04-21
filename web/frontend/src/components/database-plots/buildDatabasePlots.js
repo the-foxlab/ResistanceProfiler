@@ -225,7 +225,7 @@ function _buildDoiPerDrugPie(rules) {
   const total = ordered.reduce((sum, [, count]) => sum + count, 0);
   return {
     key: 'dois-per-drug',
-    title: 'Unique Publications',
+    title: 'Publications per Drug',
     total,
     centerLabel: 'publications',
     slices: _limitPieSlices(ordered),
@@ -248,9 +248,9 @@ function _buildMutationsPerGenePie(rules) {
   const ordered = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
   return {
     key: 'mutations-per-gene',
-    title: 'Mutations / Gene',
+    title: 'Mutations per Gene',
     total: counts.size,
-    centerLabel: 'unique genes',
+    centerLabel: 'genes',
     slices: _limitPieSlices(ordered),
   };
 }
@@ -280,9 +280,9 @@ function _buildEntriesPerOrganismPie(rules, plotMeta) {
   const ordered = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
   return {
     key: 'entries-per-organism',
-    title: 'Entries / Organism',
+    title: 'Mutations per Organism',
     total: counts.size,
-    centerLabel: 'unique organisms',
+    centerLabel: 'organisms',
     slices: _limitPieSlices(ordered),
   };
 }

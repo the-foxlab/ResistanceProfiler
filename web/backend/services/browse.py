@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from respro.db.rules_queries import (
+    get_project_summary_for_display,
     list_plot_metadata_for_display,
     list_references_for_display,
     list_rules_for_display,
@@ -16,11 +17,19 @@ def list_databases(project_db: Path) -> dict:
     """Return available database metadata for the web UI catalog dropdown."""
     project_conn = open_project_db(project_db)
     try:
-        project_row = project_conn.execute(
-            'SELECT id, name, created_at, schema_version FROM project ORDER BY id LIMIT 1'
-        ).fetchone()
-        if project_row is None:
-            raise ValueError('Project DB contains no project metadata.')
+        project_row = get_project_summary_for_display(project_conn)
+
+        metadata = {
+            'maintainers': project_row.get('metadata_maintainers', ''),
+            'contact': project_row.get('metadata_contact', ''),
+            'publication_pmid': project_row.get('metadata_publication_pmid', ''),
+            'publication_doi': project_row.get('metadata_publication_doi', ''),
+            'website': project_row.get('metadata_website', ''),
+            'description': project_row.get('metadata_description', ''),
+            'maintainer_update': project_row.get('metadata_maintainer_update', ''),
+            'license': project_row.get('metadata_license', ''),
+            'tsv_checksum': project_row.get('metadata_tsv_checksum', ''),
+        }
 
         organisms = [
             row['organism']
@@ -34,10 +43,12 @@ def list_databases(project_db: Path) -> dict:
         item = {
             'id': str(project_row['id']),
             'display_name': project_row['name'],
+            'uuid': project_row['uuid'],
             'created_at': project_row['created_at'],
             'schema_version': project_row['schema_version'],
             'supported_organisms': organisms,
             'mutation_count': mutation_count,
+            'metadata': metadata,
         }
         return {'items': [item], 'count': 1}
     finally:

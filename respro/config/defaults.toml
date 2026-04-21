@@ -15,3 +15,7 @@ ncbi_protein_page = 'https://www.ncbi.nlm.nih.gov/protein/{protein_id}/'
 
 [parsing]
 doi_prefixes = ['https://doi.org/', 'http://doi.org/']
+
+[alignment]
+min_identity = 0.8
+min_coverage = 0.9

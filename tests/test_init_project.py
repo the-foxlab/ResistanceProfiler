@@ -1302,3 +1302,104 @@ class TestAnchorlessDeletion:
                          rules_tsv=tsv, additional_info=False)
 
 
+class TestProjectMetadataInit:
+    def test_init_project_stores_metadata_and_resolves_doi(self, tmp_path) -> None:
+        genbank_path = write_genbank(
+            tmp_path / 'ref.gb',
+            [
+                {
+                    'id': 'myref',
+                    'accession': 'MYREF001',
+                    'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
+                    'genes': [
+                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
+                    ],
+                },
+            ],
+        )
+        rules_path = tmp_path / 'rules.tsv'
+        rules_path.write_text(
+            'gene\treference_identifier\tposition\treference\tmutation\tantiviral\n'
+            'gag\tMYREF001\t2\tK\tE\tTestDrug\n'
+        )
+        metadata_path = tmp_path / 'metadata.json'
+        metadata_path.write_text(
+            '{\n'
+            '  "Maintainers": ["A Curator", "B Curator"],\n'
+            '  "Contact": "team@example.org",\n'
+            '  "Publication": "12345678",\n'
+            '  "Website": "https://example.org/db",\n'
+            '  "Description": "Curated antiviral resistance database.",\n'
+            '  "Maintainer update": "2026-04-21",\n'
+            '  "License": "CC-BY-4.0",\n'
+            '  "TSV checksum": "sha256:abc123"\n'
+            '}\n'
+        )
+
+        db_path = tmp_path / 'project.db'
+        with patch('respro.db.project_metadata.fetch_pubmed_metadata', return_value={'title': 'x', 'doi': '10.1000/test'}):
+            init_project(
+                db_path=db_path,
+                name='Meta Project',
+                genbank_paths=[genbank_path],
+                rules_tsv=rules_path,
+                metadata_json=metadata_path,
+                overwrite=False,
+                additional_info=False,
+            )
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            'SELECT metadata_maintainers, metadata_contact, metadata_publication_pmid, '
+            'metadata_publication_doi, metadata_website, metadata_description, '
+            'metadata_maintainer_update, metadata_license, metadata_tsv_checksum '
+            'FROM project LIMIT 1'
+        ).fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row['metadata_maintainers'] == 'A Curator; B Curator'
+        assert row['metadata_contact'] == 'team@example.org'
+        assert row['metadata_publication_pmid'] == '12345678'
+        assert row['metadata_publication_doi'] == '10.1000/test'
+        assert row['metadata_website'] == 'https://example.org/db'
+        assert row['metadata_description'] == 'Curated antiviral resistance database.'
+        assert row['metadata_maintainer_update'] == '2026-04-21'
+        assert row['metadata_license'] == 'CC-BY-4.0'
+        assert row['metadata_tsv_checksum'] == 'sha256:abc123'
+
+    def test_init_project_rejects_unknown_metadata_key(self, tmp_path) -> None:
+        genbank_path = write_genbank(
+            tmp_path / 'ref.gb',
+            [
+                {
+                    'id': 'myref',
+                    'accession': 'MYREF001',
+                    'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
+                    'genes': [
+                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
+                    ],
+                },
+            ],
+        )
+        rules_path = tmp_path / 'rules.tsv'
+        rules_path.write_text(
+            'gene\treference_identifier\tposition\treference\tmutation\tantiviral\n'
+            'gag\tMYREF001\t2\tK\tE\tTestDrug\n'
+        )
+        metadata_path = tmp_path / 'metadata.json'
+        metadata_path.write_text('{"UnknownField": "value"}\n')
+
+        with pytest.raises(ValueError, match='Invalid metadata key'):
+            init_project(
+                db_path=tmp_path / 'project.db',
+                name='Meta Project',
+                genbank_paths=[genbank_path],
+                rules_tsv=rules_path,
+                metadata_json=metadata_path,
+                overwrite=False,
+                additional_info=False,
+            )
+
+

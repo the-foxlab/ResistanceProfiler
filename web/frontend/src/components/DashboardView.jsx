@@ -95,6 +95,33 @@ export function DashboardView({
   );
   const activePhenotypeMode = phenotypeMode.activeMode;
 
+  const databaseInfoEntries = useMemo(() => {
+    if (!selectedDatabase) {
+      return [];
+    }
+
+    const metadata = selectedDatabase.metadata || {};
+    const entries = [
+      { key: 'display_name', label: 'Database name', value: selectedDatabase.display_name },
+      { key: 'uuid', label: 'UUID', value: selectedDatabase.uuid },
+      { key: 'created_at', label: 'Created at', value: selectedDatabase.created_at },
+      { key: 'schema_version', label: 'Schema version', value: selectedDatabase.schema_version },
+      { key: 'supported_organisms', label: 'Organisms', value: _listValue(selectedDatabase.supported_organisms) },
+      { key: 'mutation_count', label: 'Mutation entries', value: selectedDatabase.mutation_count },
+      { key: 'maintainers', label: 'Maintainers', value: metadata.maintainers },
+      { key: 'contact', label: 'Contact', value: metadata.contact },
+      { key: 'publication_pmid', label: 'Publication PMID', value: metadata.publication_pmid },
+      { key: 'publication_doi', label: 'Publication DOI', value: metadata.publication_doi },
+      { key: 'website', label: 'Website', value: metadata.website },
+      { key: 'description', label: 'Description', value: metadata.description },
+      { key: 'maintainer_update', label: 'Maintainer update', value: metadata.maintainer_update },
+      { key: 'license', label: 'License', value: metadata.license },
+      { key: 'tsv_checksum', label: 'TSV checksum', value: metadata.tsv_checksum },
+    ];
+
+    return entries.filter((entry) => _isPopulated(entry.value));
+  }, [selectedDatabase]);
+
   useEffect(() => {
     // Keep mode selection valid when only one annotation source is available.
     if (phenotypeMode.hasPhenotype && !phenotypeMode.hasClinical) {
@@ -488,6 +515,24 @@ export function DashboardView({
 
                 {selectedDatabase ? (
                   <>
+                  {databaseInfoEntries.length > 0 ? (
+                    <div className="database-meta-grid">
+                      {databaseInfoEntries.map((entry) => (
+                        <div key={entry.key} className="database-meta-item">
+                          <span className="database-meta-label">{entry.label}</span>
+                          {entry.key === 'website' ? (
+                            <a href={String(entry.value)} target="_blank" rel="noreferrer">{entry.value}</a>
+                          ) : entry.key === 'publication_doi' ? (
+                            <a href={`https://doi.org/${String(entry.value).replace(/^https?:\/\/doi\.org\//i, '')}`} target="_blank" rel="noreferrer">
+                              {entry.value}
+                            </a>
+                          ) : (
+                            <span>{entry.value}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                   {summaryTile || detailSections.length > 0 ? (
                     <div className="database-plot-grid">
                       {summaryTile ? <DatabasePieSummaryRow tile={summaryTile} /> : null}
@@ -561,14 +606,19 @@ export function DashboardView({
               <div className="about-header">
                 <h2>About ResistanceProfiler</h2>
                 <p>
-                  ResistanceProfiler is a codon-aware antiviral resistance framework with a CLI-first core and a web
-                  explorer for interactive analysis.
+                  ResistanceProfiler is a pathogen-agnostic antiviral resistance framework with a CLI-first core and a web
+                  frontend for interactive analysis.
                 </p>
               </div>
 
               <div className="about-notice">
                 <strong>Research use only.</strong> This software supports exploratory interpretation and does not replace
                 accredited clinical diagnostics.
+              </div>
+              <div className="about-notice">
+                <strong>No database curation.</strong> We do not maintain or curate resistance databases ourselves. We only
+                provide up-to-date converted versions of openly available databases and are not responsible for their content 
+                or maintenance.
               </div>
 
               <div className="about-grid">
@@ -578,12 +628,22 @@ export function DashboardView({
                     <h3>Project Scope and How It Works</h3>
                   </div>
                   <p>
-                    The project is pathogen-agnostic: references and rules are stored in a curated project database and
-                    interpreted at amino-acid level.
+                    References and rules are matched during database creation to ensure internal consistency.
+                    Mutations are stored in a project database, and new sequences are compared against internal
+                    references to identify resistance patterns. Importantly, the reference is determined automatically
+                    by pairwise mapping, and the sequence with the highest identity is selected. Currently, the tool
+                    requires a sequence identity of at least 80% and coverage of at least 90% of either the reference
+                    or the query sequence. This allows flexible use across a wide range of viruses and gene targets
+                    without strict input-format requirements, but results can become unreliable when the input is
+                    highly divergent from the reference sequences in the database.
                   </p>
                   <ul>
-                    <li>Input can be consensus FASTA or VCF plus matching reference FASTA.</li>
+                    <li>Input can be consensus FASTA or VCF plus matching reference FASTA and an optional BAM file for coverage analysis.</li>
                     <li>The core pipeline resolves reference context, maps changes codon-aware, and matches rules.</li>
+                    <li>
+                      Coverage analysis provides insights into sequencing depth and data quality. For FASTA
+                      sequences, missing information is treated as coverage gaps.
+                    </li>
                     <li>Outputs include structured results and HTML reports for review.</li>
                   </ul>
                 </section>
@@ -599,9 +659,10 @@ export function DashboardView({
                   </p>
                   <ul>
                     <li><strong>Substitution:</strong> <strong>A123V</strong> means position 123 changed from A to V.</li>
-                    <li><strong>Anchored deletion:</strong> <strong>V215del</strong> means residue V at anchor position 215 is deleted.</li>
-                    <li><strong>Anchored insertion:</strong> <strong>215_216insG</strong> means insertion of G between anchor positions 215 and 216.</li>
-                    <li><strong>Frameshift:</strong> <strong>L201fs</strong> indicates a reading-frame shift starting at anchor position 201.</li>
+                    <li><strong>Anchored deletion:</strong> <strong>VG215V</strong> means that the G after position 215 is deleted.</li>
+                    <li><strong>Anchored insertion:</strong> <strong>V215VG</strong> means insertion of G after the V at position 215.</li>
+                    <li><strong>Frameshift:</strong> <strong>L201Lfsx</strong> indicates a reading-frame shift after the L at position 201.</li>
+                    <li><strong>Complex:</strong> <strong>L201complex</strong> indicates a triplet indel within the L codon at position 201.</li>
                     <li><strong>Phenotype</strong> captures in-vitro susceptibility interpretation.</li>
                     <li><strong>Clinical phenotype</strong> captures treatment-oriented interpretation where available.</li>
                     <li>Combination context can matter; interpreted annotations are shown in reports and dashboard plots.</li>
@@ -614,14 +675,17 @@ export function DashboardView({
                     <h3>CLI and Extended Functionality</h3>
                   </div>
                   <p>
-                    The CLI is the primary interface and includes project creation, rule curation, profiling, and export.
+                    The CLI is the primary interface and includes project creation, rule curation, profiling, and export. The same
+                    functionality as the web app can be achieved through the CLI, enabling direct integration into existing
+                    workflows and pipelines.
                   </p>
                   <div className="about-command-block">
                     <code>respro init --name "My Project" --genbank refs.gb --rules rules.tsv --output project.db</code>
                     <code>respro add --project project.db --rules more_rules.tsv</code>
                     <code>respro vcf --project project.db --vcf sample.vcf --ref-fasta ref.fasta --output report/</code>
+                    <code>respro fasta --project project.db --fasta sample.fasta --output report/</code>
                   </div>
-                  <p className="about-mini-heading">Start your own ResPro Explorer</p>
+                  <p className="about-mini-heading">Start your own ResPro Explorer by cloning the repository</p>
                   <div className="about-command-block">
                     <code>docker compose -f docker-compose.web.yml up --build</code>
                   </div>
@@ -635,33 +699,45 @@ export function DashboardView({
                   </div>
                   <p>
                     Contributions are very welcome, especially curated rule datasets, bug reports, reproducible test
-                    cases, and code improvements.
-                  </p>
-                  <div className="about-contact-list">
-                    <a href="mailto:jonas.fuchs@uniklinik-freiburg.de">jonas.fuchs@uniklinik-freiburg.de</a>
+                    cases, and code improvements. Open an issue or submit a pull request on{' '}
                     <a href="https://github.com/jonas-fuchs/ResistanceProfiler" target="_blank" rel="noreferrer">
-                      github.com/jonas-fuchs/ResistanceProfiler
-                    </a>
-                    <a href="https://www.uniklinik-freiburg.de/virologie-en/research/research-teams/jonas-fuchs-team.html" target="_blank" rel="noreferrer">
-                      Jonas Fuchs Team website
-                    </a>
-                  </div>
-
+                      GitHub
+                    </a>{' '}
+                    to get in touch. For direct contact, please{' '}
+                    <a href="mailto:jonas.fuchs@uniklinik-freiburg.de">email Jonas Fuchs</a>.
+                  </p>
                   <p className="about-mini-heading">Data usage</p>
                   <ul>
-                    <li>Uploaded inputs and generated reports are stored in the configured local data directory.</li>
                     <li>Session-scoped uploads/reports are cleaned up automatically when a browser tab closes.</li>
-                    <li>As a self-hosted deployment, data governance and retention remain under the operator's control.</li>
+                    <li>
+                      No data is stored on remote servers. Nevertheless, avoid naming your results with sensitive
+                      information such as patient identifiers or names.
+                    </li>
                   </ul>
 
                   <p className="about-mini-heading">Licensing</p>
                   <ul>
                     <li>ResistanceProfiler source code is released under the MIT License.</li>
                     <li>External references, rules, and publication-linked datasets may have separate licenses or citation requirements.</li>
+                    <li>The databases listed here are openly accessible and have been converted to be compatible with ResPro.</li>
                     <li>Users are responsible for compliant use of third-party data in their own environments.</li>
                   </ul>
 
-                  <p className="about-backend-note">Current backend endpoint: {API_BASE || 'same-origin API'}</p>
+                  <div className="about-sponsor">
+                    <p className="about-mini-heading">Sponsored by</p>
+                    <a
+                      href="https://uni-freiburg.de/med/forschung/qualifizierung-nach-der-promotion/medical-scientist/"
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="Sponsor page"
+                    >
+                      <img
+                        src="https://uni-freiburg.de/med/wp-content/uploads/sites/9/fodek-hans-a-krebs-program-for-medical-scientist.png"
+                        alt="Sponsor logo"
+                        className="about-sponsor-logo"
+                      />
+                    </a>
+                  </div>
                 </section>
               </div>
             </article>
