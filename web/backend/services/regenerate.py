@@ -9,7 +9,7 @@ from respro.db.models import ProfilingResult
 from respro.db.results import (
     load_run_from_json,
     reconstruct_annotations,
-    reconstruct_combo_rule_hits,
+    reconstruct_formula_rule_hits,
     validate_project_fingerprint_match,
 )
 from respro.db.results import project_fingerprint as compute_project_fingerprint
@@ -25,7 +25,7 @@ def regenerate_from_json(
     json_path: Path,
 ) -> dict:
     """Regenerate HTML/JSON/TSV artifacts from a previously exported results JSON file."""
-    run_dict, variant_rows, coverage_gaps, combo_rows, sample_classifications = load_run_from_json(json_path)
+    run_dict, variant_rows, coverage_gaps, formula_rows, sample_classifications = load_run_from_json(json_path)
 
     project_conn = open_project_db(project_db)
     try:
@@ -48,7 +48,7 @@ def regenerate_from_json(
         reference_length_nt = int(ref_row['length'] or 0) if ref_row is not None else 0
 
         annotations = reconstruct_annotations(variant_rows)
-        combo_hits = reconstruct_combo_rule_hits(combo_rows, annotations)
+        formula_hits = reconstruct_formula_rule_hits(formula_rows, annotations)
 
         result = ProfilingResult(
             project_name=run_dict['project_name'],
@@ -62,7 +62,7 @@ def regenerate_from_json(
             variants_in_cds=int(run_dict.get('variants_in_cds', 0) or 0),
             resistance_hits=int(run_dict.get('resistance_hits', 0) or 0),
             annotations=annotations,
-            combo_hits=combo_hits,
+            formula_hits=formula_hits,
             coverage_gaps=coverage_gaps,
             sample_classifications=sample_classifications,
         )

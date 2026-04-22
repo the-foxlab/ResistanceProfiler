@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from respro.core.query import pick_best_reference_id, select_matches_for_reference
-from respro.core.rules import load_rule_sets, load_rules, match_rule_sets, match_rules
+from respro.core.rules import load_formula_rules, load_rules, match_formula_rules, match_rules
 from respro.db.models import AnnotatedVariant, CoverageGap, GeneMatch, ProfilingResult
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.results import save_run
@@ -110,25 +110,25 @@ def _load_reference_data(
     ref_id: int,
 ) -> tuple[list, list, list, set[str]]:
     """
-    Load genes, rules, rule_sets, and the union of gene names covered by any rule.
+    Load genes, atomic rules, formula rules, and the union of rule-covered genes.
 
     :param project_conn: open project database connection
     :param ref_id: internal reference id
-    :return: (genes, rules, rule_sets, rule_gene_names)
+    :return: (genes, rules, formula_rules, rule_gene_names)
     """
     genes = load_genes_for_reference(project_conn, ref_id)
     rules = load_rules(project_conn, ref_id)
-    rule_sets = load_rule_sets(project_conn, ref_id)
+    formula_rules = load_formula_rules(project_conn, ref_id)
     rule_gene_names: set[str] = {rule.gene_name for rule in rules}
-    for rule_set in rule_sets:
-        for member in rule_set.members:
-            rule_gene_names.add(member.gene_name)
-    return genes, rules, rule_sets, rule_gene_names
+    for formula_rule in formula_rules:
+        for member_rule in formula_rule.member_rules.values():
+            rule_gene_names.add(member_rule.gene_name)
+    return genes, rules, formula_rules, rule_gene_names
 
 
 def _finalize_and_export(
     annotations: list,
-    rule_sets: list,
+    formula_rules: list,
     project_conn: sqlite3.Connection,
     ref_id: int,
     project_name: str,
@@ -154,7 +154,7 @@ def _finalize_and_export(
     Apply rule matching and AF binning, build the result object, export, and optionally persist.
 
     :param annotations: list of annotated variants
-    :param rule_sets: combo rule sets
+    :param formula_rules: formula rules
     :param project_conn: open project database connection
     :param ref_id: internal reference id
     :param project_name: project name for the report
@@ -178,7 +178,7 @@ def _finalize_and_export(
     :return: (ProfilingResult, export path dict)
     """
     annotations = match_rules(annotations, rules)
-    combo_hits = match_rule_sets(annotations, rule_sets)
+    formula_hits = match_formula_rules(annotations, formula_rules)
     annotations = assign_af_bins(annotations, bins=af_bins)
 
     reference_row = project_conn.execute(
@@ -198,7 +198,7 @@ def _finalize_and_export(
         variants_in_cds=variants_in_cds,
         resistance_hits=sum(1 for a in annotations if a.is_resistance_hit),
         annotations=annotations,
-        combo_hits=combo_hits,
+        formula_hits=formula_hits,
         coverage_gaps=coverage_gaps or [],
         query_sequence=query_sequence,
         gene_matches=gene_matches or [],
@@ -259,8 +259,8 @@ def assign_af_bins(
 def _print_completion_panel(console: Console, title: str, result: ProfilingResult, outputs: dict) -> None:
     """Render a summary panel after a profiling run."""
     hit_line = f'{result.resistance_hits} database hit(s)'
-    if hasattr(result, 'combo_hits') and result.combo_hits:
-        hit_line += f'  ·  {len(result.combo_hits)} combo rule hit(s)'
+    if hasattr(result, 'formula_hits') and result.formula_hits:
+        hit_line += f'  ·  {len(result.formula_hits)} formula rule hit(s)'
     lines = [hit_line, '']
     for fmt, path in outputs.items():
         lines.append(f'[dim]{fmt}[/dim]   {path}')

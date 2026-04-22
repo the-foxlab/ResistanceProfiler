@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS resistance_rule (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     gene_id     INTEGER NOT NULL REFERENCES gene(id),
     drug_id     INTEGER NOT NULL REFERENCES drug(id),
+    external_id TEXT    NOT NULL DEFAULT '',
     reference_identifier TEXT DEFAULT '',
     position    INTEGER NOT NULL,  -- 0-based AA position within gene
     reference   TEXT    DEFAULT '',
@@ -94,36 +95,38 @@ CREATE TABLE IF NOT EXISTS resistance_rule (
 );
 
 CREATE INDEX IF NOT EXISTS idx_rule_gene_pos ON resistance_rule(gene_id, position);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_external_id_unique
+ON resistance_rule(external_id)
+WHERE external_id != '';
 
--- Combined / co-occurring resistance rules (prepared for future use)
-CREATE TABLE IF NOT EXISTS resistance_rule_set (
+CREATE TABLE IF NOT EXISTS resistance_formula_rule (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     drug_id     INTEGER NOT NULL REFERENCES drug(id),
+    formula_id  TEXT    NOT NULL,
+    label       TEXT    DEFAULT '',
+    normalized_expression TEXT NOT NULL,
     phenotype   TEXT    NOT NULL DEFAULT 'unknown',
     clinical_phenotype TEXT NOT NULL DEFAULT 'unknown',
     ic50        TEXT    DEFAULT '',
     fold_ic50   TEXT    DEFAULT '',
-    publication TEXT    DEFAULT '',
     source      TEXT    DEFAULT '',
-    group_name  TEXT    DEFAULT '',
     comment     TEXT    DEFAULT ''
 );
 
-CREATE TABLE IF NOT EXISTS resistance_rule_set_member (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    rule_set_id INTEGER NOT NULL REFERENCES resistance_rule_set(id),
-    gene_id     INTEGER NOT NULL REFERENCES gene(id),
-    reference_identifier TEXT DEFAULT '',
-    position    INTEGER NOT NULL,  -- 0-based AA position within gene
-    reference   TEXT    DEFAULT '',
-    mutation    TEXT    NOT NULL
+CREATE TABLE IF NOT EXISTS resistance_formula_rule_member (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    formula_rule_id INTEGER NOT NULL REFERENCES resistance_formula_rule(id),
+    rule_id         INTEGER NOT NULL REFERENCES resistance_rule(id),
+    UNIQUE(formula_rule_id, rule_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_rule_set_drug ON resistance_rule_set(drug_id);
-CREATE INDEX IF NOT EXISTS idx_rule_set_member_set ON resistance_rule_set_member(rule_set_id);
-CREATE INDEX IF NOT EXISTS idx_rule_set_member_gene_pos ON resistance_rule_set_member(gene_id, position);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_set_member_unique
-ON resistance_rule_set_member(rule_set_id, gene_id, position, mutation);
+CREATE INDEX IF NOT EXISTS idx_formula_rule_drug ON resistance_formula_rule(drug_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_formula_rule_id_unique
+ON resistance_formula_rule(formula_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_formula_rule_expression_unique
+ON resistance_formula_rule(drug_id, normalized_expression);
+CREATE INDEX IF NOT EXISTS idx_formula_rule_member_formula
+ON resistance_formula_rule_member(formula_rule_id);
 
 -- Publications (deduped; doi is the natural key when available)
 CREATE TABLE IF NOT EXISTS publication (
@@ -143,13 +146,13 @@ CREATE TABLE IF NOT EXISTS rule_publication (
 );
 CREATE INDEX IF NOT EXISTS idx_rule_pub ON rule_publication(rule_id);
 
-CREATE TABLE IF NOT EXISTS rule_set_publication (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    rule_set_id    INTEGER NOT NULL REFERENCES resistance_rule_set(id),
-    publication_id INTEGER NOT NULL REFERENCES publication(id),
-    UNIQUE(rule_set_id, publication_id)
+CREATE TABLE IF NOT EXISTS resistance_formula_rule_publication (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    formula_rule_id INTEGER NOT NULL REFERENCES resistance_formula_rule(id),
+    publication_id  INTEGER NOT NULL REFERENCES publication(id),
+    UNIQUE(formula_rule_id, publication_id)
 );
-CREATE INDEX IF NOT EXISTS idx_rule_set_pub ON rule_set_publication(rule_set_id);
+CREATE INDEX IF NOT EXISTS idx_resistance_formula_rule_pub ON resistance_formula_rule_publication(formula_rule_id);
 
 -- Cached user-provided query references and their CDS mappings
 CREATE TABLE IF NOT EXISTS query_reference (
@@ -196,7 +199,7 @@ CREATE TABLE IF NOT EXISTS run (
     total_variants  INTEGER NOT NULL DEFAULT 0,
     variants_in_cds INTEGER NOT NULL DEFAULT 0,
     resistance_hits INTEGER NOT NULL DEFAULT 0,
-    combo_hits      INTEGER NOT NULL DEFAULT 0,
+    formula_hits    INTEGER NOT NULL DEFAULT 0,
     status          TEXT    NOT NULL DEFAULT 'complete',
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -235,13 +238,13 @@ CREATE TABLE IF NOT EXISTS coverage_gap (
 
 CREATE INDEX IF NOT EXISTS idx_cg_run ON coverage_gap(run_id);
 
-CREATE TABLE IF NOT EXISTS combo_rule_hit (
+CREATE TABLE IF NOT EXISTS formula_rule_hit (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id      INTEGER NOT NULL REFERENCES run(id),
     hit_json    TEXT    NOT NULL DEFAULT '{}'
 );
 
-CREATE INDEX IF NOT EXISTS idx_crh_run ON combo_rule_hit(run_id);
+CREATE INDEX IF NOT EXISTS idx_frh_run ON formula_rule_hit(run_id);
 
 CREATE TABLE IF NOT EXISTS sample_classification (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -276,12 +279,12 @@ CREATE TABLE IF NOT EXISTS coverage_gap (
 );
 CREATE INDEX IF NOT EXISTS idx_cg_run ON coverage_gap(run_id);
 
-CREATE TABLE IF NOT EXISTS combo_rule_hit (
+CREATE TABLE IF NOT EXISTS formula_rule_hit (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id      INTEGER NOT NULL REFERENCES run(id),
     hit_json    TEXT    NOT NULL DEFAULT '{}'
 );
-CREATE INDEX IF NOT EXISTS idx_crh_run ON combo_rule_hit(run_id);
+CREATE INDEX IF NOT EXISTS idx_frh_run ON formula_rule_hit(run_id);
 
 CREATE TABLE IF NOT EXISTS sample_classification (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -307,7 +310,7 @@ _OPTIONAL_RESULTS_COLUMN_DEFS = {
         'total_variants': 'INTEGER NOT NULL DEFAULT 0',
         'variants_in_cds': 'INTEGER NOT NULL DEFAULT 0',
         'resistance_hits': 'INTEGER NOT NULL DEFAULT 0',
-        'combo_hits': 'INTEGER NOT NULL DEFAULT 0',
+        'formula_hits': 'INTEGER NOT NULL DEFAULT 0',
         'status': "TEXT NOT NULL DEFAULT 'complete'",
         'created_at': "TEXT DEFAULT ''",
     },
@@ -333,8 +336,6 @@ _REQUIRED_PROJECT_COLUMNS = {
     'gene': {'id', 'reference_id', 'name', 'start', 'end', 'strand'},
     'drug': {'id', 'project_id', 'name'},
     'resistance_rule': {'id', 'gene_id', 'drug_id', 'position', 'mutation'},
-    'resistance_rule_set': {'id', 'drug_id'},
-    'resistance_rule_set_member': {'id', 'rule_set_id', 'gene_id', 'position', 'mutation'},
     'query_reference': {'id', 'name', 'sequence', 'length', 'checksum'},
     'query_gene_mapping': {
         'id', 'query_ref_id', 'gene_id', 'identity', 'cds_coverage',
@@ -342,7 +343,6 @@ _REQUIRED_PROJECT_COLUMNS = {
     },
     'publication': {'id', 'doi', 'title', 'pubmed_id', 'raw_input'},
     'rule_publication': {'id', 'rule_id', 'publication_id'},
-    'rule_set_publication': {'id', 'rule_set_id', 'publication_id'},
 }
 
 _OPTIONAL_PROJECT_COLUMN_DEFS = {
@@ -383,6 +383,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'structure_url': "TEXT DEFAULT ''",
     },
     'resistance_rule': {
+        'external_id': "TEXT NOT NULL DEFAULT ''",
         'reference_identifier': "TEXT DEFAULT ''",
         'reference': "TEXT DEFAULT ''",
         'phenotype': "TEXT NOT NULL DEFAULT 'unknown'",
@@ -577,6 +578,28 @@ def _add_missing_optional_columns(
     return changed
 
 
+def _ensure_project_indexes(conn: sqlite3.Connection) -> None:
+    """Create project indexes that depend on optional columns when prerequisites exist."""
+    existing_tables = {
+        row['name']
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    }
+    if 'resistance_rule' not in existing_tables:
+        return
+
+    available_columns = {
+        row['name']
+        for row in conn.execute('PRAGMA table_info(resistance_rule)').fetchall()
+    }
+    if 'external_id' not in available_columns:
+        return
+
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_external_id_unique "
+        "ON resistance_rule(external_id) WHERE external_id != ''"
+    )
+
+
 def open_project_db(db_path: Path) -> sqlite3.Connection:
     """
     Open an existing project database and validate the schema version.
@@ -590,7 +613,10 @@ def open_project_db(db_path: Path) -> sqlite3.Connection:
     _ensure_optional_tables(conn)
     _validate_project_schema_overlap(conn, db_path)
     if _add_missing_optional_columns(conn, _OPTIONAL_PROJECT_COLUMN_DEFS):
+        _ensure_project_indexes(conn)
         conn.commit()
+    else:
+        _ensure_project_indexes(conn)
     _ensure_project_uuid(conn)
     return conn
 
@@ -616,13 +642,39 @@ CREATE TABLE IF NOT EXISTS rule_publication (
     UNIQUE(rule_id, publication_id)
 );
 CREATE INDEX IF NOT EXISTS idx_rule_pub ON rule_publication(rule_id);
-CREATE TABLE IF NOT EXISTS rule_set_publication (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    rule_set_id    INTEGER NOT NULL REFERENCES resistance_rule_set(id),
-    publication_id INTEGER NOT NULL REFERENCES publication(id),
-    UNIQUE(rule_set_id, publication_id)
+CREATE TABLE IF NOT EXISTS resistance_formula_rule (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    drug_id     INTEGER NOT NULL REFERENCES drug(id),
+    formula_id  TEXT    NOT NULL,
+    label       TEXT    DEFAULT '',
+    normalized_expression TEXT NOT NULL,
+    phenotype   TEXT    NOT NULL DEFAULT 'unknown',
+    clinical_phenotype TEXT NOT NULL DEFAULT 'unknown',
+    ic50        TEXT    DEFAULT '',
+    fold_ic50   TEXT    DEFAULT '',
+    source      TEXT    DEFAULT '',
+    comment     TEXT    DEFAULT ''
 );
-CREATE INDEX IF NOT EXISTS idx_rule_set_pub ON rule_set_publication(rule_set_id);
+CREATE TABLE IF NOT EXISTS resistance_formula_rule_member (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    formula_rule_id INTEGER NOT NULL REFERENCES resistance_formula_rule(id),
+    rule_id         INTEGER NOT NULL REFERENCES resistance_rule(id),
+    UNIQUE(formula_rule_id, rule_id)
+);
+CREATE INDEX IF NOT EXISTS idx_formula_rule_drug ON resistance_formula_rule(drug_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_formula_rule_id_unique
+ON resistance_formula_rule(formula_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_formula_rule_expression_unique
+ON resistance_formula_rule(drug_id, normalized_expression);
+CREATE INDEX IF NOT EXISTS idx_formula_rule_member_formula
+ON resistance_formula_rule_member(formula_rule_id);
+CREATE TABLE IF NOT EXISTS resistance_formula_rule_publication (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    formula_rule_id INTEGER NOT NULL REFERENCES resistance_formula_rule(id),
+    publication_id  INTEGER NOT NULL REFERENCES publication(id),
+    UNIQUE(formula_rule_id, publication_id)
+);
+CREATE INDEX IF NOT EXISTS idx_resistance_formula_rule_pub ON resistance_formula_rule_publication(formula_rule_id);
 """)
     conn.commit()
 

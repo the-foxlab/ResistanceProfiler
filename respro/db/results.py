@@ -10,8 +10,8 @@ from pathlib import Path
 
 from respro.db.models import (
     AnnotatedVariant,
-    ComboRuleHit,
     CoverageGap,
+    FormulaRuleHit,
     ProfilingResult,
     Publication,
     ResistanceRule,
@@ -75,7 +75,7 @@ def save_run(
         'INSERT INTO run '
         '(project_name, project_db_path, project_fingerprint, project_updated_at, reference_name, '
         'sample_name, vcf_path, total_variants, variants_in_cds, '
-        'resistance_hits, combo_hits, status) '
+        'resistance_hits, formula_hits, status) '
         'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         (
             result.project_name,
@@ -88,7 +88,7 @@ def save_run(
             result.total_variants,
             result.variants_in_cds,
             result.resistance_hits,
-            len(result.combo_hits),
+            len(result.formula_hits),
             'complete',
         ),
     )
@@ -129,10 +129,10 @@ def save_run(
             (run_id, gap.gene_name, gap.codon_start, gap.codon_end),
         )
 
-    for combo_hit in result.combo_hits:
+    for formula_hit in result.formula_hits:
         results_conn.execute(
-            'INSERT INTO combo_rule_hit (run_id, hit_json) VALUES (?, ?)',
-            (run_id, json.dumps(combo_hit.to_dict())),
+            'INSERT INTO formula_rule_hit (run_id, hit_json) VALUES (?, ?)',
+            (run_id, json.dumps(formula_hit.to_dict())),
         )
 
     results_conn.commit()
@@ -148,7 +148,7 @@ def list_runs(results_conn: sqlite3.Connection) -> list[dict]:
     """
     rows = results_conn.execute(
         'SELECT id, sample_name, reference_name, vcf_path, '
-        'total_variants, variants_in_cds, resistance_hits, combo_hits, created_at '
+        'total_variants, variants_in_cds, resistance_hits, formula_hits, created_at '
         'FROM run ORDER BY id'
     ).fetchall()
     return [dict(row) for row in rows]
@@ -173,7 +173,7 @@ def delete_run(results_conn: sqlite3.Connection, run_identifier: str | int) -> d
 
     results_conn.execute('DELETE FROM variant_result WHERE run_id = ?', (run_id,))
     results_conn.execute('DELETE FROM coverage_gap WHERE run_id = ?', (run_id,))
-    results_conn.execute('DELETE FROM combo_rule_hit WHERE run_id = ?', (run_id,))
+    results_conn.execute('DELETE FROM formula_rule_hit WHERE run_id = ?', (run_id,))
     results_conn.execute('DELETE FROM sample_classification WHERE run_id = ?', (run_id,))
     results_conn.execute('DELETE FROM run WHERE id = ?', (run_id,))
     results_conn.commit()
@@ -240,13 +240,13 @@ def load_coverage_gaps(
     ]
 
 
-def load_combo_rule_hits(results_conn: sqlite3.Connection, run_id: int) -> list[dict]:
+def load_formula_rule_hits(results_conn: sqlite3.Connection, run_id: int) -> list[dict]:
     """
-    Load persisted combination-rule hits for a run.
+    Load persisted formula-rule hits for a run.
 
     :param results_conn: open results DB connection
-    :param run_id: id of the run to load combo hits for
-    :return: list of combo_rule_hit row dicts ordered by insertion
+    :param run_id: id of the run to load formula hits for
+    :return: list of formula_rule_hit row dicts ordered by insertion
     """
     tables = {
         row['name']
@@ -254,11 +254,11 @@ def load_combo_rule_hits(results_conn: sqlite3.Connection, run_id: int) -> list[
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         ).fetchall()
     }
-    if 'combo_rule_hit' not in tables:
+    if 'formula_rule_hit' not in tables:
         return []
 
     rows = results_conn.execute(
-        'SELECT id, run_id, hit_json FROM combo_rule_hit WHERE run_id = ? ORDER BY id',
+        'SELECT id, run_id, hit_json FROM formula_rule_hit WHERE run_id = ? ORDER BY id',
         (run_id,),
     ).fetchall()
     return [dict(row) for row in rows]
@@ -302,26 +302,32 @@ def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
     return annotations
 
 
-def reconstruct_combo_rule_hits(
-    combo_rows: list[dict],
+def reconstruct_formula_rule_hits(
+    formula_rows: list[dict],
     annotations: list[AnnotatedVariant],
-) -> list[ComboRuleHit]:
+) -> list[FormulaRuleHit]:
     """
-    Reconstruct ComboRuleHit objects from persisted combo_rule_hit rows.
+    Reconstruct FormulaRuleHit objects from persisted formula-hit payload rows.
 
-    :param combo_rows: list of combo_rule_hit row dicts
+    :param formula_rows: list of formula-hit row dicts
     :param annotations: reconstructed annotations for the same run
-    :return: list of ComboRuleHit objects
+    :return: list of FormulaRuleHit objects
     """
-    if not combo_rows:
+    if not formula_rows:
         return []
 
-    hits: list[ComboRuleHit] = []
-    for row in combo_rows:
+    hits: list[FormulaRuleHit] = []
+    for row in formula_rows:
         payload = json.loads(row.get('hit_json') or '{}')
-        rule_set = _rule_set_from_combo_hit(payload)
-        matched_variants = _match_combo_variants(payload.get('matched_variants', []), annotations)
-        hits.append(ComboRuleHit(rule_set=rule_set, matched_variants=matched_variants))
+        rule_set = _rule_set_from_formula_hit(payload)
+        matched_variants = _match_formula_variants(payload.get('matched_variants', []), annotations)
+        hits.append(
+            FormulaRuleHit(
+                rule_set=rule_set,
+                matched_variants=matched_variants,
+                matched_member_ids=list(payload.get('matched_member_ids', [])),
+            )
+        )
     return hits
 
 
@@ -356,8 +362,8 @@ def _rule_from_hit(hit: dict, gene_name: str) -> ResistanceRule:
     )
 
 
-def _rule_set_from_combo_hit(payload: dict) -> ResistanceRuleSet:
-    """Build a ResistanceRuleSet shell from a persisted combo hit payload."""
+def _rule_set_from_formula_hit(payload: dict) -> ResistanceRuleSet:
+    """Build a ResistanceRuleSet shell from a persisted formula hit payload."""
     publications = [
         Publication(
             id=0,
@@ -379,6 +385,7 @@ def _rule_set_from_combo_hit(payload: dict) -> ResistanceRuleSet:
         source=payload.get('source', ''),
         group_name=payload.get('rule_group', ''),
         pubchem_url=payload.get('pubchem_url', ''),
+        logic_expression=payload.get('logic_expression', ''),
         publications=publications,
     )
     for idx, member in enumerate(payload.get('members', []), start=1):
@@ -393,16 +400,17 @@ def _rule_set_from_combo_hit(payload: dict) -> ResistanceRuleSet:
                 position=max(0, position_1based - 1),
                 reference=member.get('reference', ''),
                 mutation=member.get('mutation', ''),
+                external_id=member.get('member_id', ''),
             )
         )
     return rule_set
 
 
-def _match_combo_variants(
+def _match_formula_variants(
     variant_payloads: list[dict],
     annotations: list[AnnotatedVariant],
 ) -> list[AnnotatedVariant]:
-    """Match persisted combo-variant summaries back to reconstructed annotations."""
+    """Match persisted formula-variant summaries back to reconstructed annotations."""
     by_key: dict[tuple, AnnotatedVariant] = {}
     by_key_weak: dict[tuple, AnnotatedVariant] = {}
     for ann in annotations:
@@ -547,14 +555,22 @@ def load_run_from_json(
     Load a stored run payload from a JSON export.
 
     :param json_path: path to one `*.results.json` export file
-    :return: run metadata, variant rows, coverage gaps, combo rows, classification rows
+    :return: run metadata, variant rows, coverage gaps, formula rows, classification rows
     :raises ValueError: if JSON is malformed or misses required keys
     """
     payload = _read_json_payload(json_path)
     run_dict = _require_dict(payload, 'run')
     variant_rows = _require_list_of_dicts(payload, 'variant_result')
     coverage_rows = _require_list_of_dicts(payload, 'coverage_gap')
-    combo_rows = _require_list_of_dicts(payload, 'combo_rule_hit')
+    if 'formula_rule_hit' in payload:
+        formula_rows = _require_list_of_dicts(payload, 'formula_rule_hit')
+    elif 'combo_rule_hit' in payload:
+        # Accept legacy exports where formula hits were serialized under combo_rule_hit.
+        formula_rows = _require_list_of_dicts(payload, 'combo_rule_hit')
+    else:
+        raise ValueError(
+            "Invalid results JSON: missing key 'formula_rule_hit' (or legacy 'combo_rule_hit')"
+        )
     classification_rows = _require_list_of_dicts(payload, 'sample_classification')
 
     required_run_keys = {
@@ -577,7 +593,7 @@ def load_run_from_json(
     run_dict.setdefault('project_db_path', '')
     run_dict.setdefault('project_fingerprint', '')
     run_dict.setdefault('project_updated_at', '')
-    run_dict.setdefault('combo_hits', len(combo_rows))
+    run_dict.setdefault('formula_hits', len(formula_rows))
     run_dict.setdefault('status', 'complete')
 
     coverage_gaps: list[CoverageGap] = []
@@ -597,11 +613,11 @@ def load_run_from_json(
         if 'drug_hits' not in row:
             raise ValueError(f'Invalid results JSON: variant_result[{idx}] missing \'drug_hits\'')
 
-    for idx, row in enumerate(combo_rows, start=1):
+    for idx, row in enumerate(formula_rows, start=1):
         if 'hit_json' not in row:
-            raise ValueError(f'Invalid results JSON: combo_rule_hit[{idx}] missing \'hit_json\'')
+            raise ValueError(f'Invalid results JSON: formula_rule_hit[{idx}] missing \'hit_json\'')
 
-    return run_dict, variant_rows, coverage_gaps, combo_rows, classification_rows
+    return run_dict, variant_rows, coverage_gaps, formula_rows, classification_rows
 
 
 def validate_project_fingerprint_match(

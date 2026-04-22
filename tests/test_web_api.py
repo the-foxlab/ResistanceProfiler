@@ -187,6 +187,11 @@ class TestWebApi:
         assert response.status_code == 200
         payload = response.json()['data']
         assert payload['count'] >= 1
+        assert 'formula_items' in payload
+        assert 'formula_count' in payload
+        assert 'formula_columns' in payload
+        if payload['formula_count'] > 0:
+            assert 'normalized_expression' in payload['formula_columns']
 
     def test_rules_endpoint_ignores_undefined_reference_filter(
         self,
@@ -397,7 +402,7 @@ class TestWebApi:
             },
             'variant_result': [],
             'coverage_gap': [],
-            'combo_rule_hit': [],
+            'formula_rule_hit': [],
             'sample_classification': [],
         }
         response = client.post(

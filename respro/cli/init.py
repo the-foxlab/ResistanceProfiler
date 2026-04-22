@@ -36,6 +36,7 @@ def init_project(
     name: str,
     genbank_paths: list[Path],
     rules_tsv: Path,
+    formula_rules_tsv: Path | None = None,
     metadata_json: Path | None = None,
     overwrite: bool = False,
     additional_info: bool = True,
@@ -59,6 +60,8 @@ def init_project(
     for genbank_path in genbank_paths:
         require_file(genbank_path, 'GenBank file')
     require_file(rules_tsv, 'Rules TSV')
+    if formula_rules_tsv is not None:
+        require_file(formula_rules_tsv, 'Formula rules TSV')
     metadata_payload = load_metadata_json(metadata_json) if metadata_json else {}
 
     genbank_records = parse_genbank_sources(genbank_paths)
@@ -77,6 +80,7 @@ def init_project(
             conn,
             project_id,
             rules_tsv,
+            formula_rules_tsv=formula_rules_tsv,
             additional_info=additional_info,
         )
         store_project_metadata(conn, project_id, metadata_payload)
@@ -97,6 +101,7 @@ def add_to_project(
     *,
     db_path: Path,
     rules_tsv: Path,
+    formula_rules_tsv: Path | None = None,
     genbank_paths: list[Path] | None = None,
     additional_info: bool = True,
     validate_only: bool = False,
@@ -113,6 +118,8 @@ def add_to_project(
     """
     require_file(db_path, 'Project database')
     require_file(rules_tsv, 'Rules TSV')
+    if formula_rules_tsv is not None:
+        require_file(formula_rules_tsv, 'Formula rules TSV')
 
     records: list[ParsedGenBankReference] = []
     for genbank_path in genbank_paths or []:
@@ -128,7 +135,7 @@ def add_to_project(
         if records:
             _load_genbank_records(conn, project_id, records)
         if validate_only:
-            validate_rules_tsv(conn, project_id, rules_tsv)
+            validate_rules_tsv(conn, project_id, rules_tsv, formula_rules_tsv=formula_rules_tsv)
             conn.rollback()
             logger.info('Rules validation passed: %s', rules_tsv)
             return db_path
@@ -137,6 +144,7 @@ def add_to_project(
             conn,
             project_id,
             rules_tsv,
+            formula_rules_tsv=formula_rules_tsv,
             additional_info=additional_info,
         )
         if additional_info:
@@ -195,6 +203,9 @@ def _init_command(
     rules: Annotated[
         Path, typer.Option('--rules', '-r', help='Resistance rules TSV.')
     ],
+    formula_rules: Annotated[
+        Path | None, typer.Option('--formula-rules', help='Optional formula rules TSV.')
+    ] = None,
     genbank_paths: Annotated[
         list[Path] | None, typer.Option(
             '--genbank', '-g', exists=True,
@@ -231,6 +242,7 @@ def _init_command(
                 name=name,
                 genbank_paths=list(genbank_paths),
                 rules_tsv=rules,
+                formula_rules_tsv=formula_rules,
                 metadata_json=metadata,
                 overwrite=overwrite,
                 additional_info=additional_info,
@@ -248,6 +260,9 @@ def _init_add_command(
     rules: Annotated[
         Path, typer.Option('--rules', '-r', exists=True, help='Resistance rules TSV to add.')
     ],
+    formula_rules: Annotated[
+        Path | None, typer.Option('--formula-rules', exists=True, help='Optional formula rules TSV.')
+    ] = None,
     genbank_paths: Annotated[
         list[Path] | None, typer.Option(
             '--genbank', '-g', exists=True,
@@ -274,6 +289,7 @@ def _init_add_command(
                 db_path=project,
                 genbank_paths=list(genbank_paths or []),
                 rules_tsv=rules,
+                formula_rules_tsv=formula_rules,
                 additional_info=additional_info,
                 validate_only=validate,
             )

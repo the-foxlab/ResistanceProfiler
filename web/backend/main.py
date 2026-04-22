@@ -393,7 +393,7 @@ def _user_facing_error_message(raw_message: str | None) -> str:
     if 'invalid results json' in lowered:
         return (
             'Unsupported JSON format. Upload a valid ResistanceProfiler results JSON '
-            'with run, variant_result, coverage_gap, combo_rule_hit, and sample_classification sections.'
+            'with run, variant_result, coverage_gap, formula_rule_hit, and sample_classification sections.'
         )
     if 'project database uuid mismatch' in lowered:
         return (

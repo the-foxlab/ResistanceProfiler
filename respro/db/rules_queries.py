@@ -4,7 +4,15 @@ Read-only query helpers for resistance rules — reusable without any CLI depend
 
 from __future__ import annotations
 
+import re
 import sqlite3
+
+
+_RE_LOGIC_TOKEN = re.compile(
+    r'\(|\)|\bAND\b|\bOR\b|\bNOT\b|\bXOR\b|[A-Za-z0-9_.:-]+',
+    re.IGNORECASE,
+)
+_LOGIC_OPERATORS = {'AND', 'OR', 'NOT', 'XOR'}
 
 
 def list_rules_for_display(
@@ -83,6 +91,154 @@ def list_rules_for_display(
         {column_name: row[column_name] for column_name in non_empty_columns}
         for row in row_dicts
     ]
+
+
+def list_formula_rules_for_display(
+    conn: sqlite3.Connection,
+    ref_id: int | None = None,
+) -> list[dict]:
+    """
+    Return formula rules as plain dicts suitable for tabular display.
+
+    Rows are ordered by reference name, drug name, then formula identifier.
+    When ``ref_id`` is given, only formulas with at least one member rule in that reference are returned.
+
+    :param conn: open project DB connection
+    :param ref_id: optional reference id to filter by
+    :return: list of formula rule dicts with non-empty columns only
+    """
+    publication_doi_expr = (
+        "COALESCE(("
+        "SELECT GROUP_CONCAT(doi, '; ') FROM ("
+        "SELECT DISTINCT p.doi AS doi "
+        "FROM resistance_formula_rule_publication frp "
+        "JOIN publication p ON p.id = frp.publication_id "
+        "WHERE frp.formula_rule_id = fr.id AND p.doi IS NOT NULL AND p.doi != '' "
+        "ORDER BY p.doi"
+        ")"
+        "), '') AS publication"
+    )
+
+    base_sql = (
+        'SELECT '
+        "COALESCE((SELECT r.name "
+        "FROM resistance_formula_rule_member frm "
+        "JOIN resistance_rule rr ON rr.id = frm.rule_id "
+        "JOIN gene g ON g.id = rr.gene_id "
+        "JOIN reference r ON r.id = g.reference_id "
+        'WHERE frm.formula_rule_id = fr.id '
+        'ORDER BY r.name LIMIT 1), \'\') AS reference_name, '
+        'd.name AS drug, fr.formula_id, fr.label, fr.normalized_expression, '
+        'fr.phenotype, fr.clinical_phenotype, fr.ic50, fr.fold_ic50, '
+        + publication_doi_expr + ', '
+        'fr.source, fr.comment, '
+        'COALESCE((SELECT COUNT(*) FROM resistance_formula_rule_member frm '
+        'WHERE frm.formula_rule_id = fr.id), 0) AS member_count '
+        'FROM resistance_formula_rule fr '
+        'JOIN drug d ON d.id = fr.drug_id '
+    )
+
+    if ref_id is not None:
+        rows = conn.execute(
+            base_sql
+            + 'WHERE EXISTS (SELECT 1 FROM resistance_formula_rule_member frm '
+            'JOIN resistance_rule rr ON rr.id = frm.rule_id '
+            'JOIN gene g ON g.id = rr.gene_id '
+            'WHERE frm.formula_rule_id = fr.id AND g.reference_id = ?) '
+            'ORDER BY reference_name, d.name, fr.formula_id',
+            (ref_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            base_sql + 'ORDER BY reference_name, d.name, fr.formula_id'
+        ).fetchall()
+
+    row_dicts = [dict(row) for row in rows]
+    if not row_dicts:
+        return []
+
+    labels_by_formula_id = _load_formula_member_labels_for_display(conn, ref_id=ref_id)
+    for row in row_dicts:
+        formula_id = str(row.get('formula_id', '') or '')
+        expression = str(row.get('normalized_expression', '') or '')
+        if expression and formula_id and formula_id in labels_by_formula_id:
+            row['normalized_expression'] = _replace_formula_expression_for_display(
+                expression,
+                labels_by_formula_id[formula_id],
+            )
+
+    def _is_empty(value: object) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            return value.strip() == ''
+        return False
+
+    column_names = list(row_dicts[0].keys())
+    non_empty_columns = [
+        column_name
+        for column_name in column_names
+        if any(not _is_empty(row[column_name]) for row in row_dicts)
+    ]
+
+    return [
+        {column_name: row[column_name] for column_name in non_empty_columns}
+        for row in row_dicts
+    ]
+
+
+def _load_formula_member_labels_for_display(
+    conn: sqlite3.Connection,
+    ref_id: int | None = None,
+) -> dict[str, dict[str, str]]:
+    """Return formula_id -> (member_id -> display label) mapping for expression rendering."""
+    sql = (
+        'SELECT fr.formula_id, rr.external_id, g.name AS gene_name, '
+        'rr.position, rr.reference, rr.mutation '
+        'FROM resistance_formula_rule fr '
+        'JOIN resistance_formula_rule_member frm ON frm.formula_rule_id = fr.id '
+        'JOIN resistance_rule rr ON rr.id = frm.rule_id '
+        'JOIN gene g ON g.id = rr.gene_id '
+    )
+    params: tuple[int, ...] = ()
+    if ref_id is not None:
+        sql += 'WHERE g.reference_id = ? '
+        params = (ref_id,)
+    sql += 'ORDER BY fr.formula_id, rr.external_id'
+
+    rows = conn.execute(sql, params).fetchall()
+    labels: dict[str, dict[str, str]] = {}
+    for row in rows:
+        formula_id = str(row['formula_id'] or '')
+        member_id = str(row['external_id'] or '')
+        if formula_id == '' or member_id == '':
+            continue
+
+        position = int(row['position']) + 1
+        label = f"{row['gene_name']}:{row['reference']}{position}{row['mutation']}"
+        labels.setdefault(formula_id, {})[member_id] = label
+    return labels
+
+
+def _replace_formula_expression_for_display(
+    expression: str,
+    labels_by_member_id: dict[str, str],
+) -> str:
+    """Replace formula member IDs in one expression by human-readable mutation labels."""
+    rendered: list[str] = []
+    last_index = 0
+    for match in _RE_LOGIC_TOKEN.finditer(expression):
+        rendered.append(expression[last_index:match.start()])
+        token = match.group(0)
+        upper_token = token.upper()
+        if token in {'(', ')'} or upper_token in _LOGIC_OPERATORS:
+            rendered.append(token)
+        else:
+            rendered.append(labels_by_member_id.get(token, token))
+        last_index = match.end()
+
+    rendered.append(expression[last_index:])
+    return ''.join(rendered)
 
 
 def list_references_for_display(conn: sqlite3.Connection) -> list[dict]:

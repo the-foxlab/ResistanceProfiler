@@ -14,7 +14,7 @@ from respro.cli.main import app
 from respro.core.rules import load_rules
 from respro.db.models import (
     AnnotatedVariant,
-    ComboRuleHit,
+    FormulaRuleHit,
     ProfilingResult,
     ResistanceRuleSet,
     ResistanceRuleSetMember,
@@ -22,11 +22,11 @@ from respro.db.models import (
 )
 from respro.db.results import (
     load_classifications,
-    load_combo_rule_hits,
+    load_formula_rule_hits,
     load_coverage_gaps,
     load_run,
     reconstruct_annotations,
-    reconstruct_combo_rule_hits,
+    reconstruct_formula_rule_hits,
     save_run,
 )
 from respro.db.schema import init_results_db, open_project_db, open_results_db
@@ -398,7 +398,7 @@ class TestRegenerate:
             variants_in_cds=1,
             resistance_hits=0,
             annotations=[ann],
-            combo_hits=[ComboRuleHit(rule_set=rule_set, matched_variants=[ann])],
+            formula_hits=[FormulaRuleHit(rule_set=rule_set, matched_variants=[ann])],
         )
         save_run(results_conn, project_db.resolve(), project_conn, result_obj)
         project_conn.close()
@@ -444,7 +444,7 @@ class TestRegenerate:
         results_conn = open_results_db(results_db)
         run_dict, variant_rows = load_run(results_conn, 1)
         coverage_gaps = load_coverage_gaps(results_conn, 1)
-        combo_rows = load_combo_rule_hits(results_conn, 1)
+        combo_rows = load_formula_rule_hits(results_conn, 1)
         sample_classifications = load_classifications(results_conn, 1)
 
         project_conn = open_project_db(project_db)
@@ -455,7 +455,7 @@ class TestRegenerate:
         assert ref_row is not None
 
         annotations = reconstruct_annotations(variant_rows)
-        combo_hits = reconstruct_combo_rule_hits(combo_rows, annotations)
+        formula_hits = reconstruct_formula_rule_hits(combo_rows, annotations)
         profiling_result = ProfilingResult(
             project_name=run_dict['project_name'],
             organism=ref_row['organism'] or '',
@@ -468,7 +468,7 @@ class TestRegenerate:
             variants_in_cds=run_dict.get('variants_in_cds', 0),
             resistance_hits=run_dict.get('resistance_hits', 0),
             annotations=annotations,
-            combo_hits=combo_hits,
+            formula_hits=formula_hits,
             coverage_gaps=coverage_gaps,
             sample_classifications=sample_classifications,
         )

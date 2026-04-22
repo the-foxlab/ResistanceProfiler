@@ -202,11 +202,16 @@ function _buildRulesPerDrugPie(rules) {
   };
 }
 
-function _buildDoiPerDrugPie(rules) {
-  // Counts unique publication identifiers per drug.
+function _buildDoiPerDrugPie(rules, formulaRules) {
+  // Counts unique publication identifiers per drug across single and formula rules.
   const counts = new Map();
 
-  rules.forEach((rule) => {
+  const allRows = [
+    ...(Array.isArray(rules) ? rules : []),
+    ...(Array.isArray(formulaRules) ? formulaRules : []),
+  ];
+
+  allRows.forEach((rule) => {
     const drugName = _displayValue(rule.drug, 'Unspecified drug');
     const doiSet = counts.get(drugName) || new Set();
     _extractDoiTokens(rule.publication).forEach((doi) => doiSet.add(doi));
@@ -287,11 +292,38 @@ function _buildEntriesPerOrganismPie(rules, plotMeta) {
   };
 }
 
-function _buildSummaryPies(rules, plotMeta) {
+function _buildRuleTypePie(rules, formulaRules) {
+  // Show how many rows are single-rule entries vs combination (formula) entries.
+  const singleCount = Array.isArray(rules) ? rules.length : 0;
+  const combinationCount = Array.isArray(formulaRules) ? formulaRules.length : 0;
+
+  const slices = [];
+  if (singleCount > 0) {
+    slices.push({ label: 'Single', count: singleCount, color: PIE_COLORS[0] });
+  }
+  if (combinationCount > 0) {
+    slices.push({ label: 'Combinatorial', count: combinationCount, color: PIE_COLORS[1] });
+  }
+
+  if (slices.length === 0) {
+    return null;
+  }
+
+  return {
+    key: 'mutations-per-rule-type',
+    title: 'Mutations per Rule Type',
+    total: slices.length,
+    centerLabel: 'types',
+    slices,
+  };
+}
+
+function _buildSummaryPies(rules, formulaRules, plotMeta) {
   // Compose all headline pies shown in the summary row.
   const pies = [
+    _buildRuleTypePie(rules, formulaRules),
     _buildRulesPerDrugPie(rules),
-    _buildDoiPerDrugPie(rules),
+    _buildDoiPerDrugPie(rules, formulaRules),
     _buildMutationsPerGenePie(rules),
     _buildEntriesPerOrganismPie(rules, plotMeta),
   ].filter(Boolean);
@@ -503,6 +535,7 @@ function _buildGenePositionSections(rules, plotMeta, phenotypeMode, binSize) {
 
 export function buildDatabasePlots(
   rules,
+  formulaRules,
   plotMeta,
   requestedPhenotypeMode = 'auto',
   requestedBinSize = 10
@@ -511,7 +544,7 @@ export function buildDatabasePlots(
   const parsedBinSize = Number(requestedBinSize);
   const binSize = Number.isFinite(parsedBinSize) ? Math.min(100, Math.max(1, Math.floor(parsedBinSize))) : 10;
   const phenotypeMode = _resolvePhenotypeMode(rules, requestedPhenotypeMode);
-  const summaryTile = _buildSummaryPies(rules, plotMeta);
+  const summaryTile = _buildSummaryPies(rules, formulaRules, plotMeta);
   const detailSections = _buildGenePositionSections(rules, plotMeta, phenotypeMode.activeMode, binSize);
 
   return {

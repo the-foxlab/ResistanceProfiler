@@ -8,6 +8,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 
+FORMULA_COMPONENT_DRUG = '__formula_component__'
+
+
 @dataclass(frozen=True)
 class Publication:
     """A deduplicated publication entry linked to one or more resistance rules."""
@@ -102,6 +105,7 @@ class ResistanceRule:
     reference: str
     mutation: str
     phenotype: str
+    external_id: str = ''
     clinical_phenotype: str = 'unknown'
     ic50: str = ''
     fold_ic50: str = ''
@@ -124,6 +128,7 @@ class ResistanceRuleSetMember:
     position: int
     reference: str
     mutation: str
+    external_id: str = ''
 
 
 @dataclass
@@ -142,6 +147,7 @@ class ResistanceRuleSet:
     pubchem_url: str = ''
     description: str = ''
     comment: str = ''
+    logic_expression: str = ''
     publications: list[Publication] = field(default_factory=list)
     members: list[ResistanceRuleSetMember] = field(default_factory=list)
 
@@ -179,8 +185,17 @@ class AnnotatedVariant:
     rule_matches: list[ResistanceRule] = field(default_factory=list)
 
     @property
+    def non_formula_component_rule_matches(self) -> list[ResistanceRule]:
+        """Return matched single rules excluding formula-component placeholder rows."""
+        return [
+            rule
+            for rule in self.rule_matches
+            if (rule.drug_name or '').lower() != FORMULA_COMPONENT_DRUG
+        ]
+
+    @property
     def is_resistance_hit(self) -> bool:
-        return bool(self.rule_matches)
+        return bool(self.non_formula_component_rule_matches)
 
     def drug_hits_json(self) -> list[dict]:
         """
@@ -191,6 +206,7 @@ class AnnotatedVariant:
         return [
             {
                 'drug': r.drug_name,
+                'external_id': r.external_id,
                 'reference_identifier': r.reference_identifier,
                 'reference': r.reference,
                 'mutation': r.mutation,
@@ -204,20 +220,21 @@ class AnnotatedVariant:
                 ],
                 'pubchem_url': r.pubchem_url,
             }
-            for r in self.rule_matches
+            for r in self.non_formula_component_rule_matches
         ]
 
 
 @dataclass
-class ComboRuleHit:
-    """A fired combination resistance rule set with its contributing annotated variants."""
+class FormulaRuleHit:
+    """A fired formula resistance rule with its contributing annotated variants."""
 
     rule_set: ResistanceRuleSet
     matched_variants: list[AnnotatedVariant] = field(default_factory=list)
+    matched_member_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """
-        Return a JSON-serializable representation of this combo rule hit.
+        Return a JSON-serializable representation of this formula rule hit.
 
         :return: dict with rule set metadata and matched variant summaries
         """
@@ -235,8 +252,10 @@ class ComboRuleHit:
             'source': rs.source,
             'pubchem_url': rs.pubchem_url,
             'rule_group': rs.group_name,
+            'logic_expression': rs.logic_expression,
             'members': [
                 {
+                    'member_id': m.external_id,
                     'gene': m.gene_name,
                     'position': m.position + 1,  # 1-based for output
                     'reference': m.reference,
@@ -244,6 +263,7 @@ class ComboRuleHit:
                 }
                 for m in rs.members
             ],
+            'matched_member_ids': list(self.matched_member_ids),
             'matched_variants': [
                 {
                     'gene': v.gene_name,
@@ -289,7 +309,7 @@ class ProfilingResult:
     variants_in_cds: int = 0
     resistance_hits: int = 0
     annotations: list[AnnotatedVariant] = field(default_factory=list)
-    combo_hits: list[ComboRuleHit] = field(default_factory=list)
+    formula_hits: list[FormulaRuleHit] = field(default_factory=list)
     coverage_gaps: list[CoverageGap] = field(default_factory=list)
     sample_classifications: list[dict] = field(default_factory=list)
     query_sequence: str = ''
@@ -321,5 +341,5 @@ class ProfilingResult:
             'total_variants': self.total_variants,
             'variants_in_cds': self.variants_in_cds,
             'resistance_hits': self.resistance_hits,
-            'combo_rule_hits': len(self.combo_hits),
+            'formula_rule_hits': len(self.formula_hits),
         }

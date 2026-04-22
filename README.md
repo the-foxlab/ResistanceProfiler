@@ -4,13 +4,14 @@
 
 Framework for broadly applicable antiviral resistance profiling from FASTA consensus sequences or VCF-derived variants.
 
-## Why ResistanceProfiler
+## Why ResistanceProfiler (in short ResPro)
 
 - Broadly applicable framework instead of a single pathogen- or database-specific workflow
 - Internal project references and curated rules stored in one reusable project database
 - Query sequences and VCF-linked references can be mapped back to internal references before comparison
 - Final profiling is performed on amino-acid mutations after reference normalization
 - CLI-first workflows for initialization, profiling, and regeneration, with an optional web application
+- Support for resistence formulas with logical operators allow definition of higher complexity rules that includes depend mutations to be present
 
 Many resistance tools already perform amino-acid or codon-based interpretation. The main value of ResPro is that it lets you curate rules once against internal references and then compare new samples against those rules. It provides a clear and structured framework that can be used for any pathogen. The database autocurates itself (so checks if rules are valid given the provided reference) and new sequences are automatically matched against all references. Afterwards, the best matching one is selected for resistance rule comparision. Its lightning fast. No need to specify which pathogen or using a specific reference. Everything goes automatically.
 
@@ -40,9 +41,12 @@ respro init \
     --name "Docs Demo" \
     --genbank data/demo-alpha/inputs/reference_hsv1.gb \
     --rules data/demo-alpha/inputs/rules_hsv1.tsv \
+    --formula-rules data/demo-alpha/inputs/formula_rules_hsv1.tsv \
     --output data/demo-alpha/project/project.db \
     --no-additional-info
 ```
+
+The `--formula-rules` TSV is optional. Use it when a pathogen requires boolean combination logic over atomic mutation rules.
 
 ### 3) Run FASTA profiling
 

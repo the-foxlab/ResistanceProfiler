@@ -39,6 +39,7 @@ export function DashboardView({
   fastaInput,
   setFastaInput,
   rules,
+  formulaRules,
   databases,
   selectedDatabase,
   selectedDatabaseId,
@@ -54,6 +55,10 @@ export function DashboardView({
   setMutationSortColumn,
   mutationSortAsc,
   setMutationSortAsc,
+  formulaFilter,
+  setFormulaFilter,
+  formulaFilterColumn,
+  setFormulaFilterColumn,
   mutationsLoaded,
   activeMode,
   setActiveMode,
@@ -62,8 +67,10 @@ export function DashboardView({
   inlineReportPath,
   inlineReportLabel,
   mutationColumns,
+  formulaColumns,
   mutationPlotMeta,
   displayedRules,
+  displayedFormulaRules,
   reportOptions,
   isProfileBusy,
   runSelectedProfile,
@@ -86,8 +93,8 @@ export function DashboardView({
   const [requestedBinSize, setRequestedBinSize] = useState(10);
 
   const { summaryTile, detailSections, phenotypeMode, binSize } = useMemo(
-    () => buildDatabasePlots(rules, mutationPlotMeta, requestedPhenotypeMode, requestedBinSize),
-    [rules, mutationPlotMeta, requestedPhenotypeMode, requestedBinSize]
+    () => buildDatabasePlots(rules, formulaRules, mutationPlotMeta, requestedPhenotypeMode, requestedBinSize),
+    [rules, formulaRules, mutationPlotMeta, requestedPhenotypeMode, requestedBinSize]
   );
   const activePhenotypeMode = phenotypeMode.activeMode;
   const selectedReportOption = useMemo(
@@ -521,7 +528,9 @@ export function DashboardView({
                 <div className="workspace-output-header workspace-output-header-with-db section-header">
                   <div>
                     <h2>Mutation browser</h2>
-                    <p>{displayedRules.length} visible row(s)</p>
+                    <p>
+                      {displayedRules.length} visible mutation row(s), {formulaRules.length} formula row(s)
+                    </p>
                   </div>
                   <DatabaseSelectorBar
                     databases={databases}
@@ -605,10 +614,74 @@ export function DashboardView({
                   </table>
                 </div>
                 {mutationsLoaded && rules.length === 0 ? (
-                  <p className="status">No mutations were found for the selected database/filter.</p>
+                  <p className="status">No single-mutation rules were found for the selected database/filter.</p>
                 ) : null}
                 {mutationsLoaded && rules.length > 0 && displayedRules.length === 0 ? (
                   <p className="status">No mutations match the current filter.</p>
+                ) : null}
+              </article>
+
+              <article className="card full-width-tile mutation-table-tile formula-table-tile">
+                <div className="workspace-output-header section-header">
+                  <div>
+                    <h3>Formula combinations</h3>
+                    <p>{displayedFormulaRules.length} visible row(s)</p>
+                  </div>
+                </div>
+                <div className="table-controls-container section-subtile">
+                  <div className="table-controls">
+                    <label>Filter:</label>
+                    <select
+                      value={formulaFilterColumn}
+                      onChange={(event) => setFormulaFilterColumn(event.target.value)}
+                    >
+                      <option value="-1">All columns</option>
+                      {formulaColumns.map((column, index) => (
+                        <option key={column.key} value={String(index)}>{column.label}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      placeholder="contains..."
+                      value={formulaFilter}
+                      onChange={(event) => setFormulaFilter(event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFormulaFilter('');
+                        setFormulaFilterColumn('-1');
+                      }}
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+                <div className="table-wrap mutation-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        {formulaColumns.map((column) => (
+                          <th key={column.key}>{column.label}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayedFormulaRules.map((rule, index) => (
+                        <tr key={`${rule.formula_id || 'formula'}-${index}`}>
+                          {formulaColumns.map((column) => (
+                            <td key={`${column.key}-${index}`}>{column.accessor(rule)}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {mutationsLoaded && formulaRules.length === 0 ? (
+                  <p className="status">No formula combinations were found for the selected database/filter.</p>
+                ) : null}
+                {mutationsLoaded && formulaRules.length > 0 && displayedFormulaRules.length === 0 ? (
+                  <p className="status">No formula combinations match the current filter.</p>
                 ) : null}
               </article>
             </>
@@ -793,6 +866,24 @@ export function DashboardView({
 
                 <section className="about-section-card">
                   <div className="about-section-title">
+                    <img src={aboutNomenclatureIconSrc} alt="" aria-hidden="true" className="about-section-icon" />
+                    <h3>Resistance Combinations</h3>
+                  </div>
+                  <p>
+                    Combination rules allow interpretation based on boolean logic across multiple mutation members.
+                    They are defined separately from single rules and evaluated with operators such as
+                    <strong> and</strong>, <strong>or</strong>, <strong>not</strong>, and <strong>xor</strong>.
+                  </p>
+                  <ul>
+                    <li><strong>Single rules</strong> represent one mutation-to-interpretation mapping.</li>
+                    <li><strong>Combination rules</strong> fire only when their formula conditions are satisfied.</li>
+                    <li>Both rule types are displayed in reports and in the dashboard mutation browser.</li>
+                    <li>The database dashboard summarizes single vs combination rule distribution in dedicated pies.</li>
+                  </ul>
+                </section>
+
+                <section className="about-section-card">
+                  <div className="about-section-title">
                     <img src={aboutCliIconSrc} alt="" aria-hidden="true" className="about-section-icon" />
                     <h3>CLI and Extended Functionality</h3>
                   </div>
@@ -849,7 +940,7 @@ export function DashboardView({
                   </ul>
 
                   <div className="about-sponsor">
-                    <p className="about-mini-heading">Sponsored by</p>
+                    <p className="about-mini-heading">Supported by</p>
                     <a
                       href="https://uni-freiburg.de/med/forschung/qualifizierung-nach-der-promotion/medical-scientist/"
                       target="_blank"

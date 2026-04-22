@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 
 from respro.cli.main import app
 from respro.cli.init import init_project
-from respro.core.rules import load_rule_sets, load_rules, match_rule_sets, match_rules
+from respro.core.rules import FormulaRuleRuntime, load_rules, match_formula_rules, match_rule_sets, match_rules
 from respro.db.models import (
     AnnotatedVariant,
     ResistanceRule,
@@ -555,96 +555,88 @@ class TestMatchRuleSets:
         assert len(hits) == 1
 
 
-class TestLoadRuleSets:
-    def test_loads_combo_rules_from_db(self, project_db_with_combo: Path) -> None:
-        conn = open_project_db(project_db_with_combo)
-        rule_sets = load_rule_sets(conn, reference_id=1)
-        conn.close()
-
-        assert len(rule_sets) == 1
-        rs = rule_sets[0]
-        assert rs.drug_name == 'TestDrug'
-        assert rs.phenotype == 'resistant'
-        assert rs.group_name == 'combo_group_1'
-        assert len(rs.members) == 2
-        positions = {m.position for m in rs.members}
-        assert positions == {1, 5}
-
-    def test_returns_empty_when_no_combo_rules(self, project_db: Path) -> None:
-        conn = open_project_db(project_db)
-        rule_sets = load_rule_sets(conn, reference_id=1)
-        conn.close()
-        assert rule_sets == []
-
-    def test_loads_combo_rules_from_tsv_init_path(self, tmp_path: Path) -> None:
-        genbank_path = tmp_path / 'tiny.gb'
-        write_genbank(
-            genbank_path,
-            [
-                {
-                    'id': 'tiny_ref',
-                    'accession': 'tiny_ref',
-                    'sequence': TINY_REF_SEQ,
-                    'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
-                }
-            ],
-        )
-        rules_tsv = tmp_path / 'rules.tsv'
-        rules_tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tcombo_KE_PV
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_KE_PV
-        """))
-
-        project_db = tmp_path / 'project.db'
-        init_project(
-            db_path=project_db,
-            name='test',
-            genbank_paths=[genbank_path],
-            rules_tsv=rules_tsv,
-            additional_info=False,
+class TestMatchFormulaRules:
+    def _atomic_rule(self, external_id: str, mutation: str, *, position: int = 1) -> ResistanceRule:
+        return ResistanceRule(
+            id=1,
+            gene_name='gag',
+            gene_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='',
+            position=position,
+            reference='K',
+            mutation=mutation,
+            phenotype='resistant',
+            external_id=external_id,
         )
 
-        conn = open_project_db(project_db)
-        ref_id = conn.execute(
-            'SELECT id FROM reference WHERE name = ?',
-            ('tiny_ref',),
-        ).fetchone()['id']
-        rule_sets = load_rule_sets(conn, reference_id=ref_id)
-        conn.close()
+    def _formula(self, expression: str, members: list[ResistanceRule]) -> FormulaRuleRuntime:
+        return FormulaRuleRuntime(
+            id=1,
+            formula_id='formula_1',
+            label='Formula 1',
+            normalized_expression=expression,
+            drug_name='DrugA',
+            drug_id=1,
+            phenotype='resistant',
+            clinical_phenotype='unknown',
+            ic50='',
+            fold_ic50='',
+            source='',
+            comment='',
+            member_rules={rule.external_id: rule for rule in members if rule.external_id},
+        )
 
-        assert len(rule_sets) == 1
-        rule_set = rule_sets[0]
-        assert rule_set.group_name == 'combo_KE_PV'
-        assert rule_set.drug_name == 'druga'
-        assert len(rule_set.members) == 2
-        positions = {member.position for member in rule_set.members}
-        assert positions == {1, 5}
+    def test_formula_and_matches_when_all_members_pass_af_gate(self) -> None:
+        mut_a = self._atomic_rule('mut_a', 'E', position=1)
+        mut_b = self._atomic_rule('mut_b', 'V', position=5)
+        formula = self._formula('(mut_a AND mut_b)', [mut_a, mut_b])
 
+        ann_a = _make_ann('gag', 1, 'K', 'E')
+        ann_b = _make_ann('gag', 5, 'A', 'V')
+        ann_a.rule_matches = [mut_a]
+        ann_b.rule_matches = [mut_b]
 
-@pytest.fixture()
-def project_db_with_combo(project_db: Path) -> Path:
-    """Extend the minimal project_db fixture with a two-member combo rule set."""
-    conn = sqlite3.connect(str(project_db))
-    conn.execute('PRAGMA foreign_keys=ON')
-    # The gene_id=1 ('gag') and drug_id=1 ('TestDrug') already exist from project_db.
-    conn.execute(
-        'INSERT INTO resistance_rule_set (drug_id, phenotype, group_name) VALUES (?, ?, ?)',
-        (1, 'resistant', 'combo_group_1'),
-    )
-    rule_set_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-    conn.executemany(
-        'INSERT INTO resistance_rule_set_member '
-        '(rule_set_id, gene_id, reference_identifier, position, reference, mutation) '
-        'VALUES (?, ?, ?, ?, ?, ?)',
-        [
-            (rule_set_id, 1, '', 1, 'K', 'E'),
-            (rule_set_id, 1, '', 5, 'A', 'V'),
-        ],
-    )
-    conn.commit()
-    conn.close()
-    return project_db
+        hits = match_formula_rules([ann_a, ann_b], [formula], member_af_threshold=0.75)
+
+        assert len(hits) == 1
+        assert hits[0].rule_set.group_name == 'Formula 1'
+        assert {v.alt_aa for v in hits[0].matched_variants} == {'E', 'V'}
+
+    def test_formula_not_uses_af_gated_presence(self) -> None:
+        mut_a = self._atomic_rule('mut_a', 'E', position=1)
+        mut_b = self._atomic_rule('mut_b', 'V', position=5)
+        formula = self._formula('(mut_a AND (NOT mut_b))', [mut_a, mut_b])
+
+        ann_a = _make_ann('gag', 1, 'K', 'E')
+        ann_a.rule_matches = [mut_a]
+        ann_b = _make_ann('gag', 5, 'A', 'V')
+        ann_b.variant.allele_freq = 0.60
+        ann_b.rule_matches = [mut_b]
+
+        hits = match_formula_rules([ann_a, ann_b], [formula], member_af_threshold=0.75)
+
+        assert len(hits) == 1
+        assert {v.alt_aa for v in hits[0].matched_variants} == {'E'}
+
+    def test_formula_or_prefers_highest_af_branch(self) -> None:
+        mut_a = self._atomic_rule('mut_a', 'E', position=1)
+        mut_b = self._atomic_rule('mut_b', 'V', position=5)
+        formula = self._formula('(mut_a OR mut_b)', [mut_a, mut_b])
+
+        ann_a = _make_ann('gag', 1, 'K', 'E')
+        ann_a.variant.allele_freq = 0.80
+        ann_a.rule_matches = [mut_a]
+        ann_b = _make_ann('gag', 5, 'A', 'V')
+        ann_b.variant.allele_freq = 0.95
+        ann_b.rule_matches = [mut_b]
+
+        hits = match_formula_rules([ann_a, ann_b], [formula], member_af_threshold=0.75)
+
+        assert len(hits) == 1
+        assert len(hits[0].matched_variants) == 1
+        assert hits[0].matched_variants[0].alt_aa == 'V'
 
 
 class TestInitAddValidate:

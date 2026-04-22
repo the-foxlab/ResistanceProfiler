@@ -31,7 +31,7 @@ Top-level sections include:
 - `run`
 - `variant_result`
 - `coverage_gap`
-- `combo_rule_hit`
+- `formula_rule_hit`
 - `sample_classification`
 
 Best use:

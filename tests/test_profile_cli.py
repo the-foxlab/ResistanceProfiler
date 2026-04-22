@@ -75,7 +75,7 @@ class TestProfileCli:
             'run',
             'variant_result',
             'coverage_gap',
-            'combo_rule_hit',
+            'formula_rule_hit',
             'sample_classification',
         }
         assert 'id' not in payload['run']

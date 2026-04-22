@@ -42,6 +42,38 @@ const MUTATION_COLUMN_ORDER = [
   'comment',
 ];
 
+const FORMULA_COLUMN_LABELS = {
+  reference_name: 'Reference',
+  drug: 'Drug',
+  formula_id: 'Formula ID',
+  label: 'Label',
+  normalized_expression: 'Expression',
+  member_count: 'Members',
+  phenotype: 'Phenotype',
+  clinical_phenotype: 'Clinical phenotype',
+  ic50: 'IC50',
+  fold_ic50: 'Fold IC50',
+  publication: 'DOI',
+  source: 'Source',
+  comment: 'Comment',
+};
+
+const FORMULA_COLUMN_ORDER = [
+  'reference_name',
+  'drug',
+  'formula_id',
+  'label',
+  'normalized_expression',
+  'member_count',
+  'phenotype',
+  'clinical_phenotype',
+  'ic50',
+  'fold_ic50',
+  'publication',
+  'source',
+  'comment',
+];
+
 function _mutationColumnSortIndex(columnKey) {
   // Unknown columns are still shown, but pushed behind the known stable order.
   const idx = MUTATION_COLUMN_ORDER.indexOf(columnKey);
@@ -62,6 +94,31 @@ function _buildMutationColumns(columnKeys) {
           }
         }
         const value = rule[columnKey];
+        if (value === null || value === undefined) {
+          return '';
+        }
+        return String(value);
+      };
+      return {
+        key: columnKey,
+        label,
+        accessor,
+      };
+    });
+}
+
+function _formulaColumnSortIndex(columnKey) {
+  const idx = FORMULA_COLUMN_ORDER.indexOf(columnKey);
+  return idx === -1 ? FORMULA_COLUMN_ORDER.length + 100 : idx;
+}
+
+function _buildFormulaColumns(columnKeys) {
+  return [...columnKeys]
+    .sort((a, b) => _formulaColumnSortIndex(a) - _formulaColumnSortIndex(b))
+    .map((columnKey) => {
+      const label = FORMULA_COLUMN_LABELS[columnKey] || columnKey;
+      const accessor = (formulaRule) => {
+        const value = formulaRule[columnKey];
         if (value === null || value === undefined) {
           return '';
         }
@@ -242,6 +299,7 @@ export function useDashboardLogic() {
   });
   const [jsonInputPath, setJsonInputPath] = useState('');
   const [rules, setRules] = useState([]);
+  const [formulaRules, setFormulaRules] = useState([]);
   const [databases, setDatabases] = useState([]);
   const [selectedDatabaseId, setSelectedDatabaseId] = useState('');
   const [uploadedPaths, setUploadedPaths] = useState([]);
@@ -257,7 +315,10 @@ export function useDashboardLogic() {
   const [mutationFilterColumn, setMutationFilterColumn] = useState('-1');
   const [mutationSortColumn, setMutationSortColumn] = useState(null);
   const [mutationSortAsc, setMutationSortAsc] = useState(true);
+  const [formulaFilter, setFormulaFilter] = useState('');
+  const [formulaFilterColumn, setFormulaFilterColumn] = useState('-1');
   const [mutationColumnKeys, setMutationColumnKeys] = useState([]);
+  const [formulaColumnKeys, setFormulaColumnKeys] = useState([]);
   const [mutationPlotMeta, setMutationPlotMeta] = useState({ references: [], genes: [] });
   const [mutationsLoaded, setMutationsLoaded] = useState(false);
   const [activeMode, setActiveMode] = useState('profile');
@@ -302,13 +363,22 @@ export function useDashboardLogic() {
         const payload = await apiGet('/api/mutations');
         const items = payload.data.items || [];
         const columns = payload.data.columns || (items.length > 0 ? Object.keys(items[0]) : []);
+        const formulaItems = payload.data.formula_items || [];
+        const formulaColumns = payload.data.formula_columns
+          || (formulaItems.length > 0 ? Object.keys(formulaItems[0]) : []);
         const plotMeta = payload.data.plot_meta || { references: [], genes: [] };
         setRules(items);
+        setFormulaRules(formulaItems);
         setMutationColumnKeys(columns);
+        setFormulaColumnKeys(formulaColumns);
         setMutationPlotMeta(plotMeta);
         setMutationsLoaded(true);
         const databaseName = selectedDatabase ? selectedDatabase.display_name : selectedDatabaseId;
-        setStatus(`Database ${databaseName} with ${payload.data.count} mutations loaded`);
+        const singleCount = Number(payload.data.single_count ?? payload.data.count ?? items.length);
+        const combinationCount = Number(payload.data.formula_count ?? formulaItems.length);
+        setStatus(
+          `Database ${databaseName} loaded: ${singleCount} single rule(s), ${combinationCount} combination rule(s)`
+        );
       } catch (error) {
         setStatus(`Error loading mutations: ${error.message}`);
       }
@@ -330,6 +400,12 @@ export function useDashboardLogic() {
     mutationColumnKeys.length > 0
       ? mutationColumnKeys
       : (rules[0] ? Object.keys(rules[0]) : [])
+  );
+
+  const formulaColumns = _buildFormulaColumns(
+    formulaColumnKeys.length > 0
+      ? formulaColumnKeys
+      : (formulaRules[0] ? Object.keys(formulaRules[0]) : [])
   );
 
   const filterMutations = (rulesList) => {
@@ -381,6 +457,30 @@ export function useDashboardLogic() {
   };
 
   const displayedRules = sortMutations(filterMutations(rules));
+
+  const filterFormulaRules = (formulaRuleList) => {
+    if (!formulaFilter) {
+      return formulaRuleList;
+    }
+
+    const query = formulaFilter.toLowerCase();
+    const colIdx = Number(formulaFilterColumn);
+
+    return formulaRuleList.filter((formulaRule) => {
+      if (colIdx === -1) {
+        const haystack = formulaColumns.map((column) => column.accessor(formulaRule))
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(query);
+      }
+
+      const selectedColumn = formulaColumns[colIdx];
+      const cellText = selectedColumn ? selectedColumn.accessor(formulaRule) : '';
+      return cellText.toLowerCase().includes(query);
+    });
+  };
+
+  const displayedFormulaRules = filterFormulaRules(formulaRules);
 
   // Reports are shown newest first for quick access after job completion.
   const reportOptions = sessionResults
@@ -685,6 +785,7 @@ export function useDashboardLogic() {
     fastaInput,
     setFastaInput,
     rules,
+    formulaRules,
     databases,
     selectedDatabase,
     selectedDatabaseId,
@@ -700,6 +801,10 @@ export function useDashboardLogic() {
     setMutationSortColumn,
     mutationSortAsc,
     setMutationSortAsc,
+    formulaFilter,
+    setFormulaFilter,
+    formulaFilterColumn,
+    setFormulaFilterColumn,
     mutationsLoaded,
     activeMode,
     setActiveMode,
@@ -708,8 +813,10 @@ export function useDashboardLogic() {
     inlineReportPath,
     inlineReportLabel,
     mutationColumns,
+    formulaColumns,
     mutationPlotMeta,
     displayedRules,
+    displayedFormulaRules,
     reportOptions,
     isProfileBusy,
     runSelectedProfile,

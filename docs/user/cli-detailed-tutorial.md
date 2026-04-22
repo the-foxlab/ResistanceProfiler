@@ -22,9 +22,12 @@ respro init \
   --name "Docs Demo" \
   --genbank data/demo-gamma/inputs/reference_hsv1.gb \
   --rules data/demo-gamma/inputs/rules_hsv1.tsv \
+  --formula-rules data/demo-gamma/inputs/formula_rules_hsv1.tsv \
   --output data/demo-gamma/project/project.db \
   --no-additional-info
 ```
+
+If your dataset only contains atomic mutation rules, omit `--formula-rules`.
 
 ## 2. Extend or validate rules in an existing project (`respro add`)
 
@@ -34,6 +37,7 @@ Validate rules without writing changes:
 respro add \
   --project data/demo-gamma/project/project.db \
   --rules data/demo-gamma/inputs/rules_hsv1.tsv \
+  --formula-rules data/demo-gamma/inputs/formula_rules_hsv1.tsv \
   --validate
 ```
 
@@ -42,7 +46,8 @@ Add rules and commit changes:
 ```bash
 respro add \
   --project data/demo-gamma/project/project.db \
-  --rules data/demo-gamma/inputs/rules_hsv1.tsv
+  --rules data/demo-gamma/inputs/rules_hsv1.tsv \
+  --formula-rules data/demo-gamma/inputs/formula_rules_hsv1.tsv
 ```
 
 ## 3. Profile FASTA input (`respro fasta`)

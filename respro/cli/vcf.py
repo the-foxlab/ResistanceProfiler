@@ -127,7 +127,7 @@ def _profile_vcf_command(
         ref_id, ref_name, fasta_matches = _resolve_reference(
             project_conn, fasta_matches, query_name, logger,
         )
-        genes, rules, rule_sets, rule_gene_names = _load_reference_data(project_conn, ref_id)
+        genes, rules, formula_rules, rule_gene_names = _load_reference_data(project_conn, ref_id)
 
         variants = parse_vcf(vcf, expected_query_name=query_name)
         logger.info('Parsed %d variant(s)', len(variants))
@@ -167,7 +167,7 @@ def _profile_vcf_command(
 
         result, outputs = _finalize_and_export(
             annotations=annotations,
-            rule_sets=rule_sets,
+            formula_rules=formula_rules,
             project_conn=project_conn,
             ref_id=ref_id,
             project_name=project_row['name'],

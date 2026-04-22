@@ -103,7 +103,7 @@ def _profile_fasta_command(
         ref_id, ref_name, fasta_matches = _resolve_reference(
             project_conn, fasta_matches, query_name, logger,
         )
-        genes, rules, rule_sets, rule_gene_names = _load_reference_data(project_conn, ref_id)
+        genes, rules, formula_rules, rule_gene_names = _load_reference_data(project_conn, ref_id)
 
         annotations, coverage_gaps = profile_fasta_consensus(query_seq, fasta_matches)
 
@@ -125,7 +125,7 @@ def _profile_fasta_command(
 
         result, outputs = _finalize_and_export(
             annotations=annotations,
-            rule_sets=rule_sets,
+            formula_rules=formula_rules,
             project_conn=project_conn,
             ref_id=ref_id,
             project_name=project_row['name'],

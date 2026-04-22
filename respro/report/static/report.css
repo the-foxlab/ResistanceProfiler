@@ -146,8 +146,8 @@ table {
 th { background: var(--accent); color: #fff; text-align: left; padding: .5rem .7rem; white-space: nowrap; }
 td { padding: .45rem .7rem; border-bottom: 1px solid #e1e4e8; white-space: nowrap; }
 tr:hover td { background: #f0f4f8; }
-.hit-row { background: #fdf2f2; }
-.hit-row:hover td { background: #fce8e8; }
+.hit-row { background: transparent; }
+.hit-row:hover td { background: #f0f4f8; }
 .expandable-row { cursor: pointer; }
 .expandable-row td:first-child::before {
   content: '▸';
@@ -239,6 +239,72 @@ tr:hover td { background: #f0f4f8; }
   font-size: .74rem;
   font-weight: 700;
   letter-spacing: .01em;
+}
+
+.formula-operator {
+  color: #8b3a2a;
+  font-weight: 700;
+  letter-spacing: .01em;
+}
+
+.formula-paren {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.formula-member {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 5px;
+  overflow: hidden;
+  font-weight: 600;
+}
+
+.formula-member-gene,
+.formula-member-mutation {
+  display: inline-block;
+  padding: 0 6px;
+}
+
+.formula-member-detected {
+  color: #f0fdf4;
+}
+
+.formula-member-detected .formula-member-gene {
+  background: #14532d;
+}
+
+.formula-member-detected .formula-member-mutation {
+  background: #15803d;
+}
+
+.formula-member-missing {
+  background: #e2e8f0;
+  color: #475569;
+  border: 1px dashed #94a3b8;
+  opacity: .95;
+}
+
+.formula-member-missing .formula-member-gene {
+  background: #cbd5e1;
+}
+
+.formula-member-missing .formula-member-mutation {
+  background: #e2e8f0;
+}
+
+.formula-logic {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .18rem .28rem;
+  line-height: 1.5;
+  white-space: normal;
+  max-width: min(100%, 52ch);
+}
+
+.formula-logic-cell {
+  white-space: normal;
 }
 /* Click-to-highlight behavior for table badges */
 .badge-interactive { cursor: pointer; transition: opacity .15s ease, transform .12s ease, box-shadow .15s ease; }

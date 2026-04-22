@@ -6,6 +6,7 @@ from pathlib import Path
 
 from respro.db.rules_queries import (
     get_project_summary_for_display,
+    list_formula_rules_for_display,
     list_plot_metadata_for_display,
     list_references_for_display,
     list_rules_for_display,
@@ -78,11 +79,17 @@ def list_rules(project_db: Path, reference_filter: str | None = None) -> dict:
 
         rows = list_rules_for_display(project_conn, ref_id=ref_id)
         columns = list(rows[0].keys()) if rows else []
+        formula_rows = list_formula_rules_for_display(project_conn, ref_id=ref_id)
+        formula_columns = list(formula_rows[0].keys()) if formula_rows else []
         plot_meta = list_plot_metadata_for_display(project_conn, ref_id=ref_id)
         return {
             'items': rows,
             'count': len(rows),
+            'single_count': len(rows),
             'columns': columns,
+            'formula_items': formula_rows,
+            'formula_count': len(formula_rows),
+            'formula_columns': formula_columns,
             'plot_meta': plot_meta,
         }
     finally:

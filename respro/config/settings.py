@@ -38,12 +38,20 @@ class CliParsingConfig:
 
 
 @dataclass(frozen=True)
+class CliMatchingConfig:
+    """Matching defaults shared by combination evaluation paths."""
+
+    combination_member_af_threshold: float
+
+
+@dataclass(frozen=True)
 class CliConfig:
     """Bundled CLI/core configuration loaded from defaults.toml."""
 
     timeouts: CliTimeoutConfig
     urls: CliUrlConfig
     parsing: CliParsingConfig
+    matching: CliMatchingConfig
 
 
 def _load_cli_config() -> CliConfig:
@@ -53,6 +61,7 @@ def _load_cli_config() -> CliConfig:
     timeouts = payload['timeouts']
     urls = payload['urls']
     parsing = payload['parsing']
+    matching = payload['matching']
 
     return CliConfig(
         timeouts=CliTimeoutConfig(
@@ -72,6 +81,9 @@ def _load_cli_config() -> CliConfig:
         ),
         parsing=CliParsingConfig(
             doi_prefixes=tuple(str(item) for item in parsing['doi_prefixes']),
+        ),
+        matching=CliMatchingConfig(
+            combination_member_af_threshold=float(matching['combination_member_af_threshold']),
         ),
     )
 

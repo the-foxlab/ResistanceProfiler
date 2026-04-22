@@ -13,7 +13,7 @@ import pytest
 
 from respro.db.models import (
     AnnotatedVariant,
-    ComboRuleHit,
+    FormulaRuleHit,
     CoverageGap,
     ProfilingResult,
     ResistanceRule,
@@ -24,12 +24,12 @@ from respro.db.models import (
 from respro.db.results import (
     delete_run,
     list_runs,
-    load_combo_rule_hits,
+    load_formula_rule_hits,
     load_coverage_gaps,
     load_run,
     project_fingerprint,
     reconstruct_annotations,
-    reconstruct_combo_rule_hits,
+    reconstruct_formula_rule_hits,
     save_run,
 )
 from respro.db.schema import create_schema, init_results_db, open_project_db
@@ -379,7 +379,7 @@ class TestResultsPersistence:
             af_bin='high',
             rule_matches=[rule] if annotated else [],
         )
-        combo_hits: list[ComboRuleHit] = []
+        formula_hits: list[FormulaRuleHit] = []
         if with_combo_hit:
             rule_set = ResistanceRuleSet(
                 id=1,
@@ -410,7 +410,7 @@ class TestResultsPersistence:
                     mutation='V',
                 ),
             ]
-            combo_hits = [ComboRuleHit(rule_set=rule_set, matched_variants=[ann])]
+            formula_hits = [FormulaRuleHit(rule_set=rule_set, matched_variants=[ann])]
 
         return ProfilingResult(
             project_name='Test Project',
@@ -421,7 +421,7 @@ class TestResultsPersistence:
             variants_in_cds=1,
             resistance_hits=1 if annotated else 0,
             annotations=[ann],
-            combo_hits=combo_hits,
+            formula_hits=formula_hits,
         )
 
     def test_save_run_inserts_run_row(self, results_conn, minimal_project_conn, tmp_path) -> None:
@@ -501,7 +501,7 @@ class TestResultsPersistence:
         assert payload['rule_group'] == 'combo_1'
         assert payload['drug'] == 'drugx'
 
-    def test_reconstruct_combo_rule_hits_restores_combo_data(
+    def test_reconstruct_formula_rule_hits_restores_combo_data(
         self,
         results_conn,
         minimal_project_conn,
@@ -515,12 +515,12 @@ class TestResultsPersistence:
         )
         _, variant_rows = load_run(results_conn, 1)
         annotations = reconstruct_annotations(variant_rows)
-        combo_rows = load_combo_rule_hits(results_conn, 1)
+        combo_rows = load_formula_rule_hits(results_conn, 1)
 
-        combo_hits = reconstruct_combo_rule_hits(combo_rows, annotations)
+        formula_hits = reconstruct_formula_rule_hits(combo_rows, annotations)
 
-        assert len(combo_hits) == 1
-        hit = combo_hits[0]
+        assert len(formula_hits) == 1
+        hit = formula_hits[0]
         assert hit.rule_set.group_name == 'combo_1'
         assert hit.rule_set.drug_name == 'drugx'
         assert len(hit.rule_set.members) == 2

@@ -285,8 +285,8 @@ class TestValidateReferenceAminoAcids:
         assert any('mismatch' in r.message.lower() for r in caplog.records)
 
 
-class TestSchemaCombinedRuleSets:
-    def test_schema_includes_future_combined_rule_tables(self, tmp_path) -> None:
+class TestSchemaFormulaRules:
+    def test_schema_includes_formula_tables_but_not_legacy_combo_tables(self, tmp_path) -> None:
         db_path = tmp_path / 'schema.db'
         conn = create_schema(db_path)
         tables = {
@@ -297,10 +297,14 @@ class TestSchemaCombinedRuleSets:
         }
         conn.close()
 
-        assert 'resistance_rule_set' in tables
-        assert 'resistance_rule_set_member' in tables
+        assert 'resistance_formula_rule' in tables
+        assert 'resistance_formula_rule_member' in tables
+        assert 'resistance_formula_rule_publication' in tables
+        assert 'resistance_rule_set' not in tables
+        assert 'resistance_rule_set_member' not in tables
+        assert 'rule_set_publication' not in tables
 
-    def test_schema_rejects_duplicate_combo_members_within_one_set(self, tmp_path) -> None:
+    def test_schema_rejects_duplicate_formula_members_within_one_formula(self, tmp_path) -> None:
         db_path = tmp_path / 'schema_unique.db'
         conn = create_schema(db_path)
         conn.execute(
@@ -320,29 +324,31 @@ class TestSchemaCombinedRuleSets:
             (1, 'druga'),
         )
         conn.execute(
-            'INSERT INTO resistance_rule_set (drug_id, phenotype, group_name) VALUES (?, ?, ?)',
-            (1, 'resistant', 'combo_1'),
+            'INSERT INTO resistance_rule (gene_id, drug_id, external_id, position, reference, mutation) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (1, 1, 'mut_k1e', 1, 'K', 'E'),
         )
         conn.execute(
-            'INSERT INTO resistance_rule_set_member '
-            '(rule_set_id, gene_id, reference_identifier, position, reference, mutation) '
-            'VALUES (?, ?, ?, ?, ?, ?)',
-            (1, 1, 'ref1', 1, 'K', 'E'),
+            'INSERT INTO resistance_formula_rule '
+            '(drug_id, formula_id, normalized_expression, phenotype) VALUES (?, ?, ?, ?)',
+            (1, 'formula_1', 'mut_k1e', 'resistant'),
+        )
+        conn.execute(
+            'INSERT INTO resistance_formula_rule_member (formula_rule_id, rule_id) VALUES (?, ?)',
+            (1, 1),
         )
 
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
-                'INSERT INTO resistance_rule_set_member '
-                '(rule_set_id, gene_id, reference_identifier, position, reference, mutation) '
-                'VALUES (?, ?, ?, ?, ?, ?)',
-                (1, 1, 'ref1', 1, 'K', 'E'),
+                'INSERT INTO resistance_formula_rule_member (formula_rule_id, rule_id) VALUES (?, ?)',
+                (1, 1),
             )
 
         conn.close()
 
 
 class TestComboRuleParsing:
-    """Verify that rule_group rows in the TSV are loaded as combination rule sets."""
+    """Verify grouped atomic-rule behavior for group_id/member_id workflows."""
 
     @pytest.fixture()
     def tiny_genbank(self, tmp_path):
@@ -358,114 +364,77 @@ class TestComboRuleParsing:
         ])
         return gb
 
-    def test_combo_rows_are_loaded_as_rule_sets(self, tmp_path, tiny_genbank) -> None:
+    def test_grouped_rows_without_formula_still_load_atomic_rules(self, tmp_path, tiny_genbank, caplog) -> None:
         tsv = tmp_path / 'rules.tsv'
-        # Two combo rows + one single row. Positions are 1-based (K=pos2, P=pos6 in TINY_REF_SEQ).
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\t
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tcombo_KE_PV
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_KE_PV
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_1\tmut_A
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tgroup_1\tmut_B
+            gag\ttiny_ref\t4\tF\tL\tDrugA\tresistant\t\t
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
-                     rules_tsv=tsv, additional_info=False)
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                         rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
         single_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
-        set_count = conn.execute('SELECT COUNT(*) FROM resistance_rule_set').fetchone()[0]
-        member_count = conn.execute('SELECT COUNT(*) FROM resistance_rule_set_member').fetchone()[0]
+        formula_count = conn.execute('SELECT COUNT(*) FROM resistance_formula_rule').fetchone()[0]
+        member_count = conn.execute('SELECT COUNT(*) FROM resistance_formula_rule_member').fetchone()[0]
         conn.close()
 
-        assert single_count == 1       # the row without rule_group
-        assert set_count == 1          # one combo rule set
-        assert member_count == 2       # two members
+        assert single_count == 3
+        assert formula_count == 0
+        assert member_count == 0
+        assert any('combinatorial rules are ignored' in rec.message for rec in caplog.records)
 
-    def test_combo_group_with_fewer_than_two_members_raises(self, tmp_path, tiny_genbank) -> None:
+    def test_grouped_rows_require_member_id_even_without_formula_tsv(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tcombo_solo
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_1
         """))
         db = tmp_path / 'proj.db'
-        with pytest.raises(ValueError, match='at least 2 member'):
+        with pytest.raises(ValueError, match='missing required field member_id'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=False)
 
-    def test_row_with_multiple_group_labels_creates_separate_rule_sets(
-        self, tmp_path, tiny_genbank
-    ) -> None:
-        # Row for gag pos 2 (K→E) belongs to both groups via comma-separated rule_group.
-        # Each group gets two members: the shared row plus one unique row.
+    def test_member_ids_must_be_unique(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroupA, groupB
-            gag\ttiny_ref\t3\tA\tV\tDrugA\tresistant\tgroupA
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tgroupB
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_1\tmut_dup
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tgroup_2\tmut_dup
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
-                     rules_tsv=tsv, additional_info=False)
+        with pytest.raises(ValueError, match='duplicate atomic rule ids'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                         rules_tsv=tsv, additional_info=False)
+
+    def test_identical_duplicate_member_id_rows_are_skipped_with_warning(self, tmp_path, tiny_genbank, caplog) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_1\tmut_same
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_2\tmut_same
+        """))
+        db = tmp_path / 'proj.db'
+
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                         rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
-        set_count = conn.execute('SELECT COUNT(*) FROM resistance_rule_set').fetchone()[0]
-        member_count = conn.execute('SELECT COUNT(*) FROM resistance_rule_set_member').fetchone()[0]
-        group_names = {
-            row[0]
-            for row in conn.execute('SELECT group_name FROM resistance_rule_set').fetchall()
-        }
+        count = conn.execute(
+            'SELECT COUNT(*) FROM resistance_rule WHERE external_id = ?',
+            ('mut_same',),
+        ).fetchone()[0]
         conn.close()
 
-        assert set_count == 2          # two independent rule sets
-        assert member_count == 4       # 2 members each (shared + unique)
-        assert group_names == {'groupA', 'groupB'}
+        assert count == 1
+        assert any('duplicate member_id with identical atomic definition' in rec.message for rec in caplog.records)
 
-    def test_combo_group_inconsistent_drug_raises(self, tmp_path, tiny_genbank) -> None:
-        tsv = tmp_path / 'rules.tsv'
-        tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tconflict_group
-            gag\ttiny_ref\t6\tP\tV\tDrugB\tresistant\tconflict_group
-        """))
-        db = tmp_path / 'proj.db'
-        with pytest.raises(ValueError, match='inconsistent antiviral'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
-                         rules_tsv=tsv, additional_info=False)
-
-    def test_combo_group_duplicate_member_raises(self, tmp_path, tiny_genbank) -> None:
-        tsv = tmp_path / 'rules.tsv'
-        tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tdup_group
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tdup_group
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tdup_group
-        """))
-        db = tmp_path / 'proj.db'
-        with pytest.raises(ValueError, match='duplicate member'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
-                         rules_tsv=tsv, additional_info=False)
-
-    def test_duplicate_combo_group_is_skipped_on_reinit(self, tmp_path, tiny_genbank) -> None:
-        tsv = tmp_path / 'rules.tsv'
-        tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tcombo_KE_PV
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_KE_PV
-        """))
-        db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
-                     rules_tsv=tsv, additional_info=False)
-        # init-add with the same TSV must not create a second copy
-        from respro.cli.init import add_to_project
-        add_to_project(db_path=db, rules_tsv=tsv, additional_info=False)
-
-        conn = sqlite3.connect(str(db))
-        set_count = conn.execute('SELECT COUNT(*) FROM resistance_rule_set').fetchone()[0]
-        conn.close()
-        assert set_count == 1
-
-    def test_single_mixed_anchor_change_insertion_is_split_to_combo(self, tmp_path, tiny_genbank) -> None:
+    def test_single_mixed_anchor_change_insertion_splits_into_atomic_rows(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
@@ -478,20 +447,15 @@ class TestComboRuleParsing:
         conn = sqlite3.connect(str(db))
         conn.row_factory = sqlite3.Row
         single_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
-        set_row = conn.execute(
-            'SELECT id, group_name FROM resistance_rule_set'
-        ).fetchone()
-        members = conn.execute(
-            'SELECT reference, mutation FROM resistance_rule_set_member ORDER BY reference, mutation'
+        rows = conn.execute(
+            'SELECT reference, mutation FROM resistance_rule ORDER BY reference, mutation'
         ).fetchall()
         conn.close()
 
-        assert single_count == 0
-        assert set_row is not None
-        assert set_row['group_name'].startswith('__auto_anchor_split_row_')
-        assert [(m['reference'], m['mutation']) for m in members] == [('K', 'E'), ('K', 'KW')]
+        assert single_count == 2
+        assert [(m['reference'], m['mutation']) for m in rows] == [('K', 'E'), ('K', 'KW')]
 
-    def test_single_mixed_anchor_change_deletion_is_split_to_combo(self, tmp_path, tiny_genbank) -> None:
+    def test_single_mixed_anchor_change_deletion_splits_into_atomic_rows(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
@@ -504,18 +468,13 @@ class TestComboRuleParsing:
         conn = sqlite3.connect(str(db))
         conn.row_factory = sqlite3.Row
         single_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
-        set_row = conn.execute(
-            'SELECT id, group_name FROM resistance_rule_set'
-        ).fetchone()
-        members = conn.execute(
-            'SELECT reference, mutation FROM resistance_rule_set_member ORDER BY reference, mutation'
+        rows = conn.execute(
+            'SELECT reference, mutation FROM resistance_rule ORDER BY reference, mutation'
         ).fetchall()
         conn.close()
 
-        assert single_count == 0
-        assert set_row is not None
-        assert set_row['group_name'].startswith('__auto_anchor_split_row_')
-        assert [(m['reference'], m['mutation']) for m in members] == [('G', 'A'), ('GP', 'G')]
+        assert single_count == 2
+        assert [(m['reference'], m['mutation']) for m in rows] == [('G', 'A'), ('GP', 'G')]
 
     def test_single_rule_publication_doi_is_stored_in_publication_table(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -615,20 +574,32 @@ class TestComboRuleParsing:
 
         assert call_count == 1  # one PMID → one network call, regardless of how many rules use it
 
-    def test_combo_rule_set_publication_doi_is_stored(self, tmp_path, tiny_genbank) -> None:
+    def test_formula_rule_publication_doi_is_stored(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group\tpublication
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tcombo_KE_PV\tdoi.org/10.1086/590668
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_KE_PV\t
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tcombo_KE_PV\tmut_A
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_KE_PV\tmut_B
+        """))
+        formula_tsv = tmp_path / 'formula.tsv'
+        formula_tsv.write_text(textwrap.dedent("""\
+            group_id\tantiviral\texpression\tpublication
+            combo_KE_PV\tDrugA\tmut_A AND mut_B\tdoi.org/10.1086/590668
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
+        init_project(
+            db_path=db,
+            name='test',
+            genbank_paths=[tiny_genbank],
+            rules_tsv=tsv,
+            formula_rules_tsv=formula_tsv,
+            additional_info=False,
+        )
 
         conn = sqlite3.connect(str(db))
         row = conn.execute(
             'SELECT p.doi FROM publication p '
-            'JOIN rule_set_publication rsp ON rsp.publication_id = p.id'
+            'JOIN resistance_formula_rule_publication frp ON frp.publication_id = p.id'
         ).fetchone()
         conn.close()
         assert row is not None
@@ -705,18 +676,30 @@ class TestIc50ParsingAndAggregation:
         with pytest.raises(ValueError, match='invalid ic50 value'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
-    def test_combo_group_uses_highest_numeric_ic50(self, tmp_path, tiny_genbank) -> None:
+    def test_formula_rule_uses_declared_numeric_ic50_values(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group\tfold_ic50
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tcombo_1\t2.0x
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_1\t8.5 fold
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tgroup_id\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tcombo_1\tmut_A
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tcombo_1\tmut_B
+        """))
+        formula_tsv = tmp_path / 'formula.tsv'
+        formula_tsv.write_text(textwrap.dedent("""\
+            group_id\tantiviral\texpression\tfold_ic50
+            combo_1\tDrugA\tmut_A AND mut_B\t8.5 fold
         """))
         db = tmp_path / 'proj.db'
-        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
+        init_project(
+            db_path=db,
+            name='test',
+            genbank_paths=[tiny_genbank],
+            rules_tsv=tsv,
+            formula_rules_tsv=formula_tsv,
+            additional_info=False,
+        )
 
         conn = sqlite3.connect(str(db))
-        ic50, fold_ic50 = conn.execute('SELECT ic50, fold_ic50 FROM resistance_rule_set').fetchone()
+        ic50, fold_ic50 = conn.execute('SELECT ic50, fold_ic50 FROM resistance_formula_rule').fetchone()
         conn.close()
         assert ic50 == ''
         assert fold_ic50 == '8.5'
@@ -858,9 +841,9 @@ class TestPhenotypeNormalization:
     def test_rejects_noop_combo_member(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
-            gag\ttiny_ref\t2\tK\tK\tDrugA\tresistant\tcombo_noop
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_noop
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            gag\ttiny_ref\t2\tK\tK\tDrugA\tresistant\tcombo_noop\tmut_A
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_noop\tmut_B
         """))
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='does not change reference'):
@@ -936,9 +919,9 @@ class TestPhenotypeNormalization:
 
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
-            gag\ttiny_ref\t2\tK\tK2Z\tDrugA\tresistant\tcombo_bad
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_bad
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            gag\ttiny_ref\t2\tK\tK2Z\tDrugA\tresistant\tcombo_bad\tmut_bad
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_bad\tmut_ok
         """))
         db = tmp_path / 'proj.db'
 
@@ -946,10 +929,10 @@ class TestPhenotypeNormalization:
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
-        combo_count = conn.execute('SELECT COUNT(*) FROM resistance_rule_set').fetchone()[0]
+        single_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
         conn.close()
 
-        assert combo_count == 0
+        assert single_count == 1
         assert any('unsupported amino-acid tokens' in rec.message for rec in caplog.records)
 
 
@@ -996,17 +979,17 @@ class TestRefAaMismatchSkip:
         assert 'drugbad' not in drugs
         assert any('mismatch' in r.message.lower() for r in caplog.records)
 
-    def test_mismatching_ref_aa_combo_member_skips_group(
+    def test_mismatching_ref_aa_grouped_member_is_skipped_but_other_atomic_rules_load(
         self, tmp_path, tiny_genbank, caplog
     ) -> None:
         import logging
 
-        # pos 2 has 'K', not 'Z' → mismatch member → whole group skipped
+        # pos 2 has 'K', not 'Z' → mismatching row is skipped while valid atomic rows still load.
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\trule_group
-            gag\ttiny_ref\t2\tZ\tE\tDrugA\tresistant\tcombo_bad
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_bad
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            gag\ttiny_ref\t2\tZ\tE\tDrugA\tresistant\tcombo_bad\tmut_bad
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_bad\tmut_ok
         """))
         db = tmp_path / 'proj.db'
 
@@ -1015,10 +998,10 @@ class TestRefAaMismatchSkip:
                          rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
-        set_count = conn.execute('SELECT COUNT(*) FROM resistance_rule_set').fetchone()[0]
+        single_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
         conn.close()
 
-        assert set_count == 0
+        assert single_count == 1
         assert any('mismatch' in r.message.lower() for r in caplog.records)
 
     def test_correct_ref_aa_loads_in_presence_of_mismatching_sibling(
@@ -1401,5 +1384,313 @@ class TestProjectMetadataInit:
                 overwrite=False,
                 additional_info=False,
             )
+
+
+class TestFormulaRuleImport:
+    def test_init_project_rejects_grouped_rule_without_member_id(self, tmp_path) -> None:
+        genbank_path = write_genbank(
+            tmp_path / 'ref.gb',
+            [
+                {
+                    'id': 'myref',
+                    'accession': 'MYREF001',
+                    'sequence': TINY_REF_SEQ,
+                    'genes': [
+                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    ],
+                },
+            ],
+        )
+        rules_path = tmp_path / 'rules.tsv'
+        rules_path.write_text(
+            textwrap.dedent(
+                """\
+                group_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral
+                group_1\tgag\tmyref\t2\tK\tE\tDrugA
+                """
+            )
+        )
+        formula_path = tmp_path / 'formula_rules.tsv'
+        formula_path.write_text(
+            textwrap.dedent(
+                """\
+                group_id\tantiviral\texpression\tphenotype
+                group_1\tDrugA\tmut_k2e\tresistant
+                """
+            )
+        )
+
+        with pytest.raises(ValueError, match='missing required field member_id'):
+            init_project(
+                db_path=tmp_path / 'project.db',
+                name='Formula Project',
+                genbank_paths=[genbank_path],
+                rules_tsv=rules_path,
+                formula_rules_tsv=formula_path,
+                additional_info=False,
+            )
+
+    def test_init_project_imports_formula_rules_from_second_tsv(self, tmp_path) -> None:
+        genbank_path = write_genbank(
+            tmp_path / 'ref.gb',
+            [
+                {
+                    'id': 'myref',
+                    'accession': 'MYREF001',
+                    'sequence': TINY_REF_SEQ,
+                    'genes': [
+                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    ],
+                },
+            ],
+        )
+        rules_path = tmp_path / 'rules.tsv'
+        rules_path.write_text(
+            textwrap.dedent(
+                """\
+                member_id\tgroup_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+                mut_k2e\tgroup_1\tgag\tmyref\t2\tK\tE\tDrugA\tunknown
+                mut_f4l\tgroup_1\tgag\tmyref\t4\tF\tL\tDrugA\tunknown
+                mut_a6v\tgroup_1\tgag\tmyref\t6\tP\tV\tDrugA\tunknown
+                """
+            )
+        )
+        formula_path = tmp_path / 'formula_rules.tsv'
+        formula_path.write_text(
+            textwrap.dedent(
+                """\
+                group_id\tantiviral\texpression\tphenotype\tclinical_phenotype\tic50\tfold_ic50\tsource\tcomment
+                group_1\tDrugA\t(mut_k2e XOR mut_a6v) AND NOT mut_f4l\tresistant\tunknown\t\t3\tliterature\tExample formula
+                """
+            )
+        )
+
+        db_path = tmp_path / 'project.db'
+        init_project(
+            db_path=db_path,
+            name='Formula Project',
+            genbank_paths=[genbank_path],
+            rules_tsv=rules_path,
+            formula_rules_tsv=formula_path,
+            additional_info=False,
+        )
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        rule_rows = conn.execute(
+            'SELECT external_id FROM resistance_rule ORDER BY external_id'
+        ).fetchall()
+        formula_row = conn.execute(
+            'SELECT formula_id, normalized_expression, fold_ic50, source, comment '
+            'FROM resistance_formula_rule'
+        ).fetchone()
+        link_rows = conn.execute(
+            'SELECT r.external_id '
+            'FROM resistance_formula_rule_member frm '
+            'JOIN resistance_rule r ON r.id = frm.rule_id '
+            'ORDER BY r.external_id'
+        ).fetchall()
+        conn.close()
+
+        assert [row['external_id'] for row in rule_rows] == ['mut_a6v', 'mut_f4l', 'mut_k2e']
+        assert formula_row is not None
+        assert formula_row['formula_id'] == 'group_1'
+        assert formula_row['normalized_expression'] == '((mut_a6v XOR mut_k2e) AND (NOT mut_f4l))'
+        assert formula_row['fold_ic50'] == '3'
+        assert formula_row['source'] == 'literature'
+        assert formula_row['comment'] == 'Example formula'
+        assert [row['external_id'] for row in link_rows] == ['mut_a6v', 'mut_f4l', 'mut_k2e']
+
+    def test_init_project_imports_shared_atomic_rule_once_for_multiple_groups(self, tmp_path) -> None:
+        genbank_path = write_genbank(
+            tmp_path / 'ref.gb',
+            [
+                {
+                    'id': 'myref',
+                    'accession': 'MYREF001',
+                    'sequence': TINY_REF_SEQ,
+                    'genes': [
+                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    ],
+                },
+            ],
+        )
+        rules_path = tmp_path / 'rules.tsv'
+        rules_path.write_text(
+            textwrap.dedent(
+                """\
+                member_id\tgroup_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+                mut_shared\tgroup_a,group_b\tgag\tmyref\t2\tK\tE\tDrugSingle\tresistant
+                mut_only_a\tgroup_a\tgag\tmyref\t4\tF\tL\tDrugSingle\tunknown
+                mut_only_b\tgroup_b\tgag\tmyref\t6\tP\tV\tDrugSingle\tunknown
+                """
+            )
+        )
+        formula_path = tmp_path / 'formula_rules.tsv'
+        formula_path.write_text(
+            textwrap.dedent(
+                """\
+                group_id\tantiviral\texpression\tphenotype\tcomment
+                group_a\tDrugA\tmut_shared AND mut_only_a\tresistant\tFormula A
+                group_b\tDrugB\tmut_shared AND mut_only_b\tintermediate\tFormula B
+                """
+            )
+        )
+
+        db_path = tmp_path / 'project.db'
+        init_project(
+            db_path=db_path,
+            name='Formula Project',
+            genbank_paths=[genbank_path],
+            rules_tsv=rules_path,
+            formula_rules_tsv=formula_path,
+            additional_info=False,
+        )
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        shared_rows = conn.execute(
+            'SELECT external_id, drug_id FROM resistance_rule WHERE external_id = ?',
+            ('mut_shared',),
+        ).fetchall()
+        atomic_row = conn.execute(
+            'SELECT rr.external_id, d.name AS drug_name, rr.phenotype '
+            'FROM resistance_rule rr JOIN drug d ON d.id = rr.drug_id '
+            'WHERE rr.external_id = ?',
+            ('mut_shared',),
+        ).fetchone()
+        formula_rows = conn.execute(
+            'SELECT fr.formula_id, d.name AS drug_name, fr.phenotype, fr.comment '
+            'FROM resistance_formula_rule fr JOIN drug d ON d.id = fr.drug_id '
+            'ORDER BY fr.formula_id'
+        ).fetchall()
+        formula_links = conn.execute(
+            'SELECT fr.formula_id, r.external_id '
+            'FROM resistance_formula_rule_member frm '
+            'JOIN resistance_formula_rule fr ON fr.id = frm.formula_rule_id '
+            'JOIN resistance_rule r ON r.id = frm.rule_id '
+            'ORDER BY fr.formula_id, r.external_id'
+        ).fetchall()
+        conn.close()
+
+        assert len(shared_rows) == 1
+        assert atomic_row is not None
+        assert atomic_row['drug_name'] == 'drugsingle'
+        assert atomic_row['phenotype'] == 'resistant'
+        assert [(row['formula_id'], row['drug_name'], row['phenotype'], row['comment']) for row in formula_rows] == [
+            ('group_a', 'druga', 'resistant', 'Formula A'),
+            ('group_b', 'drugb', 'intermediate', 'Formula B'),
+        ]
+        assert [(row['formula_id'], row['external_id']) for row in formula_links] == [
+            ('group_a', 'mut_only_a'),
+            ('group_a', 'mut_shared'),
+            ('group_b', 'mut_only_b'),
+            ('group_b', 'mut_shared'),
+        ]
+
+    def test_init_project_rejects_duplicate_atomic_rule_ids(self, tmp_path) -> None:
+        genbank_path = write_genbank(
+            tmp_path / 'ref.gb',
+            [
+                {
+                    'id': 'myref',
+                    'accession': 'MYREF001',
+                    'sequence': TINY_REF_SEQ,
+                    'genes': [
+                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    ],
+                },
+            ],
+        )
+        rules_path = tmp_path / 'rules.tsv'
+        rules_path.write_text(
+            textwrap.dedent(
+                """\
+                member_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral
+                mut_dup\tgag\tmyref\t2\tK\tE\tDrugA
+                mut_dup\tgag\tmyref\t4\tF\tL\tDrugA
+                """
+            )
+        )
+
+        with pytest.raises(ValueError, match='duplicate atomic rule ids'):
+            init_project(
+                db_path=tmp_path / 'project.db',
+                name='Formula Project',
+                genbank_paths=[genbank_path],
+                rules_tsv=rules_path,
+                additional_info=False,
+            )
+
+    def test_add_to_project_soft_skips_formula_with_unknown_atomic_rule_id(self, tmp_path) -> None:
+        from respro.cli.init import add_to_project
+
+        genbank_path = write_genbank(
+            tmp_path / 'ref.gb',
+            [
+                {
+                    'id': 'myref',
+                    'accession': 'MYREF001',
+                    'sequence': TINY_REF_SEQ,
+                    'genes': [
+                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    ],
+                },
+            ],
+        )
+        db_path = tmp_path / 'project.db'
+        initial_rules = tmp_path / 'initial_rules.tsv'
+        initial_rules.write_text(
+            textwrap.dedent(
+                """\
+                member_id\tgroup_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral
+                mut_k2e\tgroup_1\tgag\tmyref\t2\tK\tE\tDrugA
+                """
+            )
+        )
+        init_project(
+            db_path=db_path,
+            name='Formula Project',
+            genbank_paths=[genbank_path],
+            rules_tsv=initial_rules,
+            additional_info=False,
+        )
+
+        additional_rules = tmp_path / 'additional_rules.tsv'
+        additional_rules.write_text(
+            textwrap.dedent(
+                """\
+                member_id\tgroup_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral
+                mut_a6v\tgroup_1\tgag\tmyref\t6\tP\tV\tDrugA
+                """
+            )
+        )
+        formula_path = tmp_path / 'formula_rules.tsv'
+        formula_path.write_text(
+            textwrap.dedent(
+                """\
+                group_id\tantiviral\texpression\tphenotype
+                group_1\tDrugA\tmut_a6v AND missing_rule\tresistant
+                """
+            )
+        )
+
+        # Should not raise; instead skip the formula rule with unknown member
+        add_to_project(
+            db_path=db_path,
+            rules_tsv=additional_rules,
+            formula_rules_tsv=formula_path,
+            additional_info=False,
+            validate_only=True,
+        )
+        
+        # Verify atomic rules were imported but formula rule was skipped
+        conn = sqlite3.connect(str(db_path))
+        formula_count = conn.execute(
+            'SELECT COUNT(*) FROM resistance_formula_rule WHERE formula_id = ?',
+            ('group_1',)
+        ).fetchone()[0]
+        conn.close()
+        assert formula_count == 0  # Formula rule should be skipped
 
 

@@ -11,7 +11,7 @@ from respro.core.query import (
     resolve_fasta_query,
     select_matches_for_reference,
 )
-from respro.core.rules import load_rule_sets, load_rules, match_rule_sets, match_rules
+from respro.core.rules import load_formula_rules, load_rules, match_formula_rules, match_rules
 from respro.core.vcf_coverage import compute_coverage_gaps_from_bam
 from respro.core.vcf_remap import remap_variants
 from respro.db.models import AnnotatedVariant, CoverageGap, ProfilingResult
@@ -55,7 +55,7 @@ def profile_fasta(
         selected_matches = select_matches_for_reference(fasta_matches, ref_id)
         ref_name = _reference_name(project_conn, ref_id)
 
-        genes, rules, rule_sets, rule_gene_names = _load_reference_data(project_conn, ref_id)
+        genes, rules, formula_rules, rule_gene_names = _load_reference_data(project_conn, ref_id)
         annotations, coverage_gaps = profile_fasta_consensus(query_seq, selected_matches)
 
         af_bins = {
@@ -66,7 +66,7 @@ def profile_fasta(
 
         result = _build_result(
             annotations=annotations,
-            rule_sets=rule_sets,
+            formula_rules=formula_rules,
             rules=rules,
             project_conn=project_conn,
             ref_id=ref_id,
@@ -149,7 +149,7 @@ def profile_vcf(
         selected_matches = select_matches_for_reference(fasta_matches, ref_id)
         ref_name = _reference_name(project_conn, ref_id)
 
-        genes, rules, rule_sets, rule_gene_names = _load_reference_data(project_conn, ref_id)
+        genes, rules, formula_rules, rule_gene_names = _load_reference_data(project_conn, ref_id)
 
         try:
             variants = parse_vcf(vcf_path, expected_query_name=query_name)
@@ -181,7 +181,7 @@ def profile_vcf(
         annotations = annotate_variants(variants, genes)
         result = _build_result(
             annotations=annotations,
-            rule_sets=rule_sets,
+            formula_rules=formula_rules,
             rules=rules,
             project_conn=project_conn,
             ref_id=ref_id,
@@ -229,7 +229,7 @@ def profile_vcf(
 def _build_result(
     *,
     annotations: list[AnnotatedVariant],
-    rule_sets: list,
+    formula_rules: list,
     rules: list,
     project_conn,
     ref_id: int,
@@ -246,7 +246,7 @@ def _build_result(
 ) -> ProfilingResult:
     """Apply rule matching and build the result dataclass."""
     matched_annotations = match_rules(annotations, rules)
-    combo_hits = match_rule_sets(matched_annotations, rule_sets)
+    formula_hits = match_formula_rules(matched_annotations, formula_rules)
     _assign_af_bins(matched_annotations, bins=af_bins)
 
     reference_row = project_conn.execute(
@@ -266,7 +266,7 @@ def _build_result(
         variants_in_cds=variants_in_cds,
         resistance_hits=sum(1 for ann in matched_annotations if ann.is_resistance_hit),
         annotations=matched_annotations,
-        combo_hits=combo_hits,
+        formula_hits=formula_hits,
         coverage_gaps=coverage_gaps or [],
         query_sequence=query_sequence,
         gene_matches=gene_matches or [],
@@ -274,15 +274,15 @@ def _build_result(
 
 
 def _load_reference_data(project_conn, ref_id: int) -> tuple[list, list, list, set[str]]:
-    """Load genes/rules/rule sets for one internal reference."""
+    """Load genes, atomic rules, and formula rules for one internal reference."""
     genes = load_genes_for_reference(project_conn, ref_id)
     rules = load_rules(project_conn, ref_id)
-    rule_sets = load_rule_sets(project_conn, ref_id)
+    formula_rules = load_formula_rules(project_conn, ref_id)
     rule_gene_names: set[str] = {rule.gene_name for rule in rules}
-    for rule_set in rule_sets:
-        for member in rule_set.members:
+    for formula_rule in formula_rules:
+        for member in formula_rule.member_rules.values():
             rule_gene_names.add(member.gene_name)
-    return genes, rules, rule_sets, rule_gene_names
+    return genes, rules, formula_rules, rule_gene_names
 
 
 def _project_name(project_conn) -> str:

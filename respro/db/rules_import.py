@@ -22,6 +22,12 @@ logger = logging.getLogger(__name__)
 _RE_ANCHORLESS_DEL = re.compile(r'^([A-Za-z]+)\d+del$', re.IGNORECASE)
 _RE_REWRITE_TOKEN = re.compile(r'^([A-Z*]+)(\d+)([A-Z*]+)$')
 _AUTO_SPLIT_GROUP_PREFIX = '__auto_anchor_split_row_'
+_RE_FORMULA_TOKEN = re.compile(
+    r'\(|\)|\bAND\b|\bOR\b|\bNOT\b|\bXOR\b|[A-Za-z0-9_.:-]+',
+    re.IGNORECASE,
+)
+_FORMULA_OPERATORS = {'AND', 'OR', 'NOT', 'XOR'}
+_FORMULA_COMPONENT_DRUG = '__formula_component__'
 
 
 def _normalize_publication_token(token: str) -> tuple[str, str, str]:
@@ -179,23 +185,287 @@ def _link_rule_publications(
         )
 
 
-def _link_rule_set_publications(
+def _link_formula_rule_publications(
     conn: sqlite3.Connection,
-    rule_set_id: int,
-    raw_publications: list[str],
+    formula_rule_id: int,
+    raw_publication: str,
     additional_info: bool,
     pub_cache: dict[str, int],
 ) -> None:
-    """Parse, resolve, and link all publications from a combo group to a rule set."""
-    for raw in raw_publications:
-        for doi, pubmed_id, raw_input in _parse_publication_entries(raw):
-            pub_id = _get_or_create_publication(
-                conn, doi, pubmed_id, raw_input, additional_info, pub_cache,
-            )
-            conn.execute(
-                'INSERT OR IGNORE INTO rule_set_publication (rule_set_id, publication_id) VALUES (?, ?)',
-                (rule_set_id, pub_id),
-            )
+    """Parse, resolve, and link all publications in a raw TSV cell to one formula rule."""
+    for doi, pubmed_id, raw_input in _parse_publication_entries(raw_publication):
+        pub_id = _get_or_create_publication(
+            conn, doi, pubmed_id, raw_input, additional_info, pub_cache,
+        )
+        conn.execute(
+            'INSERT OR IGNORE INTO resistance_formula_rule_publication '
+            '(formula_rule_id, publication_id) VALUES (?, ?)',
+            (formula_rule_id, pub_id),
+        )
+
+
+def _tokenize_formula_expression(expression: str) -> list[str]:
+    """Tokenize a boolean formula expression and reject unsupported characters."""
+    tokens = _RE_FORMULA_TOKEN.findall(expression)
+    if not tokens:
+        raise ValueError('empty expression')
+
+    condensed_expression = re.sub(r'\s+', '', expression)
+    condensed_tokens = ''.join(token.replace(' ', '') for token in tokens)
+    if condensed_expression != condensed_tokens:
+        raise ValueError('contains unsupported characters')
+
+    normalized_tokens: list[str] = []
+    for token in tokens:
+        upper = token.upper()
+        if upper in _FORMULA_OPERATORS or token in {'(', ')'}:
+            normalized_tokens.append(upper)
+            continue
+        normalized_tokens.append(token)
+    return normalized_tokens
+
+
+def _parse_formula_expression(expression: str) -> tuple[tuple, str, list[str]]:
+    """
+    Parse a boolean formula expression into an AST (abstract syntax tree) and canonical string.
+
+    This implements a **recursive descent parser** with operator precedence to convert
+    expressions like "mut_1 AND mut_2 OR mut_3" into:
+    1. An AST (nested tuples) representing the logical hierarchy
+    2. A canonical normalized string (for duplicate detection)
+    3. A list of all referenced atomic rule IDs
+
+    **Operator Precedence (lowest to highest):**
+    - OR   (lowest precedence)
+    - XOR
+    - AND
+    - NOT  (highest precedence, unary operator)
+    - Parentheses and atoms (atomic rule IDs) (highest)
+
+    **How it works:**
+    - Tokenization: the expression is first split into tokens (operators, parens, IDs)
+    - Parsing: each precedence level has its own function that handles that operator:
+      * parse_or_expression () → handles OR (lowest precedence, called first)
+      * parse_xor_expression() → handles XOR
+      * parse_and_expression() → handles AND
+      * parse_not_expression() → handles NOT (unary prefix operator)
+      * parse_primary()       → handles atoms and parentheses (highest precedence)
+    - Each function calls the next higher precedence function to parse its operands,
+      ensuring that lower-precedence operators are parsed at the top level of the tree.
+
+    Example: "A AND B OR C"
+    - Parsed as (A AND B) OR C because AND has higher precedence
+    - AST structure: ('OR', [('AND', [('ATOM', 'A'), ('ATOM', 'B')]), ('ATOM', 'C')])
+
+    Example: "NOT A AND B"
+    - Parsed as (NOT A) AND B because NOT is highest precedence
+    - AST structure: ('AND', [('NOT', ('ATOM', 'A')), ('ATOM', 'B')])
+    """
+    #  Tokenize the expression into a list of operators, parens, and IDs
+    tokens = _tokenize_formula_expression(expression)
+    position = 0  # Current position in the token stream
+    referenced_ids: list[str] = []  # Accumulate all atomic rule IDs referenced in the expression
+
+    # Manage the token stream (position, lookahead, validation)
+
+    def peek() -> str | None:
+        """Return the current token WITHOUT advancing position (lookahead)."""
+        return tokens[position] if position < len(tokens) else None
+
+    def consume(expected: str | None = None) -> str:
+        """
+        Advance position and return the current token.
+
+        :param expected: if provided, raise error if current token doesn't match
+        :return: the token that was consumed
+        """
+        nonlocal position
+        token = peek()
+        if token is None:
+            raise ValueError('unexpected end of expression')
+        if expected is not None and token != expected:
+            raise ValueError(f'expected {expected!r}, found {token!r}')
+        position += 1
+        return token
+
+    # PARSING FUNCTIONS: Implement recursive descent with operator precedence
+
+    def parse_primary() -> tuple:
+        """
+        Parse HIGHEST PRECEDENCE items: atoms (atomic rule IDs) and parentheses.
+
+        Grammar:
+          primary := '(' or_expression ')' | ATOM
+
+        Returns AST node:
+          - ('ATOM', 'rule_id') for atomic rule references
+          - Result of parse_or_expression() for parenthesized sub-expressions
+        """
+        token = peek()
+        if token is None:
+            raise ValueError('unexpected end of expression')
+
+        # Case 1: Parenthesized sub-expression
+        if token == '(':
+            consume('(')
+            # Recursively parse the full expression inside parens (restart at lowest precedence)
+            node = parse_or_expression()
+            consume(')')
+            return node
+
+        # Case 2: Invalid token (operator or closing paren where atom expected)
+        if token in _FORMULA_OPERATORS or token == ')':
+            raise ValueError(f'unexpected token {token!r}')
+
+        # Case 3: Atomic rule ID (the leaf of the AST tree)
+        referenced_ids.append(token)  # Track that we've seen this ID
+        consume()  # Move past this token
+        return ('ATOM', token)
+
+    def parse_not_expression() -> tuple:
+        """
+        Parse NOT operator (unary prefix; applies to next higher-precedence expression).
+
+        Grammar:
+          not_expr := 'NOT' not_expr | primary
+
+        Returns AST node:
+          - ('NOT', operand) if NOT is present
+          - Result of parse_primary() otherwise
+
+        **Key insight:** NOT is right-associative, so "NOT NOT A" means "NOT (NOT A)".
+        """
+        if peek() == 'NOT':
+            consume('NOT')
+            # Recursively parse another NOT (or PRIMARY) — allows chaining NOT operators
+            return ('NOT', parse_not_expression())
+        # No NOT found; parse the next highest-precedence level (primary)
+        return parse_primary()
+
+    def parse_and_expression() -> tuple:
+        """
+        Parse AND operator (binary; left-associative).
+
+        Grammar:
+          and_expr := not_expr ('AND' not_expr)*
+
+        Returns AST node:
+          - If multiple operands: ('AND', [operand1, operand2, ...])
+          - If single operand: that operand (unwrapped)
+
+        **Left-associative:** "A AND B AND C" becomes ('AND', [A, B, C])
+        **Flattening:** Multiple ANDs at the same level are combined into a single AND node
+        with a list of children (not nested pairs), which simplifies the tree.
+        """
+        nodes = [parse_not_expression()]
+        # Accumulate all AND-separated operands
+        while peek() == 'AND':
+            consume('AND')
+            nodes.append(parse_not_expression())
+        # If no AND operators found, return the single operand unwrapped
+        if len(nodes) == 1:
+            return nodes[0]
+        # Multiple operands: wrap in AND node
+        return ('AND', nodes)
+
+    def parse_xor_expression() -> tuple:
+        """
+        Parse XOR operator (binary; left-associative).
+
+        Grammar:
+          xor_expr := and_expr ('XOR' and_expr)*
+
+        Returns AST node:
+          - If multiple operands: ('XOR', [operand1, operand2, ...])
+          - If single operand: that operand (unwrapped)
+
+        **Note:** XOR has the same precedence as AND in this grammar, but is parsed
+        at a separate level to establish precedence above AND and below OR.
+        """
+        nodes = [parse_and_expression()]
+        while peek() == 'XOR':
+            consume('XOR')
+            nodes.append(parse_and_expression())
+        if len(nodes) == 1:
+            return nodes[0]
+        return ('XOR', nodes)
+
+    def parse_or_expression() -> tuple:
+        """
+        Parse OR operator (binary; left-associative; LOWEST PRECEDENCE).
+
+        Grammar:
+          or_expr := xor_expr ('OR' xor_expr)*
+
+        Returns AST node:
+          - If multiple operands: ('OR', [operand1, operand2, ...])
+          - If single operand: that operand (unwrapped)
+
+        **Lowest precedence:** OR is parsed at the outermost level of the tree.
+        "A AND B OR C" → OR applied last, meaning (A AND B) is one operand, C is the other.
+        """
+        nodes = [parse_xor_expression()]
+        while peek() == 'OR':
+            consume('OR')
+            nodes.append(parse_xor_expression())
+        if len(nodes) == 1:
+            return nodes[0]
+        return ('OR', nodes)
+
+    # Start parsing at the lowest-precedence level (OR), which will recursively
+    # call down through XOR → AND → NOT → PRIMARY, building the tree bottom-up.
+    ast = parse_or_expression()
+
+    # Verify we've consumed all tokens (no garbage after the final expression)
+    if peek() is not None:
+        raise ValueError(f'unexpected token {peek()!r}')
+
+    # Convert the AST to canonical form (deterministic ordering for duplicate detection)
+    canonical_ast = _canonicalize_formula_ast(ast)
+
+    return _formula_ast_to_string(canonical_ast), referenced_ids
+
+
+def _canonicalize_formula_ast(node: tuple) -> tuple:
+    """Return a deterministic AST for duplicate detection and stable storage."""
+    node_type = node[0]
+    if node_type == 'ATOM':
+        return node
+    if node_type == 'NOT':
+        return ('NOT', _canonicalize_formula_ast(node[1]))
+
+    children = [_canonicalize_formula_ast(child) for child in node[1]]
+    flattened: list[tuple] = []
+    for child in children:
+        if child[0] == node_type:
+            flattened.extend(child[1])
+        else:
+            flattened.append(child)
+    flattened.sort(key=_formula_sort_key)
+    return (node_type, flattened)
+
+
+def _formula_ast_to_string(node: tuple) -> str:
+    """Serialize a canonical formula AST to a deterministic normalized expression."""
+    node_type = node[0]
+    if node_type == 'ATOM':
+        return node[1]
+    if node_type == 'NOT':
+        return f'(NOT {_formula_ast_to_string(node[1])})'
+    joiner = f' {node_type} '
+    return '(' + joiner.join(_formula_ast_to_string(child) for child in node[1]) + ')'
+
+
+def _formula_sort_key(node: tuple) -> tuple[int, str]:
+    """Return a stable sort key that keeps negated branches after positive branches."""
+    rank_map = {
+        'ATOM': 0,
+        'AND': 1,
+        'OR': 1,
+        'XOR': 1,
+        'NOT': 2,
+    }
+    return rank_map.get(node[0], 99), _formula_ast_to_string(node)
 
 
 def _get_value(row: dict[str, str], *keys: str) -> str:
@@ -468,7 +738,7 @@ def _split_anchor_changed_indel_token(
 
 def _expand_anchor_changed_indel_rules(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     """
-    Expand mixed anchor-change indel rows into explicit two-member combo rows.
+    Expand mixed anchor-change indel rows into explicit two-member grouped rows.
 
     Rows that cannot be split safely are returned unchanged and continue through
     normal validation.
@@ -508,17 +778,28 @@ def _expand_anchor_changed_indel_rules(rows: list[dict[str, str]]) -> list[dict[
             continue
 
         sub_ref, sub_mut, indel_ref, indel_mut = split
-        group_name = _get_value(row, 'rule_group') or f'{_AUTO_SPLIT_GROUP_PREFIX}{row_number}'
+        group_name = _get_value(row, 'group_id', 'rule_group') or (
+            f'{_AUTO_SPLIT_GROUP_PREFIX}{row_number}'
+        )
 
         substitution_row = dict(row)
         substitution_row['reference'] = sub_ref
         substitution_row['mutation'] = sub_mut
-        substitution_row['rule_group'] = group_name
+        substitution_row['group_id'] = group_name
+        member_id = _get_value(row, 'member_id', 'rule_id')
+        if member_id:
+            substitution_row['member_id'] = f'{member_id}__sub'
+        else:
+            substitution_row['member_id'] = f'{group_name}__sub'
 
         indel_row = dict(row)
         indel_row['reference'] = indel_ref
         indel_row['mutation'] = indel_mut
-        indel_row['rule_group'] = group_name
+        indel_row['group_id'] = group_name
+        if member_id:
+            indel_row['member_id'] = f'{member_id}__indel'
+        else:
+            indel_row['member_id'] = f'{group_name}__indel'
 
         expanded_rows.extend([substitution_row, indel_row])
         split_count += 1
@@ -783,13 +1064,49 @@ def _rule_exists(
     return row is not None
 
 
-def _rule_set_exists(conn: sqlite3.Connection, *, drug_id: int, group_name: str) -> bool:
-    """Return True when a combination rule set with the same drug and group label already exists."""
+def _external_rule_id_exists(conn: sqlite3.Connection, external_id: str) -> bool:
+    """Return True when an atomic external rule id is already stored."""
     row = conn.execute(
-        'SELECT id FROM resistance_rule_set WHERE drug_id = ? AND group_name = ? LIMIT 1',
-        (drug_id, group_name),
+        'SELECT id FROM resistance_rule WHERE external_id = ? LIMIT 1',
+        (external_id,),
     ).fetchone()
     return row is not None
+
+
+def _load_rule_ids_by_external_id(
+    conn: sqlite3.Connection,
+    external_ids: set[str],
+) -> dict[str, int]:
+    """Return a mapping from atomic external rule ids to resistance_rule row ids."""
+    if not external_ids:
+        return {}
+
+    placeholders = ','.join('?' * len(external_ids))
+    rows = conn.execute(
+        f'SELECT id, external_id FROM resistance_rule WHERE external_id IN ({placeholders})',
+        sorted(external_ids),
+    ).fetchall()
+    return {row['external_id']: int(row['id']) for row in rows}
+
+
+def _formula_rule_exists(
+    conn: sqlite3.Connection,
+    *,
+    formula_id: str,
+    drug_id: int,
+    normalized_expression: str,
+) -> tuple[bool, bool]:
+    """Return whether a formula id or a canonical drug-level expression already exists."""
+    id_exists = conn.execute(
+        'SELECT 1 FROM resistance_formula_rule WHERE formula_id = ? LIMIT 1',
+        (formula_id,),
+    ).fetchone() is not None
+    expression_exists = conn.execute(
+        'SELECT 1 FROM resistance_formula_rule '
+        'WHERE drug_id = ? AND normalized_expression = ? LIMIT 1',
+        (drug_id, normalized_expression),
+    ).fetchone() is not None
+    return id_exists, expression_exists
 
 
 def _build_gene_lookup(conn: sqlite3.Connection) -> dict[str, list[sqlite3.Row]]:
@@ -820,309 +1137,26 @@ def _build_gene_lookup(conn: sqlite3.Connection) -> dict[str, list[sqlite3.Row]]
     return genes_by_name
 
 
-def _insert_combo_rule_sets(
-    conn: sqlite3.Connection,
-    project_id: int,
-    combo_rows: list[dict],
-    genes_by_name: dict[str, list[sqlite3.Row]],
-    coord_base: int,
-    drug_cache: dict[str, int],
-    pub_cache: dict[str, int],
-    additional_info: bool,
-    errors: list[str],
-    skipped_gene: list[str],
-    skipped_ref: list[str],
-    skipped_invalid_aa: list[str],
-    mismatch_keys: set[tuple[str, str, str, str]],
-) -> int:
-    """
-    Parse combination rule rows (those with a non-empty ``rule_group`` column) and
-    insert validated rule sets into ``resistance_rule_set`` and
-    ``resistance_rule_set_member``.
-
-    Each unique ``rule_group`` value defines one rule set.  All rows in a group
-    must agree on ``antiviral`` and normalized phenotype. At least two valid
-    member mutations are required per group.
-
-    :param conn: SQLite database connection
-    :param project_id: ID of the project
-    :param combo_rows: rows from the TSV that carry a non-empty ``rule_group``
-    :param genes_by_name: gene lookup built from the project DB
-    :param coord_base: detected coordinate base (0 or 1)
-    :param drug_cache: shared drug-name → drug-id cache
-    :param errors: list accumulating fatal validation errors
-    :param skipped_gene: list accumulating skipped gene names (non-fatal)
-    :param skipped_ref: list accumulating skipped reference warnings (non-fatal)
-    :param skipped_invalid_aa: list accumulating skipped unsupported AA token rows
-    :param mismatch_keys: set of (gene_name, position_raw, reference_identifier, ref_aa)
-        tuples for rows with reference AA mismatches; matching members are skipped
-    :return: number of combination rule sets successfully inserted
-    """
-    # Group rows by rule_group value (preserves insertion order in Python ≥ 3.7).
-    # A row may carry a comma-separated list of group labels, assigning it to each group.
-    groups: dict[str, list[dict]] = {}
-    for row in combo_rows:
-        for group_id in [g.strip() for g in _get_value(row, 'rule_group').split(',') if g.strip()]:
-            groups.setdefault(group_id, []).append(row)
-
-    count = 0
-    for group_id, rows in groups.items():
-        # --- set-level metadata validation ---
-
-        drug_names = {_get_value(row, 'antiviral') for row in rows} - {''}
-        if not drug_names:
-            errors.append(f'Combo rule group {group_id!r}: no antiviral value found')
-            continue
-        if len(drug_names) > 1:
-            errors.append(
-                f'Combo rule group {group_id!r}: inconsistent antiviral values '
-                f'{sorted(drug_names)} — all rows in a group must name the same drug'
-            )
-            continue
-        drug_name = next(iter(drug_names))
-
-        phenotype_values: set[str] = set()
-        clinical_phenotype_values: set[str] = set()
-        phenotype_error = False
-        for combo_row in rows:
-            normalized, normalized_clinical = _normalize_phenotypes_from_row(
-                combo_row,
-                errors=errors,
-                context=f'Combo rule group {group_id!r}',
-            )
-            if normalized != 'unknown':
-                phenotype_values.add(normalized)
-            if normalized_clinical != 'unknown':
-                clinical_phenotype_values.add(normalized_clinical)
-        if len(phenotype_values) > 1:
-            errors.append(
-                f'Combo rule group {group_id!r}: inconsistent phenotype values '
-                f'{sorted(phenotype_values)} — all rows in a group must have the same phenotype'
-            )
-            phenotype_error = True
-        phenotype = next(iter(phenotype_values), 'unknown')
-
-        if len(clinical_phenotype_values) > 1:
-            errors.append(
-                f'Combo rule group {group_id!r}: inconsistent clinical_phenotype values '
-                f'{sorted(clinical_phenotype_values)} — all rows in a group must have the same clinical_phenotype'
-            )
-            phenotype_error = True
-        clinical_phenotype = next(iter(clinical_phenotype_values), 'unknown')
-
-        if phenotype_error:
-            continue
-
-        # ic50 and fold_ic50: keep the highest numeric value across members in the same group.
-        ic50_values: list[float] = []
-        fold_ic50_values: list[float] = []
-        for combo_row in rows:
-            raw_ic50 = _get_value(combo_row, 'ic50', 'ic_50')
-            if raw_ic50 and raw_ic50.lower() != 'none':
-                parsed = _parse_ic50_value(raw_ic50)
-                if parsed is None:
-                    errors.append(f'Combo rule group {group_id!r}: invalid ic50 value {raw_ic50!r}')
-                else:
-                    ic50_values.append(parsed)
-            raw_fold = _get_value(combo_row, 'fold_ic50', 'fold_ic_50')
-            if raw_fold and raw_fold.lower() != 'none':
-                parsed = _parse_ic50_value(raw_fold)
-                if parsed is None:
-                    errors.append(f'Combo rule group {group_id!r}: invalid fold_ic50 value {raw_fold!r}')
-                else:
-                    fold_ic50_values.append(parsed)
-        ic50 = f'{max(ic50_values):g}' if ic50_values else ''
-        fold_ic50 = f'{max(fold_ic50_values):g}' if fold_ic50_values else ''
-
-        # publication: union of all non-empty publication strings across the group.
-        all_publication_raws = [
-            _get_value(r, 'publication') for r in rows if _get_value(r, 'publication')
-        ]
-        source = next((_get_value(r, 'source') for r in rows if _get_value(r, 'source')), '')
-        comment = next((_get_value(r, 'comment') for r in rows if _get_value(r, 'comment')), '')
-
-        # --- per-member validation (pre-validate before any DB write) ---
-        valid_members: list[tuple] = []
-        seen_member_signatures: set[tuple[int, int, str]] = set()
-        group_ok = True
-        for row in rows:
-            gene_name = _get_value(row, 'gene')
-            if not gene_name or gene_name not in genes_by_name:
-                skipped_gene.append(gene_name or '<empty>')
-                group_ok = False
-                continue
-
-            reference_identifier = _get_value(row, 'reference_identifier')
-            gene_id = _resolve_rule_gene_id(genes_by_name[gene_name], reference_identifier)
-            if gene_id is None:
-                candidate_refs = sorted(
-                    {c['reference_accession'] or c['reference_name'] for c in genes_by_name[gene_name]}
-                )
-                if reference_identifier:
-                    skipped_ref.append(
-                        f'combo group {group_id!r} gene {gene_name!r}: '
-                        f'reference_identifier {reference_identifier!r} not found '
-                        f'(available: {candidate_refs})'
-                    )
-                else:
-                    errors.append(
-                        f'Combo rule group {group_id!r}: gene {gene_name!r} is ambiguous '
-                        f'across references {candidate_refs}; add reference_identifier'
-                    )
-                group_ok = False
-                continue
-
-            position_raw = _get_value(row, 'position')
-            mutation_raw = _get_value(row, 'mutation')
-            if not position_raw or not mutation_raw:
-                errors.append(
-                    f'Combo rule group {group_id!r}: member for gene {gene_name!r} '
-                    'is missing position or mutation'
-                )
-                group_ok = False
-                continue
-
-            try:
-                position_0based = int(position_raw) - coord_base
-            except ValueError:
-                errors.append(
-                    f'Combo rule group {group_id!r}: member for gene {gene_name!r} '
-                    f'has invalid position {position_raw!r}'
-                )
-                group_ok = False
-                continue
-
-            reference_aa = _get_value(row, 'reference')
-            if (gene_name, position_raw, reference_identifier, reference_aa) in mismatch_keys:
-                group_ok = False
-                continue
-
-            # Resolve anchor-less deletion tokens — same logic as for single rules.
-            m_del = _RE_ANCHORLESS_DEL.match(mutation_raw)
-            if m_del:
-                deleted_block = m_del.group(1).upper()
-                aa_seq = _get_gene_aa_sequence(genes_by_name[gene_name], reference_identifier)
-                if not aa_seq:
-                    errors.append(
-                        f'Combo rule group {group_id!r}: member for gene {gene_name!r} '
-                        f'pos {position_raw!r} has no aa_sequence, cannot resolve deletion '
-                        f'anchor for {mutation_raw!r}'
-                    )
-                    group_ok = False
-                    continue
-                resolved = _resolve_anchorless_deletion(deleted_block, position_0based, aa_seq)
-                if resolved is None:
-                    errors.append(
-                        f'Combo rule group {group_id!r}: member for gene {gene_name!r} '
-                        f'pos {position_raw!r}: cannot resolve anchor for deletion '
-                        f'{mutation_raw!r}'
-                    )
-                    group_ok = False
-                    continue
-                position_0based, reference_aa, mutation_raw = resolved
-
-            normalized = _normalize_rule_alleles_for_storage(
-                reference_aa=reference_aa,
-                mutation_raw=mutation_raw,
-                position_0based=position_0based,
-                context=(
-                    f'Combo rule group {group_id!r}: member for gene {gene_name!r} '
-                    f'pos {position_raw!r}'
-                ),
-                errors=errors,
-            )
-            if normalized is None:
-                group_ok = False
-                continue
-            position_0based, reference_aa, mutation = normalized
-
-            if _is_noop_mutation(reference_aa, mutation):
-                errors.append(
-                    f'Combo rule group {group_id!r}: member for gene {gene_name!r} '
-                    f'pos {position_raw!r} does not change reference {reference_aa!r}'
-                )
-                group_ok = False
-                continue
-
-            if not _is_supported_mutation_token(mutation):
-                skipped_invalid_aa.append(
-                    f'combo group {group_id!r} gene {gene_name!r} pos {position_raw!r}: '
-                    f'unsupported amino-acid token {mutation_raw!r} (normalized {mutation!r})'
-                )
-                group_ok = False
-                continue
-
-            member_signature = (gene_id, position_0based, mutation)
-            if member_signature in seen_member_signatures:
-                errors.append(
-                    f'Combo rule group {group_id!r}: duplicate member '
-                    f'gene {gene_name!r} pos {position_raw!r} mutation {mutation!r}'
-                )
-                group_ok = False
-                continue
-
-            seen_member_signatures.add(member_signature)
-
-            valid_members.append((gene_id, reference_identifier, position_0based, reference_aa, mutation))
-
-        if not group_ok:
-            # Non-fatal member issues were already appended; skip this group.
-            continue
-
-        if len(valid_members) < 2:
-            errors.append(
-                f'Combo rule group {group_id!r}: only {len(valid_members)} valid member(s) — '
-                'combination rules require at least 2 member mutations'
-            )
-            continue
-
-        drug_id = _get_or_create_drug_id(conn, project_id, drug_name, drug_cache)
-
-        if _rule_set_exists(conn, drug_id=drug_id, group_name=group_id):
-            logger.debug('Combo rule group %r already loaded — skipped', group_id)
-            continue
-
-        cur = conn.execute(
-            'INSERT INTO resistance_rule_set '
-            '(drug_id, phenotype, clinical_phenotype, ic50, fold_ic50, source, group_name, comment) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            (drug_id, phenotype, clinical_phenotype, ic50, fold_ic50, source, group_id, comment),
-        )
-        rule_set_id = cur.lastrowid
-
-        for gene_id, reference_identifier, position_0based, reference_aa, mutation in valid_members:
-            conn.execute(
-                'INSERT INTO resistance_rule_set_member '
-                '(rule_set_id, gene_id, reference_identifier, position, reference, mutation) '
-                'VALUES (?, ?, ?, ?, ?, ?)',
-                (rule_set_id, gene_id, reference_identifier, position_0based, reference_aa, mutation),
-            )
-
-        _link_rule_set_publications(conn, rule_set_id, all_publication_raws, additional_info, pub_cache)
-
-        count += 1
-
-    return count
-
-
 def _load_resistance_rules(
     conn: sqlite3.Connection,
     project_id: int,
     rules_tsv: Path,
+    require_external_ids: bool = False,
     additional_info: bool = False,
-) -> int:
+) -> tuple[int, set[str], set[str], dict[str, str]]:
     """
-    Load resistance rules from TSV file; return count of inserted rules.
+    Load resistance rules from TSV file; return count of inserted rules and grouped IDs.
 
-    Rows with an empty ``rule_group`` column (or no such column) are imported as
-    single resistance rules into ``resistance_rule``.  Rows with a non-empty
-    ``rule_group`` value are grouped and imported as combination rule sets into
-    ``resistance_rule_set`` / ``resistance_rule_set_member``.
+    All rows are imported as atomic single rules into ``resistance_rule``.
+    Grouping metadata from ``group_id``/``member_id`` is captured for formula
+    validation only; no implicit combination rules are created during this step.
 
     :param conn: SQLite database connection
     :param project_id: ID of the project
     :param rules_tsv: path to resistance rules TSV file
-    :return: number of single rules inserted (not counting combo rule sets)
+    :return: (inserted atomic-rule count, set of group_id values found in rules TSV,
+             set of declared external_ids in rules TSV,
+             dict of external_id -> skip reason for ids that were skipped)
     """
     drug_cache: dict[str, int] = {}
     pub_cache: dict[str, int] = {}
@@ -1136,6 +1170,12 @@ def _load_resistance_rules(
     skipped_ref: list[str] = []
     skipped_gene: list[str] = []
     skipped_invalid_aa: list[str] = []
+    skipped_duplicates_detail: list[str] = []
+    skipped_identical_member_id_rows: list[str] = []
+    grouped_missing_antiviral_rows: list[str] = []
+    # Maps external_id → skip reason, for formula rule skip messages.
+    skipped_external_ids: dict[str, str] = {}
+    seen_external_id_signatures: dict[str, tuple[int, tuple[int, str, int, str, str]]] = {}
 
     with open(rules_tsv, newline='') as fh:
         reader = csv.DictReader(fh, delimiter='\t')
@@ -1158,6 +1198,9 @@ def _load_resistance_rules(
         )
 
     required_field_errors: list[str] = []
+    external_ids: list[str] = []
+    declared_external_ids: set[str] = set()
+    grouped_ids: set[str] = set()
     for row_number, row in enumerate(all_rows, start=2):
         if not _get_value(row, 'reference_identifier'):
             required_field_errors.append(
@@ -1167,6 +1210,34 @@ def _load_resistance_rules(
             required_field_errors.append(
                 f'row {row_number}: missing required field reference'
             )
+        group_ids = [
+            value.strip()
+            for value in _get_value(row, 'group_id', 'rule_group').split(',')
+            if value.strip()
+        ]
+        grouped_ids.update(group_ids)
+
+        external_id = _get_value(row, 'member_id', 'rule_id')
+        if external_id:
+            if external_id.upper() in _FORMULA_OPERATORS:
+                required_field_errors.append(
+                    f'row {row_number}: member_id {external_id!r} uses a reserved boolean keyword'
+                )
+            external_ids.append(external_id)
+            declared_external_ids.add(external_id)
+        elif group_ids:
+            required_field_errors.append(
+                f'row {row_number}: missing required field member_id'
+            )
+
+    existing_external_ids = sorted(
+        external_id for external_id in set(external_ids) if _external_rule_id_exists(conn, external_id)
+    )
+    if existing_external_ids:
+        required_field_errors.append(
+            'atomic rule ids already exist in project: '
+            + ', '.join(repr(external_id) for external_id in existing_external_ids)
+        )
 
     if required_field_errors:
         formatted = '\n'.join(f'- {message}' for message in required_field_errors)
@@ -1177,11 +1248,7 @@ def _load_resistance_rules(
     logger.info('Detected %d-based amino acid positions in rules TSV', coord_base)
     mismatch_keys = _validate_reference_amino_acids(all_rows, genes_by_name, coord_base)
 
-    # Split rows into single rules and combination rule members.
-    single_rows = [r for r in all_rows if not _get_value(r, 'rule_group')]
-    combo_rows = [r for r in all_rows if _get_value(r, 'rule_group')]
-
-    for row in single_rows:
+    for row_number, row in enumerate(all_rows, start=2):
         gene_name = _get_value(row, 'gene')
         if not gene_name or gene_name not in genes_by_name:
             skipped_gene.append(gene_name or '<empty>')
@@ -1210,9 +1277,22 @@ def _load_resistance_rules(
             continue
 
         drug_name = _get_value(row, 'antiviral')
+        external_id = _get_value(row, 'member_id', 'rule_id')
+        group_ids = [
+            value.strip()
+            for value in _get_value(row, 'group_id', 'rule_group').split(',')
+            if value.strip()
+        ]
+
         if not drug_name:
-            errors.append(f'Rule for gene {gene_name!r} has no antiviral value')
-            continue
+            if require_external_ids and group_ids and external_id:
+                grouped_missing_antiviral_rows.append(
+                    f'row {row_number}: gene {gene_name!r}, member_id {external_id!r}'
+                )
+                drug_name = _FORMULA_COMPONENT_DRUG
+            else:
+                errors.append(f'Rule for gene {gene_name!r} has no antiviral value')
+                continue
 
         position_raw = _get_value(row, 'position')
         mutation_raw = _get_value(row, 'mutation')
@@ -1230,6 +1310,10 @@ def _load_resistance_rules(
 
         reference_aa = _get_value(row, 'reference')
         if (gene_name, position_raw, reference_identifier, reference_aa) in mismatch_keys:
+            if external_id:
+                skipped_external_ids[external_id] = (
+                    f'reference AA mismatch at {reference_identifier} {gene_name} pos {position_raw}'
+                )
             continue
 
         # Resolve anchor-less deletion tokens (e.g. 'Q35del', 'DD676del') emitted by
@@ -1297,7 +1381,29 @@ def _load_resistance_rules(
         # Reuse/create drug IDs through a tiny cache to avoid repeated lookups.
         drug_id = _get_or_create_drug_id(conn, project_id, drug_name, drug_cache)
 
-        if _rule_exists(
+        if external_id:
+            signature = (gene_id, reference_identifier, position_0based, reference_aa, mutation)
+            seen = seen_external_id_signatures.get(external_id)
+            if seen is not None:
+                first_row, first_signature = seen
+                if signature == first_signature:
+                    skipped_identical_member_id_rows.append(
+                        f'row {row_number}: member_id {external_id!r} duplicates identical atomic '
+                        f'definition from row {first_row}'
+                    )
+                    skipped_external_ids[external_id] = 'duplicate of an earlier identical row'
+                    continue
+                errors.append(
+                    f'duplicate atomic rule ids: {external_id!r} '
+                    f'(conflicting definitions in rows {first_row} and {row_number})'
+                )
+                continue
+            seen_external_id_signatures[external_id] = (row_number, signature)
+
+        # Formula component rows (no antiviral, linked via external_id) may share the same
+        # mutation across multiple formula groups. Each has a unique external_id, so skip
+        # mutation-level deduplication; the unique index on external_id prevents true duplicates.
+        if not group_ids and _rule_exists(
             conn,
             gene_id=gene_id,
             drug_id=drug_id,
@@ -1307,17 +1413,24 @@ def _load_resistance_rules(
             mutation=mutation,
         ):
             skipped_duplicates += 1
+            skipped_duplicates_detail.append(
+                f'{reference_identifier} gene {gene_name!r} pos {position_raw} '
+                f'{reference_aa!r}>{mutation!r} ({drug_name})'
+            )
+            if external_id:
+                skipped_external_ids[external_id] = 'duplicate of an existing rule'
             continue
 
         conn.execute(
             'INSERT INTO resistance_rule '
             '('
-            'gene_id, drug_id, reference_identifier, position, reference, mutation, '
+            'gene_id, drug_id, external_id, reference_identifier, position, reference, mutation, '
             'phenotype, clinical_phenotype, ic50, fold_ic50, source, comment'
-            ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 gene_id,
                 drug_id,
+                external_id,
                 reference_identifier,
                 position_0based,
                 reference_aa,
@@ -1335,12 +1448,6 @@ def _load_resistance_rules(
         if raw_publication:
             _link_rule_publications(conn, rule_id, raw_publication, additional_info, pub_cache)
         count += 1
-
-    combo_count = _insert_combo_rule_sets(
-        conn, project_id, combo_rows, genes_by_name, coord_base,
-        drug_cache, pub_cache, additional_info, errors, skipped_gene, skipped_ref, skipped_invalid_aa,
-        mismatch_keys,
-    )
 
     if skipped_gene:
         unique_genes = sorted(set(skipped_gene))
@@ -1366,16 +1473,261 @@ def _load_resistance_rules(
             '\n'.join(f'  - {msg}' for msg in unique_invalid),
         )
 
-    if skipped_duplicates:
+    if grouped_missing_antiviral_rows:
         logger.warning(
-            '%d duplicate rule(s) skipped — existing rows were kept',
-            skipped_duplicates,
+            '%d grouped atomic rule row(s) without antiviral were imported as formula members '
+            'using placeholder drug %r:\n%s',
+            len(grouped_missing_antiviral_rows),
+            _FORMULA_COMPONENT_DRUG,
+            '\n'.join(f'  - {msg}' for msg in grouped_missing_antiviral_rows),
+        )
+
+    if skipped_duplicates_detail:
+        logger.warning(
+            '%d duplicate rule(s) skipped — existing rows were kept:\n%s',
+            len(skipped_duplicates_detail),
+            '\n'.join(f'  {rule}' for rule in sorted(skipped_duplicates_detail)),
+        )
+
+    if skipped_identical_member_id_rows:
+        logger.warning(
+            '%d row(s) skipped — duplicate member_id with identical atomic definition '
+            '(first occurrence kept):\n%s',
+            len(skipped_identical_member_id_rows),
+            '\n'.join(f'  - {msg}' for msg in sorted(skipped_identical_member_id_rows)),
         )
 
     if errors:
         formatted = '\n'.join(f'- {message}' for message in sorted(set(errors)))
         raise ValueError(f'Rules validation failed:\n{formatted}')
 
-    logger.info('Loaded %d single resistance rule(s), %d combination rule set(s)', count, combo_count)
-    return count
+    if grouped_ids and not require_external_ids:
+        logger.warning(
+            'Detected grouped atomic rules (%d group_id values), but no formula TSV was provided; '
+            'combinatorial rules are ignored while atomic rules are still imported',
+            len(grouped_ids),
+        )
+
+    logger.info('Loaded %d single resistance rule(s)', count)
+    return count, grouped_ids, declared_external_ids, skipped_external_ids
+
+
+def _load_formula_rules(
+    conn: sqlite3.Connection,
+    project_id: int,
+    formula_rules_tsv: Path,
+    expected_group_ids: set[str] | None = None,
+    declared_atomic_ids: set[str] | None = None,
+    skipped_atomic_ids: dict[str, str] | None = None,
+    additional_info: bool = False,
+) -> int:
+    """Load formula rules from a second TSV and return the inserted formula-rule count."""
+    drug_cache: dict[str, int] = {}
+    pub_cache: dict[str, int] = {}
+    errors: list[str] = []
+
+    with open(formula_rules_tsv, newline='') as fh:
+        reader = csv.DictReader(fh, delimiter='\t')
+        rows = list(reader)
+
+    formula_ids: list[str] = []
+    formula_id_to_row: dict[str, int] = {}  # Track row number for each formula_id
+    normalized_by_drug: dict[tuple[str, str], str] = {}
+    prepared_rows: list[tuple[dict[str, str], str, list[str]]] = []
+    skipped_formula_validation: list[str] = []  # Track rows skipped due to duplicates/conflicts
+    for row_number, row in enumerate(rows, start=2):
+        formula_id = _get_value(row, 'group_id', 'formula_id')
+        drug_name = _get_value(row, 'antiviral')
+        expression = _get_value(row, 'expression', 'formula')
+        context = f'Formula rule row {row_number}'
+
+        if not formula_id:
+            errors.append(f'{context}: missing required field group_id')
+            continue
+        if not drug_name:
+            errors.append(f'{context}: missing required field antiviral')
+            continue
+        if not expression:
+            errors.append(f'{context}: missing required field expression')
+            continue
+        if formula_id.upper() in _FORMULA_OPERATORS:
+            errors.append(f'{context}: formula_id {formula_id!r} uses a reserved boolean keyword')
+            continue
+
+        try:
+            normalized_expression, referenced_ids = _parse_formula_expression(expression)
+        except ValueError as exc:
+            errors.append(f'{context}: invalid expression {expression!r} ({exc})')
+            continue
+
+        duplicate_refs = sorted(
+            {ref_id for ref_id in referenced_ids if referenced_ids.count(ref_id) > 1}
+        )
+        if duplicate_refs:
+            skipped_formula_validation.append(
+                f'{context}: duplicate atomic rule ids in expression '
+                + ', '.join(repr(ref_id) for ref_id in duplicate_refs)
+            )
+            continue
+
+        key = (drug_name.lower(), normalized_expression)
+        if key in normalized_by_drug:
+            skipped_formula_validation.append(
+                f'{context}: duplicate formula rule for drug {drug_name!r}; '
+                f'matches {normalized_by_drug[key]!r} after normalization'
+            )
+            continue
+
+        # Check for duplicate formula_id but only report the second and later occurrences
+        if formula_id in formula_id_to_row:
+            skipped_formula_validation.append(
+                f'{context}: duplicate formula rule id {formula_id!r} (first occurrence at row {formula_id_to_row[formula_id]})'
+            )
+            continue
+
+        normalized_by_drug[key] = formula_id
+        formula_ids.append(formula_id)
+        formula_id_to_row[formula_id] = row_number
+        prepared_rows.append((row, normalized_expression, referenced_ids))
+
+    # Warn about duplicate/conflict validation issues
+    if skipped_formula_validation:
+        logger.warning(
+            '%d formula rule(s) skipped due to duplicates or conflicts:\n%s',
+            len(skipped_formula_validation),
+            '\n'.join(f'  - {msg}' for msg in skipped_formula_validation),
+        )
+
+    if expected_group_ids is not None:
+        provided_group_ids = set(formula_ids)
+        missing_group_ids = sorted(expected_group_ids - provided_group_ids)
+        if missing_group_ids:
+            missing_list = ', '.join(repr(group_id) for group_id in missing_group_ids)
+            logger.warning(
+                'missing formula rule(s) for group id(s): %s',
+                missing_list
+            )
+
+        unknown_group_ids = sorted(provided_group_ids - expected_group_ids)
+        if unknown_group_ids:
+            unknown_list = ', '.join(
+                f'{group_id!r} (row {formula_id_to_row.get(group_id, "?")})'
+                for group_id in unknown_group_ids
+            )
+            logger.warning(
+                'formula rule(s) reference unknown atomic rule id(s) from grouped rules: %s',
+                unknown_list
+            )
+
+    referenced_atomic_ids = {
+        ref_id
+        for _, _, referenced_ids in prepared_rows
+        for ref_id in referenced_ids
+    }
+    rule_ids_by_external_id = _load_rule_ids_by_external_id(conn, referenced_atomic_ids)
+
+    inserted = 0
+    skipped_formula_rules: list[str] = []
+    for row, normalized_expression, referenced_ids in prepared_rows:
+        formula_id = _get_value(row, 'group_id', 'formula_id')
+        drug_name = _get_value(row, 'antiviral')
+        missing_members = sorted(ref_id for ref_id in referenced_ids if ref_id not in rule_ids_by_external_id)
+        if missing_members:
+            # Member rules were skipped during atomic import or are unknown; skip this formula rule.
+            reasons = []
+            for m in missing_members:
+                if skipped_atomic_ids and m in skipped_atomic_ids:
+                    reasons.append(f'{m!r} ({skipped_atomic_ids[m]})')
+                elif declared_atomic_ids and m not in declared_atomic_ids:
+                    reasons.append(f'{m!r} (unknown atomic rule id)')
+                else:
+                    reasons.append(repr(m))
+            skipped_formula_rules.append(
+                f'{formula_id!r}: member(s) not imported: ' + ', '.join(reasons)
+            )
+            continue
+
+        phenotype_value, clinical_phenotype_value = _normalize_phenotypes_from_row(
+            row,
+            errors=errors,
+            context=f'Formula rule {formula_id!r}',
+        )
+        ic50_value = _normalize_ic50_from_row(
+            row,
+            errors=errors,
+            context=f'Formula rule {formula_id!r}',
+        )
+        fold_ic50_value = _normalize_fold_ic50_from_row(
+            row,
+            errors=errors,
+            context=f'Formula rule {formula_id!r}',
+        )
+
+        drug_id = _get_or_create_drug_id(conn, project_id, drug_name, drug_cache)
+        formula_id_exists, normalized_exists = _formula_rule_exists(
+            conn,
+            formula_id=formula_id,
+            drug_id=drug_id,
+            normalized_expression=normalized_expression,
+        )
+        if formula_id_exists:
+            errors.append(f'Formula rule {formula_id!r}: formula_id already exists in project')
+            continue
+        if normalized_exists:
+            errors.append(
+                f'Formula rule {formula_id!r}: duplicate normalized expression for drug {drug_name!r}'
+            )
+            continue
+
+        cur = conn.execute(
+            'INSERT INTO resistance_formula_rule '
+            '('
+            'drug_id, formula_id, label, normalized_expression, phenotype, '
+            'clinical_phenotype, ic50, fold_ic50, source, comment'
+            ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (
+                drug_id,
+                formula_id,
+                _get_value(row, 'label'),
+                normalized_expression,
+                phenotype_value,
+                clinical_phenotype_value,
+                ic50_value,
+                fold_ic50_value,
+                _get_value(row, 'source'),
+                _get_value(row, 'comment'),
+            ),
+        )
+        formula_rule_id = int(cur.lastrowid)
+
+        for ref_id in sorted(referenced_ids):
+            conn.execute(
+                'INSERT INTO resistance_formula_rule_member (formula_rule_id, rule_id) VALUES (?, ?)',
+                (formula_rule_id, rule_ids_by_external_id[ref_id]),
+            )
+
+        raw_publication = _get_value(row, 'publication')
+        if raw_publication:
+            _link_formula_rule_publications(
+                conn,
+                formula_rule_id,
+                raw_publication,
+                additional_info,
+                pub_cache,
+            )
+        inserted += 1
+
+    if skipped_formula_rules:
+        logger.warning(
+            '%d formula rule(s) skipped — one or more member rules were not imported:\n%s',
+            len(skipped_formula_rules),
+            '\n'.join(f'  - {msg}' for msg in skipped_formula_rules),
+        )
+
+    if errors:
+        formatted = '\n'.join(f'- {message}' for message in sorted(set(errors)))
+        raise ValueError(f'Rules validation failed:\n{formatted}')
+
+    logger.info('Loaded %d formula resistance rule(s)', inserted)
+    return inserted
 

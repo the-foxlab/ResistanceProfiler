@@ -1,6 +1,6 @@
 [timeouts]
 pubchem = 5
-pubmed = 3
+pubmed = 5
 crossref = 5
 
 [urls]
@@ -19,3 +19,6 @@ doi_prefixes = ['https://doi.org/', 'http://doi.org/']
 [alignment]
 min_identity = 0.8
 min_coverage = 0.9
+
+[matching]
+combination_member_af_threshold = 0.75

@@ -37,7 +37,7 @@ def _sync_single_run(
     results_conn,
     logger: logging.Logger,
 ) -> tuple[int, int]:
-    """Sync one stored run and return (resistance_hits, combo_hits)."""
+    """Sync one stored run and return (resistance_hits, formula_hits)."""
     run_dict, variant_rows = load_run(results_conn, run_id)
 
     stored_fp = run_dict.get('project_fingerprint', '')
@@ -62,7 +62,7 @@ def _sync_single_run(
         )
     ref_id = int(ref_row['id'])
 
-    genes, rules, rule_sets, rule_gene_names = _load_reference_data(project_conn, ref_id)
+    genes, rules, formula_rules, rule_gene_names = _load_reference_data(project_conn, ref_id)
     coverage_gaps = load_coverage_gaps(results_conn, run_id)
 
     # Reconstruct raw AnnotatedVariant objects without rule matches so re-annotation is clean.
@@ -103,7 +103,7 @@ def _sync_single_run(
     with err_console.status(f'[dim]Re-annotating run #{run_id}…[/dim]'):
         result, _outputs = _finalize_and_export(
             annotations=raw_annotations,
-            rule_sets=rule_sets,
+            formula_rules=formula_rules,
             project_conn=project_conn,
             ref_id=ref_id,
             project_name=run_dict['project_name'],
@@ -124,9 +124,9 @@ def _sync_single_run(
             coverage_gaps=coverage_gaps,
         )
 
-    # Replace stored variant rows and re-write combo hits.
+    # Replace stored variant rows and re-write formula hits.
     results_conn.execute('DELETE FROM variant_result WHERE run_id = ?', (run_id,))
-    results_conn.execute('DELETE FROM combo_rule_hit WHERE run_id = ?', (run_id,))
+    results_conn.execute('DELETE FROM formula_rule_hit WHERE run_id = ?', (run_id,))
 
     for ann in result.annotations:
         vv = ann.variant
@@ -157,19 +157,19 @@ def _sync_single_run(
             ),
         )
 
-    for combo_hit in result.combo_hits:
+    for formula_hit in result.formula_hits:
         results_conn.execute(
-            'INSERT INTO combo_rule_hit (run_id, hit_json) VALUES (?, ?)',
-            (run_id, json.dumps(combo_hit.to_dict())),
+            'INSERT INTO formula_rule_hit (run_id, hit_json) VALUES (?, ?)',
+            (run_id, json.dumps(formula_hit.to_dict())),
         )
 
     current_updated_at = project_updated_at(project_conn)
     results_conn.execute(
-        'UPDATE run SET resistance_hits = ?, combo_hits = ?, project_updated_at = ? WHERE id = ?',
-        (result.resistance_hits, len(result.combo_hits), current_updated_at, run_id),
+        'UPDATE run SET resistance_hits = ?, formula_hits = ?, project_updated_at = ? WHERE id = ?',
+        (result.resistance_hits, len(result.formula_hits), current_updated_at, run_id),
     )
     results_conn.commit()
-    return result.resistance_hits, len(result.combo_hits)
+    return result.resistance_hits, len(result.formula_hits)
 
 
 def sync_results_database(
@@ -181,8 +181,8 @@ def sync_results_database(
     Re-annotate a stored run in a local database against the current project database and update stored results.
 
     Loads raw variant calls from the results database, re-runs annotation and rule matching
-    against the live project DB, replaces stored variant_result and combo-hit rows, and
-    updates resistance_hits and combo_hits counters. Requires a project fingerprint match.
+    against the live project DB, replaces stored variant_result and formula-hit rows, and
+    updates resistance_hits and formula_hits counters. Requires a project fingerprint match.
     This is useful if the project database has been updated with new rules since the original run.
 
     All runs in the results database are attempted; runs with a fingerprint mismatch
@@ -207,7 +207,7 @@ def sync_results_database(
         skipped = 0
         for current_run_id in run_ids:
             try:
-                hits, combo_hits = _sync_single_run(
+                hits, formula_hits = _sync_single_run(
                     run_id=current_run_id,
                     project_path=project_db_path,
                     project_conn=project_conn,
@@ -217,7 +217,7 @@ def sync_results_database(
                 synced += 1
                 console.print(
                     f'[green]✓[/green] Run #{current_run_id} synced '
-                    f'({hits} hit(s), {combo_hits} combo rule hit(s)).'
+                    f'({hits} hit(s), {formula_hits} formula rule hit(s)).'
                 )
             except click.ClickException as exc:
                 skipped += 1

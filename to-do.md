@@ -32,6 +32,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Drug deduplication — case-insensitive; biological duplicate detection for `add`
 - [X] Stable drug badge colors persisted in `drug.badge_color` during rules import for consistent report styling across runs/regeneration
 - [X] Combination rule sets — `resistance_rule_set` + `resistance_rule_set_member` tables; TSV `rule_group` column
+- [X] Formula-rule import scaffold — grouped atomic rules support `group_id` + unique `member_id`; `respro init` / `respro add` accept optional `--formula-rules` TSV with boolean `AND` / `OR` / `NOT` / `XOR` expressions, normalized formula storage, strict group-to-formula validation, and warning-only behavior when grouped rows are provided without a formula TSV
 - [X] `add` — extend existing project with new rules and optional additional GenBank annotations
 - [X] PubChem integration — best-effort drug CID, canonical URL, short description; fully non-fatal
 - [X] Publication table — deduplicated `publication` table + `rule_publication` / `rule_set_publication` join tables; all publications from all combo-group members collected; PMID resolved to DOI via NCBI E-utilities; title fetched from CrossRef; `--drug-info` renamed to `--additional-info` covering both drugs and publications; citation-number bibliography section in HTML report
@@ -77,6 +78,7 @@ Mark items done and update priorities after each completed milestone.
 
 - [X] Single-mutation rule matching — explicit per-position allele matching only (no wildcard token support)
 - [X] Combination rule matching (`match_rule_sets`) — all members must co-occur to fire
+- [X] Formula-rule first-class workflow outputs — `resistance_formula_rule` import is wired into profiling-time matching, report rendering, results DB persistence, regenerate, and WebUI
 - [X] BLOSUM62 similarity scoring for matched substitutions (`core/similarity.py`)
 - [X] End-to-end combo rule loading via TSV `init` path — `init_project` + `rule_group` rows tested through `load_rule_sets` (no manual SQL setup)
 

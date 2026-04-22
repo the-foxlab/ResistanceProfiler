@@ -18,6 +18,7 @@ from respro.core.annotation import classify_similarity
 from respro.db.models import (
     AnnotatedVariant,
     CoverageGap,
+    FORMULA_COMPONENT_DRUG,
     GeneRecord,
     ProfilingResult,
     ResistanceRule,
@@ -38,6 +39,9 @@ from respro.report.palette import (
 from respro.report.plots import render_lollipop_plot_bytes
 
 logger = logging.getLogger(__name__)
+
+_RE_LOGIC_TOKEN = re.compile(r'\(|\)|\bAND\b|\bOR\b|\bNOT\b|\bXOR\b|[A-Za-z0-9_.:-]+')
+_LOGIC_OPERATORS = {'AND', 'OR', 'NOT', 'XOR'}
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -243,7 +247,7 @@ def _build_db_hit_rows(
         if ann.gene_name in gene_alignments:
             alignment_html = build_alignment_html(ann, gene_alignments[ann.gene_name])
 
-        for rule in ann.rule_matches:
+        for rule in ann.non_formula_component_rule_matches:
             rows.append({
                 'gene': ann.gene_name,
                 'aa_change': aa_change,
@@ -274,12 +278,25 @@ def _build_combo_hit_rows(result: ProfilingResult) -> list[dict]:
     :return: list of dicts for the combo hits table
     """
     rows: list[dict] = []
-    for combo in result.combo_hits:
+    for combo in result.formula_hits:
         rs = combo.rule_set
-        member_labels = ', '.join(
-            f'{m.gene_name}:{m.reference}{m.position + 1}{m.mutation}'
-            for m in rs.members
-        )
+        member_by_id = {
+            member.external_id: f'{member.gene_name}:{member.reference}{member.position + 1}{member.mutation}'
+            for member in rs.members
+            if member.external_id
+        }
+        logic_text = rs.logic_expression or ''
+        if logic_text and member_by_id:
+            member_labels = _render_formula_logic(
+                logic_text,
+                member_by_id,
+                set(combo.matched_member_ids),
+            )
+        else:
+            member_labels = ', '.join(
+                f'{m.gene_name}:{m.reference}{m.position + 1}{m.mutation}'
+                for m in rs.members
+            )
         rows.append({
             'group_name': rs.group_name or '—',
             'members': member_labels,
@@ -295,6 +312,47 @@ def _build_combo_hit_rows(result: ProfilingResult) -> list[dict]:
             'pub_citations': [],
         })
     return rows
+
+
+def _render_formula_logic(
+    expression: str,
+    members_by_id: dict[str, str],
+    matched_member_ids: set[str],
+) -> Markup:
+    """Render one formula logic expression with mutation labels and highlight classes."""
+    rendered: list[str] = []
+    last_index = 0
+    for match in _RE_LOGIC_TOKEN.finditer(expression):
+        rendered.append(str(escape(expression[last_index:match.start()])))
+        token = match.group(0)
+        upper_token = token.upper()
+
+        if token in {'(', ')'}:
+            rendered.append(f"<span class='formula-paren'>{escape(token)}</span>")
+        elif upper_token in _LOGIC_OPERATORS:
+            rendered.append(f"<span class='formula-operator'>{escape(upper_token.lower())}</span>")
+        else:
+            label = members_by_id.get(token, token)
+            member_class = 'formula-member-detected' if token in matched_member_ids else 'formula-member-missing'
+            gene_name, mutation_label = _split_formula_member_label(label)
+            rendered.append(
+                f"<span class='formula-member {member_class}'>"
+                f"<span class='formula-member-gene'>{escape(gene_name)}</span>"
+                f"<span class='formula-member-mutation'>{escape(mutation_label)}</span>"
+                f"</span>"
+            )
+        last_index = match.end()
+
+    rendered.append(str(escape(expression[last_index:])))
+    return Markup("<div class='formula-logic'>" + ''.join(rendered) + '</div>')
+
+
+def _split_formula_member_label(label: str) -> tuple[str, str]:
+    """Split one formula member display label into gene and mutation chunks."""
+    if ':' not in label:
+        return label, ''
+    gene_name, mutation_label = label.split(':', 1)
+    return gene_name, mutation_label
 
 
 def _build_sample_classification(result: ProfilingResult) -> dict | None:
@@ -546,7 +604,7 @@ def _build_bibliography(
     """
     Collect unique publications across all row sets and assign sequential citation numbers.
 
-    Publications appear in order of first encounter (db_hits → combo_hits → potential).
+    Publications appear in order of first encounter (db_hits → formula_hits → potential).
 
     :param row_sets: one or more row-dict lists to collect publications from
     :return: (ordered bibliography dicts, mapping of publication id → citation number)
@@ -911,6 +969,21 @@ def build_report_context(
     db_hit_rows = _build_db_hit_rows(result, gene_alignments)
     summary['db_hit_rules'] = len(db_hit_rows)
     combo_hit_rows = _build_combo_hit_rows(result)
+    summary['combination_rule_hits'] = len(combo_hit_rows)
+
+    summary['single_hit_positions'] = int(summary['database_hits'])
+    summary['single_hit_rules'] = len(db_hit_rows)
+    summary['single_total_hits'] = summary['single_hit_rules']
+    summary['single_hit_drugs'] = len({(row.get('drug') or '').lower() for row in db_hit_rows})
+
+    summary['combo_hit_positions'] = len({
+        (variant.gene_name, variant.codon_pos)
+        for hit in result.formula_hits
+        for variant in hit.matched_variants
+    })
+    summary['combo_hit_rules'] = len(combo_hit_rows)
+    summary['combo_total_hits'] = summary['combo_hit_rules']
+    summary['combo_hit_drugs'] = len({(row.get('drug') or '').lower() for row in combo_hit_rows})
     sample_classification = _build_sample_classification(result)
     cds_rows = _build_cds_rows(result, gene_alignments)
     potential_rows = _build_potential_effects_rows(result, rules or [], gene_alignments)
@@ -930,6 +1003,10 @@ def build_report_context(
     summary['resistant_hits'] = sum(1 for r in db_hit_rows if _effective_phenotype(r) == 'resistant')
     summary['intermediate_hits'] = sum(1 for r in db_hit_rows if _effective_phenotype(r) == 'intermediate')
     summary['sensitive_hits'] = sum(1 for r in db_hit_rows if _effective_phenotype(r) == 'sensitive')
+
+    summary['combo_resistant_hits'] = sum(1 for r in combo_hit_rows if _effective_phenotype(r) == 'resistant')
+    summary['combo_intermediate_hits'] = sum(1 for r in combo_hit_rows if _effective_phenotype(r) == 'intermediate')
+    summary['combo_sensitive_hits'] = sum(1 for r in combo_hit_rows if _effective_phenotype(r) == 'sensitive')
 
     summary['similarity_resistant'] = sum(1 for r in potential_rows if _effective_phenotype(r) == 'resistant')
     summary['similarity_intermediate'] = sum(1 for r in potential_rows if _effective_phenotype(r) == 'intermediate')
@@ -975,10 +1052,11 @@ def build_report_context(
 
     detected_drug_names: set[str] = set()
     for ann in result.cds_annotations:
-        for rule in ann.rule_matches:
+        for rule in ann.non_formula_component_rule_matches:
             detected_drug_names.add(rule.drug_name.lower())
-    for combo in result.combo_hits:
-        detected_drug_names.add(combo.rule_set.drug_name.lower())
+    for combo in result.formula_hits:
+        if combo.rule_set.drug_name.lower() != FORMULA_COMPONENT_DRUG:
+            detected_drug_names.add(combo.rule_set.drug_name.lower())
 
     drug_colours = _load_drug_badge_colours(project_conn, detected_drug_names)
     _attach_drug_badges(db_hit_rows, drug_colours)
@@ -1138,7 +1216,7 @@ def write_json(
         'total_variants': result.total_variants,
         'variants_in_cds': result.variants_in_cds,
         'resistance_hits': result.resistance_hits,
-        'combo_hits': len(result.combo_hits),
+        'formula_hits': len(result.formula_hits),
         'status': 'complete',
         'created_at': result.run_timestamp,
     }
@@ -1181,7 +1259,7 @@ def write_json(
             'id': None,
             'hit_json': json.dumps(hit.to_dict()),
         }
-        for hit in result.combo_hits
+        for hit in result.formula_hits
     ]
 
     classification_rows = [
@@ -1203,7 +1281,7 @@ def write_json(
         'run': run_payload,
         'variant_result': variant_rows,
         'coverage_gap': coverage_rows,
-        'combo_rule_hit': combo_rows,
+        'formula_rule_hit': combo_rows,
         'sample_classification': classification_rows,
     }
 

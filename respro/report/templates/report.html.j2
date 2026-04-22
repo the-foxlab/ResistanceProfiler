@@ -53,14 +53,26 @@
   </a>
   {% endif %}
   <a class='stat-card hit' href='#section-db-hits'>
-    <div class='number'>{{ summary.database_hits }}</div>
-    <div class='label'>Database hits</div>
-    {% if summary.database_hits %}
-    <div class='stat-note'>{{ summary.database_hits }} position{{ 's' if summary.database_hits != 1 }} &middot; {{ summary.db_hit_rules }} rule{{ 's' if summary.db_hit_rules != 1 }}</div>
+    <div class='number'>{{ summary.single_total_hits }}</div>
+    <div class='label'>Single Rule Hits</div>
+    {% if summary.single_hit_rules %}
+    <div class='stat-note'>{{ summary.single_total_hits }} total hit{{ 's' if summary.single_total_hits != 1 }} &middot; {{ summary.single_hit_positions }} position{{ 's' if summary.single_hit_positions != 1 }} &middot; {{ summary.single_hit_drugs }} drug{{ 's' if summary.single_hit_drugs != 1 }}</div>
     <div class='stat-sub'>
       <span class='stat-pill resistant{{ ' zero' if not summary.resistant_hits }}'>Resistant: {{ summary.resistant_hits }}</span>
       <span class='stat-pill intermediate{{ ' zero' if not summary.intermediate_hits }}'>Intermediate: {{ summary.intermediate_hits }}</span>
       <span class='stat-pill sensitive{{ ' zero' if not summary.sensitive_hits }}'>Sensitive: {{ summary.sensitive_hits }}</span>
+    </div>
+    {% endif %}
+  </a>
+  <a class='stat-card hit' href='#section-combo-hits'>
+    <div class='number'>{{ summary.combo_total_hits }}</div>
+    <div class='label'>Combination Rule Hits</div>
+    {% if summary.combo_hit_rules %}
+    <div class='stat-note'>{{ summary.combo_total_hits }} total hit{{ 's' if summary.combo_total_hits != 1 }} &middot; {{ summary.combo_hit_positions }} position{{ 's' if summary.combo_hit_positions != 1 }} &middot; {{ summary.combo_hit_drugs }} drug{{ 's' if summary.combo_hit_drugs != 1 }}</div>
+    <div class='stat-sub'>
+      <span class='stat-pill resistant{{ ' zero' if not summary.combo_resistant_hits }}'>Resistant: {{ summary.combo_resistant_hits }}</span>
+      <span class='stat-pill intermediate{{ ' zero' if not summary.combo_intermediate_hits }}'>Intermediate: {{ summary.combo_intermediate_hits }}</span>
+      <span class='stat-pill sensitive{{ ' zero' if not summary.combo_sensitive_hits }}'>Sensitive: {{ summary.combo_sensitive_hits }}</span>
     </div>
     {% endif %}
   </a>
@@ -207,13 +219,14 @@
 {% endif %}
 
 {% if combo_hit_rows %}
-<div class='section open'>
+<div class='section open' id='section-combo-hits'>
 <h2 class='section-toggle'>Combination rule hits <span class='toggle-arrow'>&#9654;</span></h2>
 <div class='section-body'>
+<p class='table-note'>Logic rows show mutations that are part of a combination rule. Green markers indicate detected members that are sufficient for the rule to apply; gray markers indicate not-detected members. Operators and parentheses are color-coded for readability. Boolean operators: <strong>and</strong> = all linked conditions must be true, <strong>or</strong> = at least one linked condition must be true, <strong>not</strong> = the next condition must be false, <strong>xor</strong> = exactly one of two linked conditions must be true.</p>
 <div class='table-wrapper'>
 <table class='sortable expandable-table'>
 <thead><tr>
-  <th>Group</th><th>Member mutations</th><th>Drug</th>
+  <th>Group</th><th>Logic / member mutations</th><th>Drug</th>
   {% if combo_cols.ic50 %}<th>IC50</th>{% endif %}
   {% if combo_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
   <th>Phenotype</th>
@@ -225,7 +238,7 @@
 {% for r in combo_hit_rows %}
 <tr class='hit-row data-row'>
   <td>{{ r.group_name }}</td>
-  <td>{{ r.members }}</td>
+  <td>{{ r.members | safe }}</td>
   <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
   {% if combo_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
   {% if combo_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}

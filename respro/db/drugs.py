@@ -8,6 +8,7 @@ import hashlib
 import logging
 import sqlite3
 
+from respro.db.models import FORMULA_COMPONENT_DRUG
 from respro.io.pubchem import lookup_drug
 
 logger = logging.getLogger(__name__)
@@ -123,10 +124,6 @@ def _consolidate_drug_names_to_lowercase(conn: sqlite3.Connection, project_id: i
                 'UPDATE resistance_rule SET drug_id = ? WHERE drug_id = ?',
                 (keep_id, duplicate_id),
             )
-            conn.execute(
-                'UPDATE resistance_rule_set SET drug_id = ? WHERE drug_id = ?',
-                (keep_id, duplicate_id),
-            )
             conn.execute('DELETE FROM drug WHERE id = ?', (duplicate_id,))
 
         conn.execute(
@@ -168,7 +165,10 @@ def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
     # backfill title-based text for compounds where PubChem has no description.
     drugs_to_query = [
         drug for drug in drug_rows
-        if not (drug['pubchem_cid'] or '').strip() or not (drug['description'] or '').strip()
+        if (
+            (not (drug['pubchem_cid'] or '').strip() or not (drug['description'] or '').strip())
+            and (drug['name'] or '').strip().lower() != FORMULA_COMPONENT_DRUG
+        )
     ]
 
     already_present = len(drug_rows) - len(drugs_to_query)
