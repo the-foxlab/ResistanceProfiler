@@ -56,7 +56,7 @@
     <div class='number'>{{ summary.single_total_hits }}</div>
     <div class='label'>Single Rule Hits</div>
     {% if summary.single_hit_rules %}
-    <div class='stat-note'>{{ summary.single_total_hits }} total hit{{ 's' if summary.single_total_hits != 1 }} &middot; {{ summary.single_hit_positions }} position{{ 's' if summary.single_hit_positions != 1 }} &middot; {{ summary.single_hit_drugs }} drug{{ 's' if summary.single_hit_drugs != 1 }}</div>
+    <div class='stat-note'>{{ summary.single_hit_rules }} rule{{ 's' if summary.single_hit_rules != 1 }} &middot; {{ summary.single_hit_positions }} position{{ 's' if summary.single_hit_positions != 1 }} &middot; {{ summary.single_hit_drugs }} drug{{ 's' if summary.single_hit_drugs != 1 }}</div>
     <div class='stat-sub'>
       <span class='stat-pill resistant{{ ' zero' if not summary.resistant_hits }}'>Resistant: {{ summary.resistant_hits }}</span>
       <span class='stat-pill intermediate{{ ' zero' if not summary.intermediate_hits }}'>Intermediate: {{ summary.intermediate_hits }}</span>

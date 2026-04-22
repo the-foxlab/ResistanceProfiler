@@ -18,6 +18,7 @@ from respro.db.models import (
     ResistanceRuleSet,
     ResistanceRuleSetMember,
     VariantCall,
+    is_internal_formula_component_drug_name,
 )
 
 
@@ -359,6 +360,7 @@ def _rule_from_hit(hit: dict, gene_name: str) -> ResistanceRule:
         fold_ic50=hit.get('fold_ic50', ''),
         publications=publications,
         pubchem_url=hit.get('pubchem_url', ''),
+        is_internal_formula_component=is_internal_formula_component_drug_name(hit.get('drug', '')),
     )
 
 
@@ -562,15 +564,9 @@ def load_run_from_json(
     run_dict = _require_dict(payload, 'run')
     variant_rows = _require_list_of_dicts(payload, 'variant_result')
     coverage_rows = _require_list_of_dicts(payload, 'coverage_gap')
-    if 'formula_rule_hit' in payload:
-        formula_rows = _require_list_of_dicts(payload, 'formula_rule_hit')
-    elif 'combo_rule_hit' in payload:
-        # Accept legacy exports where formula hits were serialized under combo_rule_hit.
-        formula_rows = _require_list_of_dicts(payload, 'combo_rule_hit')
-    else:
-        raise ValueError(
-            "Invalid results JSON: missing key 'formula_rule_hit' (or legacy 'combo_rule_hit')"
-        )
+    if 'formula_rule_hit' not in payload:
+        raise ValueError("Invalid results JSON: missing key 'formula_rule_hit'")
+    formula_rows = _require_list_of_dicts(payload, 'formula_rule_hit')
     classification_rows = _require_list_of_dicts(payload, 'sample_classification')
 
     required_run_keys = {

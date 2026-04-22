@@ -877,8 +877,6 @@ export function DashboardView({
                   <ul>
                     <li><strong>Single rules</strong> represent one mutation-to-interpretation mapping.</li>
                     <li><strong>Combination rules</strong> fire only when their formula conditions are satisfied.</li>
-                    <li>Both rule types are displayed in reports and in the dashboard mutation browser.</li>
-                    <li>The database dashboard summarizes single vs combination rule distribution in dedicated pies.</li>
                   </ul>
                 </section>
 

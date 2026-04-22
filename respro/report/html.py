@@ -18,7 +18,6 @@ from respro.core.annotation import classify_similarity
 from respro.db.models import (
     AnnotatedVariant,
     CoverageGap,
-    FORMULA_COMPONENT_DRUG,
     GeneRecord,
     ProfilingResult,
     ResistanceRule,
@@ -1055,7 +1054,7 @@ def build_report_context(
         for rule in ann.non_formula_component_rule_matches:
             detected_drug_names.add(rule.drug_name.lower())
     for combo in result.formula_hits:
-        if combo.rule_set.drug_name.lower() != FORMULA_COMPONENT_DRUG:
+        if combo.rule_set.drug_name:
             detected_drug_names.add(combo.rule_set.drug_name.lower())
 
     drug_colours = _load_drug_badge_colours(project_conn, detected_drug_names)

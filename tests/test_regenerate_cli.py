@@ -339,7 +339,7 @@ class TestRegenerate:
         assert 'uuid mismatch' in output_lower
         assert 'database updates currently do not allow' in output_lower
 
-    def test_regenerate_restores_persisted_combo_rule_hits(
+    def test_regenerate_restores_persisted_formula_rule_hits(
         self,
         project_db: Path,
         tmp_path: Path,

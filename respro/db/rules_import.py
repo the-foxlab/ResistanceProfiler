@@ -13,6 +13,7 @@ from pathlib import Path
 from respro.config.settings import CLI_CONFIG
 from respro.core.annotation import normalize_mutation
 from respro.db.drugs import _get_or_create_drug_id
+from respro.db.models import _INTERNAL_FORMULA_COMPONENT_DRUG_NAME
 from respro.io.publications import fetch_publication_metadata, fetch_pubmed_metadata
 
 logger = logging.getLogger(__name__)
@@ -27,9 +28,6 @@ _RE_FORMULA_TOKEN = re.compile(
     re.IGNORECASE,
 )
 _FORMULA_OPERATORS = {'AND', 'OR', 'NOT', 'XOR'}
-_FORMULA_COMPONENT_DRUG = '__formula_component__'
-
-
 def _normalize_publication_token(token: str) -> tuple[str, str, str]:
     """
     Normalise a single publication token to (doi, pubmed_id, raw_input).
@@ -1289,7 +1287,7 @@ def _load_resistance_rules(
                 grouped_missing_antiviral_rows.append(
                     f'row {row_number}: gene {gene_name!r}, member_id {external_id!r}'
                 )
-                drug_name = _FORMULA_COMPONENT_DRUG
+                drug_name = _INTERNAL_FORMULA_COMPONENT_DRUG_NAME
             else:
                 errors.append(f'Rule for gene {gene_name!r} has no antiviral value')
                 continue
@@ -1476,9 +1474,8 @@ def _load_resistance_rules(
     if grouped_missing_antiviral_rows:
         logger.warning(
             '%d grouped atomic rule row(s) without antiviral were imported as formula members '
-            'using placeholder drug %r:\n%s',
+            'using an internal placeholder drug entry:\n%s',
             len(grouped_missing_antiviral_rows),
-            _FORMULA_COMPONENT_DRUG,
             '\n'.join(f'  - {msg}' for msg in grouped_missing_antiviral_rows),
         )
 

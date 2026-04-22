@@ -17,6 +17,7 @@ from respro.db.models import (
     ResistanceRule,
     ResistanceRuleSet,
     ResistanceRuleSetMember,
+    is_internal_formula_component_drug_name,
 )
 from respro.db.rules_import import _load_formula_rules, _load_resistance_rules, _tokenize_formula_expression
 
@@ -287,6 +288,7 @@ def load_formula_rules(conn: sqlite3.Connection, reference_id: int) -> list[Form
             comment=row['comment'] or '',
             pubchem_url=row['pubchem_url'] or '',
             description=row['description'] or '',
+              is_internal_formula_component=is_internal_formula_component_drug_name(row['drug_name'] or ''),
         )
 
     if formulas_with_cross_reference_members:
@@ -583,6 +585,7 @@ def _rule_from_row(row: sqlite3.Row) -> ResistanceRule:
         comment=row['comment'] or '',
         pubchem_url=row['pubchem_url'] or '',
         description=row['description'] or '',
+        is_internal_formula_component=is_internal_formula_component_drug_name(row['drug_name'] or ''),
     )
 
 

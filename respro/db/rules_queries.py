@@ -7,6 +7,8 @@ from __future__ import annotations
 import re
 import sqlite3
 
+from respro.db.models import is_internal_formula_component_drug_name
+
 
 _RE_LOGIC_TOKEN = re.compile(
     r'\(|\)|\bAND\b|\bOR\b|\bNOT\b|\bXOR\b|[A-Za-z0-9_.:-]+',
@@ -69,7 +71,11 @@ def list_rules_for_display(
             'ORDER BY r.name, g.name, rr.position, d.name',
         ).fetchall()
 
-    row_dicts = [dict(row) for row in rows]
+    row_dicts = [
+        dict(row)
+        for row in rows
+        if not is_internal_formula_component_drug_name(row['drug'] or '')
+    ]
     if not row_dicts:
         return []
 

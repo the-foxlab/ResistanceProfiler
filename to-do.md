@@ -107,7 +107,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] `load_run` — reconstruct a run from `results.db`
 - [X] `list_runs` — tabular CLI listing of all stored runs
 - [X] `reconstruct_annotations` — rebuild `AnnotatedVariant` objects from stored rows
-- [X] Persist combo rule hits to `results.db` and restore them on `regenerate` via `combo_rule_hit` rows + reconstruction
+- [X] Persist formula rule hits to `results.db` and restore them on `regenerate` via `formula_rule_hit` rows + reconstruction
 - [X] `respro regenerate` — re-export report from stored run with project-fingerprint validation
 - [X] `respro regenerate --json` — regenerate report artifacts directly from exported `*.results.json` with strict JSON validation and UUID mismatch guardrails
 - [X] `respro regenerate --export json|tabular` — parity export options when regenerating from stored runs or JSON input
@@ -200,7 +200,8 @@ Mark items done and update priorities after each completed milestone.
 - [X] Report artifact downloads in web app — profiling jobs now emit HTML + JSON + tabular outputs; report panel adds direct JSON/tabular download buttons and backend `/api/artifact` serves non-HTML files from the allowed data directory
 - [X] Regenerate-from-JSON web flow — `POST /api/upload/json` + `POST /api/regenerate/json` with JSON schema validation, UUID mismatch feedback, and shared report artifact payloads
 - [X] Dedicated "Regenerate from JSON" frontend tab — simple JSON upload + regenerate action; output rendered in the same report tile with JSON/tabular downloads
-- [X] `respro manage results <results_db_path> --delete <run_id>` — delete one stored run (including `variant_result`, `coverage_gap`, `combo_rule_hit`, and `sample_classification` rows) from `results.db` with optional `--force` confirmation bypass
+- [X] `respro manage results <results_db_path> --delete <run_id>` — delete one stored run (including `variant_result`, `coverage_gap`, `formula_rule_hit`, and `sample_classification` rows) from `results.db` with optional `--force` confirmation bypass
+- [X] Hide internal formula-component placeholder rows from user-facing rule/drug displays and internalize the marker handling
 - [X] `respro add --validate` dry-run mode — execute full rules parsing/validation pipeline without persisting DB changes
 
 ### Public release (done)

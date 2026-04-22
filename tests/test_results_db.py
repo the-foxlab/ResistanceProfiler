@@ -225,7 +225,7 @@ class TestResultsDbSchema:
         assert 'run' in tables
         assert 'variant_result' in tables
         assert 'coverage_gap' in tables
-        assert 'combo_rule_hit' in tables
+        assert 'formula_rule_hit' in tables
 
     def test_init_results_db_validates_existing_compatible_db(self, tmp_path: Path) -> None:
         db_path = tmp_path / 'results_existing.db'
@@ -484,7 +484,7 @@ class TestResultsPersistence:
         assert ann.is_resistance_hit
         assert ann.rule_matches[0].drug_name == 'drugx'
 
-    def test_save_run_persists_combo_rule_hits(self, results_conn, minimal_project_conn, tmp_path) -> None:
+    def test_save_run_persists_formula_rule_hits(self, results_conn, minimal_project_conn, tmp_path) -> None:
         save_run(
             results_conn,
             tmp_path / 'project.db',
@@ -493,7 +493,7 @@ class TestResultsPersistence:
         )
 
         row = results_conn.execute(
-            'SELECT run_id, hit_json FROM combo_rule_hit WHERE run_id = 1'
+            'SELECT run_id, hit_json FROM formula_rule_hit WHERE run_id = 1'
         ).fetchone()
         assert row is not None
         assert row['run_id'] == 1
@@ -689,7 +689,7 @@ class TestCoverageGapPersistence:
         }
         migrated.close()
         assert 'coverage_gap' in tables
-        assert 'combo_rule_hit' in tables
+        assert 'formula_rule_hit' in tables
 
 
 class TestDeleteRun:
@@ -710,7 +710,7 @@ class TestDeleteRun:
             (run_id, 'gag', 1, 3),
         )
         conn.execute(
-            'INSERT INTO combo_rule_hit (run_id, hit_json) VALUES (?, ?)',
+            'INSERT INTO formula_rule_hit (run_id, hit_json) VALUES (?, ?)',
             (run_id, json.dumps({'drug': 'x'})),
         )
         conn.execute(
@@ -726,7 +726,7 @@ class TestDeleteRun:
         assert conn.execute('SELECT COUNT(*) FROM run WHERE id = ?', (run_id,)).fetchone()[0] == 0
         assert conn.execute('SELECT COUNT(*) FROM variant_result WHERE run_id = ?', (run_id,)).fetchone()[0] == 0
         assert conn.execute('SELECT COUNT(*) FROM coverage_gap WHERE run_id = ?', (run_id,)).fetchone()[0] == 0
-        assert conn.execute('SELECT COUNT(*) FROM combo_rule_hit WHERE run_id = ?', (run_id,)).fetchone()[0] == 0
+        assert conn.execute('SELECT COUNT(*) FROM formula_rule_hit WHERE run_id = ?', (run_id,)).fetchone()[0] == 0
         assert conn.execute('SELECT COUNT(*) FROM sample_classification WHERE run_id = ?', (run_id,)).fetchone()[0] == 0
         conn.close()
 

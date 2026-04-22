@@ -8,7 +8,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 
-FORMULA_COMPONENT_DRUG = '__formula_component__'
+_INTERNAL_FORMULA_COMPONENT_DRUG_NAME = '__formula_component__'
+
+
+def is_internal_formula_component_drug_name(drug_name: str) -> bool:
+    """Return True when a drug name is the internal placeholder for formula members."""
+    return (drug_name or '').strip().lower() == _INTERNAL_FORMULA_COMPONENT_DRUG_NAME
 
 
 @dataclass(frozen=True)
@@ -114,6 +119,7 @@ class ResistanceRule:
     description: str = ''
     comment: str = ''
     publications: list[Publication] = field(default_factory=list)
+    is_internal_formula_component: bool = False
 
 
 @dataclass
@@ -186,12 +192,8 @@ class AnnotatedVariant:
 
     @property
     def non_formula_component_rule_matches(self) -> list[ResistanceRule]:
-        """Return matched single rules excluding formula-component placeholder rows."""
-        return [
-            rule
-            for rule in self.rule_matches
-            if (rule.drug_name or '').lower() != FORMULA_COMPONENT_DRUG
-        ]
+        """Return matched single rules excluding internal formula-component placeholder rows."""
+        return [rule for rule in self.rule_matches if not rule.is_internal_formula_component]
 
     @property
     def is_resistance_hit(self) -> bool:

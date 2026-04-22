@@ -8,7 +8,7 @@ import hashlib
 import logging
 import sqlite3
 
-from respro.db.models import FORMULA_COMPONENT_DRUG
+from respro.db.models import is_internal_formula_component_drug_name
 from respro.io.pubchem import lookup_drug
 
 logger = logging.getLogger(__name__)
@@ -167,7 +167,7 @@ def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
         drug for drug in drug_rows
         if (
             (not (drug['pubchem_cid'] or '').strip() or not (drug['description'] or '').strip())
-            and (drug['name'] or '').strip().lower() != FORMULA_COMPONENT_DRUG
+            and not is_internal_formula_component_drug_name(drug['name'] or '')
         )
     ]
 

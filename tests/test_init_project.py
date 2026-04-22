@@ -14,6 +14,8 @@ from conftest import TINY_REF_SEQ, write_genbank
 
 from respro.cli.init import init_project
 from respro.db.genes import _is_ncbi_protein_accession
+from respro.db.models import is_internal_formula_component_drug_name
+from respro.db.rules_queries import list_rules_for_display
 from respro.db.rules_import import (
     _detect_coordinate_base,
     _resolve_anchorless_deletion,
@@ -398,6 +400,38 @@ class TestComboRuleParsing:
         with pytest.raises(ValueError, match='missing required field member_id'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=False)
+
+    def test_formula_member_placeholder_rows_are_hidden_from_rule_display(self, tmp_path, tiny_genbank) -> None:
+        rules_tsv = tmp_path / 'rules.tsv'
+        rules_tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tphenotype\tgroup_id\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tunknown\tgroup_1\tmut_A
+            gag\ttiny_ref\t6\tP\tV\tunknown\tgroup_1\tmut_B
+        """))
+        formula_tsv = tmp_path / 'formula.tsv'
+        formula_tsv.write_text(textwrap.dedent("""\
+            group_id\tantiviral\texpression\tphenotype
+            group_1\tDrugA\tmut_A AND mut_B\tresistant
+        """))
+
+        db = tmp_path / 'proj.db'
+        init_project(
+            db_path=db,
+            name='test',
+            genbank_paths=[tiny_genbank],
+            rules_tsv=rules_tsv,
+            formula_rules_tsv=formula_tsv,
+            additional_info=False,
+        )
+
+        conn = sqlite3.connect(str(db))
+        conn.row_factory = sqlite3.Row
+        rows = list_rules_for_display(conn)
+        stored_drugs = [row['name'] for row in conn.execute('SELECT name FROM drug ORDER BY name').fetchall()]
+        conn.close()
+
+        assert any(is_internal_formula_component_drug_name(name) for name in stored_drugs)
+        assert rows == []
 
     def test_member_ids_must_be_unique(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
