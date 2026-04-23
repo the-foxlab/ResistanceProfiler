@@ -38,6 +38,7 @@ class FormulaRuleRuntime:
     clinical_phenotype: str
     ic50: str
     fold_ic50: str
+    score: str
     source: str
     comment: str
     pubchem_url: str = ''
@@ -150,7 +151,7 @@ def load_rules(conn: sqlite3.Connection, reference_id: int) -> list[ResistanceRu
             rr.external_id,
             rr.reference_identifier,
             rr.position, rr.reference, rr.mutation,
-            rr.phenotype, rr.clinical_phenotype, rr.ic50, rr.fold_ic50, rr.source, rr.comment
+            rr.phenotype, rr.clinical_phenotype, rr.ic50, rr.fold_ic50, rr.score, rr.source, rr.comment
         FROM resistance_rule rr
         JOIN gene g ON g.id = rr.gene_id
         JOIN drug d ON d.id = rr.drug_id
@@ -187,6 +188,7 @@ def load_formula_rules(conn: sqlite3.Connection, reference_id: int) -> list[Form
             fr.clinical_phenotype,
             fr.ic50,
             fr.fold_ic50,
+            fr.score,
             fr.source,
             fr.comment,
             d.id AS drug_id,
@@ -220,6 +222,7 @@ def load_formula_rules(conn: sqlite3.Connection, reference_id: int) -> list[Form
             clinical_phenotype=row['clinical_phenotype'] or 'unknown',
             ic50=row['ic50'] or '',
             fold_ic50=row['fold_ic50'] or '',
+            score=row['score'] or '',
             source=row['source'] or '',
             comment=row['comment'] or '',
             pubchem_url=row['pubchem_url'] or '',
@@ -241,6 +244,7 @@ def load_formula_rules(conn: sqlite3.Connection, reference_id: int) -> list[Form
             rr.clinical_phenotype,
             rr.ic50,
             rr.fold_ic50,
+            rr.score,
             rr.source,
             rr.comment,
             rr.drug_id,
@@ -284,6 +288,7 @@ def load_formula_rules(conn: sqlite3.Connection, reference_id: int) -> list[Form
             clinical_phenotype=row['clinical_phenotype'] or 'unknown',
             ic50=row['ic50'] or '',
             fold_ic50=row['fold_ic50'] or '',
+            score=row['score'] or '',
             source=row['source'] or '',
             comment=row['comment'] or '',
             pubchem_url=row['pubchem_url'] or '',
@@ -504,6 +509,7 @@ def match_formula_rules(
             clinical_phenotype=formula.clinical_phenotype,
             ic50=formula.ic50,
             fold_ic50=formula.fold_ic50,
+            score=formula.score,
             source=formula.source,
             group_name=formula.label or formula.formula_id,
             pubchem_url=formula.pubchem_url,

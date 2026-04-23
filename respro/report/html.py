@@ -200,7 +200,7 @@ def _load_js_text() -> str:
 
 def _phenotype_badge_class(value: str) -> str:
     """Map a phenotype string to a CSS badge class suffix."""
-    if value in ('resistant', 'intermediate', 'sensitive'):
+    if value in ('resistant', 'intermediate', 'sensitive', 'contradictory'):
         return value if value != 'intermediate' else 'intermediate-p'
     return 'unknown'
 
@@ -256,6 +256,7 @@ def _build_db_hit_rows(
                 'drug': rule.drug_name,
                 'ic50': rule.ic50,
                 'fold_ic50': rule.fold_ic50,
+                'score': rule.score,
                 'phenotype': rule.phenotype,
                 'clinical_phenotype': rule.clinical_phenotype,
                 'source': rule.source,
@@ -302,6 +303,7 @@ def _build_combo_hit_rows(result: ProfilingResult) -> list[dict]:
             'drug': rs.drug_name,
             'ic50': rs.ic50,
             'fold_ic50': rs.fold_ic50,
+            'score': rs.score,
             'phenotype': rs.phenotype,
             'clinical_phenotype': rs.clinical_phenotype,
             'phenotype_class': _phenotype_badge_class(rs.phenotype),
@@ -533,6 +535,7 @@ def _build_potential_effects_rows(
                 'drug': rule.drug_name,
                 'ic50': rule.ic50,
                 'fold_ic50': rule.fold_ic50,
+                'score': rule.score,
                 'phenotype': rule.phenotype,
                 'clinical_phenotype': rule.clinical_phenotype,
                 'source': rule.source,
@@ -1033,9 +1036,9 @@ def build_report_context(
             if pub.id in pub_id_to_num
         ]
 
-    _optional_cols = ['ic50', 'fold_ic50', 'clinical_phenotype', 'source', 'comment', 'publication']
+    _optional_cols = ['ic50', 'fold_ic50', 'score', 'clinical_phenotype', 'source', 'comment', 'publication']
     db_cols = _col_visibility(db_hit_rows, _optional_cols)
-    combo_cols = _col_visibility(combo_hit_rows, ['ic50', 'fold_ic50', 'clinical_phenotype', 'comment', 'publication'])
+    combo_cols = _col_visibility(combo_hit_rows, ['ic50', 'fold_ic50', 'score', 'clinical_phenotype', 'comment', 'publication'])
     pot_cols = _col_visibility(potential_rows, _optional_cols)
 
     # Unify clinical_phenotype visibility across all hit sections: if any section has

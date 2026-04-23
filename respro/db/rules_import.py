@@ -525,6 +525,26 @@ def _normalize_fold_ic50_from_row(
     return _parse_single_ic50(_get_value(row, 'fold_ic50', 'fold_ic_50'), errors=errors, context=context)
 
 
+def _normalize_score_from_row(
+    row: dict[str, str],
+    *,
+    errors: list[str],
+    context: str,
+) -> str:
+    """Return canonical score text or empty string; reads the score column."""
+    raw = _get_value(row, 'score')
+    if not raw:
+        return ''
+    value = raw.strip()
+    if not value or value.lower() == 'none':
+        return ''
+    try:
+        return f'{float(value):g}'
+    except ValueError:
+        errors.append(f'{context}: invalid score value {value!r}')
+        return ''
+
+
 
 def _normalize_phenotype_token(raw: str) -> str | None:
     """Map supported phenotype inputs to canonical internal values."""
@@ -553,6 +573,10 @@ def _normalize_phenotype_token(raw: str) -> str | None:
         'na': 'unknown',
         'n/a': 'unknown',
         'nd': 'unknown',
+        'contradictory': 'contradictory',
+        'contra': 'contradictory',
+        'conflict': 'contradictory',
+        'conflicting': 'contradictory',
     }
     return mapping.get(value)
 
@@ -1346,6 +1370,11 @@ def _load_resistance_rules(
             errors=errors,
             context=f'Rule for gene {gene_name!r} pos {position_raw!r}',
         )
+        score_value = _normalize_score_from_row(
+            row,
+            errors=errors,
+            context=f'Rule for gene {gene_name!r} pos {position_raw!r}',
+        )
         phenotype_value, clinical_phenotype_value = _normalize_phenotypes_from_row(
             row,
             errors=errors,
@@ -1423,8 +1452,8 @@ def _load_resistance_rules(
             'INSERT INTO resistance_rule '
             '('
             'gene_id, drug_id, external_id, reference_identifier, position, reference, mutation, '
-            'phenotype, clinical_phenotype, ic50, fold_ic50, source, comment'
-            ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'phenotype, clinical_phenotype, ic50, fold_ic50, score, source, comment'
+            ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 gene_id,
                 drug_id,
@@ -1437,6 +1466,7 @@ def _load_resistance_rules(
                 clinical_phenotype_value,
                 ic50_value,
                 fold_ic50_value,
+                score_value,
                 _get_value(row, 'source'),
                 _get_value(row, 'comment'),
             ),
@@ -1659,6 +1689,11 @@ def _load_formula_rules(
             errors=errors,
             context=f'Formula rule {formula_id!r}',
         )
+        score_value = _normalize_score_from_row(
+            row,
+            errors=errors,
+            context=f'Formula rule {formula_id!r}',
+        )
 
         drug_id = _get_or_create_drug_id(conn, project_id, drug_name, drug_cache)
         formula_id_exists, normalized_exists = _formula_rule_exists(
@@ -1680,8 +1715,8 @@ def _load_formula_rules(
             'INSERT INTO resistance_formula_rule '
             '('
             'drug_id, formula_id, label, normalized_expression, phenotype, '
-            'clinical_phenotype, ic50, fold_ic50, source, comment'
-            ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'clinical_phenotype, ic50, fold_ic50, score, source, comment'
+            ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 drug_id,
                 formula_id,
@@ -1691,6 +1726,7 @@ def _load_formula_rules(
                 clinical_phenotype_value,
                 ic50_value,
                 fold_ic50_value,
+                score_value,
                 _get_value(row, 'source'),
                 _get_value(row, 'comment'),
             ),

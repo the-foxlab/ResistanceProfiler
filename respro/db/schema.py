@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS resistance_rule (
     clinical_phenotype TEXT NOT NULL DEFAULT 'unknown',
     ic50        TEXT    DEFAULT '',
     fold_ic50   TEXT    DEFAULT '',
+    score       TEXT    DEFAULT '',
     publication TEXT    DEFAULT '',
     source      TEXT    DEFAULT '',
     comment     TEXT    DEFAULT ''
@@ -109,6 +110,7 @@ CREATE TABLE IF NOT EXISTS resistance_formula_rule (
     clinical_phenotype TEXT NOT NULL DEFAULT 'unknown',
     ic50        TEXT    DEFAULT '',
     fold_ic50   TEXT    DEFAULT '',
+    score       TEXT    DEFAULT '',
     source      TEXT    DEFAULT '',
     comment     TEXT    DEFAULT ''
 );
@@ -390,6 +392,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'clinical_phenotype': "TEXT NOT NULL DEFAULT 'unknown'",
         'ic50': "TEXT DEFAULT ''",
         'fold_ic50': "TEXT DEFAULT ''",
+        'score': "TEXT DEFAULT ''",
         'publication': "TEXT DEFAULT ''",
         'source': "TEXT DEFAULT ''",
         'comment': "TEXT DEFAULT ''",

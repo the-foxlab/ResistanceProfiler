@@ -114,6 +114,7 @@ class ResistanceRule:
     clinical_phenotype: str = 'unknown'
     ic50: str = ''
     fold_ic50: str = ''
+    score: str = ''
     source: str = ''
     pubchem_url: str = ''
     description: str = ''
@@ -148,6 +149,7 @@ class ResistanceRuleSet:
     clinical_phenotype: str = 'unknown'
     ic50: str = ''
     fold_ic50: str = ''
+    score: str = ''
     source: str = ''
     group_name: str = ''
     pubchem_url: str = ''
@@ -216,6 +218,7 @@ class AnnotatedVariant:
                 'clinical_phenotype': r.clinical_phenotype,
                 'ic50': r.ic50,
                 'fold_ic50': r.fold_ic50,
+                'score': r.score,
                 'publications': [
                     {'doi': p.doi, 'title': p.title, 'pubmed_id': p.pubmed_id, 'raw_input': p.raw_input}
                     for p in r.publications
@@ -247,6 +250,7 @@ class FormulaRuleHit:
             'clinical_phenotype': rs.clinical_phenotype,
             'ic50': rs.ic50,
             'fold_ic50': rs.fold_ic50,
+            'score': rs.score,
             'publications': [
                 {'doi': p.doi, 'title': p.title, 'pubmed_id': p.pubmed_id, 'raw_input': p.raw_input}
                 for p in rs.publications

@@ -38,6 +38,7 @@ and `respro add`.
 | `source`                     | Provenance label                      |
 | `comment`                    | Free-text curator note                |
 | `group_id`                   | Combination group key                 |
+| `score`                      | Numeric quality/evidence score        |
 
 Notes:
 
@@ -185,6 +186,7 @@ Accepted flexible inputs are intentionally limited.
 | `resistant`, `resistance`, `res`, `r`, `true`, `1`               | `resistant`    |
 | `intermediate`, `interm`, `i`                                          | `intermediate` |
 | `sensitive`, `susceptible`, `sensi`, `sens`, `s`, `false`, `0` | `sensitive`    |
+| `contradictory`, `contra`, `conflict`, `conflicting`              | `contradictory` |
 | empty value,`None`, `unknown`, `na`, `n/a`, `nd`                   | `unknown`      |
 
 Rules:
@@ -201,6 +203,14 @@ Rules:
 - `fold_ic50` and `fold_ic_50` are aliases (use at most one in a file)
 - absolute and fold columns may coexist in the same TSV
 - values are parsed numerically and stored in dedicated DB fields
+
+### Score
+
+- Optional numeric field accepted in the `score` column.
+- Accepts any finite numeric value (integer or decimal, including negative values).
+- Useful for evidence scores, confidence scores, or any database-specific numeric quality metric.
+- Shown in the HTML report as a dedicated column when at least one rule carries a non-empty value.
+- The value is stored and propagated as-is; ResPro does not interpret or threshold it.
 
 ### Publications and sources
 
@@ -268,6 +278,7 @@ The optional formula TSV defines higher-order resistance rules over atomic `memb
 | `clinical_phenotype`         | Formula-level clinical interpretation  |
 | `ic50` / `ic_50`           | Absolute IC50 value                    |
 | `fold_ic50` / `fold_ic_50` | Fold IC50 value                        |
+| `score`                      | Numeric quality/evidence score         |
 | `publication`                | DOI, PMID, or source publication text  |
 | `source`                     | Provenance label                       |
 | `comment`                    | Free-text curator note                 |

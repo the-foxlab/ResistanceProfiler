@@ -172,6 +172,7 @@
   <th>Gene</th><th>AA change</th><th>Frequency classification</th><th>Underlying nt change</th><th>Drug</th>
   {% if db_cols.ic50 %}<th>IC50</th>{% endif %}
   {% if db_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
+  {% if db_cols.score %}<th>Score</th>{% endif %}
   <th>Phenotype</th>
   {% if db_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
   {% if db_cols.source %}<th>Source</th>{% endif %}
@@ -188,14 +189,17 @@
   <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
   {% if db_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
   {% if db_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
+  {% if db_cols.score %}<td>{{ r.score or '—' }}</td>{% endif %}
   <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
       {% elif r.phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
       {% elif r.phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% elif r.phenotype == 'contradictory' %}<span class='badge badge-contradictory'>contradictory</span>
       {% else %}<span class='badge badge-unknown'>{{ r.phenotype }}</span>{% endif %}</td>
   {% if db_cols.clinical_phenotype %}
   <td>{% if r.clinical_phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
       {% elif r.clinical_phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
       {% elif r.clinical_phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% elif r.clinical_phenotype == 'contradictory' %}<span class='badge badge-contradictory'>contradictory</span>
       {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
   {% endif %}
   {% if db_cols.source %}<td>{{ r.source or '—' }}</td>{% endif %}
@@ -229,6 +233,7 @@
   <th>Group</th><th>Logic / member mutations</th><th>Drug</th>
   {% if combo_cols.ic50 %}<th>IC50</th>{% endif %}
   {% if combo_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
+  {% if combo_cols.score %}<th>Score</th>{% endif %}
   <th>Phenotype</th>
   {% if combo_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
   {% if combo_cols.comment %}<th>Comment</th>{% endif %}
@@ -242,14 +247,17 @@
   <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
   {% if combo_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
   {% if combo_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
+  {% if combo_cols.score %}<td>{{ r.score or '—' }}</td>{% endif %}
   <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
       {% elif r.phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
       {% elif r.phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% elif r.phenotype == 'contradictory' %}<span class='badge badge-contradictory'>contradictory</span>
       {% else %}<span class='badge badge-unknown'>{{ r.phenotype }}</span>{% endif %}</td>
   {% if combo_cols.clinical_phenotype %}
   <td>{% if r.clinical_phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
       {% elif r.clinical_phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
       {% elif r.clinical_phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% elif r.clinical_phenotype == 'contradictory' %}<span class='badge badge-contradictory'>contradictory</span>
       {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
   {% endif %}
   {% if combo_cols.comment %}<td>{{ r.comment or '—' }}</td>{% endif %}
@@ -274,6 +282,7 @@
   <th>Gene</th><th>Observed AA change</th><th>Known rule</th><th>Similarity</th><th>Drug</th>
   {% if pot_cols.ic50 %}<th>IC50</th>{% endif %}
   {% if pot_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
+  {% if pot_cols.score %}<th>Score</th>{% endif %}
   <th>Phenotype</th>
   {% if pot_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
   {% if pot_cols.source %}<th>Source</th>{% endif %}
@@ -290,14 +299,17 @@
   <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
   {% if pot_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
   {% if pot_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
+  {% if pot_cols.score %}<td>{{ r.score or '—' }}</td>{% endif %}
   <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
       {% elif r.phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
       {% elif r.phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% elif r.phenotype == 'contradictory' %}<span class='badge badge-contradictory'>contradictory</span>
       {% else %}<span class='badge badge-unknown'>{{ r.phenotype }}</span>{% endif %}</td>
   {% if pot_cols.clinical_phenotype %}
   <td>{% if r.clinical_phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
       {% elif r.clinical_phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
       {% elif r.clinical_phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% elif r.clinical_phenotype == 'contradictory' %}<span class='badge badge-contradictory'>contradictory</span>
       {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
   {% endif %}
   {% if pot_cols.source %}<td>{{ r.source or '—' }}</td>{% endif %}
