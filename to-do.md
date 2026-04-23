@@ -397,7 +397,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   `respro/io/databases.py` module using stdlib `urllib.request` to avoid new heavy dependencies;
   depends on the companion database repository existing and following a consistent asset naming
   convention that encodes `PROJECT_SCHEMA_VERSION`
-- 🟡 For Jaki et al report all weird columns and send to Theo/Lena
 
 ### WebUI
 

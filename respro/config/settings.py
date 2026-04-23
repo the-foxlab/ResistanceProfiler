@@ -28,6 +28,9 @@ class CliUrlConfig:
     ncbi_pubmed_esummary: str
     crossref_works: str
     ncbi_protein_page: str
+    ncbi_nuccore_efetch: str
+    github_respro_db_api: str
+    github_respro_db_raw: str
 
 
 @dataclass(frozen=True)
@@ -78,6 +81,9 @@ def _load_cli_config() -> CliConfig:
             ncbi_pubmed_esummary=str(urls['ncbi_pubmed_esummary']),
             crossref_works=str(urls['crossref_works']),
             ncbi_protein_page=str(urls['ncbi_protein_page']),
+            ncbi_nuccore_efetch=str(urls['ncbi_nuccore_efetch']),
+            github_respro_db_api=str(urls['github_respro_db_api']),
+            github_respro_db_raw=str(urls['github_respro_db_raw']),
         ),
         parsing=CliParsingConfig(
             doi_prefixes=tuple(str(item) for item in parsing['doi_prefixes']),
