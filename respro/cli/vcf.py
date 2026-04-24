@@ -47,7 +47,7 @@ def _profile_vcf_command(
     ] = 'sample',
     output: Annotated[
         Path,
-        typer.Option('--output', '-o', help='Output directory.')
+        typer.Option('--output', '-o', help='Output path (directory or HTML file path).')
     ] = Path('output'),
     results_db: Annotated[
         Path | None,
@@ -176,7 +176,7 @@ def _profile_vcf_command(
             input_basename=vcf.name,
             total_variants=total_variants,
             variants_in_cds=variants_in_cds,
-            output_dir=output,
+            output_target=output,
             genes=genes,
             rule_gene_names=rule_gene_names,
             rules=rules,

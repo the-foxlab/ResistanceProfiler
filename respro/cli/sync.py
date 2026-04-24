@@ -114,7 +114,7 @@ def _sync_single_run(
             gene_matches=gene_matches,
             total_variants=run_dict.get('total_variants', 0),
             variants_in_cds=run_dict.get('variants_in_cds', 0),
-            output_dir=Path('.'),
+            output_target=Path('.'),
             genes=genes,
             rule_gene_names=rule_gene_names,
             rules=rules,

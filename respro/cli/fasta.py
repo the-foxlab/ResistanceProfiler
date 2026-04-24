@@ -40,7 +40,7 @@ def _profile_fasta_command(
     ] = 'sample',
     output: Annotated[
         Path,
-        typer.Option('--output', '-o', help='Output directory.')
+        typer.Option('--output', '-o', help='Output path (directory or HTML file path).')
     ] = Path('output'),
     results_db: Annotated[
         Path | None,
@@ -134,7 +134,7 @@ def _profile_fasta_command(
             input_basename=consensus_fasta.name,
             total_variants=len(annotations),
             variants_in_cds=len(annotations),
-            output_dir=output,
+            output_target=output,
             genes=genes,
             rule_gene_names=rule_gene_names,
             rules=rules,

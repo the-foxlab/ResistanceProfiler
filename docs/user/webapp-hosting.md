@@ -24,7 +24,7 @@ The repository contains a full stack definition in `docker-compose.web.yml`:
 mkdir -p data
 ```
 
-Place your `project.db` at `data/demo-web/project.db`.
+Place your `project.db` at `data/project.db`.
 
 ### 2. Build and start the stack
 

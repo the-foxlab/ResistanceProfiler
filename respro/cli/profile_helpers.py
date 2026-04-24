@@ -8,6 +8,7 @@ they belong to the CLI layer and must not be moved into respro/core/.
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from respro.db.results import save_run
 from respro.db.schema import init_results_db
 from respro.io.reference import load_genes_for_reference
 from respro.report.html import export_results
+from respro.utils.files import resolve_output_file
 
 
 def _init_results_db_connection(
@@ -137,7 +139,7 @@ def _finalize_and_export(
     input_basename: str,
     total_variants: int,
     variants_in_cds: int,
-    output_dir: Path,
+    output_target: Path,
     genes: list,
     rule_gene_names: set[str],
     rules: list,
@@ -163,7 +165,7 @@ def _finalize_and_export(
     :param input_basename: filename of the input VCF or FASTA
     :param total_variants: total variant count
     :param variants_in_cds: variant count within CDS regions
-    :param output_dir: output directory path
+    :param output_target: output path option; interpreted as directory or explicit HTML file
     :param genes: gene list for the reference
     :param rule_gene_names: set of gene names covered by any rule
     :param rules: resistance rules for the reference
@@ -206,15 +208,20 @@ def _finalize_and_export(
 
     requested_export_formats = {extra_export_format} if extra_export_format else set()
 
+    raw_stem = Path(input_basename).stem.strip() or 'profile'
+    safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', raw_stem) or 'profile'
+    html_output_path = resolve_output_file(output_target, f'{safe_stem}.report.html')
+
     outputs = export_results(
         result,
-        output_dir,
+        html_output_path.parent,
         genes=genes,
         rule_gene_names=rule_gene_names,
         project_conn=project_conn,
         rules=rules,
         extra_export_formats=requested_export_formats if requested_export_formats else None,
         project_db_path=project_path.resolve(),
+        output_html_path=html_output_path,
     )
 
     if results_conn is not None:

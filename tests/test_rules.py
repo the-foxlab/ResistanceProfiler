@@ -583,6 +583,7 @@ class TestMatchFormulaRules:
             clinical_phenotype='unknown',
             ic50='',
             fold_ic50='',
+            score='',
             source='',
             comment='',
             member_rules={rule.external_id: rule for rule in members if rule.external_id},

@@ -29,6 +29,7 @@ from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.schema import open_project_db, open_results_db
 from respro.io.reference import load_genes_for_reference
 from respro.report.html import export_results
+from respro.utils.files import resolve_output_file
 from respro.utils.logging import err_console
 
 
@@ -47,7 +48,7 @@ def regenerate(
         typer.Option(
             '--output',
             '-o',
-            help='Output directory.',
+            help='Output path (directory or HTML file path).',
         ),
     ],
     result_db: Annotated[
@@ -177,15 +178,19 @@ def regenerate(
             rules = load_rules(project_conn, ref_id)
             rule_gene_names = {rule.gene_name for rule in rules}
 
+        default_stem = Path(run_dict['vcf_path']).stem.strip() or 'profile'
+        html_output_path = resolve_output_file(out, f'{default_stem}.report.html')
+
         with err_console.status(f'[dim]{status_label}[/dim]'):
             outputs = export_results(
                 result,
-                out,
+                html_output_path.parent,
                 genes=genes,
                 rule_gene_names=rule_gene_names,
                 project_conn=project_conn,
                 rules=rules,
                 extra_export_formats=extra_export_formats,
+                output_html_path=html_output_path,
             )
 
         console.print(Panel(

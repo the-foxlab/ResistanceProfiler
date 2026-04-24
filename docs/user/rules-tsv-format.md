@@ -218,6 +218,7 @@ Rules:
 
 - DOI forms (`doi:10...`, `https://doi.org/...`, `doi.org/...`)
 - PMID forms (`PMID:12345678`)
+- Multiple possible must be comma seperated
 - free text
 
 Import deduplicates publication entries and links them to atomic rules and formula rules.

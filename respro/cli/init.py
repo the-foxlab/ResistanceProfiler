@@ -20,7 +20,7 @@ from respro.db.genes import _load_genbank_records
 from respro.db.project_metadata import load_metadata_json, store_project_metadata
 from respro.db.schema import PROJECT_SCHEMA_VERSION, create_schema, open_project_db
 from respro.io.genbank import ParsedGenBankReference, parse_genbank_sources
-from respro.utils.files import require_file
+from respro.utils.files import require_file, resolve_output_file
 from respro.utils.logging import err_console
 
 logger = logging.getLogger(__name__)
@@ -234,11 +234,13 @@ def _init_command(
     if not genbank_paths:
         raise click.UsageError('At least one --genbank file is required.')
 
+    output_path = resolve_output_file(output, 'project.db')
+
     console = Console(highlight=False)
     try:
         with err_console.status('[dim]Initialising project database…[/dim]'):
             db_path = init_project(
-                db_path=output,
+                db_path=output_path,
                 name=name,
                 genbank_paths=list(genbank_paths),
                 rules_tsv=rules,

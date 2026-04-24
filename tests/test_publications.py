@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import urllib.error
+from email.message import Message
 from unittest.mock import MagicMock, patch
 
 from respro.io.publications import fetch_publication_metadata, fetch_pubmed_metadata
@@ -74,6 +75,36 @@ class TestFetchPubmedMetadata:
             url='', code=500, msg='Server Error', hdrs=None, fp=None,  # type: ignore[arg-type]
         )):
             assert fetch_pubmed_metadata('12345678') is None
+
+    def test_retries_on_429_and_eventually_succeeds(self) -> None:
+        headers = Message()
+        headers['Retry-After'] = '0'
+        rate_limited = urllib.error.HTTPError(
+            url='', code=429, msg='Too Many Requests', hdrs=headers, fp=None,  # type: ignore[arg-type]
+        )
+        with (
+            patch('urllib.request.urlopen', side_effect=[rate_limited, _mock_response(_ESUMMARY_WITH_DOI)]),
+            patch('time.sleep') as mock_sleep,
+        ):
+            result = fetch_pubmed_metadata('12345678')
+        assert result is not None
+        assert result['title'] == 'Some antiviral resistance study.'
+        assert result['doi'] == '10.1234/xyz'
+        mock_sleep.assert_called_once_with(0.0)
+
+    def test_returns_none_after_exhausting_429_retries(self) -> None:
+        headers = Message()
+        headers['Retry-After'] = '0'
+        rate_limited = urllib.error.HTTPError(
+            url='', code=429, msg='Too Many Requests', hdrs=headers, fp=None,  # type: ignore[arg-type]
+        )
+        with (
+            patch('urllib.request.urlopen', side_effect=[rate_limited] * 4),
+            patch('time.sleep') as mock_sleep,
+        ):
+            result = fetch_pubmed_metadata('12345678')
+        assert result is None
+        assert mock_sleep.call_count == 3
 
     def test_returns_none_on_network_error(self) -> None:
         with patch('urllib.request.urlopen', side_effect=OSError('no network')):

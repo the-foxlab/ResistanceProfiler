@@ -208,6 +208,10 @@ Mark items done and update priorities after each completed milestone.
 
 - [X] Professional documentation — rewritten README with tested CLI/web quickstarts, linked user guides (install, database preparation, TSV format, workflow explanation, basic/detailed CLI tutorials, detailed web hosting, troubleshooting/FAQ, output interpretation), and development architecture/contribution documentation
 
+### Databases
+
+- [X] `respro maintained.db` CLI command — `maintained.db --list` prints available databases (with full metadata panel) from the companion repository at `https://github.com/jonas-fuchs/respro-db`; `maintained.db --download <name> --output <path>` fetches `rules.tsv`, `metadata.json`, and optional `formula-rules.tsv` from the repo, resolves unique `reference_identifier` accessions from the rules TSV, downloads the corresponding GenBank records from NCBI, and calls `respro init` with `--overwrite` to produce a ready-to-use `<name>.db` (directory paths use `<name>.db` by default); implemented in `respro/io/maintained_db.py` and `respro/cli/maintained_db.py` using stdlib `urllib.request`
+
 ---
 
 ## Next
@@ -372,31 +376,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟢 PyPI release — changelog, version bump, and hatch-based build after CI and docs are in place
 - 🟢 Add mypy or pyright to the dev toolchain — type hints are comprehensive throughout the
   codebase; a type checker run in CI would catch drift and wrong annotations before they reach tests
-
-### Databases
-
-- 🟡 Companion database repository — separate public GitHub repo with automated bots that scrape
-  known public resistance databases (e.g. HerpesdrG, HIVDB) and format them as ready-to-use .tsv
-  files; also pre-build `.db` files for direct use with the `respro databases` CLI command; the
-  repo's CI must monitor two triggers independently: (1) upstream database content changes, which
-  trigger a TSV/DB rebuild for the current `PROJECT_SCHEMA_VERSION`, and (2) new `respro` releases,
-  which must be checked for a `PROJECT_SCHEMA_VERSION` bump — if the schema version has increased,
-  all databases must be rebuilt against the new schema and released as new assets; old `.db` assets
-  built against earlier schema versions must be retained in prior releases (not deleted) so that
-  users pinned to an older `respro` version can still download a compatible database; each release
-  asset filename and metadata must embed the `PROJECT_SCHEMA_VERSION` it was built with (e.g.
-  `hsv1_schema1.db`) so that both humans and the CLI can identify compatibility at a glance
-- 🟡 Add `respro databases` CLI command — new command group that talks to the companion database
-  repository via the GitHub Releases API; implement three options:
-  `--list` (print available databases with version and description),
-  `--download <identifier>` (fetch the TSV or DB for a named database release to disk),
-  `--path <dir>` (destination directory for the download, default: current directory);
-  `--list` must filter assets by the running `PROJECT_SCHEMA_VERSION` and only show databases
-  whose schema version matches — databases built for a different schema are silently omitted from
-  the list (a `--all` flag can expose them with a compatibility warning); implement in a new
-  `respro/io/databases.py` module using stdlib `urllib.request` to avoid new heavy dependencies;
-  depends on the companion database repository existing and following a consistent asset naming
-  convention that encodes `PROJECT_SCHEMA_VERSION`
 
 ### WebUI
 

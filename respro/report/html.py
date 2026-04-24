@@ -1353,6 +1353,7 @@ def export_results(
     rules: list[ResistanceRule] | None = None,
     extra_export_formats: set[str] | None = None,
     project_db_path: Path | None = None,
+    output_html_path: Path | None = None,
 ) -> dict[str, Path]:
     """
     Write all report outputs to a directory and return a format-to-path mapping.
@@ -1365,11 +1366,25 @@ def export_results(
     :param rules: optional resistance rules for potential effects table in HTML
     :param extra_export_formats: optional set of additional output formats ('json', 'tabular')
     :param project_db_path: optional path to project database used for this run
+    :param output_html_path: optional explicit HTML output file path; when set, HTML is written
+        exactly to this path and JSON/tabular files use its basename stem
     :return: dict mapping format names to output file paths
     """
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    stem = _build_output_stem(result)
+    if output_html_path is None:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stem = _build_output_stem(result)
+        html_path = output_dir / f'{stem}.report.html'
+    else:
+        html_path = Path(output_html_path)
+        output_dir = html_path.parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if html_path.name.endswith('.report.html'):
+            stem = html_path.name[:-12]
+        elif html_path.suffix == '.html':
+            stem = html_path.stem
+        else:
+            stem = html_path.name
 
     requested_formats = set(extra_export_formats or set())
     unknown_formats = requested_formats - {'json', 'tabular'}
@@ -1385,7 +1400,6 @@ def export_results(
             rule_gene_names=rule_gene_names,
         )
 
-    html_path = output_dir / f'{stem}.report.html'
     write_html(
         result,
         html_path,
