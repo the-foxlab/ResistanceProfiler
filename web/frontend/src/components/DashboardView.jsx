@@ -31,6 +31,56 @@ function _isPopulated(value) {
   return value !== null && value !== undefined && String(value).trim() !== '';
 }
 
+function _renderPmidLinks(value) {
+  const pmidText = String(value);
+  const pmids = Array.from(new Set(pmidText.match(/\d+/g) || []));
+  if (pmids.length === 0) {
+    return pmidText;
+  }
+  return (
+    <>
+      {pmids.map((pmid, index) => (
+        <span key={pmid}>
+          {index > 0 ? ', ' : ''}
+          <a
+            href={`https://pubmed.ncbi.nlm.nih.gov/${pmid}/`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            PMID:{pmid}
+          </a>
+        </span>
+      ))}
+    </>
+  );
+}
+
+function _renderDatabaseMetaValue(entry) {
+  const valueText = String(entry.value).trim();
+  if (entry.key === 'website') {
+    return (
+      <a href={valueText} target="_blank" rel="noreferrer">{valueText}</a>
+    );
+  }
+  if (entry.key === 'publication_doi') {
+    const doi = valueText.replace(/^https?:\/\/doi\.org\//i, '');
+    return (
+      <a href={`https://doi.org/${doi}`} target="_blank" rel="noreferrer">
+        {valueText}
+      </a>
+    );
+  }
+  if (entry.key === 'publication_pmid') {
+    return _renderPmidLinks(valueText);
+  }
+  if (entry.key === 'contact' && valueText.includes('@') && !valueText.includes('mailto:')) {
+    return (
+      <a href={`mailto:${valueText}`}>{valueText}</a>
+    );
+  }
+  return entry.value;
+}
+
 export function DashboardView({
   API_BASE,
   PROFILE_MODES,
@@ -714,15 +764,7 @@ export function DashboardView({
                         <div key={entry.key} className="database-meta-row">
                           <span className="database-meta-label">{entry.label}</span>
                           <span className="database-meta-value">
-                            {entry.key === 'website' ? (
-                              <a href={String(entry.value)} target="_blank" rel="noreferrer">{entry.value}</a>
-                            ) : entry.key === 'publication_doi' ? (
-                              <a href={`https://doi.org/${String(entry.value).replace(/^https?:\/\/doi\.org\//i, '')}`} target="_blank" rel="noreferrer">
-                                {entry.value}
-                              </a>
-                            ) : (
-                              entry.value
-                            )}
+                            {_renderDatabaseMetaValue(entry)}
                           </span>
                         </div>
                       ))}

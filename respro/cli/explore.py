@@ -17,6 +17,7 @@ from respro.cli.sync import sync_results_database
 from respro.db.results import delete_run, list_runs
 from respro.db.rules_queries import (
     get_project_summary_for_display,
+    list_formula_rules_for_display,
     list_references_for_display,
     list_rules_for_display,
 )
@@ -37,6 +38,23 @@ RULE_COLUMN_LABELS = {
     'publication': 'DOI',
     'source': 'Source',
     'comment': 'Comment',
+}
+
+FORMULA_RULE_COLUMN_LABELS = {
+    'reference_name': 'Reference',
+    'drug': 'Drug',
+    'formula_id': 'Formula ID',
+    'label': 'Label',
+    'normalized_expression': 'Expression',
+    'phenotype': 'Phenotype',
+    'clinical_phenotype': 'Clinical phenotype',
+    'ic50': 'IC50',
+    'fold_ic50': 'Fold IC50',
+    'score': 'Score',
+    'publication': 'DOI',
+    'source': 'Source',
+    'comment': 'Comment',
+    'member_count': 'Members',
 }
 
 PROJECT_INFO_LABELS = {
@@ -80,13 +98,25 @@ def manage_database(
         str | None,
         typer.Option('--reference', help='Optional reference filter (partial, case-insensitive).'),
     ] = None,
+    list_single: Annotated[
+        bool,
+        typer.Option('--list-single', help='List single (atomic) resistance rules.'),
+    ] = False,
+    list_combi: Annotated[
+        bool,
+        typer.Option('--list-combi', help='List combination/formula resistance rules.'),
+    ] = False,
 ) -> None:
     """Manage a project database via --rules or --info mode."""
-    if rules == info:
-        raise click.UsageError('Specify exactly one of --rules or --info.')
+    rules_mode = bool(rules or list_single or list_combi)
+    if info == rules_mode:
+        raise click.UsageError('Specify either --info or --rules/--list-single/--list-combi.')
 
-    if rules:
-        _explore_rules(db_path, reference)
+    if rules_mode:
+        if not list_single and not list_combi:
+            list_single = True
+            list_combi = True
+        _explore_rules(db_path, reference, list_single=list_single, list_combi=list_combi)
         return
 
     _explore_info(db_path)
@@ -160,7 +190,13 @@ def manage_results(
             results_conn.close()
 
 
-def _explore_rules(project_db: Path, reference: str | None) -> None:
+def _explore_rules(
+    project_db: Path,
+    reference: str | None,
+    *,
+    list_single: bool,
+    list_combi: bool,
+) -> None:
     """List resistance rules in a project database."""
     console = Console(highlight=False, width=220)
     project_conn = None
@@ -184,32 +220,50 @@ def _explore_rules(project_db: Path, reference: str | None) -> None:
                 )
             ref_id = int(matches[0]['id'])
 
-        rows = list_rules_for_display(project_conn, ref_id=ref_id)
-        if not rows:
+        single_rows = list_rules_for_display(project_conn, ref_id=ref_id) if list_single else []
+        combi_rows = list_formula_rules_for_display(project_conn, ref_id=ref_id) if list_combi else []
+
+        if not single_rows and not combi_rows:
             console.print('No resistance rules found.')
             return
 
-        columns = list(rows[0].keys())
-        table = Table(box=box.SIMPLE, header_style='bold cyan', show_edge=False)
-        for column_key in columns:
-            label = RULE_COLUMN_LABELS.get(column_key, column_key)
-            justify = 'right' if column_key == 'position' else 'left'
-            table.add_column(label, justify=justify)
+        if single_rows:
+            console.print('[bold]Single rules[/bold]')
+            _render_rule_table(console, single_rows, RULE_COLUMN_LABELS)
 
-        for row in rows:
-            cells = []
-            for column_key in columns:
-                value = row.get(column_key)
-                cells.append('' if value is None else str(value))
-            table.add_row(*cells)
-
-        console.print(table)
+        if combi_rows:
+            if single_rows:
+                console.print('')
+            console.print('[bold]Combination rules[/bold]')
+            _render_rule_table(console, combi_rows, FORMULA_RULE_COLUMN_LABELS)
 
     except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     finally:
         if project_conn is not None:
             project_conn.close()
+
+def _render_rule_table(
+    console: Console,
+    rows: list[dict],
+    column_labels: dict[str, str],
+) -> None:
+    """Render a tabular list of rule rows."""
+    columns = list(rows[0].keys())
+    table = Table(box=box.SIMPLE, header_style='bold cyan', show_edge=False)
+    for column_key in columns:
+        label = column_labels.get(column_key, column_key)
+        justify = 'right' if column_key in {'position', 'member_count'} else 'left'
+        table.add_column(label, justify=justify)
+
+    for row in rows:
+        cells = []
+        for column_key in columns:
+            value = row.get(column_key)
+            cells.append('' if value is None else str(value))
+        table.add_row(*cells)
+
+    console.print(table)
 
 
 def _explore_runs(results_db: Path) -> None:

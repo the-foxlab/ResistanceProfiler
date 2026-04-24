@@ -23,7 +23,7 @@ def bootstrap_missing_maintained_databases(project_databases_dir: Path) -> None:
     """
     database_names = list_maintained_databases()
     logger.info(f'Found {len(database_names)} maintained database(s): {database_names}')
-    
+
     for database_name in database_names:
         db_path = project_databases_dir / f'{database_name}.db'
         if db_path.is_file():

@@ -338,8 +338,9 @@ th {
 }
 
 .database-meta-panel {
-  display: grid;
-  gap: 0.45rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1rem;
   padding: 0.85rem 0.95rem;
   border: 1px solid #dbe6ee;
   border-radius: var(--radius-md);
@@ -348,6 +349,8 @@ th {
 }
 
 .database-meta-row {
+  flex: 1 1 calc(50% - 0.5rem);
+  min-width: 280px;
   display: grid;
   grid-template-columns: minmax(130px, 180px) minmax(0, 1fr);
   gap: 0.7rem;
@@ -1225,6 +1228,8 @@ th.sortable-col {
   }
 
   .database-meta-row {
+    flex-basis: 100%;
+    min-width: 0;
     grid-template-columns: 1fr;
     gap: 0.2rem;
   }

@@ -152,6 +152,19 @@ class TestBuildReportContext:
         assert ctx['summary']['database_hits'] == 1    # 1 position
         assert ctx['summary']['db_hit_rules'] == 2     # 2 rules matched
 
+    def test_publication_citations_deduplicate_without_publication_ids(self) -> None:
+        r = _make_result()
+        r.annotations[0].rule_matches[0].publications = [
+            Publication(id=0, doi='', title='', pubmed_id='11111', raw_input='PMID:11111'),
+            Publication(id=0, doi='', title='', pubmed_id='11111', raw_input='PMID:11111'),
+            Publication(id=0, doi='', title='', pubmed_id='22222', raw_input='PMID:22222'),
+        ]
+
+        ctx = build_report_context(r)
+
+        assert len(ctx['bibliography']) == 2
+        assert ctx['db_hit_rows'][0]['pub_citations'] == [1, 2]
+
     def test_stat_note_rendered_in_html(self) -> None:
         r = _make_result()
         html = render_html(r)

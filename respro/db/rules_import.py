@@ -28,6 +28,29 @@ _RE_FORMULA_TOKEN = re.compile(
     re.IGNORECASE,
 )
 _FORMULA_OPERATORS = {'AND', 'OR', 'NOT', 'XOR'}
+_CONTRADICTORY_COMMENT = 'Publications have contradictory phenotype associations.'
+
+
+def _append_contradictory_comment(
+    comment: str,
+    *,
+    phenotype: str,
+    clinical_phenotype: str,
+) -> str:
+    """Append a standard explanatory comment when a row is labeled contradictory."""
+    if phenotype != 'contradictory' and clinical_phenotype != 'contradictory':
+        return comment
+
+    normalized_comment = comment.strip()
+    if _CONTRADICTORY_COMMENT.lower() in normalized_comment.lower():
+        return normalized_comment
+    if not normalized_comment:
+        return _CONTRADICTORY_COMMENT
+    if normalized_comment.endswith(('.', '!', '?')):
+        return f'{normalized_comment} {_CONTRADICTORY_COMMENT}'
+    return f'{normalized_comment}. {_CONTRADICTORY_COMMENT}'
+
+
 def _normalize_publication_token(token: str) -> tuple[str, str, str]:
     """
     Normalise a single publication token to (doi, pubmed_id, raw_input).
@@ -1307,7 +1330,7 @@ def _load_resistance_rules(
         ]
 
         if not drug_name:
-            if require_external_ids and group_ids and external_id:
+            if require_external_ids and external_id:
                 grouped_missing_antiviral_rows.append(
                     f'row {row_number}: gene {gene_name!r}, member_id {external_id!r}'
                 )
@@ -1407,6 +1430,11 @@ def _load_resistance_rules(
 
         # Reuse/create drug IDs through a tiny cache to avoid repeated lookups.
         drug_id = _get_or_create_drug_id(conn, project_id, drug_name, drug_cache)
+        comment_value = _append_contradictory_comment(
+            _get_value(row, 'comment'),
+            phenotype=phenotype_value,
+            clinical_phenotype=clinical_phenotype_value,
+        )
 
         if external_id:
             signature = (gene_id, reference_identifier, position_0based, reference_aa, mutation)
@@ -1468,7 +1496,7 @@ def _load_resistance_rules(
                 fold_ic50_value,
                 score_value,
                 _get_value(row, 'source'),
-                _get_value(row, 'comment'),
+                comment_value,
             ),
         )
         rule_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
@@ -1625,7 +1653,7 @@ def _load_formula_rules(
             '\n'.join(f'  - {msg}' for msg in skipped_formula_validation),
         )
 
-    if expected_group_ids is not None:
+    if expected_group_ids:
         provided_group_ids = set(formula_ids)
         missing_group_ids = sorted(expected_group_ids - provided_group_ids)
         if missing_group_ids:
@@ -1694,6 +1722,11 @@ def _load_formula_rules(
             errors=errors,
             context=f'Formula rule {formula_id!r}',
         )
+        comment_value = _append_contradictory_comment(
+            _get_value(row, 'comment'),
+            phenotype=phenotype_value,
+            clinical_phenotype=clinical_phenotype_value,
+        )
 
         drug_id = _get_or_create_drug_id(conn, project_id, drug_name, drug_cache)
         formula_id_exists, normalized_exists = _formula_rule_exists(
@@ -1728,7 +1761,7 @@ def _load_formula_rules(
                 fold_ic50_value,
                 score_value,
                 _get_value(row, 'source'),
-                _get_value(row, 'comment'),
+                comment_value,
             ),
         )
         formula_rule_id = int(cur.lastrowid)

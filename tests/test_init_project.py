@@ -433,6 +433,39 @@ class TestComboRuleParsing:
         assert any(is_internal_formula_component_drug_name(name) for name in stored_drugs)
         assert rows == []
 
+    def test_formula_member_rows_without_group_id_are_allowed(self, tmp_path, tiny_genbank) -> None:
+        rules_tsv = tmp_path / 'rules.tsv'
+        rules_tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tphenotype\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tunknown\tmut_A
+            gag\ttiny_ref\t6\tP\tV\tunknown\tmut_B
+        """))
+        formula_tsv = tmp_path / 'formula.tsv'
+        formula_tsv.write_text(textwrap.dedent("""\
+            group_id\tantiviral\texpression\tphenotype
+            group_1\tDrugA\tmut_A AND mut_B\tresistant
+        """))
+
+        db = tmp_path / 'proj.db'
+        init_project(
+            db_path=db,
+            name='test',
+            genbank_paths=[tiny_genbank],
+            rules_tsv=rules_tsv,
+            formula_rules_tsv=formula_tsv,
+            additional_info=False,
+        )
+
+        conn = sqlite3.connect(str(db))
+        single_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
+        formula_count = conn.execute('SELECT COUNT(*) FROM resistance_formula_rule').fetchone()[0]
+        member_count = conn.execute('SELECT COUNT(*) FROM resistance_formula_rule_member').fetchone()[0]
+        conn.close()
+
+        assert single_count == 2
+        assert formula_count == 1
+        assert member_count == 2
+
     def test_member_ids_must_be_unique(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
@@ -1621,6 +1654,97 @@ class TestFormulaRuleImport:
             ('group_b', 'mut_only_b'),
             ('group_b', 'mut_shared'),
         ]
+
+    def test_contradictory_atomic_rule_gets_auto_comment(self, tmp_path) -> None:
+        genbank_path = write_genbank(
+            tmp_path / 'ref.gb',
+            [
+                {
+                    'id': 'myref',
+                    'accession': 'MYREF001',
+                    'sequence': TINY_REF_SEQ,
+                    'genes': [
+                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    ],
+                },
+            ],
+        )
+        rules_path = tmp_path / 'rules.tsv'
+        rules_path.write_text(
+            textwrap.dedent(
+                """\
+                gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+                gag\tmyref\t2\tK\tE\tDrugA\tcontradictory
+                """
+            )
+        )
+
+        db_path = tmp_path / 'project.db'
+        init_project(
+            db_path=db_path,
+            name='Contradictory Project',
+            genbank_paths=[genbank_path],
+            rules_tsv=rules_path,
+            additional_info=False,
+        )
+
+        conn = sqlite3.connect(db_path)
+        row = conn.execute('SELECT comment FROM resistance_rule LIMIT 1').fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row[0] == 'Publications have contradictory phenotype associations.'
+
+    def test_contradictory_formula_rule_gets_auto_comment(self, tmp_path) -> None:
+        genbank_path = write_genbank(
+            tmp_path / 'ref.gb',
+            [
+                {
+                    'id': 'myref',
+                    'accession': 'MYREF001',
+                    'sequence': TINY_REF_SEQ,
+                    'genes': [
+                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    ],
+                },
+            ],
+        )
+        rules_path = tmp_path / 'rules.tsv'
+        rules_path.write_text(
+            textwrap.dedent(
+                """\
+                member_id\tgroup_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+                mut_k2e\tgroup_1\tgag\tmyref\t2\tK\tE\tDrugA\tunknown
+                mut_p6v\tgroup_1\tgag\tmyref\t6\tP\tV\tDrugA\tunknown
+                """
+            )
+        )
+        formula_path = tmp_path / 'formula_rules.tsv'
+        formula_path.write_text(
+            textwrap.dedent(
+                """\
+                group_id\tantiviral\texpression\tphenotype
+                group_1\tDrugA\tmut_k2e AND mut_p6v\tcontradictory
+                """
+            )
+        )
+
+        db_path = tmp_path / 'project.db'
+        init_project(
+            db_path=db_path,
+            name='Contradictory Formula Project',
+            genbank_paths=[genbank_path],
+            rules_tsv=rules_path,
+            formula_rules_tsv=formula_path,
+            additional_info=False,
+        )
+
+        conn = sqlite3.connect(db_path)
+        row = conn.execute('SELECT comment FROM resistance_formula_rule LIMIT 1').fetchone()
+        conn.close()
+
+        assert row is not None
+        assert row[0] == 'Publications have contradictory phenotype associations.'
 
     def test_init_project_rejects_duplicate_atomic_rule_ids(self, tmp_path) -> None:
         genbank_path = write_genbank(

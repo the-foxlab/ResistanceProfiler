@@ -602,32 +602,46 @@ def _col_visibility(rows: list[dict], columns: list[str]) -> dict[str, bool]:
 
 def _build_bibliography(
     *row_sets: list[dict],
-) -> tuple[list[dict], dict[int, int]]:
+) -> tuple[list[dict], dict[tuple[str, str, str, str, str], int]]:
     """
     Collect unique publications across all row sets and assign sequential citation numbers.
 
     Publications appear in order of first encounter (db_hits → formula_hits → potential).
 
     :param row_sets: one or more row-dict lists to collect publications from
-    :return: (ordered bibliography dicts, mapping of publication id → citation number)
+    :return: (ordered bibliography dicts, mapping of normalized publication key → citation number)
     """
-    seen: dict[int, int] = {}  # pub.id → citation number
+    seen: dict[tuple[str, str, str, str, str], int] = {}
     ordered: list[dict] = []
     num = 1
     for rows in row_sets:
         for row in rows:
             for pub in row.get('publications', []):
-                if pub.id not in seen:
-                    seen[pub.id] = num
+                key = _publication_identity(pub)
+                if key not in seen:
+                    seen[key] = num
                     ordered.append({
                         'citation_num': num,
-                        'doi': pub.doi,
-                        'title': pub.title,
-                        'pubmed_id': pub.pubmed_id,
-                        'raw_input': pub.raw_input,
+                        'doi': getattr(pub, 'doi', ''),
+                        'title': getattr(pub, 'title', ''),
+                        'pubmed_id': getattr(pub, 'pubmed_id', ''),
+                        'raw_input': getattr(pub, 'raw_input', ''),
                     })
                     num += 1
     return ordered, seen
+
+
+def _publication_identity(pub) -> tuple[str, str, str, str, str]:
+    """Return a stable publication identity key for citation deduplication."""
+    pub_id = int(getattr(pub, 'id', 0) or 0)
+    if pub_id > 0:
+        return ('id', str(pub_id), '', '', '')
+
+    doi = (getattr(pub, 'doi', '') or '').strip().lower()
+    pubmed_id = (getattr(pub, 'pubmed_id', '') or '').strip()
+    raw_input = (getattr(pub, 'raw_input', '') or '').strip().lower()
+    title = (getattr(pub, 'title', '') or '').strip().lower()
+    return ('meta', doi, pubmed_id, raw_input, title)
 
 
 def _load_drug_cards(
@@ -1028,13 +1042,17 @@ def build_report_context(
     summary['rule_positions_total'] = total_rule_positions
     summary['unassessed_rule_positions'] = unassessed_rule_positions
 
-    bibliography, pub_id_to_num = _build_bibliography(db_hit_rows, combo_hit_rows, potential_rows)
+    bibliography, pub_to_num = _build_bibliography(db_hit_rows, combo_hit_rows, potential_rows)
     for row in [*db_hit_rows, *combo_hit_rows, *potential_rows]:
-        row['pub_citations'] = [
-            pub_id_to_num[pub.id]
-            for pub in row.get('publications', [])
-            if pub.id in pub_id_to_num
-        ]
+        row_citations: list[int] = []
+        seen_citations: set[int] = set()
+        for pub in row.get('publications', []):
+            citation_num = pub_to_num.get(_publication_identity(pub))
+            if citation_num is None or citation_num in seen_citations:
+                continue
+            seen_citations.add(citation_num)
+            row_citations.append(citation_num)
+        row['pub_citations'] = row_citations
 
     _optional_cols = ['ic50', 'fold_ic50', 'score', 'clinical_phenotype', 'source', 'comment', 'publication']
     db_cols = _col_visibility(db_hit_rows, _optional_cols)

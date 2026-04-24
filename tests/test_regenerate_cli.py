@@ -8,8 +8,10 @@ import json
 import sqlite3
 from pathlib import Path
 
+from conftest import TINY_REF_SEQ, write_genbank
 from typer.testing import CliRunner
 
+from respro.cli.init import init_project
 from respro.cli.main import app
 from respro.core.rules import load_rules
 from respro.db.models import (
@@ -22,8 +24,8 @@ from respro.db.models import (
 )
 from respro.db.results import (
     load_classifications,
-    load_formula_rule_hits,
     load_coverage_gaps,
+    load_formula_rule_hits,
     load_run,
     reconstruct_annotations,
     reconstruct_formula_rule_hits,
@@ -704,4 +706,64 @@ class TestExploreRules:
         assert 'Comment' in result.output
         assert '10.1000/example-doi' in result.output
         assert 'example-comment' in result.output
+
+    def test_rules_lists_single_and_combi_with_rendered_expression(self, tmp_path: Path) -> None:
+        genbank_path = write_genbank(
+            tmp_path / 'ref.gb',
+            [
+                {
+                    'id': 'tiny_ref',
+                    'accession': 'tiny_ref',
+                    'sequence': TINY_REF_SEQ,
+                    'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+                }
+            ],
+        )
+        rules_tsv = tmp_path / 'rules.tsv'
+        rules_tsv.write_text(
+            'gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id\n'
+            'gag\ttiny_ref\t2\tK\tE\tDrugA\tunknown\tgroup_1\tmut_k2e\n'
+            'gag\ttiny_ref\t6\tP\tV\tDrugA\tunknown\tgroup_1\tmut_p6v\n',
+            encoding='utf-8',
+        )
+        formula_tsv = tmp_path / 'formula.tsv'
+        formula_tsv.write_text(
+            'group_id\tantiviral\texpression\tphenotype\n'
+            'group_1\tDrugA\tmut_k2e AND mut_p6v\tresistant\n',
+            encoding='utf-8',
+        )
+
+        db_path = tmp_path / 'project.db'
+        init_project(
+            db_path=db_path,
+            name='Combo Project',
+            genbank_paths=[genbank_path],
+            rules_tsv=rules_tsv,
+            formula_rules_tsv=formula_tsv,
+            additional_info=False,
+        )
+
+        both = CliRunner().invoke(app, ['manage', 'database', str(db_path), '--rules'])
+        assert both.exit_code == 0, both.output
+        assert 'Single rules' in both.output
+        assert 'Combination rules' in both.output
+        assert 'gag:K2E' in both.output
+        assert 'gag:P6V' in both.output
+        assert 'AND' in both.output
+
+        combi_only = CliRunner().invoke(
+            app,
+            ['manage', 'database', str(db_path), '--rules', '--list-combi'],
+        )
+        assert combi_only.exit_code == 0, combi_only.output
+        assert 'Combination rules' in combi_only.output
+        assert 'Single rules' not in combi_only.output
+
+        single_only = CliRunner().invoke(
+            app,
+            ['manage', 'database', str(db_path), '--rules', '--list-single'],
+        )
+        assert single_only.exit_code == 0, single_only.output
+        assert 'Single rules' in single_only.output
+        assert 'Combination rules' not in single_only.output
 

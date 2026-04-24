@@ -38,8 +38,8 @@ class WebDefaults:
     frontend_base_path: str
     service_name: str
     maintained_bootstrap: bool
-    profile: 'WebProfileDefaults'
-    upload: 'WebUploadDefaults'
+    profile: WebProfileDefaults
+    upload: WebUploadDefaults
 
 
 @dataclass(frozen=True)
