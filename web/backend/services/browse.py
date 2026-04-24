@@ -12,52 +12,66 @@ from respro.db.rules_queries import (
     list_rules_for_display,
 )
 from respro.db.schema import open_project_db
+from web.backend.startup_config import list_project_db_paths, resolve_project_db_path
 
 
-def list_databases(project_db: Path) -> dict:
-    """Return available database metadata for the web UI catalog dropdown."""
-    project_conn = open_project_db(project_db)
-    try:
-        project_row = get_project_summary_for_display(project_conn)
+def list_databases(project_databases_dir: Path) -> dict:
+    """Return metadata for all project databases available in project_databases_dir."""
+    items: list[dict] = []
+    for project_db in list_project_db_paths(project_databases_dir):
+        project_conn = open_project_db(project_db)
+        try:
+            try:
+                project_row = get_project_summary_for_display(project_conn)
+            except (ValueError, Exception):
+                continue
 
-        metadata = {
-            'maintainers': project_row.get('metadata_maintainers', ''),
-            'contact': project_row.get('metadata_contact', ''),
-            'publication_pmid': project_row.get('metadata_publication_pmid', ''),
-            'publication_doi': project_row.get('metadata_publication_doi', ''),
-            'website': project_row.get('metadata_website', ''),
-            'description': project_row.get('metadata_description', ''),
-            'maintainer_update': project_row.get('metadata_maintainer_update', ''),
-            'license': project_row.get('metadata_license', ''),
-            'tsv_checksum': project_row.get('metadata_tsv_checksum', ''),
-        }
+            metadata = {
+                'maintainers': project_row.get('metadata_maintainers', ''),
+                'contact': project_row.get('metadata_contact', ''),
+                'publication_pmid': project_row.get('metadata_publication_pmid', ''),
+                'publication_doi': project_row.get('metadata_publication_doi', ''),
+                'website': project_row.get('metadata_website', ''),
+                'description': project_row.get('metadata_description', ''),
+                'maintainer_update': project_row.get('metadata_maintainer_update', ''),
+                'license': project_row.get('metadata_license', ''),
+                'tsv_checksum': project_row.get('metadata_tsv_checksum', ''),
+            }
 
-        organisms = [
-            row['organism']
-            for row in project_conn.execute(
-                "SELECT DISTINCT organism FROM reference WHERE organism IS NOT NULL AND organism != '' ORDER BY organism"
-            ).fetchall()
-        ]
-        mutation_count_row = project_conn.execute('SELECT COUNT(*) AS count FROM resistance_rule').fetchone()
-        mutation_count = int(mutation_count_row['count']) if mutation_count_row else 0
+            organisms = [
+                row['organism']
+                for row in project_conn.execute(
+                    "SELECT DISTINCT organism FROM reference WHERE organism IS NOT NULL AND organism != '' ORDER BY organism"
+                ).fetchall()
+            ]
+            mutation_count_row = project_conn.execute('SELECT COUNT(*) AS count FROM resistance_rule').fetchone()
+            mutation_count = int(mutation_count_row['count']) if mutation_count_row else 0
 
-        item = {
-            'id': str(project_row['id']),
-            'display_name': project_row['name'],
-            'uuid': project_row['uuid'],
-            'created_at': project_row['created_at'],
-            'schema_version': project_row['schema_version'],
-            'supported_organisms': organisms,
-            'mutation_count': mutation_count,
-            'metadata': metadata,
-        }
-        return {'items': [item], 'count': 1}
-    finally:
-        project_conn.close()
+            items.append(
+                {
+                    'id': project_db.name,
+                    'display_name': project_row['name'],
+                    'uuid': project_row['uuid'],
+                    'created_at': project_row['created_at'],
+                    'schema_version': project_row['schema_version'],
+                    'supported_organisms': organisms,
+                    'mutation_count': mutation_count,
+                    'metadata': metadata,
+                }
+            )
+        finally:
+            project_conn.close()
+
+    return {'items': items, 'count': len(items)}
 
 
-def list_rules(project_db: Path, reference_filter: str | None = None) -> dict:
+def list_rules(
+    project_databases_dir: Path,
+    database_id: str | None,
+    reference_filter: str | None = None,
+) -> dict:
     """Return rule rows with optional reference-name filtering."""
+    project_db = resolve_project_db_path(project_databases_dir, database_id)
     project_conn = open_project_db(project_db)
     try:
         normalized_reference_filter = _normalize_reference_filter(reference_filter)

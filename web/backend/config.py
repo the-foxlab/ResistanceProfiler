@@ -12,17 +12,16 @@ class WebEnvKeys:
     """Environment variable keys used by the web backend."""
 
     data_dir: str = 'RESPRO_WEB_DATA_DIR'
-    project_db: str = 'RESPRO_WEB_PROJECT_DB'
     results_db: str = 'RESPRO_WEB_RESULTS_DB'
     api_token: str = 'RESPRO_WEB_API_TOKEN'
     allowed_roots: str = 'RESPRO_WEB_ALLOWED_ROOTS'
-    frontend_dist: str = 'RESPRO_FRONTEND_DIST'
     cors_origins: str = 'RESPRO_WEB_CORS_ORIGINS'
     upload_rate_limit: str = 'RESPRO_WEB_UPLOAD_RATE_LIMIT'
     host: str = 'RESPRO_WEB_HOST'
     port: str = 'RESPRO_WEB_PORT'
     redis_url: str = 'REDIS_URL'
     job_timeout: str = 'RESPRO_WEB_JOB_TIMEOUT'
+    maintained_bootstrap: str = 'RESPRO_WEB_MAINTAINED_BOOTSTRAP'
 
 
 @dataclass(frozen=True)
@@ -38,6 +37,7 @@ class WebDefaults:
     profile_queue_name: str
     frontend_base_path: str
     service_name: str
+    maintained_bootstrap: bool
     profile: 'WebProfileDefaults'
     upload: 'WebUploadDefaults'
 
@@ -89,17 +89,16 @@ def _load_web_backend_config() -> WebBackendConfig:
 
     env = WebEnvKeys(
         data_dir=str(env_payload['data_dir']),
-        project_db=str(env_payload['project_db']),
         results_db=str(env_payload['results_db']),
         api_token=str(env_payload['api_token']),
         allowed_roots=str(env_payload['allowed_roots']),
-        frontend_dist=str(env_payload['frontend_dist']),
         cors_origins=str(env_payload['cors_origins']),
         upload_rate_limit=str(env_payload['upload_rate_limit']),
         host=str(env_payload['host']),
         port=str(env_payload['port']),
         redis_url=str(env_payload['redis_url']),
         job_timeout=str(env_payload['job_timeout']),
+        maintained_bootstrap=str(env_payload['maintained_bootstrap']),
     )
 
     defaults = WebDefaults(
@@ -112,6 +111,7 @@ def _load_web_backend_config() -> WebBackendConfig:
         profile_queue_name=str(defaults_payload['profile_queue_name']),
         frontend_base_path=str(defaults_payload['frontend_base_path']),
         service_name=str(defaults_payload['service_name']),
+        maintained_bootstrap=bool(defaults_payload['maintained_bootstrap']),
         profile=WebProfileDefaults(
             sample_name=str(profile_payload['sample_name']),
             threads=int(profile_payload['threads']),

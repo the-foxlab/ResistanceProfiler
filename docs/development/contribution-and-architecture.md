@@ -75,6 +75,7 @@ flowchart TD
 - job logic in `web/backend/jobs.py`
 - service layer under `web/backend/services/`
 - startup/runtime config in `web/backend/startup_config.py` and `web/backend/config.py`
+  with startup-managed `project_databases/`, `uploads/`, and `results/` directories
 - frontend app in `web/frontend/src/`
 
 ### Web flow
@@ -95,7 +96,8 @@ flowchart TD
 
 1. Keep API transport and validation in web layer.
 2. Reuse `respro/` logic instead of reimplementing domain behavior.
-3. Preserve startup-managed path constraints and auth assumptions.
+3. Preserve startup-managed path constraints and auth assumptions, including
+  database-catalog selection via `database_id` for browse/profile/regenerate routes.
 
 ## Annotation and profiling algorithm (detailed)
 

@@ -360,7 +360,7 @@ export function useDashboardLogic() {
       // Mutation browser + database charts both read from this payload.
       setStatus('Loading mutations from database...');
       try {
-        const payload = await apiGet('/api/mutations');
+        const payload = await apiGet('/api/mutations', { database_id: selectedDatabaseId });
         const items = payload.data.items || [];
         const columns = payload.data.columns || (items.length > 0 ? Object.keys(items[0]) : []);
         const formulaItems = payload.data.formula_items || [];
@@ -595,6 +595,7 @@ export function useDashboardLogic() {
     try {
       const submitResponse = await apiPost('/api/profile/fasta', {
         ...fastaInput,
+        database_id: selectedDatabaseId,
         aligner: FRONTEND_CONFIG.profile.aligner,
         threads: FRONTEND_CONFIG.profile.threads,
       });
@@ -631,6 +632,7 @@ export function useDashboardLogic() {
 
       const submitResponse = await apiPost('/api/profile/vcf', {
         ...vcfInput,
+        database_id: selectedDatabaseId,
         aligner: FRONTEND_CONFIG.profile.aligner,
         threads: FRONTEND_CONFIG.profile.threads,
       });
@@ -720,6 +722,7 @@ export function useDashboardLogic() {
     try {
       const submitResponse = await apiPost('/api/regenerate/json', {
         json_path: jsonInputPath,
+        database_id: selectedDatabaseId,
       });
       setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
       const result = await pollJob(submitResponse.job_id);

@@ -8,25 +8,54 @@ services:
       context: .
       dockerfile: Dockerfile.web
     image: respro-web:latest
+    # Bind to one interface/IP only (internal hosting) and expose container port 8000.
     ports:
-      - '127.0.0.1:8000:8000'
+      - '10.203.50.175:8000:8000'
+    # Host data location: change the left path to move persistent storage.
+    # Layout inside /data: project_databases/, uploads/, results/.
     volumes:
       - ./data:/data:rw
     environment:
+      # Listen on all interfaces inside container.
       - RESPRO_WEB_HOST=0.0.0.0
+      # API port inside container.
       - RESPRO_WEB_PORT=8000
+      # Download + initialize missing maintained DBs on startup.
+      - RESPRO_WEB_MAINTAINED_BOOTSTRAP=true
+      # Redis broker URL used by API and worker.
       - REDIS_URL=redis://redis:6379/0
+      # Optional security: require Bearer token for API calls.
+      # - RESPRO_WEB_API_TOKEN=change-me
+      # Optional CORS allowlist (comma-separated).
       # - RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
+      # Optional upload rate limit (slowapi format).
       # - RESPRO_WEB_UPLOAD_RATE_LIMIT=5/minute
+      # Optional job timeout in seconds for profiling/regenerate tasks.
+      # - RESPRO_WEB_JOB_TIMEOUT=3600
+      # Optional: explicit data directory inside container.
+      # Usually leave unset because /data comes from volume mount above.
+      # - RESPRO_WEB_DATA_DIR=/data
+      # Optional: explicit results DB path.
+      # - RESPRO_WEB_RESULTS_DB=/data/results/results.db
+      # Optional: tighten filesystem access checks used by upload/regenerate APIs.
+      # Comma-separated absolute paths in container.
+      # - RESPRO_WEB_ALLOWED_ROOTS=/data/project_databases,/data/uploads,/data/results
     depends_on:
       - redis
 
   respro-worker:
     image: respro-web:latest
+    # Keep queue name in sync with backend default/profile queue.
     command: rq worker --url redis://redis:6379/0 profiling
+    # Must point to the same host data directory as respro-web.
     volumes:
       - ./data:/data:rw
     environment:
+      # Same Redis broker as respro-web.
       - REDIS_URL=redis://redis:6379/0
+      # Optional job timeout for worker-launched tasks.
+      # - RESPRO_WEB_JOB_TIMEOUT=3600
+      # Optional token is not needed for worker, but harmless if shared env files are used.
+      # - RESPRO_WEB_API_TOKEN=change-me
     depends_on:
       - redis

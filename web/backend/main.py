@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 import os
 from pathlib import Path
@@ -40,7 +41,9 @@ from web.backend.services.upload import cleanup_session_files, save_upload_strea
 from web.backend.startup_config import (
     StartupConfig,
     is_path_within_allowed_roots,
+    list_project_db_paths,
     load_startup_config,
+    resolve_project_db_path,
 )
 
 
@@ -64,8 +67,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         allow_headers=['*'],
     )
 
-    _env_dist = os.environ.get(WEB_ENV.frontend_dist)
-    frontend_dist = Path(_env_dist) if _env_dist else Path(__file__).resolve().parents[1] / 'frontend' / 'dist'
+    frontend_dist = Path(__file__).resolve().parents[1] / 'frontend' / 'dist'
     if frontend_dist.is_dir():
         app.mount(
             WEB_BACKEND_CONFIG.defaults.frontend_base_path,
@@ -80,9 +82,11 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         return ApiEnvelope(
             data={
                 'service': WEB_BACKEND_CONFIG.defaults.service_name,
-                'project_db': str(config.project_db),
+                'project_databases_dir': str(config.project_databases_dir),
+                'project_database_count': len(list_project_db_paths(config.project_databases_dir)),
                 'results_db': str(config.results_db),
-                'output_dir': str(config.data_dir),
+                'uploads_dir': str(config.uploads_dir),
+                'results_dir': str(config.results_dir),
             },
             status='ok',
         )
@@ -96,8 +100,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     ) -> UploadResponse:
         del request
         try:
-            upload_dir = config.data_dir / '.uploads'
-            saved_path, size_bytes = await save_upload_stream(file, 'fasta', upload_dir)
+            saved_path, size_bytes = await save_upload_stream(file, 'fasta', config.uploads_dir)
             return UploadResponse(
                 file_path=str(saved_path),
                 file_type='fasta',
@@ -119,8 +122,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     ) -> UploadResponse:
         del request
         try:
-            upload_dir = config.data_dir / '.uploads'
-            saved_path, size_bytes = await save_upload_stream(file, 'vcf', upload_dir)
+            saved_path, size_bytes = await save_upload_stream(file, 'vcf', config.uploads_dir)
             return UploadResponse(
                 file_path=str(saved_path),
                 file_type='vcf',
@@ -142,8 +144,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     ) -> UploadResponse:
         del request
         try:
-            upload_dir = config.data_dir / '.uploads'
-            saved_path, size_bytes = await save_upload_stream(file, 'bam', upload_dir)
+            saved_path, size_bytes = await save_upload_stream(file, 'bam', config.uploads_dir)
             return UploadResponse(
                 file_path=str(saved_path),
                 file_type='bam',
@@ -165,8 +166,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     ) -> UploadResponse:
         del request
         try:
-            upload_dir = config.data_dir / '.uploads'
-            saved_path, size_bytes = await save_upload_stream(file, 'json', upload_dir)
+            saved_path, size_bytes = await save_upload_stream(file, 'json', config.uploads_dir)
             return UploadResponse(
                 file_path=str(saved_path),
                 file_type='json',
@@ -181,22 +181,32 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
 
     @app.get('/api/rules', response_model=ApiEnvelope)
     def rules(
+        database_id: str | None = Query(default=None),
         reference: str | None = Query(default=None),
         _auth: None = Depends(require_api_token),
     ) -> ApiEnvelope:
         try:
-            data = list_rules(config.project_db, reference_filter=reference)
+            data = list_rules(
+                config.project_databases_dir,
+                database_id,
+                reference_filter=reference,
+            )
             return ApiEnvelope(data=data)
         except (FileNotFoundError, ValueError, OSError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get('/api/mutations', response_model=ApiEnvelope)
     def mutations(
+        database_id: str | None = Query(default=None),
         reference: str | None = Query(default=None),
         _auth: None = Depends(require_api_token),
     ) -> ApiEnvelope:
         try:
-            data = list_rules(config.project_db, reference_filter=reference)
+            data = list_rules(
+                config.project_databases_dir,
+                database_id,
+                reference_filter=reference,
+            )
             return ApiEnvelope(data=data)
         except (FileNotFoundError, ValueError, OSError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -204,7 +214,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     @app.get('/api/databases', response_model=ApiEnvelope)
     def databases(_auth: None = Depends(require_api_token)) -> ApiEnvelope:
         try:
-            data = list_databases(config.project_db)
+            data = list_databases(config.project_databases_dir)
             return ApiEnvelope(data=data)
         except (FileNotFoundError, ValueError, OSError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -214,12 +224,11 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         payload: SessionCleanupPayload,
         _auth: None = Depends(require_api_token),
     ) -> SessionCleanupResponse:
-        upload_dir = config.data_dir / '.uploads'
         deleted_count = cleanup_session_files(
             payload.upload_paths,
             payload.report_paths,
-            upload_dir,
-            config.data_dir,
+            config.uploads_dir,
+            config.results_dir,
         )
         return SessionCleanupResponse(deleted_count=deleted_count)
 
@@ -229,12 +238,13 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
+        project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
         profile_defaults = WEB_BACKEND_CONFIG.defaults.profile
         job = queue.enqueue(
             run_profile_fasta,
-            project_db=str(config.project_db),
+            project_db=str(project_db),
             results_db=str(config.results_db),
-            output_dir=str(config.data_dir),
+            output_dir=str(config.results_dir),
             fasta_path=payload.fasta_path,
             sample=payload.sample or profile_defaults.sample_name,
             threads=payload.threads if payload.threads is not None else profile_defaults.threads,
@@ -248,12 +258,13 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
+        project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
         profile_defaults = WEB_BACKEND_CONFIG.defaults.profile
         job = queue.enqueue(
             run_profile_vcf,
-            project_db=str(config.project_db),
+            project_db=str(project_db),
             results_db=str(config.results_db),
-            output_dir=str(config.data_dir),
+            output_dir=str(config.results_dir),
             vcf_path=payload.vcf_path,
             ref_fasta_path=payload.ref_fasta_path,
             sample=payload.sample or profile_defaults.sample_name,
@@ -271,16 +282,17 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
+        project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
         json_path = Path(payload.json_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(json_path, (config.data_dir,)):
+        if not is_path_within_allowed_roots(json_path, (config.uploads_dir, config.results_dir)):
             raise HTTPException(status_code=400, detail='JSON path is outside allowed upload/output directory.')
         if not json_path.is_file():
             raise HTTPException(status_code=404, detail='JSON file not found.')
 
         job = queue.enqueue(
             run_regenerate_json,
-            project_db=str(config.project_db),
-            output_dir=str(config.data_dir),
+            project_db=str(project_db),
+            output_dir=str(config.results_dir),
             json_path=str(json_path),
         )
         return JobSubmitResponse(job_id=job.id)
@@ -308,7 +320,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         _auth: None = Depends(require_api_token),
     ) -> FileResponse:
         report_path = Path(path).expanduser().resolve()
-        if not is_path_within_allowed_roots(report_path, (config.data_dir,)):
+        if not is_path_within_allowed_roots(report_path, (config.results_dir,)):
             raise HTTPException(status_code=400, detail='Report path is outside allowed output directory.')
         if not report_path.is_file():
             raise HTTPException(status_code=404, detail='Report not found.')
@@ -320,7 +332,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         _auth: None = Depends(require_api_token),
     ) -> FileResponse:
         artifact_path = Path(path).expanduser().resolve()
-        if not is_path_within_allowed_roots(artifact_path, (config.data_dir,)):
+        if not is_path_within_allowed_roots(artifact_path, (config.results_dir,)):
             raise HTTPException(status_code=400, detail='Artifact path is outside allowed output directory.')
         if not artifact_path.is_file():
             raise HTTPException(status_code=404, detail='Artifact not found.')
@@ -506,6 +518,7 @@ def require_api_token(
 
 def run() -> None:
     """Run the web API with uvicorn."""
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(name)s: %(message)s')
     host = os.getenv(WEB_ENV.host, WEB_BACKEND_CONFIG.defaults.web_host)
     port = int(os.getenv(WEB_ENV.port, str(WEB_BACKEND_CONFIG.defaults.web_port)))
     uvicorn.run(create_app(), host=host, port=port, reload=False)

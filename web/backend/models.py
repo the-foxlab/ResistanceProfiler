@@ -9,6 +9,7 @@ class ProfileFastaPayload(BaseModel):
     """Payload for FASTA profiling."""
 
     fasta_path: str
+    database_id: str | None = None
     sample: str | None = None
     threads: int | None = None
     aligner: str | None = None
@@ -19,6 +20,7 @@ class ProfileVcfPayload(BaseModel):
 
     vcf_path: str
     ref_fasta_path: str
+    database_id: str | None = None
     sample: str | None = None
     min_af: float | None = Field(default=None, ge=0.0, le=1.0)
     min_depth: int | None = Field(default=None, ge=0)
@@ -31,6 +33,7 @@ class RegenerateJsonPayload(BaseModel):
     """Payload for regenerating reports from uploaded JSON artifacts."""
 
     json_path: str
+    database_id: str | None = None
 
 
 class ApiEnvelope(BaseModel):

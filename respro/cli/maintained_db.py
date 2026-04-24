@@ -146,7 +146,7 @@ def _maintained_db_command(
 ) -> None:
     """
     List maintained project databases or download one and initialize a local project DB.
-    
+
     These databases are stored in a companion repository and are monthly checked for maintainer updates and formatted to be respro compatible.
     """
     if list_mode and download:

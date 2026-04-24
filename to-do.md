@@ -182,13 +182,13 @@ Mark items done and update priorities after each completed milestone.
 - [X] Local file/path UX — `/api/fs/list` filesystem browser; Browse buttons on all path inputs; app binds to localhost by default
 - [X] Web install/start workflow — `web/backend/requirements.txt` for web deps; Docker Compose with `redis`, `respro-web`, and `respro-worker` services
 - [X] Web UI architecture scaffold — FastAPI backend + React frontend in `web/`; web layer decoupled from PyPI packaging
-- [X] Startup workspace bootstrap — `RESPRO_WEB_DATA_DIR` as single root; `project.db` and `results.db` resolved from it at startup; no runtime workspace selection
-- [X] Startup results DB initialization — `results.db` created/opened at backend startup from data directory
+- [X] Startup workspace bootstrap — `RESPRO_WEB_DATA_DIR` now creates deterministic subfolders (`project_databases/`, `uploads/`, `results/`) and keeps route-level path confinement aligned with those roots
+- [X] Startup results DB initialization — `results/results.db` created/opened at backend startup
 - [X] Remove workspace tile flow end-to-end — workspace form/UI, `/api/workspace/open`, and workspace payload fields removed
 - [X] Wire startup config into profiling routes/jobs — startup config used by `/api/rules`, `/api/profile/fasta`, `/api/profile/vcf`; request bodies contain only analysis inputs
 - [X] Web-layer tests for startup-only mode — startup-config fixture, auth header coverage, 14 tests passing
-- [X] Prototype distribution path for bundled DB — `data/project.db` is the canonical location; mounted via `./data:/data` in Docker; documented in web-deployment.md
-- [X] Multipart file upload endpoints — `POST /api/upload/fasta` and `POST /api/upload/vcf` with validation, temp storage in `data/.uploads/`, auth enforcement
+- [X] Prototype distribution path for bundled DB — `data/project_databases/*.db` is the catalog location; mounted via `./data:/data` in Docker
+- [X] Multipart file upload endpoints — `POST /api/upload/fasta` and `POST /api/upload/vcf` with validation, temp storage in `data/uploads/`, auth enforcement
 - [X] Streamed upload persistence in web backend — `/api/upload/fasta`, `/api/upload/vcf`, and `/api/upload/bam` now validate and persist uploads chunk-by-chunk to avoid loading whole files into memory; existing size caps and user-facing validation errors preserved
 - [X] Autoload first database and mutations on app startup — frontend loads database list on mount, selects first DB automatically, triggers mutations load to avoid manual "Load" button click
 - [X] Filter/sort mutations table with client-side search — column selector dropdown, text search input, reset button; compatible with report UI filter pattern; click headers to sort (↕ ↑ ↓ indicators)
@@ -200,6 +200,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Report artifact downloads in web app — profiling jobs now emit HTML + JSON + tabular outputs; report panel adds direct JSON/tabular download buttons and backend `/api/artifact` serves non-HTML files from the allowed data directory
 - [X] Regenerate-from-JSON web flow — `POST /api/upload/json` + `POST /api/regenerate/json` with JSON schema validation, UUID mismatch feedback, and shared report artifact payloads
 - [X] Dedicated "Regenerate from JSON" frontend tab — simple JSON upload + regenerate action; output rendered in the same report tile with JSON/tabular downloads
+- [X] Project DB catalog and runtime selection in web app — `/api/databases` now enumerates all valid `project_databases/*.db` files, the database dropdown drives `/api/mutations` and profile/regenerate submissions via `database_id`, and startup supports optional maintained-db bootstrap (`RESPRO_WEB_MAINTAINED_BOOTSTRAP`, default off, missing-only)
 - [X] `respro manage results <results_db_path> --delete <run_id>` — delete one stored run (including `variant_result`, `coverage_gap`, `formula_rule_hit`, and `sample_classification` rows) from `results.db` with optional `--force` confirmation bypass
 - [X] Hide internal formula-component placeholder rows from user-facing rule/drug displays and internalize the marker handling
 - [X] `respro add --validate` dry-run mode — execute full rules parsing/validation pipeline without persisting DB changes
@@ -403,5 +404,4 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 Dev startup ergonomics — add one-command local startup scripts (backend + worker + frontend + Redis) to reduce manual terminal orchestration during development
 - 🟡 Compose integration tests — add compose-backed smoke/integration tests for submit → poll → report retrieval using startup-configured paths
 - 🟢 CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
-- 🟢 Project DB catalog support (post-prototype) — support multiple project DBs with startup catalog metadata and runtime selection
 - 🟢 Results retention and portability (post-prototype) — add TTL cleanup policy for central results plus explicit export/import endpoints for user portability

@@ -1,16 +1,15 @@
 [env]
 data_dir = 'RESPRO_WEB_DATA_DIR'
-project_db = 'RESPRO_WEB_PROJECT_DB'
 results_db = 'RESPRO_WEB_RESULTS_DB'
 api_token = 'RESPRO_WEB_API_TOKEN'
 allowed_roots = 'RESPRO_WEB_ALLOWED_ROOTS'
-frontend_dist = 'RESPRO_FRONTEND_DIST'
 cors_origins = 'RESPRO_WEB_CORS_ORIGINS'
 upload_rate_limit = 'RESPRO_WEB_UPLOAD_RATE_LIMIT'
 host = 'RESPRO_WEB_HOST'
 port = 'RESPRO_WEB_PORT'
 redis_url = 'REDIS_URL'
 job_timeout = 'RESPRO_WEB_JOB_TIMEOUT'
+maintained_bootstrap = 'RESPRO_WEB_MAINTAINED_BOOTSTRAP'
 
 [defaults]
 web_host = '127.0.0.1'
@@ -22,6 +21,7 @@ cors_local_origins = ['http://127.0.0.1:5173', 'http://localhost:5173']
 profile_queue_name = 'profiling'
 frontend_base_path = '/app'
 service_name = 'respro-web-api'
+maintained_bootstrap = false
 
 [defaults.profile]
 sample_name = 'sample'

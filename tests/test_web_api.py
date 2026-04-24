@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -27,12 +28,23 @@ def sync_queue():
 def startup_config(project_db: Path, tmp_path: Path) -> StartupConfig:
     """Startup config fixture for startup-managed path mode."""
     data_dir = tmp_path / 'data'
-    data_dir.mkdir(parents=True, exist_ok=True)
+    project_databases_dir = data_dir / 'project_databases'
+    uploads_dir = data_dir / 'uploads'
+    results_dir = data_dir / 'results'
+    project_databases_dir.mkdir(parents=True, exist_ok=True)
+    uploads_dir.mkdir(parents=True, exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    bundled_project_db = project_databases_dir / project_db.name
+    shutil.copy2(project_db, bundled_project_db)
+
     return StartupConfig(
-        project_db=project_db.resolve(),
-        results_db=(data_dir / 'results.db').resolve(),
+        project_databases_dir=project_databases_dir.resolve(),
+        uploads_dir=uploads_dir.resolve(),
+        results_dir=results_dir.resolve(),
+        results_db=(results_dir / 'results.db').resolve(),
         data_dir=data_dir.resolve(),
-        allowed_roots=(data_dir.resolve(), project_db.parent.resolve()),
+        allowed_roots=(project_databases_dir.resolve(), uploads_dir.resolve(), results_dir.resolve()),
         api_token='test-token',
     )
 
@@ -70,7 +82,9 @@ class TestWebApi:
         startup_config: StartupConfig,
     ) -> None:
         no_token_config = StartupConfig(
-            project_db=startup_config.project_db,
+            project_databases_dir=startup_config.project_databases_dir,
+            uploads_dir=startup_config.uploads_dir,
+            results_dir=startup_config.results_dir,
             results_db=startup_config.results_db,
             data_dir=startup_config.data_dir,
             allowed_roots=startup_config.allowed_roots,
@@ -107,7 +121,9 @@ class TestWebApi:
             'https://respro.example.com, https://lab.example.com',
         )
         no_token_config = StartupConfig(
-            project_db=startup_config.project_db,
+            project_databases_dir=startup_config.project_databases_dir,
+            uploads_dir=startup_config.uploads_dir,
+            results_dir=startup_config.results_dir,
             results_db=startup_config.results_db,
             data_dir=startup_config.data_dir,
             allowed_roots=startup_config.allowed_roots,
@@ -167,7 +183,8 @@ class TestWebApi:
         startup_config: StartupConfig,
         auth_headers: dict[str, str],
     ) -> None:
-        conn = sqlite3.connect(startup_config.project_db)
+        project_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        conn = sqlite3.connect(project_db)
         conn.execute(
             'UPDATE project SET metadata_maintainers = ?, metadata_contact = ?, metadata_license = ? WHERE id = 1',
             ('Alice; Bob', 'team@example.org', 'MIT'),
@@ -333,7 +350,7 @@ class TestWebApi:
         # Verify file is in upload directory
         uploaded_path = Path(payload['file_path'])
         assert uploaded_path.exists()
-        assert uploaded_path.parent == startup_config.data_dir / '.uploads'
+        assert uploaded_path.parent == startup_config.uploads_dir
         assert uploaded_path.read_bytes() == fasta_data
 
     def test_upload_vcf_success(
@@ -356,7 +373,7 @@ class TestWebApi:
         # Verify file is in upload directory
         uploaded_path = Path(payload['file_path'])
         assert uploaded_path.exists()
-        assert uploaded_path.parent == startup_config.data_dir / '.uploads'
+        assert uploaded_path.parent == startup_config.uploads_dir
         assert uploaded_path.read_bytes() == vcf_data
 
     def test_upload_bam_success(
@@ -380,7 +397,7 @@ class TestWebApi:
         # Verify file is in upload directory
         uploaded_path = Path(payload['file_path'])
         assert uploaded_path.exists()
-        assert uploaded_path.parent == startup_config.data_dir / '.uploads'
+        assert uploaded_path.parent == startup_config.uploads_dir
         assert uploaded_path.read_bytes() == bam_data
 
     def test_upload_json_success(
@@ -421,7 +438,7 @@ class TestWebApi:
         assert upload_payload['file_type'] == 'json'
         uploaded_path = Path(upload_payload['file_path'])
         assert uploaded_path.is_file()
-        assert uploaded_path.parent == startup_config.data_dir / '.uploads'
+        assert uploaded_path.parent == startup_config.uploads_dir
 
     def test_upload_json_invalid_payload_rejected(
         self,
@@ -515,7 +532,7 @@ class TestWebApi:
         assert profile_payload['status'] == 'succeeded'
 
         source_json = Path(profile_payload['result']['report_json_path'])
-        tampered_json = startup_config.data_dir / 'tampered.results.json'
+        tampered_json = startup_config.uploads_dir / 'tampered.results.json'
         tampered_payload = json.loads(source_json.read_text(encoding='utf-8'))
         tampered_payload['run']['project_fingerprint'] = 'mismatching-uuid'
         tampered_json.write_text(json.dumps(tampered_payload), encoding='utf-8')
@@ -677,7 +694,9 @@ class TestWebApi:
     ) -> None:
         monkeypatch.setenv('RESPRO_WEB_UPLOAD_RATE_LIMIT', '1/minute')
         no_token_config = StartupConfig(
-            project_db=startup_config.project_db,
+            project_databases_dir=startup_config.project_databases_dir,
+            uploads_dir=startup_config.uploads_dir,
+            results_dir=startup_config.results_dir,
             results_db=startup_config.results_db,
             data_dir=startup_config.data_dir,
             allowed_roots=startup_config.allowed_roots,
@@ -705,7 +724,9 @@ class TestWebApi:
     ) -> None:
         monkeypatch.setenv('RESPRO_WEB_UPLOAD_RATE_LIMIT', '1/minute')
         no_token_config = StartupConfig(
-            project_db=startup_config.project_db,
+            project_databases_dir=startup_config.project_databases_dir,
+            uploads_dir=startup_config.uploads_dir,
+            results_dir=startup_config.results_dir,
             results_db=startup_config.results_db,
             data_dir=startup_config.data_dir,
             allowed_roots=startup_config.allowed_roots,
@@ -746,7 +767,7 @@ class TestWebApi:
         uploaded_path = Path(upload_response.json()['file_path'])
         assert uploaded_path.exists()
 
-        report_path = startup_config.data_dir / 'session-result.report.html'
+        report_path = startup_config.results_dir / 'session-result.report.html'
         report_path.write_text('<html><body>report</body></html>')
         assert report_path.exists()
 
@@ -782,7 +803,7 @@ class TestWebApi:
         bam_index_path = bam_path.with_suffix('.bam.bai')
         bam_index_path.write_bytes(b'index')
         assert bam_index_path.exists()
-        assert bam_index_path.parent == startup_config.data_dir / '.uploads'
+        assert bam_index_path.parent == startup_config.uploads_dir
 
         cleanup_response = client.post(
             '/api/session/cleanup',
