@@ -97,6 +97,9 @@ def profile_fasta(
         return {
             'mode': 'fasta',
             'run_id': run_id,
+            'database_id': project_db.name,
+            'database_path': str(project_db.resolve()),
+            'input_path': str(fasta_path.resolve()),
             'sample_name': result.sample_name,
             'created_at': result.run_timestamp,
             'reference_name': result.reference_name,
@@ -211,6 +214,10 @@ def profile_vcf(
         return {
             'mode': 'vcf',
             'run_id': run_id,
+            'database_id': project_db.name,
+            'database_path': str(project_db.resolve()),
+            'input_path': str(vcf_path.resolve()),
+            'reference_fasta_path': str(ref_fasta_path.resolve()),
             'sample_name': result.sample_name,
             'created_at': result.run_timestamp,
             'reference_name': result.reference_name,

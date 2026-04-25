@@ -209,6 +209,15 @@ function formatResultTimestamp(timestamp) {
   return parsed.toLocaleString();
 }
 
+function formatPathBasename(path) {
+  if (!path) {
+    return 'n/a';
+  }
+  const normalized = String(path).replace(/\\/g, '/');
+  const parts = normalized.split('/').filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : normalized;
+}
+
 async function apiGet(path, params = {}) {
   // Shared fetch helper keeps all GET error handling consistent.
   const response = await fetch(buildApiUrl(path, params), {
@@ -590,12 +599,17 @@ export function useDashboardLogic() {
   };
 
   const submitFasta = async () => {
+    const databaseId = selectedDatabaseId;
+    const databaseLabel = selectedDatabase ? selectedDatabase.display_name : databaseId || 'default database';
+    const fastaPath = fastaInput.fasta_path;
+    const fastaLabel = formatPathBasename(fastaPath);
+
     setIsProcessingFasta(true);
-    setStatus('Submitting FASTA profiling job...');
+    setStatus(`Submitting FASTA profiling job for ${databaseLabel} using ${fastaLabel}...`);
     try {
       const submitResponse = await apiPost('/api/profile/fasta', {
         ...fastaInput,
-        database_id: selectedDatabaseId,
+        database_id: databaseId,
         aligner: FRONTEND_CONFIG.profile.aligner,
         threads: FRONTEND_CONFIG.profile.threads,
       });
@@ -608,9 +622,15 @@ export function useDashboardLogic() {
       setInlineReportPath(result.report_html_path);
       setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);
       if ((result.resistance_hits || 0) === 0) {
-        setStatus('FASTA profiling finished. No database matches were found for this sample.');
+        setStatus(
+          `FASTA profiling finished for ${result.database_id || databaseLabel} using `
+          + `${formatPathBasename(result.input_path || fastaPath)}. No database matches were found for this sample.`
+        );
       } else {
-        setStatus('FASTA profiling finished. Database matches were found.');
+        setStatus(
+          `FASTA profiling finished for ${result.database_id || databaseLabel} using `
+          + `${formatPathBasename(result.input_path || fastaPath)}. Database matches were found.`
+        );
       }
     } catch (error) {
       setStatus(formatUserError(error.message));
@@ -620,8 +640,18 @@ export function useDashboardLogic() {
   };
 
   const submitVcf = async () => {
+    const databaseId = selectedDatabaseId;
+    const databaseLabel = selectedDatabase ? selectedDatabase.display_name : databaseId || 'default database';
+    const vcfPath = vcfInput.vcf_path;
+    const referenceFastaPath = vcfInput.ref_fasta_path;
+    const vcfLabel = formatPathBasename(vcfPath);
+    const referenceLabel = formatPathBasename(referenceFastaPath);
+
     setIsProcessingVcf(true);
-    setStatus('Submitting VCF profiling job...');
+    setStatus(
+      `Submitting VCF profiling job for ${databaseLabel} using ${vcfLabel} `
+      + `and ${referenceLabel}...`
+    );
     try {
       if (!Number.isFinite(vcfInput.min_af) || vcfInput.min_af < 0 || vcfInput.min_af > 1) {
         throw new Error('Frequency cutoff (min AF) must be a number between 0 and 1.');
@@ -632,7 +662,7 @@ export function useDashboardLogic() {
 
       const submitResponse = await apiPost('/api/profile/vcf', {
         ...vcfInput,
-        database_id: selectedDatabaseId,
+        database_id: databaseId,
         aligner: FRONTEND_CONFIG.profile.aligner,
         threads: FRONTEND_CONFIG.profile.threads,
       });
@@ -644,9 +674,15 @@ export function useDashboardLogic() {
       setInlineReportPath(result.report_html_path);
       setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);
       if ((result.resistance_hits || 0) === 0) {
-        setStatus('VCF profiling finished. No database matches were found for this sample.');
+        setStatus(
+          `VCF profiling finished for ${result.database_id || databaseLabel} using `
+          + `${formatPathBasename(result.input_path || vcfPath)}. No database matches were found for this sample.`
+        );
       } else {
-        setStatus('VCF profiling finished. Database matches were found.');
+        setStatus(
+          `VCF profiling finished for ${result.database_id || databaseLabel} using `
+          + `${formatPathBasename(result.input_path || vcfPath)}. Database matches were found.`
+        );
       }
     } catch (error) {
       setStatus(formatUserError(error.message));

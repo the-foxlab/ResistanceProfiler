@@ -230,6 +230,7 @@ class TestWebApi:
     def test_profile_fasta(
         self,
         client: TestClient,
+        startup_config: StartupConfig,
         sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
@@ -250,8 +251,12 @@ class TestWebApi:
         payload = status.json()
         assert payload['status'] == 'succeeded'
         result = payload['result']
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        assert result['database_id'] == default_db.name
+        assert result['database_path'] == str(default_db.resolve())
         assert result['sample_name'] == 'web-fasta'
         assert result['run_id'] >= 1
+        assert result['input_path'] == str(sample_ref_fasta.resolve())
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
         assert result['report_tabular_path'].endswith('.mutations.tsv')
@@ -262,6 +267,7 @@ class TestWebApi:
     def test_profile_vcf(
         self,
         client: TestClient,
+        startup_config: StartupConfig,
         sample_vcf: Path,
         sample_ref_fasta: Path,
         auth_headers: dict[str, str],
@@ -284,14 +290,53 @@ class TestWebApi:
         payload = status.json()
         assert payload['status'] == 'succeeded'
         result = payload['result']
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
         assert result['sample_name'] == 'web-vcf'
         assert result['run_id'] >= 1
+        assert result['database_id'] == default_db.name
+        assert result['database_path'] == str(default_db.resolve())
+        assert result['input_path'] == str(sample_vcf.resolve())
+        assert result['reference_fasta_path'] == str(sample_ref_fasta.resolve())
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
         assert result['report_tabular_path'].endswith('.mutations.tsv')
         assert Path(result['report_html_path']).is_file()
         assert Path(result['report_json_path']).is_file()
         assert Path(result['report_tabular_path']).is_file()
+
+    def test_profile_vcf_uses_requested_database_id(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        primary_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        alternate_db = startup_config.project_databases_dir / 'alternate.db'
+        shutil.copy2(primary_db, alternate_db)
+
+        submit = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(sample_vcf),
+                'ref_fasta_path': str(sample_ref_fasta),
+                'database_id': alternate_db.name,
+                'sample': 'web-vcf-alt',
+            },
+            headers=auth_headers,
+        )
+        assert submit.status_code == 200
+
+        status = client.get(f"/api/jobs/{submit.json()['job_id']}", headers=auth_headers)
+        assert status.status_code == 200
+        payload = status.json()
+        assert payload['status'] == 'succeeded'
+        result = payload['result']
+        assert result['database_id'] == alternate_db.name
+        assert result['database_path'] == str(alternate_db.resolve())
+        assert result['input_path'] == str(sample_vcf.resolve())
+        assert result['reference_fasta_path'] == str(sample_ref_fasta.resolve())
 
     def test_profile_vcf_reports_reference_mismatch_clearly(
         self,

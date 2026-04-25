@@ -242,6 +242,7 @@ export function DashboardView({
                     selectedDatabase={selectedDatabase}
                     selectedDatabaseId={selectedDatabaseId}
                     onDatabaseChange={setSelectedDatabaseId}
+                    disabled={isProfileBusy}
                     selectId="header-db-select"
                     className="profile-db-bar"
                   />
@@ -254,6 +255,7 @@ export function DashboardView({
                           <span>Mode</span>
                           <select
                             value={activeProfileMode}
+                            disabled={isProfileBusy}
                             onChange={(event) => setActiveProfileMode(event.target.value)}
                           >
                             {PROFILE_MODES.map((mode) => (
@@ -281,6 +283,7 @@ export function DashboardView({
                           <input
                             type="file"
                             accept=".vcf,.vcf.gz"
+                            disabled={isProfileBusy}
                             onChange={(event) => {
                               if (event.target.files && event.target.files[0]) {
                                 uploadVcfFile(event.target.files[0]);
@@ -293,6 +296,7 @@ export function DashboardView({
                           <input
                             type="file"
                             accept=".fasta,.fa,.fna"
+                            disabled={isProfileBusy}
                             onChange={(event) => {
                               if (event.target.files && event.target.files[0]) {
                                 uploadReferenceFile(event.target.files[0]);
@@ -305,6 +309,7 @@ export function DashboardView({
                           <input
                             type="file"
                             accept=".bam"
+                            disabled={isProfileBusy}
                             onChange={(event) => {
                               if (event.target.files && event.target.files[0]) {
                                 uploadBamFile(event.target.files[0]);
@@ -317,6 +322,7 @@ export function DashboardView({
                           <input
                             className="sample-name-input"
                             value={vcfInput.sample}
+                            disabled={isProfileBusy}
                             onChange={(event) => setVcfInput({ ...vcfInput, sample: event.target.value })}
                           />
                         </label>
@@ -328,6 +334,7 @@ export function DashboardView({
                             max="1"
                             step="0.001"
                             value={vcfInput.min_af}
+                            disabled={isProfileBusy}
                             onChange={(event) => {
                               const value = Number(event.target.value);
                               if (!Number.isFinite(value)) {
@@ -344,6 +351,7 @@ export function DashboardView({
                             min="0"
                             step="1"
                             value={vcfInput.min_depth}
+                            disabled={isProfileBusy}
                             onChange={(event) => {
                               const value = Number(event.target.value);
                               if (!Number.isFinite(value)) {
@@ -362,6 +370,7 @@ export function DashboardView({
                           <span>Mode</span>
                           <select
                             value={activeProfileMode}
+                            disabled={isProfileBusy}
                             onChange={(event) => setActiveProfileMode(event.target.value)}
                           >
                             {PROFILE_MODES.map((mode) => (
@@ -389,6 +398,7 @@ export function DashboardView({
                           <input
                             type="file"
                             accept=".fasta,.fa,.fna,.faa"
+                            disabled={isProfileBusy}
                             onChange={(event) => {
                               if (event.target.files && event.target.files[0]) {
                                 uploadFastaFile(event.target.files[0]);
@@ -401,6 +411,7 @@ export function DashboardView({
                           <input
                             className="sample-name-input"
                             value={fastaInput.sample}
+                            disabled={isProfileBusy}
                             onChange={(event) => setFastaInput({ ...fastaInput, sample: event.target.value })}
                           />
                         </label>

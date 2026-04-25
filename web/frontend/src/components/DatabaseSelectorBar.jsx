@@ -3,6 +3,7 @@ export function DatabaseSelectorBar({
   selectedDatabase,
   selectedDatabaseId,
   onDatabaseChange,
+  disabled = false,
   selectId,
   className,
 }) {
@@ -16,6 +17,7 @@ export function DatabaseSelectorBar({
             id={selectId}
             className="header-db-select"
             value={selectedDatabaseId}
+            disabled={disabled}
             onChange={(event) => onDatabaseChange(event.target.value)}
           >
             {databases.map((database) => (
