@@ -120,13 +120,13 @@ Insertion rules are normalized to a canonical insertion allele that preserves:
 | ---------------- | --------------------------------------------------- | ----------------------------------------------------------------------- |
 | `F50FGG`       | `reference=F`, `position=50`, `mutation=FGG` | GG insertion after the F at position 50                                 |
 | `F50_F51insGG` | `reference=F`, `position=50`, `mutation=FGG` | GG insertion after the F at position 50                                 |
-| `insGG`        | `reference=F`, `position=50`, `mutation=FGG` | GG insertion after the F at position 50, anchor resolved from reference |
+| `50insGG`      | `reference=F`, `position=50`, `mutation=FGG` | GG insertion after the F at position 50, anchor resolved from reference |
 
-| Input mutation | Example row context                                 | Canonical interpretation                                           |
-| -------------- | --------------------------------------------------- | ------------------------------------------------------------------ |
-| `FGG50F`     | `reference=FGG`, `position=50`, `mutation=F` | GG deletion after F at position 50                                 |
-| `F50delGG`   | `reference=FGG`, `position=50,` `mutation=F` | GG deletion after F at position 50                                 |
-| `Q35del`     | `reference=FGG`, `position=50,` `mutation=F` | GG deletion after F at position 50, anchor resolved from reference |
+| Input mutation | Example row context                                 | Canonical interpretation                                          |
+| -------------- | --------------------------------------------------- | ----------------------------------------------------------------- |
+| `FGG50F`     | `reference=FGG`, `position=50`, `mutation=F` | GG deletion after F at position 50                                |
+| `F50delGG`   | `reference=FGG`, `position=50,` `mutation=F` | GG deletion after F at position 50                                |
+| `Q35del`     | `reference=FQ`, `position=34,` `mutation=F`  | Q deletion after F at position 34, anchor resolved from reference |
 
 Anchor-less deletion note:
 
