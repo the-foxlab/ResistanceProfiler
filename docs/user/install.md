@@ -8,7 +8,7 @@ If you are new to Python tooling, this page gives the shortest safe path to a wo
 - Linux, macOS, or Windows (WSL works)
 - A working C/C++ build environment for optional native dependencies
 
-## Recommended installation (developer and power-user setup)
+## Recommended installation
 
 Optional but recommended: create and activate a virtual environment first.
 
@@ -19,14 +19,6 @@ source .venv/bin/activate
 
 ```bash
 pip install -e ".[dev]"
-```
-
-## Web backend dependencies
-
-If you use the web app backend directly, also install:
-
-```bash
-pip install -r web/backend/requirements.txt
 ```
 
 ## Verify installation

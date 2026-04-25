@@ -16,5 +16,5 @@
 
   <!-- Text -->
   <text x="100" y="67" class="t" fill="white">Resistance</text>
-  <text x="280" y="67" class="t" fill="#45577e" stroke="white" stroke-width="1" paint-order="stroke fill">Profiler</text>
+  <text x="280" y="67" class="t" fill="#45577e" stroke="white" stroke-width="2" paint-order="stroke fill">Profiler</text>
 </svg>

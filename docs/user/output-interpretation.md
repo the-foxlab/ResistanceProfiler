@@ -47,9 +47,9 @@ Regenerate a report from JSON:
 
 ```bash
 respro regenerate \
-  --project data/demo-epsilon/project/project.db \
-  --json data/demo-epsilon/output/sample_variants.results.json \
-  --output data/demo-epsilon/output
+  --project myrespro.db \
+  --json my_output/sample_variants.results.json \
+  --output my_output
 ```
 
 ## Tabular export (`*.mutations.tsv`)

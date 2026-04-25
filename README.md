@@ -38,7 +38,7 @@ pip install -e ".[dev]"
 
 ### 2) Initialize a project database
 
-Either initialize your own dataset with your own [custom rules](docs/user/rules-tsv-format.md):
+Either initialize your own dataset with your own [custom rules](docs/user/database-preparation.md):
 
 ```bash
 respro init \
@@ -117,8 +117,7 @@ Open the app at: `http://127.0.0.1:8000/app/`
 - [How to prepare a database](docs/user/database-preparation.md)
 - [How to format the TSV](docs/user/rules-tsv-format.md)
 - [How ResPro works](docs/user/how-respro-works.md)
-- [Basic CLI tutorial](docs/user/cli-basic-tutorial.md)
-- [Detailed CLI tutorial](docs/user/cli-detailed-tutorial.md)
+- [CLI tutorial](docs/user/cli-detailed-tutorial.md)
 - [How to run and host the web app (detailed)](docs/user/webapp-hosting.md)
 - [Troubleshooting and FAQ](docs/user/troubleshooting-faq.md)
 - [Output interpretation guide (HTML, JSON, TSV)](docs/user/output-interpretation.md)
