@@ -1,21 +1,23 @@
-![ResistanceProfiler logo](respro/report/static/logo.svg)
+![ResistanceProfiler logo](web/frontend/src/assets/logo.svg)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-2f6db3)
 
-Framework for broadly applicable antiviral resistance profiling from FASTA consensus sequences or VCF-derived variants.
+Pathogen agnostic antiviral resistance profiling command-line interface (CLI) for FASTA consensus sequences or VCF-derived variants. Also comes with a WebApp and pre-ported databases.
 
-## Why ResistanceProfiler (in short ResPro)
+## Why use ResistanceProfiler (in short ResPro)?
 
-- Broadly applicable framework instead of a single pathogen- or database-specific workflow
-- Internal project references and curated rules stored in one reusable project database
+- Think of it as a framework for genotypic antiviral resistance analysis instead of a single pathogen-specific workflow
+- One harmonized report that classifies mutations and assists diagnostic interpretations
+- Internal project references and curated mutation substitution rules stored in one reusable project database
+- Companion [repository](https://github.com/jonas-fuchs/respro-db) auto-updates maintained databases and makes them ResPro compatible. Users can download and build curated databases directly via the CLI. No need to do much, just download and test your sequences.
+- Support for custom rule sets. You have an in-house closed database? Transform it to a ResPro compatible database and enjoy simplified analyses.
+- The database creation performs stringent QC and ensures that resistance rules stay coherent with the internal reference sequence.
 - Query sequences and VCF-linked references can be mapped back to internal references before comparison
 - Final profiling is performed on amino-acid mutations after reference normalization
-- CLI-first workflows for initialization, profiling, and regeneration, with an optional web application
-- Support for resistence formulas with logical operators allow definition of higher complexity rules that includes depend mutations to be present
+- Store your results in an SQlite database and regenerate the html report. No need to store everything. ResPro can save your resluts in a compact way and lets you regenerate your results or update them when the database changes. Moreover you can add custom metadata to your results. (these functions are currently only supported by the CLI).
+- Support for resistence formulas with logical operators (`parenthesis`, `OR`, `AND`, `XOR` and `NOT`) to allow definition of higher complexity rules.
 
-Many resistance tools already perform amino-acid or codon-based interpretation. The main value of ResPro is that it lets you curate rules once against internal references and then compare new samples against those rules. It provides a clear and structured framework that can be used for any pathogen. The database autocurates itself (so checks if rules are valid given the provided reference) and new sequences are automatically matched against all references. Afterwards, the best matching one is selected for resistance rule comparision. Its lightning fast. No need to specify which pathogen or using a specific reference. Everything goes automatically.
-
-In the end you get a informative html report that highlights these results. The good thing is that the CLI is made to be incoorporated into existing NGS sequencing workflows and the WebApp is made for non-bioinformatic users.
+Its lightning fast. No need to specify which pathogen or using a specific reference during profiling against the database. Everything goes automatically. The CLI is made to be incoorporated into existing NGS sequencing workflows and the WebApp is made for non-bioinformatic users.
 
 > [!TIP]
 > ResPro is strongest when the same curated project database is reused across runs. Treat `project.db` as your internal reference contract.
@@ -36,26 +38,53 @@ pip install -e ".[dev]"
 
 ### 2) Initialize a project database
 
+Either initialize your own dataset with your own [custom rules](docs/user/rules-tsv-format.md):
+
 ```bash
 respro init \
     --name "Docs Demo" \
-    --genbank data/demo-alpha/inputs/reference_hsv1.gb \
-    --rules data/demo-alpha/inputs/rules_hsv1.tsv \
-    --formula-rules data/demo-alpha/inputs/formula_rules_hsv1.tsv \
-    --output data/demo-alpha/project/project.db \
-    --no-additional-info
+    --genbank some_reference.gb \
+    --rules rules.tsv \
+    --formula-rules combinatorial_rules.tsv \
+    --output myrespro.db \
 ```
 
-The `--formula-rules` TSV is optional. Use it when a pathogen requires boolean combination logic over atomic mutation rules.
+or list available ported databases:
 
-### 3) Run FASTA profiling
+```bash
+respro databases --list
+```
+
+and then download:
+
+```bash
+respro databases --download db_name --output my_folder/
+```
+
+In this step respro automatically downloads tsv rules and genbank files temporarily and then builds the respro compatible SQlite database from scratch. As ResPro automatically enriches the databases with Pubmed and Pubchem information database creation can take a bit. If you want to see what ResPro is doing, just add a `--VV` to your command: `respro --VV databases ...`
+
+### 3) Run profiling
+
+For fasta consensus sequences:
 
 ```bash
 respro fasta \
-    --project data/demo-alpha/project/project.db \
-    --fasta data/demo-alpha/inputs/sample_consensus.fasta \
-    --output data/demo-alpha/output \
-    --results-db data/demo-alpha/results/results.db \
+    --project my_database.db \
+    --fasta my_consensus_sequence.fasta \
+    --output my_output \
+    --results-db my_results.db \
+    --export json
+```
+
+Or from vcf files:
+
+```bash
+respro fasta
+    --project my_database.db
+    --vcf my_ngs_result.vcf
+    --ref-fasta my_vcf_ref.fasta
+    --output my_output
+    --results-db my_results.db
     --export json
 ```
 
@@ -63,40 +92,24 @@ respro fasta \
 
 ```bash
 respro regenerate \
-    --project data/demo-alpha/project/project.db \
-    --results-db data/demo-alpha/results/results.db \
+    --project my_database.db \
+    --results-db my_results.db \
     --run-id 1 \
-    --output data/demo-alpha/output \
-    --export tabular
+    --output my_output
 ```
 
-## Quickstart (Web App)
+> [!TIP]
+> You can also regenerate your result from a json file.
 
-### 1) Install backend dependencies
+## Quickstart [Web App](docs/user/webapp-hosting.md) with docker
 
 ```bash
-pip install -r web/backend/requirements.txt
+docker compose -f docker-compose.web.yml up --build
 ```
 
-### 2) Build frontend assets
+Open the app at: `http://127.0.0.1:8000/app/`
 
-```bash
-npm --prefix web/frontend install
-npm --prefix web/frontend run build
-```
-
-### 3) Start the backend
-
-```bash
-RESPRO_WEB_PORT=8011 python -m web.backend.main
-```
-
-Quick smoke checks:
-
-- `GET http://127.0.0.1:8011/api/health` returned status `ok`
-- `GET http://127.0.0.1:8011/app/` returned `200`
-
-## Documentation
+## Detailed Documentation
 
 ### User Documentation
 
