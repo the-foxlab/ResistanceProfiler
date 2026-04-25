@@ -10,17 +10,21 @@ import textwrap
 from unittest.mock import patch
 
 import pytest
+from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature
+from Bio.SeqRecord import SeqRecord
 from conftest import TINY_REF_SEQ, write_genbank
 
 from respro.cli.init import init_project
 from respro.db.genes import _is_ncbi_protein_accession
 from respro.db.models import is_internal_formula_component_drug_name
-from respro.db.rules_queries import list_rules_for_display
 from respro.db.rules_import import (
     _detect_coordinate_base,
     _resolve_anchorless_deletion,
     _validate_reference_amino_acids,
 )
+from respro.db.rules_queries import list_rules_for_display
 from respro.db.schema import create_schema
 
 # Amino acid sequence used across tests:
@@ -597,6 +601,35 @@ class TestComboRuleParsing:
         assert row is not None
         assert row[0] == '10.1086/590668'
 
+    def test_doi_lookup_logs_concise_success_messages(self, tmp_path, tiny_genbank, caplog) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tdoi.org/10.1086/590668
+        """))
+        db = tmp_path / 'proj.db'
+
+        with (
+            caplog.at_level(logging.INFO, logger='respro.db.rules_import'),
+            patch(
+                'respro.db.rules_import.fetch_pubmed_id_for_doi',
+                return_value='12345678',
+            ),
+            patch(
+                'respro.db.rules_import.fetch_pubmed_metadata',
+                return_value={'title': '', 'doi': ''},
+            ),
+            patch(
+                'respro.db.rules_import.fetch_publication_metadata',
+                return_value={'title': 'A resolved CrossRef title'},
+            ),
+        ):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=True)
+
+        assert any('Resolved DOI:10.1086/590668 → PMID 12345678' in rec.message for rec in caplog.records)
+        assert not any('Resolving DOI:' in rec.message for rec in caplog.records)
+        assert not any('Could not resolve DOI:' in rec.message for rec in caplog.records)
+
     def test_single_rule_publication_pmid_is_stored(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
@@ -1135,6 +1168,173 @@ class TestMissingGeneWarnings:
 
         assert "row 2: gene 'pol', reference_identifier 'tiny_ref'" in warning_text
         assert "row 3: gene 'UL89', reference_identifier 'ref_ul89'" in warning_text
+
+
+class TestGenbankAliasFallbacks:
+    def test_compound_cds_warning_uses_product_label(self, tmp_path, caplog) -> None:
+        gb = tmp_path / 'compound_product_only.gb'
+
+        record = SeqRecord(Seq('ATG' * 40), id='tiny_ref', name='tiny_ref', description='')
+        record.annotations['molecule_type'] = 'DNA'
+        record.annotations['accessions'] = ['tiny_ref']
+        record.features = [
+            SeqFeature(
+                CompoundLocation(
+                    [
+                        FeatureLocation(0, 30, strand=1),
+                        FeatureLocation(60, 90, strand=1),
+                    ]
+                ),
+                type='CDS',
+                qualifiers={
+                    'product': ['DNA polymerase'],
+                    'codon_start': ['1'],
+                },
+            )
+        ]
+        with open(gb, 'w') as handle:
+            SeqIO.write([record], handle, 'genbank')
+
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            DNA polymerase\ttiny_ref\t2\tM\tK\tDrugA\tresistant
+        """))
+        db = tmp_path / 'proj.db'
+
+        with caplog.at_level(logging.WARNING, logger='respro.io.genbank'):
+            init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
+
+        assert any(
+            "Skipping CDS 'DNA polymerase'" in record.message
+            for record in caplog.records
+        )
+
+    def test_product_only_cds_is_accepted_for_rule_matching(self, tmp_path) -> None:
+        gb = tmp_path / 'product_only.gb'
+        write_genbank(gb, [
+            {
+                'id': 'tiny_ref',
+                'accession': 'tiny_ref',
+                'sequence': TINY_REF_SEQ,
+                'genes': [
+                    {
+                        'product': 'DNA polymerase',
+                        'start': 1,
+                        'end': 87,
+                        'strand': '+',
+                    }
+                ],
+            }
+        ])
+
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            DNA polymerase\ttiny_ref\t2\tK\tE\tDrugA\tresistant
+        """))
+        db = tmp_path / 'proj.db'
+
+        init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        gene_name, protein_name = conn.execute(
+            'SELECT name, protein FROM gene'
+        ).fetchone()
+        rule_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
+        conn.close()
+
+        assert gene_name == 'DNA polymerase'
+        assert protein_name == 'DNA polymerase'
+        assert rule_count == 1
+
+    def test_rule_gene_can_match_product_alias_when_gene_name_differs(
+        self, tmp_path, caplog
+    ) -> None:
+        gb = tmp_path / 'alias.gb'
+        write_genbank(gb, [
+            {
+                'id': 'tiny_ref',
+                'accession': 'tiny_ref',
+                'sequence': TINY_REF_SEQ,
+                'genes': [
+                    {
+                        'gene': 'UL30',
+                        'protein': 'DNA polymerase',
+                        'start': 1,
+                        'end': 87,
+                        'strand': '+',
+                    }
+                ],
+            }
+        ])
+
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            DNA polymerase\ttiny_ref\t2\tK\tE\tDrugA\tresistant
+        """))
+        db = tmp_path / 'proj.db'
+
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+            init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        stored_gene = conn.execute('SELECT name FROM gene').fetchone()[0]
+        rule_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
+        conn.close()
+
+        assert stored_gene == 'UL30'
+        assert rule_count == 1
+        assert not any('gene(s) not found in GenBank annotations' in rec.message for rec in caplog.records)
+
+    def test_canonical_gene_name_match_wins_over_alias_match(self, tmp_path, caplog) -> None:
+        sequence = TINY_REF_SEQ + TINY_REF_SEQ
+        gb = tmp_path / 'canonical_vs_alias.gb'
+        write_genbank(gb, [
+            {
+                'id': 'tiny_ref',
+                'accession': 'tiny_ref',
+                'sequence': sequence,
+                'genes': [
+                    {
+                        'gene': 'DNA polymerase',
+                        'protein': 'Polymerase alpha',
+                        'translation': 'MKAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+                        'start': 1,
+                        'end': 87,
+                        'strand': '+',
+                    },
+                    {
+                        'gene': 'UL30',
+                        'protein': 'DNA polymerase',
+                        'translation': 'MKAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+                        'start': 88,
+                        'end': 174,
+                        'strand': '+',
+                    },
+                ],
+            }
+        ])
+
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            DNA polymerase\ttiny_ref\t2\tK\tE\tDrugA\tresistant
+        """))
+        db = tmp_path / 'proj.db'
+
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+            init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        matched_gene = conn.execute(
+            'SELECT g.name FROM resistance_rule rr JOIN gene g ON g.id = rr.gene_id'
+        ).fetchone()[0]
+        conn.close()
+
+        assert matched_gene == 'DNA polymerase'
+        assert not any('gene(s) not found in GenBank annotations' in rec.message for rec in caplog.records)
 
 
 class TestGenbankTranslationQuality:
@@ -1884,7 +2084,7 @@ class TestFormulaRuleImport:
             additional_info=False,
             validate_only=True,
         )
-        
+
         # Verify atomic rules were imported but formula rule was skipped
         conn = sqlite3.connect(str(db_path))
         formula_count = conn.execute(

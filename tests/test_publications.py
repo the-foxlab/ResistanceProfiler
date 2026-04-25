@@ -9,7 +9,11 @@ import urllib.error
 from email.message import Message
 from unittest.mock import MagicMock, patch
 
-from respro.io.publications import fetch_publication_metadata, fetch_pubmed_metadata
+from respro.io.publications import (
+    fetch_publication_metadata,
+    fetch_pubmed_id_for_doi,
+    fetch_pubmed_metadata,
+)
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -148,4 +152,34 @@ class TestFetchPublicationMetadata:
         payload = {'message': {'title': []}}
         with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             assert fetch_publication_metadata('10.1234/xyz') is None
+
+
+# ── fetch_pubmed_id_for_doi ───────────────────────────────────────────────────
+
+class TestFetchPubmedIdForDoi:
+    def test_returns_pmid_on_success(self) -> None:
+        payload = {'records': [{'doi': '10.1234/xyz', 'pmid': '12345678'}]}
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
+            result = fetch_pubmed_id_for_doi('10.1234/xyz')
+        assert result == '12345678'
+
+    def test_returns_none_when_record_has_no_pmid(self) -> None:
+        payload = {'records': [{'doi': '10.1234/xyz'}]}
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
+            assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
+
+    def test_returns_none_when_records_empty(self) -> None:
+        payload = {'records': []}
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
+            assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
+
+    def test_returns_none_on_http_error(self) -> None:
+        with patch('urllib.request.urlopen', side_effect=urllib.error.HTTPError(
+            url='', code=500, msg='Server Error', hdrs=None, fp=None,  # type: ignore[arg-type]
+        )):
+            assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
+
+    def test_returns_none_on_network_error(self) -> None:
+        with patch('urllib.request.urlopen', side_effect=OSError('no network')):
+            assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
 

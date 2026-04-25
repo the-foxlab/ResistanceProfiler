@@ -14,7 +14,11 @@ from respro.config.settings import CLI_CONFIG
 from respro.core.annotation import normalize_mutation
 from respro.db.drugs import _get_or_create_drug_id
 from respro.db.models import _INTERNAL_FORMULA_COMPONENT_DRUG_NAME
-from respro.io.publications import fetch_publication_metadata, fetch_pubmed_metadata
+from respro.io.publications import (
+    fetch_publication_metadata,
+    fetch_pubmed_id_for_doi,
+    fetch_pubmed_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +151,19 @@ def _get_or_create_publication(
                 logger.info('Resolved PMID:%s → DOI %s', pubmed_id, doi)
             prefetched_title = meta['title']
 
+    if additional_info and doi and not pubmed_id:
+        resolved_pubmed_id = fetch_pubmed_id_for_doi(doi)
+        if resolved_pubmed_id:
+            pubmed_id = resolved_pubmed_id
+            logger.info('Resolved DOI:%s → PMID %s', doi, pubmed_id)
+
+            meta = fetch_pubmed_metadata(pubmed_id)
+            if meta:
+                prefetched_title = prefetched_title or meta.get('title', '')
+                if meta['doi'] and not doi:
+                    doi = meta['doi']
+                    logger.info('Resolved PMID:%s → DOI %s', pubmed_id, doi)
+
     cache_key = doi if doi else raw_input
 
     if cache_key in pub_cache:
@@ -177,6 +194,8 @@ def _get_or_create_publication(
         meta = fetch_publication_metadata(doi)
         if meta:
             title = meta.get('title', '')
+            if title and not pubmed_id:
+                logger.info('Resolved DOI:%s → title via CrossRef', doi)
 
     cur = conn.execute(
         'INSERT INTO publication (doi, title, pubmed_id, raw_input) VALUES (?, ?, ?, ?)',
@@ -860,15 +879,16 @@ def _expand_anchor_changed_indel_rules(rows: list[dict[str, str]]) -> list[dict[
 
 def _resolve_rule_gene_id(candidates: list[sqlite3.Row], reference_identifier: str) -> int | None:
     """Resolve a rule row to a unique gene_id using optional reference information."""
-    if not candidates:
+    narrowed = _narrow_gene_lookup_candidates(candidates)
+    if not narrowed:
         return None
-    if len(candidates) == 1 and not reference_identifier:
-        return candidates[0]['gene_id']
+    if len(narrowed) == 1 and not reference_identifier:
+        return narrowed[0]['gene_id']
     if not reference_identifier:
         return None
 
     matched = [
-        c for c in candidates
+        c for c in narrowed
         if reference_identifier in {c['reference_name'], c['reference_accession']}
     ]
     if len(matched) == 1:
@@ -890,13 +910,25 @@ def _get_gene_aa_sequence(
     :param reference_identifier: optional reference identifier from the rules row
     :return: amino acid sequence string or empty string if ambiguous/unavailable
     """
+    narrowed = _narrow_gene_lookup_candidates(candidates)
     if reference_identifier:
-        for c in candidates:
+        for c in narrowed:
             if reference_identifier in {c['reference_name'], c['reference_accession']}:
                 return c['aa_sequence'] or ''
-    if len(candidates) == 1:
-        return candidates[0]['aa_sequence'] or ''
+    if len(narrowed) == 1:
+        return narrowed[0]['aa_sequence'] or ''
     return ''
+
+
+def _narrow_gene_lookup_candidates(candidates: list[sqlite3.Row]) -> list[sqlite3.Row]:
+    """Prefer canonical gene-name matches before alias matches when both are present."""
+    if not candidates:
+        return []
+
+    canonical = [candidate for candidate in candidates if int(candidate['alias_rank']) == 0]
+    if canonical:
+        return canonical
+    return candidates
 
 
 def _resolve_anchorless_deletion(
@@ -1167,6 +1199,9 @@ def _build_gene_lookup(conn: sqlite3.Connection) -> dict[str, list[sqlite3.Row]]
         SELECT
             g.id AS gene_id,
             g.name AS gene_name,
+            g.protein AS protein,
+            g.protein_id AS protein_id,
+            g.locus_tag AS locus_tag,
             g.aa_sequence AS aa_sequence,
             r.name AS reference_name,
             r.accession AS reference_accession
@@ -1177,7 +1212,28 @@ def _build_gene_lookup(conn: sqlite3.Connection) -> dict[str, list[sqlite3.Row]]
 
     genes_by_name: dict[str, list[sqlite3.Row]] = {}
     for row in gene_lookup_rows:
-        genes_by_name.setdefault(row['gene_name'], []).append(row)
+        entries = [
+            (row['gene_name'], 0),
+            (row['locus_tag'], 1),
+            (row['protein_id'], 2),
+            (row['protein'], 3),
+        ]
+        seen_keys: set[str] = set()
+        for raw_key, alias_rank in entries:
+            key = (raw_key or '').strip()
+            if not key or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            genes_by_name.setdefault(key, []).append(
+                {
+                    'gene_id': row['gene_id'],
+                    'gene_name': row['gene_name'],
+                    'aa_sequence': row['aa_sequence'],
+                    'reference_name': row['reference_name'],
+                    'reference_accession': row['reference_accession'],
+                    'alias_rank': alias_rank,
+                }
+            )
 
     return genes_by_name
 
@@ -1214,6 +1270,7 @@ def _load_resistance_rules(
     errors: list[str] = []
     skipped_ref: list[str] = []
     skipped_gene: list[str] = []
+    skipped_gene_pairs: list[tuple[str, str]] = []
     skipped_invalid_aa: list[str] = []
     skipped_duplicates_detail: list[str] = []
     skipped_identical_member_id_rows: list[str] = []
@@ -1302,6 +1359,7 @@ def _load_resistance_rules(
             skipped_gene.append(
                 f'row {row_number}: gene {gene_label!r}, reference_identifier {reference_label!r}'
             )
+            skipped_gene_pairs.append((gene_label, reference_label))
             continue
 
         gene_id = _resolve_rule_gene_id(genes_by_name[gene_name], reference_identifier)
@@ -1511,9 +1569,14 @@ def _load_resistance_rules(
 
     if skipped_gene:
         unique_rows = sorted(set(skipped_gene))
+        unique_pairs = sorted(set(skipped_gene_pairs))
         logger.warning(
             '%d rule(s) skipped — gene(s) not found in GenBank annotations: %s\n%s',
             len(skipped_gene),
+            ', '.join(
+                f'{gene!r} @ reference_identifier {reference!r}'
+                for gene, reference in unique_pairs
+            ),
             '\n'.join(f'  - {detail}' for detail in unique_rows),
         )
 

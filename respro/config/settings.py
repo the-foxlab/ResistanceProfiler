@@ -26,6 +26,7 @@ class CliUrlConfig:
     pubchem_description: str
     pubchem_title: str
     ncbi_pubmed_esummary: str
+    ncbi_pmc_idconv: str
     crossref_works: str
     ncbi_protein_page: str
     ncbi_nuccore_efetch: str
@@ -79,6 +80,7 @@ def _load_cli_config() -> CliConfig:
             pubchem_description=str(urls['pubchem_description']),
             pubchem_title=str(urls['pubchem_title']),
             ncbi_pubmed_esummary=str(urls['ncbi_pubmed_esummary']),
+            ncbi_pmc_idconv=str(urls['ncbi_pmc_idconv']),
             crossref_works=str(urls['crossref_works']),
             ncbi_protein_page=str(urls['ncbi_protein_page']),
             ncbi_nuccore_efetch=str(urls['ncbi_nuccore_efetch']),

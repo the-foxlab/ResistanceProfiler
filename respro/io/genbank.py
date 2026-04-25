@@ -197,7 +197,15 @@ def _parse_cds_features(
         if feature.type != 'CDS':
             continue
         if isinstance(feature.location, CompoundLocation):
-            gene_label = feature.qualifiers.get('gene', ['<unknown>'])[0]
+            gene_label = _first_qualifier(
+                feature,
+                'gene',
+                'locus_tag',
+                'protein_id',
+                'product',
+                'protein',
+                default='<unknown>',
+            )
             logger.warning(
                 'Skipping CDS %r in %r: compound (split/joined) locations are not yet '
                 'supported and the gene will be absent from the project database.',
@@ -312,10 +320,19 @@ def _extract_gene_name(feature: SeqFeature, reference_name: str) -> str:
     :param reference_name: name of the reference for error messages
     :return: gene identifier string
     """
-    gene_name = _first_qualifier(feature, 'gene', 'locus_tag', 'protein_id', default='')
+    gene_name = _first_qualifier(
+        feature,
+        'gene',
+        'locus_tag',
+        'protein_id',
+        'product',
+        'protein',
+        default='',
+    )
     if not gene_name:
         raise ValueError(
-            f'CDS feature in GenBank record {reference_name!r} lacks gene/locus_tag/protein_id'
+            f'CDS feature in GenBank record {reference_name!r} lacks '
+            'gene/locus_tag/protein_id/product'
         )
     return gene_name
 

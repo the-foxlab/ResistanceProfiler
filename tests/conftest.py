@@ -158,11 +158,18 @@ def write_genbank(
         record.features = []
 
         for gene in record_data.get('genes', []):
+            product_value = gene.get('product', gene.get('protein', gene.get('gene', '')))
             qualifiers = {
-                'gene': [gene['gene']],
-                'product': [gene.get('protein', gene['gene'])],
                 'codon_start': [str(gene.get('codon_start', 1))],
             }
+            if gene.get('gene'):
+                qualifiers['gene'] = [gene['gene']]
+            if product_value:
+                qualifiers['product'] = [product_value]
+            if gene.get('protein_id'):
+                qualifiers['protein_id'] = [gene['protein_id']]
+            if gene.get('locus_tag'):
+                qualifiers['locus_tag'] = [gene['locus_tag']]
             if 'translation' in gene:
                 qualifiers['translation'] = [gene['translation']]
             feature = SeqFeature(

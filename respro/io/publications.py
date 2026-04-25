@@ -94,6 +94,41 @@ def fetch_pubmed_metadata(pmid: str, timeout: int = CLI_CONFIG.timeouts.pubmed) 
     return None
 
 
+def fetch_pubmed_id_for_doi(doi: str, timeout: int = CLI_CONFIG.timeouts.pubmed) -> str | None:
+    """
+    Resolve a DOI to a PubMed ID via the NCBI PMC idconv API.
+
+    :param doi: bare DOI string (e.g. ``10.1234/xyz``)
+    :param timeout: HTTP request timeout in seconds
+    :return: PubMed ID string or ``None`` if unavailable
+    """
+    encoded = urllib.parse.quote(doi, safe='')
+    url = CLI_CONFIG.urls.ncbi_pmc_idconv.format(identifier=encoded)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            data = json.loads(resp.read())
+        records = data.get('records', [])
+        if not records:
+            logger.debug('NCBI idconv: no records found for DOI %r', doi)
+            return None
+
+        pmid = str(records[0].get('pmid', '')).strip()
+        if pmid:
+            return pmid
+
+        logger.debug('NCBI idconv: no PMID found for DOI %r', doi)
+        return None
+    except urllib.error.HTTPError as exc:
+        logger.debug('NCBI idconv lookup failed for DOI %r: HTTP %s', doi, exc.code)
+        return None
+    except OSError as exc:
+        logger.debug('NCBI idconv lookup failed for DOI %r (network): %s', doi, exc)
+        return None
+    except Exception as exc:
+        logger.debug('NCBI idconv lookup failed for DOI %r: %s', doi, exc)
+        return None
+
+
 def fetch_publication_metadata(doi: str, timeout: int = CLI_CONFIG.timeouts.crossref) -> dict | None:
     """
     Fetch a publication title from the CrossRef API.
