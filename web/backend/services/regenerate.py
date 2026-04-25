@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from datetime import UTC, datetime
 from pathlib import Path
 
 from respro.core.rules import load_rules
@@ -16,6 +18,14 @@ from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.schema import open_project_db
 from respro.io.reference import load_genes_for_reference
 from respro.report.html import export_results
+
+
+def _build_web_output_html_path(*, output_dir: Path, result: ProfilingResult) -> Path:
+    """Return a unique HTML report path so session history keeps every run."""
+    raw_stem = Path(result.vcf_name).stem.strip() or 'profile'
+    safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', raw_stem) or 'profile'
+    run_stamp = datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')
+    return output_dir / f'{safe_stem}.{run_stamp}.report.html'
 
 
 def regenerate_from_json(
@@ -84,6 +94,7 @@ def regenerate_from_json(
             rules=rules,
             extra_export_formats={'json', 'tabular'},
             project_db_path=project_db.resolve(),
+            output_html_path=_build_web_output_html_path(output_dir=output_dir, result=result),
         )
 
         return {

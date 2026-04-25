@@ -304,6 +304,47 @@ class TestWebApi:
         assert Path(result['report_json_path']).is_file()
         assert Path(result['report_tabular_path']).is_file()
 
+    def test_profile_vcf_repeated_runs_keep_distinct_report_artifacts(
+        self,
+        client: TestClient,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        first_submit = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(sample_vcf),
+                'ref_fasta_path': str(sample_ref_fasta),
+                'sample': 'web-vcf-repeat',
+            },
+            headers=auth_headers,
+        )
+        assert first_submit.status_code == 200
+        first_payload = client.get(f"/api/jobs/{first_submit.json()['job_id']}", headers=auth_headers).json()
+        assert first_payload['status'] == 'succeeded'
+        first_result = first_payload['result']
+
+        second_submit = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(sample_vcf),
+                'ref_fasta_path': str(sample_ref_fasta),
+                'sample': 'web-vcf-repeat',
+            },
+            headers=auth_headers,
+        )
+        assert second_submit.status_code == 200
+        second_payload = client.get(f"/api/jobs/{second_submit.json()['job_id']}", headers=auth_headers).json()
+        assert second_payload['status'] == 'succeeded'
+        second_result = second_payload['result']
+
+        assert first_result['report_html_path'] != second_result['report_html_path']
+        assert first_result['report_json_path'] != second_result['report_json_path']
+        assert first_result['report_tabular_path'] != second_result['report_tabular_path']
+        assert Path(first_result['report_html_path']).is_file()
+        assert Path(second_result['report_html_path']).is_file()
+
     def test_profile_vcf_uses_requested_database_id(
         self,
         client: TestClient,

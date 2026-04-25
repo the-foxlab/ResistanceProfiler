@@ -155,7 +155,7 @@ def _get_or_create_publication(
         resolved_pubmed_id = fetch_pubmed_id_for_doi(doi)
         if resolved_pubmed_id:
             pubmed_id = resolved_pubmed_id
-            logger.info('Resolved DOI:%s → PMID %s', doi, pubmed_id)
+            logger.info('Resolved DOI:%s → PMID:%s', doi, pubmed_id)
 
             meta = fetch_pubmed_metadata(pubmed_id)
             if meta:

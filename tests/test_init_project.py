@@ -626,7 +626,7 @@ class TestComboRuleParsing:
         ):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=True)
 
-        assert any('Resolved DOI:10.1086/590668 → PMID 12345678' in rec.message for rec in caplog.records)
+        assert any('Resolved DOI:10.1086/590668 → PMID:12345678' in rec.message for rec in caplog.records)
         assert not any('Resolving DOI:' in rec.message for rec in caplog.records)
         assert not any('Could not resolve DOI:' in rec.message for rec in caplog.records)
 

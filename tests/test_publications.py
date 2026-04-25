@@ -183,3 +183,14 @@ class TestFetchPubmedIdForDoi:
         with patch('urllib.request.urlopen', side_effect=OSError('no network')):
             assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
 
+    def test_skips_non_doi_tokens_without_http_call(self) -> None:
+        with patch('urllib.request.urlopen') as mock_urlopen:
+            assert fetch_pubmed_id_for_doi('PMID:12345678') is None
+        mock_urlopen.assert_not_called()
+
+    def test_returns_none_on_http_400_without_raising(self) -> None:
+        with patch('urllib.request.urlopen', side_effect=urllib.error.HTTPError(
+            url='', code=400, msg='Bad Request', hdrs=None, fp=None,  # type: ignore[arg-type]
+        )):
+            assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
+

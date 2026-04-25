@@ -242,7 +242,6 @@ export function DashboardView({
                     selectedDatabase={selectedDatabase}
                     selectedDatabaseId={selectedDatabaseId}
                     onDatabaseChange={setSelectedDatabaseId}
-                    disabled={isProfileBusy}
                     selectId="header-db-select"
                     className="profile-db-bar"
                   />
