@@ -1295,11 +1295,15 @@ def _load_resistance_rules(
 
     for row_number, row in enumerate(all_rows, start=2):
         gene_name = _get_value(row, 'gene')
+        reference_identifier = _get_value(row, 'reference_identifier')
         if not gene_name or gene_name not in genes_by_name:
-            skipped_gene.append(gene_name or '<empty>')
+            gene_label = gene_name or '<empty>'
+            reference_label = reference_identifier or '<empty>'
+            skipped_gene.append(
+                f'row {row_number}: gene {gene_label!r}, reference_identifier {reference_label!r}'
+            )
             continue
 
-        reference_identifier = _get_value(row, 'reference_identifier')
         gene_id = _resolve_rule_gene_id(genes_by_name[gene_name], reference_identifier)
         if gene_id is None:
             # Missing reference context can make same gene name ambiguous across records.
@@ -1506,11 +1510,11 @@ def _load_resistance_rules(
         count += 1
 
     if skipped_gene:
-        unique_genes = sorted(set(skipped_gene))
+        unique_rows = sorted(set(skipped_gene))
         logger.warning(
-            '%d rule(s) skipped — gene(s) not found in GenBank annotations: %s',
+            '%d rule(s) skipped — gene(s) not found in GenBank annotations: %s\n%s',
             len(skipped_gene),
-            ', '.join(repr(g) for g in unique_genes),
+            '\n'.join(f'  - {detail}' for detail in unique_rows),
         )
 
     if skipped_ref:

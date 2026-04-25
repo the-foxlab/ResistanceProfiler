@@ -1094,6 +1094,49 @@ class TestRefAaMismatchSkip:
         assert 'druggood' in drugs
 
 
+class TestMissingGeneWarnings:
+    @pytest.fixture()
+    def tiny_genbank(self, tmp_path):
+        gb = tmp_path / 'tiny.gb'
+        write_genbank(gb, [
+            {
+                'id': 'tiny_ref',
+                'accession': 'tiny_ref',
+                'sequence': TINY_REF_SEQ,
+                'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+            }
+        ])
+        return gb
+
+    def test_missing_gene_warning_includes_reference_identifier(
+        self, tmp_path, tiny_genbank, caplog
+    ) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            pol\ttiny_ref\t2\tK\tE\tDrugBad\tresistant
+            UL89\tref_ul89\t6\tP\tV\tDrugBad\tresistant
+            gag\ttiny_ref\t2\tK\tE\tDrugGood\tresistant
+        """))
+        db = tmp_path / 'proj.db'
+
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv,
+                         additional_info=False)
+
+        warning_messages = [
+            record.message
+            for record in caplog.records
+            if 'gene(s) not found in GenBank annotations' in record.message
+        ]
+
+        assert warning_messages
+        warning_text = warning_messages[0]
+
+        assert "row 2: gene 'pol', reference_identifier 'tiny_ref'" in warning_text
+        assert "row 3: gene 'UL89', reference_identifier 'ref_ul89'" in warning_text
+
+
 class TestGenbankTranslationQuality:
     @pytest.fixture()
     def tiny_genbank(self, tmp_path):
