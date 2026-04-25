@@ -119,7 +119,6 @@ Open the app at: `http://127.0.0.1:8000/app/`
 - [How ResPro works](docs/user/how-respro-works.md)
 - [CLI tutorial](docs/user/cli-detailed-tutorial.md)
 - [How to run and host the web app (detailed)](docs/user/webapp-hosting.md)
-- [Troubleshooting and FAQ](docs/user/troubleshooting-faq.md)
 - [Output interpretation guide (HTML, JSON, TSV)](docs/user/output-interpretation.md)
 
 ### Development Documentation

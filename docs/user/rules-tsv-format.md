@@ -1,7 +1,6 @@
 # Rules TSV Format Reference
 
-This document is the source of truth for curated rules TSV files used by `respro init`
-and `respro add`.
+This document is the source of truth for curated rules TSV files used by `respro init` and `respro add`.
 
 ## Overview
 
@@ -71,8 +70,7 @@ Notes:
 
 ### How mutation normalization works
 
-Normalization means that different textual inputs describing the same biological event
-are converted into one canonical representation before rules are stored and matched.
+Normalization means that different textual inputs describing the same biological event are converted into one canonical representation before rules are stored and matched.
 
 High-level processing order:
 
@@ -181,13 +179,13 @@ For substitutions/stops, `reference` and normalized `mutation` are stored as dir
 
 Accepted flexible inputs are intentionally limited.
 
-| Input                                                                        | Normalized to    |
-| ---------------------------------------------------------------------------- | ---------------- |
-| `resistant`, `resistance`, `res`, `r`, `true`, `1`               | `resistant`    |
-| `intermediate`, `interm`, `i`                                          | `intermediate` |
-| `sensitive`, `susceptible`, `sensi`, `sens`, `s`, `false`, `0` | `sensitive`    |
-| `contradictory`, `contra`, `conflict`, `conflicting`              | `contradictory` |
-| empty value,`None`, `unknown`, `na`, `n/a`, `nd`                   | `unknown`      |
+| Input                                                                        | Normalized to     |
+| ---------------------------------------------------------------------------- | ----------------- |
+| `resistant`, `resistance`, `res`, `r`, `true`, `1`               | `resistant`     |
+| `intermediate`, `interm`, `i`                                          | `intermediate`  |
+| `sensitive`, `susceptible`, `sensi`, `sens`, `s`, `false`, `0` | `sensitive`     |
+| `contradictory`, `contra`, `conflict`, `conflicting`                 | `contradictory` |
+| empty value,`None`, `unknown`, `na`, `n/a`, `nd`                   | `unknown`       |
 
 Rules:
 
@@ -236,9 +234,9 @@ Import deduplicates publication entries and links them to atomic rules and formu
 
 ### Minimal single-rule example
 
-| gene | reference_identifier | position | reference | mutation | antiviral | phenotype         |
-| ---- | -------------------- | -------: | --------- | -------- | --------- | ----------------- |
-| UL23 | NC_001806            |      336 | A         | V        | Aciclovir | resistant      |
+| gene | reference_identifier | position | reference | mutation | antiviral | phenotype |
+| ---- | -------------------- | -------: | --------- | -------- | --------- | --------- |
+| UL23 | NC_001806            |      336 | A         | V        | Aciclovir | resistant |
 
 ### Minimal single-rule example for INDELs and frameshifts
 
