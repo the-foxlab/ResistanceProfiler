@@ -244,6 +244,18 @@ async function apiPost(path, body) {
   return response.json();
 }
 
+async function apiDelete(path) {
+  // Shared DELETE helper centralizes auth/error handling.
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+    headers: buildHeaders(),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
+  }
+}
+
 async function apiUpload(path, file, onProgress = null) {
   // Use XHR so upload progress events can be surfaced in the UI.
   const formData = new FormData();
@@ -319,6 +331,9 @@ export function useDashboardLogic() {
   const [isProcessingFasta, setIsProcessingFasta] = useState(false);
   const [isProcessingVcf, setIsProcessingVcf] = useState(false);
   const [isProcessingRegenerate, setIsProcessingRegenerate] = useState(false);
+  const [activeJobId, setActiveJobId] = useState('');
+  const [activeJobStatus, setActiveJobStatus] = useState('');
+  const [isCancelingJob, setIsCancelingJob] = useState(false);
 
   const [mutationFilter, setMutationFilter] = useState('');
   const [mutationFilterColumn, setMutationFilterColumn] = useState('-1');
@@ -592,9 +607,31 @@ export function useDashboardLogic() {
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, FRONTEND_CONFIG.profile.jobPollIntervalMs));
       const payload = await apiGet(`/api/jobs/${jobId}`);
+      setActiveJobStatus(payload.status);
       if (payload.status === 'succeeded') return payload.result;
       if (payload.status === 'failed') throw new Error(formatUserError(payload.error || 'Job failed'));
-      setStatus(`Job running (${jobId.slice(0, 8)}...)`);
+      if (payload.status === 'queued') {
+        setStatus(`Job queued (${jobId.slice(0, 8)}...)`);
+      } else {
+        setStatus(`Job running (${jobId.slice(0, 8)}...)`);
+      }
+    }
+  };
+
+  const cancelActiveJob = async () => {
+    if (!activeJobId) {
+      return;
+    }
+
+    setIsCancelingJob(true);
+    try {
+      await apiDelete(`/api/jobs/${activeJobId}`);
+      setStatus(`Job cancellation requested (${activeJobId.slice(0, 8)}...)`);
+      setActiveJobStatus('canceling');
+    } catch (error) {
+      setStatus(formatUserError(error.message));
+    } finally {
+      setIsCancelingJob(false);
     }
   };
 
@@ -613,6 +650,8 @@ export function useDashboardLogic() {
         aligner: FRONTEND_CONFIG.profile.aligner,
         threads: FRONTEND_CONFIG.profile.threads,
       });
+      setActiveJobId(submitResponse.job_id);
+      setActiveJobStatus('queued');
       setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
       const result = await pollJob(submitResponse.job_id);
       // Keep a local history of run results for the report selector.
@@ -636,6 +675,9 @@ export function useDashboardLogic() {
       setStatus(formatUserError(error.message));
     } finally {
       setIsProcessingFasta(false);
+      setIsCancelingJob(false);
+      setActiveJobId('');
+      setActiveJobStatus('');
     }
   };
 
@@ -666,6 +708,8 @@ export function useDashboardLogic() {
         aligner: FRONTEND_CONFIG.profile.aligner,
         threads: FRONTEND_CONFIG.profile.threads,
       });
+      setActiveJobId(submitResponse.job_id);
+      setActiveJobStatus('queued');
       setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
       const result = await pollJob(submitResponse.job_id);
       setSessionResults((prev) => [...prev, result]);
@@ -688,6 +732,9 @@ export function useDashboardLogic() {
       setStatus(formatUserError(error.message));
     } finally {
       setIsProcessingVcf(false);
+      setIsCancelingJob(false);
+      setActiveJobId('');
+      setActiveJobStatus('');
     }
   };
 
@@ -760,6 +807,8 @@ export function useDashboardLogic() {
         json_path: jsonInputPath,
         database_id: selectedDatabaseId,
       });
+      setActiveJobId(submitResponse.job_id);
+      setActiveJobStatus('queued');
       setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
       const result = await pollJob(submitResponse.job_id);
       setSessionResults((prev) => [...prev, result]);
@@ -772,10 +821,14 @@ export function useDashboardLogic() {
       setStatus(formatUserError(error.message));
     } finally {
       setIsProcessingRegenerate(false);
+      setIsCancelingJob(false);
+      setActiveJobId('');
+      setActiveJobStatus('');
     }
   };
 
   const isProfileBusy = activeProfileMode === 'fasta' ? isProcessingFasta : isProcessingVcf;
+  const canCancelJob = Boolean(activeJobId) && ['queued', 'running'].includes(activeJobStatus);
 
   const runSelectedProfile = async () => {
     // Dispatch to the selected profiling workflow from one button handler.
@@ -858,6 +911,9 @@ export function useDashboardLogic() {
     displayedFormulaRules,
     reportOptions,
     isProfileBusy,
+    canCancelJob,
+    isCancelingJob,
+    cancelActiveJob,
     runSelectedProfile,
     openSelectedReportInline,
     buildReportUrl,

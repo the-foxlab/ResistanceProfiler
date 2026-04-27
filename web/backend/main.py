@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 
 import uvicorn
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -312,7 +312,39 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         status = _map_job_status(rq_status)
         result = job.return_value() if status == 'succeeded' else None
         error = _user_facing_error_message(job.exc_info) if status == 'failed' and job.exc_info else None
+        if status == 'failed' and error is None and rq_status in ('stopped', 'canceled'):
+            error = 'Job canceled by user.'
         return JobStatusResponse(job_id=job_id, status=status, result=result, error=error)
+
+    @app.delete('/api/jobs/{job_id}', status_code=204)
+    def cancel_job(
+        job_id: str,
+        queue: Queue = Depends(get_queue),
+        _auth: None = Depends(require_api_token),
+    ) -> Response:
+        try:
+            job = Job.fetch(job_id, connection=queue.connection)
+        except NoSuchJobError:
+            raise HTTPException(status_code=404, detail='Job not found.')
+
+        rq_status = job.get_status()
+        if rq_status in ('queued', 'scheduled', 'deferred'):
+            job.cancel()
+            return Response(status_code=204)
+
+        if rq_status == 'started':
+            kill_worker = getattr(job, 'kill_worker', None)
+            if callable(kill_worker):
+                kill_worker()
+                return Response(status_code=204)
+
+            # Fallback when worker-kill support is unavailable in the installed RQ version.
+            job.exc_info = 'Job canceled by user.'
+            job.set_status('failed')
+            job.save()
+            return Response(status_code=204)
+
+        return Response(status_code=204)
 
     @app.get('/api/report')
     def open_report(

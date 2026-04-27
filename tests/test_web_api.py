@@ -6,6 +6,7 @@ import json
 import shutil
 import sqlite3
 from pathlib import Path
+from unittest.mock import Mock
 
 import fakeredis
 import pytest
@@ -411,6 +412,45 @@ class TestWebApi:
         payload = status.json()
         assert payload['status'] == 'failed'
         assert payload['error'] == 'VCF and reference FASTA do not match. Use files derived from the same reference sequence.'
+
+    def test_cancel_job_returns_404_for_unknown_id(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        response = client.delete('/api/jobs/does-not-exist', headers=auth_headers)
+        assert response.status_code == 404
+        assert response.json()['detail'] == 'Job not found.'
+
+    def test_cancel_queued_job_calls_job_cancel(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        job = Mock()
+        job.get_status.return_value = 'queued'
+
+        monkeypatch.setattr('web.backend.main.Job.fetch', lambda *_args, **_kwargs: job)
+
+        response = client.delete('/api/jobs/test-job-id', headers=auth_headers)
+        assert response.status_code == 204
+        job.cancel.assert_called_once_with()
+
+    def test_cancel_started_job_calls_kill_worker_when_available(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        job = Mock()
+        job.get_status.return_value = 'started'
+
+        monkeypatch.setattr('web.backend.main.Job.fetch', lambda *_args, **_kwargs: job)
+
+        response = client.delete('/api/jobs/test-job-id', headers=auth_headers)
+        assert response.status_code == 204
+        job.kill_worker.assert_called_once_with()
 
     def test_protected_route_requires_auth(self, client: TestClient) -> None:
         response = client.get('/api/rules')

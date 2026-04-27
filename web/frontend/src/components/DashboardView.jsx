@@ -124,6 +124,9 @@ export function DashboardView({
   displayedFormulaRules,
   reportOptions,
   isProfileBusy,
+  canCancelJob,
+  isCancelingJob,
+  cancelActiveJob,
   runSelectedProfile,
   openSelectedReportInline,
   buildReportUrl,
@@ -439,6 +442,16 @@ export function DashboardView({
 
                   <div className="profile-analyze-row">
                     <p className="status analyze-status-inline">{status}</p>
+                    {canCancelJob ? (
+                      <button
+                        type="button"
+                        className="button-link report-action-btn"
+                        onClick={() => cancelActiveJob()}
+                        disabled={isCancelingJob}
+                      >
+                        {isCancelingJob ? 'Canceling...' : 'Cancel job'}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="analyze-primary"
@@ -500,6 +513,16 @@ export function DashboardView({
 
                   <div className="profile-analyze-row">
                     <p className="status analyze-status-inline">{status}</p>
+                    {canCancelJob ? (
+                      <button
+                        type="button"
+                        className="button-link report-action-btn"
+                        onClick={() => cancelActiveJob()}
+                        disabled={isCancelingJob}
+                      >
+                        {isCancelingJob ? 'Canceling...' : 'Cancel job'}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       className="analyze-primary"

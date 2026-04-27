@@ -195,6 +195,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Processing spinner during profiling jobs — animated spinner SVG appears on Run button while job is queued/running; disabled button state prevents secondary submissions
 - [X] Upload progress tracking — XMLHttpRequest-based progress events display percentage bar during file uploads (FASTA/VCF/BAM); smooth transitions to 100% on completion
 - [X] BAM file upload support — new `/api/upload/bam` endpoint with BAM magic byte validation (BAM\x01); supports files up to 1GB; integrated into VCF profiling card as optional coverage input
+- [X] Job cancel endpoint and UI action — added `DELETE /api/jobs/{job_id}` to cancel queued/running RQ jobs (`job.cancel()` for queued and `job.kill_worker()` fallback-to-fail for started jobs), return `204/404` semantics, and a frontend cancel button shown only while jobs are queued/running
 - [X] Unified dashboard shell and in-app report integration — frontend now uses a cohesive scientific dashboard with global database card, left mode sidebar (Profile VCF, Profile FASTA, Browse mutations, Report), app-level branding links/logo/favicon, and report viewing in an in-app modal instead of opening new browser tabs; report CSS harmonized with web app styling tokens
 - [X] Database analytics tiles in Web UI — Database tab now shows structured metadata cards plus a responsive 2-column plot grid with per-reference/gene mutation-position charts and optional IC50/drug summary plots derived from the loaded rules
 - [X] Report artifact downloads in web app — profiling jobs now emit HTML + JSON + tabular outputs; report panel adds direct JSON/tabular download buttons and backend `/api/artifact` serves non-HTML files from the allowed data directory
@@ -380,12 +381,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### WebUI
 
-- 🟡 Job cancel endpoint — add `DELETE /api/jobs/{job_id}` that cancels a queued or running RQ
-  job; for queued jobs call `job.cancel()` on the RQ `Job` object; for running jobs send a
-  `SIGTERM` to the worker process via `job.kill_worker()` (RQ ≥ 1.16) or instruct RQ to set the
-  job to failed; return 204 on success or 404 if the job ID is unknown; expose a cancel button in
-  the frontend that appears while the job is in `queued` or `started` state and is hidden once
-  the job reaches a terminal state
 - 🟡 Persistent job history in the frontend — currently submitted job IDs live only in React
   component state and are lost on page reload; persist the list of job IDs and their last-known
   status to `localStorage` (keyed by session token or a browser-generated UUID stored in
