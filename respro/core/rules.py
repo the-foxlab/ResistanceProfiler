@@ -19,7 +19,12 @@ from respro.db.models import (
     ResistanceRuleSetMember,
     is_internal_formula_component_drug_name,
 )
-from respro.db.rules_import import _load_formula_rules, _load_resistance_rules, _tokenize_formula_expression
+from respro.db.rules_import import (
+    _load_formula_rules,
+    _load_resistance_rules,
+    _report_publication_lookup_failures,
+    _tokenize_formula_expression,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +73,7 @@ def import_rules_with_summary(
     before_formula_members = int(
         conn.execute('SELECT COUNT(*) FROM resistance_formula_rule_member').fetchone()[0]
     )
+    publication_lookup_failures: list[str] = []
 
     single_rules, grouped_ids, declared_external_ids, skipped_external_ids = _load_resistance_rules(
         conn,
@@ -75,6 +81,7 @@ def import_rules_with_summary(
         rules_tsv,
         require_external_ids=formula_rules_tsv is not None,
         additional_info=additional_info,
+        publication_lookup_failures=publication_lookup_failures,
     )
     if formula_rules_tsv is not None:
         _load_formula_rules(
@@ -85,12 +92,15 @@ def import_rules_with_summary(
             declared_atomic_ids=declared_external_ids,
             skipped_atomic_ids=skipped_external_ids,
             additional_info=additional_info,
+            publication_lookup_failures=publication_lookup_failures,
         )
     elif grouped_ids:
         logger.warning(
             'Detected grouped atomic rules in rules TSV, but --formula-rules was not provided; '
             'the database was created and atomic rules were imported, while combinatorial rules were ignored'
         )
+
+    _report_publication_lookup_failures(publication_lookup_failures)
 
     after_formula_rules = int(conn.execute('SELECT COUNT(*) FROM resistance_formula_rule').fetchone()[0])
     after_formula_members = int(

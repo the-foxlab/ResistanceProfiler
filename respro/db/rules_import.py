@@ -18,6 +18,7 @@ from respro.io.publications import (
     fetch_publication_metadata,
     fetch_pubmed_id_for_doi,
     fetch_pubmed_metadata,
+    normalize_doi_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,28 @@ def _parse_publication_entries(raw: str) -> list[tuple[str, str, str]]:
     return entries
 
 
+def _record_publication_lookup_failure(
+    publication_lookup_failures: list[str] | None,
+    message: str,
+) -> None:
+    """Append one publication lookup failure message when collection is enabled."""
+    if publication_lookup_failures is None:
+        return
+    publication_lookup_failures.append(message)
+
+
+def _report_publication_lookup_failures(publication_lookup_failures: list[str]) -> None:
+    """Emit one consolidated warning block for failed publication metadata lookups."""
+    unique_failures = sorted(set(publication_lookup_failures))
+    if not unique_failures:
+        return
+    logger.warning(
+        '%d publication metadata lookup(s) failed:\n%s',
+        len(unique_failures),
+        '\n'.join(f'  - {message}' for message in unique_failures),
+    )
+
+
 def _get_or_create_publication(
     conn: sqlite3.Connection,
     doi: str,
@@ -113,6 +136,7 @@ def _get_or_create_publication(
     raw_input: str,
     additional_info: bool,
     pub_cache: dict[str, int],
+    publication_lookup_failures: list[str] | None = None,
 ) -> int:
     """
     Return the id of an existing publication row, creating one if needed.
@@ -143,26 +167,40 @@ def _get_or_create_publication(
         return pub_cache[raw_input]
 
     prefetched_title = ''
+    doi = normalize_doi_token(doi)
+    pmid_to_doi_resolved = False
+    doi_to_pmid_resolved = False
+    doi_lookup_missing_pmid = False
     if additional_info and pubmed_id:
         meta = fetch_pubmed_metadata(pubmed_id)
         if meta:
             if meta['doi'] and not doi:
-                doi = meta['doi']
-                logger.info('Resolved PMID:%s → DOI %s', pubmed_id, doi)
+                doi = normalize_doi_token(meta['doi'])
+                if doi:
+                    pmid_to_doi_resolved = True
             prefetched_title = meta['title']
+        else:
+            _record_publication_lookup_failure(
+                publication_lookup_failures,
+                f'PMID:{pubmed_id} → metadata lookup failed',
+            )
 
     if additional_info and doi and not pubmed_id:
         resolved_pubmed_id = fetch_pubmed_id_for_doi(doi)
         if resolved_pubmed_id:
             pubmed_id = resolved_pubmed_id
-            logger.info('Resolved DOI:%s → PMID:%s', doi, pubmed_id)
+            doi_to_pmid_resolved = True
 
             meta = fetch_pubmed_metadata(pubmed_id)
             if meta:
                 prefetched_title = prefetched_title or meta.get('title', '')
                 if meta['doi'] and not doi:
-                    doi = meta['doi']
-                    logger.info('Resolved PMID:%s → DOI %s', pubmed_id, doi)
+                    normalized_doi = normalize_doi_token(meta['doi'])
+                    if normalized_doi:
+                        doi = normalized_doi
+                        pmid_to_doi_resolved = True
+        else:
+            doi_lookup_missing_pmid = True
 
     cache_key = doi if doi else raw_input
 
@@ -188,14 +226,40 @@ def _get_or_create_publication(
         pub_cache[raw_input] = pub_id
         return pub_id
 
-    # Title: from NCBI (already prefetched), or CrossRef fallback for DOI-only entries.
+    # Prefer CrossRef title whenever a DOI is known; fall back to PMID title.
     title = prefetched_title
-    if additional_info and not title and doi:
+    crossref_title_fetched = False
+    if additional_info and doi:
         meta = fetch_publication_metadata(doi)
         if meta:
-            title = meta.get('title', '')
-            if title and not pubmed_id:
-                logger.info('Resolved DOI:%s → title via CrossRef', doi)
+            crossref_title = meta.get('title', '')
+            if crossref_title:
+                title = crossref_title
+                crossref_title_fetched = True
+
+    if crossref_title_fetched:
+        if doi_to_pmid_resolved:
+            logger.info(
+                'Resolved DOI %s → PMID:%s and title successfully fetched via CrossRef',
+                doi,
+                pubmed_id,
+            )
+        elif doi_lookup_missing_pmid:
+            logger.info(
+                'Resolved DOI %s → No PMID found and title successfully fetched via CrossRef',
+                doi,
+            )
+        if pmid_to_doi_resolved:
+            logger.info(
+                'Resolved PMID %s → DOI %s and title successfully fetched via CrossRef',
+                pubmed_id,
+                doi,
+            )
+    elif doi_lookup_missing_pmid:
+        _record_publication_lookup_failure(
+            publication_lookup_failures,
+            f'DOI {doi} → identifier lookup failed',
+        )
 
     cur = conn.execute(
         'INSERT INTO publication (doi, title, pubmed_id, raw_input) VALUES (?, ?, ?, ?)',
@@ -213,11 +277,18 @@ def _link_rule_publications(
     raw_publication: str,
     additional_info: bool,
     pub_cache: dict[str, int],
+    publication_lookup_failures: list[str] | None = None,
 ) -> None:
     """Parse, resolve, and link all publications in a raw TSV cell to a single rule."""
     for doi, pubmed_id, raw_input in _parse_publication_entries(raw_publication):
         pub_id = _get_or_create_publication(
-            conn, doi, pubmed_id, raw_input, additional_info, pub_cache,
+            conn,
+            doi,
+            pubmed_id,
+            raw_input,
+            additional_info,
+            pub_cache,
+            publication_lookup_failures,
         )
         conn.execute(
             'INSERT OR IGNORE INTO rule_publication (rule_id, publication_id) VALUES (?, ?)',
@@ -231,11 +302,18 @@ def _link_formula_rule_publications(
     raw_publication: str,
     additional_info: bool,
     pub_cache: dict[str, int],
+    publication_lookup_failures: list[str] | None = None,
 ) -> None:
     """Parse, resolve, and link all publications in a raw TSV cell to one formula rule."""
     for doi, pubmed_id, raw_input in _parse_publication_entries(raw_publication):
         pub_id = _get_or_create_publication(
-            conn, doi, pubmed_id, raw_input, additional_info, pub_cache,
+            conn,
+            doi,
+            pubmed_id,
+            raw_input,
+            additional_info,
+            pub_cache,
+            publication_lookup_failures,
         )
         conn.execute(
             'INSERT OR IGNORE INTO resistance_formula_rule_publication '
@@ -1244,6 +1322,7 @@ def _load_resistance_rules(
     rules_tsv: Path,
     require_external_ids: bool = False,
     additional_info: bool = False,
+    publication_lookup_failures: list[str] | None = None,
 ) -> tuple[int, set[str], set[str], dict[str, str]]:
     """
     Load resistance rules from TSV file; return count of inserted rules and grouped IDs.
@@ -1274,7 +1353,6 @@ def _load_resistance_rules(
     skipped_invalid_aa: list[str] = []
     skipped_duplicates_detail: list[str] = []
     skipped_identical_member_id_rows: list[str] = []
-    grouped_missing_antiviral_rows: list[str] = []
     # Maps external_id → skip reason, for formula rule skip messages.
     skipped_external_ids: dict[str, str] = {}
     seen_external_id_signatures: dict[str, tuple[int, tuple[int, str, int, str, str]]] = {}
@@ -1393,9 +1471,6 @@ def _load_resistance_rules(
 
         if not drug_name:
             if require_external_ids and external_id:
-                grouped_missing_antiviral_rows.append(
-                    f'row {row_number}: gene {gene_name!r}, member_id {external_id!r}'
-                )
                 drug_name = _INTERNAL_FORMULA_COMPONENT_DRUG_NAME
             else:
                 errors.append(f'Rule for gene {gene_name!r} has no antiviral value')
@@ -1564,7 +1639,14 @@ def _load_resistance_rules(
         rule_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
         raw_publication = _get_value(row, 'publication')
         if raw_publication:
-            _link_rule_publications(conn, rule_id, raw_publication, additional_info, pub_cache)
+            _link_rule_publications(
+                conn,
+                rule_id,
+                raw_publication,
+                additional_info,
+                pub_cache,
+                publication_lookup_failures,
+            )
         count += 1
 
     if skipped_gene:
@@ -1594,14 +1676,6 @@ def _load_resistance_rules(
             '%d rule(s) skipped — unsupported amino-acid tokens:\n%s',
             len(unique_invalid),
             '\n'.join(f'  - {msg}' for msg in unique_invalid),
-        )
-
-    if grouped_missing_antiviral_rows:
-        logger.warning(
-            '%d grouped atomic rule row(s) without antiviral were imported as formula members '
-            'using an internal placeholder drug entry:\n%s',
-            len(grouped_missing_antiviral_rows),
-            '\n'.join(f'  - {msg}' for msg in grouped_missing_antiviral_rows),
         )
 
     if skipped_duplicates_detail:
@@ -1642,6 +1716,7 @@ def _load_formula_rules(
     declared_atomic_ids: set[str] | None = None,
     skipped_atomic_ids: dict[str, str] | None = None,
     additional_info: bool = False,
+    publication_lookup_failures: list[str] | None = None,
 ) -> int:
     """Load formula rules from a second TSV and return the inserted formula-rule count."""
     drug_cache: dict[str, int] = {}
@@ -1847,6 +1922,7 @@ def _load_formula_rules(
                 raw_publication,
                 additional_info,
                 pub_cache,
+                publication_lookup_failures,
             )
         inserted += 1
 

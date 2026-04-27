@@ -153,6 +153,21 @@ class TestFetchPublicationMetadata:
         with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             assert fetch_publication_metadata('10.1234/xyz') is None
 
+    def test_retries_on_429_and_eventually_succeeds(self) -> None:
+        headers = Message()
+        headers['Retry-After'] = '0'
+        rate_limited = urllib.error.HTTPError(
+            url='', code=429, msg='Too Many Requests', hdrs=headers, fp=None,  # type: ignore[arg-type]
+        )
+        payload = {'message': {'title': ['A CrossRef Title']}}
+        with (
+            patch('urllib.request.urlopen', side_effect=[rate_limited, _mock_response(payload)]),
+            patch('time.sleep') as mock_sleep,
+        ):
+            result = fetch_publication_metadata('10.1234/xyz')
+        assert result == {'title': 'A CrossRef Title'}
+        mock_sleep.assert_called_once_with(0.0)
+
 
 # ── fetch_pubmed_id_for_doi ───────────────────────────────────────────────────
 
@@ -193,4 +208,25 @@ class TestFetchPubmedIdForDoi:
             url='', code=400, msg='Bad Request', hdrs=None, fp=None,  # type: ignore[arg-type]
         )):
             assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
+
+    def test_accepts_doi_org_prefixed_input(self) -> None:
+        payload = {'records': [{'doi': '10.1234/xyz', 'pmid': '12345678'}]}
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
+            result = fetch_pubmed_id_for_doi('doi.org/10.1234/xyz')
+        assert result == '12345678'
+
+    def test_retries_on_429_and_eventually_succeeds(self) -> None:
+        headers = Message()
+        headers['Retry-After'] = '0'
+        rate_limited = urllib.error.HTTPError(
+            url='', code=429, msg='Too Many Requests', hdrs=headers, fp=None,  # type: ignore[arg-type]
+        )
+        payload = {'records': [{'doi': '10.1234/xyz', 'pmid': '12345678'}]}
+        with (
+            patch('urllib.request.urlopen', side_effect=[rate_limited, _mock_response(payload)]),
+            patch('time.sleep') as mock_sleep,
+        ):
+            result = fetch_pubmed_id_for_doi('10.1234/xyz')
+        assert result == '12345678'
+        mock_sleep.assert_called_once_with(0.0)
 

@@ -64,8 +64,10 @@ def _list_command() -> None:
             if isinstance(value, list):
                 value = ', '.join(str(v) for v in value)
             lines.append(f'{label}: ', style='dim')
-            lines.append(f'{value}\n')
-
+            if key == 'publication_pmid':
+                lines.append(f'{value}')
+            else:
+                lines.append(f'{value}\n')
         console.print(Panel(lines, expand=False))
 
 

@@ -601,6 +601,41 @@ class TestComboRuleParsing:
         assert row is not None
         assert row[0] == '10.1086/590668'
 
+    def test_doi_publication_stores_resolved_pmid_when_additional_info_is_enabled(
+        self,
+        tmp_path,
+        tiny_genbank,
+    ) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tdoi.org/10.1086/590668
+        """))
+        db = tmp_path / 'proj.db'
+
+        with (
+            patch('respro.db.rules_import.fetch_pubmed_id_for_doi', return_value='12345678'),
+            patch(
+                'respro.db.rules_import.fetch_pubmed_metadata',
+                return_value={'title': 'PubMed title', 'doi': '10.1086/590668'},
+            ),
+            patch(
+                'respro.db.rules_import.fetch_publication_metadata',
+                return_value={'title': 'CrossRef title'},
+            ),
+        ):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=True)
+
+        conn = sqlite3.connect(str(db))
+        row = conn.execute(
+            'SELECT p.doi, p.pubmed_id FROM publication p '
+            'JOIN rule_publication rp ON rp.publication_id = p.id'
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] == '10.1086/590668'
+        assert row[1] == '12345678'
+
     def test_doi_lookup_logs_concise_success_messages(self, tmp_path, tiny_genbank, caplog) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
@@ -617,7 +652,7 @@ class TestComboRuleParsing:
             ),
             patch(
                 'respro.db.rules_import.fetch_pubmed_metadata',
-                return_value={'title': '', 'doi': ''},
+                return_value={'title': '', 'doi': '10.1086/590668'},
             ),
             patch(
                 'respro.db.rules_import.fetch_publication_metadata',
@@ -626,9 +661,104 @@ class TestComboRuleParsing:
         ):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=True)
 
-        assert any('Resolved DOI:10.1086/590668 → PMID:12345678' in rec.message for rec in caplog.records)
+        assert any(
+            'Resolved DOI 10.1086/590668 → PMID:12345678 and title successfully fetched via CrossRef'
+            in rec.message
+            for rec in caplog.records
+        )
         assert not any('Resolving DOI:' in rec.message for rec in caplog.records)
         assert not any('Could not resolve DOI:' in rec.message for rec in caplog.records)
+
+    def test_pmid_lookup_logs_doi_and_crossref_title_success(
+        self,
+        tmp_path,
+        tiny_genbank,
+        caplog,
+    ) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tPMID:3034575
+        """))
+        db = tmp_path / 'proj.db'
+
+        with (
+            caplog.at_level(logging.INFO, logger='respro.db.rules_import'),
+            patch(
+                'respro.db.rules_import.fetch_pubmed_metadata',
+                return_value={'title': 'PubMed title', 'doi': 'doi.org/10.1002/j.1460-2075.1987.tb04735.x'},
+            ),
+            patch(
+                'respro.db.rules_import.fetch_publication_metadata',
+                return_value={'title': 'CrossRef title'},
+            ),
+        ):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=True)
+
+        assert any(
+            'Resolved PMID 3034575 → DOI 10.1002/j.1460-2075.1987.tb04735.x and title '
+            'successfully fetched via CrossRef' in rec.message
+            for rec in caplog.records
+        )
+
+    def test_publication_lookup_failures_are_reported_once_after_import(
+        self,
+        tmp_path,
+        tiny_genbank,
+        caplog,
+    ) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tdoi.org/10.1086/590668
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tPMID:3034575
+        """))
+        db = tmp_path / 'proj.db'
+
+        with (
+            caplog.at_level(logging.WARNING, logger='respro.db.rules_import'),
+            patch('respro.db.rules_import.fetch_pubmed_id_for_doi', return_value=None),
+            patch('respro.db.rules_import.fetch_pubmed_metadata', return_value=None),
+            patch('respro.db.rules_import.fetch_publication_metadata', return_value=None),
+        ):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=True)
+
+        warning_messages = [
+            rec.message for rec in caplog.records if 'publication metadata lookup(s) failed' in rec.message
+        ]
+        assert len(warning_messages) == 1
+        assert 'DOI 10.1086/590668 → identifier lookup failed' in warning_messages[0]
+        assert 'PMID:3034575 → metadata lookup failed' in warning_messages[0]
+
+    def test_doi_lookup_logs_no_pmid_found_with_crossref_success_without_warning(
+        self,
+        tmp_path,
+        tiny_genbank,
+        caplog,
+    ) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tdoi.org/10.1093/infdis/jiz577
+        """))
+        db = tmp_path / 'proj.db'
+
+        with (
+            caplog.at_level(logging.INFO, logger='respro.db.rules_import'),
+            patch('respro.db.rules_import.fetch_pubmed_id_for_doi', return_value=None),
+            patch(
+                'respro.db.rules_import.fetch_publication_metadata',
+                return_value={'title': 'CrossRef title'},
+            ),
+        ):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=True)
+
+        assert any(
+            'Resolved DOI 10.1093/infdis/jiz577 → No PMID found and title successfully '
+            'fetched via CrossRef' in rec.message
+            for rec in caplog.records
+        )
+        assert not any('publication metadata lookup(s) failed' in rec.message for rec in caplog.records)
 
     def test_single_rule_publication_pmid_is_stored(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
