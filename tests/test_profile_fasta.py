@@ -5,9 +5,12 @@ and end-to-end CLI workflow.
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
+from typing import Literal
 
 import pytest
+from Bio.Seq import Seq
 from conftest import TINY_REF_NAME, TINY_REF_SEQ
 from typer.testing import CliRunner
 
@@ -1245,4 +1248,84 @@ class TestFastaDeletionAnnotation:
         assert _matches_rule_alleles(
             reference='MG', mutation='M', ann_ref=ann.ref_aa, ann_alt=ann.alt_aa,
         )
+
+
+class TestReverseStrandMappyParity:
+    """Regression tests for reverse-strand FASTA profiling with mappy CIGAR handling."""
+
+    def _build_long_coding_reference(self) -> str:
+        rng = random.Random(42)
+        codons = (
+            'GCT', 'GAT', 'GAA', 'TCC', 'CAG', 'AAC', 'CTG', 'TAC',
+            'GGA', 'ATC', 'CAA', 'TTG', 'GTC', 'AGC', 'AAG', 'TTC',
+            'GCG', 'ACC', 'GGT', 'CAT',
+        )
+        return ''.join(rng.choice(codons) for _ in range(700))
+
+    def _profile_reverse_query(
+        self,
+        coding_reference: str,
+        coding_query: str,
+        aligner: Literal['mappy', 'pairwise'],
+    ) -> list[tuple[int, str, str, str]]:
+        query = str(Seq(coding_query).reverse_complement())
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='rev',
+            protein='Rev',
+            start=0,
+            end=len(coding_reference),
+            strand='-',
+            codon_start=0,
+            nt_sequence=coding_reference,
+            aa_sequence='',
+        )
+
+        matches = match_query_to_genes(
+            query,
+            [gene],
+            min_identity=0.7,
+            min_coverage=0.7,
+            aligner=aligner,
+        )
+        assert len(matches) == 1
+        assert matches[0].strand == '-'
+
+        annotations, gaps = profile_fasta_consensus(query, [matches[0]])
+        assert gaps == []
+        return [
+            (ann.codon_pos, ann.consequence, ann.ref_aa, ann.alt_aa)
+            for ann in annotations
+        ]
+
+    def test_reverse_frameshift_is_single_event_in_mappy(self) -> None:
+        coding_reference = self._build_long_coding_reference()
+        event_pos = 901
+        coding_query = coding_reference[:event_pos] + coding_reference[event_pos + 1:]
+
+        mappy = self._profile_reverse_query(coding_reference, coding_query, 'mappy')
+
+        assert len(mappy) == 1
+        assert mappy[0][1] == 'frameshift'
+
+    def test_reverse_triplet_deletion_is_single_event_in_mappy(self) -> None:
+        coding_reference = self._build_long_coding_reference()
+        event_pos = 900
+        coding_query = coding_reference[:event_pos] + coding_reference[event_pos + 3:]
+
+        mappy = self._profile_reverse_query(coding_reference, coding_query, 'mappy')
+
+        assert len(mappy) == 1
+        assert mappy[0][1] == 'deletion'
+
+    def test_reverse_triplet_insertion_is_single_event_in_mappy(self) -> None:
+        coding_reference = self._build_long_coding_reference()
+        event_pos = 900
+        coding_query = coding_reference[:event_pos] + 'GCC' + coding_reference[event_pos:]
+
+        mappy = self._profile_reverse_query(coding_reference, coding_query, 'mappy')
+
+        assert len(mappy) == 1
+        assert mappy[0][1] == 'insertion'
 

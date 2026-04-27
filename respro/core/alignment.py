@@ -233,10 +233,7 @@ def _match_with_mappy(
             continue
 
         strand = '+' if h.strand == 1 else '-'
-        # mappy CIGAR convention (gene=query, genome=reference): I means gene has extra
-        # bases relative to the genome; D means genome has extra.  The pipeline convention
-        # is the inverse (CDS=reference, genome=query), so I and D are swapped.
-        cigar = _swap_cigar_indels(h.cigar_str)
+        cigar = _normalize_mappy_cigar(h.cigar_str, strand)
 
         matches.append(GeneMatch(
             gene=gene,
@@ -268,6 +265,37 @@ def _swap_cigar_indels(cigar: str) -> str:
         lambda m: m.group(1) + ('D' if m.group(2) == 'I' else 'I'),
         cigar,
     )
+
+
+def _reverse_cigar_operations(cigar: str) -> str:
+    """
+    Reverse the operation order of a CIGAR string.
+
+    :param cigar: CIGAR string
+    :return: CIGAR with reversed operation order
+    """
+    ops = re.findall(r'(\d+)([MIDNSHP=X])', cigar)
+    return ''.join(f'{length}{op}' for length, op in reversed(ops))
+
+
+def _normalize_mappy_cigar(cigar: str, strand: str) -> str:
+    """
+    Convert a mappy CIGAR to pipeline CDS-vs-query convention.
+
+    mappy reports CIGAR for gene=query, genome=reference. The pipeline uses
+    CDS=reference, genome=query, so I/D are swapped. For reverse-strand hits,
+    the query region is reverse-complemented before FASTA codon-walking and
+    therefore requires reversed CIGAR operation order to keep indel positions
+    in coding order.
+
+    :param cigar: mappy CIGAR string
+    :param strand: '+' or '-'
+    :return: normalized CIGAR string for downstream pipeline use
+    """
+    swapped = _swap_cigar_indels(cigar)
+    if strand == '-':
+        return _reverse_cigar_operations(swapped)
+    return swapped
 
 
 # ──────────────────────────────────────────────────────────────────────

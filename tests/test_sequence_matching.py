@@ -11,6 +11,8 @@ from Bio.Seq import Seq
 
 import respro.core.alignment as alignment
 from respro.core.alignment import (
+    _normalize_mappy_cigar,
+    _reverse_cigar_operations,
     _swap_cigar_indels,
     cigar_to_coordinate_map,
     load_cached_mappings,
@@ -346,6 +348,17 @@ class TestSwapCigarIndels:
 
     def test_empty_string(self) -> None:
         assert _swap_cigar_indels('') == ''
+
+
+class TestNormalizeMappyCigar:
+    def test_reverse_cigar_operations(self) -> None:
+        assert _reverse_cigar_operations('10M2D5M1I8M') == '8M1I5M2D10M'
+
+    def test_normalize_mappy_cigar_forward(self) -> None:
+        assert _normalize_mappy_cigar('10M2I5M1D8M', '+') == '10M2D5M1I8M'
+
+    def test_normalize_mappy_cigar_reverse(self) -> None:
+        assert _normalize_mappy_cigar('10M2I5M1D8M', '-') == '8M1I5M2D10M'
 
 
 class TestMappyBackend:
