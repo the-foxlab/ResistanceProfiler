@@ -15,6 +15,7 @@ import { FRONTEND_CONFIG } from '../config';
 import { buildDatabasePlots } from './database-plots/buildDatabasePlots';
 import { DatabasePieSummaryRow } from './database-plots/DatabasePieSummaryTile';
 import { DatabasePositionPlot } from './database-plots/DatabasePositionPlot';
+import { DatabaseDrugDistributionPlot } from './database-plots/DatabaseDrugDistributionPlot';
 import { DatabaseSelectorBar } from './DatabaseSelectorBar';
 import { Spinner } from './Spinner';
 import regenerateIconSrc from '../assets/icon-regenerate.svg';
@@ -142,9 +143,27 @@ export function DashboardView({
   const [requestedPhenotypeMode, setRequestedPhenotypeMode] = useState('auto');
   const [requestedBinSize, setRequestedBinSize] = useState(10);
 
-  const { summaryTile, detailSections, phenotypeMode, binSize } = useMemo(
-    () => buildDatabasePlots(rules, formulaRules, mutationPlotMeta, requestedPhenotypeMode, requestedBinSize),
-    [rules, formulaRules, mutationPlotMeta, requestedPhenotypeMode, requestedBinSize]
+  const {
+    summaryTile,
+    ic50Sections,
+    detailSections,
+    phenotypeMode,
+    binSize,
+  } = useMemo(
+    () => buildDatabasePlots(
+      rules,
+      formulaRules,
+      mutationPlotMeta,
+      requestedPhenotypeMode,
+      requestedBinSize,
+    ),
+    [
+      rules,
+      formulaRules,
+      mutationPlotMeta,
+      requestedPhenotypeMode,
+      requestedBinSize,
+    ]
   );
   const activePhenotypeMode = phenotypeMode.activeMode;
   const selectedReportOption = useMemo(
@@ -780,12 +799,27 @@ export function DashboardView({
                       ))}
                     </section>
                   ) : null}
-                  {summaryTile || detailSections.length > 0 ? (
+                  {summaryTile || ic50Sections.length > 0 || detailSections.length > 0 ? (
                     <div className="database-plot-grid">
                       {summaryTile ? <DatabasePieSummaryRow tile={summaryTile} /> : null}
                       {/* Chart controls are global for all gene tiles in this section. */}
+                      {ic50Sections.map((section) => (
+                        <section
+                          key={section.sectionKey}
+                          className="database-reference-section database-reference-section-wide"
+                        >
+                          <div className="database-phenotype-switch-row">
+                            <h3 className="database-section-heading">{section.sectionHeading}</h3>
+                          </div>
+                          <div className="database-reference-plot-grid">
+                            {section.plots.map((plot) => (
+                              <DatabaseDrugDistributionPlot key={plot.key} plot={plot} />
+                            ))}
+                          </div>
+                        </section>
+                      ))}
                       <div className="database-phenotype-switch-row">
-                        <span className="database-phenotype-switch-label">Mutations in each gene</span>
+                        <h3 className="database-section-heading">Mutations in each gene</h3>
                         <div className="database-phenotype-switch-controls">
                           {phenotypeMode.hasPhenotype && phenotypeMode.hasClinical ? (
                             <div className="database-phenotype-switch" role="group" aria-label="Position annotation mode">

@@ -8,29 +8,6 @@ function _displayValue(value, fallback = 'n/a') {
   return _isPopulated(value) ? String(value) : fallback;
 }
 
-function _classificationText(rule) {
-  const clinicalPhenotype = _isPopulated(rule.clinical_phenotype)
-    ? String(rule.clinical_phenotype).trim()
-    : '';
-  const phenotype = _isPopulated(rule.phenotype)
-    ? String(rule.phenotype).trim()
-    : '';
-
-  if (clinicalPhenotype && clinicalPhenotype.toLowerCase() !== 'unknown') {
-    return clinicalPhenotype;
-  }
-  if (phenotype && phenotype.toLowerCase() !== 'unknown') {
-    return phenotype;
-  }
-  if (clinicalPhenotype) {
-    return clinicalPhenotype;
-  }
-  if (phenotype) {
-    return phenotype;
-  }
-  return '';
-}
-
 function _hasUsableAnnotation(value) {
   if (!_isPopulated(value)) {
     return false;
@@ -368,6 +345,226 @@ function _buildGeneLengthLookup(plotMeta) {
   return lookup;
 }
 
+function _parseNumericMeasurement(value) {
+  if (!_isPopulated(value)) {
+    return null;
+  }
+
+  const normalized = String(value).trim();
+  const direct = Number(normalized);
+  if (Number.isFinite(direct)) {
+    return direct;
+  }
+
+  const match = normalized.match(/[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?/);
+  if (!match) {
+    return null;
+  }
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function _buildLogTicks(minValue, maxValue) {
+  const safeMin = Math.max(minValue, 1e-6);
+  const safeMax = Math.max(maxValue, safeMin);
+  const multipliers = [2, 3, 4, 5, 6, 7, 8, 9, 10];
+  const majorMultipliers = new Set([2]);
+  const minExponent = Math.floor(Math.log10(safeMin)) - 1;
+  const maxExponent = Math.ceil(Math.log10(safeMax)) + 1;
+  const tickEntries = [];
+
+  for (let exponent = minExponent; exponent <= maxExponent; exponent += 1) {
+    const scale = 10 ** exponent;
+    multipliers.forEach((multiplier) => {
+      const tickValue = multiplier * scale;
+      if (tickValue >= safeMin && tickValue <= safeMax) {
+        tickEntries.push({
+          value: Math.log10(tickValue),
+          isMajor: majorMultipliers.has(multiplier),
+        });
+      }
+    });
+  }
+
+  const roundedEntries = tickEntries
+    .map((entry) => ({
+      value: Math.round(entry.value * 1000000) / 1000000,
+      isMajor: entry.isMajor,
+    }))
+    .sort((a, b) => a.value - b.value);
+
+  const merged = [];
+  roundedEntries.forEach((entry) => {
+    const existing = merged.find((item) => item.value === entry.value);
+    if (existing) {
+      existing.isMajor = existing.isMajor || entry.isMajor;
+      return;
+    }
+    merged.push(entry);
+  });
+
+  return {
+    ticks: merged.map((entry) => entry.value),
+    majorTicks: merged.filter((entry) => entry.isMajor).map((entry) => entry.value),
+  };
+}
+
+function _buildIc50DistributionSections(rules, plotMeta) {
+  // Build one strip-plot per organism with one y-lane per drug and log-scaled IC50 on x.
+  const references = Array.isArray(plotMeta?.references) ? plotMeta.references : [];
+  const organismByReference = new Map();
+
+  references.forEach((reference) => {
+    const referenceName = _displayValue(reference.reference_name, 'Unknown reference');
+    const organism = _displayValue(reference.reference_organism, 'Unknown organism');
+    organismByReference.set(referenceName, organism);
+  });
+
+  const groups = new Map();
+  rules.forEach((rule) => {
+    const referenceName = _displayValue(rule.reference_name, 'Unknown reference');
+    const organism = organismByReference.get(referenceName) || 'Unknown organism';
+    if (!groups.has(organism)) {
+      groups.set(organism, {
+        organism,
+        byDrug: new Map(),
+        skippedNonPositive: 0,
+      });
+    }
+
+    const group = groups.get(organism);
+    const drug = _displayValue(rule.drug, 'Unspecified drug');
+    if (!group.byDrug.has(drug)) {
+      group.byDrug.set(drug, {
+        ic50Values: [],
+        foldValues: [],
+      });
+    }
+
+    const drugBucket = group.byDrug.get(drug);
+    const ic50Value = _parseNumericMeasurement(rule.ic50);
+    if (ic50Value !== null) {
+      if (ic50Value > 0) {
+        drugBucket.ic50Values.push(ic50Value);
+      } else {
+        group.skippedNonPositive += 1;
+      }
+    }
+
+    const foldValue = _parseNumericMeasurement(rule.fold_ic50);
+    if (foldValue !== null) {
+      if (foldValue > 0) {
+        drugBucket.foldValues.push(foldValue);
+      } else {
+        group.skippedNonPositive += 1;
+      }
+    }
+  });
+
+  const plots = Array.from(groups.values())
+    .map((group) => {
+      const drugEntries = Array.from(group.byDrug.entries())
+        .map(([drug, bucket]) => {
+          const useIc50 = bucket.ic50Values.length > 0;
+          const values = useIc50 ? bucket.ic50Values : bucket.foldValues;
+          return {
+            drug,
+            values,
+            metricLabel: useIc50 ? 'IC50' : 'Fold IC50',
+          };
+        })
+        .filter((entry) => entry.values.length > 0)
+        .sort((a, b) => a.drug.localeCompare(b.drug));
+
+      if (drugEntries.length === 0) {
+        return null;
+      }
+
+      const laneLabels = {};
+      const points = [];
+      const metricLabels = new Set();
+      let minValue = Number.POSITIVE_INFINITY;
+      let maxValue = Number.NEGATIVE_INFINITY;
+
+      drugEntries.forEach((entry, laneIdx) => {
+        const lane = laneIdx + 1;
+        laneLabels[String(lane)] = entry.drug;
+        metricLabels.add(entry.metricLabel);
+
+        entry.values.forEach((value, valueIdx) => {
+          // Small deterministic jitter to reduce overplotting while keeping lane readability.
+          const jitter = ((valueIdx % 7) - 3) / 14;
+          points.push({
+            x: Math.log10(value),
+            y: lane + jitter,
+            lane,
+            drug: entry.drug,
+            value,
+            metricLabel: entry.metricLabel,
+            color: PIE_COLORS[laneIdx % PIE_COLORS.length],
+          });
+          minValue = Math.min(minValue, value);
+          maxValue = Math.max(maxValue, value);
+        });
+      });
+
+      if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) {
+        return null;
+      }
+
+      if (minValue === maxValue) {
+        minValue = minValue / 2;
+        maxValue = maxValue * 2;
+      }
+
+      const minLog = Math.log10(minValue);
+      const maxLog = Math.log10(maxValue);
+      const xDomain = minLog === maxLog
+        ? [minLog - 0.3, maxLog + 0.3]
+        : [minLog, maxLog];
+      const tickConfig = _buildLogTicks(minValue, maxValue);
+      const axisMetricLabel = metricLabels.size === 1
+        ? Array.from(metricLabels)[0].replace('IC50', 'IC₅₀')
+        : 'IC₅₀ / Fold IC₅₀';
+      const subtitleMetricHint = metricLabels.size === 1
+        ? Array.from(metricLabels)[0].replace('IC50', 'IC₅₀')
+        : 'IC₅₀ preferred, Fold IC₅₀ fallback';
+
+      return {
+        kind: 'ic50-distribution',
+        key: `ic50::${group.organism}`,
+        title: group.organism,
+        subtitle: `Log-scaled ${subtitleMetricHint} distribution across ${drugEntries.length} drug(s)`,
+        footer: group.skippedNonPositive > 0
+          ? `${group.skippedNonPositive} non-positive value(s) were ignored for log-scale plotting`
+          : 'Each point is one rule-level measurement',
+        xAxisLabel: `${axisMetricLabel} (log scale)`,
+        yAxisLabel: 'Drug',
+        xDomain,
+        xTicks: tickConfig.ticks,
+        majorTicks: tickConfig.majorTicks,
+        yDomain: [0.5, drugEntries.length + 0.5],
+        yTicks: drugEntries.map((_, idx) => idx + 1),
+        laneLabels,
+        points,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.title.localeCompare(b.title));
+
+  if (plots.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      sectionKey: 'ic50-distribution',
+      sectionHeading: 'IC50 distribution',
+      plots,
+    },
+  ];
+}
+
 function _buildGenePositionSections(rules, plotMeta, phenotypeMode, binSize) {
   // Build per-reference/per-gene datasets for stacked mutation-position bars.
   const groupMap = new Map();
@@ -545,10 +742,12 @@ export function buildDatabasePlots(
   const binSize = Number.isFinite(parsedBinSize) ? Math.min(100, Math.max(1, Math.floor(parsedBinSize))) : 10;
   const phenotypeMode = _resolvePhenotypeMode(rules, requestedPhenotypeMode);
   const summaryTile = _buildSummaryPies(rules, formulaRules, plotMeta);
+  const ic50Sections = _buildIc50DistributionSections(rules, plotMeta);
   const detailSections = _buildGenePositionSections(rules, plotMeta, phenotypeMode.activeMode, binSize);
 
   return {
     summaryTile,
+    ic50Sections,
     detailSections,
     phenotypeMode,
     binSize,

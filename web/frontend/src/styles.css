@@ -432,7 +432,8 @@ th {
   align-items: center;
   justify-content: space-between;
   gap: 0.8rem;
-  padding: 0.3rem 0.2rem;
+  padding: 0.75rem 0 0.35rem;
+  border-top: 1px solid #d5e2ec;
 }
 
 .database-phenotype-switch-label {
@@ -441,6 +442,14 @@ th {
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.database-section-heading {
+  margin: 0;
+  font-size: 1.12rem;
+  font-weight: 700;
+  color: #274156;
+  letter-spacing: 0.01em;
 }
 
 .database-phenotype-switch {
@@ -517,6 +526,10 @@ th {
   gap: 0.8rem;
 }
 
+.database-reference-section-wide .database-reference-plot-grid {
+  grid-template-columns: 1fr;
+}
+
 .database-summary-pie-card {
   display: grid;
   justify-items: center;
@@ -575,6 +588,20 @@ th {
   height: 10px;
   border-radius: 999px;
   flex: 0 0 auto;
+}
+
+.database-tooltip-card {
+  background: #ffffff;
+  border: 1px solid #d4e1ea;
+  border-radius: 8px;
+  padding: 0.4rem 0.55rem;
+  box-shadow: 0 8px 18px rgba(16, 42, 67, 0.12);
+}
+
+.database-tooltip-card p {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.3;
 }
 
 .database-pie-chart-wrap {
