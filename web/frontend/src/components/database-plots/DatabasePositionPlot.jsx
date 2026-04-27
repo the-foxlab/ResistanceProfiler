@@ -3,11 +3,36 @@ import {
   BarChart,
   CartesianGrid,
   ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
 
 import { chartLabelStyle, CLASSIFICATION_COLORS, CLASSIFICATION_LABELS } from './shared';
+
+function _PositionTooltipContent({ active, payload }) {
+  if (!active || !payload || payload.length === 0) {
+    return null;
+  }
+
+  const entry = payload[0].payload;
+  if (!entry) {
+    return null;
+  }
+
+  const start = Number(entry.rangeStart);
+  const end = Number(entry.rangeEnd);
+  const resistant = Number(entry.resistant || 0);
+  const sensitive = Number(entry.susceptible || 0);
+
+  return (
+    <div className="database-tooltip-card">
+      <p><strong>Position range:</strong> {start}-{end}</p>
+      <p><strong>Counts resistant:</strong> {resistant}</p>
+      <p><strong>Counts sensitive:</strong> {sensitive}</p>
+    </div>
+  );
+}
 
 export function DatabasePositionPlot({ plot }) {
   const barGap = 6;
@@ -48,6 +73,7 @@ export function DatabasePositionPlot({ plot }) {
                 width={48}
                 label={yAxisLabel}
               />
+              <Tooltip content={<_PositionTooltipContent />} />
               {plot.tones.map((tone) => (
                 <Bar
                   key={tone}

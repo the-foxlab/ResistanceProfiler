@@ -26,6 +26,20 @@ function _formatIc50Tick(value) {
   return String(Math.round(ic50Value * 100) / 100);
 }
 
+function _formatRawMeasurement(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return String(value);
+  }
+  if (numeric >= 100) {
+    return String(Math.round(numeric));
+  }
+  if (numeric >= 10) {
+    return String(Math.round(numeric * 10) / 10);
+  }
+  return String(Math.round(numeric * 100) / 100);
+}
+
 function _TooltipContent({ active, payload }) {
   if (!active || !payload || payload.length === 0) {
     return null;
@@ -39,7 +53,7 @@ function _TooltipContent({ active, payload }) {
   return (
     <div className="database-tooltip-card">
       <p><strong>{point.drug}</strong></p>
-      <p>{(point.metricLabel || 'IC50').replace('IC50', 'IC₅₀')}: {_formatIc50Tick(point.value)}</p>
+      <p>{(point.metricLabel || 'IC50').replace('IC50', 'IC₅₀')}: {_formatRawMeasurement(point.value)}</p>
     </div>
   );
 }

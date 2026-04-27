@@ -396,8 +396,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   critical user flows: file selection and upload flow (mocked XHR), job polling until completion,
   and report display; the test runner should be invokable via `npm test` inside `web/frontend/`
   and should run in CI alongside the Python tests
-- 🟡 Project DB download via web (future) — add a CLI or startup-time mechanism to pull a versioned `project.db` from a companion release URL (GitHub Releases API) instead of requiring manual placement in `data/`; 
-     depends on the `respro databases` CLI work and a published release asset convention
 - 🟡 Job status contract hardening — standardize and test queued/running/succeeded/failed mapping plus consistent error payloads for failed jobs and missing `job_id`
 - 🟡 Queue runtime safeguards — add worker timeout/retry defaults and explicit logging for enqueue/start/fail/finish transitions to improve debuggability
 - 🟡 API readiness checks — extend health/readiness behavior to surface Redis connectivity and startup DB path readiness for operational diagnostics

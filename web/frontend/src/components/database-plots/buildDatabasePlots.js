@@ -367,23 +367,34 @@ function _parseNumericMeasurement(value) {
 function _buildLogTicks(minValue, maxValue) {
   const safeMin = Math.max(minValue, 1e-6);
   const safeMax = Math.max(maxValue, safeMin);
-  const multipliers = [2, 3, 4, 5, 6, 7, 8, 9, 10];
-  const majorMultipliers = new Set([2]);
-  const minExponent = Math.floor(Math.log10(safeMin)) - 1;
-  const maxExponent = Math.ceil(Math.log10(safeMax)) + 1;
+  const logMin = Math.log10(safeMin);
+  const logMax = Math.log10(safeMax);
+  const minExponent = Math.floor(logMin) - 1;
+  const maxExponent = Math.ceil(logMax) + 1;
   const tickEntries = [];
 
   for (let exponent = minExponent; exponent <= maxExponent; exponent += 1) {
-    const scale = 10 ** exponent;
-    multipliers.forEach((multiplier) => {
-      const tickValue = multiplier * scale;
+    const decadeScale = 10 ** exponent;
+
+    // Major ticks at powers of ten.
+    const majorValue = 1 * decadeScale;
+    if (majorValue >= safeMin && majorValue <= safeMax) {
+      tickEntries.push({
+        value: Math.log10(majorValue),
+        isMajor: true,
+      });
+    }
+
+    // Minor ticks at 2..9 within each decade.
+    for (let multiplier = 2; multiplier <= 9; multiplier += 1) {
+      const tickValue = multiplier * decadeScale;
       if (tickValue >= safeMin && tickValue <= safeMax) {
         tickEntries.push({
           value: Math.log10(tickValue),
-          isMajor: majorMultipliers.has(multiplier),
+          isMajor: false,
         });
       }
-    });
+    }
   }
 
   const roundedEntries = tickEntries
@@ -665,6 +676,8 @@ function _buildGenePositionSections(rules, plotMeta, phenotypeMode, binSize) {
       return {
         position: entry.binStart,
         label: entry.label,
+        rangeStart: entry.binStart,
+        rangeEnd: entry.binEnd,
         count: entry.mutationSet.size,
         tone: _dominantTone(toneCounts),
         resistant: toneCounts.get('resistant') || 0,
