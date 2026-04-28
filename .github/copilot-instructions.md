@@ -1,6 +1,4 @@
-# ResistanceProfiler — Copilot instructions
-
-- Attention: Your primary language to talk and think in should be english independent of the user's IDE language setting.
+# Copilot instructions
 
 ## Primary references
 
@@ -189,112 +187,24 @@ a collection.
 ## Planning source of truth
 
 `to-do.md` is the single planning source of truth. Review it before any substantial change.
-
-### Structure
-
-The file has three sections:
-
-- **Done** — completed work, grouped by theme, marked `[x]`. Do not remove entries; they serve as
-  a project history.
-- **Next** — open work, grouped by theme, each item prefixed with a priority emoji:
-  - 🔴 high — tackle first; blockers or foundational work
-  - 🟡 medium — important but not urgent
-  - 🟢 low — nice-to-have or dependent on higher-priority work
-- **Deferred** (subsection of Next) — items that are explicitly postponed; keep them visible but
-  do not pick them up unless the user requests it.
-
-### How to select work
-
-1. Prefer 🔴 items in **Next** unless the user specifies otherwise.
-2. When a group of items is marked "introduce together", implement them in one change.
-3. If user instructions conflict with to-do priorities, follow the user and update the to-do
-   afterwards.
-4. If only 🟡 items are present, reevaluate the priorities for all tasks.
-
-### How to mark work done
-
-When a feature is fully implemented:
-
-1. Move its entry from **Next** to the matching theme group in **Done**, or create a new group if
-   none fits.
-2. Change `- 🔴/🟡/🟢` to `- [x]` and drop the priority emoji.
-3. Keep the description concise — one line that summarises what was built.
-4. Update the to-do in the same commit/change as the implementation.
-
-### How to add new items
-
-1. Choose the correct theme group in **Next**, or add a new group if none fits.
-2. Assign a priority emoji based on urgency and dependency order.
-3. Write a single-sentence description that includes the affected module(s) and the observable
-   behaviour change.
-4. If the item is intentionally deferred, place it in the **Deferred** subsection with a brief
-   rationale.
-
-### What not to do
-
-- Do not remove **Done** entries — they are project history.
-- Do not invent a "Now" section; the priority emoji replaces it.
-- Do not leave the to-do stale after a change — accuracy matters more than brevity.
+Full todo management rules (structure, priority selection, marking done, adding items) are defined
+in the `todo-management` skill.
 
 # Code review guidelines
 
-When reviewing code, check the whole repository for:
+Full code review is handled by the **Codebase Review Specialist** agent and its skills
+(`code-review-and-quality`, `dead-code-and-test-only-audit`, `complexity-and-compartmentalization-audit`).
 
-- Coding standards and conventions
-- Unused features, functions, classes, modules or imports
-- Group related functions into modules
-- Check for logical consistency and correctness, especially in edge cases
-- add comments where the intent or logic is not immediately clear
-- Unnecessary complexity
-- Simplify highly nested functions or methods
-- Simplify and improve readability
+When reviewing code, always check for:
+
+- Coding standards and conventions defined in this file
+- Logical consistency and correctness, especially in edge cases
+- Proper error handling and informative error messages
+- Proper use of type hints and docstrings
+- Proper test coverage and quality of test cases
+- Backward-compatibility code that was not explicitly requested — remove it
 - Follow SOLID, KISS and DRY principles
-- Check for proper error handling and informative error messages
-- Check for proper use of type hints and docstrings
-- Check for proper test coverage and quality of test cases
-- Remove any behaviour that is intended for backward compatibility if not
-  being explicitly requested by the user
-- Check for functions that are only called by tests and remove them including tests
 
 ## Testing
 
-Mimic a test-driven environment and write test cases first for non-trivial tasks.
-Organize tests in classes when grouping related scenarios:
-
-```python
-import pytest
-from respro.core.annotate_vcf import annotate_codon
-
-
-class TestCodonAnnotation:
-  def test_single_snp_changes_amino_acid(self) -> None:
-    result = annotate_codon(...)
-    assert result.alt == 'V'
-
-  def test_synonymous_change_detected(self) -> None:
-    ...
-```
-
-Use fixtures for reusable setup:
-
-```python
-@pytest.fixture
-def sample_vcf(tmp_path):
-    vcf = tmp_path / 'sample.vcf'
-    vcf.write_text(...)
-    return vcf
-```
-
-Focus tests on:
-
-- Codon-level edge cases (overlapping ORFs, reverse strand, adjacent variants)
-- Reference resolution correctness
-- Resistance rule matching
-- Deterministic report exports
-
-Testing expectations:
-
-- Add regression tests for behavior changes, especially for codon edge cases.
-- Prefer focused scenario tests over broad smoke tests.
-- When fixing ambiguous interpretation, add a test that would fail without the fix.
-- Keep outputs deterministic so report/export tests stay stable.
+Full testing rules, TDD cycle, fixtures, focus areas, and anti-patterns are defined in the `testing` skill.

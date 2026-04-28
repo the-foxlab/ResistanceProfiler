@@ -10,8 +10,8 @@ services:
     image: respro-web:latest
     # Bind to one interface/IP only (internal hosting) and expose container port 8000.
     ports:
-    #  - '127.0.0.1:8000:8000'
-      - '10.203.50.175:8000:8000'
+      - '127.0.0.1:8000:8000'
+    #  - '10.203.50.175:8000:8000'
     # Host data location: change the left path to move persistent storage.
     # Layout inside /data: project_databases/, uploads/, results/.
     volumes:
