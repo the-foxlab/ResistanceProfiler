@@ -51,6 +51,7 @@ class GeneRecord:
     nt_sequence: str = ''  # CDS nucleotide slice in coding orientation
     aa_sequence: str = ''  # pre-translated protein sequence stored at init time
     reference_accession: str = ''  # accession of the parent reference (e.g. NC_001806)
+    segments: tuple[GeneSegment, ...] = field(default_factory=tuple)
 
     @property
     def length_nt(self) -> int:
@@ -94,6 +95,15 @@ class GeneRecord:
         :return: 0-based position within codon
         """
         return (self.nt_offset(pos) - self.codon_start) % 3
+
+
+@dataclass(frozen=True)
+class GeneSegment:
+    """One CDS genomic segment as a 0-based [start, end) interval."""
+
+    segment_index: int
+    start: int
+    end: int
 
 
 @dataclass

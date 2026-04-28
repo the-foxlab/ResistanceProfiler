@@ -26,7 +26,7 @@ from Bio.Align import PairwiseAligner
 from Bio.Seq import Seq
 
 from respro.core.settings import CORE_CONFIG
-from respro.db.models import GeneMatch, GeneRecord
+from respro.db.models import GeneMatch, GeneRecord, GeneSegment
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +126,8 @@ def load_genes_with_rules(
             'ORDER BY g.start',
             (reference_id,),
         ).fetchall()
+    gene_ids = [int(row['id']) for row in rows]
+    segments_by_gene = _load_gene_segments_by_gene_id(conn, gene_ids)
     return [
         GeneRecord(
             id=r['id'],
@@ -139,6 +141,7 @@ def load_genes_with_rules(
             nt_sequence=r['nt_sequence'] or '',
             aa_sequence=r['aa_sequence'] or '',
             reference_accession=r['reference_accession'] or '',
+            segments=segments_by_gene.get(int(r['id']), tuple()),
         )
         for r in rows
     ]
@@ -388,6 +391,9 @@ def load_cached_mappings(
         (qref['id'],),
     ).fetchall()
 
+    gene_ids = [int(row['gene_id']) for row in rows]
+    segments_by_gene = _load_gene_segments_by_gene_id(conn, gene_ids)
+
     matches: list[GeneMatch] = []
     for r in rows:
         gene = GeneRecord(
@@ -402,6 +408,7 @@ def load_cached_mappings(
             nt_sequence=r['nt_sequence'] or '',
             aa_sequence=r['aa_sequence'] or '',
             reference_accession=r['reference_accession'] or '',
+            segments=segments_by_gene.get(int(r['gene_id']), tuple()),
         )
         matches.append(GeneMatch(
             gene=gene,
@@ -416,6 +423,33 @@ def load_cached_mappings(
 
     logger.info('Loaded %d cached mapping(s) for checksum %s…', len(matches), checksum[:12])
     return matches
+
+
+def _load_gene_segments_by_gene_id(
+    conn: sqlite3.Connection,
+    gene_ids: list[int],
+) -> dict[int, tuple[GeneSegment, ...]]:
+    """Return gene_id -> ordered tuple of GeneSegment objects."""
+    if not gene_ids:
+        return {}
+
+    placeholders = ','.join(['?'] * len(gene_ids))
+    rows = conn.execute(
+        f'SELECT gene_id, segment_index, start, end FROM gene_segment '
+        f'WHERE gene_id IN ({placeholders}) ORDER BY gene_id, segment_index',
+        gene_ids,
+    ).fetchall()
+    grouped: dict[int, list[GeneSegment]] = {}
+    for row in rows:
+        gene_id = int(row['gene_id'])
+        grouped.setdefault(gene_id, []).append(
+            GeneSegment(
+                segment_index=int(row['segment_index']),
+                start=int(row['start']),
+                end=int(row['end']),
+            )
+        )
+    return {gene_id: tuple(items) for gene_id, items in grouped.items()}
 
 
 def store_mappings(

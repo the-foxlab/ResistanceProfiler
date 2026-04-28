@@ -99,7 +99,7 @@ def _get_or_create_gene(
     gene: ParsedGenBankGene,
     *,
     ncbi_protein_url_cache: dict[str, str],
-) -> bool:
+) -> tuple[int, bool]:
     """Insert a gene row or validate that an existing one is compatible."""
     conn.row_factory = sqlite3.Row
     existing = conn.execute(
@@ -112,7 +112,7 @@ def _get_or_create_gene(
     strand = validate_strand(gene.strand)
     ncbi_protein_url = _resolve_ncbi_protein_url(gene.protein_id, ncbi_protein_url_cache)
     if existing is None:
-        conn.execute(
+        cur = conn.execute(
             'INSERT INTO gene '
             '(reference_id, name, protein, protein_id, ncbi_protein_url, locus_tag, note, '
             'start, end, strand, codon_start, nt_sequence, aa_sequence) '
@@ -133,7 +133,7 @@ def _get_or_create_gene(
                 gene.aa_sequence,
             ),
         )
-        return True
+        return int(cur.lastrowid), True
 
     same_gene = (
         int(existing['start']) == gene.start
@@ -176,7 +176,44 @@ def _get_or_create_gene(
             ),
         )
 
-    return False
+    row = conn.execute(
+        'SELECT id FROM gene WHERE reference_id = ? AND name = ?',
+        (reference_id, gene.gene_name),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f'Gene {gene.gene_name!r} could not be reloaded after lookup')
+    return int(row['id']), False
+
+
+def _upsert_gene_segments(
+    conn: sqlite3.Connection,
+    gene_id: int,
+    segments: tuple[tuple[int, int], ...],
+) -> None:
+    """Insert or validate persisted CDS segment rows for one gene."""
+    expected = [(idx, start, end) for idx, (start, end) in enumerate(segments)]
+    existing = conn.execute(
+        'SELECT segment_index, start, end FROM gene_segment WHERE gene_id = ? '
+        'ORDER BY segment_index',
+        (gene_id,),
+    ).fetchall()
+
+    if not existing:
+        conn.executemany(
+            'INSERT INTO gene_segment (gene_id, segment_index, start, end) VALUES (?, ?, ?, ?)',
+            [(gene_id, idx, start, end) for idx, start, end in expected],
+        )
+        return
+
+    existing_triplets = [
+        (int(row['segment_index']), int(row['start']), int(row['end']))
+        for row in existing
+    ]
+    if existing_triplets != expected:
+        raise ValueError(
+            f'Gene id {gene_id} already exists with different CDS segment coordinates; '
+            'refusing to append incompatible data'
+        )
 
 
 def _load_genbank_records(
@@ -205,12 +242,13 @@ def _load_genbank_records(
             reused_refs += 1
 
         for gene in record.genes:
-            created_gene = _get_or_create_gene(
+            gene_id, created_gene = _get_or_create_gene(
                 conn,
                 reference_id,
                 gene,
                 ncbi_protein_url_cache=ncbi_protein_url_cache,
             )
+            _upsert_gene_segments(conn, gene_id, gene.segments)
             if created_gene:
                 inserted_genes += 1
             else:

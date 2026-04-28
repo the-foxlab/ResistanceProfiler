@@ -62,6 +62,17 @@ CREATE TABLE IF NOT EXISTS gene (
     UNIQUE(reference_id, name)
 );
 
+CREATE TABLE IF NOT EXISTS gene_segment (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    gene_id     INTEGER NOT NULL REFERENCES gene(id),
+    segment_index INTEGER NOT NULL,
+    start       INTEGER NOT NULL,  -- 0-based inclusive
+    end         INTEGER NOT NULL,  -- 0-based exclusive
+    UNIQUE(gene_id, segment_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_gene_segment_gene ON gene_segment(gene_id);
+
 -- Drugs
 CREATE TABLE IF NOT EXISTS drug (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -336,6 +347,7 @@ _REQUIRED_PROJECT_COLUMNS = {
     'project': {'id', 'name', 'created_at', 'schema_version'},
     'reference': {'id', 'project_id', 'name', 'length'},
     'gene': {'id', 'reference_id', 'name', 'start', 'end', 'strand'},
+    'gene_segment': {'id', 'gene_id', 'segment_index', 'start', 'end'},
     'drug': {'id', 'project_id', 'name'},
     'resistance_rule': {'id', 'gene_id', 'drug_id', 'position', 'mutation'},
     'query_reference': {'id', 'name', 'sequence', 'length', 'checksum'},
@@ -615,7 +627,12 @@ def open_project_db(db_path: Path) -> sqlite3.Connection:
     _configure_connection(conn)
     _ensure_optional_tables(conn)
     _validate_project_schema_overlap(conn, db_path)
+    changed = False
     if _add_missing_optional_columns(conn, _OPTIONAL_PROJECT_COLUMN_DEFS):
+        changed = True
+    if _backfill_gene_segments(conn):
+        changed = True
+    if changed:
         _ensure_project_indexes(conn)
         conn.commit()
     else:
@@ -638,6 +655,15 @@ CREATE TABLE IF NOT EXISTS publication (
     pubmed_id  TEXT    NOT NULL DEFAULT '',
     raw_input  TEXT    NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS gene_segment (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    gene_id     INTEGER NOT NULL REFERENCES gene(id),
+    segment_index INTEGER NOT NULL,
+    start       INTEGER NOT NULL,
+    end         INTEGER NOT NULL,
+    UNIQUE(gene_id, segment_index)
+);
+CREATE INDEX IF NOT EXISTS idx_gene_segment_gene ON gene_segment(gene_id);
 CREATE TABLE IF NOT EXISTS rule_publication (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     rule_id        INTEGER NOT NULL REFERENCES resistance_rule(id),
@@ -680,6 +706,23 @@ CREATE TABLE IF NOT EXISTS resistance_formula_rule_publication (
 CREATE INDEX IF NOT EXISTS idx_resistance_formula_rule_pub ON resistance_formula_rule_publication(formula_rule_id);
 """)
     conn.commit()
+
+
+def _backfill_gene_segments(conn: sqlite3.Connection) -> bool:
+    """Ensure every existing gene has at least one gene_segment row."""
+    rows = conn.execute(
+        'SELECT g.id, g.start, g.end FROM gene g '
+        'LEFT JOIN gene_segment gs ON gs.gene_id = g.id '
+        'GROUP BY g.id HAVING COUNT(gs.id) = 0'
+    ).fetchall()
+    if not rows:
+        return False
+
+    conn.executemany(
+        'INSERT INTO gene_segment (gene_id, segment_index, start, end) VALUES (?, 0, ?, ?)',
+        [(int(row['id']), int(row['start']), int(row['end'])) for row in rows],
+    )
+    return True
 
 
 def _ensure_project_uuid(conn: sqlite3.Connection) -> None:

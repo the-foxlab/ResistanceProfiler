@@ -48,6 +48,7 @@ class ParsedGenBankGene:
     codon_start: int = 0  # 0-based offset (GenBank codon_start qualifier minus 1)
     nt_sequence: str = ''  # CDS nucleotide slice in coding orientation
     aa_sequence: str = ''  # pre-translated amino acid sequence (stop codon excluded)
+    segments: tuple[tuple[int, int], ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
@@ -196,23 +197,6 @@ def _parse_cds_features(
     for feature in record.features or []:
         if feature.type != 'CDS':
             continue
-        if isinstance(feature.location, CompoundLocation):
-            gene_label = _first_qualifier(
-                feature,
-                'gene',
-                'locus_tag',
-                'protein_id',
-                'product',
-                'protein',
-                default='<unknown>',
-            )
-            logger.warning(
-                'Skipping CDS %r in %r: compound (split/joined) locations are not yet '
-                'supported and the gene will be absent from the project database.',
-                gene_label,
-                reference_name,
-            )
-            continue
 
         gene_name = _extract_gene_name(feature, reference_name)
         if gene_name in seen_gene_names:
@@ -233,6 +217,7 @@ def _parse_cds_features(
         strand = '+' if feature.location.strand != -1 else '-'
         start = int(feature.location.start)
         end = int(feature.location.end)
+        segments = _extract_segments(feature)
         nt_sequence = str(feature.extract(record.seq)).upper().replace('U', 'T')
         aa_sequence = _translate_cds(
             feature,
@@ -257,10 +242,25 @@ def _parse_cds_features(
                 codon_start=codon_start,
                 nt_sequence=nt_sequence,
                 aa_sequence=aa_sequence,
+                segments=segments,
             )
         )
 
     return genes
+
+
+def _extract_segments(feature: SeqFeature) -> tuple[tuple[int, int], ...]:
+    """
+    Return CDS genomic segments as 0-based [start, end) intervals.
+
+    For contiguous CDS entries this returns one segment matching the gene row.
+    For compound CDS entries this returns one segment per location part in the
+    GenBank-provided part order.
+    """
+    location = feature.location
+    if isinstance(location, CompoundLocation):
+        return tuple((int(part.start), int(part.end)) for part in location.parts)
+    return ((int(location.start), int(location.end)),)
 
 
 def _translate_cds(

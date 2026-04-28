@@ -233,6 +233,14 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   variant falling inside two genes simultaneously produces correct, independent annotations for
   both; add tests for both the VCF and FASTA profiling paths
 
+### Split/joined GenBank CDS support
+
+- 🔴 Phase 1 (database representation): add split/joined CDS persistence with a `gene_segment` model/table, parse GenBank compound CDS parts, and keep contiguous genes unchanged.
+- 🔴 Phase 2 (annotation logic): make VCF/FASTA coordinate mapping segment-aware so only coding regions are assessed; silently skip envelope positions outside CDS segments as non-coding.
+- 🔴 Phase 3 (report representation): render split genes as graphical multi-part blocks only (no textual part labels), with 5-prime to 3-prime ordering following reference genomic orientation.
+- 🔴 Phase 4 (regenerate/results): ensure split-gene annotations and report rendering survive `results.db` persistence and `respro regenerate` roundtrips.
+- 🔴 Testing: add an extensive regression suite for split genes, with explicit negative-strand split CDS cases and guards against contiguous-annotation regressions.
+
 ### Usability and workflow
 
 - 🟡 Multi-chrom VCF and multi-record query FASTA support — a single VCF may carry variants

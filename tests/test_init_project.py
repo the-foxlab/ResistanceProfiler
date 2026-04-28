@@ -17,6 +17,7 @@ from Bio.SeqRecord import SeqRecord
 from conftest import TINY_REF_SEQ, write_genbank
 
 from respro.cli.init import init_project
+from respro.core.alignment import load_cached_mappings, load_genes_with_rules, sequence_checksum
 from respro.db.genes import _is_ncbi_protein_accession
 from respro.db.models import is_internal_formula_component_drug_name
 from respro.db.rules_import import (
@@ -25,7 +26,8 @@ from respro.db.rules_import import (
     _validate_reference_amino_acids,
 )
 from respro.db.rules_queries import list_rules_for_display
-from respro.db.schema import create_schema
+from respro.db.schema import create_schema, open_project_db
+from respro.io.reference import load_genes_for_reference
 
 # Amino acid sequence used across tests:
 #   index:  0  1  2  3  4  5
@@ -1303,22 +1305,23 @@ class TestMissingGeneWarnings:
 
 
 class TestGenbankAliasFallbacks:
-    def test_compound_cds_warning_uses_product_label(self, tmp_path, caplog) -> None:
+    def test_compound_cds_persists_segments_and_populates_loaders(self, tmp_path) -> None:
         gb = tmp_path / 'compound_product_only.gb'
 
-        record = SeqRecord(Seq('ATG' * 40), id='tiny_ref', name='tiny_ref', description='')
+        record = SeqRecord(Seq('GCT' * 100), id='tiny_ref', name='tiny_ref', description='')
         record.annotations['molecule_type'] = 'DNA'
         record.annotations['accessions'] = ['tiny_ref']
         record.features = [
             SeqFeature(
                 CompoundLocation(
                     [
-                        FeatureLocation(0, 30, strand=1),
-                        FeatureLocation(60, 90, strand=1),
+                        FeatureLocation(0, 18, strand=1),
+                        FeatureLocation(60, 78, strand=1),
                     ]
                 ),
                 type='CDS',
                 qualifiers={
+                    'gene': ['split_pol'],
                     'product': ['DNA polymerase'],
                     'codon_start': ['1'],
                 },
@@ -1330,17 +1333,226 @@ class TestGenbankAliasFallbacks:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
-            DNA polymerase\ttiny_ref\t2\tM\tK\tDrugA\tresistant
+            split_pol\ttiny_ref\t2\tA\tV\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
 
-        with caplog.at_level(logging.WARNING, logger='respro.io.genbank'):
-            init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
+        init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
 
-        assert any(
-            "Skipping CDS 'DNA polymerase'" in record.message
-            for record in caplog.records
+        conn = open_project_db(db)
+        conn.row_factory = sqlite3.Row
+        gene_row = conn.execute(
+            'SELECT id, start, end FROM gene WHERE name = ?',
+            ('split_pol',),
+        ).fetchone()
+        assert gene_row is not None
+
+        segments = conn.execute(
+            'SELECT segment_index, start, end FROM gene_segment WHERE gene_id = ? ORDER BY segment_index',
+            (gene_row['id'],),
+        ).fetchall()
+        assert [
+            (row['segment_index'], row['start'], row['end'])
+            for row in segments
+        ] == [(0, 0, 18), (1, 60, 78)]
+
+        ref_id = conn.execute(
+            'SELECT id FROM reference WHERE name = ?',
+            ('tiny_ref',),
+        ).fetchone()['id']
+        by_reference = load_genes_for_reference(conn, ref_id)
+        assert len(by_reference) == 1
+        assert len(by_reference[0].segments) == 2
+
+        with_rules = load_genes_with_rules(conn, ref_id)
+        assert len(with_rules) == 1
+        assert len(with_rules[0].segments) == 2
+
+        query_sequence = 'GCT' * 100
+        checksum = sequence_checksum(query_sequence)
+        conn.execute(
+            'INSERT INTO query_reference (name, sequence, length, checksum) VALUES (?, ?, ?, ?)',
+            ('query', query_sequence, len(query_sequence), checksum),
         )
+        query_ref_id = conn.execute(
+            'SELECT id FROM query_reference WHERE checksum = ?',
+            (checksum,),
+        ).fetchone()['id']
+        conn.execute(
+            'INSERT INTO query_gene_mapping '
+            '(query_ref_id, gene_id, identity, cds_coverage, query_coverage, query_start, '
+            'query_end, strand, cigar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (query_ref_id, gene_row['id'], 1.0, 1.0, 1.0, 0, 36, '+', '36M'),
+        )
+        conn.commit()
+
+        cached_matches = load_cached_mappings(conn, checksum)
+        assert cached_matches is not None
+        assert len(cached_matches) == 1
+        assert len(cached_matches[0].gene.segments) == 2
+        conn.close()
+
+    def test_negative_strand_compound_cds_persists_segments(self, tmp_path) -> None:
+        gb = tmp_path / 'compound_negative.gb'
+
+        record = SeqRecord(Seq('GCT' * 120), id='tiny_ref', name='tiny_ref', description='')
+        record.annotations['molecule_type'] = 'DNA'
+        record.annotations['accessions'] = ['tiny_ref']
+        record.features = [
+            SeqFeature(
+                CompoundLocation(
+                    [
+                        FeatureLocation(30, 48, strand=-1),
+                        FeatureLocation(90, 108, strand=-1),
+                    ]
+                ),
+                type='CDS',
+                qualifiers={
+                    'gene': ['split_neg'],
+                    'product': ['DNA polymerase'],
+                    'codon_start': ['1'],
+                },
+            )
+        ]
+        with open(gb, 'w') as handle:
+            SeqIO.write([record], handle, 'genbank')
+
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            split_neg\ttiny_ref\t2\tS\tA\tDrugA\tresistant
+        """))
+        db = tmp_path / 'proj.db'
+
+        init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
+
+        conn = open_project_db(db)
+        conn.row_factory = sqlite3.Row
+        gene_row = conn.execute(
+            'SELECT id, strand, start, end FROM gene WHERE name = ?',
+            ('split_neg',),
+        ).fetchone()
+        assert gene_row is not None
+        assert gene_row['strand'] == '-'
+        assert (gene_row['start'], gene_row['end']) == (30, 108)
+
+        segments = conn.execute(
+            'SELECT segment_index, start, end FROM gene_segment WHERE gene_id = ? ORDER BY segment_index',
+            (gene_row['id'],),
+        ).fetchall()
+        conn.close()
+
+        assert [
+            (row['segment_index'], row['start'], row['end'])
+            for row in segments
+        ] == [(0, 30, 48), (1, 90, 108)]
+
+
+class TestGeneSegmentMigration:
+    def test_open_project_db_backfills_gene_segment_rows_for_legacy_genes(self, tmp_path) -> None:
+        db_path = tmp_path / 'legacy_project.db'
+        conn = sqlite3.connect(str(db_path))
+        conn.execute(
+            'CREATE TABLE project ('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'name TEXT NOT NULL, '
+            "created_at TEXT NOT NULL DEFAULT (datetime('now')), "
+            'schema_version INTEGER NOT NULL DEFAULT 1'
+            ')'
+        )
+        conn.execute(
+            'CREATE TABLE reference ('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'project_id INTEGER NOT NULL, '
+            'name TEXT NOT NULL, '
+            'length INTEGER NOT NULL'
+            ')'
+        )
+        conn.execute(
+            'CREATE TABLE gene ('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'reference_id INTEGER NOT NULL, '
+            'name TEXT NOT NULL, '
+            'start INTEGER NOT NULL, '
+            'end INTEGER NOT NULL, '
+            "strand TEXT NOT NULL DEFAULT '+'"
+            ')'
+        )
+        conn.execute(
+            'CREATE TABLE drug ('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'project_id INTEGER NOT NULL, '
+            'name TEXT NOT NULL'
+            ')'
+        )
+        conn.execute(
+            'CREATE TABLE resistance_rule ('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'gene_id INTEGER NOT NULL, '
+            'drug_id INTEGER NOT NULL, '
+            'position INTEGER NOT NULL, '
+            'mutation TEXT NOT NULL'
+            ')'
+        )
+        conn.execute(
+            'CREATE TABLE query_reference ('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'name TEXT NOT NULL, '
+            'sequence TEXT NOT NULL, '
+            'length INTEGER NOT NULL, '
+            'checksum TEXT NOT NULL, '
+            'UNIQUE(checksum)'
+            ')'
+        )
+        conn.execute(
+            'CREATE TABLE query_gene_mapping ('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+            'query_ref_id INTEGER NOT NULL, '
+            'gene_id INTEGER NOT NULL, '
+            'identity REAL NOT NULL, '
+            'cds_coverage REAL NOT NULL, '
+            'query_start INTEGER NOT NULL, '
+            'query_end INTEGER NOT NULL, '
+            "strand TEXT NOT NULL DEFAULT '+', "
+            'cigar TEXT NOT NULL, '
+            'UNIQUE(query_ref_id, gene_id)'
+            ')'
+        )
+        conn.execute(
+            'INSERT INTO project (name, created_at, schema_version) VALUES (?, datetime(\'now\'), ?)',
+            ('Legacy Project', 1),
+        )
+        conn.execute(
+            'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
+            (1, 'ref_legacy', 100),
+        )
+        conn.execute(
+            'INSERT INTO gene (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
+            (1, 'gag', 11, 41, '+'),
+        )
+        conn.execute(
+            'INSERT INTO drug (project_id, name) VALUES (?, ?)',
+            (1, 'drugx'),
+        )
+        conn.execute(
+            'INSERT INTO resistance_rule (gene_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
+            (1, 1, 1, 'E'),
+        )
+        conn.commit()
+        conn.close()
+
+        migrated_conn = open_project_db(db_path)
+        migrated_conn.row_factory = sqlite3.Row
+        segments = migrated_conn.execute(
+            'SELECT gene_id, segment_index, start, end FROM gene_segment WHERE gene_id = 1 '
+            'ORDER BY segment_index'
+        ).fetchall()
+        migrated_conn.close()
+
+        assert [
+            (row['gene_id'], row['segment_index'], row['start'], row['end'])
+            for row in segments
+        ] == [(1, 0, 11, 41)]
 
     def test_product_only_cds_is_accepted_for_rule_matching(self, tmp_path) -> None:
         gb = tmp_path / 'product_only.gb'

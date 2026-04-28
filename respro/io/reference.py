@@ -10,7 +10,7 @@ from pathlib import Path
 
 from Bio import SeqIO
 
-from respro.db.models import GeneRecord
+from respro.db.models import GeneRecord, GeneSegment
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,27 @@ def load_genes_for_reference(conn: sqlite3.Connection, reference_id: int) -> lis
         (reference_id,),
     ).fetchall()
 
+    gene_ids = [int(row['id']) for row in rows]
+    segments_by_gene: dict[int, tuple[GeneSegment, ...]] = {}
+    if gene_ids:
+        placeholders = ','.join(['?'] * len(gene_ids))
+        segment_rows = conn.execute(
+            f'SELECT gene_id, segment_index, start, end FROM gene_segment '
+            f'WHERE gene_id IN ({placeholders}) ORDER BY gene_id, segment_index',
+            gene_ids,
+        ).fetchall()
+        grouped: dict[int, list[GeneSegment]] = {}
+        for segment_row in segment_rows:
+            gene_id = int(segment_row['gene_id'])
+            grouped.setdefault(gene_id, []).append(
+                GeneSegment(
+                    segment_index=int(segment_row['segment_index']),
+                    start=int(segment_row['start']),
+                    end=int(segment_row['end']),
+                )
+            )
+        segments_by_gene = {gene_id: tuple(items) for gene_id, items in grouped.items()}
+
     genes = [
         GeneRecord(
             id=row['id'],
@@ -59,6 +80,7 @@ def load_genes_for_reference(conn: sqlite3.Connection, reference_id: int) -> lis
             codon_start=row['codon_start'],
             nt_sequence=row['nt_sequence'] or '',
             aa_sequence=row['aa_sequence'] or '',
+            segments=segments_by_gene.get(int(row['id']), tuple()),
         )
         for row in rows
     ]
