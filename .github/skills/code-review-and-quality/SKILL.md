@@ -125,6 +125,8 @@ For each file changed:
 4. Security — any vulnerabilities?
 5. Performance — any bottlenecks?
 
+When the diff changes module boundaries or cross-layer flows, run `repo-knowledge-graph` in `quick` mode to verify architecture drift and identify any required updates to development layout docs.
+
 ### Step 4: Categorize Findings
 
 Label every finding with its severity:

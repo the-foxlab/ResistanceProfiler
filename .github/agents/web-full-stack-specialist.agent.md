@@ -27,6 +27,7 @@ You are the web full-stack specialist for this repository. Your mission is to de
 - Use `testing` for TDD, regression tests, and verification strategy
 - Use `public-documentation` for updating README/docs when web behavior changes
 - Use `web-deployment-and-runtime-config` for Docker/Compose changes, backend env vars, startup behavior, worker/runtime parity, and production hosting safety checks
+- Use `repo-knowledge-graph` when route/service/job wiring or web-to-respro interaction boundaries change
 
 ## Constraints
 

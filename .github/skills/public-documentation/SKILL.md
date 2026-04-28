@@ -49,6 +49,7 @@ Primary scope:
 Secondary scope:
 - Public-facing sections of `docs/development/` when they affect user understanding of workflows or architecture
 - Public-facing docs elsewhere in the repo when explicitly requested
+- `docs/development/detailed_respro_layout.md` and `docs/development/detailed_app_layout.md` when architecture interactions change
 
 Always verify claims against current code and configuration before editing.
 
@@ -79,6 +80,9 @@ Classify each issue as one of:
 - Structurally confusing flow
 - Too much assumed bioinformatics or developer knowledge
 - Inconsistent terminology across files
+- Architecture interaction drift (module/function flow docs no longer match code)
+
+For architecture interaction drift, run `repo-knowledge-graph` in selective mode (`quick` or `medium`) before editing detailed layout docs.
 
 ### Step 3: Rewrite for Accuracy and Readability
 
@@ -100,6 +104,7 @@ When a user-visible behavior changes, update all affected public docs in the sam
 - `README.md`
 - Relevant `docs/user/*`
 - Relevant `docs/development/*`
+- `docs/development/detailed_respro_layout.md` and/or `docs/development/detailed_app_layout.md` when cross-module flow changed
 
 ### Step 5: Verify the Documentation Change
 

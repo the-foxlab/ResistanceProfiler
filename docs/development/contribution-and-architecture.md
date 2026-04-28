@@ -2,6 +2,11 @@
 
 This document combines contributor workflow, project structure guidance, and runtime architecture.
 
+For deeper interaction maps and function-chain views, see:
+
+- `docs/development/detailed_respro_layout.md`
+- `docs/development/detailed_app_layout.md`
+
 ## Principles
 
 - CLI-first behavior: the `respro` command remains the primary interface.
