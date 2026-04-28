@@ -13,11 +13,12 @@ import fakeredis
 import pytest
 from fastapi.testclient import TestClient
 from rq import Queue
+from rq.exceptions import NoSuchJobError
 
 from tests.conftest import TINY_REF_NAME, TINY_REF_SEQ
-from web.backend.main import create_app
+from web.backend.main import _resolve_proxy_settings, create_app
 from web.backend.queue import get_queue
-from web.backend.startup_config import StartupConfig
+from web.backend.startup_config import StartupConfig, _validate_startup_policy
 
 
 @pytest.fixture()
@@ -91,6 +92,43 @@ def client(sync_queue: Queue, startup_config: StartupConfig):
 
 
 class TestWebApi:
+    def test_startup_policy_allows_docker_bind_without_token(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_HOST', '0.0.0.0')
+        monkeypatch.delenv('RESPRO_WEB_CORS_ORIGINS', raising=False)
+
+        _validate_startup_policy(api_token='')
+
+    def test_startup_policy_requires_token_for_non_local_bind_host(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_HOST', '10.0.0.5')
+        monkeypatch.delenv('RESPRO_WEB_CORS_ORIGINS', raising=False)
+
+        with pytest.raises(RuntimeError, match='RESPRO_WEB_API_TOKEN'):
+            _validate_startup_policy(api_token='')
+
+    def test_proxy_settings_default_to_disabled_without_trusted_proxies(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv('RESPRO_WEB_TRUSTED_PROXIES', raising=False)
+        proxy_headers, forwarded_allow_ips = _resolve_proxy_settings()
+        assert proxy_headers is False
+        assert forwarded_allow_ips == ''
+
+    def test_proxy_settings_enable_forwarded_headers_when_trusted_proxies_configured(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_TRUSTED_PROXIES', '127.0.0.1, 10.0.0.0/8')
+        proxy_headers, forwarded_allow_ips = _resolve_proxy_settings()
+        assert proxy_headers is True
+        assert forwarded_allow_ips == '127.0.0.1,10.0.0.0/8'
+
     def test_cors_uses_configured_origins_when_token_is_set(
         self,
         startup_config: StartupConfig,
@@ -203,6 +241,118 @@ class TestWebApi:
         assert response.status_code == 200
         payload = response.json()
         assert payload['status'] == 'ok'
+
+    def test_readiness_endpoint_reports_redis_and_project_db_readiness(
+        self,
+        startup_config: StartupConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        redis_client = Mock()
+        redis_client.ping.return_value = True
+        monkeypatch.setattr('web.backend.main.redis.Redis.from_url', lambda *_args, **_kwargs: redis_client)
+
+        client = TestClient(create_app(startup_config=startup_config))
+        response = client.get('/api/readiness')
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['status'] == 'ok'
+        assert payload['data']['redis']['connected'] is True
+        assert payload['data']['project_databases']['ready'] is True
+        assert payload['data']['project_databases']['count'] >= 1
+
+    def test_readiness_endpoint_returns_503_when_redis_unreachable(
+        self,
+        startup_config: StartupConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        redis_client = Mock()
+        redis_client.ping.side_effect = RuntimeError('redis connection failed')
+        monkeypatch.setattr('web.backend.main.redis.Redis.from_url', lambda *_args, **_kwargs: redis_client)
+
+        client = TestClient(create_app(startup_config=startup_config))
+        response = client.get('/api/readiness')
+
+        assert response.status_code == 503
+        payload = response.json()
+        assert payload['status'] == 'error'
+        assert payload['data']['redis']['connected'] is False
+        assert payload['data']['project_databases']['ready'] is True
+        assert 'redis_unreachable' in payload['data']['diagnostics']
+
+    @pytest.mark.parametrize(
+        ('rq_status', 'expected_api_status'),
+        [
+            ('queued', 'queued'),
+            ('deferred', 'queued'),
+            ('scheduled', 'queued'),
+            ('started', 'running'),
+            ('finished', 'succeeded'),
+            ('failed', 'failed'),
+            ('stopped', 'failed'),
+            ('canceled', 'failed'),
+            ('unknown', 'queued'),
+        ],
+    )
+    def test_job_status_maps_rq_statuses_to_stable_api_contract(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+        rq_status: str,
+        expected_api_status: str,
+    ) -> None:
+        job = Mock()
+        job.get_status.return_value = rq_status
+        job.return_value.return_value = {'report_html_path': '/tmp/example.report.html'}
+        job.exc_info = None
+        monkeypatch.setattr('web.backend.main.Job.fetch', lambda *_args, **_kwargs: job)
+
+        response = client.get('/api/jobs/test-job-id', headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['job_id'] == 'test-job-id'
+        assert payload['status'] == expected_api_status
+        if expected_api_status == 'succeeded':
+            assert payload['result'] == {'report_html_path': '/tmp/example.report.html'}
+        else:
+            assert payload['result'] is None
+
+    def test_job_status_failed_without_exc_info_returns_stable_error_message(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        job = Mock()
+        job.get_status.return_value = 'failed'
+        job.return_value.return_value = None
+        job.exc_info = None
+        monkeypatch.setattr('web.backend.main.Job.fetch', lambda *_args, **_kwargs: job)
+
+        response = client.get('/api/jobs/test-job-id', headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload['status'] == 'failed'
+        assert payload['error'] == 'The operation failed on the server.'
+
+    def test_job_status_missing_id_returns_404_with_stable_payload(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def _raise_no_such_job(*_args, **_kwargs):
+            raise NoSuchJobError('missing')
+
+        monkeypatch.setattr('web.backend.main.Job.fetch', _raise_no_such_job)
+
+        response = client.get('/api/jobs/missing-job-id', headers=auth_headers)
+
+        assert response.status_code == 404
+        assert response.json() == {'detail': 'Job not found.'}
 
     def test_rules_endpoint(self, client: TestClient, auth_headers: dict[str, str]) -> None:
         rules_response = client.get(
@@ -557,6 +707,37 @@ class TestWebApi:
         response = client.delete('/api/jobs/test-job-id', headers=auth_headers)
         assert response.status_code == 204
         job.kill_worker.assert_called_once_with()
+
+    def test_profile_vcf_enqueues_with_job_timeout_and_retry_defaults(
+        self,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        queue = Mock()
+        enqueued = Mock()
+        enqueued.id = 'test-job-id'
+        queue.enqueue.return_value = enqueued
+
+        app = create_app(startup_config=startup_config)
+        app.dependency_overrides[get_queue] = lambda: queue
+        client = TestClient(app)
+
+        response = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(web_sample_vcf),
+                'ref_fasta_path': str(web_sample_ref_fasta),
+                'sample': 'queue-defaults',
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        _args, kwargs = queue.enqueue.call_args
+        assert kwargs['job_timeout'] == 3600
+        assert kwargs['retry'].max == 1
 
     def test_protected_route_requires_auth(self, client: TestClient) -> None:
         response = client.get('/api/rules')

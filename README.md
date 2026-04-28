@@ -110,7 +110,7 @@ docker compose -f docker-compose.web.yml up --build
 Open the app at: `http://127.0.0.1:8000/app/`
 
 > [!CAUTION]
-> At initial startup, the app will download all available input files for maintained databases if none are available in your ./data location. If you do not want this, simply set RESPRO_WEB_MAINTAINED_BOOTSTRAP=true to false in the docker-compose.web.yml. If you allow maintained database download, it might take some time as pubmed and pubchem information is fetched automatically.
+> At initial startup, the app can download maintained databases if none are available in `./data/project_databases/`. To disable this, set `RESPRO_WEB_MAINTAINED_BOOTSTRAP=false` in `docker-compose.web.yml`.
 
 ## Detailed Documentation
 

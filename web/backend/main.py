@@ -11,6 +11,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import redis
 import uvicorn
 from fastapi import (
     Depends,
@@ -49,7 +50,7 @@ from web.backend.models import (
     SessionCleanupResponse,
     UploadResponse,
 )
-from web.backend.queue import get_queue
+from web.backend.queue import build_enqueue_job_options, get_queue
 from web.backend.services.browse import list_databases, list_rules
 from web.backend.services.upload import cleanup_session_files, save_upload_stream
 from web.backend.startup_config import (
@@ -59,6 +60,8 @@ from web.backend.startup_config import (
     load_startup_config,
     resolve_project_db_path,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _sweep_expired_files(results_dir: Path, uploads_dir: Path, ttl_seconds: int) -> None:
@@ -157,13 +160,16 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         return ApiEnvelope(
             data={
                 'service': WEB_BACKEND_CONFIG.defaults.service_name,
-                'project_databases_dir': str(config.project_databases_dir),
-                'project_database_count': len(list_project_db_paths(config.project_databases_dir)),
-                'uploads_dir': str(config.uploads_dir),
-                'results_dir': str(config.results_dir),
             },
             status='ok',
         )
+
+    @app.get('/api/readiness', response_model=ApiEnvelope)
+    def readiness() -> JSONResponse | ApiEnvelope:
+        payload = _build_readiness_payload(config)
+        if payload.status == 'ok':
+            return payload
+        return JSONResponse(status_code=503, content=payload.model_dump())
 
     @app.post('/api/upload/fasta', response_model=UploadResponse)
     @limiter.limit(upload_rate_limit)
@@ -312,6 +318,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail='FASTA file not found.')
         project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
         defaults = WEB_BACKEND_CONFIG.defaults
+        enqueue_options = build_enqueue_job_options()
         job = queue.enqueue(
             run_profile_fasta,
             project_db=str(project_db),
@@ -320,7 +327,9 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             sample=payload.sample or defaults.profile_sample_name,
             threads=payload.threads if payload.threads is not None else defaults.profile_threads,
             aligner=payload.aligner or defaults.profile_aligner,
+            **enqueue_options,
         )
+        logger.info('Queue job enqueued: job_id=%s mode=fasta database_id=%s', job.id, project_db.name)
         return JobSubmitResponse(job_id=job.id)
 
     @app.post('/api/profile/vcf', response_model=JobSubmitResponse)
@@ -349,6 +358,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             bam_path = str(resolved_bam)
         project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
         defaults = WEB_BACKEND_CONFIG.defaults
+        enqueue_options = build_enqueue_job_options()
         job = queue.enqueue(
             run_profile_vcf,
             project_db=str(project_db),
@@ -361,7 +371,9 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             bam_path=bam_path,
             threads=payload.threads if payload.threads is not None else defaults.profile_threads,
             aligner=payload.aligner or defaults.profile_aligner,
+            **enqueue_options,
         )
+        logger.info('Queue job enqueued: job_id=%s mode=vcf database_id=%s', job.id, project_db.name)
         return JobSubmitResponse(job_id=job.id)
 
     @app.post('/api/regenerate/json', response_model=JobSubmitResponse)
@@ -382,6 +394,12 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             project_db=str(project_db),
             output_dir=str(config.results_dir),
             json_path=str(json_path),
+            **build_enqueue_job_options(),
+        )
+        logger.info(
+            'Queue job enqueued: job_id=%s mode=regenerate-json database_id=%s',
+            job.id,
+            project_db.name,
         )
         return JobSubmitResponse(job_id=job.id)
 
@@ -399,8 +417,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         rq_status = job.get_status()
         status = _map_job_status(rq_status)
         result = job.return_value() if status == 'succeeded' else None
-        error = _user_facing_error_message(job.exc_info) if status == 'failed' and job.exc_info else None
-        if status == 'failed' and error is None and rq_status in ('stopped', 'canceled'):
+        error = _user_facing_error_message(job.exc_info) if status == 'failed' else None
+        if status == 'failed' and rq_status in ('stopped', 'canceled'):
             error = 'Job canceled by user.'
         return JobStatusResponse(job_id=job_id, status=status, result=result, error=error)
 
@@ -493,6 +511,64 @@ def _map_job_status(rq_status) -> str:
     if rq_status in failed_statuses:
         return 'failed'
     return 'queued'
+
+
+def _build_readiness_payload(config: StartupConfig) -> ApiEnvelope:
+    """Build readiness diagnostics without exposing filesystem paths or credentials."""
+    diagnostics: list[str] = []
+    redis_connected = _is_redis_connected()
+    if not redis_connected:
+        diagnostics.append('redis_unreachable')
+
+    project_db_ready, project_db_count = _project_database_catalog_readiness(config.project_databases_dir)
+    if not project_db_ready:
+        diagnostics.append('project_database_catalog_unready')
+
+    workspace = {
+        'project_databases_dir_ready': config.project_databases_dir.is_dir(),
+        'uploads_dir_ready': config.uploads_dir.is_dir(),
+        'results_dir_ready': config.results_dir.is_dir(),
+    }
+    if not all(workspace.values()):
+        diagnostics.append('workspace_directories_unready')
+
+    status = 'ok' if not diagnostics else 'error'
+    return ApiEnvelope(
+        status=status,
+        data={
+            'service': WEB_BACKEND_CONFIG.defaults.service_name,
+            'redis': {'connected': redis_connected},
+            'project_databases': {
+                'ready': project_db_ready,
+                'count': project_db_count,
+            },
+            'workspace': workspace,
+            'diagnostics': diagnostics,
+        },
+    )
+
+
+def _is_redis_connected() -> bool:
+    """Check Redis connectivity for readiness checks."""
+    redis_url = os.getenv(WEB_ENV.redis_url, WEB_BACKEND_CONFIG.defaults.redis_url)
+    try:
+        client = redis.Redis.from_url(redis_url)
+        return bool(client.ping())
+    except redis.RedisError:
+        return False
+    except OSError:
+        return False
+    except RuntimeError:
+        return False
+
+
+def _project_database_catalog_readiness(project_databases_dir: Path) -> tuple[bool, int]:
+    """Validate project database catalog readiness and return ready/count diagnostics."""
+    try:
+        db_paths = list_project_db_paths(project_databases_dir)
+    except (FileNotFoundError, OSError, ValueError):
+        return False, 0
+    return bool(db_paths), len(db_paths)
 
 
 def _user_facing_error_message(raw_message: str | None) -> str:
@@ -634,7 +710,27 @@ def run() -> None:
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(name)s: %(message)s')
     host = os.getenv(WEB_ENV.host, WEB_BACKEND_CONFIG.defaults.web_host)
     port = int(os.getenv(WEB_ENV.port, str(WEB_BACKEND_CONFIG.defaults.web_port)))
-    uvicorn.run(create_app(), host=host, port=port, reload=False)
+    proxy_headers, forwarded_allow_ips = _resolve_proxy_settings()
+    uvicorn.run(
+        create_app(),
+        host=host,
+        port=port,
+        reload=False,
+        proxy_headers=proxy_headers,
+        forwarded_allow_ips=forwarded_allow_ips,
+    )
+
+
+def _resolve_proxy_settings() -> tuple[bool, str]:
+    """Enable trusted proxy forwarding only when explicitly configured."""
+    configured = os.getenv(WEB_ENV.trusted_proxies, '').strip()
+    if not configured:
+        return False, ''
+
+    proxy_ips = [value.strip() for value in configured.split(',') if value.strip()]
+    if not proxy_ips:
+        return False, ''
+    return True, ','.join(proxy_ips)
 
 
 if __name__ == '__main__':

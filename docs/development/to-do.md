@@ -180,14 +180,17 @@ Mark items done and update priorities after each completed milestone.
 - [X] Configurable CORS origins — `RESPRO_WEB_CORS_ORIGINS` now accepts a comma-separated origin list at startup; backend defaults to localhost development origins when no API token is set and to `*` only when `RESPRO_WEB_API_TOKEN` is configured; compose and deployment docs include configuration guidance
 - [X] Upload rate limiting — web uploads are now rate limited via `slowapi`; `RESPRO_WEB_UPLOAD_RATE_LIMIT` configures the limit, token-authenticated requests are keyed by token, unauthenticated requests fall back to client IP, and deployment docs/compose include configuration guidance
 - [X] Upload input validation hardening — FASTA/VCF upload validation now rejects binary content, enforces structural checks and line-length caps, and requires both `##fileformat` + `#CHROM` headers for VCF; BAM validation now verifies BGZF header structure (not just two-byte magic); parser-heavy profiling steps wrap FASTA/VCF/BAM parser failures into explicit user-facing errors
-- [x] Add explicit startup policy validation for auth and CORS
-- [x] Require explicit web API authentication in non-local deployments
-- [x] Restrict profiling input paths to trusted roots
-- [x] Remove token transport via query string
-- [x] Remove query-token auth fallback from non-route surfaces
-- [x] Tighten authenticated CORS defaults
-- [x] Ephemeral web mode as the only default path (no login)
-- [x] Remove mandatory `results.db` dependency from web profiling
+- [X] Add explicit startup policy validation for auth and CORS
+- [X] Require explicit web API authentication in non-local deployments
+- [X] Restrict profiling input paths to trusted roots
+- [X] Remove token transport via query string
+- [X] Remove query-token auth fallback from non-route surfaces
+- [X] Tighten authenticated CORS defaults
+- [X] Ephemeral web mode as the only default path (no login)
+- [X] Remove mandatory `results.db` dependency from web profiling
+- [X] Configurable worker concurrency and env-tunable CPU/memory limits in `docker-compose.web.yml`, with compose compatibility comments for local vs Swarm-style limit handling
+- [X] HTTPS/reverse-proxy hosting guidance with ready-to-copy Caddy/nginx examples and deployment notes in `docs/user/webapp-hosting.md`
+- [X] Optional trusted proxy support (`RESPRO_WEB_TRUSTED_PROXIES`) wired into uvicorn proxy settings so forwarded client IP headers are only trusted when explicitly configured
 
 ### WebUI
 
@@ -221,6 +224,9 @@ Mark items done and update priorities after each completed milestone.
 - [X] `respro manage results <results_db_path> --delete <run_id>` — delete one stored run (including `variant_result`, `coverage_gap`, `formula_rule_hit`, and `sample_classification` rows) from `results.db` with optional `--force` confirmation bypass
 - [X] Hide internal formula-component placeholder rows from user-facing rule/drug displays and internalize the marker handling
 - [X] `respro add --validate` dry-run mode — execute full rules parsing/validation pipeline without persisting DB changes
+- [X] Job status contract hardening — standardized and tested queued/running/succeeded/failed mapping with consistent failed-job and missing-job error payload behavior for `/api/jobs/{job_id}`
+- [X] Queue runtime safeguards — added configurable queue timeout/retry defaults plus explicit enqueue/start/fail/finish lifecycle logging for background jobs
+- [X] API readiness checks — added `/api/readiness` with Redis connectivity and startup workspace/project-db readiness diagnostics without exposing sensitive paths or credentials
 
 ### Public release (done)
 
@@ -292,30 +298,9 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Web deployment and security
 
--  Optional lightweight run cache for active session UX — if needed for frontend refresh
+- 🟢 Optional lightweight run cache for active session UX — if needed for frontend refresh
   resilience, keep a short-lived in-memory or Redis-backed session cache keyed by browser session
   ID (no durable per-user storage)
-- 🟡 Configurable worker concurrency and resource limits in Docker Compose — currently one
-  `respro-worker` container handles all profiling jobs serially with no CPU or memory cap; two
-  independent improvements are needed: (1) **scaling** — document `docker compose up --scale respro-worker=N` so multiple worker containers drain the same `profiling` RQ queue from Redis;
-  each replica needs the same `/data` volume mount so output files written by a worker are visible
-  to the web process; (2) **per-container resource limits** — add `deploy.resources.limits` to
-  the `respro-worker` service in `docker-compose.web.yml` so each worker is bounded; example:
-  `cpus: '2.0'` (two CPU cores) and `memory: 4G` (4 GB RAM); these values should be tunable via
-  environment variables `RESPRO_WORKER_CPU_LIMIT` and `RESPRO_WORKER_MEM_LIMIT` with sensible
-  defaults; without limits a rogue job can starve the web API and Redis on the same host;
-  `deploy.resources` requires Docker Compose v3.8+ with `docker compose` (not `docker-compose`
-  v1) and has no effect outside Swarm unless the `--compatibility` flag is passed; for Kubernetes
-  the equivalent is `resources.limits` in the container spec; document both the scale and the
-  resource-limit approach in `docs/user/webapp-hosting.md` with ready-to-copy snippets
-- 🟡 HTTPS / reverse-proxy guidance — the current Docker Compose setup binds the web service to
-  `127.0.0.1:8000`, which is safe for local use but cannot be reached from outside the host; for
-  a broader deployment add guidance in `docs/user/webapp-hosting.md` for placing an nginx or Caddy
-  reverse proxy in front of the container that terminates TLS; provide an example Caddy config
-  (Caddy auto-provisions Let's Encrypt certificates) with the correct `proxy_pass` and
-  `proxy_set_header` directives; add `RESPRO_WEB_TRUSTED_PROXIES` as an optional env variable
-  read by uvicorn (`--proxy-headers`, `--forwarded-allow-ips`) so that `X-Forwarded-For` is
-  trusted for rate-limiting purposes
 
 ### Public release
 
@@ -349,19 +334,9 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### WebUI
 
-- 🟡 Persistent job history in the frontend — currently submitted job IDs live only in React
-  component state and are lost on page reload; persist the list of job IDs and their last-known
-  status to `localStorage` (keyed by session token or a browser-generated UUID stored in
-  `sessionStorage`); on page load, rehydrate the list and poll for current status for any
-  non-terminal jobs; cap stored history to the last 20 entries to bound storage use; add a
-  "Clear history" button
 - 🟢 Frontend tests — add a Vitest + React Testing Library setup to `web/frontend/`; cover the
   critical user flows: file selection and upload flow (mocked XHR), job polling until completion,
   and report display; the test runner should be invokable via `npm test` inside `web/frontend/`
   and should run in CI alongside the Python tests
-- 🟡 Job status contract hardening — standardize and test queued/running/succeeded/failed mapping plus consistent error payloads for failed jobs and missing `job_id`
-- 🟡 Queue runtime safeguards — add worker timeout/retry defaults and explicit logging for enqueue/start/fail/finish transitions to improve debuggability
-- 🟡 API readiness checks — extend health/readiness behavior to surface Redis connectivity and startup DB path readiness for operational diagnostics
-- 🟡 Dev startup ergonomics — add one-command local startup scripts (backend + worker + frontend + Redis) to reduce manual terminal orchestration during development
 - 🟡 Compose integration tests — add compose-backed smoke/integration tests for submit → poll → report retrieval using startup-configured paths
 - 🟢 CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls

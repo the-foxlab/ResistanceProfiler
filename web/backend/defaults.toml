@@ -8,13 +8,18 @@ host = 'RESPRO_WEB_HOST'
 port = 'RESPRO_WEB_PORT'
 redis_url = 'REDIS_URL'
 job_timeout = 'RESPRO_WEB_JOB_TIMEOUT'
+job_retry_max = 'RESPRO_WEB_JOB_RETRY_MAX'
+job_retry_intervals = 'RESPRO_WEB_JOB_RETRY_INTERVALS'
 maintained_bootstrap = 'RESPRO_WEB_MAINTAINED_BOOTSTRAP'
+trusted_proxies = 'RESPRO_WEB_TRUSTED_PROXIES'
 
 [defaults]
 web_host = '127.0.0.1'
 web_port = 8000
 redis_url = 'redis://127.0.0.1:6379/0'
 job_timeout_seconds = 3600
+job_retry_max = 1
+job_retry_intervals_seconds = [30]
 sweep_frequency_seconds = 3600
 upload_rate_limit = '5/minute'
 cors_local_origins = ['http://127.0.0.1:5173', 'http://localhost:5173']

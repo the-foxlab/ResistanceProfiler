@@ -20,7 +20,10 @@ class WebEnvKeys:
     port: str = 'RESPRO_WEB_PORT'
     redis_url: str = 'REDIS_URL'
     job_timeout: str = 'RESPRO_WEB_JOB_TIMEOUT'
+    job_retry_max: str = 'RESPRO_WEB_JOB_RETRY_MAX'
+    job_retry_intervals: str = 'RESPRO_WEB_JOB_RETRY_INTERVALS'
     maintained_bootstrap: str = 'RESPRO_WEB_MAINTAINED_BOOTSTRAP'
+    trusted_proxies: str = 'RESPRO_WEB_TRUSTED_PROXIES'
 
 
 @dataclass(frozen=True)
@@ -31,6 +34,8 @@ class WebDefaults:
     web_port: int
     redis_url: str
     job_timeout_seconds: int
+    job_retry_max: int
+    job_retry_intervals_seconds: tuple[int, ...]
     sweep_frequency_seconds: int
     upload_rate_limit: str
     cors_local_origins: tuple[str, ...]
@@ -85,7 +90,10 @@ def _load_web_backend_config() -> WebBackendConfig:
         port=str(env_payload['port']),
         redis_url=str(env_payload['redis_url']),
         job_timeout=str(env_payload['job_timeout']),
+        job_retry_max=str(env_payload['job_retry_max']),
+        job_retry_intervals=str(env_payload['job_retry_intervals']),
         maintained_bootstrap=str(env_payload['maintained_bootstrap']),
+        trusted_proxies=str(env_payload['trusted_proxies']),
     )
 
     defaults = WebDefaults(
@@ -93,7 +101,11 @@ def _load_web_backend_config() -> WebBackendConfig:
         web_port=int(defaults_payload['web_port']),
         redis_url=str(defaults_payload['redis_url']),
         job_timeout_seconds=int(defaults_payload['job_timeout_seconds']),
-            sweep_frequency_seconds=int(defaults_payload['sweep_frequency_seconds']),
+        job_retry_max=int(defaults_payload['job_retry_max']),
+        job_retry_intervals_seconds=tuple(
+            int(item) for item in defaults_payload['job_retry_intervals_seconds']
+        ),
+        sweep_frequency_seconds=int(defaults_payload['sweep_frequency_seconds']),
         upload_rate_limit=str(defaults_payload['upload_rate_limit']),
         cors_local_origins=tuple(str(item) for item in defaults_payload['cors_local_origins']),
         profile_queue_name=str(defaults_payload['profile_queue_name']),

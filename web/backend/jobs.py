@@ -8,10 +8,16 @@ converted inside the function.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from pathlib import Path
+
+from rq import get_current_job
 
 from web.backend.services.profile import profile_fasta, profile_vcf
 from web.backend.services.regenerate import regenerate_from_json
+
+logger = logging.getLogger(__name__)
 
 
 def run_profile_fasta(
@@ -24,13 +30,18 @@ def run_profile_fasta(
     aligner: str,
 ) -> dict:
     """RQ job wrapper for FASTA profiling."""
-    return profile_fasta(
-        project_db=Path(project_db),
-        output_dir=Path(output_dir),
-        fasta_path=Path(fasta_path),
+    return _run_job_with_logging(
+        mode='fasta',
+        database_id=Path(project_db).name,
         sample=sample,
-        threads=threads,
-        aligner=aligner,
+        job_func=lambda: profile_fasta(
+            project_db=Path(project_db),
+            output_dir=Path(output_dir),
+            fasta_path=Path(fasta_path),
+            sample=sample,
+            threads=threads,
+            aligner=aligner,
+        ),
     )
 
 
@@ -48,17 +59,22 @@ def run_profile_vcf(
     aligner: str,
 ) -> dict:
     """RQ job wrapper for VCF profiling."""
-    return profile_vcf(
-        project_db=Path(project_db),
-        output_dir=Path(output_dir),
-        vcf_path=Path(vcf_path),
-        ref_fasta_path=Path(ref_fasta_path),
+    return _run_job_with_logging(
+        mode='vcf',
+        database_id=Path(project_db).name,
         sample=sample,
-        min_af=min_af,
-        min_depth=min_depth,
-        bam_path=Path(bam_path) if bam_path else None,
-        threads=threads,
-        aligner=aligner,
+        job_func=lambda: profile_vcf(
+            project_db=Path(project_db),
+            output_dir=Path(output_dir),
+            vcf_path=Path(vcf_path),
+            ref_fasta_path=Path(ref_fasta_path),
+            sample=sample,
+            min_af=min_af,
+            min_depth=min_depth,
+            bam_path=Path(bam_path) if bam_path else None,
+            threads=threads,
+            aligner=aligner,
+        ),
     )
 
 
@@ -69,8 +85,52 @@ def run_regenerate_json(
     json_path: str,
 ) -> dict:
     """RQ job wrapper for regenerating report artifacts from result JSON."""
-    return regenerate_from_json(
-        project_db=Path(project_db),
-        output_dir=Path(output_dir),
-        json_path=Path(json_path),
+    return _run_job_with_logging(
+        mode='regenerate-json',
+        database_id=Path(project_db).name,
+        sample='regenerate',
+        job_func=lambda: regenerate_from_json(
+            project_db=Path(project_db),
+            output_dir=Path(output_dir),
+            json_path=Path(json_path),
+        ),
     )
+
+
+def _run_job_with_logging(
+    *,
+    mode: str,
+    database_id: str,
+    sample: str,
+    job_func: Callable[[], dict],
+) -> dict:
+    """Run one queued task with explicit lifecycle logs for debugging and operations."""
+    current_job = get_current_job()
+    job_id = current_job.id if current_job is not None else 'unknown'
+    logger.info(
+        'Queue job started: job_id=%s mode=%s database_id=%s sample=%s',
+        job_id,
+        mode,
+        database_id,
+        sample,
+    )
+    try:
+        result = job_func()
+    except Exception:
+        logger.exception(
+            'Queue job failed: job_id=%s mode=%s database_id=%s sample=%s',
+            job_id,
+            mode,
+            database_id,
+            sample,
+        )
+        raise
+
+    logger.info(
+        'Queue job finished: job_id=%s mode=%s database_id=%s sample=%s',
+        job_id,
+        mode,
+        database_id,
+        sample,
+    )
+    return result

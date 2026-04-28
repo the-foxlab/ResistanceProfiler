@@ -179,7 +179,7 @@ def _resolve_bool(raw_value: str, *, setting_name: str) -> bool:
 def _validate_startup_policy(api_token: str) -> None:
     """Enforce deployment safety rules based on host binding and token configuration."""
     host = os.getenv(WEB_ENV.host, '').strip()
-    if host and host not in ('127.0.0.1', 'localhost') and not api_token:
+    if host and host not in ('127.0.0.1', 'localhost', '0.0.0.0') and not api_token:
         raise RuntimeError(
             'Public bind address detected but RESPRO_WEB_API_TOKEN is not set. '
             'Set a strong API token before deploying publicly.'
