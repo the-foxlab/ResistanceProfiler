@@ -118,8 +118,8 @@ Set secrets and deployment-specific values in `.env` (loaded by Docker Compose).
 | `RESPRO_WEB_TRUSTED_PROXIES`      | Trusted reverse-proxy IPs/CIDRs for forwarded headers (`X-Forwarded-*`). Set only behind a known proxy.       | `127.0.0.1` or `10.0.0.0/8`                         | `.env`                        |
 | `RESPRO_WEB_UPLOAD_RATE_LIMIT`    | Upload request throttle (`slowapi` syntax).                                                                   | default `5/minute`; example `10/minute`             | `.env`                        |
 | `RESPRO_WEB_JOB_TIMEOUT`          | Queue job timeout in seconds.                                                                                   | default `3600`; example `7200`                      | `.env`                        |
-| `RESPRO_WEB_JOB_RETRY_MAX`        | Retry count for failed queued jobs.                                                                             | default `1`; example `2`                            | `.env`                        |
-| `RESPRO_WEB_JOB_RETRY_INTERVALS`  | Comma-separated retry delays in seconds.                                                                        | default `30`; example `30,120`                      | `.env`                        |
+| `RESPRO_WEB_JOB_RETRY_MAX`        | Retry count for failed queued jobs. Set > 0 only if you want automatic retries for transient failures.        | default `1`; example `2`                            | `.env`                        |
+| `RESPRO_WEB_JOB_RETRY_INTERVALS`  | Comma-separated retry delays in seconds (used only when `RESPRO_WEB_JOB_RETRY_MAX` > 0).                      | default `30`; example `30,120`                      | `.env`                        |
 | `RESPRO_WEB_DATA_DIR`             | Startup data root override (normally mounted as `/data` in compose).                                          | default `/data`; example `/data`                    | `.env` (only when overriding) |
 | `RESPRO_WEB_ALLOWED_ROOTS`        | Comma-separated absolute path allowlist for upload/regenerate path checks.                                      | `/data/project_databases,/data/uploads,/data/results` | `.env` (only when overriding) |
 | `RESPRO_WEB_MAINTAINED_BOOTSTRAP` | Downloads missing maintained DBs at startup. Often enabled for local convenience, optional in production.       | default `false`; local compose sets `true`          | compose file or `.env`        |
@@ -152,6 +152,4 @@ RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
 RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
 RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
 RESPRO_WEB_JOB_TIMEOUT=3600
-RESPRO_WEB_JOB_RETRY_MAX=1
-RESPRO_WEB_JOB_RETRY_INTERVALS=30
 ```

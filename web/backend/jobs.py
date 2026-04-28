@@ -116,6 +116,16 @@ def _run_job_with_logging(
     )
     try:
         result = job_func()
+    except ValueError:
+        _mark_current_job_non_retryable(current_job)
+        logger.exception(
+            'Queue job failed: job_id=%s mode=%s database_id=%s sample=%s',
+            job_id,
+            mode,
+            database_id,
+            sample,
+        )
+        raise
     except Exception:
         logger.exception(
             'Queue job failed: job_id=%s mode=%s database_id=%s sample=%s',
@@ -134,3 +144,12 @@ def _run_job_with_logging(
         sample,
     )
     return result
+
+
+def _mark_current_job_non_retryable(current_job) -> None:
+    """Disable retries for deterministic user-input errors handled by this worker job."""
+    if current_job is None:
+        return
+    if getattr(current_job, 'retries_left', None) is None:
+        return
+    current_job.retries_left = 0
