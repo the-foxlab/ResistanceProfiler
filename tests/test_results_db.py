@@ -6,15 +6,22 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import textwrap
 import uuid
 from pathlib import Path
 
 import pytest
+from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature
+from Bio.SeqRecord import SeqRecord
 
+from respro.cli.init import init_project
+from respro.core.rules import load_rules
 from respro.db.models import (
     AnnotatedVariant,
-    FormulaRuleHit,
     CoverageGap,
+    FormulaRuleHit,
     ProfilingResult,
     ResistanceRule,
     ResistanceRuleSet,
@@ -24,8 +31,8 @@ from respro.db.models import (
 from respro.db.results import (
     delete_run,
     list_runs,
-    load_formula_rule_hits,
     load_coverage_gaps,
+    load_formula_rule_hits,
     load_run,
     project_fingerprint,
     reconstruct_annotations,
@@ -33,6 +40,62 @@ from respro.db.results import (
     save_run,
 )
 from respro.db.schema import create_schema, init_results_db, open_project_db
+from respro.io.reference import load_genes_for_reference
+from respro.report.html import export_results
+
+
+def _init_split_project(
+    tmp_path: Path,
+    *,
+    gene_name: str,
+    strand: str,
+    segments: list[tuple[int, int]],
+    reference_aa: str,
+    mutation_aa: str,
+) -> Path:
+    gb_path = tmp_path / f'{gene_name}.gb'
+    record = SeqRecord(Seq('GCT' * 120), id='tiny_ref', name='tiny_ref', description='')
+    record.annotations['molecule_type'] = 'DNA'
+    record.annotations['accessions'] = ['tiny_ref']
+    record.features = [
+        SeqFeature(
+            CompoundLocation(
+                [
+                    FeatureLocation(start, end, strand=1 if strand == '+' else -1)
+                    for start, end in segments
+                ]
+            ),
+            type='CDS',
+            qualifiers={
+                'gene': [gene_name],
+                'product': ['DNA polymerase'],
+                'codon_start': ['1'],
+            },
+        )
+    ]
+    with open(gb_path, 'w') as handle:
+        SeqIO.write([record], handle, 'genbank')
+
+    rules_tsv = tmp_path / f'{gene_name}.tsv'
+    rules_tsv.write_text(
+        textwrap.dedent(
+            f'''\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            {gene_name}\ttiny_ref\t2\t{reference_aa}\t{mutation_aa}\tDrugA\tresistant
+            '''
+        ),
+        encoding='utf-8',
+    )
+
+    db_path = tmp_path / f'{gene_name}.db'
+    init_project(
+        db_path=db_path,
+        name='split-test',
+        genbank_paths=[gb_path],
+        rules_tsv=rules_tsv,
+        additional_info=False,
+    )
+    return db_path
 
 
 class TestProjectSchemaBoundary:
@@ -559,6 +622,104 @@ class TestResultsPersistence:
         assert project_fingerprint(conn_a) != project_fingerprint(conn_b)
         conn_a.close()
         conn_b.close()
+
+    def test_split_gene_run_roundtrip_reconstructs_and_exports_report(self, tmp_path: Path) -> None:
+        project_db = _init_split_project(
+            tmp_path,
+            gene_name='split_pol',
+            strand='+',
+            segments=[(0, 18), (60, 78)],
+            reference_aa='A',
+            mutation_aa='V',
+        )
+        results_conn = init_results_db(tmp_path / 'results.db')
+        project_conn = open_project_db(project_db)
+
+        try:
+            ref_row = project_conn.execute(
+                'SELECT id, organism, length FROM reference WHERE name = ?',
+                ('tiny_ref',),
+            ).fetchone()
+            assert ref_row is not None
+
+            rules = load_rules(project_conn, int(ref_row['id']))
+            assert len(rules) == 1
+
+            ann = AnnotatedVariant(
+                variant=VariantCall(
+                    chrom='tiny_ref',
+                    pos=4,
+                    ref='C',
+                    alt='T',
+                    allele_freq=0.95,
+                    depth=250,
+                ),
+                gene_name='split_pol',
+                codon_pos=1,
+                ref_codon='GCT',
+                alt_codon='GTT',
+                ref_aa='A',
+                alt_aa='V',
+                consequence='missense',
+                af_bin='high',
+                rule_matches=rules,
+            )
+            run_id = save_run(
+                results_conn,
+                project_db.resolve(),
+                project_conn,
+                ProfilingResult(
+                    project_name='split-test',
+                    organism=ref_row['organism'] or '',
+                    reference_name='tiny_ref',
+                    reference_length_nt=int(ref_row['length'] or 0),
+                    sample_name='split-sample',
+                    vcf_name='split.vcf',
+                    total_variants=1,
+                    variants_in_cds=1,
+                    resistance_hits=1,
+                    annotations=[ann],
+                ),
+            )
+
+            run_dict, variant_rows = load_run(results_conn, run_id)
+            annotations = reconstruct_annotations(variant_rows)
+            genes = load_genes_for_reference(project_conn, int(ref_row['id']))
+            outputs = export_results(
+                ProfilingResult(
+                    project_name=run_dict['project_name'],
+                    organism=ref_row['organism'] or '',
+                    reference_name=run_dict['reference_name'],
+                    reference_length_nt=int(ref_row['length'] or 0),
+                    sample_name=run_dict.get('sample_name', ''),
+                    vcf_name=run_dict['vcf_path'],
+                    run_timestamp=run_dict.get('created_at', ''),
+                    total_variants=run_dict.get('total_variants', 0),
+                    variants_in_cds=run_dict.get('variants_in_cds', 0),
+                    resistance_hits=run_dict.get('resistance_hits', 0),
+                    annotations=annotations,
+                ),
+                tmp_path / 'roundtrip_report',
+                genes=genes,
+                rule_gene_names={rule.gene_name for rule in rules},
+                project_conn=project_conn,
+                rules=rules,
+            )
+
+            assert len(annotations) == 1
+            assert annotations[0].gene_name == 'split_pol'
+            assert annotations[0].rule_matches[0].drug_name == 'druga'
+            assert len(genes) == 1
+            assert [
+                (segment.segment_index, segment.start, segment.end)
+                for segment in genes[0].segments
+            ] == [(0, 0, 18), (1, 60, 78)]
+            assert 'html' in outputs
+            assert outputs['html'].exists()
+            assert 'split_pol' in outputs['html'].read_text(encoding='utf-8')
+        finally:
+            project_conn.close()
+            results_conn.close()
 
 
 class TestCoverageGapPersistence:

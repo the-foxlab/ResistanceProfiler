@@ -4,7 +4,7 @@
 
 - Repository structure and module responsibilities: `docs/development/contribution-and-architecture.md`
 - Detailed module/function interaction layouts: `docs/development/detailed_respro_layout.md`, `docs/development/detailed_app_layout.md`
-- Planning source of truth and current priorities: `to-do.md`
+- Planning source of truth and current priorities: `docs/development/to-do.md`
 - Rules TSV formatting, allowed column values, and mutation notation: `docs/user/rules-tsv-format.md`
 - Public project overview and usage examples: `README.md`
 
@@ -173,7 +173,7 @@ a collection.
 
 ## Editing guidance
 
-- Align implementation with `to-do.md` priorities unless direct user instructions say otherwise.
+- Align implementation with `docs/development/to-do.md` priorities unless direct user instructions say otherwise.
 - When changing repository layout or module responsibilities, update
   `docs/development/contribution-and-architecture.md` in the same change.
 - For architecture-relevant changes, update affected sections in
@@ -190,7 +190,7 @@ a collection.
 
 ## Planning source of truth
 
-`to-do.md` is the single planning source of truth. Review it before any substantial change.
+`docs/development/to-do.md` is the single planning source of truth. Review it before any substantial change.
 Full todo management rules (structure, priority selection, marking done, adding items) are defined
 in the `todo-management` skill.
 

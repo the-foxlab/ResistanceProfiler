@@ -78,6 +78,9 @@ Mark items done and update priorities after each completed milestone.
 
 - [X] Phase 1 (database representation): add split/joined CDS persistence with a `gene_segment` model/table, parse GenBank compound CDS parts, and keep contiguous genes unchanged.
 - [X] Phase 2 (annotation logic) — VCF/FASTA coordinate mapping is segment-aware so only coding regions are assessed; envelope positions outside CDS segments are skipped as non-coding
+- [X] Phase 3 (report representation): render split genes as graphical multi-part blocks only (no textual part labels), with 5-prime to 3-prime ordering following reference genomic orientation.
+- [X] Phase 4 (results/regenerate): split-gene annotations and multi-block report rendering survive `results.db` persistence and `respro regenerate` roundtrips.
+- [X] Regression coverage for split genes spans persistence/regenerate roundtrips, including an explicit negative-strand split CDS case.
 
 ### Resistance rule matching
 
@@ -237,12 +240,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 Regression tests for overlapping ORF annotation — no test currently verifies that a
   variant falling inside two genes simultaneously produces correct, independent annotations for
   both; add tests for both the VCF and FASTA profiling paths
-
-### Split/joined GenBank CDS support
-
-- 🔴 Phase 3 (report representation): render split genes as graphical multi-part blocks only (no textual part labels), with 5-prime to 3-prime ordering following reference genomic orientation.
-- 🔴 Phase 4 (regenerate/results): ensure split-gene annotations and report rendering survive `results.db` persistence and `respro regenerate` roundtrips.
-- 🔴 Testing: add an extensive regression suite for split genes, with explicit negative-strand split CDS cases and guards against contiguous-annotation regressions.
 
 ### Usability and workflow
 

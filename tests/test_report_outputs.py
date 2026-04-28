@@ -4,11 +4,14 @@ Tests for report output generation.
 
 import sqlite3
 
+import matplotlib.pyplot as plt
+
 from respro.db.models import (
     AnnotatedVariant,
     CoverageGap,
     GeneMatch,
     GeneRecord,
+    GeneSegment,
     ProfilingResult,
     Publication,
     ResistanceRule,
@@ -811,6 +814,71 @@ class TestBuildReportContext:
         assert svg is not None
         assert b'#6b7280' in svg
         assert b'opacity: 0.12' in svg
+
+
+class TestSplitGenePlotRendering:
+    def test_genome_overview_draws_one_block_per_segment_in_genomic_order(self) -> None:
+        from respro.report.plots import _draw_genome_overview
+
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='UL30',
+            protein='UL30',
+            start=10,
+            end=36,
+            strand='-',
+            codon_start=0,
+            nt_sequence='A' * 12,
+            segments=(
+                GeneSegment(segment_index=0, start=30, end=36),
+                GeneSegment(segment_index=1, start=10, end=16),
+            ),
+        )
+
+        fig, ax = plt.subplots()
+        try:
+            _draw_genome_overview(ax, [gene], {gene.name}, reference_length_nt=50)
+
+            rects = ax.patches
+            assert len(rects) == 2
+            assert [rect.get_x() for rect in rects] == [11, 31]
+            assert [rect.get_width() for rect in rects] == [6, 6]
+            assert [text.get_text() for text in ax.texts] == ['UL30']
+        finally:
+            plt.close(fig)
+
+    def test_gene_track_draws_one_block_per_segment_in_genomic_order(self) -> None:
+        from respro.report.plots import _draw_gene_track
+
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='UL30',
+            protein='UL30',
+            start=10,
+            end=36,
+            strand='-',
+            codon_start=0,
+            nt_sequence='A' * 12,
+            segments=(
+                GeneSegment(segment_index=0, start=30, end=36),
+                GeneSegment(segment_index=1, start=10, end=16),
+            ),
+        )
+
+        fig, ax = plt.subplots()
+        try:
+            _draw_gene_track(ax, gene)
+
+            rects = ax.patches
+            assert len(rects) == 2
+            # Full gene box (start=10 → x=11, width=26) then intron gap (16–30 → x=17, width=14)
+            assert [rect.get_x() for rect in rects] == [11, 17]
+            assert [rect.get_width() for rect in rects] == [26, 14]
+            assert [text.get_text() for text in ax.texts] == ['← UL30 ←']
+        finally:
+            plt.close(fig)
 
 
 class TestAlignmentVisualization:

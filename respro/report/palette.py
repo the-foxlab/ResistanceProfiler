@@ -24,6 +24,7 @@ NON_COVERED_COLOUR = '#6b7280'
 
 # Genome overview gene track colours
 GENE_HIGHLIGHTED_COLOUR = 'steelblue'
+GENE_INTRON_COLOUR = "#b2b2b2"  # muted blue-grey for intron / non-coding intervals within split genes
 GENE_DEFAULT_COLOUR = '#d9dde3'
 GENE_HIGHLIGHTED_EDGE = 'slategrey'
 GENE_DEFAULT_EDGE = '#8d99a6'

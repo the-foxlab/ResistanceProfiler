@@ -1,7 +1,7 @@
 ---
 name: todo-management
-description: 'Manage to-do.md in ResistanceProfiler. Use when adding new tasks, marking work done, checking whether a feature is already implemented, drafting new todo items from a plan, selecting next priorities, or keeping the planning file accurate after a change.'
-argument-hint: 'What to add, update, check, or verify in to-do.md.'
+description: 'Manage docs/development/to-do.md in ResistanceProfiler. Use when adding new tasks, marking work done, checking whether a feature is already implemented, drafting new todo items from a plan, selecting next priorities, or keeping the planning file accurate after a change.'
+argument-hint: 'What to add, update, check, or verify in docs/development/to-do.md.'
 user-invocable: true
 disable-model-invocation: false
 ---
@@ -10,7 +10,7 @@ disable-model-invocation: false
 
 ## Planning Source of Truth
 
-`to-do.md` is the single planning source of truth. Always read it before any substantial change.
+`docs/development/to-do.md` is the single planning source of truth. Always read it before any substantial change.
 
 ## Structure
 
@@ -61,7 +61,7 @@ When a feature is fully implemented:
 4. Assign priority based on dependencies, blocking risk, and user priority signals.
 5. Write each item as a single sentence: affected module(s) + observable behaviour change.
 6. Group related items under one theme heading rather than creating isolated entries.
-7. Propose the additions for confirmation before editing `to-do.md` unless explicitly told to write immediately.
+7. Propose the additions for confirmation before editing `docs/development/to-do.md` unless explicitly told to write immediately.
 
 ## What Not to Do
 
@@ -74,7 +74,7 @@ When a feature is fully implemented:
 
 ## Output Format
 
-When proposing new todo items, output a preview block showing exactly how the entries will appear in `to-do.md` before writing the file. For example:
+When proposing new todo items, output a preview block showing exactly how the entries will appear in `docs/development/to-do.md` before writing the file. For example:
 
 ```
 ### My Theme

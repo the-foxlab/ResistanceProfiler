@@ -6,8 +6,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import textwrap
 from pathlib import Path
 
+from Bio import SeqIO
+from Bio.Seq import Seq
+from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature
+from Bio.SeqRecord import SeqRecord
 from conftest import TINY_REF_SEQ, write_genbank
 from typer.testing import CliRunner
 
@@ -34,6 +39,60 @@ from respro.db.results import (
 from respro.db.schema import init_results_db, open_project_db, open_results_db
 from respro.io.reference import load_genes_for_reference
 from respro.report.html import export_results
+
+
+def _init_split_project(
+    tmp_path: Path,
+    *,
+    gene_name: str,
+    strand: str,
+    segments: list[tuple[int, int]],
+    reference_aa: str,
+    mutation_aa: str,
+) -> Path:
+    gb_path = tmp_path / f'{gene_name}.gb'
+    record = SeqRecord(Seq('GCT' * 120), id='tiny_ref', name='tiny_ref', description='')
+    record.annotations['molecule_type'] = 'DNA'
+    record.annotations['accessions'] = ['tiny_ref']
+    record.features = [
+        SeqFeature(
+            CompoundLocation(
+                [
+                    FeatureLocation(start, end, strand=1 if strand == '+' else -1)
+                    for start, end in segments
+                ]
+            ),
+            type='CDS',
+            qualifiers={
+                'gene': [gene_name],
+                'product': ['DNA polymerase'],
+                'codon_start': ['1'],
+            },
+        )
+    ]
+    with open(gb_path, 'w') as handle:
+        SeqIO.write([record], handle, 'genbank')
+
+    rules_tsv = tmp_path / f'{gene_name}.tsv'
+    rules_tsv.write_text(
+        textwrap.dedent(
+            f'''\
+            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            {gene_name}\ttiny_ref\t2\t{reference_aa}\t{mutation_aa}\tDrugA\tresistant
+            '''
+        ),
+        encoding='utf-8',
+    )
+
+    db_path = tmp_path / f'{gene_name}.db'
+    init_project(
+        db_path=db_path,
+        name='split-test',
+        genbank_paths=[gb_path],
+        rules_tsv=rules_tsv,
+        additional_info=False,
+    )
+    return db_path
 
 
 def _run_profile(project_db: Path, sample_vcf: Path, sample_ref_fasta: Path, results_db: Path, tmp_path: Path) -> None:
@@ -421,6 +480,86 @@ class TestRegenerate:
         html = html_files[0].read_text()
         assert 'combo_regen_test' in html
         assert 'TestDrug' in html
+
+    def test_regenerate_handles_negative_strand_split_gene_roundtrip(self, tmp_path: Path) -> None:
+        project_db = _init_split_project(
+            tmp_path,
+            gene_name='split_neg',
+            strand='-',
+            segments=[(30, 48), (90, 108)],
+            reference_aa='S',
+            mutation_aa='A',
+        )
+        results_db = tmp_path / 'results.db'
+        results_conn = init_results_db(results_db)
+        project_conn = open_project_db(project_db)
+
+        try:
+            ref_row = project_conn.execute(
+                'SELECT id, length FROM reference WHERE name = ?',
+                ('tiny_ref',),
+            ).fetchone()
+            assert ref_row is not None
+
+            rules = load_rules(project_conn, int(ref_row['id']))
+            genes = load_genes_for_reference(project_conn, int(ref_row['id']))
+            assert len(genes) == 1
+            assert len(genes[0].segments) == 2
+
+            ann = AnnotatedVariant(
+                variant=VariantCall(
+                    chrom='tiny_ref',
+                    pos=95,
+                    ref='G',
+                    alt='C',
+                    allele_freq=0.98,
+                    depth=400,
+                ),
+                gene_name='split_neg',
+                codon_pos=1,
+                ref_codon='AGC',
+                alt_codon='GCC',
+                ref_aa='S',
+                alt_aa='A',
+                consequence='missense',
+                af_bin='high',
+                rule_matches=rules,
+            )
+            save_run(
+                results_conn,
+                project_db.resolve(),
+                project_conn,
+                ProfilingResult(
+                    project_name='split-test',
+                    reference_name='tiny_ref',
+                    reference_length_nt=int(ref_row['length'] or 0),
+                    sample_name='split-neg-sample',
+                    vcf_name='split-neg.vcf',
+                    total_variants=1,
+                    variants_in_cds=1,
+                    resistance_hits=1,
+                    annotations=[ann],
+                ),
+            )
+        finally:
+            project_conn.close()
+            results_conn.close()
+
+        out_dir = tmp_path / 'regenerated_split_neg'
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(project_db),
+            '--output', str(out_dir),
+        ])
+
+        assert result.exit_code == 0, result.output
+        html_files = list(out_dir.glob('*.html'))
+        assert len(html_files) == 1
+        html = html_files[0].read_text(encoding='utf-8')
+        assert 'split_neg' in html
+        assert 'split-neg-sample' in html
 
     def test_regenerate_surfaces_manual_classifications_in_html(
         self,

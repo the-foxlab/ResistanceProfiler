@@ -20,6 +20,7 @@ from respro.report.palette import (
     GENE_DEFAULT_EDGE,
     GENE_HIGHLIGHTED_COLOUR,
     GENE_HIGHLIGHTED_EDGE,
+    GENE_INTRON_COLOUR,
     MUTATION_COLOURS,
     NON_COVERED_COLOUR,
     mutation_legend_patches,
@@ -141,12 +142,15 @@ def _build_lollipop_figure(
     )
     # Legend handles
     effects_for_legend = {ann.consequence for ann in cds}
+    has_split_genes = any(gene.segments for gene in plot_genes)
     handles = [
         plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='white',
                    markeredgecolor='black', markersize=8, label='Database hit'),
         mpatches.Patch(facecolor=NON_COVERED_COLOUR, alpha=0.12, edgecolor='none', label='non covered'),
-        *mutation_legend_patches(effects_for_legend),
     ]
+    if has_split_genes:
+        handles.append(mpatches.Patch(facecolor=GENE_INTRON_COLOUR, label='Intron (non-coding)'))
+    handles.extend(mutation_legend_patches(effects_for_legend))
 
     for i, gene in enumerate(plot_genes):
         lollipop_ax = gene_pair_axes[2 * i]
@@ -247,6 +251,30 @@ def _assign_gene_tracks(genes: list[GeneRecord]) -> dict[str, int]:
     return tracks
 
 
+def _gene_plot_segments(gene: GeneRecord) -> list[tuple[int, int]]:
+    """Return genomic CDS segments ordered left-to-right for plotting."""
+    if not gene.segments:
+        return [(gene.start, gene.end)]
+    return sorted(
+        [(segment.start, segment.end) for segment in gene.segments],
+        key=lambda item: (item[0], item[1]),
+    )
+
+
+def _gene_intron_gaps(gene: GeneRecord) -> list[tuple[int, int]]:
+    """Return non-coding intron gap intervals for a split gene, ordered by position."""
+    if not gene.segments:
+        return []
+    sorted_segs = sorted(gene.segments, key=lambda s: s.start)
+    gaps = []
+    for i in range(len(sorted_segs) - 1):
+        gap_start = sorted_segs[i].end
+        gap_end = sorted_segs[i + 1].start
+        if gap_end > gap_start:
+            gaps.append((gap_start, gap_end))
+    return gaps
+
+
 def _draw_genome_overview(
     ax,
     genes: list[GeneRecord],
@@ -276,25 +304,23 @@ def _draw_genome_overview(
     for gene in sorted_genes:
         track = tracks[gene.name]
         y = -(track * track_step)
-        left = gene.start + 1
-        width = max(1, gene.end - gene.start)
         is_highlighted = gene.name in highlighted_gene_names
         colour = GENE_HIGHLIGHTED_COLOUR if is_highlighted else GENE_DEFAULT_COLOUR
         edge = GENE_HIGHLIGHTED_EDGE if is_highlighted else GENE_DEFAULT_EDGE
-        rect = mpatches.Rectangle(
-            (left, y - (track_height / 2.0)),
-            width,
-            track_height,
-            facecolor=colour,
-            edgecolor=edge,
-            linewidth=0.7,
-            zorder=100+y,
-        )
-        ax.add_patch(rect)
+        for segment_start, segment_end in _gene_plot_segments(gene):
+            ax.add_patch(mpatches.Rectangle(
+                (segment_start + 1, y - (track_height / 2.0)),
+                max(1, segment_end - segment_start),
+                track_height,
+                facecolor=colour,
+                edgecolor=edge,
+                linewidth=0.7,
+                zorder=100 + y,
+            ))
 
         if is_highlighted:
             label_y = y + (track_height / 2.0) + 0.11
-            label_x = left + (width / 2)
+            label_x = gene.start + 1 + ((gene.end - gene.start) / 2)
             ax.text(
                 label_x,
                 label_y,
@@ -352,17 +378,27 @@ def _draw_gene_track(ax, gene: GeneRecord) -> None:
     pad = max(10, int((gene.end - gene.start) * 0.03))
     ax.hlines(0.5, gene.start + 1 - pad, gene.end + pad, color=GENE_BASELINE_COLOUR, linewidth=1.0, zorder=-10)
 
-    rect = mpatches.Rectangle(
+    # Draw full gene extent then overlay intron regions on top
+    ax.add_patch(mpatches.Rectangle(
         (gene.start + 1, 0.3),
-        gene_width,
+        max(1, gene.end - gene.start),
         0.4,
         facecolor=GENE_HIGHLIGHTED_COLOUR,
         edgecolor=GENE_HIGHLIGHTED_EDGE,
         alpha=1,
         linewidth=1.0,
         zorder=2,
-    )
-    ax.add_patch(rect)
+    ))
+    for gap_start, gap_end in _gene_intron_gaps(gene):
+        ax.add_patch(mpatches.Rectangle(
+            (gap_start + 1, 0.3),
+            max(1, gap_end - gap_start),
+            0.4,
+            facecolor=GENE_INTRON_COLOUR,
+            edgecolor=GENE_INTRON_COLOUR,
+            linewidth=0,
+            zorder=3,
+        ))
 
     # Add gene label in the middle
     gene_x = gene.start + 1 + (gene_width / 2)
