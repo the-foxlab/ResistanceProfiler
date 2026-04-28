@@ -169,7 +169,7 @@ def _plan_combined_snp_groups(
                 continue
             # Group SNPs per gene-codon so linked high-AF changes can be evaluated jointly.
             codon_idx = gene.codon_index(var.pos)
-            if codon_idx < 0:
+            if codon_idx is None or codon_idx < 0:
                 continue
             key = (gene.id, codon_idx)
             grouped.setdefault(key, []).append(idx)
@@ -203,6 +203,11 @@ def _annotate_combined_snp_codon(
     seq_cds = gene.nt_sequence.upper()
     anchor = sorted(variants, key=lambda v: v.pos)[0]
     codon_idx = gene.codon_index(anchor.pos)
+    if codon_idx is None:
+        raise ValueError(
+            f'Combined SNP annotation requires coding codon index for gene {gene.name!r} '
+            f'at genomic position {anchor.pos}'
+        )
     codon_start = gene.codon_start + (codon_idx * 3)
     internal_codon = seq_cds[codon_start:codon_start + 3]
     ref_aa = translate_codon(internal_codon)
@@ -215,6 +220,11 @@ def _annotate_combined_snp_codon(
     seen: dict[int, str] = {}
     for var in sorted(variants, key=lambda v: v.pos):
         codon_pos = gene.codon_position_in_codon(var.pos)
+        if codon_pos is None:
+            raise ValueError(
+                f'Combined SNP annotation requires coding codon position for gene {gene.name!r} '
+                f'at genomic position {var.pos}'
+            )
         alt_base = reverse_complement(var.alt) if gene.strand == '-' else var.alt.upper()
         # Conflicting ALTs at the same codon base indicate inconsistent input; fail fast.
         if codon_pos in seen and seen[codon_pos] != alt_base:
@@ -270,10 +280,9 @@ def _annotate_variant_in_gene(
 
     coding_nt = seq_cds[gene.codon_start:]
 
-    if gene.strand == '-':
-        cds_variant_pos = (gene.end - 1) - var.pos
-    else:
-        cds_variant_pos = var.pos - gene.start
+    cds_variant_pos = gene.genomic_to_cds_position(var.pos)
+    if cds_variant_pos is None:
+        return AnnotatedVariant(variant=var, gene_name=gene.name)
 
     coding_variant_pos = cds_variant_pos - gene.codon_start
     if coding_variant_pos < 0:

@@ -74,6 +74,11 @@ Mark items done and update priorities after each completed milestone.
 - [X] Combined SNP codon events — multiple high-AF SNPs in the same codon annotated as one event
 - [X] Allele-frequency binning — high / intermediate / low; customizable thresholds
 
+### Split/joined GenBank CDS support
+
+- [X] Phase 1 (database representation): add split/joined CDS persistence with a `gene_segment` model/table, parse GenBank compound CDS parts, and keep contiguous genes unchanged.
+- [X] Phase 2 (annotation logic) — VCF/FASTA coordinate mapping is segment-aware so only coding regions are assessed; envelope positions outside CDS segments are skipped as non-coding
+
 ### Resistance rule matching
 
 - [X] Single-mutation rule matching — explicit per-position allele matching only (no wildcard token support)
@@ -235,8 +240,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Split/joined GenBank CDS support
 
-- 🔴 Phase 1 (database representation): add split/joined CDS persistence with a `gene_segment` model/table, parse GenBank compound CDS parts, and keep contiguous genes unchanged.
-- 🔴 Phase 2 (annotation logic): make VCF/FASTA coordinate mapping segment-aware so only coding regions are assessed; silently skip envelope positions outside CDS segments as non-coding.
 - 🔴 Phase 3 (report representation): render split genes as graphical multi-part blocks only (no textual part labels), with 5-prime to 3-prime ordering following reference genomic orientation.
 - 🔴 Phase 4 (regenerate/results): ensure split-gene annotations and report rendering survive `results.db` persistence and `respro regenerate` roundtrips.
 - 🔴 Testing: add an extensive regression suite for split genes, with explicit negative-strand split CDS cases and guards against contiguous-annotation regressions.

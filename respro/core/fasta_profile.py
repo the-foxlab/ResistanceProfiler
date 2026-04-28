@@ -387,11 +387,10 @@ def _codon_genomic_pos(gene: GeneRecord, codon_idx: int) -> int:
     :param codon_idx: 0-based codon index in the protein
     :return: 0-based genomic position on the internal reference
     """
-    nt_offset = gene.codon_start + codon_idx * 3
-    if gene.strand == '+':
-        return gene.start + nt_offset
-    # For '-' strand genes, codon 0 starts at the highest genomic position
-    return (gene.end - 1) - nt_offset
+    genomic_pos = gene.cds_to_genomic_position(gene.codon_start + codon_idx * 3)
+    if genomic_pos is None:
+        raise ValueError(f'Codon index {codon_idx} is outside CDS for gene {gene.name!r}')
+    return genomic_pos
 
 
 def _coding_nt_genomic_pos(gene: GeneRecord, coding_nt_idx: int) -> int:
@@ -402,10 +401,12 @@ def _coding_nt_genomic_pos(gene: GeneRecord, coding_nt_idx: int) -> int:
     :param coding_nt_idx: 0-based nucleotide index in coding orientation (after codon_start)
     :return: 0-based genomic position on the internal reference
     """
-    nt_offset = gene.codon_start + coding_nt_idx
-    if gene.strand == '+':
-        return gene.start + nt_offset
-    return (gene.end - 1) - nt_offset
+    genomic_pos = gene.cds_to_genomic_position(gene.codon_start + coding_nt_idx)
+    if genomic_pos is None:
+        raise ValueError(
+            f'Coding nucleotide index {coding_nt_idx} is outside CDS for gene {gene.name!r}'
+        )
+    return genomic_pos
 
 
 def _make_variant(

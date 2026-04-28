@@ -4,13 +4,14 @@ Canonical VCF remap/annotation orientation tests (E1-E7).
 
 from __future__ import annotations
 
+import logging
 import re
 
 import pytest
 
 from respro.core.annotation import annotate_variants, reverse_complement
 from respro.core.vcf_remap import _transform_allele, remap_variants
-from respro.db.models import GeneMatch, GeneRecord, VariantCall
+from respro.db.models import GeneMatch, GeneRecord, GeneSegment, VariantCall
 
 
 def _make_gene(*, strand: str) -> GeneRecord:
@@ -25,6 +26,25 @@ def _make_gene(*, strand: str) -> GeneRecord:
         strand=strand,
         codon_start=0,
         nt_sequence='ATGCAAGTCGGAAACTAA',
+    )
+
+
+def _make_split_gene(*, strand: str = '+') -> GeneRecord:
+    """Build a split CDS with a non-coding envelope gap between segments."""
+    return GeneRecord(
+        id=2,
+        reference_id=1,
+        name='split_gene',
+        protein='P',
+        start=0,
+        end=18,
+        strand=strand,
+        codon_start=0,
+        nt_sequence='ATGAAAGGGTCC',
+        segments=(
+            GeneSegment(segment_index=0, start=0, end=6),
+            GeneSegment(segment_index=1, start=12, end=18),
+        ),
     )
 
 
@@ -212,6 +232,49 @@ def test_anchor_ref_mismatch_produces_warning() -> None:
 
     assert len(remapped) == 0
     assert len(warnings) == 1
+
+
+def test_split_gene_remap_projects_second_segment_coordinates() -> None:
+    """Split CDS remap must land in the second coding segment, not the envelope gap."""
+    gene = _make_split_gene(strand='+')
+    query = gene.nt_sequence
+    match = _make_match(gene, match_strand='+', query=query, cigar='12M')
+    var = VariantCall(chrom='c', pos=6, ref='G', alt='A', allele_freq=0.9, depth=50)
+
+    remapped, warnings = remap_variants([var], [match], query)
+
+    assert not warnings
+    assert len(remapped) == 1
+    assert remapped[0].pos == 12
+
+
+def test_split_gene_envelope_gap_is_treated_as_non_coding() -> None:
+    """A position inside the split-gene envelope gap must not annotate against the CDS."""
+    gene = _make_split_gene(strand='+')
+    gap_variant = VariantCall(chrom='c', pos=6, ref='A', alt='G', allele_freq=0.9, depth=50)
+
+    annotations = annotate_variants([gap_variant], [gene])
+
+    assert len(annotations) == 1
+    assert annotations[0].gene_name == ''
+
+
+def test_split_gene_envelope_gap_remap_logs_debug_skip_reason(caplog: pytest.LogCaptureFixture) -> None:
+    """Split-gene envelope gaps should emit a debug skip reason during remap."""
+    gene = _make_split_gene(strand='+')
+    query = 'ATGAAATTTTTTGGGTCC'
+    match = _make_match(gene, match_strand='+', query=query, cigar='6M6I6M')
+    var = VariantCall(chrom='c', pos=6, ref='T', alt='G', allele_freq=0.9, depth=50)
+
+    with caplog.at_level(logging.DEBUG, logger='respro.core.vcf_remap'):
+        remapped, warnings = remap_variants([var], [match], query)
+
+    assert not remapped
+    assert not warnings
+    assert any(
+        'query pos 6' in message and 'no match / outside mapped CDS' in message
+        for message in caplog.messages
+    )
 
 
 def test_minus_gene_reference_sequence_is_reverse_complement_of_coding_sequence() -> None:

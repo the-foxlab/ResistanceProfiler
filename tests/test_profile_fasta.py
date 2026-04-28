@@ -24,6 +24,8 @@ from respro.core.alignment import (
 from respro.core.fasta_profile import (
     _annotate_from_alignment,
     _expand_iupac_codon,
+    _make_variant,
+    _make_variant_from_coding_nt,
     profile_fasta_consensus,
 )
 from respro.core.query import (
@@ -35,7 +37,7 @@ from respro.core.vcf_remap import (
     _cds_pos_to_genomic_pos,
     remap_variants,
 )
-from respro.db.models import GeneMatch, GeneRecord, VariantCall
+from respro.db.models import GeneMatch, GeneRecord, GeneSegment, VariantCall
 from respro.db.schema import create_schema, open_project_db
 
 # ──────────────────────────────────────────────────────────────────────
@@ -135,6 +137,25 @@ def gene_fwd() -> GeneRecord:
     )
 
 
+def _split_gene(*, strand: str) -> GeneRecord:
+    """Build a two-segment CDS with a non-coding envelope gap."""
+    return GeneRecord(
+        id=99,
+        reference_id=1,
+        name=f'split_{strand}',
+        protein='Split',
+        start=0,
+        end=18,
+        strand=strand,
+        codon_start=0,
+        nt_sequence='ATGAAAGGGTCC',
+        segments=(
+            GeneSegment(segment_index=0, start=0, end=6),
+            GeneSegment(segment_index=1, start=12, end=18),
+        ),
+    )
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Unit tests: coordinate mapping helpers
 # ──────────────────────────────────────────────────────────────────────
@@ -213,6 +234,49 @@ class TestCdsPosToGenomic:
         for cds in range(30):
             genomic = _cds_pos_to_genomic_pos(gene, cds)
             assert gene.nt_offset(genomic) == cds
+
+    def test_split_gene_roundtrip_forward_strand(self) -> None:
+        gene = _split_gene(strand='+')
+
+        assert gene.contains(0)
+        assert gene.contains(12)
+        assert not gene.contains(6)
+        assert gene.nt_offset(0) == 0
+        assert gene.nt_offset(5) == 5
+        assert gene.nt_offset(12) == 6
+        assert gene.nt_offset(17) == 11
+        assert gene.nt_offset(6) is None
+        assert _cds_pos_to_genomic_pos(gene, 0) == 0
+        assert _cds_pos_to_genomic_pos(gene, 5) == 5
+        assert _cds_pos_to_genomic_pos(gene, 6) == 12
+        assert _cds_pos_to_genomic_pos(gene, 11) == 17
+
+    def test_split_gene_roundtrip_reverse_strand(self) -> None:
+        gene = _split_gene(strand='-')
+
+        assert gene.contains(0)
+        assert gene.contains(17)
+        assert not gene.contains(6)
+        assert gene.nt_offset(17) == 0
+        assert gene.nt_offset(12) == 5
+        assert gene.nt_offset(5) == 6
+        assert gene.nt_offset(0) == 11
+        assert gene.nt_offset(6) is None
+        assert _cds_pos_to_genomic_pos(gene, 0) == 17
+        assert _cds_pos_to_genomic_pos(gene, 5) == 12
+        assert _cds_pos_to_genomic_pos(gene, 6) == 5
+        assert _cds_pos_to_genomic_pos(gene, 11) == 0
+
+
+class TestSplitGeneFastaProjection:
+    def test_synthetic_variant_projection_uses_segment_coordinates(self) -> None:
+        gene = _split_gene(strand='+')
+
+        codon_variant = _make_variant(gene, 2, 'G', 'A')
+        nt_variant = _make_variant_from_coding_nt(gene, 7, 'G', 'A')
+
+        assert codon_variant.pos == 12
+        assert nt_variant.pos == 13
 
 
 # ──────────────────────────────────────────────────────────────────────

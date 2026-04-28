@@ -4,6 +4,7 @@ Tests for codon-aware annotation logic.
 
 from respro.cli.profile_helpers import assign_af_bins
 from respro.core.annotation import (
+    _annotate_combined_snp_codon,
     _annotate_variant_in_gene,
     _classify_snp_consequence,
     annotate_variants,
@@ -281,6 +282,57 @@ class TestAnnotateVariantsReverse:
         assert ann.ref_aa == 'H'
         assert ann.alt_aa == 'D'
         assert ann.consequence == 'missense'
+
+
+class TestAnnotateCombinedSnpCodon:
+    def test_raises_clear_error_when_anchor_has_no_codon_index(self):
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='split_gene',
+            protein='SplitP',
+            start=0,
+            end=9,
+            strand='+',
+            nt_sequence='ATGAAA',
+        )
+        variant = VariantCall(chrom='ref', pos=99, ref='A', alt='G', allele_freq=0.9, depth=100)
+
+        try:
+            _annotate_combined_snp_codon([variant], gene)
+        except ValueError as exc:
+            assert str(exc) == (
+                "Combined SNP annotation requires coding codon index for gene 'split_gene' at "
+                'genomic position 99'
+            )
+        else:
+            raise AssertionError('Expected ValueError for missing codon index')
+
+    def test_raises_clear_error_when_member_has_no_codon_position(self):
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='split_gene',
+            protein='SplitP',
+            start=0,
+            end=9,
+            strand='+',
+            nt_sequence='ATGAAA',
+        )
+        variants = [
+            VariantCall(chrom='ref', pos=0, ref='A', alt='G', allele_freq=0.9, depth=100),
+            VariantCall(chrom='ref', pos=99, ref='A', alt='C', allele_freq=0.9, depth=100),
+        ]
+
+        try:
+            _annotate_combined_snp_codon(variants, gene)
+        except ValueError as exc:
+            assert str(exc) == (
+                "Combined SNP annotation requires coding codon position for gene 'split_gene' at "
+                'genomic position 99'
+            )
+        else:
+            raise AssertionError('Expected ValueError for missing codon position')
 
 
 

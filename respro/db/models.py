@@ -57,6 +57,43 @@ class GeneRecord:
     def length_nt(self) -> int:
         return self.end - self.start
 
+    @property
+    def _coding_segments(self) -> tuple[GeneSegment, ...]:
+        """Return CDS segments in 5'->3' coding orientation."""
+        if not self.segments:
+            return (GeneSegment(segment_index=0, start=self.start, end=self.end),)
+        if self.strand == '+':
+            return self.segments
+        return tuple(reversed(self.segments))
+
+    def genomic_to_cds_position(self, pos: int) -> int | None:
+        """Return the 0-based CDS offset for one genomic position, or None outside coding segments."""
+        cds_offset = 0
+        for segment in self._coding_segments:
+            segment_length = segment.end - segment.start
+            if segment.start <= pos < segment.end:
+                if self.strand == '+':
+                    return cds_offset + (pos - segment.start)
+                return cds_offset + ((segment.end - 1) - pos)
+            cds_offset += segment_length
+        return None
+
+    def cds_to_genomic_position(self, cds_pos: int) -> int | None:
+        """Return the genomic position for one 0-based CDS offset, or None outside the CDS."""
+        if cds_pos < 0:
+            return None
+
+        remaining = cds_pos
+        for segment in self._coding_segments:
+            segment_length = segment.end - segment.start
+            if remaining < segment_length:
+                if self.strand == '+':
+                    return segment.start + remaining
+                return (segment.end - 1) - remaining
+            remaining -= segment_length
+
+        return None
+
 
     def contains(self, pos: int) -> bool:
         """
@@ -65,36 +102,40 @@ class GeneRecord:
         :param pos: 0-based genomic position
         :return: True if position is within gene bounds
         """
-        return self.start <= pos < self.end
+        return self.genomic_to_cds_position(pos) is not None
 
-    def nt_offset(self, pos: int) -> int:
+    def nt_offset(self, pos: int) -> int | None:
         """
         Return 0-based nucleotide offset within the gene.
 
         :param pos: 0-based genomic position
         :return: 0-based offset within the gene
         """
-        if self.strand == '+':
-            return pos - self.start
-        return (self.end - 1) - pos
+        return self.genomic_to_cds_position(pos)
 
-    def codon_index(self, pos: int) -> int:
+    def codon_index(self, pos: int) -> int | None:
         """
         Return 0-based codon index for a 0-based genomic position.
 
         :param pos: 0-based genomic position
         :return: 0-based codon index
         """
-        return (self.nt_offset(pos) - self.codon_start) // 3
+        nt_offset = self.nt_offset(pos)
+        if nt_offset is None:
+            return None
+        return (nt_offset - self.codon_start) // 3
 
-    def codon_position_in_codon(self, pos: int) -> int:
+    def codon_position_in_codon(self, pos: int) -> int | None:
         """
         Return 0-based position within the codon (0, 1, or 2).
 
         :param pos: 0-based genomic position
         :return: 0-based position within codon
         """
-        return (self.nt_offset(pos) - self.codon_start) % 3
+        nt_offset = self.nt_offset(pos)
+        if nt_offset is None:
+            return None
+        return (nt_offset - self.codon_start) % 3
 
 
 @dataclass(frozen=True)

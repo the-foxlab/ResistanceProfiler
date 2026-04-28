@@ -55,6 +55,7 @@ def remap_variants(
 
     for var in remap_input_variants:
         hit = False
+        skip_reason = 'no match / outside mapped CDS'
         for match, q2c in match_maps:
             if var.pos not in q2c:
                 continue
@@ -64,15 +65,18 @@ def remap_variants(
 
             cds_pos = _map_variant_anchor_cds_pos(var, q2c, reverse_to_reference, gene.strand)
             if cds_pos is None:
+                skip_reason = 'no match / outside mapped CDS'
                 continue
 
             # VCF position must be within query sequence
             if not (0 <= var.pos < query_len):
+                skip_reason = 'query position is outside query sequence'
                 continue
 
             # Sanity check: VCF anchor REF base must agree with query FASTA
             query_base = query_upper[var.pos]
             if query_base != var.ref[0].upper():
+                skip_reason = 'VCF REF anchor does not match query FASTA'
                 warnings.append(
                     f'pos {var.pos + 1}: VCF REF anchor {var.ref[0]!r} \u2260 FASTA '
                     f'{query_base!r}'
@@ -81,6 +85,12 @@ def remap_variants(
 
             # Convert CDS position to internal genomic position.
             genomic_pos = _cds_pos_to_genomic_pos(gene, cds_pos)
+            if genomic_pos is None:
+                skip_reason = (
+                    'projected CDS position cannot map back to an internal coding genomic '
+                    'position'
+                )
+                continue
 
             # Transform REF/ALT to internal reference forward strand.
             # Reverse-orientation indels also switch anchor side.
@@ -89,6 +99,13 @@ def remap_variants(
             else:
                 ref_base = _transform_allele(var.ref, reverse_to_reference)
                 alt_base = _transform_allele(var.alt, reverse_to_reference)
+
+            if not ref_base or not alt_base:
+                skip_reason = (
+                    'transformed REF/ALT became empty because projected anchor is outside '
+                    'coding segments'
+                )
+                continue
 
             codon_context_pos = cds_pos
             if _is_indel(var.ref, var.alt):
@@ -115,8 +132,9 @@ def remap_variants(
 
         if not hit:
             logger.debug(
-                'Variant at query pos %d excluded (outside mapped CDS)',
+                'Skipping variant at query pos %d: %s',
                 var.pos,
+                skip_reason,
             )
 
     logger.info(
@@ -275,7 +293,9 @@ def _remap_reverse_indel_alleles(
 
 def _internal_forward_base(gene: GeneRecord, genomic_pos: int) -> str:
     """Return the internal forward-reference nucleotide at one genomic position."""
-    cds_pos = genomic_pos - gene.start if gene.strand == '+' else (gene.end - 1) - genomic_pos
+    cds_pos = gene.genomic_to_cds_position(genomic_pos)
+    if cds_pos is None:
+        return ''
     if cds_pos < 0 or cds_pos >= len(gene.nt_sequence):
         return ''
     coding_base = gene.nt_sequence.upper()[cds_pos]
@@ -339,7 +359,7 @@ def _build_query_to_cds_map(
     return query_to_cds
 
 
-def _cds_pos_to_genomic_pos(gene: GeneRecord, cds_pos: int) -> int:
+def _cds_pos_to_genomic_pos(gene: GeneRecord, cds_pos: int) -> int | None:
     """
     Convert a 0-based CDS nucleotide position to a 0-based internal genomic position.
     Inverse of ``GeneRecord.nt_offset()``.
@@ -348,6 +368,4 @@ def _cds_pos_to_genomic_pos(gene: GeneRecord, cds_pos: int) -> int:
     :param cds_pos: 0-based CDS nucleotide offset
     :return: 0-based genomic position on the internal reference
     """
-    if gene.strand == '+':
-        return gene.start + cds_pos
-    return (gene.end - 1) - cds_pos
+    return gene.cds_to_genomic_position(cds_pos)
