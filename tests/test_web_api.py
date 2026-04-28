@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import textwrap
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -13,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from rq import Queue
 
+from tests.conftest import TINY_REF_NAME, TINY_REF_SEQ
 from web.backend.main import create_app
 from web.backend.queue import get_queue
 from web.backend.startup_config import StartupConfig
@@ -54,6 +56,30 @@ def startup_config(project_db: Path, tmp_path: Path) -> StartupConfig:
 def auth_headers(startup_config: StartupConfig) -> dict[str, str]:
     """Authorization header for protected API routes."""
     return {'Authorization': f'Bearer {startup_config.api_token}'}
+
+
+@pytest.fixture()
+def web_sample_vcf(startup_config: StartupConfig) -> Path:
+    """Minimal VCF written inside uploads_dir so path confinement checks pass."""
+    vcf_content = textwrap.dedent(f"""\
+        ##fileformat=VCFv4.2
+        ##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">
+        ##INFO=<ID=DP,Number=1,Type=Integer,Description="Read Depth">
+        #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO
+        {TINY_REF_NAME}\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500
+        {TINY_REF_NAME}\t10\t.\tT\tC\t80\tPASS\tAF=0.30;DP=200
+    """)
+    path = startup_config.uploads_dir / 'sample.vcf'
+    path.write_text(vcf_content)
+    return path
+
+
+@pytest.fixture()
+def web_sample_ref_fasta(startup_config: StartupConfig) -> Path:
+    """Reference FASTA written inside uploads_dir so path confinement checks pass."""
+    path = startup_config.uploads_dir / 'sample_ref.fasta'
+    path.write_text(f'>{TINY_REF_NAME}\n{TINY_REF_SEQ}\n')
+    return path
 
 
 @pytest.fixture()
@@ -232,13 +258,13 @@ class TestWebApi:
         self,
         client: TestClient,
         startup_config: StartupConfig,
-        sample_ref_fasta: Path,
+        web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
         submit = client.post(
             '/api/profile/fasta',
             json={
-                'fasta_path': str(sample_ref_fasta),
+                'fasta_path': str(web_sample_ref_fasta),
                 'sample': 'web-fasta',
             },
             headers=auth_headers,
@@ -257,7 +283,7 @@ class TestWebApi:
         assert result['database_path'] == str(default_db.resolve())
         assert result['sample_name'] == 'web-fasta'
         assert result['run_id'] >= 1
-        assert result['input_path'] == str(sample_ref_fasta.resolve())
+        assert result['input_path'] == str(web_sample_ref_fasta.resolve())
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
         assert result['report_tabular_path'].endswith('.mutations.tsv')
@@ -265,19 +291,35 @@ class TestWebApi:
         assert Path(result['report_json_path']).is_file()
         assert Path(result['report_tabular_path']).is_file()
 
+    def test_profile_fasta_path_outside_uploads_rejected(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        tmp_path: Path,
+    ) -> None:
+        outside_path = tmp_path / 'outside.fasta'
+        outside_path.write_text('>seq1\nATCG\n')
+        response = client.post(
+            '/api/profile/fasta',
+            json={'fasta_path': str(outside_path)},
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+        assert 'outside allowed upload directory' in response.json()['detail']
+
     def test_profile_vcf(
         self,
         client: TestClient,
         startup_config: StartupConfig,
-        sample_vcf: Path,
-        sample_ref_fasta: Path,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
         submit = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(sample_vcf),
-                'ref_fasta_path': str(sample_ref_fasta),
+                'vcf_path': str(web_sample_vcf),
+                'ref_fasta_path': str(web_sample_ref_fasta),
                 'sample': 'web-vcf',
             },
             headers=auth_headers,
@@ -296,8 +338,8 @@ class TestWebApi:
         assert result['run_id'] >= 1
         assert result['database_id'] == default_db.name
         assert result['database_path'] == str(default_db.resolve())
-        assert result['input_path'] == str(sample_vcf.resolve())
-        assert result['reference_fasta_path'] == str(sample_ref_fasta.resolve())
+        assert result['input_path'] == str(web_sample_vcf.resolve())
+        assert result['reference_fasta_path'] == str(web_sample_ref_fasta.resolve())
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
         assert result['report_tabular_path'].endswith('.mutations.tsv')
@@ -305,18 +347,62 @@ class TestWebApi:
         assert Path(result['report_json_path']).is_file()
         assert Path(result['report_tabular_path']).is_file()
 
+    def test_profile_vcf_path_outside_uploads_rejected(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+        tmp_path: Path,
+    ) -> None:
+        outside_vcf = tmp_path / 'outside.vcf'
+        outside_vcf.write_text(
+            '##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\n'
+        )
+        response = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(outside_vcf),
+                'ref_fasta_path': str(web_sample_ref_fasta),
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+        assert 'outside allowed upload directory' in response.json()['detail']
+
+    def test_profile_vcf_ref_fasta_outside_uploads_rejected(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        auth_headers: dict[str, str],
+        tmp_path: Path,
+    ) -> None:
+        outside_fasta = tmp_path / 'outside.fasta'
+        outside_fasta.write_text('>seq1\nATCG\n')
+        response = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(web_sample_vcf),
+                'ref_fasta_path': str(outside_fasta),
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 400
+        assert 'outside allowed upload directory' in response.json()['detail']
+
     def test_profile_vcf_repeated_runs_keep_distinct_report_artifacts(
         self,
         client: TestClient,
-        sample_vcf: Path,
-        sample_ref_fasta: Path,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
         first_submit = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(sample_vcf),
-                'ref_fasta_path': str(sample_ref_fasta),
+                'vcf_path': str(web_sample_vcf),
+                'ref_fasta_path': str(web_sample_ref_fasta),
                 'sample': 'web-vcf-repeat',
             },
             headers=auth_headers,
@@ -329,8 +415,8 @@ class TestWebApi:
         second_submit = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(sample_vcf),
-                'ref_fasta_path': str(sample_ref_fasta),
+                'vcf_path': str(web_sample_vcf),
+                'ref_fasta_path': str(web_sample_ref_fasta),
                 'sample': 'web-vcf-repeat',
             },
             headers=auth_headers,
@@ -350,8 +436,8 @@ class TestWebApi:
         self,
         client: TestClient,
         startup_config: StartupConfig,
-        sample_vcf: Path,
-        sample_ref_fasta: Path,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
         primary_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
@@ -361,8 +447,8 @@ class TestWebApi:
         submit = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(sample_vcf),
-                'ref_fasta_path': str(sample_ref_fasta),
+                'vcf_path': str(web_sample_vcf),
+                'ref_fasta_path': str(web_sample_ref_fasta),
                 'database_id': alternate_db.name,
                 'sample': 'web-vcf-alt',
             },
@@ -377,17 +463,17 @@ class TestWebApi:
         result = payload['result']
         assert result['database_id'] == alternate_db.name
         assert result['database_path'] == str(alternate_db.resolve())
-        assert result['input_path'] == str(sample_vcf.resolve())
-        assert result['reference_fasta_path'] == str(sample_ref_fasta.resolve())
+        assert result['input_path'] == str(web_sample_vcf.resolve())
+        assert result['reference_fasta_path'] == str(web_sample_ref_fasta.resolve())
 
     def test_profile_vcf_reports_reference_mismatch_clearly(
         self,
         client: TestClient,
-        sample_ref_fasta: Path,
-        tmp_path: Path,
+        startup_config: StartupConfig,
+        web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
-        mismatch_vcf = tmp_path / 'mismatch.vcf'
+        mismatch_vcf = startup_config.uploads_dir / 'mismatch.vcf'
         mismatch_vcf.write_text(
             '##fileformat=VCFv4.2\n'
             '##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">\n'
@@ -400,7 +486,7 @@ class TestWebApi:
             '/api/profile/vcf',
             json={
                 'vcf_path': str(mismatch_vcf),
-                'ref_fasta_path': str(sample_ref_fasta),
+                'ref_fasta_path': str(web_sample_ref_fasta),
                 'sample': 'web-vcf-mismatch',
             },
             headers=auth_headers,
@@ -590,15 +676,15 @@ class TestWebApi:
     def test_regenerate_from_json(
         self,
         client: TestClient,
-        sample_vcf: Path,
-        sample_ref_fasta: Path,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
         submit_profile = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(sample_vcf),
-                'ref_fasta_path': str(sample_ref_fasta),
+                'vcf_path': str(web_sample_vcf),
+                'ref_fasta_path': str(web_sample_ref_fasta),
                 'sample': 'regen-web-vcf',
             },
             headers=auth_headers,
@@ -637,15 +723,15 @@ class TestWebApi:
         self,
         client: TestClient,
         startup_config: StartupConfig,
-        sample_vcf: Path,
-        sample_ref_fasta: Path,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
         submit_profile = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(sample_vcf),
-                'ref_fasta_path': str(sample_ref_fasta),
+                'vcf_path': str(web_sample_vcf),
+                'ref_fasta_path': str(web_sample_ref_fasta),
                 'sample': 'regen-web-vcf-mismatch',
             },
             headers=auth_headers,

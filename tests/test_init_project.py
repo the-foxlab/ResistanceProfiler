@@ -45,6 +45,7 @@ def _gene_row(
     reference_name: str = 'ref1',
     reference_accession: str = 'ACC1',
     gene_id: int = 1,
+    alias_rank: int = 0,
 ) -> dict:
     """Build a dict that mimics a sqlite3.Row for gene lookups."""
     return {
@@ -53,6 +54,7 @@ def _gene_row(
         'aa_sequence': aa_sequence,
         'reference_name': reference_name,
         'reference_accession': reference_accession,
+        'alias_rank': alias_rank,
     }
 
 
@@ -614,13 +616,13 @@ class TestComboRuleParsing:
         db = tmp_path / 'proj.db'
 
         with (
-            patch('respro.db.rules_import.fetch_pubmed_id_for_doi', return_value='12345678'),
+            patch('respro.db._rules_publication.fetch_pubmed_id_for_doi', return_value='12345678'),
             patch(
-                'respro.db.rules_import.fetch_pubmed_metadata',
+                'respro.db._rules_publication.fetch_pubmed_metadata',
                 return_value={'title': 'PubMed title', 'doi': '10.1086/590668'},
             ),
             patch(
-                'respro.db.rules_import.fetch_publication_metadata',
+                'respro.db._rules_publication.fetch_publication_metadata',
                 return_value={'title': 'CrossRef title'},
             ),
         ):
@@ -645,17 +647,17 @@ class TestComboRuleParsing:
         db = tmp_path / 'proj.db'
 
         with (
-            caplog.at_level(logging.INFO, logger='respro.db.rules_import'),
+            caplog.at_level(logging.INFO, logger='respro.db'),
             patch(
-                'respro.db.rules_import.fetch_pubmed_id_for_doi',
+                'respro.db._rules_publication.fetch_pubmed_id_for_doi',
                 return_value='12345678',
             ),
             patch(
-                'respro.db.rules_import.fetch_pubmed_metadata',
+                'respro.db._rules_publication.fetch_pubmed_metadata',
                 return_value={'title': '', 'doi': '10.1086/590668'},
             ),
             patch(
-                'respro.db.rules_import.fetch_publication_metadata',
+                'respro.db._rules_publication.fetch_publication_metadata',
                 return_value={'title': 'A resolved CrossRef title'},
             ),
         ):
@@ -683,13 +685,13 @@ class TestComboRuleParsing:
         db = tmp_path / 'proj.db'
 
         with (
-            caplog.at_level(logging.INFO, logger='respro.db.rules_import'),
+            caplog.at_level(logging.INFO, logger='respro.db'),
             patch(
-                'respro.db.rules_import.fetch_pubmed_metadata',
+                'respro.db._rules_publication.fetch_pubmed_metadata',
                 return_value={'title': 'PubMed title', 'doi': 'doi.org/10.1002/j.1460-2075.1987.tb04735.x'},
             ),
             patch(
-                'respro.db.rules_import.fetch_publication_metadata',
+                'respro.db._rules_publication.fetch_publication_metadata',
                 return_value={'title': 'CrossRef title'},
             ),
         ):
@@ -717,9 +719,9 @@ class TestComboRuleParsing:
 
         with (
             caplog.at_level(logging.WARNING, logger='respro.db.rules_import'),
-            patch('respro.db.rules_import.fetch_pubmed_id_for_doi', return_value=None),
-            patch('respro.db.rules_import.fetch_pubmed_metadata', return_value=None),
-            patch('respro.db.rules_import.fetch_publication_metadata', return_value=None),
+            patch('respro.db._rules_publication.fetch_pubmed_id_for_doi', return_value=None),
+            patch('respro.db._rules_publication.fetch_pubmed_metadata', return_value=None),
+            patch('respro.db._rules_publication.fetch_publication_metadata', return_value=None),
         ):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=True)
 
@@ -744,10 +746,10 @@ class TestComboRuleParsing:
         db = tmp_path / 'proj.db'
 
         with (
-            caplog.at_level(logging.INFO, logger='respro.db.rules_import'),
-            patch('respro.db.rules_import.fetch_pubmed_id_for_doi', return_value=None),
+            caplog.at_level(logging.INFO, logger='respro.db'),
+            patch('respro.db._rules_publication.fetch_pubmed_id_for_doi', return_value=None),
             patch(
-                'respro.db.rules_import.fetch_publication_metadata',
+                'respro.db._rules_publication.fetch_publication_metadata',
                 return_value={'title': 'CrossRef title'},
             ),
         ):
@@ -798,7 +800,7 @@ class TestComboRuleParsing:
         db = tmp_path / 'proj.db'
         call_count = 0
         # Patch the name as it exists in rules.py's namespace.
-        with patch('respro.db.rules_import.fetch_pubmed_metadata', side_effect=_fake_fetch):
+        with patch('respro.db._rules_publication.fetch_pubmed_metadata', side_effect=_fake_fetch):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=True)
 

@@ -201,15 +201,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         reference: str | None = Query(default=None),
         _auth: None = Depends(require_api_token),
     ) -> ApiEnvelope:
-        try:
-            data = list_rules(
-                config.project_databases_dir,
-                database_id,
-                reference_filter=reference,
-            )
-            return ApiEnvelope(data=data)
-        except (FileNotFoundError, ValueError, OSError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # Alias for /api/rules — delegates to the same handler.
+        return rules(database_id=database_id, reference=reference, _auth=_auth)
 
     @app.get('/api/databases', response_model=ApiEnvelope)
     def databases(_auth: None = Depends(require_api_token)) -> ApiEnvelope:
@@ -238,6 +231,11 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
+        fasta_path = Path(payload.fasta_path).expanduser().resolve()
+        if not is_path_within_allowed_roots(fasta_path, (config.uploads_dir,)):
+            raise HTTPException(status_code=400, detail='FASTA path is outside allowed upload directory.')
+        if not fasta_path.is_file():
+            raise HTTPException(status_code=404, detail='FASTA file not found.')
         project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
         profile_defaults = WEB_BACKEND_CONFIG.defaults.profile
         job = queue.enqueue(
@@ -245,7 +243,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             project_db=str(project_db),
             results_db=str(config.results_db),
             output_dir=str(config.results_dir),
-            fasta_path=payload.fasta_path,
+            fasta_path=str(fasta_path),
             sample=payload.sample or profile_defaults.sample_name,
             threads=payload.threads if payload.threads is not None else profile_defaults.threads,
             aligner=payload.aligner or profile_defaults.aligner,
@@ -258,6 +256,24 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
+        vcf_path = Path(payload.vcf_path).expanduser().resolve()
+        if not is_path_within_allowed_roots(vcf_path, (config.uploads_dir,)):
+            raise HTTPException(status_code=400, detail='VCF path is outside allowed upload directory.')
+        if not vcf_path.is_file():
+            raise HTTPException(status_code=404, detail='VCF file not found.')
+        ref_fasta_path = Path(payload.ref_fasta_path).expanduser().resolve()
+        if not is_path_within_allowed_roots(ref_fasta_path, (config.uploads_dir,)):
+            raise HTTPException(status_code=400, detail='Reference FASTA path is outside allowed upload directory.')
+        if not ref_fasta_path.is_file():
+            raise HTTPException(status_code=404, detail='Reference FASTA file not found.')
+        bam_path: str | None = None
+        if payload.bam_path:
+            resolved_bam = Path(payload.bam_path).expanduser().resolve()
+            if not is_path_within_allowed_roots(resolved_bam, (config.uploads_dir,)):
+                raise HTTPException(status_code=400, detail='BAM path is outside allowed upload directory.')
+            if not resolved_bam.is_file():
+                raise HTTPException(status_code=404, detail='BAM file not found.')
+            bam_path = str(resolved_bam)
         project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
         profile_defaults = WEB_BACKEND_CONFIG.defaults.profile
         job = queue.enqueue(
@@ -265,12 +281,12 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             project_db=str(project_db),
             results_db=str(config.results_db),
             output_dir=str(config.results_dir),
-            vcf_path=payload.vcf_path,
-            ref_fasta_path=payload.ref_fasta_path,
+            vcf_path=str(vcf_path),
+            ref_fasta_path=str(ref_fasta_path),
             sample=payload.sample or profile_defaults.sample_name,
             min_af=payload.min_af if payload.min_af is not None else profile_defaults.min_af,
             min_depth=payload.min_depth if payload.min_depth is not None else profile_defaults.min_depth,
-            bam_path=payload.bam_path,
+            bam_path=bam_path,
             threads=payload.threads if payload.threads is not None else profile_defaults.threads,
             aligner=payload.aligner or profile_defaults.aligner,
         )

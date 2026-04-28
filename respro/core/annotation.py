@@ -35,7 +35,6 @@ def annotate_variants(
 
     Handles SNPs, in-frame insertions, in-frame deletions, frameshifts, and in-frame complex
     indels in CDS regions. Only variants outside any CDS are skipped (included with empty gene_name).
-    Variants outside any CDS are included with empty gene_name.
 
     SNP consequences can use a query codon from FASTA-based remapping when
     available (``VariantCall.query_ref_codon``).
