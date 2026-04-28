@@ -520,17 +520,11 @@ export function useDashboardLogic() {
   const selectedReportOption = reportOptions.find((option) => option.path === selectedProfileReportPath) || null;
 
   const buildReportUrl = (reportPath) => {
-    return buildApiUrl('/api/report', {
-      path: reportPath,
-      token: API_TOKEN || undefined,
-    });
+    return buildApiUrl('/api/report', { path: reportPath });
   };
 
   const buildArtifactUrl = (artifactPath) => {
-    return buildApiUrl('/api/artifact', {
-      path: artifactPath,
-      token: API_TOKEN || undefined,
-    });
+    return buildApiUrl('/api/artifact', { path: artifactPath });
   };
 
   const addUploadedPath = (path) => {

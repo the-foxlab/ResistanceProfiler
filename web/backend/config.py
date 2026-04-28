@@ -12,7 +12,6 @@ class WebEnvKeys:
     """Environment variable keys used by the web backend."""
 
     data_dir: str = 'RESPRO_WEB_DATA_DIR'
-    results_db: str = 'RESPRO_WEB_RESULTS_DB'
     api_token: str = 'RESPRO_WEB_API_TOKEN'
     allowed_roots: str = 'RESPRO_WEB_ALLOWED_ROOTS'
     cors_origins: str = 'RESPRO_WEB_CORS_ORIGINS'
@@ -26,48 +25,37 @@ class WebEnvKeys:
 
 @dataclass(frozen=True)
 class WebDefaults:
-    """Runtime defaults used by the web backend when env vars are unset."""
+    """Runtime defaults for web backend."""
 
     web_host: str
     web_port: int
     redis_url: str
     job_timeout_seconds: int
+    sweep_frequency_seconds: int
     upload_rate_limit: str
     cors_local_origins: tuple[str, ...]
     profile_queue_name: str
     frontend_base_path: str
     service_name: str
     maintained_bootstrap: bool
-    profile: WebProfileDefaults
-    upload: WebUploadDefaults
-
-
-@dataclass(frozen=True)
-class WebProfileDefaults:
-    """Default profiling parameters for web API requests."""
-
-    sample_name: str
-    threads: int
-    aligner: str
-    min_af: float
-    min_depth: int
-
-
-@dataclass(frozen=True)
-class WebUploadDefaults:
-    """Upload validation and streaming defaults for web API file ingestion."""
-
-    max_fasta_size: int
-    max_vcf_size: int
-    max_bam_size: int
-    chunk_size: int
-    max_fasta_line_length: int
-    max_vcf_line_length: int
-    max_vcf_data_lines: int
-    bgzf_header_bytes: int
-    allowed_fasta_types: tuple[str, ...]
-    allowed_vcf_types: tuple[str, ...]
-    allowed_bam_types: tuple[str, ...]
+    # Profile defaults
+    profile_sample_name: str
+    profile_threads: int
+    profile_aligner: str
+    profile_min_af: float
+    profile_min_depth: int
+    # Upload defaults
+    upload_max_fasta_size: int
+    upload_max_vcf_size: int
+    upload_max_bam_size: int
+    upload_chunk_size: int
+    upload_max_fasta_line_length: int
+    upload_max_vcf_line_length: int
+    upload_max_vcf_data_lines: int
+    upload_bgzf_header_bytes: int
+    upload_allowed_fasta_types: tuple[str, ...]
+    upload_allowed_vcf_types: tuple[str, ...]
+    upload_allowed_bam_types: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -89,7 +77,6 @@ def _load_web_backend_config() -> WebBackendConfig:
 
     env = WebEnvKeys(
         data_dir=str(env_payload['data_dir']),
-        results_db=str(env_payload['results_db']),
         api_token=str(env_payload['api_token']),
         allowed_roots=str(env_payload['allowed_roots']),
         cors_origins=str(env_payload['cors_origins']),
@@ -106,32 +93,29 @@ def _load_web_backend_config() -> WebBackendConfig:
         web_port=int(defaults_payload['web_port']),
         redis_url=str(defaults_payload['redis_url']),
         job_timeout_seconds=int(defaults_payload['job_timeout_seconds']),
+            sweep_frequency_seconds=int(defaults_payload['sweep_frequency_seconds']),
         upload_rate_limit=str(defaults_payload['upload_rate_limit']),
         cors_local_origins=tuple(str(item) for item in defaults_payload['cors_local_origins']),
         profile_queue_name=str(defaults_payload['profile_queue_name']),
         frontend_base_path=str(defaults_payload['frontend_base_path']),
         service_name=str(defaults_payload['service_name']),
         maintained_bootstrap=bool(defaults_payload['maintained_bootstrap']),
-        profile=WebProfileDefaults(
-            sample_name=str(profile_payload['sample_name']),
-            threads=int(profile_payload['threads']),
-            aligner=str(profile_payload['aligner']),
-            min_af=float(profile_payload['min_af']),
-            min_depth=int(profile_payload['min_depth']),
-        ),
-        upload=WebUploadDefaults(
-            max_fasta_size=int(upload_payload['max_fasta_size']),
-            max_vcf_size=int(upload_payload['max_vcf_size']),
-            max_bam_size=int(upload_payload['max_bam_size']),
-            chunk_size=int(upload_payload['chunk_size']),
-            max_fasta_line_length=int(upload_payload['max_fasta_line_length']),
-            max_vcf_line_length=int(upload_payload['max_vcf_line_length']),
-            max_vcf_data_lines=int(upload_payload['max_vcf_data_lines']),
-            bgzf_header_bytes=int(upload_payload['bgzf_header_bytes']),
-            allowed_fasta_types=tuple(str(item) for item in upload_payload['allowed_fasta_types']),
-            allowed_vcf_types=tuple(str(item) for item in upload_payload['allowed_vcf_types']),
-            allowed_bam_types=tuple(str(item) for item in upload_payload['allowed_bam_types']),
-        ),
+        profile_sample_name=str(profile_payload['sample_name']),
+        profile_threads=int(profile_payload['threads']),
+        profile_aligner=str(profile_payload['aligner']),
+        profile_min_af=float(profile_payload['min_af']),
+        profile_min_depth=int(profile_payload['min_depth']),
+        upload_max_fasta_size=int(upload_payload['max_fasta_size']),
+        upload_max_vcf_size=int(upload_payload['max_vcf_size']),
+        upload_max_bam_size=int(upload_payload['max_bam_size']),
+        upload_chunk_size=int(upload_payload['chunk_size']),
+        upload_max_fasta_line_length=int(upload_payload['max_fasta_line_length']),
+        upload_max_vcf_line_length=int(upload_payload['max_vcf_line_length']),
+        upload_max_vcf_data_lines=int(upload_payload['max_vcf_data_lines']),
+        upload_bgzf_header_bytes=int(upload_payload['bgzf_header_bytes']),
+        upload_allowed_fasta_types=tuple(str(item) for item in upload_payload['allowed_fasta_types']),
+        upload_allowed_vcf_types=tuple(str(item) for item in upload_payload['allowed_vcf_types']),
+        upload_allowed_bam_types=tuple(str(item) for item in upload_payload['allowed_bam_types']),
     )
 
     return WebBackendConfig(env=env, defaults=defaults)

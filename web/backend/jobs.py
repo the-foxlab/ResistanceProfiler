@@ -17,7 +17,6 @@ from web.backend.services.regenerate import regenerate_from_json
 def run_profile_fasta(
     *,
     project_db: str,
-    results_db: str,
     output_dir: str,
     fasta_path: str,
     sample: str,
@@ -27,7 +26,6 @@ def run_profile_fasta(
     """RQ job wrapper for FASTA profiling."""
     return profile_fasta(
         project_db=Path(project_db),
-        results_db=Path(results_db),
         output_dir=Path(output_dir),
         fasta_path=Path(fasta_path),
         sample=sample,
@@ -39,7 +37,6 @@ def run_profile_fasta(
 def run_profile_vcf(
     *,
     project_db: str,
-    results_db: str,
     output_dir: str,
     vcf_path: str,
     ref_fasta_path: str,
@@ -53,7 +50,6 @@ def run_profile_vcf(
     """RQ job wrapper for VCF profiling."""
     return profile_vcf(
         project_db=Path(project_db),
-        results_db=Path(results_db),
         output_dir=Path(output_dir),
         vcf_path=Path(vcf_path),
         ref_fasta_path=Path(ref_fasta_path),

@@ -28,8 +28,9 @@ def sync_queue():
 
 
 @pytest.fixture()
-def startup_config(project_db: Path, tmp_path: Path) -> StartupConfig:
+def startup_config(project_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> StartupConfig:
     """Startup config fixture for startup-managed path mode."""
+    monkeypatch.setenv('RESPRO_WEB_CORS_ORIGINS', 'http://localhost:5173')
     data_dir = tmp_path / 'data'
     project_databases_dir = data_dir / 'project_databases'
     uploads_dir = data_dir / 'uploads'
@@ -45,7 +46,6 @@ def startup_config(project_db: Path, tmp_path: Path) -> StartupConfig:
         project_databases_dir=project_databases_dir.resolve(),
         uploads_dir=uploads_dir.resolve(),
         results_dir=results_dir.resolve(),
-        results_db=(results_dir / 'results.db').resolve(),
         data_dir=data_dir.resolve(),
         allowed_roots=(project_databases_dir.resolve(), uploads_dir.resolve(), results_dir.resolve()),
         api_token='test-token',
@@ -91,18 +91,40 @@ def client(sync_queue: Queue, startup_config: StartupConfig):
 
 
 class TestWebApi:
-    def test_cors_uses_wildcard_when_token_is_configured(self, startup_config: StartupConfig) -> None:
+    def test_cors_uses_configured_origins_when_token_is_set(
+        self,
+        startup_config: StartupConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_CORS_ORIGINS', 'https://respro.example.com')
         client = TestClient(create_app(startup_config=startup_config))
-        response = client.options(
+        allowed = client.options(
             '/api/health',
             headers={
                 'Origin': 'https://respro.example.com',
                 'Access-Control-Request-Method': 'GET',
             },
         )
+        blocked = client.options(
+            '/api/health',
+            headers={
+                'Origin': 'https://other.example.com',
+                'Access-Control-Request-Method': 'GET',
+            },
+        )
 
-        assert response.status_code == 200
-        assert response.headers['access-control-allow-origin'] == '*'
+        assert allowed.status_code == 200
+        assert allowed.headers['access-control-allow-origin'] == 'https://respro.example.com'
+        assert blocked.status_code == 400
+
+    def test_cors_raises_when_token_set_without_cors_origins(
+        self,
+        startup_config: StartupConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv('RESPRO_WEB_CORS_ORIGINS', raising=False)
+        with pytest.raises(RuntimeError, match='RESPRO_WEB_CORS_ORIGINS'):
+            create_app(startup_config=startup_config)
 
     def test_cors_uses_localhost_defaults_without_token(
         self,
@@ -112,7 +134,6 @@ class TestWebApi:
             project_databases_dir=startup_config.project_databases_dir,
             uploads_dir=startup_config.uploads_dir,
             results_dir=startup_config.results_dir,
-            results_db=startup_config.results_db,
             data_dir=startup_config.data_dir,
             allowed_roots=startup_config.allowed_roots,
             api_token='',
@@ -151,7 +172,6 @@ class TestWebApi:
             project_databases_dir=startup_config.project_databases_dir,
             uploads_dir=startup_config.uploads_dir,
             results_dir=startup_config.results_dir,
-            results_db=startup_config.results_db,
             data_dir=startup_config.data_dir,
             allowed_roots=startup_config.allowed_roots,
             api_token='',
@@ -282,7 +302,7 @@ class TestWebApi:
         assert result['database_id'] == default_db.name
         assert result['database_path'] == str(default_db.resolve())
         assert result['sample_name'] == 'web-fasta'
-        assert result['run_id'] >= 1
+        assert result['run_id'] is None
         assert result['input_path'] == str(web_sample_ref_fasta.resolve())
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
@@ -335,7 +355,7 @@ class TestWebApi:
         result = payload['result']
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
         assert result['sample_name'] == 'web-vcf'
-        assert result['run_id'] >= 1
+        assert result['run_id'] is None
         assert result['database_id'] == default_db.name
         assert result['database_path'] == str(default_db.resolve())
         assert result['input_path'] == str(web_sample_vcf.resolve())
@@ -909,7 +929,6 @@ class TestWebApi:
             project_databases_dir=startup_config.project_databases_dir,
             uploads_dir=startup_config.uploads_dir,
             results_dir=startup_config.results_dir,
-            results_db=startup_config.results_db,
             data_dir=startup_config.data_dir,
             allowed_roots=startup_config.allowed_roots,
             api_token='',
@@ -939,7 +958,6 @@ class TestWebApi:
             project_databases_dir=startup_config.project_databases_dir,
             uploads_dir=startup_config.uploads_dir,
             results_dir=startup_config.results_dir,
-            results_db=startup_config.results_db,
             data_dir=startup_config.data_dir,
             allowed_roots=startup_config.allowed_roots,
             api_token='',
@@ -947,16 +965,19 @@ class TestWebApi:
         client = TestClient(create_app(startup_config=no_token_config))
 
         first = client.post(
-            '/api/upload/fasta?token=token-a',
+            '/api/upload/fasta',
             files={'file': ('sample.fasta', b'>seq\nATCG\n', 'text/plain')},
+            headers={'Authorization': 'Bearer token-a'},
         )
         second = client.post(
-            '/api/upload/fasta?token=token-a',
+            '/api/upload/fasta',
             files={'file': ('sample.fasta', b'>seq\nATCG\n', 'text/plain')},
+            headers={'Authorization': 'Bearer token-a'},
         )
         third = client.post(
-            '/api/upload/fasta?token=token-b',
+            '/api/upload/fasta',
             files={'file': ('sample.fasta', b'>seq\nATCG\n', 'text/plain')},
+            headers={'Authorization': 'Bearer token-b'},
         )
 
         assert first.status_code == 200

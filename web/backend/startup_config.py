@@ -9,7 +9,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from respro.db.schema import init_results_db, open_project_db
+from respro.db.schema import open_project_db
 from web.backend.config import WEB_BACKEND_CONFIG, WEB_ENV
 from web.backend.services.maintained_bootstrap import bootstrap_missing_maintained_databases
 
@@ -23,7 +23,6 @@ class StartupConfig:
     project_databases_dir: Path
     uploads_dir: Path
     results_dir: Path
-    results_db: Path
     data_dir: Path
     allowed_roots: tuple[Path, ...]
     api_token: str
@@ -43,7 +42,6 @@ def load_startup_config() -> StartupConfig:
     project_databases_dir = (data_dir / 'project_databases').resolve()
     uploads_dir = (data_dir / 'uploads').resolve()
     results_dir = (data_dir / 'results').resolve()
-    results_db = Path(os.getenv(WEB_ENV.results_db, str(results_dir / 'results.db'))).expanduser().resolve()
     api_token = os.getenv(WEB_ENV.api_token, '').strip()
     maintained_bootstrap = _resolve_bool(
         os.getenv(
@@ -70,13 +68,12 @@ def load_startup_config() -> StartupConfig:
         logger.info('Maintained database bootstrap enabled — downloading missing databases')
         bootstrap_missing_maintained_databases(project_databases_dir)
     _validate_at_least_one_project_db(project_databases_dir)
-    _initialize_results_db(results_db)
+    _validate_startup_policy(api_token)
 
     return StartupConfig(
         project_databases_dir=project_databases_dir,
         uploads_dir=uploads_dir,
         results_dir=results_dir,
-        results_db=results_db,
         data_dir=data_dir,
         allowed_roots=allowed_roots,
         api_token=api_token,
@@ -131,13 +128,6 @@ def _migrate_legacy_project_db(*, data_dir: Path, project_databases_dir: Path) -
     shutil.move(str(legacy), destination)
 
 
-def _initialize_results_db(results_db: Path) -> None:
-    """Create (if absent) and validate results.db at startup."""
-    results_db.parent.mkdir(parents=True, exist_ok=True)
-    connection = init_results_db(results_db)
-    connection.close()
-
-
 def _parse_allowed_roots(default_roots: tuple[Path, ...], env_value: str) -> tuple[Path, ...]:
     """Return allowed filesystem roots: env override if set, otherwise defaults."""
     parsed = [item.strip() for item in env_value.split(',') if item.strip()]
@@ -184,6 +174,22 @@ def _resolve_bool(raw_value: str, *, setting_name: str) -> bool:
     if normalized in {'0', 'false', 'no', 'off', ''}:
         return False
     raise ValueError(f'Invalid boolean for {setting_name}: {raw_value!r}')
+
+
+def _validate_startup_policy(api_token: str) -> None:
+    """Enforce deployment safety rules based on host binding and token configuration."""
+    host = os.getenv(WEB_ENV.host, '').strip()
+    if host and host not in ('127.0.0.1', 'localhost') and not api_token:
+        raise RuntimeError(
+            'Public bind address detected but RESPRO_WEB_API_TOKEN is not set. '
+            'Set a strong API token before deploying publicly.'
+        )
+    cors_origins = os.getenv(WEB_ENV.cors_origins, '').strip()
+    if api_token and not cors_origins:
+        raise RuntimeError(
+            'RESPRO_WEB_API_TOKEN is set but RESPRO_WEB_CORS_ORIGINS is not configured. '
+            'Set explicit allowed origins for token-authenticated deployments.'
+        )
 
 
 def _validate_project_db(project_db: Path) -> None:

@@ -2,13 +2,27 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import logging
 import mimetypes
 import os
+import threading
+import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, Response, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -47,9 +61,70 @@ from web.backend.startup_config import (
 )
 
 
+def _sweep_expired_files(results_dir: Path, uploads_dir: Path, ttl_seconds: int) -> None:
+    """
+    Delete files in results and uploads dirs that are older than TTL.
+    """
+    logger = logging.getLogger(__name__)
+    now = time.time()
+    total_deleted = 0
+
+    for directory in (results_dir, uploads_dir):
+        if not directory.is_dir():
+            continue
+        try:
+            for item in directory.rglob('*'):
+                if not item.is_file():
+                    continue
+                try:
+                    mtime = item.stat().st_mtime
+                    age_seconds = now - mtime
+                    if age_seconds > ttl_seconds:
+                        item.unlink(missing_ok=True)
+                        logger.debug(f'Deleted expired file: {item}')
+                        total_deleted += 1
+                except OSError as exc:
+                    logger.debug(f'Error processing file {item}: {exc}')
+        except OSError as exc:
+            logger.debug(f'Error scanning directory {directory}: {exc}')
+
+    if total_deleted > 0:
+        logger.info(f'TTL sweep deleted {total_deleted} expired files from results and uploads directories')
+
+
+def _start_ttl_sweep_thread(results_dir: Path, uploads_dir: Path) -> None:
+    """Start a background thread that periodically deletes expired files."""
+    logger = logging.getLogger(__name__)
+
+    def sweep_loop() -> None:
+        while True:
+            try:
+                ttl_seconds = int(os.getenv('RESPRO_WEB_RESULT_TTL', '86400'))
+                _sweep_expired_files(results_dir, uploads_dir, ttl_seconds)
+            except Exception as exc:
+                logger.debug(f'Error in TTL sweep: {exc}')
+            time.sleep(WEB_BACKEND_CONFIG.defaults.sweep_frequency_seconds)
+
+    sweep_thread = threading.Thread(target=sweep_loop, daemon=True)
+    sweep_thread.start()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
+    """FastAPI lifespan context manager."""
+    config: StartupConfig = app.state.startup_config
+    _start_ttl_sweep_thread(config.results_dir, config.uploads_dir)
+    yield
+
+
 def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     """Create the FastAPI app instance."""
-    app = FastAPI(title='ResistanceProfiler Web API', version='0.1.0')
+    version = importlib.metadata.version('respro')
+    app = FastAPI(
+        title='ResistanceProfiler Web API',
+        version=version,
+        lifespan=lifespan,
+    )
     config = startup_config or load_startup_config()
     app.state.startup_config = config
     cors_origins = _resolve_cors_origins(config.api_token)
@@ -84,7 +159,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 'service': WEB_BACKEND_CONFIG.defaults.service_name,
                 'project_databases_dir': str(config.project_databases_dir),
                 'project_database_count': len(list_project_db_paths(config.project_databases_dir)),
-                'results_db': str(config.results_db),
                 'uploads_dir': str(config.uploads_dir),
                 'results_dir': str(config.results_dir),
             },
@@ -232,21 +306,20 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
         fasta_path = Path(payload.fasta_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(fasta_path, (config.uploads_dir,)):
+        if not is_path_within_allowed_roots(fasta_path, config.allowed_roots):
             raise HTTPException(status_code=400, detail='FASTA path is outside allowed upload directory.')
         if not fasta_path.is_file():
             raise HTTPException(status_code=404, detail='FASTA file not found.')
         project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
-        profile_defaults = WEB_BACKEND_CONFIG.defaults.profile
+        defaults = WEB_BACKEND_CONFIG.defaults
         job = queue.enqueue(
             run_profile_fasta,
             project_db=str(project_db),
-            results_db=str(config.results_db),
             output_dir=str(config.results_dir),
             fasta_path=str(fasta_path),
-            sample=payload.sample or profile_defaults.sample_name,
-            threads=payload.threads if payload.threads is not None else profile_defaults.threads,
-            aligner=payload.aligner or profile_defaults.aligner,
+            sample=payload.sample or defaults.profile_sample_name,
+            threads=payload.threads if payload.threads is not None else defaults.profile_threads,
+            aligner=payload.aligner or defaults.profile_aligner,
         )
         return JobSubmitResponse(job_id=job.id)
 
@@ -257,38 +330,37 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
         vcf_path = Path(payload.vcf_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(vcf_path, (config.uploads_dir,)):
+        if not is_path_within_allowed_roots(vcf_path, config.allowed_roots):
             raise HTTPException(status_code=400, detail='VCF path is outside allowed upload directory.')
         if not vcf_path.is_file():
             raise HTTPException(status_code=404, detail='VCF file not found.')
         ref_fasta_path = Path(payload.ref_fasta_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(ref_fasta_path, (config.uploads_dir,)):
+        if not is_path_within_allowed_roots(ref_fasta_path, config.allowed_roots):
             raise HTTPException(status_code=400, detail='Reference FASTA path is outside allowed upload directory.')
         if not ref_fasta_path.is_file():
             raise HTTPException(status_code=404, detail='Reference FASTA file not found.')
         bam_path: str | None = None
         if payload.bam_path:
             resolved_bam = Path(payload.bam_path).expanduser().resolve()
-            if not is_path_within_allowed_roots(resolved_bam, (config.uploads_dir,)):
+            if not is_path_within_allowed_roots(resolved_bam, config.allowed_roots):
                 raise HTTPException(status_code=400, detail='BAM path is outside allowed upload directory.')
             if not resolved_bam.is_file():
                 raise HTTPException(status_code=404, detail='BAM file not found.')
             bam_path = str(resolved_bam)
         project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
-        profile_defaults = WEB_BACKEND_CONFIG.defaults.profile
+        defaults = WEB_BACKEND_CONFIG.defaults
         job = queue.enqueue(
             run_profile_vcf,
             project_db=str(project_db),
-            results_db=str(config.results_db),
             output_dir=str(config.results_dir),
             vcf_path=str(vcf_path),
             ref_fasta_path=str(ref_fasta_path),
-            sample=payload.sample or profile_defaults.sample_name,
-            min_af=payload.min_af if payload.min_af is not None else profile_defaults.min_af,
-            min_depth=payload.min_depth if payload.min_depth is not None else profile_defaults.min_depth,
+            sample=payload.sample or defaults.profile_sample_name,
+            min_af=payload.min_af if payload.min_af is not None else defaults.profile_min_af,
+            min_depth=payload.min_depth if payload.min_depth is not None else defaults.profile_min_depth,
             bam_path=bam_path,
-            threads=payload.threads if payload.threads is not None else profile_defaults.threads,
-            aligner=payload.aligner or profile_defaults.aligner,
+            threads=payload.threads if payload.threads is not None else defaults.profile_threads,
+            aligner=payload.aligner or defaults.profile_aligner,
         )
         return JobSubmitResponse(job_id=job.id)
 
@@ -300,7 +372,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     ) -> JobSubmitResponse:
         project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
         json_path = Path(payload.json_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(json_path, (config.uploads_dir, config.results_dir)):
+        if not is_path_within_allowed_roots(json_path, config.allowed_roots):
             raise HTTPException(status_code=400, detail='JSON path is outside allowed upload/output directory.')
         if not json_path.is_file():
             raise HTTPException(status_code=404, detail='JSON file not found.')
@@ -368,7 +440,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         _auth: None = Depends(require_api_token),
     ) -> FileResponse:
         report_path = Path(path).expanduser().resolve()
-        if not is_path_within_allowed_roots(report_path, (config.results_dir,)):
+        if not is_path_within_allowed_roots(report_path, config.allowed_roots):
             raise HTTPException(status_code=400, detail='Report path is outside allowed output directory.')
         if not report_path.is_file():
             raise HTTPException(status_code=404, detail='Report not found.')
@@ -380,7 +452,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         _auth: None = Depends(require_api_token),
     ) -> FileResponse:
         artifact_path = Path(path).expanduser().resolve()
-        if not is_path_within_allowed_roots(artifact_path, (config.results_dir,)):
+        if not is_path_within_allowed_roots(artifact_path, config.allowed_roots):
             raise HTTPException(status_code=400, detail='Artifact path is outside allowed output directory.')
         if not artifact_path.is_file():
             raise HTTPException(status_code=404, detail='Artifact not found.')
@@ -500,8 +572,10 @@ def _resolve_cors_origins(api_token: str) -> list[str]:
             return origins
 
     if api_token:
-        return ['*']
-
+        raise RuntimeError(
+            'RESPRO_WEB_API_TOKEN is set but RESPRO_WEB_CORS_ORIGINS is not configured. '
+            'Set explicit allowed origins for token-authenticated deployments.'
+        )
     return list(WEB_BACKEND_CONFIG.defaults.cors_local_origins)
 
 
@@ -516,15 +590,9 @@ def _rate_limit_key(request: Request) -> str:
     authorization = request.headers.get('Authorization', '').strip()
     if authorization:
         return f'token:{authorization}'
-
-    token = request.query_params.get('token', '').strip()
-    if token:
-        return f'token:{token}'
-
     client_host = request.client.host if request.client else ''
     if client_host:
         return f'ip:{client_host}'
-
     return f'ip:{get_remote_address(request)}'
 
 
@@ -552,12 +620,9 @@ def get_startup_config(request: Request) -> StartupConfig:
 def require_api_token(
     config: StartupConfig = Depends(get_startup_config),
     authorization: str | None = Header(default=None),
-    token: str | None = Query(default=None),
 ) -> None:
     """Require bearer token auth when RESPRO_WEB_API_TOKEN is configured."""
     if not config.api_token:
-        return
-    if token == config.api_token:
         return
     expected = f'Bearer {config.api_token}'
     if authorization != expected:

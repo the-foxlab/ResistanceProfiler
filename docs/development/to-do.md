@@ -180,6 +180,14 @@ Mark items done and update priorities after each completed milestone.
 - [X] Configurable CORS origins — `RESPRO_WEB_CORS_ORIGINS` now accepts a comma-separated origin list at startup; backend defaults to localhost development origins when no API token is set and to `*` only when `RESPRO_WEB_API_TOKEN` is configured; compose and deployment docs include configuration guidance
 - [X] Upload rate limiting — web uploads are now rate limited via `slowapi`; `RESPRO_WEB_UPLOAD_RATE_LIMIT` configures the limit, token-authenticated requests are keyed by token, unauthenticated requests fall back to client IP, and deployment docs/compose include configuration guidance
 - [X] Upload input validation hardening — FASTA/VCF upload validation now rejects binary content, enforces structural checks and line-length caps, and requires both `##fileformat` + `#CHROM` headers for VCF; BAM validation now verifies BGZF header structure (not just two-byte magic); parser-heavy profiling steps wrap FASTA/VCF/BAM parser failures into explicit user-facing errors
+- [x] Add explicit startup policy validation for auth and CORS
+- [x] Require explicit web API authentication in non-local deployments
+- [x] Restrict profiling input paths to trusted roots
+- [x] Remove token transport via query string
+- [x] Remove query-token auth fallback from non-route surfaces
+- [x] Tighten authenticated CORS defaults
+- [x] Ephemeral web mode as the only default path (no login)
+- [x] Remove mandatory `results.db` dependency from web profiling
 
 ### WebUI
 
@@ -284,33 +292,7 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Web deployment and security
 
-- 🔴 Add explicit startup policy validation for auth and CORS — fail fast when the server is
-  configured for non-local/public bind without `RESPRO_WEB_API_TOKEN`, and fail fast when token
-  auth is enabled but `RESPRO_WEB_CORS_ORIGINS` is missing or empty
-- 🔴 Require explicit web API authentication in non-local deployments — enforce
-  `RESPRO_WEB_API_TOKEN` outside localhost-only development defaults and fail fast on insecure
-  startup configurations intended for shared or internet-reachable environments
-- 🔴 Restrict profiling input paths to trusted roots — validate `fasta_path`, `vcf_path`,
-  `ref_fasta_path`, and optional `bam_path` against startup-configured allowed roots before
-  enqueuing jobs so clients cannot request reads from arbitrary server filesystem paths
-- 🔴 Remove token transport via query string — accept auth only via `Authorization: Bearer ...`
-  for API routes and report access to avoid token leakage through URLs, logs, browser history,
-  and referrer headers
-- 🟡 Remove query-token auth fallback from non-route surfaces — remove token query-param usage
-  from rate-limit keying and frontend-generated report, artifact, and session-cleanup URLs so
-  header-based auth is the only supported token transport outside route handlers
-- 🟡 Tighten authenticated CORS defaults — when token auth is enabled, require explicit
-  `RESPRO_WEB_CORS_ORIGINS` allowlists instead of permissive wildcard defaults
-- 🔴 Ephemeral web mode as the only default path (no login) — enforce session-scoped profiling
-  without cross-session result persistence: uploaded files and generated reports must be deleted
-  via `/api/session/cleanup`; add a server-side TTL-based safety sweep (`RESPRO_WEB_RESULT_TTL`,
-  default 24 h) for abandoned sessions; document that persistent multi-user history is deferred
-  until authentication exists
-- 🔴 Remove mandatory `results.db` dependency from web profiling — web profiling routes/jobs must
-  run without requiring a results database; make run persistence optional (disabled in ephemeral
-  mode), remove startup hard-fail when `results.db` is absent, and keep only the metadata needed
-  to return immediate job/report responses to the submitting browser session
-- 🟡 Optional lightweight run cache for active session UX — if needed for frontend refresh
+-  Optional lightweight run cache for active session UX — if needed for frontend refresh
   resilience, keep a short-lived in-memory or Redis-backed session cache keyed by browser session
   ID (no durable per-user storage)
 - 🟡 Configurable worker concurrency and resource limits in Docker Compose — currently one

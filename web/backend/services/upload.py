@@ -42,14 +42,14 @@ class UploadStream(Protocol):
 
 
 def _max_size_for_type(file_type: Literal['fasta', 'vcf', 'bam', 'json']) -> int:
-    upload_defaults = WEB_BACKEND_CONFIG.defaults.upload
+    defaults = WEB_BACKEND_CONFIG.defaults
     if file_type == 'fasta':
-        return upload_defaults.max_fasta_size
+        return defaults.upload_max_fasta_size
     if file_type == 'vcf':
-        return upload_defaults.max_vcf_size
+        return defaults.upload_max_vcf_size
     if file_type == 'json':
-        return upload_defaults.max_vcf_size
-    return upload_defaults.max_bam_size
+        return defaults.upload_max_vcf_size
+    return defaults.upload_max_bam_size
 
 
 def _extension_for_type(file_type: Literal['fasta', 'vcf', 'bam', 'json']) -> str:
@@ -89,7 +89,7 @@ def _validate_stream_chunk(
         state['chunks'].append(chunk)
         return
 
-    bgzf_header_bytes = WEB_BACKEND_CONFIG.defaults.upload.bgzf_header_bytes
+    bgzf_header_bytes = WEB_BACKEND_CONFIG.defaults.upload_bgzf_header_bytes
     if len(state['first_bytes']) < bgzf_header_bytes:
         missing = bgzf_header_bytes - len(state['first_bytes'])
         state['first_bytes'] = state['first_bytes'] + chunk[:missing]
@@ -126,7 +126,7 @@ def _validate_stream_complete(
             raise ValueError('JSON upload must be valid UTF-8 text') from exc
         return
 
-    if len(state['first_bytes']) < WEB_BACKEND_CONFIG.defaults.upload.bgzf_header_bytes:
+    if len(state['first_bytes']) < WEB_BACKEND_CONFIG.defaults.upload_bgzf_header_bytes:
         raise ValueError('BAM file is too small')
     if state['first_bytes'][:2] != b'\x1f\x8b':
         raise ValueError('BAM file does not have valid BGZF/gzip magic signature')
@@ -191,7 +191,7 @@ def _validate_fasta_line(state: dict[str, object], raw_line: bytes) -> None:
     state['line_number'] = int(state['line_number']) + 1
     line_number = int(state['line_number'])
 
-    max_fasta_line_length = WEB_BACKEND_CONFIG.defaults.upload.max_fasta_line_length
+    max_fasta_line_length = WEB_BACKEND_CONFIG.defaults.upload_max_fasta_line_length
     if len(raw_line) > max_fasta_line_length:
         raise ValueError(
             f'FASTA file contains line {line_number} longer than {max_fasta_line_length} characters'
@@ -235,8 +235,8 @@ def _validate_vcf_line(state: dict[str, object], raw_line: bytes) -> None:
     state['line_number'] = int(state['line_number']) + 1
     line_number = int(state['line_number'])
 
-    max_vcf_line_length = WEB_BACKEND_CONFIG.defaults.upload.max_vcf_line_length
-    max_vcf_data_lines = WEB_BACKEND_CONFIG.defaults.upload.max_vcf_data_lines
+    max_vcf_line_length = WEB_BACKEND_CONFIG.defaults.upload_max_vcf_line_length
+    max_vcf_data_lines = WEB_BACKEND_CONFIG.defaults.upload_max_vcf_data_lines
     if len(raw_line) > max_vcf_line_length:
         raise ValueError(f'VCF file contains line {line_number} longer than {max_vcf_line_length} characters')
 
@@ -264,7 +264,7 @@ def _validate_vcf_line(state: dict[str, object], raw_line: bytes) -> None:
 
 
 def _validate_bgzf_header(first_bytes: bytes) -> None:
-    if len(first_bytes) < WEB_BACKEND_CONFIG.defaults.upload.bgzf_header_bytes:
+    if len(first_bytes) < WEB_BACKEND_CONFIG.defaults.upload_bgzf_header_bytes:
         raise ValueError('BAM file is too small')
 
     compression_method = first_bytes[2]
@@ -301,7 +301,7 @@ async def save_upload_stream(
     :return: saved path and total size in bytes
     :raises ValueError: if file validation fails
     """
-    effective_chunk_size = chunk_size or WEB_BACKEND_CONFIG.defaults.upload.chunk_size
+    effective_chunk_size = chunk_size or WEB_BACKEND_CONFIG.defaults.upload_chunk_size
     max_size = _max_size_for_type(file_type)
     validation_state = _new_stream_validation_state(file_type)
 
@@ -413,17 +413,17 @@ def cleanup_session_files(
     output_dir: Path,
 ) -> int:
     """
-    Delete session-scoped uploads and generated HTML report files.
+    Delete session-scoped uploads and generated report files.
 
     :param upload_paths: uploaded file paths provided by the client session
-    :param report_paths: report html paths provided by the client session
+    :param report_paths: report paths provided by the client session
     :param upload_dir: allowed uploads directory
     :param output_dir: allowed output directory for generated reports
     :return: number of deleted files
     """
     deleted_count = 0
     deleted_count += _delete_paths(upload_paths, allowed_root=upload_dir, html_only=False)
-    deleted_count += _delete_paths(report_paths, allowed_root=output_dir, html_only=True)
+    deleted_count += _delete_paths(report_paths, allowed_root=output_dir, html_only=False)
     return deleted_count
 
 

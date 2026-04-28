@@ -17,8 +17,7 @@ from respro.core.rules import load_formula_rules, load_rules, match_formula_rule
 from respro.core.vcf_coverage import compute_coverage_gaps_from_bam
 from respro.core.vcf_remap import remap_variants
 from respro.db.models import AnnotatedVariant, CoverageGap, ProfilingResult
-from respro.db.results import save_run
-from respro.db.schema import init_results_db, open_project_db
+from respro.db.schema import open_project_db
 from respro.io.reference import load_genes_for_reference
 from respro.io.vcf import parse_vcf
 from respro.report.html import export_results
@@ -35,18 +34,16 @@ def _build_web_output_html_path(*, output_dir: Path, result: ProfilingResult) ->
 def profile_fasta(
     *,
     project_db: Path,
-    results_db: Path,
     output_dir: Path,
     fasta_path: Path,
     sample: str,
     threads: int,
     aligner: str,
 ) -> dict:
-    """Run FASTA profiling and persist the run in results.db."""
+    """Run FASTA profiling."""
     _validate_aligner(aligner)
 
     project_conn = open_project_db(project_db)
-    results_conn = init_results_db(results_db)
     try:
         project_name = _project_name(project_conn)
         try:
@@ -103,11 +100,10 @@ def profile_fasta(
             project_db_path=project_db.resolve(),
             output_html_path=_build_web_output_html_path(output_dir=output_dir, result=result),
         )
-        run_id = save_run(results_conn, project_db.resolve(), project_conn, result)
 
         return {
             'mode': 'fasta',
-            'run_id': run_id,
+            'run_id': None,
             'database_id': project_db.name,
             'database_path': str(project_db.resolve()),
             'input_path': str(fasta_path.resolve()),
@@ -123,13 +119,11 @@ def profile_fasta(
         }
     finally:
         project_conn.close()
-        results_conn.close()
 
 
 def profile_vcf(
     *,
     project_db: Path,
-    results_db: Path,
     output_dir: Path,
     vcf_path: Path,
     ref_fasta_path: Path,
@@ -140,11 +134,10 @@ def profile_vcf(
     threads: int,
     aligner: str,
 ) -> dict:
-    """Run VCF profiling and persist the run in results.db."""
+    """Run VCF profiling."""
     _validate_aligner(aligner)
 
     project_conn = open_project_db(project_db)
-    results_conn = init_results_db(results_db)
     try:
         project_name = _project_name(project_conn)
         try:
@@ -221,11 +214,10 @@ def profile_vcf(
             project_db_path=project_db.resolve(),
             output_html_path=_build_web_output_html_path(output_dir=output_dir, result=result),
         )
-        run_id = save_run(results_conn, project_db.resolve(), project_conn, result)
 
         return {
             'mode': 'vcf',
-            'run_id': run_id,
+            'run_id': None,
             'database_id': project_db.name,
             'database_path': str(project_db.resolve()),
             'input_path': str(vcf_path.resolve()),
@@ -242,7 +234,6 @@ def profile_vcf(
         }
     finally:
         project_conn.close()
-        results_conn.close()
 
 
 def _build_result(

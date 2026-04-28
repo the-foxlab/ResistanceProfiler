@@ -1,6 +1,5 @@
 [env]
 data_dir = 'RESPRO_WEB_DATA_DIR'
-results_db = 'RESPRO_WEB_RESULTS_DB'
 api_token = 'RESPRO_WEB_API_TOKEN'
 allowed_roots = 'RESPRO_WEB_ALLOWED_ROOTS'
 cors_origins = 'RESPRO_WEB_CORS_ORIGINS'
@@ -16,6 +15,7 @@ web_host = '127.0.0.1'
 web_port = 8000
 redis_url = 'redis://127.0.0.1:6379/0'
 job_timeout_seconds = 3600
+sweep_frequency_seconds = 3600
 upload_rate_limit = '5/minute'
 cors_local_origins = ['http://127.0.0.1:5173', 'http://localhost:5173']
 profile_queue_name = 'profiling'
