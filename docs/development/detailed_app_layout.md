@@ -12,14 +12,14 @@ This document captures detailed runtime interactions for the web application sta
 
 ```mermaid
 flowchart LR
-    FE[web/frontend] --> API[web/backend/main.py]
-    API --> SVC[web/backend/services]
-    API --> Q[RQ Queue]
-    Q --> JOB[web/backend/jobs.py]
-    JOB --> CORE[respro/core]
-    JOB --> IO[respro/io]
-    CORE --> DB[respro/db]
-    JOB --> REPORT[respro/report]
+    FE["web/frontend"] --> API["web/backend/main.py"]
+    API --> SVC["web/backend/services"]
+    API --> Q["RQ Queue"]
+    Q --> JOB["web/backend/jobs.py"]
+    JOB --> CORE["respro/core"]
+    JOB --> IO["respro/io"]
+    CORE --> DB["respro/db"]
+    JOB --> REPORT["respro/report"]
 ```
 
 ## Backend Request Paths
@@ -28,32 +28,32 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    A[POST /api/upload/*] --> B[web/backend/main.py]
-    B --> C[web/backend/services/upload.py]
-    C --> D[uploads/]
+    A["POST /api/upload/*"] --> B["web/backend/main.py"]
+    B --> C["web/backend/services/upload.py"]
+    C --> D["uploads/"]
 ```
 
 ### Profiling Job Submission and Execution
 
 ```mermaid
 flowchart TD
-    A[POST /api/profile/fasta|vcf] --> B[web/backend/main.py]
-    B --> C[web/backend/queue.py]
-    C --> D[RQ Worker]
-    D --> E[web/backend/jobs.py]
-    E --> F[respro/core + respro/io]
-    F --> G[respro/db/results.py]
-    F --> H[respro/report/html.py]
+    A["POST /api/profile/fasta|vcf"] --> B["web/backend/main.py"]
+    B --> C["web/backend/queue.py"]
+    C --> D["RQ Worker"]
+    D --> E["web/backend/jobs.py"]
+    E --> F["respro/core + respro/io"]
+    F --> G["respro/db/results.py"]
+    F --> H["respro/report/html.py"]
 ```
 
 ### Browse and Regeneration Paths
 
 ```mermaid
 flowchart TD
-    A[GET /api/databases|rules|mutations] --> B[web/backend/services/browse.py]
-    B --> C[project_databases/*.db]
-    D[POST /api/regenerate/json] --> E[web/backend/jobs.py]
-    E --> F[respro/report]
+    A["GET /api/databases|rules|mutations"] --> B["web/backend/services/browse.py"]
+    B --> C["project_databases/*.db"]
+    D["POST /api/regenerate/json"] --> E["web/backend/jobs.py"]
+    E --> F["respro/report"]
 ```
 
 ## Security and Runtime Boundaries
