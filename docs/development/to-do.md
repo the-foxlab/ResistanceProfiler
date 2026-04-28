@@ -284,6 +284,9 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Web deployment and security
 
+- 🔴 Add explicit startup policy validation for auth and CORS — fail fast when the server is
+  configured for non-local/public bind without `RESPRO_WEB_API_TOKEN`, and fail fast when token
+  auth is enabled but `RESPRO_WEB_CORS_ORIGINS` is missing or empty
 - 🔴 Require explicit web API authentication in non-local deployments — enforce
   `RESPRO_WEB_API_TOKEN` outside localhost-only development defaults and fail fast on insecure
   startup configurations intended for shared or internet-reachable environments
@@ -293,6 +296,9 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🔴 Remove token transport via query string — accept auth only via `Authorization: Bearer ...`
   for API routes and report access to avoid token leakage through URLs, logs, browser history,
   and referrer headers
+- 🟡 Remove query-token auth fallback from non-route surfaces — remove token query-param usage
+  from rate-limit keying and frontend-generated report, artifact, and session-cleanup URLs so
+  header-based auth is the only supported token transport outside route handlers
 - 🟡 Tighten authenticated CORS defaults — when token auth is enabled, require explicit
   `RESPRO_WEB_CORS_ORIGINS` allowlists instead of permissive wildcard defaults
 - 🔴 Ephemeral web mode as the only default path (no login) — enforce session-scoped profiling
@@ -328,34 +334,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   `proxy_set_header` directives; add `RESPRO_WEB_TRUSTED_PROXIES` as an optional env variable
   read by uvicorn (`--proxy-headers`, `--forwarded-allow-ips`) so that `X-Forwarded-For` is
   trusted for rate-limiting purposes
-- 🟢 Deferred authentication for persistent results — implement only after ephemeral mode is
-  complete and stable; when revisited, use per-user ownership checks for all persisted artifacts
-  and reports
-
-### Deferred: Authorized lab access (persistent mode)
-
-- 🟢 Persistent-mode architecture decision record — add a short ADR in `docs/development/contribution-and-architecture.md`
-  defining scope as lab-internal multi-user deployment (no public signup), ownership model
-  (`user_id` bound to runs/artifacts), and explicit non-goals for MVP (no SSO/MFA/password reset)
-- 🟢 Auth data model and migrations — add `user`, `session_token`, `user_role`, and per-run
-  ownership fields (`run.user_id`, `artifact.user_id`) in `respro/db/results.py` migration path;
-  include indexes for `email`, `token_hash`, and `(user_id, created_at)` lookup patterns
-- 🟢 Login/session endpoints and middleware — add `/api/auth/login`, `/api/auth/logout`,
-  `/api/auth/me` with Argon2id password verification, httpOnly secure session cookie handling,
-  and request-scoped user identity dependency for protected routes in `web/backend/main.py`
-- 🟢 Ownership enforcement for all persisted objects — enforce `user_id` checks on
-  `/api/jobs/{job_id}`, `/api/report`, `/api/session/cleanup`, and any results listing endpoints;
-  unauthorized access must return 404/403 without leaking object existence
-- 🟢 Artifact persistence for regenerate-without-reupload — store uploaded FASTA/VCF/BAM and
-  generated reports as user-owned artifacts with checksum metadata (SHA-256) and TTL/retention
-  policy controls; re-use identical user-owned uploads instead of forcing re-upload
-- 🟢 Admin-only user lifecycle for lab setups — add CLI/admin endpoints to create/disable users,
-  rotate initial passwords, and list account status; keep MVP onboarding invitation-only
-- 🟢 Security hardening baseline — add auth rate limiting, structured security/audit logs
-  (login success/failure, logout, run created, report opened), and stricter cookie flags
-  (`Secure`, `HttpOnly`, `SameSite=Lax/Strict`) for production deployments
-- 🟢 Optional OIDC bridge (post-MVP) — add pluggable OIDC integration behind config flag for labs
-  that already run institutional identity providers; keep local user/password mode as default
 
 ### Public release
 
@@ -405,4 +383,3 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 Dev startup ergonomics — add one-command local startup scripts (backend + worker + frontend + Redis) to reduce manual terminal orchestration during development
 - 🟡 Compose integration tests — add compose-backed smoke/integration tests for submit → poll → report retrieval using startup-configured paths
 - 🟢 CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
-- 🟢 Results retention and portability (post-prototype) — add TTL cleanup policy for central results plus explicit export/import endpoints for user portability
