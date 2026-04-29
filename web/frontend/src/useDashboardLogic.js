@@ -519,6 +519,15 @@ export function useDashboardLogic() {
 
   const selectedReportOption = reportOptions.find((option) => option.path === selectedProfileReportPath) || null;
 
+  useEffect(() => {
+    if (!selectedProfileReportPath) {
+      return;
+    }
+    const selectedOption = reportOptions.find((option) => option.path === selectedProfileReportPath);
+    setInlineReportPath(selectedProfileReportPath);
+    setInlineReportLabel(selectedOption ? selectedOption.label : 'Selected report');
+  }, [reportOptions, selectedProfileReportPath]);
+
   const buildReportUrl = (reportPath) => {
     return buildApiUrl('/api/report', { path: reportPath });
   };
@@ -862,6 +871,26 @@ export function useDashboardLogic() {
     URL.revokeObjectURL(href);
   };
 
+  const downloadFormulaRulesAsTsv = () => {
+    const headers = formulaColumns.map((column) => column.label);
+    const lines = [headers.join('\t')];
+    displayedFormulaRules.forEach((formulaRule) => {
+      const row = formulaColumns.map((column) => {
+        const raw = column.accessor(formulaRule);
+        return String(raw ?? '').replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
+      });
+      lines.push(row.join('\t'));
+    });
+
+    const blob = new Blob([`${lines.join('\n')}\n`], { type: 'text/tab-separated-values;charset=utf-8' });
+    const href = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = href;
+    anchor.download = 'formula-combinations.tsv';
+    anchor.click();
+    URL.revokeObjectURL(href);
+  };
+
   return {
     // Expose one stable object so the view component stays presentation-focused.
     API_BASE,
@@ -921,6 +950,7 @@ export function useDashboardLogic() {
     isRegenerateBusy: isProcessingRegenerate,
     runRegenerateFromJson,
     downloadMutationsAsTsv,
+    downloadFormulaRulesAsTsv,
     uploadProgress,
   };
 }

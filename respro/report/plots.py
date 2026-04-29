@@ -142,13 +142,15 @@ def _build_lollipop_figure(
     )
     # Legend handles
     effects_for_legend = {ann.consequence for ann in cds}
-    has_split_genes = any(gene.segments for gene in plot_genes)
+    has_coverage_overlay = any(coverage_gaps_by_gene.get(gene.name) for gene in plot_genes)
+    has_introns = any(_gene_intron_gaps(gene) for gene in plot_genes)
     handles = [
         plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='white',
                    markeredgecolor='black', markersize=8, label='Database hit'),
-        mpatches.Patch(facecolor=NON_COVERED_COLOUR, alpha=0.12, edgecolor='none', label='non covered'),
     ]
-    if has_split_genes:
+    if has_coverage_overlay:
+        handles.append(mpatches.Patch(facecolor=NON_COVERED_COLOUR, alpha=0.12, edgecolor='none', label='non covered'))
+    if has_introns:
         handles.append(mpatches.Patch(facecolor=GENE_INTRON_COLOUR, label='Intron (non-coding)'))
     handles.extend(mutation_legend_patches(effects_for_legend))
 

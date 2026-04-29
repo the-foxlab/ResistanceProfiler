@@ -105,7 +105,7 @@ class TestProfileCli:
         tsv_path = output_dir / f'{sample_vcf.stem}.mutations.tsv'
         assert tsv_path.exists()
         first_line = tsv_path.read_text(encoding='utf-8').splitlines()[0]
-        assert first_line.startswith('gene\tnt_change\taa_change')
+        assert first_line.startswith('Gene\tAA change\tDrug')
 
     def test_profile_produces_html(
         self,

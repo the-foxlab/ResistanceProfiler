@@ -267,7 +267,44 @@ def _build_db_hit_rows(
                 'has_alignment': alignment_html is not None,
                 'alignment_title': _alignment_title(ann),
             })
-    return rows
+    return _sort_db_hit_rows(rows)
+
+
+def _extract_numeric_sort_value(value: str) -> float:
+    """Extract the highest numeric token from a free-text quantitative field."""
+    matches = re.findall(r'-?\d+(?:\.\d+)?', value or '')
+    if not matches:
+        return float('-inf')
+    return max(float(token) for token in matches)
+
+
+def _sort_db_hit_rows(rows: list[dict]) -> list[dict]:
+    """Sort mutation hits by drug and then by resistance/IC50 relevance."""
+    phenotype_order = {
+        'resistant': 0,
+        'intermediate': 1,
+        'sensitive': 2,
+        'contradictory': 3,
+        'unknown': 4,
+    }
+
+    def _key(row: dict) -> tuple:
+        phenotype = _effective_phenotype(row)
+        phenotype_rank = phenotype_order.get(phenotype, 5)
+        # Prefer fold-IC50 where present, then IC50; larger values should rank higher.
+        ic50_sort_value = max(
+            _extract_numeric_sort_value(str(row.get('fold_ic50', '') or '')),
+            _extract_numeric_sort_value(str(row.get('ic50', '') or '')),
+        )
+        return (
+            (row.get('drug') or '').lower(),
+            phenotype_rank,
+            -ic50_sort_value,
+            (row.get('gene') or '').lower(),
+            _strip_html(str(row.get('aa_change', ''))).lower(),
+        )
+
+    return sorted(rows, key=_key)
 
 
 def _build_combo_hit_rows(result: ProfilingResult) -> list[dict]:
@@ -1003,7 +1040,7 @@ def build_report_context(
     sample_classification = _build_sample_classification(result)
     cds_rows = _build_cds_rows(result, gene_alignments)
     potential_rows = _build_potential_effects_rows(result, rules or [], gene_alignments)
-    coverage_assessment_available = bool(result.coverage_gaps) or any(
+    coverage_assessment_available = bool(rules) or bool(result.coverage_gaps) or any(
         ann.is_fasta_mode for ann in result.annotations
     )
     if coverage_assessment_available:
@@ -1311,24 +1348,25 @@ def write_json(
     return output_path
 
 
-def write_tabular(output_path: Path, db_hit_rows: list[dict]) -> Path:
+def write_tabular(output_path: Path, db_hit_rows: list[dict], db_cols: dict[str, bool]) -> Path:
     """Write database-hit rows in a tab-separated table format."""
     output_path = Path(output_path)
-    headers = [
-        'gene',
-        'nt_change',
-        'aa_change',
-        'consequence',
-        'af_bin',
-        'drug',
-        'ic50',
-        'fold_ic50',
-        'phenotype',
-        'clinical_phenotype',
-        'source',
-        'comment',
-        'publications',
-    ]
+    headers = ['Gene', 'AA change', 'Drug']
+    if db_cols.get('ic50', False):
+        headers.append('IC50')
+    if db_cols.get('fold_ic50', False):
+        headers.append('Fold-IC50')
+    headers.append('Phenotype')
+    if db_cols.get('clinical_phenotype', False):
+        headers.append('Clinical phenotype')
+    headers.extend(['Underlying nt change', 'Consequence', 'Frequency classification'])
+    if db_cols.get('source', False):
+        headers.append('Source')
+    if db_cols.get('comment', False):
+        headers.append('Comment')
+    if db_cols.get('publication', False):
+        headers.append('Publications')
+
     with output_path.open('w', encoding='utf-8', newline='') as handle:
         writer = csv.writer(handle, delimiter='\t', lineterminator='\n')
         writer.writerow(headers)
@@ -1336,21 +1374,31 @@ def write_tabular(output_path: Path, db_hit_rows: list[dict]) -> Path:
             publications = '; '.join(
                 filter(None, (_format_publication(pub) for pub in row.get('publications', [])))
             )
-            writer.writerow([
+            output_row = [
                 row.get('gene', ''),
-                _strip_html(str(row.get('nt_change', ''))),
                 _strip_html(str(row.get('aa_change', ''))),
+                row.get('drug', ''),
+            ]
+            if db_cols.get('ic50', False):
+                output_row.append(row.get('ic50', ''))
+            if db_cols.get('fold_ic50', False):
+                output_row.append(row.get('fold_ic50', ''))
+            output_row.append(row.get('phenotype', ''))
+            if db_cols.get('clinical_phenotype', False):
+                output_row.append(row.get('clinical_phenotype', ''))
+
+            output_row.extend([
+                _strip_html(str(row.get('nt_change', ''))),
                 row.get('consequence', ''),
                 row.get('af_bin', ''),
-                row.get('drug', ''),
-                row.get('ic50', ''),
-                row.get('fold_ic50', ''),
-                row.get('phenotype', ''),
-                row.get('clinical_phenotype', ''),
-                row.get('source', ''),
-                row.get('comment', ''),
-                publications,
             ])
+            if db_cols.get('source', False):
+                output_row.append(row.get('source', ''))
+            if db_cols.get('comment', False):
+                output_row.append(row.get('comment', ''))
+            if db_cols.get('publication', False):
+                output_row.append(publications)
+            writer.writerow(output_row)
     logger.info('Tabular report written to %s', output_path)
     return output_path
 
@@ -1443,7 +1491,7 @@ def export_results(
     if 'tabular' in requested_formats:
         context = build_report_context(result, project_conn=project_conn, rules=rules)
         tabular_path = output_dir / f'{stem}.mutations.tsv'
-        write_tabular(tabular_path, context['db_hit_rows'])
+        write_tabular(tabular_path, context['db_hit_rows'], context['db_cols'])
         outputs['tabular'] = tabular_path
 
     logger.info('Exported report to %s', html_path)

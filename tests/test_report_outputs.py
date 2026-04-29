@@ -541,6 +541,163 @@ class TestBuildReportContext:
         assert 'of 2 total positions (missing coverage)' in html
         assert 'id=\'section-unassessed\'' not in html
 
+    def test_build_report_context_reports_rule_positions_for_vcf_mode_without_gaps(self):
+        variant = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=200)
+        ann = AnnotatedVariant(
+            variant=variant,
+            gene_name='gag',
+            codon_pos=2,
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            af_bin='high',
+            is_fasta_mode=False,
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=0,
+            annotations=[ann],
+            coverage_gaps=[],
+        )
+        rules = [
+            ResistanceRule(
+                id=11,
+                gene_name='gag',
+                gene_id=1,
+                drug_name='DrugA',
+                drug_id=1,
+                reference_identifier='tiny_ref',
+                position=2,
+                reference='K',
+                mutation='E',
+                phenotype='resistant',
+            ),
+        ]
+
+        context = build_report_context(result, rules=rules)
+        assert context['summary']['rule_positions_total'] == 1
+        assert context['summary']['unassessed_rule_positions'] == 0
+
+    def test_build_report_context_sorts_db_hits_by_drug_then_resistance_then_ic50(self):
+        resistant_rule = ResistanceRule(
+            id=21,
+            gene_name='gag',
+            gene_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='tiny_ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+            ic50='2',
+        )
+        intermediate_rule = ResistanceRule(
+            id=22,
+            gene_name='gag',
+            gene_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='tiny_ref',
+            position=3,
+            reference='A',
+            mutation='V',
+            phenotype='intermediate',
+            ic50='10',
+        )
+        high_ic50_unknown_rule = ResistanceRule(
+            id=23,
+            gene_name='gag',
+            gene_id=1,
+            drug_name='DrugB',
+            drug_id=2,
+            reference_identifier='tiny_ref',
+            position=4,
+            reference='L',
+            mutation='I',
+            phenotype='unknown',
+            clinical_phenotype='unknown',
+            ic50='25',
+        )
+        low_ic50_unknown_rule = ResistanceRule(
+            id=24,
+            gene_name='gag',
+            gene_id=1,
+            drug_name='DrugB',
+            drug_id=2,
+            reference_identifier='tiny_ref',
+            position=5,
+            reference='P',
+            mutation='S',
+            phenotype='unknown',
+            clinical_phenotype='unknown',
+            ic50='5',
+        )
+
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=4,
+            variants_in_cds=4,
+            resistance_hits=4,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    gene_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[resistant_rule],
+                ),
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.9, depth=180),
+                    gene_name='gag',
+                    codon_pos=3,
+                    ref_aa='A',
+                    alt_aa='V',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[intermediate_rule],
+                ),
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=9, ref='C', alt='T', allele_freq=0.85, depth=170),
+                    gene_name='gag',
+                    codon_pos=4,
+                    ref_aa='L',
+                    alt_aa='I',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[high_ic50_unknown_rule],
+                ),
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=12, ref='C', alt='A', allele_freq=0.8, depth=160),
+                    gene_name='gag',
+                    codon_pos=5,
+                    ref_aa='P',
+                    alt_aa='S',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[low_ic50_unknown_rule],
+                ),
+            ],
+        )
+
+        context = build_report_context(result)
+        rows = context['db_hit_rows']
+
+        assert [row['drug'] for row in rows] == ['DrugA', 'DrugA', 'DrugB', 'DrugB']
+        assert rows[0]['phenotype'] == 'resistant'
+        assert rows[1]['phenotype'] == 'intermediate'
+        assert rows[2]['ic50'] == '25'
+        assert rows[3]['ic50'] == '5'
+
     def test_render_html_includes_drug_badges(self) -> None:
         r = _make_result()
         html = render_html(r)
@@ -838,8 +995,54 @@ class TestBuildReportContext:
 
         svg = render_lollipop_plot_bytes(r, genes, fmt='svg')
         assert svg is not None
+        assert b'non covered' in svg
         assert b'#6b7280' in svg
         assert b'opacity: 0.12' in svg
+
+    def test_lollipop_svg_omits_non_covered_legend_without_coverage_gaps(self):
+        from respro.report.plots import render_lollipop_plot_bytes
+
+        r = _make_result()
+        r.coverage_gaps = []
+        genes = [
+            GeneRecord(
+                id=1,
+                reference_id=1,
+                name='gag',
+                protein='Gag',
+                start=0,
+                end=12,
+                strand='+',
+                codon_start=0,
+                nt_sequence='ATGAAAGCTTAA',
+            ),
+        ]
+
+        svg = render_lollipop_plot_bytes(r, genes, fmt='svg')
+        assert svg is not None
+        assert b'non covered' not in svg
+
+    def test_lollipop_svg_omits_intron_legend_without_split_gene(self):
+        from respro.report.plots import render_lollipop_plot_bytes
+
+        r = _make_result()
+        genes = [
+            GeneRecord(
+                id=1,
+                reference_id=1,
+                name='gag',
+                protein='Gag',
+                start=0,
+                end=12,
+                strand='+',
+                codon_start=0,
+                nt_sequence='ATGAAAGCTTAA',
+            ),
+        ]
+
+        svg = render_lollipop_plot_bytes(r, genes, fmt='svg')
+        assert svg is not None
+        assert b'Intron (non-coding)' not in svg
 
 
 class TestSplitGenePlotRendering:

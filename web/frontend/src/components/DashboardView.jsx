@@ -128,7 +128,6 @@ export function DashboardView({
   isCancelingJob,
   cancelActiveJob,
   runSelectedProfile,
-  openSelectedReportInline,
   buildReportUrl,
   buildArtifactUrl,
   uploadFastaFile,
@@ -140,11 +139,13 @@ export function DashboardView({
   isRegenerateBusy,
   runRegenerateFromJson,
   downloadMutationsAsTsv,
+  downloadFormulaRulesAsTsv,
   uploadProgress,
 }) {
   // These controls only affect database charts, not mutation browsing or profiling.
   const [requestedPhenotypeMode, setRequestedPhenotypeMode] = useState('auto');
   const [requestedBinSize, setRequestedBinSize] = useState(10);
+  const [reportFrameHeight, setReportFrameHeight] = useState(900);
 
   const {
     summaryTile,
@@ -193,7 +194,6 @@ export function DashboardView({
       { key: 'description', label: 'Description', value: metadata.description },
       { key: 'maintainer_update', label: 'Maintainer update', value: metadata.maintainer_update },
       { key: 'license', label: 'License', value: metadata.license },
-      { key: 'tsv_checksum', label: 'TSV checksum', value: metadata.tsv_checksum },
     ];
 
     return entries.filter((entry) => _isPopulated(entry.value));
@@ -492,9 +492,9 @@ export function DashboardView({
                   />
                 </div>
                 <div className="profile-input-subtile section-subtile">
-                  <div className="profile-upload-row profile-upload-row-fasta">
+                  <div className="profile-upload-row profile-upload-row-regenerate">
                     <label>
-                      Results JSON
+                      Upload JSON file of prior results
                       <input
                         type="file"
                         accept=".json"
@@ -505,9 +505,11 @@ export function DashboardView({
                         }}
                       />
                     </label>
-                    <p className="status">
-                      If the JSON UUID does not match the selected database UUID, regeneration is blocked.
-                      Database updates currently do not allow regeneration of reports from older database versions.
+                  </div>
+
+                  <div className="regenerate-note-row">
+                    <p className="status regenerate-note">
+                      If the JSON UUID does not match the selected database UUID, regeneration is blocked. Database updates currently do not allow regeneration of reports from older database versions.
                     </p>
                   </div>
 
@@ -568,14 +570,6 @@ export function DashboardView({
                   <button
                     type="button"
                     className="button-link report-action-btn"
-                    onClick={openSelectedReportInline}
-                    disabled={!selectedProfileReportPath}
-                  >
-                    Open below
-                  </button>
-                  <button
-                    type="button"
-                    className="button-link report-action-btn"
                     onClick={() => {
                       if (selectedProfileReportPath) {
                         window.open(buildReportUrl(selectedProfileReportPath), '_blank', 'noopener,noreferrer');
@@ -615,6 +609,23 @@ export function DashboardView({
                     title="ResistanceProfiler report"
                     src={buildReportUrl(inlineReportPath)}
                     className="workspace-frame"
+                    style={{ height: `${reportFrameHeight}px` }}
+                    onLoad={(event) => {
+                      try {
+                        const frameDoc = event.currentTarget.contentDocument;
+                        if (!frameDoc || !frameDoc.body || !frameDoc.documentElement) {
+                          return;
+                        }
+                        const nextHeight = Math.max(
+                          frameDoc.body.scrollHeight,
+                          frameDoc.documentElement.scrollHeight,
+                          900,
+                        );
+                        setReportFrameHeight(nextHeight + 24);
+                      } catch {
+                        setReportFrameHeight(900);
+                      }
+                    }}
                   />
                 ) : (
                   <p className="status">Run profiling or regenerate from JSON and the report will open here.</p>
@@ -629,7 +640,7 @@ export function DashboardView({
               <article className="card full-width-tile tab-primary-tile">
                 <div className="workspace-output-header workspace-output-header-with-db section-header">
                   <div>
-                    <h2>Mutation browser</h2>
+                    <h2>Browse mutations</h2>
                     <p>
                       {displayedRules.length} visible mutation row(s), {formulaRules.length} formula row(s)
                     </p>
@@ -642,6 +653,15 @@ export function DashboardView({
                     selectId="mutation-db-select"
                     className="mutation-db-bar"
                   />
+                </div>
+              </article>
+
+              <article className="card full-width-tile mutation-table-tile">
+                <div className="workspace-output-header section-header">
+                  <div>
+                    <h3>Single mutations</h3>
+                    <p>{displayedRules.length} visible row(s)</p>
+                  </div>
                 </div>
                 <div className="table-controls-container section-subtile">
                   <div className="table-controls">
@@ -679,9 +699,6 @@ export function DashboardView({
                     </button>
                   </div>
                 </div>
-              </article>
-
-              <article className="card full-width-tile mutation-table-tile">
                 <div className="table-wrap mutation-table-wrap">
                   <table>
                     <thead>
@@ -726,7 +743,7 @@ export function DashboardView({
               <article className="card full-width-tile mutation-table-tile formula-table-tile">
                 <div className="workspace-output-header section-header">
                   <div>
-                    <h3>Formula combinations</h3>
+                    <h3>Combinatorial mutations</h3>
                     <p>{displayedFormulaRules.length} visible row(s)</p>
                   </div>
                 </div>
@@ -756,6 +773,13 @@ export function DashboardView({
                       }}
                     >
                       Reset
+                    </button>
+                    <button
+                      type="button"
+                      className="download-tsv-btn"
+                      onClick={downloadFormulaRulesAsTsv}
+                    >
+                      Download as TSV
                     </button>
                   </div>
                 </div>

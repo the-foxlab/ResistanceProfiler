@@ -11,8 +11,8 @@
   --radius-lg: 10px;
   --radius-md: 8px;
   --shadow: 0 10px 28px rgba(12, 34, 49, 0.08);
-  --topbar-logo-width: 300px;
-  --topbar-logo-height: 52px;
+  --topbar-logo-width: 380px;
+  --topbar-logo-height: 68px;
   --topbar-link-icon-size: 32px;
 }
 
@@ -31,6 +31,7 @@ body {
   margin: 0;
   color: var(--ink);
   font-family: 'Source Sans 3', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 15px;
   background:
     radial-gradient(circle at 10% 0%, #e8f0f7 0%, transparent 35%),
     radial-gradient(circle at 100% 20%, #edf6f2 0%, transparent 32%),
@@ -131,6 +132,10 @@ th {
   margin: 0;
 }
 
+.about-header h2 {
+  font-size: 1.34rem;
+}
+
 .about-header p {
   color: var(--muted);
   text-align: justify;
@@ -172,7 +177,7 @@ th {
 
 .about-section-title h3 {
   margin: 0;
-  font-size: 0.98rem;
+  font-size: 0.94rem;
 }
 
 .about-section-icon {
@@ -284,6 +289,7 @@ th {
   height: var(--topbar-logo-height);
   max-width: 100%;
   object-fit: contain;
+  transform: translateX(-2.5rem);
 }
 
 .brand-logo-wrap {
@@ -338,8 +344,8 @@ th {
 }
 
 .database-meta-panel {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.45rem 1rem;
   padding: 0.85rem 0.95rem;
   border: 1px solid #dbe6ee;
@@ -349,8 +355,7 @@ th {
 }
 
 .database-meta-row {
-  flex: 1 1 calc(50% - 0.5rem);
-  min-width: 280px;
+  min-width: 0;
   display: grid;
   grid-template-columns: minmax(130px, 180px) minmax(0, 1fr);
   gap: 0.7rem;
@@ -366,8 +371,6 @@ th {
 
 .database-meta-label {
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   color: var(--muted);
 }
 
@@ -403,7 +406,7 @@ th {
 }
 
 .database-plot-header h3 {
-  font-size: 1rem;
+  font-size: 0.95rem;
 }
 
 .database-plot-header p,
@@ -446,7 +449,7 @@ th {
 
 .database-section-heading {
   margin: 0;
-  font-size: 1.12rem;
+  font-size: 1.04rem;
   font-weight: 700;
   color: #274156;
   letter-spacing: 0.01em;
@@ -654,12 +657,14 @@ th {
   align-items: center;
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
-  background: var(--accent);
-  color: #ffffff;
+  background: #2e837c;
+  color: #f6fbfa;
+  border: 1px solid rgba(15, 118, 110, 0.18);
   font-size: 0.74rem;
-  font-weight: 700;
+  font-weight: 600;
   white-space: nowrap;
   flex-shrink: 0;
+  box-shadow: inset 0 0 0 999px rgba(255, 255, 255, 0.08);
 }
 
 .header-db-bar {
@@ -922,6 +927,14 @@ th {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.regenerate-note {
+  margin: 0;
+}
+
+.regenerate-note-row {
+  margin-top: 0.55rem;
+}
+
 .profile-upload-row-vcf {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
@@ -1125,8 +1138,7 @@ th {
 
 .workspace-frame {
   width: 100%;
-  height: 78vh;
-  min-height: 580px;
+  min-height: 900px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: #ffffff;
@@ -1163,6 +1175,15 @@ th {
 .workspace-output-header h2,
 .workspace-output-header p {
   margin: 0;
+}
+
+.workspace-output-header h2 {
+  font-size: 1.2rem;
+}
+
+.workspace-output-header h3 {
+  margin: 0;
+  font-size: 0.98rem;
 }
 
 .workspace-output-header p {
@@ -1255,10 +1276,13 @@ th.sortable-col {
   }
 
   .database-meta-row {
-    flex-basis: 100%;
     min-width: 0;
     grid-template-columns: 1fr;
     gap: 0.2rem;
+  }
+
+  .database-meta-panel {
+    grid-template-columns: 1fr;
   }
 
   .database-phenotype-switch-row {
@@ -1334,7 +1358,7 @@ th.sortable-col {
   }
 
   .workspace-frame {
-    min-height: 480px;
+    min-height: 680px;
   }
 
   .database-plot-card {

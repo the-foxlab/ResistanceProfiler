@@ -24,15 +24,15 @@
 </style>
 </head>
 <body>
-<dl class='meta'>
-  <dt>Database</dt><dd>{{ summary.project_name }}</dd>
-  <dt>Database UUID</dt><dd>{{ summary.project_uuid or '-' }}</dd>
-  <dt>Organism</dt><dd>{{ summary.organism or '-' }}</dd>
-  <dt>Reference</dt><dd>{{ summary.reference }}</dd>
-  <dt>Sample</dt><dd>{{ summary.sample or '-' }}</dd>
-  <dt>File name</dt><dd>{{ summary.vcf }}</dd>
-  <dt>Timestamp</dt><dd>{{ summary.timestamp }}</dd>
-</dl>
+<section class='meta-grid'>
+  <article class='meta-item'><span class='meta-label'>Database</span><span class='meta-value'>{{ summary.project_name }}</span></article>
+  <article class='meta-item'><span class='meta-label'>Database UUID</span><span class='meta-value'>{{ summary.project_uuid or '-' }}</span></article>
+  <article class='meta-item'><span class='meta-label'>Organism</span><span class='meta-value'>{{ summary.organism or '-' }}</span></article>
+  <article class='meta-item'><span class='meta-label'>Reference</span><span class='meta-value'>{{ summary.reference }}</span></article>
+  <article class='meta-item'><span class='meta-label'>Sample</span><span class='meta-value'>{{ summary.sample or '-' }}</span></article>
+  <article class='meta-item'><span class='meta-label'>File name</span><span class='meta-value'>{{ summary.vcf }}</span></article>
+  <article class='meta-item'><span class='meta-label'>Timestamp</span><span class='meta-value'>{{ summary.timestamp }}</span></article>
+</section>
 
 <div class='stats'>
   <a class='stat-card' href='#section-cds'>
@@ -169,27 +169,24 @@
 <div class='table-wrapper'>
 <table class='sortable expandable-table'>
 <thead><tr>
-  <th>Gene</th><th>AA change</th><th>Frequency classification</th><th>Underlying nt change</th><th>Drug</th>
+  <th>Gene</th><th>AA change</th><th>Drug</th>
   {% if db_cols.ic50 %}<th>IC50</th>{% endif %}
   {% if db_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
-  {% if db_cols.score %}<th>Score</th>{% endif %}
   <th>Phenotype</th>
   {% if db_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
+  <th>Underlying nt change</th><th>Consequence</th><th>Frequency classification</th>
   {% if db_cols.source %}<th>Source</th>{% endif %}
   {% if db_cols.comment %}<th>Comment</th>{% endif %}
-  {% if db_cols.publication %}<th>Ref</th>{% endif %}
+  {% if db_cols.publication %}<th>Publications</th>{% endif %}
 </tr></thead>
 <tbody>
 {% for r in db_hit_rows %}
 <tr class='hit-row data-row{% if r.has_alignment %} expandable-row{% endif %}' data-row-id='db-{{ loop.index }}'>
   <td>{{ r.gene }}</td>
   <td>{{ r.aa_change }}</td>
-  <td data-sort-value='{{ r.af_bin }}'><span class='badge badge-{{ r.af_bin }}'>{{ r.af_bin }}</span></td>
-  <td>{{ r.nt_change }}</td>
   <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
   {% if db_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
   {% if db_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
-  {% if db_cols.score %}<td>{{ r.score or '—' }}</td>{% endif %}
   <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
       {% elif r.phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
       {% elif r.phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
@@ -202,6 +199,9 @@
       {% elif r.clinical_phenotype == 'contradictory' %}<span class='badge badge-contradictory'>contradictory</span>
       {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
   {% endif %}
+  <td>{{ r.nt_change }}</td>
+  <td><span class='badge badge-{{ r.consequence }}'>{{ r.consequence }}</span></td>
+  <td data-sort-value='{{ r.af_bin }}'><span class='badge badge-{{ r.af_bin }}'>{{ r.af_bin }}</span></td>
   {% if db_cols.source %}<td>{{ r.source or '—' }}</td>{% endif %}
   {% if db_cols.comment %}<td>{{ r.comment or '—' }}</td>{% endif %}
   {% if db_cols.publication %}<td>{% for n in r.pub_citations %}<a href='#ref-{{ n }}'>[{{ n }}]</a> {% endfor %}</td>{% endif %}
