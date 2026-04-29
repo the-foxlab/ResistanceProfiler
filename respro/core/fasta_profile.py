@@ -255,11 +255,14 @@ def _annotate_from_alignment(
                 n_ins = len(ins_before)
                 if n_ins % 3 != 0:
                     annotations.append(
-                        _annotate_fasta_frameshift_codon(
+                        _annotate_fasta_frameshift_insertion(
                             gene,
                             last_valid_codon_idx,
                             last_valid_ref_codon,
                             last_valid_query_codon,
+                            ins_before,
+                            codon_idx * 3,
+                            query_codon[0],
                         )
                     )
                 else:
@@ -327,7 +330,15 @@ def _annotate_from_alignment(
             else:
                 # Partial deletion (1–2 gaps) → frameshift; anchor from internal ref codon
                 annotations.append(
-                    _annotate_fasta_frameshift_codon(gene, codon_idx, ref_codon, ref_codon)
+                    _annotate_fasta_frameshift_deletion(
+                        gene,
+                        codon_idx,
+                        ref_codon,
+                        ref_codon,
+                        query_codon,
+                        last_valid_codon_idx,
+                        last_valid_query_codon,
+                    )
                 )
                 i += 3
                 codon_idx += 1
@@ -613,14 +624,12 @@ def _annotate_fasta_deletion_codons(
     anchor_aa = translate_codon(anchor_query_codon)
     deleted_aas = ''.join(translate_codon(c) for c in deleted_ref_codons)
     deleted_nt = ''.join(deleted_ref_codons)
-    anchor_nt = anchor_query_codon[-1]
     anchor_nt_idx = anchor_codon_idx * 3 + 2
-    # ref = anchor + deleted (VCF anchor convention); alt = anchor only.
-    var = _make_variant_from_coding_nt(
+    var = _make_fasta_deletion_variant(
         gene,
         anchor_nt_idx,
-        anchor_nt + deleted_nt,
-        anchor_nt,
+        anchor_query_codon[-1],
+        deleted_nt,
     )
     return AnnotatedVariant(
         variant=var,
@@ -635,25 +644,37 @@ def _annotate_fasta_deletion_codons(
     )
 
 
-def _annotate_fasta_frameshift_codon(
+def _annotate_fasta_frameshift_insertion(
     gene: GeneRecord,
     codon_idx: int,
     ref_codon: str,
     anchor_codon: str,
+    inserted_bases: str,
+    current_coding_nt_idx: int,
+    boundary_query_nt: str,
 ) -> AnnotatedVariant:
     """
-    Annotate a frameshift indel detected in a FASTA alignment.
+    Annotate a frameshift insertion detected in a FASTA alignment.
 
     :param gene: gene record
     :param codon_idx: 0-based codon index where the frameshift starts
     :param ref_codon: internal reference codon at codon_idx
     :param anchor_codon: codon used to derive the anchor amino acid (CDS orientation)
+    :param inserted_bases: inserted query bases in CDS orientation
+    :param current_coding_nt_idx: coding NT index of the first base in the codon after insertion
+    :param boundary_query_nt: mapped query NT at the insertion boundary in CDS orientation
     :return: AnnotatedVariant with consequence='frameshift'
     """
     anchor_aa = translate_codon(anchor_codon)
-    anchor_nt = anchor_codon[-1]
     anchor_nt_idx = codon_idx * 3 + 2
-    var = _make_variant_from_coding_nt(gene, anchor_nt_idx, anchor_nt, anchor_nt)
+    var = _make_fasta_insertion_variant(
+        gene,
+        anchor_nt_idx,
+        anchor_codon[-1],
+        inserted_bases,
+        current_coding_nt_idx,
+        boundary_query_nt,
+    )
     return AnnotatedVariant(
         variant=var,
         gene_name=gene.name,
@@ -661,7 +682,61 @@ def _annotate_fasta_frameshift_codon(
         ref_codon=ref_codon,
         alt_codon='',
         ref_aa=anchor_aa,
-        alt_aa='fsX',
+        alt_aa=f'{anchor_aa}fsX',
+        consequence='frameshift',
+        is_fasta_mode=True,
+    )
+
+
+def _annotate_fasta_frameshift_deletion(
+    gene: GeneRecord,
+    codon_idx: int,
+    ref_codon: str,
+    anchor_codon: str,
+    query_codon: str,
+    last_valid_codon_idx: int,
+    last_valid_query_codon: str,
+) -> AnnotatedVariant:
+    """
+    Annotate a frameshift deletion detected in a FASTA alignment.
+
+    The amino-acid anchor stays at the affected codon, while the nucleotide change
+    follows FASTA indel anchor conventions analogous to VCF-mode rendering.
+
+    :param gene: gene record
+    :param codon_idx: 0-based codon index where the frameshift starts
+    :param ref_codon: internal reference codon at codon_idx
+    :param anchor_codon: codon used to derive the anchor amino acid (CDS orientation)
+    :param query_codon: aligned query codon, including gaps
+    :param last_valid_codon_idx: previous ungapped codon index, or -1 when unavailable
+    :param last_valid_query_codon: previous ungapped query codon in CDS orientation
+    :return: AnnotatedVariant with consequence='frameshift'
+    """
+    gap_offsets = [idx for idx, base in enumerate(query_codon) if base == '-']
+    if not gap_offsets:
+        raise ValueError('Frameshift deletion annotation requires at least one gap in query codon')
+
+    deleted_nt = ''.join(ref_codon[idx] for idx in gap_offsets)
+    first_gap = gap_offsets[0]
+    if first_gap == 0:
+        if last_valid_codon_idx < 0 or not last_valid_query_codon:
+            raise ValueError('Frameshift deletion at gene start has no valid anchor nucleotide')
+        anchor_nt_idx = last_valid_codon_idx * 3 + 2
+        anchor_query_nt = last_valid_query_codon[-1]
+    else:
+        anchor_nt_idx = codon_idx * 3 + first_gap - 1
+        anchor_query_nt = query_codon[first_gap - 1]
+
+    anchor_aa = translate_codon(anchor_codon)
+    var = _make_fasta_deletion_variant(gene, anchor_nt_idx, anchor_query_nt, deleted_nt)
+    return AnnotatedVariant(
+        variant=var,
+        gene_name=gene.name,
+        codon_pos=codon_idx,
+        ref_codon=ref_codon,
+        alt_codon='',
+        ref_aa=anchor_aa,
+        alt_aa=f'{anchor_aa}fsX',
         consequence='frameshift',
         is_fasta_mode=True,
     )
@@ -707,4 +782,56 @@ def _resolve_fasta_anchor_codon(ref_codon: str, query_codon: str) -> str:
     if len(query_codon) == 3 and '-' not in query_codon:
         return query_codon
     return ref_codon
+
+
+def _make_fasta_insertion_variant(
+    gene: GeneRecord,
+    anchor_nt_idx: int,
+    anchor_query_nt: str,
+    inserted_bases: str,
+    current_coding_nt_idx: int,
+    boundary_query_nt: str,
+) -> VariantCall:
+    """Build a FASTA-derived insertion VariantCall using genomic-orientation alleles."""
+    if gene.strand == '+':
+        return _make_variant_from_coding_nt(
+            gene,
+            anchor_nt_idx,
+            anchor_query_nt,
+            anchor_query_nt + inserted_bases,
+        )
+
+    anchor_nt = reverse_complement(boundary_query_nt)
+    inserted_nt = reverse_complement(inserted_bases)
+    return _make_variant_from_coding_nt(
+        gene,
+        current_coding_nt_idx,
+        anchor_nt,
+        anchor_nt + inserted_nt,
+    )
+
+
+def _make_fasta_deletion_variant(
+    gene: GeneRecord,
+    anchor_nt_idx: int,
+    anchor_query_nt: str,
+    deleted_bases: str,
+) -> VariantCall:
+    """Build a FASTA-derived deletion VariantCall using genomic-orientation alleles."""
+    if gene.strand == '+':
+        return _make_variant_from_coding_nt(
+            gene,
+            anchor_nt_idx,
+            anchor_query_nt + deleted_bases,
+            anchor_query_nt,
+        )
+
+    anchor_nt = reverse_complement(anchor_query_nt)
+    deleted_nt = reverse_complement(deleted_bases)
+    return _make_variant_from_coding_nt(
+        gene,
+        anchor_nt_idx,
+        anchor_nt + deleted_nt,
+        anchor_nt,
+    )
 

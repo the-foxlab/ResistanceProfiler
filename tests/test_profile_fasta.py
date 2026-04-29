@@ -810,7 +810,7 @@ class TestFastaConsensusProfile:
         match = _make_match(simple_gene, query)
         anns, gaps = profile_fasta_consensus(query, [match])
 
-        assert any(a.consequence == 'frameshift' and a.alt_aa == 'fsX' for a in anns)
+        assert any(a.consequence == 'frameshift' and a.alt_aa == 'MfsX' for a in anns)
 
     def test_deletion_produces_frameshift_annotation(self, simple_gene: GeneRecord) -> None:
         """Single-base deletion shifts the reading frame and produces a frameshift annotation."""
@@ -818,7 +818,7 @@ class TestFastaConsensusProfile:
         match = _make_match(simple_gene, query)
         anns, gaps = profile_fasta_consensus(query, [match])
 
-        assert any(a.consequence == 'frameshift' and a.alt_aa == 'fsX' for a in anns)
+        assert any(a.consequence == 'frameshift' and a.alt_aa == 'KfsX' for a in anns)
 
     def test_iupac_ambiguous_base_emits_split_frequency(self, simple_gene: GeneRecord) -> None:
         """IUPAC 'R' at codon 1 → K (ref) or E: only E emitted with af=0.5."""
@@ -1066,9 +1066,11 @@ class TestFastaInsertionAnnotation:
         ann = anns[0]
         assert ann.codon_pos == 0
         assert ann.ref_aa == 'M'
-        assert ann.alt_aa == 'fsX'
+        assert ann.alt_aa == 'MfsX'
         assert ann.consequence == 'frameshift'
         assert ann.is_fasta_mode is True
+        assert ann.variant.ref == 'G'
+        assert ann.variant.alt == 'GC'
 
     def test_mid_codon_insertion_is_inframe_complex(self) -> None:
         """Insertion embedded before position 2 of a codon → inframe_complex."""
@@ -1155,6 +1157,18 @@ class TestFastaInsertionAnnotation:
         assert ann.variant.ref == 'C'
         assert ann.variant.alt == 'CAAA'
 
+    def test_negative_strand_frameshift_insertion_uses_genomic_indel_notation(self) -> None:
+        """Reverse-complement FASTA frameshift insertion uses genomic anchor-plus-payload alleles."""
+        gene = _make_fasta_gene('ATGGGGTTT', strand='-')
+        aligned_ref = 'ATG-GGGTTT'
+        aligned_query = 'ATGTGGGTTT'
+
+        anns, _ = _annotate_from_alignment(aligned_ref, aligned_query, gene)
+
+        ann = next(a for a in anns if a.consequence == 'frameshift')
+        assert ann.variant.ref == 'C'
+        assert ann.variant.alt == 'CA'
+
 
 # ──────────────────────────────────────────────────────────────────────
 # FASTA alignment: deletion annotation
@@ -1234,9 +1248,11 @@ class TestFastaDeletionAnnotation:
         ann = anns[0]
         assert ann.codon_pos == 1
         assert ann.ref_aa == 'G'     # anchor from internal ref codon 1 = GGG → G
-        assert ann.alt_aa == 'fsX'
+        assert ann.alt_aa == 'GfsX'
         assert ann.consequence == 'frameshift'
         assert ann.is_fasta_mode is True
+        assert ann.variant.ref == 'GG'
+        assert ann.variant.alt == 'G'
 
     def test_two_gap_query_codon_is_also_frameshift(self) -> None:
         """2-gap query codon (partial deletion) → frameshift."""
@@ -1281,6 +1297,20 @@ class TestFastaDeletionAnnotation:
         assert ann.consequence == 'deletion'
         # Anchor NT is coding index 2. For '-' strand: pos = (end-1) - 2 = 6.
         assert ann.variant.pos == 6
+        assert ann.variant.ref == 'CCCC'
+        assert ann.variant.alt == 'C'
+
+    def test_negative_strand_frameshift_deletion_uses_genomic_indel_notation(self) -> None:
+        """Reverse-complement FASTA frameshift deletion uses genomic anchor-plus-payload alleles."""
+        gene = _make_fasta_gene('ATGGGGTTT', strand='-')
+        aligned_ref = 'ATGGGGTTT'
+        aligned_query = 'ATG-GGTTT'
+
+        anns, _ = _annotate_from_alignment(aligned_ref, aligned_query, gene)
+
+        ann = next(a for a in anns if a.consequence == 'frameshift')
+        assert ann.variant.ref == 'CC'
+        assert ann.variant.alt == 'C'
 
     def test_snp_before_deletion_is_emitted_separately(self) -> None:
         """A start_lost at codon 0 and a deletion at codon 1 each emit their own annotation."""

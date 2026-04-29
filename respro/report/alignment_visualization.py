@@ -346,6 +346,8 @@ def _affected_nt_positions(
         # Deletions affect reference positions after the anchor in VCF anchor convention.
         if ref_len > alt_len:
             deleted_len = ref_len - alt_len
+            if ann.is_fasta_mode and alignment.strand == '-':
+                return set(range(anchor_pos - deleted_len, anchor_pos))
             return set(range(anchor_pos + 1, anchor_pos + 1 + deleted_len))
 
         # Equal-length complex replacements: highlight replaced block including anchor.

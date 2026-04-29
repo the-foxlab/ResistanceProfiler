@@ -5,6 +5,7 @@ Tests for report output generation.
 import sqlite3
 
 import matplotlib.pyplot as plt
+from Bio.Seq import Seq
 
 from respro.db.models import (
     AnnotatedVariant,
@@ -768,6 +769,31 @@ class TestBuildReportContext:
         assert 'A4A<u><strong>G</strong></u>' in html
         assert 'A<u><strong>C</strong></u>7A' in html
 
+    def test_render_html_fasta_frameshift_uses_indel_nt_not_fsx_token(self) -> None:
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=47663, ref='GG', alt='G', allele_freq=0.8, depth=250),
+            gene_name='UL23',
+            codon_pos=47,
+            ref_aa='P',
+            alt_aa='PfsX',
+            consequence='frameshift',
+            af_bin='high',
+            is_fasta_mode=True,
+        )
+        r = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=100000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=0,
+            annotations=[ann],
+        )
+
+        html = render_html(r)
+        assert 'GG47664<u><strong>fsX</strong></u>' not in html
+        assert 'G<u><strong>G</strong></u>47664G' in html
+
     def test_render_html_uses_alignment_title_for_fasta_mode(self) -> None:
         r = _make_result()
         r.annotations[0].is_fasta_mode = True
@@ -996,6 +1022,84 @@ class TestAlignmentVisualization:
         html = str(build_alignment_html(ann, alignments['UL23'], context_codons=2))
         assert "aln-cell aln-affected" in html
         assert "aln-mutation" not in html
+        assert "<span class='aln-cell aln-affected'>-</span>" in html
+
+    def test_fasta_frameshift_deletion_highlights_gap_column_in_alignment(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='UL23',
+            protein='UL23',
+            start=0,
+            end=19,
+            strand='+',
+            codon_start=0,
+            nt_sequence='TAGCGTGGGCATTTTCTG',
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=18,
+            strand='+',
+            cigar='6M1D12M',
+            cds_start=0,
+        )
+        alignment = build_gene_alignments('TAGCGTGGCATTTTCTG', [match])['UL23']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=5, ref='TG', alt='T'),
+            gene_name='UL23',
+            codon_pos=1,
+            consequence='frameshift',
+            ref_aa='P',
+            alt_aa='PfsX',
+            is_fasta_mode=True,
+        )
+
+        html = str(build_alignment_html(ann, alignment, context_codons=2))
+        assert html.count('aln-cell aln-affected') == 1
+        assert "<span class='aln-cell aln-affected'>-</span>" in html
+
+    def test_fasta_reverse_frameshift_deletion_highlights_gap_column_in_alignment(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='REVDEL',
+            protein='REVDEL',
+            start=0,
+            end=9,
+            strand='-',
+            codon_start=0,
+            nt_sequence='ATGGGGTTT',
+        )
+        coding_query = 'ATGGGTTT'
+        query = str(Seq(coding_query).reverse_complement())
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=len(query),
+            strand='-',
+            cigar='3M1D5M',
+            cds_start=0,
+        )
+        alignment = build_gene_alignments(query, [match])['REVDEL']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=6, ref='CC', alt='C'),
+            gene_name='REVDEL',
+            codon_pos=1,
+            consequence='frameshift',
+            ref_aa='G',
+            alt_aa='GfsX',
+            is_fasta_mode=True,
+        )
+
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        assert html.count('aln-cell aln-affected') == 1
         assert "<span class='aln-cell aln-affected'>-</span>" in html
 
     def test_reverse_gene_codon_spacing_follows_cds_direction(self) -> None:

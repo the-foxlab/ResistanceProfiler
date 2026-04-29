@@ -67,7 +67,7 @@ def _format_nt_change(ann: AnnotatedVariant) -> Markup:
 
     # FASTA mode — ref is always the 3-base reference codon
     if ann.consequence == 'frameshift':
-        return Markup(f'{escape(ref)}{pos}<u><strong>fsX</strong></u>')
+        return _format_positioned_change(ref, pos, alt)
 
     if ann.consequence == 'insertion':
         return _format_positioned_change(ref, pos, alt)
