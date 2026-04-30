@@ -1003,6 +1003,7 @@ th {
 }
 
 .sidebar-rail-link {
+  position: relative;
   width: 44px;
   height: 44px;
   display: inline-flex;
@@ -1014,6 +1015,52 @@ th {
   background: #152235;
   color: #d2deea;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+/* Caret pointing right toward the tooltip */
+.sidebar-rail-link::before {
+  content: '';
+  position: absolute;
+  width: 0;
+  height: 0;
+  left: calc(100% + 7px);
+  top: 50%;
+  transform: translateY(-50%);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-right: 6px solid #1b2d45;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 101;
+}
+
+/* Tooltip label box */
+.sidebar-rail-link::after {
+  content: attr(aria-label);
+  position: absolute;
+  left: calc(100% + 13px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: linear-gradient(150deg, #162336, #0e1b2c);
+  border: 1px solid #253649;
+  border-radius: 8px;
+  color: #c8d8ea;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 0.45rem 0.85rem;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 100;
+  box-shadow: 3px 6px 22px rgba(0, 0, 0, 0.5);
+}
+
+.sidebar-rail-link:hover::before,
+.sidebar-rail-link:hover::after {
+  opacity: 1;
 }
 
 .sidebar-rail-link.about-tab {

@@ -79,12 +79,12 @@ respro fasta \
 Or from vcf files:
 
 ```bash
-respro fasta
-    --project my_database.db
-    --vcf my_ngs_result.vcf
-    --ref-fasta my_vcf_ref.fasta
-    --output my_output
-    --results-db my_results.db
+respro vcf \
+    --project my_database.db \
+    --vcf my_ngs_result.vcf \
+    --ref-fasta my_vcf_ref.fasta \
+    --output my_output \
+    --results-db my_results.db \
     --export json
 ```
 
@@ -123,6 +123,7 @@ Open the app at: `http://127.0.0.1:8000/app/`
 - [CLI tutorial](docs/user/cli-detailed-tutorial.md)
 - [How to run and host the web app (detailed)](docs/user/webapp-hosting.md)
 - [Output interpretation guide (HTML, JSON, TSV)](docs/user/output-interpretation.md)
+- [Comparision to other antiviral resistance testing tools](docs/user/tool-comparision.md)
 
 ### Development Documentation
 
