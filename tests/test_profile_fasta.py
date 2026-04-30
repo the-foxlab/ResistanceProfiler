@@ -6,6 +6,7 @@ and end-to-end CLI workflow.
 from __future__ import annotations
 
 import random
+from inspect import signature
 from pathlib import Path
 from typing import Literal
 
@@ -32,6 +33,7 @@ from respro.core.query import (
     resolve_cached_query_reference,
     resolve_fasta_query,
 )
+from respro.core.settings import CORE_CONFIG
 from respro.core.vcf_remap import (
     _build_query_to_cds_map,
     _cds_pos_to_genomic_pos,
@@ -427,6 +429,11 @@ class TestRemapVariants:
 # ──────────────────────────────────────────────────────────────────────
 
 class TestResolveFastaReference:
+    def test_defaults_follow_core_alignment_config(self) -> None:
+        parameters = signature(resolve_fasta_query).parameters
+        assert parameters['min_identity'].default == CORE_CONFIG.alignment.min_identity
+        assert parameters['min_coverage'].default == CORE_CONFIG.alignment.min_coverage
+
     def test_resolves_and_caches(self, fasta_db: Path, tmp_path: Path) -> None:
         fasta_path = tmp_path / 'query.fasta'
         fasta_path.write_text(f'>user_ref\n{TINY_REF_SEQ}\n')

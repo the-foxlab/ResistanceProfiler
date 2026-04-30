@@ -17,6 +17,7 @@ from respro.core.alignment import (
     sequence_checksum,
     store_mappings,
 )
+from respro.core.settings import CORE_CONFIG
 from respro.db.models import GeneMatch
 from respro.io.reference import read_fasta
 
@@ -27,8 +28,8 @@ def resolve_fasta_query(
     conn: sqlite3.Connection,
     fasta_path: Path,
     *,
-    min_identity: float = 0.80,
-    min_coverage: float = 0.90,
+    min_identity: float = CORE_CONFIG.alignment.min_identity,
+    min_coverage: float = CORE_CONFIG.alignment.min_coverage,
     use_cache: bool = True,
     threads: int = 1,
     aligner: Literal['pairwise', 'mappy'] = 'pairwise',
