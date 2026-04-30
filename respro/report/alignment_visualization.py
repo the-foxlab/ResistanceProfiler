@@ -346,8 +346,6 @@ def _affected_nt_positions(
         # Deletions affect reference positions after the anchor in VCF anchor convention.
         if ref_len > alt_len:
             deleted_len = ref_len - alt_len
-            if ann.is_fasta_mode and alignment.strand == '-':
-                return set(range(anchor_pos - deleted_len, anchor_pos))
             return set(range(anchor_pos + 1, anchor_pos + 1 + deleted_len))
 
         # Equal-length complex replacements: highlight replaced block including anchor.
@@ -443,11 +441,20 @@ def build_alignment_html(
         affected_ref_positions = _affected_nt_positions(ann, alignment, codon_nt_start)
         indel_like = {'insertion', 'deletion', 'frameshift', 'inframe_complex'}
         is_indel_like = ann.consequence in indel_like or len(ann.variant.ref) != len(ann.variant.alt)
+        is_minus_fasta_insertion_like = (
+            alignment.strand == '-' and len(ann.variant.alt) > len(ann.variant.ref)
+        )
         variant_anchor_pos = _variant_native_pos(ann, alignment)
         affected_mask: list[bool] = []
         for ref_pos, cell_anchor_pos in zip(native_positions, native_anchor_positions):
             if ref_pos is None:
-                affected_mask.append(cell_anchor_pos in affected_ref_positions)
+                if is_minus_fasta_insertion_like:
+                    affected_mask.append(
+                        cell_anchor_pos in affected_ref_positions
+                        or (cell_anchor_pos - 1) in affected_ref_positions
+                    )
+                else:
+                    affected_mask.append(cell_anchor_pos in affected_ref_positions)
             else:
                 if is_indel_like and ref_pos == variant_anchor_pos:
                     affected_mask.append(False)

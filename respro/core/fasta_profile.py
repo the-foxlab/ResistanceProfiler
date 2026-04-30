@@ -186,10 +186,11 @@ def _annotate_from_alignment(
       annotated as insertion (in-frame, 3n) or frameshift (non-3n).
     - Mid-codon insertion (before position 1 or 2 of codon), or ins_before combined with
       query gaps: annotated as inframe_complex.
-    - All three query positions are gaps (full-codon deletion): annotated as deletion
-      (consecutive fully-deleted codons are merged into one annotation). If no valid
-      preceding codon is available, treated as a coverage gap.
-    - One or two query gaps (partial deletion): annotated as frameshift.
+        - Consecutive codons with query gaps are treated as one deletion run.
+        - Run is annotated as deletion only when every affected codon is fully deleted
+            (all query positions are '-') and total deleted nucleotides are 3n. If no valid
+            preceding codon is available, treated as a coverage gap.
+        - Otherwise, run is annotated as one frameshift event.
     - All three query positions are 'N': non-covered codon, reported as CoverageGap.
     - Ungapped, non-insertion codon: IUPAC-expanded SNP comparison.
 
@@ -242,6 +243,8 @@ def _annotate_from_alignment(
 
         codon_triples = coding[i:i + 3]
         mid_insertions = codon_triples[1][2] + codon_triples[2][2]
+        insertion_after_pos1 = codon_triples[1][2]
+        insertion_after_pos2 = codon_triples[2][2]
         ref_codon = ''.join(r for r, q, ins in codon_triples)
         query_codon = ''.join(q for r, q, ins in codon_triples)
 
@@ -285,6 +288,45 @@ def _annotate_from_alignment(
             continue
 
         if mid_insertions:
+            if '-' not in query_codon and len(mid_insertions) % 3 != 0:
+                if insertion_after_pos1 and not insertion_after_pos2:
+                    annotations.append(
+                        _annotate_fasta_frameshift_mid_codon_insertion(
+                            gene=gene,
+                            codon_idx=codon_idx,
+                            ref_codon=ref_codon,
+                            query_codon=query_codon,
+                            last_valid_codon_idx=last_valid_codon_idx,
+                            last_valid_query_codon=last_valid_query_codon,
+                            inserted_bases=insertion_after_pos1,
+                            anchor_coding_nt_idx=codon_idx * 3,
+                            anchor_query_nt=query_codon[0],
+                            current_coding_nt_idx=codon_idx * 3 + 1,
+                            boundary_query_nt=query_codon[1],
+                        )
+                    )
+                    i += 3
+                    codon_idx += 1
+                    continue
+                if insertion_after_pos2 and not insertion_after_pos1:
+                    annotations.append(
+                        _annotate_fasta_frameshift_mid_codon_insertion(
+                            gene=gene,
+                            codon_idx=codon_idx,
+                            ref_codon=ref_codon,
+                            query_codon=query_codon,
+                            last_valid_codon_idx=last_valid_codon_idx,
+                            last_valid_query_codon=last_valid_query_codon,
+                            inserted_bases=insertion_after_pos2,
+                            anchor_coding_nt_idx=codon_idx * 3 + 1,
+                            anchor_query_nt=query_codon[1],
+                            current_coding_nt_idx=codon_idx * 3 + 2,
+                            boundary_query_nt=query_codon[2],
+                        )
+                    )
+                    i += 3
+                    codon_idx += 1
+                    continue
             annotations.append(
                 _annotate_fasta_inframe_complex_codon(gene, codon_idx, ref_codon, query_codon)
             )
@@ -293,55 +335,73 @@ def _annotate_from_alignment(
             continue
 
         if '-' in query_codon:
-            if query_codon == '---':
-                # Full codon deletion: collect consecutive all-gap codons
-                gap_start_idx = codon_idx
-                deleted_ref_codons = [ref_codon]
-                j = i + 3
-                next_c_idx = codon_idx + 1
-                while j + 3 <= len(coding):
-                    nxt = coding[j:j + 3]
-                    if nxt[0][2] or nxt[1][2] + nxt[2][2]:
-                        break  # insertion in next gap codon → stop run
-                    nxt_qc = ''.join(q for r, q, ins in nxt)
-                    if nxt_qc != '---':
-                        break
-                    # Honour coverage boundaries when extending the run
-                    nxt_nt_start = frame + next_c_idx * 3
-                    nxt_nt_end = nxt_nt_start + 3
-                    if covered_cds_start is not None and covered_cds_end is not None:
-                        if nxt_nt_start < covered_cds_start or nxt_nt_end > covered_cds_end:
-                            break
-                    deleted_ref_codons.append(''.join(r for r, q, ins in nxt))
-                    j += 3
-                    next_c_idx += 1
+            # Collect one consecutive run of codons affected by deletions (partial and/or full).
+            run_start_idx = codon_idx
+            run_ref_codons = [ref_codon]
+            run_query_codons = [query_codon]
+            j = i + 3
+            next_c_idx = codon_idx + 1
 
+            while j + 3 <= len(coding):
+                nxt = coding[j:j + 3]
+                if nxt[0][2] or nxt[1][2] + nxt[2][2]:
+                    break  # insertion in next codon -> stop run
+                nxt_qc = ''.join(q for r, q, ins in nxt)
+                if '-' not in nxt_qc:
+                    break  # clean codon -> stop run
+                # Only extend run if gaps are contiguous across the codon boundary
+                if run_query_codons[-1][-1] != '-' or nxt_qc[0] != '-':
+                    break
+                # Honour coverage boundaries when extending the run
+                nxt_nt_start = frame + next_c_idx * 3
+                nxt_nt_end = nxt_nt_start + 3
+                if covered_cds_start is not None and covered_cds_end is not None:
+                    if nxt_nt_start < covered_cds_start or nxt_nt_end > covered_cds_end:
+                        break
+                run_ref_codons.append(''.join(r for r, q, ins in nxt))
+                run_query_codons.append(nxt_qc)
+                j += 3
+                next_c_idx += 1
+
+            total_deleted_nt = sum(
+                1
+                for run_query_codon in run_query_codons
+                for base in run_query_codon
+                if base == '-'
+            )
+            all_full_gap_codons = all(run_query_codon == '---' for run_query_codon in run_query_codons)
+            # First query NT after the run: needed for minus-strand NT anchor
+            next_codon_query_nt = coding[j][1] if j < len(coding) else None
+
+            if total_deleted_nt % 3 == 0 and all_full_gap_codons:
                 if last_valid_query_codon:
                     annotations.append(
                         _annotate_fasta_deletion_codons(
-                            gene, last_valid_codon_idx, last_valid_query_codon, deleted_ref_codons,
+                            gene,
+                            last_valid_codon_idx,
+                            last_valid_query_codon,
+                            run_ref_codons,
+                            next_codon_query_nt,
                         )
                     )
                 else:
-                    # Deletion at gene start with no preceding anchor → coverage gap
-                    gap_codon_indices.extend(range(gap_start_idx, next_c_idx))
-                i = j
-                codon_idx = next_c_idx
+                    # Deletion at gene start with no preceding anchor -> coverage gap
+                    gap_codon_indices.extend(range(run_start_idx, next_c_idx))
             else:
-                # Partial deletion (1–2 gaps) → frameshift; anchor from internal ref codon
                 annotations.append(
-                    _annotate_fasta_frameshift_deletion(
+                    _annotate_fasta_frameshift_partial_deletion(
                         gene,
-                        codon_idx,
-                        ref_codon,
-                        ref_codon,
-                        query_codon,
+                        run_start_idx,
+                        run_ref_codons,
+                        run_query_codons,
                         last_valid_codon_idx,
                         last_valid_query_codon,
+                        next_codon_query_nt,
                     )
                 )
-                i += 3
-                codon_idx += 1
+
+            i = j
+            codon_idx = next_c_idx
             continue
 
         if query_codon.upper() == 'NNN':
@@ -608,6 +668,7 @@ def _annotate_fasta_deletion_codons(
     anchor_codon_idx: int,
     anchor_query_codon: str,
     deleted_ref_codons: list[str],
+    next_codon_query_nt: str | None = None,
 ) -> AnnotatedVariant:
     """
     Annotate a contiguous run of fully deleted codons detected in a FASTA alignment.
@@ -615,22 +676,35 @@ def _annotate_fasta_deletion_codons(
     The last valid query codon preceding the deletion provides the anchor amino acid.
     Deleted amino acids are translated from the internal reference codons (coordinate anchor).
 
+    The NT anchor follows VCF convention: the nucleotide immediately 5' of the deletion in
+    genomic orientation. For plus-strand genes this is the last NT of the anchor codon; for
+    minus-strand genes it is the first NT of the codon after the deletion (which is 5'
+    genomically because CDS and genomic order are reversed).
+
     :param gene: gene record
     :param anchor_codon_idx: 0-based codon index of the anchor codon (last valid before deletion)
     :param anchor_query_codon: query codon immediately before the deletion (CDS orientation)
     :param deleted_ref_codons: internal reference nucleotide codon(s) for each deleted position
+    :param next_codon_query_nt: first query NT of the codon after the deletion (CDS orientation);
+        required for minus-strand genes
     :return: AnnotatedVariant with consequence='deletion'
     """
     anchor_aa = translate_codon(anchor_query_codon)
     deleted_aas = ''.join(translate_codon(c) for c in deleted_ref_codons)
     deleted_nt = ''.join(deleted_ref_codons)
-    anchor_nt_idx = anchor_codon_idx * 3 + 2
-    var = _make_fasta_deletion_variant(
-        gene,
-        anchor_nt_idx,
-        anchor_query_codon[-1],
-        deleted_nt,
-    )
+
+    if gene.strand == '-':
+        # Minus strand: VCF anchor is the 5' genomic side = first NT after deletion in CDS order
+        if next_codon_query_nt is None:
+            raise ValueError('Minus-strand deletion at gene end has no anchor nucleotide after deletion')
+        next_codon_idx = anchor_codon_idx + 1 + len(deleted_ref_codons)
+        anchor_nt_idx = next_codon_idx * 3
+        nt_anchor_query = next_codon_query_nt
+    else:
+        anchor_nt_idx = anchor_codon_idx * 3 + 2
+        nt_anchor_query = anchor_query_codon[-1]
+
+    var = _make_fasta_deletion_variant(gene, anchor_nt_idx, nt_anchor_query, deleted_nt)
     return AnnotatedVariant(
         variant=var,
         gene_name=gene.name,
@@ -688,6 +762,62 @@ def _annotate_fasta_frameshift_insertion(
     )
 
 
+def _annotate_fasta_frameshift_mid_codon_insertion(
+    gene: GeneRecord,
+    codon_idx: int,
+    ref_codon: str,
+    query_codon: str,
+    last_valid_codon_idx: int,
+    last_valid_query_codon: str,
+    inserted_bases: str,
+    anchor_coding_nt_idx: int,
+    anchor_query_nt: str,
+    current_coding_nt_idx: int,
+    boundary_query_nt: str,
+) -> AnnotatedVariant:
+    """
+    Annotate a non-3n insertion occurring within a codon as frameshift.
+
+    :param gene: gene record
+    :param codon_idx: 0-based codon index where the frameshift starts
+    :param ref_codon: internal reference codon at codon_idx
+    :param query_codon: query codon at codon_idx in CDS orientation
+    :param last_valid_codon_idx: previous ungapped codon index, or -1 when unavailable
+    :param last_valid_query_codon: previous ungapped query codon in CDS orientation
+    :param inserted_bases: inserted query bases in CDS orientation
+    :param anchor_coding_nt_idx: coding index of the nucleotide before insertion
+    :param anchor_query_nt: query nucleotide before insertion in CDS orientation
+    :param current_coding_nt_idx: coding index of the nucleotide after insertion
+    :param boundary_query_nt: query nucleotide after insertion in CDS orientation
+    :return: AnnotatedVariant with consequence='frameshift'
+    """
+    aa_anchor_codon_idx = codon_idx
+    anchor_codon = _resolve_fasta_anchor_codon(ref_codon, query_codon)
+    anchor_aa = translate_codon(anchor_codon)
+    if gene.strand == '-' and last_valid_codon_idx >= 0 and last_valid_query_codon:
+        aa_anchor_codon_idx = last_valid_codon_idx
+        anchor_aa = translate_codon(last_valid_query_codon)
+    var = _make_fasta_insertion_variant(
+        gene,
+        anchor_coding_nt_idx,
+        anchor_query_nt,
+        inserted_bases,
+        current_coding_nt_idx,
+        boundary_query_nt,
+    )
+    return AnnotatedVariant(
+        variant=var,
+        gene_name=gene.name,
+        codon_pos=aa_anchor_codon_idx,
+        ref_codon=ref_codon,
+        alt_codon='',
+        ref_aa=anchor_aa,
+        alt_aa=f'{anchor_aa}fsX',
+        consequence='frameshift',
+        is_fasta_mode=True,
+    )
+
+
 def _annotate_fasta_frameshift_deletion(
     gene: GeneRecord,
     codon_idx: int,
@@ -724,7 +854,7 @@ def _annotate_fasta_frameshift_deletion(
         anchor_nt_idx = last_valid_codon_idx * 3 + 2
         anchor_query_nt = last_valid_query_codon[-1]
     else:
-        anchor_nt_idx = codon_idx * 3 + first_gap - 1
+        anchor_nt_idx = codon_idx * 3 + (first_gap - 1)
         anchor_query_nt = query_codon[first_gap - 1]
 
     anchor_aa = translate_codon(anchor_codon)
@@ -734,6 +864,113 @@ def _annotate_fasta_frameshift_deletion(
         gene_name=gene.name,
         codon_pos=codon_idx,
         ref_codon=ref_codon,
+        alt_codon='',
+        ref_aa=anchor_aa,
+        alt_aa=f'{anchor_aa}fsX',
+        consequence='frameshift',
+        is_fasta_mode=True,
+    )
+
+
+def _annotate_fasta_frameshift_partial_deletion(
+    gene: GeneRecord,
+    first_codon_idx: int,
+    ref_codons: list[str],
+    query_codons: list[str],
+    last_valid_codon_idx: int,
+    last_valid_query_codon: str,
+    next_codon_query_nt: str | None = None,
+) -> AnnotatedVariant:
+    """
+    Annotate a frameshift deletion spanning one or more codons with partial gaps.
+
+    Collects all deleted nucleotides across the run and emits a single frameshift event.
+
+    The amino acid anchor follows protein/CDS order (strand-independent): the last fully
+    intact codon before the frameshift starts. The nucleotide anchor follows VCF convention
+    (strand-aware): the nucleotide immediately 5' of the deletion in genomic orientation.
+    For plus-strand genes this is before the first gap in CDS order; for minus-strand genes
+    it is after the last gap in CDS order (which is 5' genomically).
+
+    :param gene: gene record
+    :param first_codon_idx: 0-based codon index of the first affected codon
+    :param ref_codons: list of internal reference codons in the affected run
+    :param query_codons: list of query codons in the affected run (with gaps)
+    :param last_valid_codon_idx: previous ungapped codon index, or -1 when unavailable
+    :param last_valid_query_codon: previous ungapped query codon in CDS orientation
+    :param next_codon_query_nt: first query NT of the codon after the run (CDS orientation);
+        required for minus-strand genes when the last gap falls at codon position 2
+    :return: AnnotatedVariant with consequence='frameshift'
+    """
+    if not ref_codons or not query_codons:
+        raise ValueError('Frameshift deletion requires at least one affected codon')
+
+    # Collect all deleted nucleotides across the run
+    deleted_nt = ''
+    for ref_codon, query_codon in zip(ref_codons, query_codons):
+        gap_offsets = [idx for idx, base in enumerate(query_codon) if base == '-']
+        deleted_nt += ''.join(ref_codon[idx] for idx in gap_offsets)
+
+    # AA anchor: always follows CDS/protein order (same for both strands)
+    # First gap at codon position 0 means the full codon is disrupted from the start;
+    # convention anchors to the last intact codon before the frameshift.
+    first_query_codon = query_codons[0]
+    first_ref_codon = ref_codons[0]
+    first_gap_offsets = [idx for idx, base in enumerate(first_query_codon) if base == '-']
+    first_gap = min(first_gap_offsets) if first_gap_offsets else 0
+
+    aa_anchor_codon_idx = first_codon_idx
+    aa_anchor_ref_codon = first_ref_codon
+
+    if first_gap == 0:
+        if last_valid_codon_idx < 0 or not last_valid_query_codon:
+            raise ValueError('Frameshift deletion at gene start has no valid anchor nucleotide')
+        aa_anchor_codon_idx = last_valid_codon_idx
+        aa_anchor_ref_codon = gene.nt_sequence[last_valid_codon_idx * 3:last_valid_codon_idx * 3 + 3]
+
+    # NT anchor: follows VCF convention (5' genomic side of deletion) - strand-aware
+    if gene.strand == '-':
+        # Minus strand: anchor = first non-deleted NT after the last gap in CDS order
+        # (CDS and genomic order are reversed, so "after in CDS" = "5' genomically")
+        last_codon_idx_in_run = first_codon_idx + len(ref_codons) - 1
+        last_query_codon = query_codons[-1]
+        last_gap_in_last_codon = max(idx for idx, b in enumerate(last_query_codon) if b == '-')
+
+        if last_gap_in_last_codon == 2:
+            if last_valid_codon_idx < 0:
+                raise ValueError(
+                    'Minus-strand frameshift deletion at gene start has no valid amino-acid anchor'
+                )
+            aa_anchor_codon_idx = last_valid_codon_idx
+            aa_anchor_ref_codon = gene.nt_sequence[last_valid_codon_idx * 3:last_valid_codon_idx * 3 + 3]
+
+        if last_gap_in_last_codon == 2:
+            # Last gap at codon position 2: anchor is first NT of the codon after the run
+            if next_codon_query_nt is None:
+                raise ValueError('Minus-strand frameshift deletion at gene end has no anchor nucleotide')
+            anchor_nt_idx = (last_codon_idx_in_run + 1) * 3
+            anchor_query_nt = next_codon_query_nt
+        else:
+            # Anchor is the NT immediately after the last gap within the last codon
+            anchor_nt_idx = last_codon_idx_in_run * 3 + last_gap_in_last_codon + 1
+            anchor_query_nt = last_query_codon[last_gap_in_last_codon + 1]
+    else:
+        # Plus strand: anchor = NT immediately before the first gap in CDS order
+        if first_gap == 0:
+            anchor_nt_idx = last_valid_codon_idx * 3 + 2
+            anchor_query_nt = last_valid_query_codon[-1]
+        else:
+            anchor_nt_idx = first_codon_idx * 3 + (first_gap - 1)
+            anchor_query_nt = first_query_codon[first_gap - 1]
+
+    anchor_aa = translate_codon(aa_anchor_ref_codon)
+
+    var = _make_fasta_deletion_variant(gene, anchor_nt_idx, anchor_query_nt, deleted_nt)
+    return AnnotatedVariant(
+        variant=var,
+        gene_name=gene.name,
+        codon_pos=aa_anchor_codon_idx,
+        ref_codon=ref_codons[0],
         alt_codon='',
         ref_aa=anchor_aa,
         alt_aa=f'{anchor_aa}fsX',

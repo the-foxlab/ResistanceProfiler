@@ -818,7 +818,7 @@ class TestFastaConsensusProfile:
         match = _make_match(simple_gene, query)
         anns, gaps = profile_fasta_consensus(query, [match])
 
-        assert any(a.consequence == 'frameshift' and a.alt_aa == 'KfsX' for a in anns)
+        assert any(a.consequence == 'frameshift' and a.alt_aa == 'MfsX' for a in anns)
 
     def test_iupac_ambiguous_base_emits_split_frequency(self, simple_gene: GeneRecord) -> None:
         """IUPAC 'R' at codon 1 → K (ref) or E: only E emitted with af=0.5."""
@@ -1091,6 +1091,58 @@ class TestFastaInsertionAnnotation:
         assert ann.consequence == 'inframe_complex'
         assert ann.is_fasta_mode is True
 
+    def test_single_nt_mid_codon_insertion_is_frameshift(self) -> None:
+        """A non-3n insertion within a codon is a frameshift, not inframe_complex."""
+        gene = _make_fasta_gene('ATGGGGTTT')
+        aligned_ref = 'AT-GGGGTTT'
+        aligned_query = 'ATCGGGGTTT'
+
+        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
+
+        assert len(gaps) == 0
+        assert len(anns) == 1
+        ann = anns[0]
+        assert ann.consequence == 'frameshift'
+        assert ann.codon_pos == 0
+        assert ann.ref_aa == 'M'
+        assert ann.alt_aa == 'MfsX'
+        assert ann.variant.ref == 'T'
+        assert ann.variant.alt == 'TC'
+
+    def test_single_nt_mid_codon_insertion_is_frameshift_on_reverse_gene(self) -> None:
+        """Reverse-strand single-nt mid-codon insertion remains a frameshift indel event."""
+        gene = _make_fasta_gene('ATGGGGTTT', strand='-')
+        aligned_ref = 'AT-GGGGTTT'
+        aligned_query = 'ATCGGGGTTT'
+
+        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
+
+        assert len(gaps) == 0
+        assert len(anns) == 1
+        ann = anns[0]
+        assert ann.consequence == 'frameshift'
+        assert ann.codon_pos == 0
+        assert ann.ref_aa == 'M'
+        assert ann.alt_aa == 'MfsX'
+        assert len(ann.variant.alt) - len(ann.variant.ref) == 1
+
+    def test_negative_strand_mid_codon_frameshift_insertion_anchors_previous_codon(self) -> None:
+        """Minus-strand mid-codon frameshift insertion anchors AA change on previous valid codon."""
+        gene = _make_fasta_gene('CCCAGCCTCCCCCCC', strand='-')
+        aligned_ref = 'CCCAGCCT-CCCCCCC'
+        aligned_query = 'CCCAGCCTCCCCCCCC'
+
+        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
+
+        assert len(gaps) == 0
+        frameshift_anns = [ann for ann in anns if ann.consequence == 'frameshift']
+        assert len(frameshift_anns) == 1
+        ann = frameshift_anns[0]
+        assert ann.codon_pos == 1
+        assert ann.ref_aa == 'S'
+        assert ann.alt_aa == 'SfsX'
+        assert len(ann.variant.alt) - len(ann.variant.ref) == 1
+
     def test_boundary_and_mid_codon_insertion_is_inframe_complex(self) -> None:
         """Insertions at both codon boundary and mid-codon → inframe_complex."""
         # Insert C before codon 0 AND CCC between positions 1 and 2 of codon 0
@@ -1246,9 +1298,9 @@ class TestFastaDeletionAnnotation:
 
         assert len(anns) == 1
         ann = anns[0]
-        assert ann.codon_pos == 1
-        assert ann.ref_aa == 'G'     # anchor from internal ref codon 1 = GGG → G
-        assert ann.alt_aa == 'GfsX'
+        assert ann.codon_pos == 0
+        assert ann.ref_aa == 'M'     # first gap at codon pos 0 anchors to previous codon
+        assert ann.alt_aa == 'MfsX'
         assert ann.consequence == 'frameshift'
         assert ann.is_fasta_mode is True
         assert ann.variant.ref == 'GG'
@@ -1263,6 +1315,125 @@ class TestFastaDeletionAnnotation:
         anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
 
         assert any(a.consequence == 'frameshift' for a in anns)
+
+    def test_non_consecutive_partial_deletions_in_separate_codons_emit_separate_frameshifts(
+        self,
+    ) -> None:
+        """
+        Non-consecutive single-nt deletions in different codons emit two separate frameshifts.
+
+        Gene: ATG GGG AAA TTT (M G K F, 12 nt)
+        Query: ATG G-A A-A TTT  ← gap at codon 1 pos 1, gap at codon 2 pos 1
+        The deletions are separated by non-gap nucleotides, so they are NOT consecutive
+        and must not be merged → TWO separate frameshift annotations.
+        """
+        gene = _make_fasta_gene('ATGGGGAAATTT')
+        aligned_ref   = 'ATGGGGAAATTT'
+        aligned_query = 'ATGG-AA-ATTT'
+
+        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
+
+        frameshift_anns = [a for a in anns if a.consequence == 'frameshift']
+        assert len(frameshift_anns) == 2, f'Expected 2 frameshifts, got {len(frameshift_anns)}'
+        codon_positions = {ann.codon_pos for ann in frameshift_anns}
+        assert 1 in codon_positions
+        assert 2 in codon_positions
+        for ann in frameshift_anns:
+            assert len(ann.variant.ref) - len(ann.variant.alt) == 1
+
+    def test_multi_codon_inframe_deletion_merged_into_one_annotation(self) -> None:
+        """
+        In-frame deletion spanning multiple codons (3n total) emits ONE deletion annotation.
+
+        Gene: ATG GGG AAA TTT CCC (M G K F P, 15 nt)
+        Query: ATG GGG --- --- CCC  ← codons 2-3 fully deleted (6 nt = 2 codons)
+        Anchor: codon 1 (last valid before deletion)
+        """
+        gene = _make_fasta_gene('ATGGGGAAATTTCCC')
+        aligned_ref   = 'ATGGGGAAATTTCCC'
+        aligned_query = 'ATGGGG------CCC'
+
+        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
+
+        assert len(gaps) == 0
+        deletion_anns = [a for a in anns if a.consequence == 'deletion']
+        assert len(deletion_anns) == 1, f'Expected 1 deletion, got {len(deletion_anns)}'
+
+        ann = deletion_anns[0]
+        assert ann.codon_pos == 1  # anchor at codon 1 (G, last valid before deletion starts)
+        assert ann.ref_aa == 'GKF'  # anchor G + deleted K + deleted F
+        assert ann.alt_aa == 'G'
+
+    def test_frameshift_deletion_anchor_before_gap_not_after(self) -> None:
+        """
+        Frameshift deletion: AA anchor follows the NT anchor codon.
+
+        Gene: ATG GGG TTT (M G F, 9 nt)
+        Query: ATG -GG TTT  ← gap at position 0 of codon 1
+        AA anchor: previous codon 0 = ATG -> M (same codon as NT anchor)
+        NT anchor: from last valid codon 0 (last NT = G)
+        """
+        gene = _make_fasta_gene('ATGGGGTTT')
+        aligned_ref   = 'ATGGGGTTT'
+        aligned_query = 'ATG-GGTTT'  # codon 1 = '-GG' → gap at pos 0, anchor from codon 0
+
+        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
+
+        frameshift_anns = [a for a in anns if a.consequence == 'frameshift']
+        assert len(frameshift_anns) == 1
+        ann = frameshift_anns[0]
+        assert ann.codon_pos == 0
+        assert ann.ref_aa == 'M'
+        assert ann.alt_aa == 'MfsX'
+        # NT anchor should start with G (last NT of codon 0)
+        assert ann.variant.ref[0] == 'G'
+
+    def test_non_consecutive_deletions_emit_separate_frameshifts(self) -> None:
+        """
+        Non-consecutive single-nt deletions in different codons emit two separate frameshift events.
+
+        Gene: ATG GGG AAA TTT (M G K F, 12 nt)
+        Query: ATG GG- A-A TTT  ← gap at position 2 of codon 1, gap at position 1 of codon 2
+        The deletions are separated by a non-gap nucleotide, so they are NOT consecutive
+        and must not be merged → TWO separate frameshift annotations.
+        """
+        gene = _make_fasta_gene('ATGGGGAAATTT')
+        aligned_ref   = 'ATGGGGAAATTT'
+        aligned_query = 'ATGGG-A-ATTT'
+
+        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
+
+        frameshift_anns = [a for a in anns if a.consequence == 'frameshift']
+        # Two non-consecutive deletions must produce two separate frameshift annotations
+        assert len(frameshift_anns) == 2, f'Expected 2 frameshifts, got {len(frameshift_anns)}'
+        codon_positions = {ann.codon_pos for ann in frameshift_anns}
+        assert 1 in codon_positions
+        assert 2 in codon_positions
+        for ann in frameshift_anns:
+            # Each deletion removes 1 nt
+            assert len(ann.variant.ref) - len(ann.variant.alt) == 1
+
+    def test_mixed_partial_and_full_deletion_run_is_one_frameshift(self) -> None:
+        """
+        Consecutive partial+full deletion codons emit one frameshift annotation.
+
+        Gene: ATG GGG AAA TTT (M G K F, 12 nt)
+        Query: ATG GG- --- TTT  ← gap at position 2 of codon 1, all gaps in codon 2
+        Total deleted: 4 nt (non-3n) -> one frameshift and no deletion annotation.
+        """
+        gene = _make_fasta_gene('ATGGGGAAATTT')
+        aligned_ref = 'ATGGGGAAATTT'
+        aligned_query = 'ATGGG----TTT'
+
+        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
+
+        assert len(gaps) == 0
+        frameshift_anns = [a for a in anns if a.consequence == 'frameshift']
+        deletion_anns = [a for a in anns if a.consequence == 'deletion']
+        assert len(frameshift_anns) == 1
+        assert len(deletion_anns) == 0
+        ann = frameshift_anns[0]
+        assert len(ann.variant.ref) - len(ann.variant.alt) == 4
 
     def test_deletion_at_gene_start_no_anchor_becomes_gap(self) -> None:
         """Full-codon deletion at codon 0 with no preceding anchor → coverage gap."""
@@ -1295,10 +1466,11 @@ class TestFastaDeletionAnnotation:
         assert ann.ref_aa == 'MG'
         assert ann.alt_aa == 'M'
         assert ann.consequence == 'deletion'
-        # Anchor NT is coding index 2. For '-' strand: pos = (end-1) - 2 = 6.
-        assert ann.variant.pos == 6
-        assert ann.variant.ref == 'CCCC'
-        assert ann.variant.alt == 'C'
+        # Minus-strand VCF anchor is after the deletion in CDS order (5' genomically).
+        # First NT of next codon (TTT) is at CDS index 6; pos = (end-1) - 6 = 2.
+        assert ann.variant.pos == 2
+        assert ann.variant.ref == 'ACCC'
+        assert ann.variant.alt == 'A'
 
     def test_negative_strand_frameshift_deletion_uses_genomic_indel_notation(self) -> None:
         """Reverse-complement FASTA frameshift deletion uses genomic anchor-plus-payload alleles."""
@@ -1311,6 +1483,22 @@ class TestFastaDeletionAnnotation:
         ann = next(a for a in anns if a.consequence == 'frameshift')
         assert ann.variant.ref == 'CC'
         assert ann.variant.alt == 'C'
+
+    def test_negative_strand_frameshift_deletion_last_codon_base_anchors_previous_amino_acid(
+        self,
+    ) -> None:
+        gene = _make_fasta_gene('ATGCCCTTT', strand='-')
+        aligned_ref = 'ATGCCCTTT'
+        aligned_query = 'ATGCC-TTT'
+
+        anns, _ = _annotate_from_alignment(aligned_ref, aligned_query, gene)
+
+        ann = next(a for a in anns if a.consequence == 'frameshift')
+        assert ann.codon_pos == 0
+        assert ann.ref_aa == 'M'
+        assert ann.alt_aa == 'MfsX'
+        assert ann.variant.ref == 'AG'
+        assert ann.variant.alt == 'A'
 
     def test_snp_before_deletion_is_emitted_separately(self) -> None:
         """A start_lost at codon 0 and a deletion at codon 1 each emit their own annotation."""
