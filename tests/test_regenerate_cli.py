@@ -38,7 +38,7 @@ from respro.db.results import (
 )
 from respro.db.schema import init_results_db, open_project_db, open_results_db
 from respro.io.reference import load_genes_for_reference
-from respro.report.html import export_results
+from respro.report.non_html_exports import export_results
 
 
 def _init_split_project(
@@ -341,6 +341,44 @@ class TestRegenerate:
         tabular_files = list(out_dir.glob('*.mutations.tsv'))
         assert len(html_files) == 1
         assert len(tabular_files) == 1
+
+    def test_regenerate_from_json_generates_pdf_report(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        profile_out = tmp_path / 'profile_out_pdf'
+        results_db = tmp_path / 'results_pdf.db'
+        profile_result = CliRunner().invoke(app, [
+            'vcf',
+            '--project', str(project_db),
+            '--vcf', str(sample_vcf),
+            '--ref-fasta', str(sample_ref_fasta),
+            '--results-db', str(results_db),
+            '--output', str(profile_out),
+            '--min-af', '0.01',
+            '--min-depth', '0',
+            '--export', 'json',
+        ])
+        assert profile_result.exit_code == 0, profile_result.output
+
+        json_files = list(profile_out.glob('*.results.json'))
+        assert len(json_files) == 1
+
+        out_dir = tmp_path / 'regenerated_from_json_pdf'
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--json', str(json_files[0]),
+            '--project', str(project_db),
+            '--output', str(out_dir),
+            '--export', 'pdf',
+        ])
+
+        assert result.exit_code == 0, result.output
+        pdf_files = list(out_dir.glob('*.report.pdf'))
+        assert len(pdf_files) == 1
 
     def test_regenerate_from_json_rejects_invalid_json(
         self,

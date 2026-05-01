@@ -13,7 +13,17 @@ ENV PIP_NO_CACHE_DIR=1 \
 	PIP_DISABLE_PIP_VERSION_CHECK=1 \
 	PYTHONDONTWRITEBYTECODE=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential python3-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	build-essential \
+	python3-dev \
+	libcairo2 \
+	libpango-1.0-0 \
+	libpangocairo-1.0-0 \
+	libgdk-pixbuf-2.0-0 \
+	libffi8 \
+	shared-mime-info \
+	fonts-dejavu-core \
+	&& rm -rf /var/lib/apt/lists/*
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
@@ -35,6 +45,16 @@ ENV RESPRO_WEB_HOST=0.0.0.0
 ENV RESPRO_WEB_PORT=8000
 ENV RESPRO_FRONTEND_DIST=/app/web/frontend/dist
 ENV PATH="/opt/venv/bin:$PATH"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+	libcairo2 \
+	libpango-1.0-0 \
+	libpangocairo-1.0-0 \
+	libgdk-pixbuf-2.0-0 \
+	libffi8 \
+	shared-mime-info \
+	fonts-dejavu-core \
+	&& rm -rf /var/lib/apt/lists/*
 
 COPY --from=python-build /opt/venv /opt/venv
 COPY --from=python-build /app/web/__init__.py /app/web/__init__.py

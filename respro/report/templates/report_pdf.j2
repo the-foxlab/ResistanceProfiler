@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ResistanceProfiler Report (v{{ version }})</title>
+  <style>{{ css }}</style>
+</head>
+<body>
+  <header class="report-header">
+    <h1>ResistanceProfiler Report (v{{ version }})</h1>
+    <div class="meta-grid">
+      <div><span class="label">Project Database:</span> {{ summary.project_name or '-' }}</div>
+      <div><span class="label">Reference:</span> {{ summary.reference or '-' }}</div>
+      <div><span class="label">Sample:</span> {{ summary.sample or '-' }}</div>
+      <div><span class="label">Generated:</span> {{ summary.timestamp or '-' }}</div>
+    </div>
+  </header>
+
+  <section>
+    <h2 class="section-band">Interpretation summary</h2>
+    <p class="summary-text">{{ summary_text_en }}</p>
+    {% if plot_data %}
+    <div class="plot-container">
+      <img src="data:image/png;base64,{{ plot_data }}" alt="Mutation overview plot" />
+    </div>
+    {% endif %}
+  </section>
+
+  <section class="details-section">
+    <h2 class="section-band">Mutations</h2>
+    <div class="mutations-list">
+      {% for group in mutation_groups %}
+      <section class="gene-group">
+        <h3 class="gene-heading">{{ group.gene }}</h3>
+        <ul class="mutation-items">
+        {% for item in group.mutations %}
+        <li class="mutation-item">
+          <p class="mutation-line">
+            {% if item.aa_change %}
+            <span class="field">AA:</span> {{ item.aa_change }}
+            |
+            {% endif %}
+            <span class="field">Effect:</span> {{ item.consequence }}
+            |
+            <span class="field">NT:</span> {{ item.nt_change }}
+            <span class="field">AF:</span> {{ '%.4f'|format(item.allele_freq) }} ({{ item.af_bin }})
+          </p>
+          <div class="db-hits">
+            <div class="field">Database hits:</div>
+            {% if item.db_hits %}
+            <ul>
+              {% for hit in item.db_hits %}
+              <li>
+                <strong>{{ hit.drug }}</strong>
+                <span class="badge {{ hit.phenotype_badge_class }}">{{ hit.phenotype }}</span>
+                {% if hit.clinical_phenotype and hit.clinical_phenotype != 'unknown' %}
+                | clinical: {{ hit.clinical_phenotype }}
+                {% endif %}
+                {% if hit.ic50 %} | IC<sub>50</sub>: {{ hit.ic50 }}{% endif %}
+                {% if hit.fold_ic50 %} | Fold-IC50: {{ hit.fold_ic50 }}{% endif %}
+                {% if hit.source %} | source: {{ hit.source }}{% endif %}
+                {% if hit.citation_numbers %}
+                | refs:
+                {% for citation_num in hit.citation_numbers %}[{{ citation_num }}]{% if not loop.last %}, {% endif %}{% endfor %}
+                {% endif %}
+              </li>
+              {% endfor %}
+            </ul>
+            {% else %}
+            <p class="no-hit">No direct database hit</p>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+        </ul>
+      </section>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="citations-section">
+    <h2 class="section-band">Citations</h2>
+    {% if bibliography %}
+    <ol class="citations-list">
+      {% for citation in bibliography %}
+      <li>
+        {% if citation.title %}{{ citation.title }}{% else %}Untitled reference{% endif %}
+        {% if citation.doi %} | DOI: {{ citation.doi }}{% endif %}
+        {% if citation.pubmed_id %} | PMID: {{ citation.pubmed_id }}{% endif %}
+        {% if citation.raw_input %} | {{ citation.raw_input }}{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p>No citations linked to detected mutations.</p>
+    {% endif %}
+  </section>
+
+</body>
+</html>

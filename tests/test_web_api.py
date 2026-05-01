@@ -458,9 +458,11 @@ class TestWebApi:
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
         assert result['report_tabular_path'].endswith('.mutations.tsv')
+        assert result['report_pdf_path'].endswith('.report.pdf')
         assert Path(result['report_html_path']).is_file()
         assert Path(result['report_json_path']).is_file()
         assert Path(result['report_tabular_path']).is_file()
+        assert Path(result['report_pdf_path']).is_file()
 
     def test_profile_fasta_path_outside_uploads_rejected(
         self,
@@ -514,9 +516,69 @@ class TestWebApi:
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
         assert result['report_tabular_path'].endswith('.mutations.tsv')
+        assert result['report_pdf_path'].endswith('.report.pdf')
         assert Path(result['report_html_path']).is_file()
         assert Path(result['report_json_path']).is_file()
         assert Path(result['report_tabular_path']).is_file()
+        assert Path(result['report_pdf_path']).is_file()
+
+    def test_artifact_download_serves_pdf_from_results_dir(
+        self,
+        client: TestClient,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        submit = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(web_sample_vcf),
+                'ref_fasta_path': str(web_sample_ref_fasta),
+                'sample': 'artifact-pdf',
+            },
+            headers=auth_headers,
+        )
+        assert submit.status_code == 200
+
+        job_id = submit.json()['job_id']
+        payload: dict[str, object] | None = None
+        for _ in range(10):
+            status = client.get(f'/api/jobs/{job_id}', headers=auth_headers)
+            assert status.status_code == 200
+            payload = status.json()
+            if payload['status'] in ('succeeded', 'failed'):
+                break
+
+        assert payload is not None
+        assert payload['status'] == 'succeeded'
+        result = payload['result']
+        assert isinstance(result, dict)
+        report_pdf_path = result['report_pdf_path']
+
+        artifact = client.get(
+            '/api/artifact',
+            params={'path': report_pdf_path},
+            headers=auth_headers,
+        )
+
+        assert artifact.status_code == 200
+        assert artifact.headers['content-type'].startswith('application/pdf')
+        assert artifact.content.startswith(b'%PDF')
+
+    def test_artifact_download_rejects_uploads_dir_file(
+        self,
+        client: TestClient,
+        web_sample_vcf: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        response = client.get(
+            '/api/artifact',
+            params={'path': str(web_sample_vcf)},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert 'outside allowed results directory' in response.json()['detail']
 
     def test_profile_vcf_path_outside_uploads_rejected(
         self,
@@ -600,6 +662,7 @@ class TestWebApi:
         assert first_result['report_html_path'] != second_result['report_html_path']
         assert first_result['report_json_path'] != second_result['report_json_path']
         assert first_result['report_tabular_path'] != second_result['report_tabular_path']
+        assert first_result['report_pdf_path'] != second_result['report_pdf_path']
         assert Path(first_result['report_html_path']).is_file()
         assert Path(second_result['report_html_path']).is_file()
 
@@ -920,9 +983,11 @@ class TestWebApi:
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
         assert result['report_tabular_path'].endswith('.mutations.tsv')
+        assert result['report_pdf_path'].endswith('.report.pdf')
         assert Path(result['report_html_path']).is_file()
         assert Path(result['report_json_path']).is_file()
         assert Path(result['report_tabular_path']).is_file()
+        assert Path(result['report_pdf_path']).is_file()
 
     def test_regenerate_from_json_uuid_mismatch_fails(
         self,

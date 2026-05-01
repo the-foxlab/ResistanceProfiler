@@ -108,6 +108,16 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
 
     branding_dir = Path(__file__).resolve().parents[2] / 'respro' / 'report' / 'static'
 
+    def _is_allowed_artifact_path(artifact_path: Path) -> bool:
+        """Allow only known artifact file types for downloads."""
+        allowed_suffixes = (
+            '.report.pdf',
+            '.results.json',
+            '.mutations.tsv',
+            '.report.html',
+        )
+        return any(str(artifact_path).endswith(suffix) for suffix in allowed_suffixes)
+
     async def _handle_upload(
         *,
         file: UploadFile,
@@ -394,8 +404,13 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         _auth: None = Depends(require_api_token),
     ) -> FileResponse:
         artifact_path = Path(path).expanduser().resolve()
-        if not is_path_within_allowed_roots(artifact_path, config.allowed_roots):
-            raise HTTPException(status_code=400, detail='Artifact path is outside allowed output directory.')
+        if not is_path_within_allowed_roots(artifact_path, (config.results_dir,)):
+            raise HTTPException(status_code=400, detail='Artifact path is outside allowed results directory.')
+        if not _is_allowed_artifact_path(artifact_path):
+            raise HTTPException(
+                status_code=400,
+                detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .mutations.tsv, .report.html.',
+            )
         if not artifact_path.is_file():
             raise HTTPException(status_code=404, detail='Artifact not found.')
 

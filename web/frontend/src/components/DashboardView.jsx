@@ -582,6 +582,18 @@ export function DashboardView({
                     type="button"
                     className="button-link report-action-btn download-action-btn"
                     onClick={() => {
+                      if (selectedReportOption?.pdfPath) {
+                        window.open(buildArtifactUrl(selectedReportOption.pdfPath), '_blank', 'noopener,noreferrer');
+                      }
+                    }}
+                    disabled={!selectedReportOption?.pdfPath}
+                  >
+                    Download PDF
+                  </button>
+                  <button
+                    type="button"
+                    className="button-link report-action-btn download-action-btn"
+                    onClick={() => {
                       if (selectedReportOption?.jsonPath) {
                         window.open(buildArtifactUrl(selectedReportOption.jsonPath), '_blank', 'noopener,noreferrer');
                       }

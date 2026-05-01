@@ -23,7 +23,7 @@ from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.results import save_run
 from respro.db.schema import init_results_db
 from respro.io.reference import load_genes_for_reference
-from respro.report.html import export_results
+from respro.report.non_html_exports import export_results
 from respro.utils.files import resolve_output_file
 
 
@@ -176,7 +176,7 @@ def _finalize_and_export(
     :param coverage_gaps: optional list of non-covered codon positions (FASTA mode)
     :param query_sequence: query FASTA sequence used during profiling
     :param gene_matches: gene alignment matches used during profiling
-    :param extra_export_format: optional additional output format ('json' or 'tabular')
+    :param extra_export_format: optional additional output format ('json', 'tabular', or 'pdf')
     :return: (ProfilingResult, export path dict)
     """
     annotations = match_rules(annotations, rules)

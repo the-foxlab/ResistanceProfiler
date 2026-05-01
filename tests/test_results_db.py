@@ -41,7 +41,7 @@ from respro.db.results import (
 )
 from respro.db.schema import create_schema, init_results_db, open_project_db
 from respro.io.reference import load_genes_for_reference
-from respro.report.html import export_results
+from respro.report.non_html_exports import export_results
 
 
 def _init_split_project(

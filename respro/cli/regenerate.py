@@ -28,7 +28,7 @@ from respro.db.results import (
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.schema import open_project_db, open_results_db
 from respro.io.reference import load_genes_for_reference
-from respro.report.html import export_results
+from respro.report.non_html_exports import export_results
 from respro.utils.files import resolve_output_file
 from respro.utils.logging import err_console
 
@@ -81,7 +81,7 @@ def regenerate(
         str | None,
         typer.Option(
             '--export',
-            help='Optional extra export format in addition to HTML: json or tabular.',
+            help='Optional extra export format in addition to HTML: json, tabular, or pdf.',
         ),
     ] = None,
 ) -> None:
@@ -95,8 +95,10 @@ def regenerate(
         extra_export_formats: set[str] = set()
         if export is not None:
             export_value = export.strip().lower()
-            if export_value not in ('json', 'tabular'):
-                raise click.ClickException('Invalid --export value. Choose one of: json, tabular.')
+            if export_value not in ('json', 'tabular', 'pdf'):
+                raise click.ClickException(
+                    'Invalid --export value. Choose one of: json, tabular, pdf.'
+                )
             extra_export_formats.add(export_value)
 
         if json_input is not None and (result_db is not None or run_id is not None):

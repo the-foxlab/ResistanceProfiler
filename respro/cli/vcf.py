@@ -87,7 +87,7 @@ def _profile_vcf_command(
         )
     ] = 'mappy',
     export: Annotated[
-        Literal['json', 'tabular'] | None,
+        Literal['json', 'tabular', 'pdf'] | None,
         typer.Option(
             '--export',
             help='Optional extra export format in addition to HTML.',
@@ -108,6 +108,14 @@ def _profile_vcf_command(
 
         if aligner not in ('pairwise', 'mappy'):
             raise click.ClickException(f"Unknown aligner {aligner!r}; choose 'pairwise' or 'mappy'.")
+
+        export_format: str | None = None
+        if export is not None:
+            export_format = export.strip().lower()
+            if export_format not in ('json', 'tabular', 'pdf'):
+                raise click.ClickException(
+                    'Invalid --export value. Choose one of: json, tabular, pdf.'
+                )
 
         project_conn = open_project_db(project)
         project_row = project_conn.execute('SELECT name FROM project LIMIT 1').fetchone()
@@ -186,7 +194,7 @@ def _profile_vcf_command(
             query_sequence=query_seq,
             gene_matches=fasta_matches,
             coverage_gaps=coverage_gaps,
-            extra_export_format=export.lower() if export else None,
+            extra_export_format=export_format,
         )
 
         _print_completion_panel(console, '✓ Profiling complete', result, outputs)

@@ -512,6 +512,7 @@ export function useDashboardLogic() {
       path: result.report_html_path,
       jsonPath: result.report_json_path || '',
       tabularPath: result.report_tabular_path || '',
+      pdfPath: result.report_pdf_path || '',
       label: `${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`,
       mode: result.mode,
     }))
@@ -553,6 +554,19 @@ export function useDashboardLogic() {
         return prev;
       }
       return [...prev, path];
+    });
+  };
+
+  const addResultArtifactPaths = (result) => {
+    [
+      result.report_html_path,
+      result.report_json_path,
+      result.report_tabular_path,
+      result.report_pdf_path,
+    ].forEach((path) => {
+      if (path) {
+        addReportPath(path);
+      }
     });
   };
 
@@ -659,7 +673,7 @@ export function useDashboardLogic() {
       const result = await pollJob(submitResponse.job_id);
       // Keep a local history of run results for the report selector.
       setSessionResults((prev) => [...prev, result]);
-      addReportPath(result.report_html_path);
+      addResultArtifactPaths(result);
       setSelectedProfileReportPath(result.report_html_path);
       setInlineReportPath(result.report_html_path);
       setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);
@@ -716,7 +730,7 @@ export function useDashboardLogic() {
       setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
       const result = await pollJob(submitResponse.job_id);
       setSessionResults((prev) => [...prev, result]);
-      addReportPath(result.report_html_path);
+      addResultArtifactPaths(result);
       setSelectedProfileReportPath(result.report_html_path);
       setInlineReportPath(result.report_html_path);
       setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);
@@ -815,7 +829,7 @@ export function useDashboardLogic() {
       setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
       const result = await pollJob(submitResponse.job_id);
       setSessionResults((prev) => [...prev, result]);
-      addReportPath(result.report_html_path);
+      addResultArtifactPaths(result);
       setSelectedProfileReportPath(result.report_html_path);
       setInlineReportPath(result.report_html_path);
       setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);

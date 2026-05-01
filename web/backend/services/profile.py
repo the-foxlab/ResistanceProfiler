@@ -20,7 +20,7 @@ from respro.db.models import AnnotatedVariant, CoverageGap, ProfilingResult
 from respro.db.schema import open_project_db
 from respro.io.reference import load_genes_for_reference
 from respro.io.vcf import parse_vcf
-from respro.report.html import export_results
+from respro.report.non_html_exports import export_results
 
 
 def profile_fasta(
@@ -88,7 +88,7 @@ def profile_fasta(
             rule_gene_names=rule_gene_names,
             project_conn=project_conn,
             rules=rules,
-            extra_export_formats={'json', 'tabular'},
+            extra_export_formats={'json', 'tabular', 'pdf'},
             project_db_path=project_db.resolve(),
             output_html_path=_build_web_output_html_path(output_dir=output_dir, result=result),
         )
@@ -106,6 +106,7 @@ def profile_fasta(
             'report_html_path': str(outputs['html']),
             'report_json_path': str(outputs.get('json', '')),
             'report_tabular_path': str(outputs.get('tabular', '')),
+            'report_pdf_path': str(outputs.get('pdf', '')),
             'resistance_hits': result.resistance_hits,
             'total_variants': result.total_variants,
         }
@@ -202,7 +203,7 @@ def profile_vcf(
             rule_gene_names=rule_gene_names,
             project_conn=project_conn,
             rules=rules,
-            extra_export_formats={'json', 'tabular'},
+            extra_export_formats={'json', 'tabular', 'pdf'},
             project_db_path=project_db.resolve(),
             output_html_path=_build_web_output_html_path(output_dir=output_dir, result=result),
         )
@@ -221,6 +222,7 @@ def profile_vcf(
             'report_html_path': str(outputs['html']),
             'report_json_path': str(outputs.get('json', '')),
             'report_tabular_path': str(outputs.get('tabular', '')),
+            'report_pdf_path': str(outputs.get('pdf', '')),
             'resistance_hits': result.resistance_hits,
             'total_variants': result.total_variants,
         }
