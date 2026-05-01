@@ -197,7 +197,7 @@ in the `todo-management` skill.
 # Code review guidelines
 
 Full code review is handled by the **Codebase Review Specialist** agent and its skills
-(`code-review-and-quality`, `dead-code-and-test-only-audit`, `complexity-and-compartmentalization-audit`).
+(`code-review-and-quality`, `dead-code-and-test-only-audit`, `complexity-and-compartmentalization-audit`, `review-cleanup-playbook`).
 
 When reviewing code, always check for:
 

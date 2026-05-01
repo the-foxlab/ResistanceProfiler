@@ -22,6 +22,7 @@ Use the `code-review-and-quality` skill as your review procedure. It defines the
 - Use the `security-and-hardening` skill when investigating upload handling, path confinement, SQL parameterisation, auth enforcement, CORS, rate limiting, or external API trust boundaries.
 - Use the `dead-code-and-test-only-audit` skill when investigating dead code, stale modules, or production code only exercised by tests.
 - Use the `complexity-and-compartmentalization-audit` skill when investigating overly long files, complex functions, missing intent comments, or unnecessary helper indirection.
+- Use the `review-cleanup-playbook` skill when you need actionable cleanup recommendations with rule-tagged quick wins and minimal-risk refactor steps.
 - Use `repo-knowledge-graph` only when diffs change module boundaries, route-to-job wiring, or cross-layer function flows.
 
 ## Constraints
@@ -38,7 +39,7 @@ Use the `code-review-and-quality` skill as your review procedure. It defines the
 1. Understand the change context and scope.
 2. Review tests first to understand intended behaviour.
 3. Walk through implementation using the five-axis review from the `code-review-and-quality` skill.
-4. Invoke specialized sub-workflow skills where appropriate.
+4. Invoke specialized sub-workflow skills where appropriate; use `review-cleanup-playbook` for cleanup-focused recommendations.
 5. Categorize every finding with a severity label.
 6. Produce the review checklist verdict with precise file references and actionable fixes.
 
