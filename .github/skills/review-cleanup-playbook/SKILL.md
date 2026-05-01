@@ -53,6 +53,21 @@ Apply this order in reviews:
 4. Small DRY extractions with clear ownership.
 5. Optional deeper refactors (only when explicitly requested).
 
+## What to Look For
+
+When running this cleanup pass, inspect the changed lines first and then the immediately adjacent code for concrete maintainability signals.
+
+- Dead code: unused helpers, stale branches, commented-out code, compatibility shims, unused imports, write-only variables.
+- Comment problems: stale comments, comments that restate the code, metadata comments, missing intent comments around non-obvious logic.
+- Function shape issues: functions doing more than one job, long selector chains, flag arguments, too many parameters, output mutation that hides side effects.
+- Naming problems: vague names, misleading names, names that hide side effects, inconsistent terminology across nearby code.
+- DRY opportunities: duplicated conditionals, repeated parsing or normalization logic, repeated literals that are non-obvious or reused.
+- Obscured intent: dense branching, magic values, hidden coupling between steps, train-wreck access chains, clever control flow that can be flattened.
+- Boundary hygiene: logic placed in the wrong layer, CLI handlers accumulating domain logic, file-format parsing outside `respro/io`, persistence logic outside `respro/db`.
+- Test-adjacent cleanup needs: missing regression coverage for a risky cleanup, boundary cases that would become safer if pinned by a small targeted test.
+
+Prefer findings that can be fixed with a small local change. If a possible cleanup would require redesign, broad rewrites, or speculative abstraction, mention it only as an optional follow-up.
+
 ## Procedure
 
 1. Confirm baseline quality first using `code-review-and-quality`.

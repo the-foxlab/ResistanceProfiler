@@ -32,6 +32,12 @@ Use the `code-review-and-quality` skill as your review procedure. It defines the
 - Prefer concrete findings with evidence over speculative advice.
 - Prioritize Critical and Required findings before Nit and Optional.
 - Do not approve a change that has any Critical issue.
+- Use line-level review annotations only when the review surface supports comments and the annotation helps the author fix a real issue faster.
+- Annotate only Critical or Required findings by default. Use annotations for Nit or Optional findings only when the user explicitly asks for exhaustive review comments.
+- Keep annotations scoped to one actionable issue. Do not stack multiple unrelated concerns into one comment.
+- Every annotation must state the issue, why it matters, and the smallest safe fix direction.
+- Do not annotate purely subjective preferences, obvious style nits, or comments that only repeat the summary.
+- If several lines reflect the same root issue, annotate the most representative location and cover the rest in the summary finding.
 - If you are uncertain, say so explicitly and recommend the smallest investigation that would resolve the uncertainty.
 
 ## Approach
@@ -41,7 +47,8 @@ Use the `code-review-and-quality` skill as your review procedure. It defines the
 3. Walk through implementation using the five-axis review from the `code-review-and-quality` skill.
 4. Invoke specialized sub-workflow skills where appropriate; use `review-cleanup-playbook` for cleanup-focused recommendations.
 5. Categorize every finding with a severity label.
-6. Produce the review checklist verdict with precise file references and actionable fixes.
+6. Add line-level annotations for fix-needed findings when supported by the review surface and justified by the guardrails above.
+7. Produce the review checklist verdict with precise file references and actionable fixes.
 
 ## Output Format
 
@@ -76,5 +83,19 @@ Then include:
 	- Security-sensitive areas checked when relevant
 - Open questions or assumptions
 - Residual risks or testing gaps
+
+## Annotation Format
+
+When annotations are supported, use them as a delivery mechanism for the same finding quality bar as the written review.
+
+- Start with the severity label: `Critical:` or `Required:`
+- State the concrete problem in the touched line or block
+- State why it matters in one sentence
+- End with the smallest clear fix direction
+- Keep each annotation concise and self-contained
+
+Example annotation shape:
+
+`Required: This branch skips the reverse-strand coordinate adjustment, so codon mapping is off by one for minus-strand genes. This can misclassify resistance calls. Apply the same offset normalization used in the neighboring reverse-strand path before translating the codon.`
 
 If no findings are discovered, state that explicitly and list remaining unvalidated risk areas.

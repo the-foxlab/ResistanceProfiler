@@ -23,7 +23,14 @@ Keep this file focused on how code should be written in this repository.
 - If any feature is removed from the codebase, remove all related tests.
 - If a feature is only loaded by tests remove it from the codebase.
 - Never write imports into functions or classes. Always import from the top level.
-- Try to write important functions with main functionality first and helper functions afterwards.
+- Prefer top-down module function layout (excluding the main entrypoint), ordered by call flow:
+  1. Top function (orchestrates A, B, C)
+  2. Subfunctions near their caller (A before B when called in that order)
+  3. Helpers immediately below their owning subfunction (A.1, A.2, then B.1, B.2)
+  4. Shared helpers at the bottom of the module
+- Keep this layout logical and readable rather than strictly mechanical; proximity should make call flow easy to follow.
+- Very small one-purpose helpers may be nested inside a larger function when they are local to that function.
+- Nested tiny helpers should stay simple, contain no complex logic, and are tested through the parent function rather than separately.
 
 ## Code style
 

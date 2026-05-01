@@ -4,12 +4,14 @@ Resistance rule matching — load rules from the project database and match agai
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import logging
 import sqlite3
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from respro.config.settings import CLI_CONFIG
+from respro.db._rules_formula import _tokenize_formula_expression
+from respro.db._rules_publication import _report_publication_lookup_failures
 from respro.db.models import (
     AnnotatedVariant,
     FormulaRuleHit,
@@ -22,8 +24,6 @@ from respro.db.models import (
 from respro.db.rules_import import (
     _load_formula_rules,
     _load_resistance_rules,
-    _report_publication_lookup_failures,
-    _tokenize_formula_expression,
 )
 
 logger = logging.getLogger(__name__)

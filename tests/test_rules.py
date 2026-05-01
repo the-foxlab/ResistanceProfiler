@@ -2,17 +2,21 @@
 Tests for resistance rule loading and matching.
 """
 
-import sqlite3
 import textwrap
 from pathlib import Path
 
-import pytest
 from conftest import TINY_REF_SEQ, write_genbank
 from typer.testing import CliRunner
 
-from respro.cli.main import app
 from respro.cli.init import init_project
-from respro.core.rules import FormulaRuleRuntime, load_rules, match_formula_rules, match_rule_sets, match_rules
+from respro.cli.main import app
+from respro.core.rules import (
+    FormulaRuleRuntime,
+    load_rules,
+    match_formula_rules,
+    match_rule_sets,
+    match_rules,
+)
 from respro.db.models import (
     AnnotatedVariant,
     ResistanceRule,

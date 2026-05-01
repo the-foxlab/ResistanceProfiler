@@ -153,7 +153,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] BAM-based VCF coverage projection — `profile-vcf` supports `--bam` and projects query BAM depth to internal codon coordinates via CIGAR mappings; codons with missing projection or depth below `--min-depth` are emitted as `CoverageGap` stretches and rendered/reported like FASTA non-covered regions
 - [X] VCF parser migration to `pysam.VariantFile` — custom parser removed; VCF ingestion now uses pysam exclusively for multi-allelic records, AF extraction, and depth extraction
 
-### Usability and workflow
+### Usability and workflow (data processing)
 
 - [X] Add short CLI option aliases alongside existing long options — `-n`/`-g`/`-r` for `init`; `-g`/`-r` for `init-add`; `-f`/`-r`/`-s`/`-d`/`-c` for `profile-vcf`; `-f`/`-s`/`-d`/`-c` for `profile-fasta`; `-d`/`-l`/`-i` for `regenerate`; long options and behavior unchanged
 - [X] Lenient rule loading — rules whose reference AA does not match the GenBank gene sequence are skipped with a warning instead of aborting; unknown gene names are also silently skipped with a warning; applies to single rules and combination rule group members
@@ -192,7 +192,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] HTTPS/reverse-proxy hosting guidance with ready-to-copy Caddy/nginx examples and deployment notes in `docs/user/webapp-hosting.md`
 - [X] Optional trusted proxy support (`RESPRO_WEB_TRUSTED_PROXIES`) wired into uvicorn proxy settings so forwarded client IP headers are only trusted when explicitly configured
 
-### WebUI
+### WebUI (quality and testing)
 
 - [X] FastAPI profiling endpoints with async job queue — `POST /api/profile/fasta` and `POST /api/profile/vcf` enqueue RQ jobs and return a `job_id`; `GET /api/jobs/{job_id}` exposes status/result; RQ worker executes jobs using `respro/` domain logic; Redis is the broker; `fakeredis` + `Queue(is_async=False)` used for test isolation
 - [X] Rules browser API — `GET /api/rules` with optional reference filter backed by `respro.db.rules_queries.list_rules_for_display`

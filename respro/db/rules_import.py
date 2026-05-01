@@ -20,7 +20,6 @@ from respro.db._rules_alleles import (
 from respro.db._rules_formula import (
     _FORMULA_OPERATORS,
     _parse_formula_expression,
-    _tokenize_formula_expression,
 )
 from respro.db._rules_genes import (
     _detect_coordinate_base,
@@ -46,7 +45,6 @@ from respro.db._rules_persist import (
 from respro.db._rules_publication import (
     _link_formula_rule_publications,
     _link_rule_publications,
-    _report_publication_lookup_failures,
 )
 from respro.db.drugs import _get_or_create_drug_id
 from respro.db.models import _INTERNAL_FORMULA_COMPONENT_DRUG_NAME

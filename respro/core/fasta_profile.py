@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from itertools import product as itertools_product
 
 from Bio.Seq import Seq
@@ -165,6 +166,421 @@ def _gapped_strings_from_cigar(
     return ''.join(aligned_ref), ''.join(aligned_query)
 
 
+@dataclass(frozen=True)
+class _CodonContext:
+    """Per-codon alignment context used by the FASTA annotation walker."""
+
+    triples: list[tuple[str, str, str]]
+    ref_codon: str
+    query_codon: str
+    ins_before: str
+    mid_insertions: str
+    insertion_after_pos1: str
+    insertion_after_pos2: str
+
+
+def _codon_outside_coverage(
+    *,
+    codon_idx: int,
+    frame: int,
+    covered_cds_start: int | None,
+    covered_cds_end: int | None,
+) -> bool:
+    """Return whether one codon falls outside the aligned/assessable CDS span."""
+    if covered_cds_start is None or covered_cds_end is None:
+        return False
+    codon_nt_start = frame + codon_idx * 3
+    codon_nt_end = codon_nt_start + 3
+    return codon_nt_start < covered_cds_start or codon_nt_end > covered_cds_end
+
+
+def _build_codon_context(coding: list[tuple[str, str, str]], i: int) -> _CodonContext:
+    """Build reusable per-codon context for one alignment step."""
+    triples = coding[i:i + 3]
+    return _CodonContext(
+        triples=triples,
+        ref_codon=''.join(r for r, _, _ in triples),
+        query_codon=''.join(q for _, q, _ in triples),
+        ins_before=triples[0][2],
+        mid_insertions=triples[1][2] + triples[2][2],
+        insertion_after_pos1=triples[1][2],
+        insertion_after_pos2=triples[2][2],
+    )
+
+
+def _annotate_boundary_insertion_codon(
+    *,
+    gene: GeneRecord,
+    codon_idx: int,
+    context: _CodonContext,
+    last_valid_codon_idx: int,
+    last_valid_ref_codon: str,
+    last_valid_query_codon: str,
+) -> tuple[AnnotatedVariant | None, bool]:
+    """
+    Handle insertion-before-codon events.
+
+    :return: (annotation or None, mark_current_codon_as_gap)
+    """
+    if context.mid_insertions or '-' in context.query_codon:
+        return (
+            _annotate_fasta_inframe_complex_codon(
+                gene,
+                codon_idx,
+                context.ref_codon,
+                context.query_codon,
+            ),
+            False,
+        )
+
+    if last_valid_query_codon and last_valid_codon_idx >= 0:
+        n_ins = len(context.ins_before)
+        if n_ins % 3 != 0:
+            return (
+                _annotate_fasta_frameshift_insertion(
+                    gene,
+                    last_valid_codon_idx,
+                    last_valid_ref_codon,
+                    last_valid_query_codon,
+                    context.ins_before,
+                    codon_idx * 3,
+                    context.query_codon[0],
+                ),
+                False,
+            )
+        return (
+            _annotate_fasta_insertion_codon(
+                gene,
+                last_valid_codon_idx,
+                last_valid_ref_codon,
+                last_valid_query_codon,
+                context.ins_before,
+                codon_idx * 3,
+                context.query_codon[0],
+            ),
+            False,
+        )
+
+    # No preceding anchor codon available (insertion before first codon): non-assessable.
+    return None, True
+
+
+def _annotate_mid_codon_insertion(
+    *,
+    gene: GeneRecord,
+    codon_idx: int,
+    context: _CodonContext,
+    last_valid_codon_idx: int,
+    last_valid_query_codon: str,
+) -> AnnotatedVariant:
+    """Handle insertions inside codons, including non-3n mid-codon frameshifts."""
+    if '-' not in context.query_codon and len(context.mid_insertions) % 3 != 0:
+        if context.insertion_after_pos1 and not context.insertion_after_pos2:
+            return _annotate_fasta_frameshift_mid_codon_insertion(
+                gene=gene,
+                codon_idx=codon_idx,
+                ref_codon=context.ref_codon,
+                query_codon=context.query_codon,
+                last_valid_codon_idx=last_valid_codon_idx,
+                last_valid_query_codon=last_valid_query_codon,
+                inserted_bases=context.insertion_after_pos1,
+                anchor_coding_nt_idx=codon_idx * 3,
+                anchor_query_nt=context.query_codon[0],
+                current_coding_nt_idx=codon_idx * 3 + 1,
+                boundary_query_nt=context.query_codon[1],
+            )
+
+        if context.insertion_after_pos2 and not context.insertion_after_pos1:
+            return _annotate_fasta_frameshift_mid_codon_insertion(
+                gene=gene,
+                codon_idx=codon_idx,
+                ref_codon=context.ref_codon,
+                query_codon=context.query_codon,
+                last_valid_codon_idx=last_valid_codon_idx,
+                last_valid_query_codon=last_valid_query_codon,
+                inserted_bases=context.insertion_after_pos2,
+                anchor_coding_nt_idx=codon_idx * 3 + 1,
+                anchor_query_nt=context.query_codon[1],
+                current_coding_nt_idx=codon_idx * 3 + 2,
+                boundary_query_nt=context.query_codon[2],
+            )
+
+    return _annotate_fasta_inframe_complex_codon(
+        gene,
+        codon_idx,
+        context.ref_codon,
+        context.query_codon,
+    )
+
+
+def _collect_deletion_run(
+    *,
+    coding: list[tuple[str, str, str]],
+    i: int,
+    codon_idx: int,
+    frame: int,
+    covered_cds_start: int | None,
+    covered_cds_end: int | None,
+    first_context: _CodonContext,
+) -> tuple[list[str], list[str], int, int]:
+    """Collect one contiguous deletion-affected codon run."""
+    run_ref_codons = [first_context.ref_codon]
+    run_query_codons = [first_context.query_codon]
+    j = i + 3
+    next_c_idx = codon_idx + 1
+
+    while j + 3 <= len(coding):
+        nxt_context = _build_codon_context(coding, j)
+        if nxt_context.ins_before or nxt_context.mid_insertions:
+            break
+        if '-' not in nxt_context.query_codon:
+            break
+        if run_query_codons[-1][-1] != '-' or nxt_context.query_codon[0] != '-':
+            break
+        if _codon_outside_coverage(
+            codon_idx=next_c_idx,
+            frame=frame,
+            covered_cds_start=covered_cds_start,
+            covered_cds_end=covered_cds_end,
+        ):
+            break
+        run_ref_codons.append(nxt_context.ref_codon)
+        run_query_codons.append(nxt_context.query_codon)
+        j += 3
+        next_c_idx += 1
+
+    return run_ref_codons, run_query_codons, j, next_c_idx
+
+
+def _annotate_deletion_run(
+    *,
+    gene: GeneRecord,
+    run_start_idx: int,
+    run_ref_codons: list[str],
+    run_query_codons: list[str],
+    last_valid_codon_idx: int,
+    last_valid_query_codon: str,
+    next_codon_query_nt: str | None,
+) -> tuple[AnnotatedVariant | None, range | None]:
+    """Classify one deletion run as canonical deletion, frameshift, or non-assessable gap."""
+    total_deleted_nt = sum(
+        1
+        for run_query_codon in run_query_codons
+        for base in run_query_codon
+        if base == '-'
+    )
+    all_full_gap_codons = all(run_query_codon == '---' for run_query_codon in run_query_codons)
+
+    if total_deleted_nt % 3 == 0 and all_full_gap_codons:
+        if not last_valid_query_codon:
+            run_end_idx = run_start_idx + len(run_ref_codons)
+            return None, range(run_start_idx, run_end_idx)
+        return (
+            _annotate_fasta_deletion_codons(
+                gene,
+                last_valid_codon_idx,
+                last_valid_query_codon,
+                run_ref_codons,
+                next_codon_query_nt,
+            ),
+            None,
+        )
+
+    return (
+        _annotate_fasta_frameshift_partial_deletion(
+            gene,
+            run_start_idx,
+            run_ref_codons,
+            run_query_codons,
+            last_valid_codon_idx,
+            last_valid_query_codon,
+            next_codon_query_nt,
+        ),
+        None,
+    )
+
+
+def _annotate_snp_step(
+    *,
+    context: _CodonContext,
+    codon_idx: int,
+    gene: GeneRecord,
+) -> tuple[list[AnnotatedVariant], int, str, str]:
+    """Annotate one plain codon step (no gaps and no insertions)."""
+    ref_aa = translate_codon(context.ref_codon)
+    annotations = _annotate_snp_codon(
+        context.ref_codon,
+        context.query_codon,
+        ref_aa,
+        codon_idx,
+        gene,
+    )
+    return annotations, codon_idx, context.ref_codon, context.query_codon
+
+
+def _handle_codon_context(
+    *,
+    coding: list[tuple[str, str, str]],
+    i: int,
+    codon_idx: int,
+    frame: int,
+    gene: GeneRecord,
+    covered_cds_start: int | None,
+    covered_cds_end: int | None,
+    last_valid_codon_idx: int,
+    last_valid_ref_codon: str,
+    last_valid_query_codon: str,
+) -> tuple[list[AnnotatedVariant], list[int], int, int, int, str, str]:
+    """Process one codon step and return updated walk state pieces."""
+    annotations: list[AnnotatedVariant] = []
+    gap_codon_indices: list[int] = []
+
+    if _codon_outside_coverage(
+        codon_idx=codon_idx,
+        frame=frame,
+        covered_cds_start=covered_cds_start,
+        covered_cds_end=covered_cds_end,
+    ):
+        return [], [codon_idx], i + 3, codon_idx + 1, last_valid_codon_idx, last_valid_ref_codon, last_valid_query_codon
+
+    if i + 3 > len(coding):
+        return [], [], len(coding), codon_idx, last_valid_codon_idx, last_valid_ref_codon, last_valid_query_codon
+
+    context = _build_codon_context(coding, i)
+
+    if context.ins_before:
+        annotation, mark_gap = _annotate_boundary_insertion_codon(
+            gene=gene,
+            codon_idx=codon_idx,
+            context=context,
+            last_valid_codon_idx=last_valid_codon_idx,
+            last_valid_ref_codon=last_valid_ref_codon,
+            last_valid_query_codon=last_valid_query_codon,
+        )
+        if annotation is not None:
+            annotations.append(annotation)
+        if mark_gap:
+            gap_codon_indices.append(codon_idx)
+        return (
+            annotations,
+            gap_codon_indices,
+            i + 3,
+            codon_idx + 1,
+            last_valid_codon_idx,
+            last_valid_ref_codon,
+            last_valid_query_codon,
+        )
+
+    if context.mid_insertions:
+        annotations.append(
+            _annotate_mid_codon_insertion(
+                gene=gene,
+                codon_idx=codon_idx,
+                context=context,
+                last_valid_codon_idx=last_valid_codon_idx,
+                last_valid_query_codon=last_valid_query_codon,
+            )
+        )
+        return (
+            annotations,
+            gap_codon_indices,
+            i + 3,
+            codon_idx + 1,
+            last_valid_codon_idx,
+            last_valid_ref_codon,
+            last_valid_query_codon,
+        )
+
+    if '-' in context.query_codon:
+        run_start_idx = codon_idx
+        run_ref_codons, run_query_codons, j, next_c_idx = _collect_deletion_run(
+            coding=coding,
+            i=i,
+            codon_idx=codon_idx,
+            frame=frame,
+            covered_cds_start=covered_cds_start,
+            covered_cds_end=covered_cds_end,
+            first_context=context,
+        )
+        next_codon_query_nt = coding[j][1] if j < len(coding) else None
+        deletion_annotation, gap_range = _annotate_deletion_run(
+            gene=gene,
+            run_start_idx=run_start_idx,
+            run_ref_codons=run_ref_codons,
+            run_query_codons=run_query_codons,
+            last_valid_codon_idx=last_valid_codon_idx,
+            last_valid_query_codon=last_valid_query_codon,
+            next_codon_query_nt=next_codon_query_nt,
+        )
+        if deletion_annotation is not None:
+            annotations.append(deletion_annotation)
+        if gap_range is not None:
+            gap_codon_indices.extend(gap_range)
+        return (
+            annotations,
+            gap_codon_indices,
+            j,
+            next_c_idx,
+            last_valid_codon_idx,
+            last_valid_ref_codon,
+            last_valid_query_codon,
+        )
+
+    if context.query_codon.upper() == 'NNN':
+        return [], [codon_idx], i + 3, codon_idx + 1, last_valid_codon_idx, last_valid_ref_codon, last_valid_query_codon
+
+    snp_annotations, last_idx, last_ref, last_query = _annotate_snp_step(
+        context=context,
+        codon_idx=codon_idx,
+        gene=gene,
+    )
+    return snp_annotations, [], i + 3, codon_idx + 1, last_idx, last_ref, last_query
+
+
+def _walk_coding_codons(
+    *,
+    coding: list[tuple[str, str, str]],
+    frame: int,
+    gene: GeneRecord,
+    covered_cds_start: int | None,
+    covered_cds_end: int | None,
+) -> tuple[list[AnnotatedVariant], list[int]]:
+    """Walk coding-aligned codons and collect annotations plus non-covered codon indices."""
+    annotations: list[AnnotatedVariant] = []
+    gap_codon_indices: list[int] = []
+    codon_idx = 0
+    i = 0
+    last_valid_codon_idx: int = -1
+    last_valid_ref_codon = ''
+    last_valid_query_codon = ''
+
+    while i < len(coding):
+        (
+            step_annotations,
+            step_gaps,
+            i,
+            codon_idx,
+            last_valid_codon_idx,
+            last_valid_ref_codon,
+            last_valid_query_codon,
+        ) = _handle_codon_context(
+            coding=coding,
+            i=i,
+            codon_idx=codon_idx,
+            frame=frame,
+            gene=gene,
+            covered_cds_start=covered_cds_start,
+            covered_cds_end=covered_cds_end,
+            last_valid_codon_idx=last_valid_codon_idx,
+            last_valid_ref_codon=last_valid_ref_codon,
+            last_valid_query_codon=last_valid_query_codon,
+        )
+        annotations.extend(step_annotations)
+        gap_codon_indices.extend(step_gaps)
+
+    return annotations, gap_codon_indices
+
+
 def _annotate_from_alignment(
     aligned_ref: str,
     aligned_query: str,
@@ -218,209 +634,13 @@ def _annotate_from_alignment(
 
     # Trailing query insertions beyond the reference end are ignored
     coding = ref_positions[frame:]  # skip leading non-coding frame offset
-    annotations: list[AnnotatedVariant] = []
-    gap_codon_indices: list[int] = []
-    codon_idx = 0
-    i = 0
-    last_valid_codon_idx: int = -1
-    last_valid_ref_codon = ''
-    last_valid_query_codon = ''
-
-    while i < len(coding):
-        codon_nt_start = frame + codon_idx * 3
-        codon_nt_end = codon_nt_start + 3
-        if covered_cds_start is not None and covered_cds_end is not None:
-            if codon_nt_start < covered_cds_start or codon_nt_end > covered_cds_end:
-                gap_codon_indices.append(codon_idx)
-                i += 3
-                codon_idx += 1
-                continue
-
-        _, _, ins_before = coding[i]
-
-        if i + 3 > len(coding):
-            break  # incomplete codon at end of CDS
-
-        codon_triples = coding[i:i + 3]
-        mid_insertions = codon_triples[1][2] + codon_triples[2][2]
-        insertion_after_pos1 = codon_triples[1][2]
-        insertion_after_pos2 = codon_triples[2][2]
-        ref_codon = ''.join(r for r, q, ins in codon_triples)
-        query_codon = ''.join(q for r, q, ins in codon_triples)
-
-        if ins_before:
-            if mid_insertions or '-' in query_codon:
-                # Boundary insertion combined with mid-codon insertion or gap -> inframe_complex.
-                annotations.append(
-                    _annotate_fasta_inframe_complex_codon(gene, codon_idx, ref_codon, query_codon)
-                )
-            elif last_valid_query_codon and last_valid_codon_idx >= 0:
-                n_ins = len(ins_before)
-                if n_ins % 3 != 0:
-                    annotations.append(
-                        _annotate_fasta_frameshift_insertion(
-                            gene,
-                            last_valid_codon_idx,
-                            last_valid_ref_codon,
-                            last_valid_query_codon,
-                            ins_before,
-                            codon_idx * 3,
-                            query_codon[0],
-                        )
-                    )
-                else:
-                    annotations.append(
-                        _annotate_fasta_insertion_codon(
-                            gene,
-                            last_valid_codon_idx,
-                            last_valid_ref_codon,
-                            last_valid_query_codon,
-                            ins_before,
-                            codon_idx * 3,
-                            query_codon[0],
-                        )
-                    )
-            else:
-                # No preceding anchor codon available (insertion before first codon): non-assessable.
-                gap_codon_indices.append(codon_idx)
-            i += 3
-            codon_idx += 1
-            continue
-
-        if mid_insertions:
-            if '-' not in query_codon and len(mid_insertions) % 3 != 0:
-                if insertion_after_pos1 and not insertion_after_pos2:
-                    annotations.append(
-                        _annotate_fasta_frameshift_mid_codon_insertion(
-                            gene=gene,
-                            codon_idx=codon_idx,
-                            ref_codon=ref_codon,
-                            query_codon=query_codon,
-                            last_valid_codon_idx=last_valid_codon_idx,
-                            last_valid_query_codon=last_valid_query_codon,
-                            inserted_bases=insertion_after_pos1,
-                            anchor_coding_nt_idx=codon_idx * 3,
-                            anchor_query_nt=query_codon[0],
-                            current_coding_nt_idx=codon_idx * 3 + 1,
-                            boundary_query_nt=query_codon[1],
-                        )
-                    )
-                    i += 3
-                    codon_idx += 1
-                    continue
-                if insertion_after_pos2 and not insertion_after_pos1:
-                    annotations.append(
-                        _annotate_fasta_frameshift_mid_codon_insertion(
-                            gene=gene,
-                            codon_idx=codon_idx,
-                            ref_codon=ref_codon,
-                            query_codon=query_codon,
-                            last_valid_codon_idx=last_valid_codon_idx,
-                            last_valid_query_codon=last_valid_query_codon,
-                            inserted_bases=insertion_after_pos2,
-                            anchor_coding_nt_idx=codon_idx * 3 + 1,
-                            anchor_query_nt=query_codon[1],
-                            current_coding_nt_idx=codon_idx * 3 + 2,
-                            boundary_query_nt=query_codon[2],
-                        )
-                    )
-                    i += 3
-                    codon_idx += 1
-                    continue
-            annotations.append(
-                _annotate_fasta_inframe_complex_codon(gene, codon_idx, ref_codon, query_codon)
-            )
-            i += 3
-            codon_idx += 1
-            continue
-
-        if '-' in query_codon:
-            # Collect one consecutive run of codons affected by deletions (partial and/or full).
-            run_start_idx = codon_idx
-            run_ref_codons = [ref_codon]
-            run_query_codons = [query_codon]
-            j = i + 3
-            next_c_idx = codon_idx + 1
-
-            while j + 3 <= len(coding):
-                nxt = coding[j:j + 3]
-                if nxt[0][2] or nxt[1][2] + nxt[2][2]:
-                    break  # insertion in next codon -> stop run
-                nxt_qc = ''.join(q for r, q, ins in nxt)
-                if '-' not in nxt_qc:
-                    break  # clean codon -> stop run
-                # Only extend run if gaps are contiguous across the codon boundary
-                if run_query_codons[-1][-1] != '-' or nxt_qc[0] != '-':
-                    break
-                # Honour coverage boundaries when extending the run
-                nxt_nt_start = frame + next_c_idx * 3
-                nxt_nt_end = nxt_nt_start + 3
-                if covered_cds_start is not None and covered_cds_end is not None:
-                    if nxt_nt_start < covered_cds_start or nxt_nt_end > covered_cds_end:
-                        break
-                run_ref_codons.append(''.join(r for r, q, ins in nxt))
-                run_query_codons.append(nxt_qc)
-                j += 3
-                next_c_idx += 1
-
-            total_deleted_nt = sum(
-                1
-                for run_query_codon in run_query_codons
-                for base in run_query_codon
-                if base == '-'
-            )
-            all_full_gap_codons = all(run_query_codon == '---' for run_query_codon in run_query_codons)
-            # First query NT after the run: needed for minus-strand NT anchor
-            next_codon_query_nt = coding[j][1] if j < len(coding) else None
-
-            if total_deleted_nt % 3 == 0 and all_full_gap_codons:
-                if last_valid_query_codon:
-                    annotations.append(
-                        _annotate_fasta_deletion_codons(
-                            gene,
-                            last_valid_codon_idx,
-                            last_valid_query_codon,
-                            run_ref_codons,
-                            next_codon_query_nt,
-                        )
-                    )
-                else:
-                    # Deletion at gene start with no preceding anchor -> coverage gap
-                    gap_codon_indices.extend(range(run_start_idx, next_c_idx))
-            else:
-                annotations.append(
-                    _annotate_fasta_frameshift_partial_deletion(
-                        gene,
-                        run_start_idx,
-                        run_ref_codons,
-                        run_query_codons,
-                        last_valid_codon_idx,
-                        last_valid_query_codon,
-                        next_codon_query_nt,
-                    )
-                )
-
-            i = j
-            codon_idx = next_c_idx
-            continue
-
-        if query_codon.upper() == 'NNN':
-            # Full-codon N-stretch: no coverage → do not IUPAC-expand
-            gap_codon_indices.append(codon_idx)
-            i += 3
-            codon_idx += 1
-            continue
-
-        # No gaps, no insertions: expand IUPAC ambiguity and emit non-synonymous changes
-        ref_aa = translate_codon(ref_codon)
-        anns = _annotate_snp_codon(ref_codon, query_codon, ref_aa, codon_idx, gene)
-        annotations.extend(anns)
-        last_valid_codon_idx = codon_idx
-        last_valid_ref_codon = ref_codon
-        last_valid_query_codon = query_codon
-        i += 3
-        codon_idx += 1
-
+    annotations, gap_codon_indices = _walk_coding_codons(
+        coding=coding,
+        frame=frame,
+        gene=gene,
+        covered_cds_start=covered_cds_start,
+        covered_cds_end=covered_cds_end,
+    )
     return annotations, _merge_codon_gaps(gene.name, gap_codon_indices)
 
 
@@ -905,63 +1125,24 @@ def _annotate_fasta_frameshift_partial_deletion(
     if not ref_codons or not query_codons:
         raise ValueError('Frameshift deletion requires at least one affected codon')
 
-    # Collect all deleted nucleotides across the run
-    deleted_nt = ''
-    for ref_codon, query_codon in zip(ref_codons, query_codons):
-        gap_offsets = [idx for idx, base in enumerate(query_codon) if base == '-']
-        deleted_nt += ''.join(ref_codon[idx] for idx in gap_offsets)
-
-    # AA anchor: always follows CDS/protein order (same for both strands)
-    # First gap at codon position 0 means the full codon is disrupted from the start;
-    # convention anchors to the last intact codon before the frameshift.
-    first_query_codon = query_codons[0]
-    first_ref_codon = ref_codons[0]
-    first_gap_offsets = [idx for idx, base in enumerate(first_query_codon) if base == '-']
-    first_gap = min(first_gap_offsets) if first_gap_offsets else 0
-
-    aa_anchor_codon_idx = first_codon_idx
-    aa_anchor_ref_codon = first_ref_codon
-
-    if first_gap == 0:
-        if last_valid_codon_idx < 0 or not last_valid_query_codon:
-            raise ValueError('Frameshift deletion at gene start has no valid anchor nucleotide')
-        aa_anchor_codon_idx = last_valid_codon_idx
-        aa_anchor_ref_codon = gene.nt_sequence[last_valid_codon_idx * 3:last_valid_codon_idx * 3 + 3]
-
-    # NT anchor: follows VCF convention (5' genomic side of deletion) - strand-aware
-    if gene.strand == '-':
-        # Minus strand: anchor = first non-deleted NT after the last gap in CDS order
-        # (CDS and genomic order are reversed, so "after in CDS" = "5' genomically")
-        last_codon_idx_in_run = first_codon_idx + len(ref_codons) - 1
-        last_query_codon = query_codons[-1]
-        last_gap_in_last_codon = max(idx for idx, b in enumerate(last_query_codon) if b == '-')
-
-        if last_gap_in_last_codon == 2:
-            if last_valid_codon_idx < 0:
-                raise ValueError(
-                    'Minus-strand frameshift deletion at gene start has no valid amino-acid anchor'
-                )
-            aa_anchor_codon_idx = last_valid_codon_idx
-            aa_anchor_ref_codon = gene.nt_sequence[last_valid_codon_idx * 3:last_valid_codon_idx * 3 + 3]
-
-        if last_gap_in_last_codon == 2:
-            # Last gap at codon position 2: anchor is first NT of the codon after the run
-            if next_codon_query_nt is None:
-                raise ValueError('Minus-strand frameshift deletion at gene end has no anchor nucleotide')
-            anchor_nt_idx = (last_codon_idx_in_run + 1) * 3
-            anchor_query_nt = next_codon_query_nt
-        else:
-            # Anchor is the NT immediately after the last gap within the last codon
-            anchor_nt_idx = last_codon_idx_in_run * 3 + last_gap_in_last_codon + 1
-            anchor_query_nt = last_query_codon[last_gap_in_last_codon + 1]
-    else:
-        # Plus strand: anchor = NT immediately before the first gap in CDS order
-        if first_gap == 0:
-            anchor_nt_idx = last_valid_codon_idx * 3 + 2
-            anchor_query_nt = last_valid_query_codon[-1]
-        else:
-            anchor_nt_idx = first_codon_idx * 3 + (first_gap - 1)
-            anchor_query_nt = first_query_codon[first_gap - 1]
+    deleted_nt = _collect_deleted_nt(ref_codons, query_codons)
+    aa_anchor_codon_idx, aa_anchor_ref_codon, first_gap = _resolve_partial_deletion_aa_anchor(
+        gene=gene,
+        first_codon_idx=first_codon_idx,
+        ref_codons=ref_codons,
+        query_codons=query_codons,
+        last_valid_codon_idx=last_valid_codon_idx,
+        last_valid_query_codon=last_valid_query_codon,
+    )
+    anchor_nt_idx, anchor_query_nt = _resolve_partial_deletion_nt_anchor(
+        gene=gene,
+        first_codon_idx=first_codon_idx,
+        query_codons=query_codons,
+        last_valid_codon_idx=last_valid_codon_idx,
+        last_valid_query_codon=last_valid_query_codon,
+        next_codon_query_nt=next_codon_query_nt,
+        first_gap=first_gap,
+    )
 
     anchor_aa = translate_codon(aa_anchor_ref_codon)
 
@@ -976,6 +1157,83 @@ def _annotate_fasta_frameshift_partial_deletion(
         alt_aa=f'{anchor_aa}fsX',
         consequence='frameshift',
         is_fasta_mode=True,
+    )
+
+
+def _collect_deleted_nt(ref_codons: list[str], query_codons: list[str]) -> str:
+    """Collect deleted nucleotide payload across one deletion-affected codon run."""
+    deleted_nt = ''
+    for ref_codon, query_codon in zip(ref_codons, query_codons):
+        gap_offsets = [idx for idx, base in enumerate(query_codon) if base == '-']
+        deleted_nt += ''.join(ref_codon[idx] for idx in gap_offsets)
+    return deleted_nt
+
+
+def _resolve_partial_deletion_aa_anchor(
+    *,
+    gene: GeneRecord,
+    first_codon_idx: int,
+    ref_codons: list[str],
+    query_codons: list[str],
+    last_valid_codon_idx: int,
+    last_valid_query_codon: str,
+) -> tuple[int, str, int]:
+    """Resolve AA anchor codon for partial-deletion frameshift events."""
+    first_query_codon = query_codons[0]
+    first_ref_codon = ref_codons[0]
+    first_gap_offsets = [idx for idx, base in enumerate(first_query_codon) if base == '-']
+    first_gap = min(first_gap_offsets) if first_gap_offsets else 0
+
+    if first_gap != 0:
+        aa_anchor_codon_idx = first_codon_idx
+        aa_anchor_ref_codon = first_ref_codon
+    else:
+        if last_valid_codon_idx < 0 or not last_valid_query_codon:
+            raise ValueError('Frameshift deletion at gene start has no valid anchor nucleotide')
+        aa_anchor_codon_idx = last_valid_codon_idx
+        aa_anchor_ref_codon = gene.nt_sequence[last_valid_codon_idx * 3:last_valid_codon_idx * 3 + 3]
+
+    if gene.strand == '-':
+        last_query_codon = query_codons[-1]
+        last_gap_in_last_codon = max(idx for idx, base in enumerate(last_query_codon) if base == '-')
+        if last_gap_in_last_codon == 2:
+            if last_valid_codon_idx < 0:
+                raise ValueError(
+                    'Minus-strand frameshift deletion at gene start has no valid amino-acid anchor'
+                )
+            aa_anchor_codon_idx = last_valid_codon_idx
+            aa_anchor_ref_codon = gene.nt_sequence[last_valid_codon_idx * 3:last_valid_codon_idx * 3 + 3]
+
+    return aa_anchor_codon_idx, aa_anchor_ref_codon, first_gap
+
+
+def _resolve_partial_deletion_nt_anchor(
+    *,
+    gene: GeneRecord,
+    first_codon_idx: int,
+    query_codons: list[str],
+    last_valid_codon_idx: int,
+    last_valid_query_codon: str,
+    next_codon_query_nt: str | None,
+    first_gap: int,
+) -> tuple[int, str]:
+    """Resolve NT anchor for partial-deletion frameshift events (strand-aware)."""
+    if gene.strand != '-':
+        if first_gap == 0:
+            return last_valid_codon_idx * 3 + 2, last_valid_query_codon[-1]
+        first_query_codon = query_codons[0]
+        return first_codon_idx * 3 + (first_gap - 1), first_query_codon[first_gap - 1]
+
+    last_codon_idx_in_run = first_codon_idx + len(query_codons) - 1
+    last_query_codon = query_codons[-1]
+    last_gap_in_last_codon = max(idx for idx, base in enumerate(last_query_codon) if base == '-')
+    if last_gap_in_last_codon == 2:
+        if next_codon_query_nt is None:
+            raise ValueError('Minus-strand frameshift deletion at gene end has no anchor nucleotide')
+        return (last_codon_idx_in_run + 1) * 3, next_codon_query_nt
+    return (
+        last_codon_idx_in_run * 3 + last_gap_in_last_codon + 1,
+        last_query_codon[last_gap_in_last_codon + 1],
     )
 
 
