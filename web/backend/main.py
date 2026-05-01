@@ -65,54 +65,6 @@ from web.backend.startup_config import (
 logger = logging.getLogger(__name__)
 
 
-def _sweep_expired_files(results_dir: Path, uploads_dir: Path, ttl_seconds: int) -> None:
-    """
-    Delete files in results and uploads dirs that are older than TTL.
-    """
-    logger = logging.getLogger(__name__)
-    now = time.time()
-    total_deleted = 0
-
-    for directory in (results_dir, uploads_dir):
-        if not directory.is_dir():
-            continue
-        try:
-            for item in directory.rglob('*'):
-                if not item.is_file():
-                    continue
-                try:
-                    mtime = item.stat().st_mtime
-                    age_seconds = now - mtime
-                    if age_seconds > ttl_seconds:
-                        item.unlink(missing_ok=True)
-                        logger.debug(f'Deleted expired file: {item}')
-                        total_deleted += 1
-                except OSError as exc:
-                    logger.debug(f'Error processing file {item}: {exc}')
-        except OSError as exc:
-            logger.debug(f'Error scanning directory {directory}: {exc}')
-
-    if total_deleted > 0:
-        logger.info(f'TTL sweep deleted {total_deleted} expired files from results and uploads directories')
-
-
-def _start_ttl_sweep_thread(results_dir: Path, uploads_dir: Path) -> None:
-    """Start a background thread that periodically deletes expired files."""
-    logger = logging.getLogger(__name__)
-
-    def sweep_loop() -> None:
-        while True:
-            try:
-                ttl_seconds = int(os.getenv('RESPRO_WEB_RESULT_TTL', '86400'))
-                _sweep_expired_files(results_dir, uploads_dir, ttl_seconds)
-            except Exception as exc:
-                logger.debug(f'Error in TTL sweep: {exc}')
-            time.sleep(WEB_BACKEND_CONFIG.defaults.sweep_frequency_seconds)
-
-    sweep_thread = threading.Thread(target=sweep_loop, daemon=True)
-    sweep_thread.start()
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     """FastAPI lifespan context manager."""
@@ -469,6 +421,54 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         return FileResponse(str(favicon_path), media_type='image/svg+xml')
 
     return app
+
+
+def _sweep_expired_files(results_dir: Path, uploads_dir: Path, ttl_seconds: int) -> None:
+    """
+    Delete files in results and uploads dirs that are older than TTL.
+    """
+    logger = logging.getLogger(__name__)
+    now = time.time()
+    total_deleted = 0
+
+    for directory in (results_dir, uploads_dir):
+        if not directory.is_dir():
+            continue
+        try:
+            for item in directory.rglob('*'):
+                if not item.is_file():
+                    continue
+                try:
+                    mtime = item.stat().st_mtime
+                    age_seconds = now - mtime
+                    if age_seconds > ttl_seconds:
+                        item.unlink(missing_ok=True)
+                        logger.debug(f'Deleted expired file: {item}')
+                        total_deleted += 1
+                except OSError as exc:
+                    logger.debug(f'Error processing file {item}: {exc}')
+        except OSError as exc:
+            logger.debug(f'Error scanning directory {directory}: {exc}')
+
+    if total_deleted > 0:
+        logger.info(f'TTL sweep deleted {total_deleted} expired files from results and uploads directories')
+
+
+def _start_ttl_sweep_thread(results_dir: Path, uploads_dir: Path) -> None:
+    """Start a background thread that periodically deletes expired files."""
+    logger = logging.getLogger(__name__)
+
+    def sweep_loop() -> None:
+        while True:
+            try:
+                ttl_seconds = int(os.getenv('RESPRO_WEB_RESULT_TTL', '86400'))
+                _sweep_expired_files(results_dir, uploads_dir, ttl_seconds)
+            except Exception as exc:
+                logger.debug(f'Error in TTL sweep: {exc}')
+            time.sleep(WEB_BACKEND_CONFIG.defaults.sweep_frequency_seconds)
+
+    sweep_thread = threading.Thread(target=sweep_loop, daemon=True)
+    sweep_thread.start()
 
 
 def _map_job_status(rq_status) -> str:

@@ -13,27 +13,6 @@ _RE_FORMULA_TOKEN = re.compile(
 _FORMULA_OPERATORS = {'AND', 'OR', 'NOT', 'XOR'}
 
 
-def _tokenize_formula_expression(expression: str) -> list[str]:
-    """Tokenize a boolean formula expression and reject unsupported characters."""
-    tokens = _RE_FORMULA_TOKEN.findall(expression)
-    if not tokens:
-        raise ValueError('empty expression')
-
-    condensed_expression = re.sub(r'\s+', '', expression)
-    condensed_tokens = ''.join(token.replace(' ', '') for token in tokens)
-    if condensed_expression != condensed_tokens:
-        raise ValueError('contains unsupported characters')
-
-    normalized_tokens: list[str] = []
-    for token in tokens:
-        upper = token.upper()
-        if upper in _FORMULA_OPERATORS or token in {'(', ')'}:
-            normalized_tokens.append(upper)
-            continue
-        normalized_tokens.append(token)
-    return normalized_tokens
-
-
 def _parse_formula_expression(expression: str) -> tuple[str, list[str]]:
     """
     Parse a boolean formula expression into an AST (abstract syntax tree) and canonical string.
@@ -234,6 +213,27 @@ def _parse_formula_expression(expression: str) -> tuple[str, list[str]]:
     return _formula_ast_to_string(canonical_ast), referenced_ids
 
 
+def _tokenize_formula_expression(expression: str) -> list[str]:
+    """Tokenize a boolean formula expression and reject unsupported characters."""
+    tokens = _RE_FORMULA_TOKEN.findall(expression)
+    if not tokens:
+        raise ValueError('empty expression')
+
+    condensed_expression = re.sub(r'\s+', '', expression)
+    condensed_tokens = ''.join(token.replace(' ', '') for token in tokens)
+    if condensed_expression != condensed_tokens:
+        raise ValueError('contains unsupported characters')
+
+    normalized_tokens: list[str] = []
+    for token in tokens:
+        upper = token.upper()
+        if upper in _FORMULA_OPERATORS or token in {'(', ')'}:
+            normalized_tokens.append(upper)
+            continue
+        normalized_tokens.append(token)
+    return normalized_tokens
+
+
 def _canonicalize_formula_ast(node: tuple) -> tuple:
     """Return a deterministic AST for duplicate detection and stable storage."""
     node_type = node[0]
@@ -253,17 +253,6 @@ def _canonicalize_formula_ast(node: tuple) -> tuple:
     return (node_type, flattened)
 
 
-def _formula_ast_to_string(node: tuple) -> str:
-    """Serialize a canonical formula AST to a deterministic normalized expression."""
-    node_type = node[0]
-    if node_type == 'ATOM':
-        return node[1]
-    if node_type == 'NOT':
-        return f'(NOT {_formula_ast_to_string(node[1])})'
-    joiner = f' {node_type} '
-    return '(' + joiner.join(_formula_ast_to_string(child) for child in node[1]) + ')'
-
-
 def _formula_sort_key(node: tuple) -> tuple[int, str]:
     """Return a stable sort key that keeps negated branches after positive branches."""
     rank_map = {
@@ -274,3 +263,14 @@ def _formula_sort_key(node: tuple) -> tuple[int, str]:
         'NOT': 2,
     }
     return rank_map.get(node[0], 99), _formula_ast_to_string(node)
+
+
+def _formula_ast_to_string(node: tuple) -> str:
+    """Serialize a canonical formula AST to a deterministic normalized expression."""
+    node_type = node[0]
+    if node_type == 'ATOM':
+        return node[1]
+    if node_type == 'NOT':
+        return f'(NOT {_formula_ast_to_string(node[1])})'
+    joiner = f' {node_type} '
+    return '(' + joiner.join(_formula_ast_to_string(child) for child in node[1]) + ')'

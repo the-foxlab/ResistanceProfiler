@@ -28,6 +28,14 @@ from respro.report.html import (
 )
 
 
+def _make_combined_result() -> ProfilingResult:
+    """Create a ProfilingResult containing one combined codon event."""
+    r = _make_result()
+    r.annotations[0].is_combined_codon_event = True
+    r.annotations[0].combined_member_count = 2
+    return r
+
+
 def _make_result() -> ProfilingResult:
     """
     Create a minimal ProfilingResult for testing.
@@ -84,14 +92,6 @@ def _make_result() -> ProfilingResult:
             )
         ],
     )
-
-
-def _make_combined_result() -> ProfilingResult:
-    """Create a ProfilingResult containing one combined codon event."""
-    r = _make_result()
-    r.annotations[0].is_combined_codon_event = True
-    r.annotations[0].combined_member_count = 2
-    return r
 
 
 class TestProfilingResult:

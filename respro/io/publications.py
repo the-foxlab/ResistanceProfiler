@@ -34,45 +34,6 @@ _DOI_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
 _RE_DOI_LIKE = r'^10\.\S+/\S+$'
 
 
-def normalize_doi_token(token: str) -> str:
-    """Normalize DOI-like input to a bare DOI token when possible."""
-    value = token.strip().rstrip('.,;:')
-    if not value:
-        return ''
-
-    lower = value.lower()
-    for prefix in CLI_CONFIG.parsing.doi_prefixes:
-        if lower.startswith(prefix):
-            value = value[len(prefix):].strip()
-            lower = value.lower()
-            break
-
-    if lower.startswith('doi.org/'):
-        value = value[8:].strip()
-        lower = value.lower()
-    elif lower.startswith('dx.doi.org/'):
-        value = value[11:].strip()
-        lower = value.lower()
-    elif lower.startswith('doi:'):
-        value = value[4:].strip()
-
-    return value.strip().rstrip('.,;:')
-
-
-def _parse_retry_after(exc: urllib.error.HTTPError) -> float | None:
-    """Return Retry-After seconds from an HTTP error header when present and valid."""
-    if exc.headers is None:
-        return None
-    retry_after = exc.headers.get('Retry-After', '').strip()
-    if not retry_after:
-        return None
-    try:
-        value = float(retry_after)
-    except ValueError:
-        return None
-    return max(value, 0.0)
-
-
 def fetch_pubmed_metadata(pmid: str, timeout: int = CLI_CONFIG.timeouts.pubmed) -> dict | None:
     """
     Fetch title and DOI (when available) for a PubMed article via NCBI E-utilities.
@@ -226,4 +187,43 @@ def fetch_publication_metadata(doi: str, timeout: int = CLI_CONFIG.timeouts.cros
             return None
 
     return None
+
+
+def normalize_doi_token(token: str) -> str:
+    """Normalize DOI-like input to a bare DOI token when possible."""
+    value = token.strip().rstrip('.,;:')
+    if not value:
+        return ''
+
+    lower = value.lower()
+    for prefix in CLI_CONFIG.parsing.doi_prefixes:
+        if lower.startswith(prefix):
+            value = value[len(prefix):].strip()
+            lower = value.lower()
+            break
+
+    if lower.startswith('doi.org/'):
+        value = value[8:].strip()
+        lower = value.lower()
+    elif lower.startswith('dx.doi.org/'):
+        value = value[11:].strip()
+        lower = value.lower()
+    elif lower.startswith('doi:'):
+        value = value[4:].strip()
+
+    return value.strip().rstrip('.,;:')
+
+
+def _parse_retry_after(exc: urllib.error.HTTPError) -> float | None:
+    """Return Retry-After seconds from an HTTP error header when present and valid."""
+    if exc.headers is None:
+        return None
+    retry_after = exc.headers.get('Retry-After', '').strip()
+    if not retry_after:
+        return None
+    try:
+        value = float(retry_after)
+    except ValueError:
+        return None
+    return max(value, 0.0)
 

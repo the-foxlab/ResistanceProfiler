@@ -16,6 +16,7 @@ from rq import Queue
 from rq.exceptions import NoSuchJobError
 
 from tests.conftest import TINY_REF_NAME, TINY_REF_SEQ
+from web.backend.config import WEB_BACKEND_CONFIG
 from web.backend.main import _resolve_proxy_settings, create_app
 from web.backend.queue import get_queue
 from web.backend.startup_config import StartupConfig, _validate_startup_policy
@@ -736,8 +737,11 @@ class TestWebApi:
 
         assert response.status_code == 200
         _args, kwargs = queue.enqueue.call_args
-        assert kwargs['job_timeout'] == 3600
-        assert kwargs['retry'].max == 1
+        assert kwargs['job_timeout'] == WEB_BACKEND_CONFIG.defaults.job_timeout_seconds
+        if WEB_BACKEND_CONFIG.defaults.job_retry_max > 0:
+            assert kwargs['retry'].max == WEB_BACKEND_CONFIG.defaults.job_retry_max
+        else:
+            assert 'retry' not in kwargs
 
     def test_protected_route_requires_auth(self, client: TestClient) -> None:
         response = client.get('/api/rules')

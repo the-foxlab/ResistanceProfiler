@@ -25,30 +25,6 @@ class QueueRuntimeSettings:
     retry_intervals_seconds: tuple[int, ...]
 
 
-def resolve_queue_runtime_settings() -> QueueRuntimeSettings:
-    """Resolve queue timeout/retry settings from environment with validated defaults."""
-    defaults = WEB_BACKEND_CONFIG.defaults
-    timeout_seconds = _parse_non_negative_int(
-        os.getenv(WEB_ENV.job_timeout, str(defaults.job_timeout_seconds)),
-        setting_name=WEB_ENV.job_timeout,
-    )
-    retry_max = _parse_non_negative_int(
-        os.getenv(WEB_ENV.job_retry_max, str(defaults.job_retry_max)),
-        setting_name=WEB_ENV.job_retry_max,
-    )
-    retry_intervals_seconds = _parse_retry_intervals(
-        os.getenv(
-            WEB_ENV.job_retry_intervals,
-            ','.join(str(value) for value in defaults.job_retry_intervals_seconds),
-        )
-    )
-    return QueueRuntimeSettings(
-        timeout_seconds=timeout_seconds,
-        retry_max=retry_max,
-        retry_intervals_seconds=retry_intervals_seconds,
-    )
-
-
 def build_enqueue_job_options() -> dict[str, int | Retry]:
     """Return standard timeout/retry options for all profiling queue submissions."""
     settings = resolve_queue_runtime_settings()
@@ -72,6 +48,30 @@ def get_queue() -> Queue:
         WEB_BACKEND_CONFIG.defaults.profile_queue_name,
         connection=connection,
         default_timeout=runtime.timeout_seconds,
+    )
+
+
+def resolve_queue_runtime_settings() -> QueueRuntimeSettings:
+    """Resolve queue timeout/retry settings from environment with validated defaults."""
+    defaults = WEB_BACKEND_CONFIG.defaults
+    timeout_seconds = _parse_non_negative_int(
+        os.getenv(WEB_ENV.job_timeout, str(defaults.job_timeout_seconds)),
+        setting_name=WEB_ENV.job_timeout,
+    )
+    retry_max = _parse_non_negative_int(
+        os.getenv(WEB_ENV.job_retry_max, str(defaults.job_retry_max)),
+        setting_name=WEB_ENV.job_retry_max,
+    )
+    retry_intervals_seconds = _parse_retry_intervals(
+        os.getenv(
+            WEB_ENV.job_retry_intervals,
+            ','.join(str(value) for value in defaults.job_retry_intervals_seconds),
+        )
+    )
+    return QueueRuntimeSettings(
+        timeout_seconds=timeout_seconds,
+        retry_max=retry_max,
+        retry_intervals_seconds=retry_intervals_seconds,
     )
 
 

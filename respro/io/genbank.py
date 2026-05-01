@@ -16,21 +16,6 @@ from Bio.SeqRecord import SeqRecord
 logger = logging.getLogger(__name__)
 
 
-def validate_strand(strand: str) -> str:
-    """
-    Normalise a GenBank strand value to '+' or '-'.
-
-    :param strand: raw strand value from a feature record
-    :return: '+' or '-'
-    :raises ValueError: if the value is not a recognised strand token
-    """
-    if strand in ('+', '1', 'plus', 'forward'):
-        return '+'
-    if strand in ('-', '-1', 'minus', 'reverse'):
-        return '-'
-    raise ValueError(f'Invalid strand value: {strand!r}')
-
-
 @dataclass(frozen=True)
 class ParsedGenBankGene:
     """A CDS/gene extracted from a GenBank record."""
@@ -61,6 +46,29 @@ class ParsedGenBankReference:
     organism: str = ''
     taxonomy: str = ''
     genes: tuple[ParsedGenBankGene, ...] = field(default_factory=tuple)
+
+
+def parse_genbank_sources(genbank_paths: list[Path]) -> list[ParsedGenBankReference]:
+    """
+    Parse and combine one or more GenBank files.
+
+    Each input file may itself contain one or more GenBank records. The
+    returned list is validated globally so duplicate reference identifiers or
+    accessions are rejected even when they come from different input files.
+
+    :param genbank_paths: one or more GenBank file paths
+    :return: combined list of ParsedGenBankReference objects
+    """
+    records: list[ParsedGenBankReference] = []
+
+    for genbank_path in genbank_paths:
+        records.extend(parse_genbank_records(genbank_path))
+
+    if not records:
+        raise ValueError('No GenBank records found in the provided input file(s)')
+
+    _validate_unique_reference_identifiers(records)
+    return records
 
 
 def parse_genbank_records(genbank_path: Path) -> list[ParsedGenBankReference]:
@@ -107,27 +115,19 @@ def parse_genbank_records(genbank_path: Path) -> list[ParsedGenBankReference]:
     return records
 
 
-def parse_genbank_sources(genbank_paths: list[Path]) -> list[ParsedGenBankReference]:
+def validate_strand(strand: str) -> str:
     """
-    Parse and combine one or more GenBank files.
+    Normalise a GenBank strand value to '+' or '-'.
 
-    Each input file may itself contain one or more GenBank records. The
-    returned list is validated globally so duplicate reference identifiers or
-    accessions are rejected even when they come from different input files.
-
-    :param genbank_paths: one or more GenBank file paths
-    :return: combined list of ParsedGenBankReference objects
+    :param strand: raw strand value from a feature record
+    :return: '+' or '-'
+    :raises ValueError: if the value is not a recognised strand token
     """
-    records: list[ParsedGenBankReference] = []
-
-    for genbank_path in genbank_paths:
-        records.extend(parse_genbank_records(genbank_path))
-
-    if not records:
-        raise ValueError('No GenBank records found in the provided input file(s)')
-
-    _validate_unique_reference_identifiers(records)
-    return records
+    if strand in ('+', '1', 'plus', 'forward'):
+        return '+'
+    if strand in ('-', '-1', 'minus', 'reverse'):
+        return '-'
+    raise ValueError(f'Invalid strand value: {strand!r}')
 
 
 def _extract_accession(record: SeqRecord) -> str:

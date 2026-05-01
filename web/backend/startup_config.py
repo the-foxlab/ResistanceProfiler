@@ -80,16 +80,6 @@ def load_startup_config() -> StartupConfig:
     )
 
 
-def list_project_db_paths(project_databases_dir: Path) -> list[Path]:
-    """Return validated project DB files sorted by file name."""
-    db_paths = sorted(path for path in project_databases_dir.glob('*.db') if path.is_file())
-    validated_paths: list[Path] = []
-    for db_path in db_paths:
-        _validate_project_db(db_path)
-        validated_paths.append(db_path)
-    return validated_paths
-
-
 def resolve_project_db_path(project_databases_dir: Path, database_id: str | None) -> Path:
     """Resolve a database id to one validated project DB path."""
     db_paths = list_project_db_paths(project_databases_dir)
@@ -153,6 +143,16 @@ def _validate_at_least_one_project_db(project_databases_dir: Path) -> None:
         f'No project database found in {project_databases_dir}. '
         'Add a .db file or enable maintained bootstrap.'
     )
+
+
+def list_project_db_paths(project_databases_dir: Path) -> list[Path]:
+    """Return validated project DB files sorted by file name."""
+    db_paths = sorted(path for path in project_databases_dir.glob('*.db') if path.is_file())
+    validated_paths: list[Path] = []
+    for db_path in db_paths:
+        _validate_project_db(db_path)
+        validated_paths.append(db_path)
+    return validated_paths
 
 
 def _initialize_workspace_dirs(

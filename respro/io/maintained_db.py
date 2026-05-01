@@ -43,17 +43,6 @@ def fetch_database_metadata(db_name: str) -> dict:
     return _fetch_json(url, context=f'metadata for {db_name!r}')
 
 
-def list_output_files(db_name: str) -> list[dict]:
-    """
-    Return the file listing for a database's output/ folder.
-
-    :param db_name: folder name of the database
-    :return: list of dicts with at least ``name`` and ``download_url`` keys
-    """
-    url = f'{CLI_CONFIG.urls.github_respro_db_api}/{db_name}/output'
-    return _fetch_json(url, context=f'output listing for {db_name!r}')
-
-
 def download_database_files(db_name: str, dest_dir: Path) -> dict[str, object]:
     """
     Download all files needed to initialise a project database.
@@ -98,6 +87,17 @@ def download_database_files(db_name: str, dest_dir: Path) -> dict[str, object]:
         'formula_rules': formula_rules_path,
         'genbank': genbank_paths,
     }
+
+
+def list_output_files(db_name: str) -> list[dict]:
+    """
+    Return the file listing for a database's output/ folder.
+
+    :param db_name: folder name of the database
+    :return: list of dicts with at least ``name`` and ``download_url`` keys
+    """
+    url = f'{CLI_CONFIG.urls.github_respro_db_api}/{db_name}/output'
+    return _fetch_json(url, context=f'output listing for {db_name!r}')
 
 
 # ──────────────────────────────────────────────────────────────────────

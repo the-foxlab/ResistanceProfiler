@@ -22,38 +22,6 @@ from respro.db.models import (
 )
 
 
-def project_fingerprint(project_conn: sqlite3.Connection) -> str:
-    """
-    Return the stable UUID that identifies a project database.
-
-    The UUID is assigned once at project creation and never changes, so it
-    remains valid even after rules are added via ``respro init-add``.
-
-    :param project_conn: open project DB connection
-    :return: UUID string
-    """
-    row = project_conn.execute('SELECT uuid FROM project LIMIT 1').fetchone()
-    if row is None:
-        raise ValueError('No project found in the database')
-    return row['uuid']
-
-
-def project_updated_at(project_conn: sqlite3.Connection) -> str:
-    """
-    Return the last-updated timestamp of the project database.
-
-    Falls back to an empty string for older DBs that lack the column.
-
-    :param project_conn: open project DB connection
-    :return: ISO timestamp string or empty string
-    """
-    try:
-        row = project_conn.execute('SELECT updated_at FROM project LIMIT 1').fetchone()
-        return row['updated_at'] or '' if row else ''
-    except Exception:
-        return ''
-
-
 def save_run(
     results_conn: sqlite3.Connection,
     project_db_path: Path,
@@ -138,6 +106,38 @@ def save_run(
 
     results_conn.commit()
     return run_id
+
+
+def project_fingerprint(project_conn: sqlite3.Connection) -> str:
+    """
+    Return the stable UUID that identifies a project database.
+
+    The UUID is assigned once at project creation and never changes, so it
+    remains valid even after rules are added via ``respro init-add``.
+
+    :param project_conn: open project DB connection
+    :return: UUID string
+    """
+    row = project_conn.execute('SELECT uuid FROM project LIMIT 1').fetchone()
+    if row is None:
+        raise ValueError('No project found in the database')
+    return row['uuid']
+
+
+def project_updated_at(project_conn: sqlite3.Connection) -> str:
+    """
+    Return the last-updated timestamp of the project database.
+
+    Falls back to an empty string for older DBs that lack the column.
+
+    :param project_conn: open project DB connection
+    :return: ISO timestamp string or empty string
+    """
+    try:
+        row = project_conn.execute('SELECT updated_at FROM project LIMIT 1').fetchone()
+        return row['updated_at'] or '' if row else ''
+    except Exception:
+        return ''
 
 
 def list_runs(results_conn: sqlite3.Connection) -> list[dict]:

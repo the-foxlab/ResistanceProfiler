@@ -186,13 +186,6 @@ def _record_info_get(record: pysam.VariantRecord, key: str) -> object | None:
         return None
 
 
-def _normalize_to_str_sequence(value: object) -> list[str]:
-    """Normalize scalar or tuple-like values to a list of strings."""
-    if isinstance(value, (tuple, list)):
-        return [str(v) for v in value if v is not None]
-    return [str(value)]
-
-
 def _normalize_to_int_sequence(value: object) -> list[int]:
     """Normalize scalar or tuple-like values to a list of ints where possible."""
     values = _normalize_to_str_sequence(value)
@@ -202,6 +195,13 @@ def _normalize_to_int_sequence(value: object) -> list[int]:
         if parsed_int is not None:
             parsed.append(parsed_int)
     return parsed
+
+
+def _normalize_to_str_sequence(value: object) -> list[str]:
+    """Normalize scalar or tuple-like values to a list of strings."""
+    if isinstance(value, (tuple, list)):
+        return [str(v) for v in value if v is not None]
+    return [str(value)]
 
 
 def _to_int(value: object) -> int | None:

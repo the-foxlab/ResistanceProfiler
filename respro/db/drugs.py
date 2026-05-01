@@ -14,41 +14,6 @@ from respro.io.pubchem import lookup_drug
 logger = logging.getLogger(__name__)
 
 
-def _drug_badge_color(name: str) -> str:
-    """
-    Return a deterministic badge color for a normalized drug name.
-
-    The mapping is stable across runs and machines so repeated imports keep
-    consistent visual identity in generated reports.
-    """
-    digest = hashlib.sha1(name.encode('utf-8')).hexdigest()
-    hue = int(digest[0:2], 16) * 360 // 255
-    saturation = 58 + (int(digest[2:4], 16) % 21)  # 58..78
-    lightness = 38 + (int(digest[4:6], 16) % 14)   # 38..51
-
-    c = (1 - abs(2 * lightness / 100 - 1)) * (saturation / 100)
-    x = c * (1 - abs((hue / 60) % 2 - 1))
-    m = lightness / 100 - c / 2
-
-    if hue < 60:
-        r1, g1, b1 = c, x, 0
-    elif hue < 120:
-        r1, g1, b1 = x, c, 0
-    elif hue < 180:
-        r1, g1, b1 = 0, c, x
-    elif hue < 240:
-        r1, g1, b1 = 0, x, c
-    elif hue < 300:
-        r1, g1, b1 = x, 0, c
-    else:
-        r1, g1, b1 = c, 0, x
-
-    r = round((r1 + m) * 255)
-    g = round((g1 + m) * 255)
-    b = round((b1 + m) * 255)
-    return f'#{r:02x}{g:02x}{b:02x}'
-
-
 def _get_or_create_drug_id(
     conn: sqlite3.Connection,
     project_id: int,
@@ -200,4 +165,39 @@ def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
         logger.info('PubChem: added data for %r (CID %s)', drug_name, record.cid)
 
     logger.info('PubChem: added data for %d/%d queried drug(s)', info_added, len(drugs_to_query))
+
+
+def _drug_badge_color(name: str) -> str:
+    """
+    Return a deterministic badge color for a normalized drug name.
+
+    The mapping is stable across runs and machines so repeated imports keep
+    consistent visual identity in generated reports.
+    """
+    digest = hashlib.sha1(name.encode('utf-8')).hexdigest()
+    hue = int(digest[0:2], 16) * 360 // 255
+    saturation = 58 + (int(digest[2:4], 16) % 21)  # 58..78
+    lightness = 38 + (int(digest[4:6], 16) % 14)   # 38..51
+
+    c = (1 - abs(2 * lightness / 100 - 1)) * (saturation / 100)
+    x = c * (1 - abs((hue / 60) % 2 - 1))
+    m = lightness / 100 - c / 2
+
+    if hue < 60:
+        r1, g1, b1 = c, x, 0
+    elif hue < 120:
+        r1, g1, b1 = x, c, 0
+    elif hue < 180:
+        r1, g1, b1 = 0, c, x
+    elif hue < 240:
+        r1, g1, b1 = 0, x, c
+    elif hue < 300:
+        r1, g1, b1 = x, 0, c
+    else:
+        r1, g1, b1 = c, 0, x
+
+    r = round((r1 + m) * 255)
+    g = round((g1 + m) * 255)
+    b = round((b1 + m) * 255)
+    return f'#{r:02x}{g:02x}{b:02x}'
 

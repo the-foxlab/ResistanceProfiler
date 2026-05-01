@@ -24,6 +24,53 @@ from respro.utils.files import resolve_output_file
 from respro.utils.logging import err_console
 
 
+def _maintained_db_command(
+    list_mode: Annotated[
+        bool,
+        typer.Option(
+            '--list',
+            help='List available maintained databases and their metadata.',
+        ),
+    ] = False,
+    download: Annotated[
+        str | None,
+        typer.Option(
+            '--download',
+            help='Database name to download (use value from --list output).',
+            metavar='NAME',
+        ),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            '--output',
+            '-o',
+            help='Output SQLite database path (directory or file). Defaults to <database_name>.db.',
+        ),
+    ] = None,
+) -> None:
+    """
+    List maintained project databases or download one and initialize a local project DB.
+
+    These databases are stored in a companion repository and are monthly checked for maintainer updates and formatted to be respro compatible.
+    """
+    if list_mode and download:
+        raise click.ClickException('Use either --list or --download, not both.')
+    if not list_mode and not download:
+        raise click.ClickException('Provide either --list or --download NAME.')
+
+    if list_mode:
+        _list_command()
+        return
+
+    db_output = (
+        resolve_output_file(output, f'{download}.db')
+        if output is not None
+        else Path(f'{download}.db')
+    )
+    _download_command(database_name=str(download), db_path=db_output)
+
+
 def _list_command() -> None:
     """List all databases available in the respro companion repository."""
     console = Console(highlight=False)
@@ -119,53 +166,6 @@ def _download_command(
             raise click.ClickException(str(exc)) from exc
 
     console.print(f'[green]✓[/green] Database initialised: [cyan]{db_path}[/cyan]')
-
-
-def _maintained_db_command(
-    list_mode: Annotated[
-        bool,
-        typer.Option(
-            '--list',
-            help='List available maintained databases and their metadata.',
-        ),
-    ] = False,
-    download: Annotated[
-        str | None,
-        typer.Option(
-            '--download',
-            help='Database name to download (use value from --list output).',
-            metavar='NAME',
-        ),
-    ] = None,
-    output: Annotated[
-        Path | None,
-        typer.Option(
-            '--output',
-            '-o',
-            help='Output SQLite database path (directory or file). Defaults to <database_name>.db.',
-        ),
-    ] = None,
-) -> None:
-    """
-    List maintained project databases or download one and initialize a local project DB.
-
-    These databases are stored in a companion repository and are monthly checked for maintainer updates and formatted to be respro compatible.
-    """
-    if list_mode and download:
-        raise click.ClickException('Use either --list or --download, not both.')
-    if not list_mode and not download:
-        raise click.ClickException('Provide either --list or --download NAME.')
-
-    if list_mode:
-        _list_command()
-        return
-
-    db_output = (
-        resolve_output_file(output, f'{download}.db')
-        if output is not None
-        else Path(f'{download}.db')
-    )
-    _download_command(database_name=str(download), db_path=db_output)
 
 
 def register(app: typer.Typer) -> None:

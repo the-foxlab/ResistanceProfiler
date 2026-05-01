@@ -238,11 +238,6 @@ def _transform_allele(allele: str, need_comp: bool) -> str:
     return anchor + payload
 
 
-def _is_indel(ref: str, alt: str) -> bool:
-    """Return True when the VCF allele pair represents an insertion or deletion."""
-    return len(ref) != 1 or len(alt) != 1
-
-
 def _map_variant_anchor_cds_pos(
     var: VariantCall,
     query_to_cds: dict[int, int],
@@ -269,6 +264,11 @@ def _map_variant_anchor_cds_pos(
     if mapped < 0:
         return None
     return mapped
+
+
+def _is_indel(ref: str, alt: str) -> bool:
+    """Return True when the VCF allele pair represents an insertion or deletion."""
+    return len(ref) != 1 or len(alt) != 1
 
 
 def _remap_reverse_indel_alleles(

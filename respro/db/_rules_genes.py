@@ -31,41 +31,6 @@ def _resolve_rule_gene_id(candidates: list[sqlite3.Row], reference_identifier: s
     return None
 
 
-def _get_gene_aa_sequence(
-    candidates: list[sqlite3.Row],
-    reference_identifier: str,
-) -> str:
-    """
-    Return the aa_sequence for the best-matching gene candidate.
-
-    If a reference_identifier is given, match it; otherwise use the only
-    candidate if unambiguous.
-
-    :param candidates: list of gene rows from the DB
-    :param reference_identifier: optional reference identifier from the rules row
-    :return: amino acid sequence string or empty string if ambiguous/unavailable
-    """
-    narrowed = _narrow_gene_lookup_candidates(candidates)
-    if reference_identifier:
-        for c in narrowed:
-            if reference_identifier in {c['reference_name'], c['reference_accession']}:
-                return c['aa_sequence'] or ''
-    if len(narrowed) == 1:
-        return narrowed[0]['aa_sequence'] or ''
-    return ''
-
-
-def _narrow_gene_lookup_candidates(candidates: list[sqlite3.Row]) -> list[sqlite3.Row]:
-    """Prefer canonical gene-name matches before alias matches when both are present."""
-    if not candidates:
-        return []
-
-    canonical = [candidate for candidate in candidates if int(candidate['alias_rank']) == 0]
-    if canonical:
-        return canonical
-    return candidates
-
-
 def _detect_coordinate_base(
     rows: list[dict],
     genes_by_name: dict[str, list[sqlite3.Row]],
@@ -217,3 +182,38 @@ def _validate_reference_amino_acids(
         )
 
     return mismatch_keys
+
+
+def _get_gene_aa_sequence(
+    candidates: list[sqlite3.Row],
+    reference_identifier: str,
+) -> str:
+    """
+    Return the aa_sequence for the best-matching gene candidate.
+
+    If a reference_identifier is given, match it; otherwise use the only
+    candidate if unambiguous.
+
+    :param candidates: list of gene rows from the DB
+    :param reference_identifier: optional reference identifier from the rules row
+    :return: amino acid sequence string or empty string if ambiguous/unavailable
+    """
+    narrowed = _narrow_gene_lookup_candidates(candidates)
+    if reference_identifier:
+        for c in narrowed:
+            if reference_identifier in {c['reference_name'], c['reference_accession']}:
+                return c['aa_sequence'] or ''
+    if len(narrowed) == 1:
+        return narrowed[0]['aa_sequence'] or ''
+    return ''
+
+
+def _narrow_gene_lookup_candidates(candidates: list[sqlite3.Row]) -> list[sqlite3.Row]:
+    """Prefer canonical gene-name matches before alias matches when both are present."""
+    if not candidates:
+        return []
+
+    canonical = [candidate for candidate in candidates if int(candidate['alias_rank']) == 0]
+    if canonical:
+        return canonical
+    return candidates

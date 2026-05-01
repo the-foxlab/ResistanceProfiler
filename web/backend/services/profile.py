@@ -23,14 +23,6 @@ from respro.io.vcf import parse_vcf
 from respro.report.html import export_results
 
 
-def _build_web_output_html_path(*, output_dir: Path, result: ProfilingResult) -> Path:
-    """Return a unique HTML report path so session history keeps every run."""
-    raw_stem = Path(result.vcf_name).stem.strip() or 'profile'
-    safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', raw_stem) or 'profile'
-    run_stamp = datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')
-    return output_dir / f'{safe_stem}.{run_stamp}.report.html'
-
-
 def profile_fasta(
     *,
     project_db: Path,
@@ -234,6 +226,14 @@ def profile_vcf(
         }
     finally:
         project_conn.close()
+
+
+def _build_web_output_html_path(*, output_dir: Path, result: ProfilingResult) -> Path:
+    """Return a unique HTML report path so session history keeps every run."""
+    raw_stem = Path(result.vcf_name).stem.strip() or 'profile'
+    safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', raw_stem) or 'profile'
+    run_stamp = datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')
+    return output_dir / f'{safe_stem}.{run_stamp}.report.html'
 
 
 def _build_result(

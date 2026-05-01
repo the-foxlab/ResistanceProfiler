@@ -41,6 +41,11 @@ _AA_SEQ = 'MKAFGP'
 _AA_SEQ_TIE = 'MMKAFG'
 
 
+def _genes(gene_name: str, aa_seq: str, **kwargs) -> dict[str, list[dict]]:
+    """Convenience wrapper — single-gene lookup dict."""
+    return {gene_name: [_gene_row(gene_name, aa_seq, **kwargs)]}
+
+
 def _gene_row(
     gene_name: str,
     aa_sequence: str,
@@ -58,11 +63,6 @@ def _gene_row(
         'reference_accession': reference_accession,
         'alias_rank': alias_rank,
     }
-
-
-def _genes(gene_name: str, aa_seq: str, **kwargs) -> dict[str, list[dict]]:
-    """Convenience wrapper — single-gene lookup dict."""
-    return {gene_name: [_gene_row(gene_name, aa_seq, **kwargs)]}
 
 
 def _rule(

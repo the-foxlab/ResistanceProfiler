@@ -29,6 +29,72 @@ from respro.db.schema import open_project_db, open_results_db
 from respro.utils.logging import err_console
 
 
+def sync_results_database(
+    *,
+    results_db_path: Path,
+    project_db_path: Path,
+) -> None:
+    """
+    Re-annotate a stored run in a local database against the current project database and update stored results.
+
+    Loads raw variant calls from the results database, re-runs annotation and rule matching
+    against the live project DB, replaces stored variant_result and formula-hit rows, and
+    updates resistance_hits and formula_hits counters. Requires a project fingerprint match.
+    This is useful if the project database has been updated with new rules since the original run.
+
+    All runs in the results database are attempted; runs with a fingerprint mismatch
+    are skipped and reported.
+    """
+    logger = logging.getLogger('respro')
+    console = Console(highlight=False)
+    results_conn = None
+    project_conn = None
+
+    try:
+        results_conn = open_results_db(results_db_path)
+        project_conn = open_project_db(project_db_path)
+
+        runs = list_runs(results_conn)
+        if not runs:
+            console.print('No stored results found.')
+            return
+        run_ids = [int(run['id']) for run in runs]
+
+        synced = 0
+        skipped = 0
+        for current_run_id in run_ids:
+            try:
+                hits, formula_hits = _sync_single_run(
+                    run_id=current_run_id,
+                    project_path=project_db_path,
+                    project_conn=project_conn,
+                    results_conn=results_conn,
+                    logger=logger,
+                )
+                synced += 1
+                console.print(
+                    f'[green]✓[/green] Run #{current_run_id} synced '
+                    f'({hits} hit(s), {formula_hits} formula rule hit(s)).'
+                )
+            except click.ClickException as exc:
+                skipped += 1
+                console.print(f'[yellow]![/yellow] Skipped run #{current_run_id}: {exc}')
+
+        console.print(Panel(
+            f'Synced: {synced} run(s)\nSkipped: {skipped} run(s)',
+            title='[green]✓ Sync complete[/green]',
+            border_style='green',
+        ))
+
+    except (FileNotFoundError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    finally:
+        if results_conn is not None:
+            results_conn.close()
+        if project_conn is not None:
+            project_conn.close()
+
+
 def _sync_single_run(
     *,
     run_id: int,
@@ -170,72 +236,6 @@ def _sync_single_run(
     )
     results_conn.commit()
     return result.resistance_hits, len(result.formula_hits)
-
-
-def sync_results_database(
-    *,
-    results_db_path: Path,
-    project_db_path: Path,
-) -> None:
-    """
-    Re-annotate a stored run in a local database against the current project database and update stored results.
-
-    Loads raw variant calls from the results database, re-runs annotation and rule matching
-    against the live project DB, replaces stored variant_result and formula-hit rows, and
-    updates resistance_hits and formula_hits counters. Requires a project fingerprint match.
-    This is useful if the project database has been updated with new rules since the original run.
-
-    All runs in the results database are attempted; runs with a fingerprint mismatch
-    are skipped and reported.
-    """
-    logger = logging.getLogger('respro')
-    console = Console(highlight=False)
-    results_conn = None
-    project_conn = None
-
-    try:
-        results_conn = open_results_db(results_db_path)
-        project_conn = open_project_db(project_db_path)
-
-        runs = list_runs(results_conn)
-        if not runs:
-            console.print('No stored results found.')
-            return
-        run_ids = [int(run['id']) for run in runs]
-
-        synced = 0
-        skipped = 0
-        for current_run_id in run_ids:
-            try:
-                hits, formula_hits = _sync_single_run(
-                    run_id=current_run_id,
-                    project_path=project_db_path,
-                    project_conn=project_conn,
-                    results_conn=results_conn,
-                    logger=logger,
-                )
-                synced += 1
-                console.print(
-                    f'[green]✓[/green] Run #{current_run_id} synced '
-                    f'({hits} hit(s), {formula_hits} formula rule hit(s)).'
-                )
-            except click.ClickException as exc:
-                skipped += 1
-                console.print(f'[yellow]![/yellow] Skipped run #{current_run_id}: {exc}')
-
-        console.print(Panel(
-            f'Synced: {synced} run(s)\nSkipped: {skipped} run(s)',
-            title='[green]✓ Sync complete[/green]',
-            border_style='green',
-        ))
-
-    except (FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
-    finally:
-        if results_conn is not None:
-            results_conn.close()
-        if project_conn is not None:
-            project_conn.close()
 
 
 def register(app: object) -> None:

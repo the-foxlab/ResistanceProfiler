@@ -114,65 +114,6 @@ def _normalize_rule_alleles_for_storage(
     return anchor_pos_0based, left, right
 
 
-def _split_anchor_changed_indel_token(
-    mutation_raw: str,
-) -> tuple[str, str, str, str] | None:
-    """
-    Split mixed anchor-change indel rewrite tokens into two events.
-
-    Examples:
-    - ``GY50A`` -> ``G50A`` + ``GY50G``
-    - ``G50AW`` -> ``G50A`` + ``G50GW``
-
-    Returns tuple ``(sub_ref, sub_mut, indel_ref, indel_mut)`` using canonical
-    storage alleles (reference/mutation columns), or ``None`` when the token is
-    not a mixed anchor-change indel.
-    """
-    lowered = mutation_raw.lower()
-    if (
-        lowered.endswith('del')
-        or 'ins' in lowered
-        or 'frameshift' in lowered
-        or 'stop' in lowered
-    ):
-        return None
-
-    match = _RE_REWRITE_TOKEN.fullmatch(mutation_raw.upper())
-    if match is None:
-        return None
-
-    left, _, right = match.groups()
-    if (
-        right.startswith('DEL')
-        or right.startswith('INS')
-        or right.startswith('FS')
-        or right.startswith('STOP')
-    ):
-        return None
-
-    if len(left) == len(right):
-        return None
-    if left[0] == right[0]:
-        return None
-
-    left_tail = left[1:]
-    right_tail = right[1:]
-
-    # Simple insertion/deletion around a changed anchor: after removing the
-    # first AA, one side must be a strict prefix extension of the other.
-    if not (
-        (right_tail.startswith(left_tail) and len(right_tail) > len(left_tail))
-        or (left_tail.startswith(right_tail) and len(left_tail) > len(right_tail))
-    ):
-        return None
-
-    sub_ref = left[0]
-    sub_mut = right[0]
-    indel_ref = left
-    indel_mut = left[0] + right_tail
-    return sub_ref, sub_mut, indel_ref, indel_mut
-
-
 def _expand_anchor_changed_indel_rules(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     """
     Expand mixed anchor-change indel rows into explicit two-member grouped rows.
@@ -248,6 +189,65 @@ def _expand_anchor_changed_indel_rules(rows: list[dict[str, str]]) -> list[dict[
         )
 
     return expanded_rows
+
+
+def _split_anchor_changed_indel_token(
+    mutation_raw: str,
+) -> tuple[str, str, str, str] | None:
+    """
+    Split mixed anchor-change indel rewrite tokens into two events.
+
+    Examples:
+    - ``GY50A`` -> ``G50A`` + ``GY50G``
+    - ``G50AW`` -> ``G50A`` + ``G50GW``
+
+    Returns tuple ``(sub_ref, sub_mut, indel_ref, indel_mut)`` using canonical
+    storage alleles (reference/mutation columns), or ``None`` when the token is
+    not a mixed anchor-change indel.
+    """
+    lowered = mutation_raw.lower()
+    if (
+        lowered.endswith('del')
+        or 'ins' in lowered
+        or 'frameshift' in lowered
+        or 'stop' in lowered
+    ):
+        return None
+
+    match = _RE_REWRITE_TOKEN.fullmatch(mutation_raw.upper())
+    if match is None:
+        return None
+
+    left, _, right = match.groups()
+    if (
+        right.startswith('DEL')
+        or right.startswith('INS')
+        or right.startswith('FS')
+        or right.startswith('STOP')
+    ):
+        return None
+
+    if len(left) == len(right):
+        return None
+    if left[0] == right[0]:
+        return None
+
+    left_tail = left[1:]
+    right_tail = right[1:]
+
+    # Simple insertion/deletion around a changed anchor: after removing the
+    # first AA, one side must be a strict prefix extension of the other.
+    if not (
+        (right_tail.startswith(left_tail) and len(right_tail) > len(left_tail))
+        or (left_tail.startswith(right_tail) and len(left_tail) > len(right_tail))
+    ):
+        return None
+
+    sub_ref = left[0]
+    sub_mut = right[0]
+    indel_ref = left
+    indel_mut = left[0] + right_tail
+    return sub_ref, sub_mut, indel_ref, indel_mut
 
 
 def _resolve_anchorless_deletion(

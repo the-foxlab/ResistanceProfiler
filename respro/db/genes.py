@@ -22,6 +22,53 @@ _RE_NCBI_PROTEIN_ACCESSION = re.compile(
 )
 
 
+def _load_genbank_records(
+    conn: sqlite3.Connection,
+    project_id: int,
+    records: list[ParsedGenBankReference],
+) -> None:
+    """
+    Load references and CDS/gene annotations from parsed GenBank records.
+
+    :param conn: SQLite database connection
+    :param project_id: ID of the project
+    :param records: list of ParsedGenBankReference objects
+    """
+    inserted_refs = 0
+    reused_refs = 0
+    inserted_genes = 0
+    reused_genes = 0
+    ncbi_protein_url_cache: dict[str, str] = {}
+
+    for record in records:
+        reference_id, created_ref = _get_or_create_reference_id(conn, project_id, record)
+        if created_ref:
+            inserted_refs += 1
+        else:
+            reused_refs += 1
+
+        for gene in record.genes:
+            gene_id, created_gene = _get_or_create_gene(
+                conn,
+                reference_id,
+                gene,
+                ncbi_protein_url_cache=ncbi_protein_url_cache,
+            )
+            _upsert_gene_segments(conn, gene_id, gene.segments)
+            if created_gene:
+                inserted_genes += 1
+            else:
+                reused_genes += 1
+
+    logger.info(
+        'Loaded GenBank data: references +%d (reused %d), genes +%d (reused %d)',
+        inserted_refs,
+        reused_refs,
+        inserted_genes,
+        reused_genes,
+    )
+
+
 def _is_ncbi_protein_accession(value: str) -> bool:
     """Return True for common NCBI protein accession formats with version suffix."""
     token = value.strip().upper()
@@ -215,50 +262,4 @@ def _upsert_gene_segments(
             'refusing to append incompatible data'
         )
 
-
-def _load_genbank_records(
-    conn: sqlite3.Connection,
-    project_id: int,
-    records: list[ParsedGenBankReference],
-) -> None:
-    """
-    Load references and CDS/gene annotations from parsed GenBank records.
-
-    :param conn: SQLite database connection
-    :param project_id: ID of the project
-    :param records: list of ParsedGenBankReference objects
-    """
-    inserted_refs = 0
-    reused_refs = 0
-    inserted_genes = 0
-    reused_genes = 0
-    ncbi_protein_url_cache: dict[str, str] = {}
-
-    for record in records:
-        reference_id, created_ref = _get_or_create_reference_id(conn, project_id, record)
-        if created_ref:
-            inserted_refs += 1
-        else:
-            reused_refs += 1
-
-        for gene in record.genes:
-            gene_id, created_gene = _get_or_create_gene(
-                conn,
-                reference_id,
-                gene,
-                ncbi_protein_url_cache=ncbi_protein_url_cache,
-            )
-            _upsert_gene_segments(conn, gene_id, gene.segments)
-            if created_gene:
-                inserted_genes += 1
-            else:
-                reused_genes += 1
-
-    logger.info(
-        'Loaded GenBank data: references +%d (reused %d), genes +%d (reused %d)',
-        inserted_refs,
-        reused_refs,
-        inserted_genes,
-        reused_genes,
-    )
 
