@@ -14,7 +14,7 @@ from jinja2 import BaseLoader, Environment
 
 try:
     from weasyprint import HTML
-except Exception:
+except ImportError:
     HTML = None
 
 from respro import __version__
@@ -329,6 +329,15 @@ def write_pdf(
 def _build_pdf_mutation_entries(result: ProfilingResult, report_context: dict) -> list[dict]:
     """Build grouped mutation cards for non-synonymous annotations."""
     bibliography_lookup = _build_pdf_bibliography_lookup(report_context.get('bibliography', []))
+    potential_rows_by_key: dict[tuple[str, int, str], list[dict]] = {}
+    for potential_row in report_context.get('potential_rows', []):
+        key = (
+            potential_row.get('gene', ''),
+            int(potential_row.get('codon_pos', -1) or -1),
+            potential_row.get('observed_change', ''),
+        )
+        potential_rows_by_key.setdefault(key, []).append(potential_row)
+
     rows: list[tuple[str, int, int, dict]] = []
     for ann in result.annotations:
         if ann.consequence == 'synonymous':
@@ -339,8 +348,9 @@ def _build_pdf_mutation_entries(result: ProfilingResult, report_context: dict) -
         if ann.ref_aa and ann.alt_aa:
             aa_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
         nt_change = f'{variant.ref}{variant.pos + 1}{variant.alt}'
-        hits = [
-            {
+        hits = []
+        for rule in ann.non_formula_component_rule_matches:
+            hits.append({
                 'drug': rule.drug_name,
                 'phenotype': rule.phenotype,
                 'clinical_phenotype': rule.clinical_phenotype,
@@ -349,17 +359,35 @@ def _build_pdf_mutation_entries(result: ProfilingResult, report_context: dict) -
                 'source': rule.source,
                 'citation_numbers': _collect_pdf_rule_citations(rule, bibliography_lookup),
                 'phenotype_badge_class': _phenotype_badge_class(rule.phenotype),
-            }
-            for rule in ann.non_formula_component_rule_matches
-        ]
+            })
+
+        similarity_hits: list[dict] = []
+        if not hits:
+            key = (gene_name, ann.codon_pos if ann.codon_pos is not None else -1, aa_change)
+            for potential_row in potential_rows_by_key.get(key, []):
+                similarity = str(potential_row.get('similarity', '') or '')
+                similarity_hits.append({
+                    'drug': str(potential_row.get('drug', '') or ''),
+                    'rule_change': str(potential_row.get('rule_change', '') or ''),
+                    'similarity': similarity,
+                    'similarity_badge_class': _similarity_badge_class(similarity),
+                    'phenotype': str(potential_row.get('phenotype', '') or ''),
+                    'phenotype_badge_class': _phenotype_badge_class(
+                        str(potential_row.get('phenotype', '') or ''),
+                    ),
+                    'citation_numbers': list(potential_row.get('pub_citations', [])),
+                })
+
         codon_pos = ann.codon_pos if ann.codon_pos is not None else -1
         row = {
             'consequence': ann.consequence or 'unknown',
+            'effect_badge_class': _effect_badge_class(ann.consequence),
             'aa_change': aa_change,
             'nt_change': nt_change,
             'allele_freq': variant.allele_freq,
             'af_bin': ann.af_bin or 'unknown',
             'db_hits': hits,
+            'similarity_hits': similarity_hits,
         }
         rows.append((gene_name, codon_pos, variant.pos, row))
 
@@ -387,6 +415,30 @@ def _phenotype_badge_class(phenotype: str) -> str:
         return 'badge-sensitive'
     if normalized == 'contradictory':
         return 'badge-contradictory'
+    return 'badge-unknown'
+
+
+def _effect_badge_class(consequence: str) -> str:
+    """Map a consequence value to a PDF badge CSS class."""
+    normalized = (consequence or '').strip().lower()
+    if normalized == 'missense':
+        return 'badge-missense'
+    if normalized == 'frameshift':
+        return 'badge-frameshift'
+    if normalized in {'insertion', 'deletion', 'inframe_complex'}:
+        return 'badge-indel'
+    return 'badge-unknown'
+
+
+def _similarity_badge_class(similarity: str) -> str:
+    """Map a similarity label to a PDF badge CSS class."""
+    normalized = (similarity or '').strip().lower()
+    if normalized == 'high':
+        return 'badge-sim-high'
+    if normalized == 'moderate':
+        return 'badge-sim-moderate'
+    if normalized == 'low':
+        return 'badge-sim-low'
     return 'badge-unknown'
 
 

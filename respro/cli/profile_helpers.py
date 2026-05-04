@@ -27,6 +27,21 @@ from respro.report.non_html_exports import export_results
 from respro.utils.files import resolve_output_file
 
 
+def _parse_export_formats(export_values: list[str] | None) -> set[str] | None:
+    """Normalize and validate repeated ``--export`` values."""
+    if export_values is None:
+        return None
+
+    normalized_formats: set[str] = set()
+    for export_value in export_values:
+        normalized_value = export_value.strip().lower()
+        if normalized_value not in ('json', 'tabular', 'pdf'):
+            raise click.ClickException('Invalid --export value. Choose one of: json, tabular, pdf.')
+        normalized_formats.add(normalized_value)
+
+    return normalized_formats if normalized_formats else None
+
+
 def _init_results_db_connection(
     results_db: str | None,
     project_conn: sqlite3.Connection,
@@ -150,7 +165,7 @@ def _finalize_and_export(
     coverage_gaps: list[CoverageGap] | None = None,
     query_sequence: str = '',
     gene_matches: list[GeneMatch] | None = None,
-    extra_export_format: str | None = None,
+    extra_export_formats: set[str] | None = None,
 ) -> tuple[ProfilingResult, dict]:
     """
     Apply rule matching and AF binning, build the result object, export, and optionally persist.
@@ -176,7 +191,7 @@ def _finalize_and_export(
     :param coverage_gaps: optional list of non-covered codon positions (FASTA mode)
     :param query_sequence: query FASTA sequence used during profiling
     :param gene_matches: gene alignment matches used during profiling
-    :param extra_export_format: optional additional output format ('json', 'tabular', or 'pdf')
+    :param extra_export_formats: optional additional output formats ('json', 'tabular', 'pdf')
     :return: (ProfilingResult, export path dict)
     """
     annotations = match_rules(annotations, rules)
@@ -206,8 +221,6 @@ def _finalize_and_export(
         gene_matches=gene_matches or [],
     )
 
-    requested_export_formats = {extra_export_format} if extra_export_format else set()
-
     raw_stem = Path(input_basename).stem.strip() or 'profile'
     safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', raw_stem) or 'profile'
     html_output_path = resolve_output_file(output_target, f'{safe_stem}.report.html')
@@ -219,7 +232,7 @@ def _finalize_and_export(
         rule_gene_names=rule_gene_names,
         project_conn=project_conn,
         rules=rules,
-        extra_export_formats=requested_export_formats if requested_export_formats else None,
+        extra_export_formats=extra_export_formats,
         project_db_path=project_path.resolve(),
         output_html_path=html_output_path,
     )

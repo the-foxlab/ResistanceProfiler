@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>ResistanceProfiler Report (v{{ version }})</title>
+  <title>ResistanceProfiler Report (v{{ version }}){% if summary.organism %} - {{ summary.organism }}{% endif %}</title>
   <style>{{ css }}</style>
 </head>
 <body>
   <header class="report-header">
-    <h1>ResistanceProfiler Report (v{{ version }})</h1>
+    <h1>ResistanceProfiler Report (v{{ version }}){% if summary.organism %} - {{ summary.organism }}{% endif %}</h1>
     <div class="meta-grid">
       <div><span class="label">Project Database:</span> {{ summary.project_name or '-' }}</div>
       <div><span class="label">Reference:</span> {{ summary.reference or '-' }}</div>
@@ -17,7 +17,7 @@
   </header>
 
   <section>
-    <h2 class="section-band">Interpretation summary</h2>
+    <h2 class="section-band-top">Interpretation summary</h2>
     <p class="summary-text">{{ summary_text_en }}</p>
     {% if plot_data %}
     <div class="plot-container">
@@ -37,32 +37,54 @@
         <li class="mutation-item">
           <p class="mutation-line">
             {% if item.aa_change %}
-            <span class="field">AA:</span> {{ item.aa_change }}
+            <span class="field">Mutation:</span> <strong>{{ item.aa_change }}</strong>
             |
             {% endif %}
-            <span class="field">Effect:</span> {{ item.consequence }}
+            <span class="badge badge-effect {{ item.effect_badge_class }}">{{ item.consequence }}</span>
             |
-            <span class="field">NT:</span> {{ item.nt_change }}
-            <span class="field">AF:</span> {{ '%.4f'|format(item.allele_freq) }} ({{ item.af_bin }})
+            <span class="field">Nucleotide change:</span> {{ item.nt_change }}
+            |
+            <span class="field">Frequency:</span> {{ '%.2f'|format(item.allele_freq) }} ({{ item.af_bin }})
           </p>
           <div class="db-hits">
             <div class="field">Database hits:</div>
             {% if item.db_hits %}
             <ul>
               {% for hit in item.db_hits %}
-              <li>
-                <strong>{{ hit.drug }}</strong>
+              <li class="hit-row">
+                <span class="hit-drug"><strong>{{ hit.drug }}</strong></span>
+                <span class="hit-detail">
                 <span class="badge {{ hit.phenotype_badge_class }}">{{ hit.phenotype }}</span>
                 {% if hit.clinical_phenotype and hit.clinical_phenotype != 'unknown' %}
                 | clinical: {{ hit.clinical_phenotype }}
                 {% endif %}
                 {% if hit.ic50 %} | IC<sub>50</sub>: {{ hit.ic50 }}{% endif %}
                 {% if hit.fold_ic50 %} | Fold-IC50: {{ hit.fold_ic50 }}{% endif %}
-                {% if hit.source %} | source: {{ hit.source }}{% endif %}
                 {% if hit.citation_numbers %}
                 | refs:
                 {% for citation_num in hit.citation_numbers %}[{{ citation_num }}]{% if not loop.last %}, {% endif %}{% endfor %}
                 {% endif %}
+                </span>
+              </li>
+              {% endfor %}
+            </ul>
+            {% elif item.similarity_hits %}
+            <div class="field">Similarity to database hits:</div>
+            <ul>
+              {% for hit in item.similarity_hits %}
+              <li class="hit-row">
+                <span class="hit-drug"><strong>{{ hit.drug }}</strong></span>
+                <span class="hit-detail">
+                {% if hit.rule_change %}rule: {{ hit.rule_change }} | {% endif %}
+                similarity: <span class="badge {{ hit.similarity_badge_class }}">{{ hit.similarity }}</span>
+                {% if hit.phenotype %}
+                | phenotype: <span class="badge {{ hit.phenotype_badge_class }}">{{ hit.phenotype }}</span>
+                {% endif %}
+                {% if hit.citation_numbers %}
+                | refs:
+                {% for citation_num in hit.citation_numbers %}[{{ citation_num }}]{% if not loop.last %}, {% endif %}{% endfor %}
+                {% endif %}
+                </span>
               </li>
               {% endfor %}
             </ul>
@@ -95,6 +117,6 @@
     <p>No citations linked to detected mutations.</p>
     {% endif %}
   </section>
-
+  
 </body>
 </html>

@@ -73,7 +73,8 @@ respro fasta \
     --fasta my_consensus_sequence.fasta \
     --output my_output \
     --results-db my_results.db \
-    --export json
+    --export json \
+    --export tabular
 ```
 
 Or from vcf files:
@@ -85,7 +86,8 @@ respro vcf \
     --ref-fasta my_vcf_ref.fasta \
     --output my_output \
     --results-db my_results.db \
-    --export json
+    --export json \
+    --export tabular
 ```
 
 ### 4) Regenerate from stored run

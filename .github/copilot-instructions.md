@@ -150,6 +150,8 @@ a collection.
 - Do not add fallback code paths for missing data — require the data to be present
   and fail fast if it is not. Compatibility shims and graceful degradation add
   hidden complexity and mask bugs during build-out.
+- Do not use silent exception handlers. Every `except` block must either re-raise,
+  raise a domain-specific error, or log the failure explicitly.
 - Keep changes small, local, and reviewable.
 - Avoid unrelated refactors in the same change.
 - Preserve existing public APIs unless the task clearly requires a change.

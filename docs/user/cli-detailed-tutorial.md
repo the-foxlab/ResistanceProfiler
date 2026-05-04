@@ -79,7 +79,8 @@ respro fasta \
   --fasta my_consensus_sequence.fasta \
   --output my_output \
   --results-db my_results.db \
-  --export json
+  --export json \
+  --export tabular
 ```
 
 ## 5. Profile VCF input (`respro vcf`)
@@ -93,7 +94,8 @@ respro vcf \
   --results-db my_results.db \
   --min-af 0.01 \
   --min-depth 0 \
-  --export json
+  --export json \
+  --export tabular
 ```
 
 ## 6. Inspect project metadata and curated rules (`respro manage database`)

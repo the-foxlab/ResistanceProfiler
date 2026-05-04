@@ -49,9 +49,6 @@ def _normalize_rule_alleles_for_storage(
     """
     Normalize one rule row to canonical DB storage columns.
 
-    Supports both legacy rewrite notation (e.g. ``Y4YDDD``, ``YP4Y``) and
-    the new spaltenorientierte representation (e.g. ``reference='YP', mutation='Y'``).
-
     :param reference_aa: value from TSV reference column
     :param mutation_raw: value from TSV mutation column
     :param position_0based: row position converted to 0-based

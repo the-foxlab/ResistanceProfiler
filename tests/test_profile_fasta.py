@@ -1001,6 +1001,30 @@ class TestFastaConsensusCli:
         json_path = output_dir / f'{fasta_path.stem}.results.json'
         assert json_path.exists()
 
+    def test_fasta_consensus_writes_repeated_export_formats(
+        self, fasta_db: Path, tmp_path: Path,
+    ) -> None:
+        fasta_path = tmp_path / 'identical_multi_export.fasta'
+        fasta_path.write_text(f'>identical\n{TINY_REF_SEQ}\n')
+
+        output_dir = tmp_path / 'out_multi_export'
+        result = CliRunner().invoke(app, [
+            'fasta',
+            '--project', str(fasta_db),
+            '--fasta', str(fasta_path),
+            '--output', str(output_dir),
+            '--export', 'json',
+            '--export', 'tabular',
+        ])
+
+        assert result.exit_code == 0, result.output
+        html_path = output_dir / f'{fasta_path.stem}.report.html'
+        json_path = output_dir / f'{fasta_path.stem}.results.json'
+        tsv_path = output_dir / f'{fasta_path.stem}.mutations.tsv'
+        assert html_path.exists()
+        assert json_path.exists()
+        assert tsv_path.exists()
+
 
 # ──────────────────────────────────────────────────────────────────────
 # FASTA alignment: insertion annotation

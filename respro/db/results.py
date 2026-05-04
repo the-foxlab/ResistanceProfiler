@@ -136,8 +136,10 @@ def project_updated_at(project_conn: sqlite3.Connection) -> str:
     try:
         row = project_conn.execute('SELECT updated_at FROM project LIMIT 1').fetchone()
         return row['updated_at'] or '' if row else ''
-    except Exception:
-        return ''
+    except sqlite3.OperationalError as exc:
+        if 'no such column: updated_at' in str(exc).lower():
+            return ''
+        raise
 
 
 def list_runs(results_conn: sqlite3.Connection) -> list[dict]:

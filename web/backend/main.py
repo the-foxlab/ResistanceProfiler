@@ -541,11 +541,14 @@ def _is_redis_connected() -> bool:
     try:
         client = redis.Redis.from_url(redis_url)
         return bool(client.ping())
-    except redis.RedisError:
+    except redis.RedisError as exc:
+        logger.debug('Readiness check: Redis ping failed for %s: %s', redis_url, exc)
         return False
-    except OSError:
+    except OSError as exc:
+        logger.debug('Readiness check: Redis connection failed for %s: %s', redis_url, exc)
         return False
-    except RuntimeError:
+    except RuntimeError as exc:
+        logger.debug('Readiness check: Redis runtime error for %s: %s', redis_url, exc)
         return False
 
 
@@ -553,7 +556,12 @@ def _project_database_catalog_readiness(project_databases_dir: Path) -> tuple[bo
     """Validate project database catalog readiness and return ready/count diagnostics."""
     try:
         db_paths = list_project_db_paths(project_databases_dir)
-    except (FileNotFoundError, OSError, ValueError):
+    except (FileNotFoundError, OSError, ValueError) as exc:
+        logger.debug(
+            'Readiness check: project database catalog unavailable in %s: %s',
+            project_databases_dir,
+            exc,
+        )
         return False, 0
     return bool(db_paths), len(db_paths)
 

@@ -426,7 +426,8 @@ def _load_drug_badge_colours(
         rows = project_conn.execute(
             'SELECT name, badge_color FROM drug ORDER BY name'
         ).fetchall()
-    except Exception:
+    except sqlite3.Error as exc:
+        logger.debug('Failed to load drug badge colours from project DB: %s', exc)
         return {}
 
     colours: dict[str, str] = {}
@@ -699,7 +700,8 @@ def _load_drug_cards(
             'SELECT name, badge_color, pubchem_cid, pubchem_url, description, structure_url '
             'FROM drug ORDER BY name'
         ).fetchall()
-    except Exception:
+    except sqlite3.Error as exc:
+        logger.debug('Failed to load drug cards from project DB: %s', exc)
         return []
 
     cards: list[dict] = []
@@ -745,7 +747,8 @@ def _load_gene_cards(
             'ORDER BY g.start',
             (reference_name,),
         ).fetchall()
-    except Exception:
+    except sqlite3.Error as exc:
+        logger.debug('Failed to load gene cards from project DB for %r: %s', reference_name, exc)
         return []
 
     cards: list[dict] = []
@@ -1010,7 +1013,8 @@ def build_report_context(
     if project_conn is not None:
         try:
             project_uuid = project_fingerprint(project_conn)
-        except Exception:
+        except (ValueError, sqlite3.Error) as exc:
+            logger.debug('Could not resolve project UUID for report context: %s', exc)
             project_uuid = ''
     summary['project_uuid'] = project_uuid
 

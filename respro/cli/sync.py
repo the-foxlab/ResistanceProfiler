@@ -28,6 +28,8 @@ from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.schema import open_project_db, open_results_db
 from respro.utils.logging import err_console
 
+logger = logging.getLogger(__name__)
+
 
 def sync_results_database(
     *,
@@ -163,8 +165,12 @@ def _sync_single_run(
             _, query_sequence, gene_matches = resolve_cached_query_reference(
                 project_conn, sample_name,
             )
-        except ValueError:
-            pass  # VCF run or mapping cache missing — mini alignments won't be rendered
+        except ValueError as exc:
+            logger.debug(
+                'Skipping cached query-reference recovery for sample %r: %s',
+                sample_name,
+                exc,
+            )
 
     with err_console.status(f'[dim]Re-annotating run #{run_id}…[/dim]'):
         result, _outputs = _finalize_and_export(
@@ -236,8 +242,3 @@ def _sync_single_run(
     )
     results_conn.commit()
     return result.resistance_hits, len(result.formula_hits)
-
-
-def register(app: object) -> None:
-    """Deprecated: sync is now exposed via `respro manage results --sync`."""
-    _ = app

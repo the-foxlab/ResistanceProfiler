@@ -16,6 +16,7 @@ from respro.cli.profile_helpers import (
     _finalize_and_export,
     _init_results_db_connection,
     _load_reference_data,
+    _parse_export_formats,
     _print_completion_panel,
     _resolve_reference,
 )
@@ -87,10 +88,10 @@ def _profile_vcf_command(
         )
     ] = 'mappy',
     export: Annotated[
-        Literal['json', 'tabular', 'pdf'] | None,
+        list[str] | None,
         typer.Option(
             '--export',
-            help='Optional extra export format in addition to HTML.',
+            help='Optional extra export format in addition to HTML. Can be provided multiple times.',
         ),
     ] = None,
 ) -> None:
@@ -109,13 +110,7 @@ def _profile_vcf_command(
         if aligner not in ('pairwise', 'mappy'):
             raise click.ClickException(f"Unknown aligner {aligner!r}; choose 'pairwise' or 'mappy'.")
 
-        export_format: str | None = None
-        if export is not None:
-            export_format = export.strip().lower()
-            if export_format not in ('json', 'tabular', 'pdf'):
-                raise click.ClickException(
-                    'Invalid --export value. Choose one of: json, tabular, pdf.'
-                )
+        export_formats = _parse_export_formats(export)
 
         project_conn = open_project_db(project)
         project_row = project_conn.execute('SELECT name FROM project LIMIT 1').fetchone()
@@ -194,7 +189,7 @@ def _profile_vcf_command(
             query_sequence=query_seq,
             gene_matches=fasta_matches,
             coverage_gaps=coverage_gaps,
-            extra_export_format=export_format,
+            extra_export_formats=export_formats,
         )
 
         _print_completion_panel(console, '✓ Profiling complete', result, outputs)

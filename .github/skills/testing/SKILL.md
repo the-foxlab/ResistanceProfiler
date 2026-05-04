@@ -284,6 +284,7 @@ After completing any implementation:
 - [ ] Bug fixes include a reproduction test that failed before the fix
 - [ ] Test names describe the behaviour being verified
 - [ ] No tests were skipped or disabled
+- [ ] Exception paths are explicit (no silent `except` blocks in touched code)
 - [ ] Deterministic outputs remain stable (report/export tests)
 - [ ] If a feature was removed, its tests were also removed
 ```

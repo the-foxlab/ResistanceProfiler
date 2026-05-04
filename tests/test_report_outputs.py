@@ -26,6 +26,7 @@ from respro.report.html import (
     build_report_context,
     render_html,
 )
+from respro.report.non_html_exports import _build_pdf_mutation_entries
 
 
 def _make_combined_result() -> ProfilingResult:
@@ -317,6 +318,28 @@ class TestBuildReportContext:
         )
         html = render_html(r, rules=[rule])
         assert 'Clinical phenotype' not in html
+
+
+class TestPdfExports:
+    def test_pdf_mutation_entries_include_effect_badge_class(self) -> None:
+        result = _make_result()
+        report_context = build_report_context(result)
+
+        groups = _build_pdf_mutation_entries(result, report_context)
+
+        assert groups
+        assert groups[0]['mutations']
+        assert groups[0]['mutations'][0]['effect_badge_class'] == 'badge-missense'
+
+    def test_pdf_direct_db_hits_do_not_embed_similarity(self) -> None:
+        result = _make_result()
+        report_context = build_report_context(result)
+
+        groups = _build_pdf_mutation_entries(result, report_context)
+
+        first_hit = groups[0]['mutations'][0]['db_hits'][0]
+        assert 'similarity' not in first_hit
+        assert 'similarity_badge_class' not in first_hit
 
     def test_similarity_clinical_phenotype_shown_when_db_hits_have_it(self) -> None:
         # If db_hits carry a non-unknown clinical_phenotype, the similarity section must

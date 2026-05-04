@@ -107,9 +107,10 @@ def translate_codon(codon: str) -> str:
         return '?'
     try:
         aa = str(Seq(codon).translate())
-        return aa if aa else '?'
-    except Exception:
+    except Exception as exc:
+        logger.debug('Codon translation failed for %r: %s', codon, exc)
         return '?'
+    return aa if aa else '?'
 
 
 def _is_snp(ref: str, alt: str) -> bool:
@@ -570,7 +571,7 @@ def normalize_mutation(
 
     The canonical tokens are:
 
-    - ``A``–``Z``  — specific alt amino acid (missense, synonymous, stop-loss target)
+    - ``A``        — specific alt amino acid (missense, synonymous, stop-loss target)
     - ``*``        — stop gained
     - ``fsX``      — frameshift at this codon
     - ``F50FGG``   — insertion: insertion after F50 resulting in ``FGG``

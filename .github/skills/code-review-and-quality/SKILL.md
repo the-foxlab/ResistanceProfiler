@@ -35,6 +35,7 @@ Does the code do what it claims to do?
 - Does it match the spec or task requirements?
 - Are edge cases handled (empty, boundary, ambiguous IUPAC, reverse strand, None)?
 - Are error paths handled, not just the happy path?
+- Are exceptions handled explicitly (no silent `except` blocks that swallow failures)?
 - Are there off-by-one errors in codon-coordinate logic or CIGAR walks?
 - Do tests actually test the right behavior?
 - Is variant remap, allele-frequency filtering, and rule matching consistent with the documented algorithm?
@@ -193,6 +194,7 @@ One change = one self-contained modification that addresses one thing, includes 
 - [ ] Change matches spec/task requirements
 - [ ] Edge cases handled (boundary, empty, reverse strand, ambiguous IUPAC)
 - [ ] Error paths handled
+- [ ] No silent exception handlers (`except` blocks log, re-raise, or raise explicit domain errors)
 - [ ] Tests cover the change, including regression tests for bug fixes
 
 ### Readability

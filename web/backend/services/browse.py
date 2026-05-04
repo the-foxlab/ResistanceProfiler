@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from respro.db.rules_queries import (
@@ -14,6 +15,8 @@ from respro.db.rules_queries import (
 from respro.db.schema import open_project_db
 from web.backend.startup_config import list_project_db_paths, resolve_project_db_path
 
+logger = logging.getLogger(__name__)
+
 
 def list_databases(project_databases_dir: Path) -> dict:
     """Return metadata for all project databases available in project_databases_dir."""
@@ -23,7 +26,11 @@ def list_databases(project_databases_dir: Path) -> dict:
         try:
             try:
                 project_row = get_project_summary_for_display(project_conn)
-            except (ValueError, Exception):
+            except ValueError as exc:
+                logger.warning('Skipping invalid project database %s: %s', project_db, exc)
+                continue
+            except Exception as exc:
+                logger.exception('Unexpected error while reading project database %s: %s', project_db, exc)
                 continue
 
             metadata = {

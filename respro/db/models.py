@@ -7,7 +7,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-
 _INTERNAL_FORMULA_COMPONENT_DRUG_NAME = '__formula_component__'
 
 

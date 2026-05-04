@@ -68,7 +68,13 @@ def _detect_coordinate_base(
 
         try:
             pos = int(position_raw)
-        except ValueError:
+        except ValueError as exc:
+            logger.debug(
+                'Skipping non-integer rule position %r for gene %r during coordinate-base detection: %s',
+                position_raw,
+                gene_name,
+                exc,
+            )
             continue
 
         verifiable += 1
@@ -146,7 +152,13 @@ def _validate_reference_amino_acids(
 
         try:
             pos = int(position_raw)
-        except ValueError:
+        except ValueError as exc:
+            logger.debug(
+                'Skipping non-integer rule position %r for gene %r during reference-AA validation: %s',
+                position_raw,
+                gene_name,
+                exc,
+            )
             continue
 
         pos_0based = pos - coord_base

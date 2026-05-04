@@ -107,6 +107,35 @@ class TestProfileCli:
         first_line = tsv_path.read_text(encoding='utf-8').splitlines()[0]
         assert first_line.startswith('Gene\tAA change\tDrug')
 
+    def test_profile_vcf_writes_repeated_export_formats(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        output_dir = tmp_path / 'results_multi_export'
+        runner = CliRunner()
+        result = runner.invoke(app, [
+            'vcf',
+            '--project', str(project_db),
+            '--vcf', str(sample_vcf),
+            '--ref-fasta', str(sample_ref_fasta),
+            '--output', str(output_dir),
+            '--export', 'json',
+            '--export', 'tabular',
+            '--min-af', '0.01',
+            '--min-depth', '0',
+        ])
+        assert result.exit_code == 0, result.output
+
+        html_path = output_dir / f'{sample_vcf.stem}.report.html'
+        json_path = output_dir / f'{sample_vcf.stem}.results.json'
+        tsv_path = output_dir / f'{sample_vcf.stem}.mutations.tsv'
+        assert html_path.exists()
+        assert json_path.exists()
+        assert tsv_path.exists()
+
     def test_profile_vcf_writes_optional_pdf_export(
         self,
         project_db: Path,

@@ -72,5 +72,6 @@ def _is_valid_project_db(db_path: Path) -> bool:
             return True
         finally:
             conn.close()
-    except Exception:
+    except Exception as exc:
+        logger.debug('Project DB validation failed for %s: %s', db_path, exc)
         return False

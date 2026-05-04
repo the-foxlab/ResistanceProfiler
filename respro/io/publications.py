@@ -126,11 +126,15 @@ def fetch_pubmed_id_for_doi(doi: str, timeout: int = CLI_CONFIG.timeouts.pubmed)
                 time.sleep(delay)
                 continue
             if exc.code in (400, 404):
+                logger.debug('NCBI DOI->PMID lookup returned HTTP %s for %r', exc.code, normalized_doi)
                 return None
+            logger.debug('NCBI DOI->PMID lookup failed for %r: HTTP %s', normalized_doi, exc.code)
             return None
-        except OSError:
+        except OSError as exc:
+            logger.debug('NCBI DOI->PMID lookup failed for %r (network): %s', normalized_doi, exc)
             return None
-        except Exception:
+        except Exception as exc:
+            logger.debug('NCBI DOI->PMID lookup failed for %r: %s', normalized_doi, exc)
             return None
 
     return None
