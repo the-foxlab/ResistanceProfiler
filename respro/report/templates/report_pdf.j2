@@ -2,17 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>ResistanceProfiler Report (v{{ version }}){% if summary.organism %} - {{ summary.organism }}{% endif %}</title>
+  <title>ResistanceProfiler Report (v{{ version }})</title>
   <style>{{ css }}</style>
 </head>
 <body>
   <header class="report-header">
-    <h1>ResistanceProfiler Report (v{{ version }}){% if summary.organism %} - {{ summary.organism }}{% endif %}</h1>
+    <h1>ResistanceProfiler Report (v{{ version }})</h1>
     <div class="meta-grid">
       <div><span class="label">Project Database:</span> {{ summary.project_name or '-' }}</div>
+      <div><span class="label">Species:</span> {{ summary.organism or '-' }}</div>
       <div><span class="label">Reference:</span> {{ summary.reference or '-' }}</div>
       <div><span class="label">Sample:</span> {{ summary.sample or '-' }}</div>
       <div><span class="label">Generated:</span> {{ summary.timestamp or '-' }}</div>
+      <div><span class="label">Input:</span> {{ summary.vcf or '-' }}</div>
     </div>
   </header>
 
