@@ -2,7 +2,7 @@
 Tests for codon-aware annotation logic.
 """
 
-from respro.cli.profile_helpers import assign_af_bins
+from respro.cli.profile_helpers import assign_af_bins, _suppress_ruleless_overlap_annotations
 from respro.core.annotation import (
     _annotate_combined_snp_codon,
     _annotate_variant_in_gene,
@@ -806,3 +806,168 @@ class TestFrameshiftAnnotation:
         assert ann.ref_aa == 'R'   # from query, not internal G
         assert ann.alt_aa == 'RfsX'
         assert ann.consequence == 'frameshift'
+
+
+# ─── _suppress_ruleless_overlap_annotations ───────────────────────────
+
+class TestSuppressRulelessOverlapAnnotations:
+    """Test filtering of spurious annotations from overlapping ruleless genes."""
+
+    def test_overlapping_genes_removes_ruleless_when_ruled_exists(self) -> None:
+        """
+        Variant at overlap of two genes: one with rules, one without.
+        Result: only the ruled gene annotation survives.
+        """
+        # Gene A: positions 0–29, with rules
+        gene_a = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='GeneA',
+            protein='ProteinA',
+            start=0,
+            end=30,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATG' + 'AAA' * 9,
+        )
+
+        # Gene B: positions 10–40, no rules
+        gene_b = GeneRecord(
+            id=2,
+            reference_id=1,
+            name='GeneB',
+            protein='ProteinB',
+            start=10,
+            end=40,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATG' + 'GGG' * 10,
+        )
+
+        # Variant at position 15, falls in both genes
+        var = VariantCall(chrom='ref', pos=15, ref='A', alt='G', allele_freq=0.9, depth=100)
+        annotations = annotate_variants([var], [gene_a, gene_b])
+
+        # Should have two annotations (one per gene)
+        assert len(annotations) == 2
+        gene_names = {ann.gene_name for ann in annotations}
+        assert gene_names == {'GeneA', 'GeneB'}
+
+        # Filter with GeneA in rule_gene_names
+        rule_gene_names = {'GeneA'}
+        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_gene_names)
+
+        # Only GeneA should survive
+        assert len(filtered) == 1
+        assert filtered[0].gene_name == 'GeneA'
+
+    def test_overlapping_genes_keeps_both_when_neither_has_rules(self) -> None:
+        """
+        Variant at overlap of two genes, neither with rules.
+        Result: both annotations survive (no ruled genes to filter against).
+        """
+        # Gene A: positions 0–30, no rules
+        gene_a = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='GeneA',
+            protein='ProteinA',
+            start=0,
+            end=30,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATG' + 'AAA' * 9,
+        )
+
+        # Gene B: positions 10–40, no rules
+        gene_b = GeneRecord(
+            id=2,
+            reference_id=1,
+            name='GeneB',
+            protein='ProteinB',
+            start=10,
+            end=40,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATG' + 'GGG' * 10,
+        )
+
+        # Variant at position 15, falls in both genes
+        var = VariantCall(chrom='ref', pos=15, ref='A', alt='G', allele_freq=0.9, depth=100)
+        annotations = annotate_variants([var], [gene_a, gene_b])
+
+        # Should have two annotations
+        assert len(annotations) == 2
+
+        # Filter with empty rule_gene_names (neither gene has rules)
+        rule_gene_names: set[str] = set()
+        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_gene_names)
+
+        # Both should survive since neither has rules
+        assert len(filtered) == 2
+        gene_names = {ann.gene_name for ann in filtered}
+        assert gene_names == {'GeneA', 'GeneB'}
+
+    def test_single_gene_annotation_always_passes(self) -> None:
+        """
+        Single-gene annotations should always pass through unchanged,
+        regardless of rule_gene_names.
+        """
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='GeneX',
+            protein='ProteinX',
+            start=0,
+            end=30,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATG' + 'AAA' * 9,
+        )
+
+        # Variant within single gene
+        var = VariantCall(chrom='ref', pos=5, ref='A', alt='G', allele_freq=0.9, depth=100)
+        annotations = annotate_variants([var], [gene])
+
+        # Should have one annotation
+        assert len(annotations) == 1
+
+        # Filter with GeneX not in rule_gene_names
+        rule_gene_names: set[str] = set()
+        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_gene_names)
+
+        # Should survive unchanged
+        assert len(filtered) == 1
+        assert filtered[0].gene_name == 'GeneX'
+
+    def test_variant_outside_all_genes_passes(self) -> None:
+        """
+        Variants outside all genes (gene_name='') should pass through unchanged.
+        """
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='GeneA',
+            protein='ProteinA',
+            start=0,
+            end=30,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATG' + 'AAA' * 9,
+        )
+
+        # Variant far outside the gene
+        var = VariantCall(chrom='ref', pos=100, ref='A', alt='G', allele_freq=0.9, depth=100)
+        annotations = annotate_variants([var], [gene])
+
+        # Should have one annotation with empty gene_name
+        assert len(annotations) == 1
+        assert annotations[0].gene_name == ''
+
+        # Filter with any rule_gene_names
+        rule_gene_names = {'GeneA'}
+        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_gene_names)
+
+        # Should survive unchanged
+        assert len(filtered) == 1
+        assert filtered[0].gene_name == ''

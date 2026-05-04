@@ -143,6 +143,51 @@ def _load_reference_data(
     return genes, rules, formula_rules, rule_gene_names
 
 
+def _suppress_ruleless_overlap_annotations(
+    annotations: list[AnnotatedVariant],
+    rule_gene_names: set[str],
+) -> list[AnnotatedVariant]:
+    """
+    Filter out annotations for genes that have no rules when multiple genes overlap a variant.
+
+    Groups annotations by the underlying variant object identity (same VariantCall).
+    For groups with more than one annotation (overlapping genes):
+    - If at least one gene_name is in rule_gene_names, keep only those annotations.
+    - If no gene_name is in rule_gene_names, keep all (variants in ruleless genes alone).
+
+    Single-annotation groups (common case) are always left unchanged.
+
+    :param annotations: list of annotated variants
+    :param rule_gene_names: set of gene names that have at least one rule
+    :return: filtered list of annotated variants
+    """
+    # Group by variant object identity (each annotation for the same underlying variant
+    # shares the exact same VariantCall object).
+    variant_groups: dict[int, list[AnnotatedVariant]] = {}
+    for ann in annotations:
+        variant_id = id(ann.variant)
+        if variant_id not in variant_groups:
+            variant_groups[variant_id] = []
+        variant_groups[variant_id].append(ann)
+
+    filtered: list[AnnotatedVariant] = []
+    for group in variant_groups.values():
+        # Single-annotation groups always pass through unchanged.
+        if len(group) == 1:
+            filtered.extend(group)
+            continue
+
+        # Multi-annotation group: check if any gene_name is in rule_gene_names.
+        has_ruled_gene = any(ann.gene_name in rule_gene_names for ann in group)
+
+        if has_ruled_gene:
+            filtered.extend(ann for ann in group if ann.gene_name in rule_gene_names)
+        else:
+            filtered.extend(group)
+
+    return filtered
+
+
 def _finalize_and_export(
     annotations: list,
     formula_rules: list,
@@ -194,6 +239,8 @@ def _finalize_and_export(
     :param extra_export_formats: optional additional output formats ('json', 'tabular', 'pdf')
     :return: (ProfilingResult, export path dict)
     """
+    # Filter out spurious annotations for ruleless genes when overlapping with ruled genes.
+    annotations = _suppress_ruleless_overlap_annotations(annotations, rule_gene_names)
     annotations = match_rules(annotations, rules)
     formula_hits = match_formula_rules(annotations, formula_rules)
     annotations = assign_af_bins(annotations, bins=af_bins)

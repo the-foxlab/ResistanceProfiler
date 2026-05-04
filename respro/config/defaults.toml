@@ -22,7 +22,7 @@ doi_prefixes = ['https://doi.org/', 'http://doi.org/']
 
 [alignment]
 min_identity = 0.85
-min_coverage = 0.7
+min_coverage = 0.9
 
 [matching]
 combination_member_af_threshold = 0.75
