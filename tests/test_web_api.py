@@ -18,7 +18,7 @@ from rq.exceptions import NoSuchJobError
 from tests.conftest import TINY_REF_NAME, TINY_REF_SEQ
 from web.backend.config import WEB_BACKEND_CONFIG
 from web.backend.main import _resolve_proxy_settings, create_app
-from web.backend.queue import get_queue
+from web.backend.queue import get_batch_queue, get_queue
 from web.backend.startup_config import StartupConfig, _validate_startup_policy
 
 
@@ -89,6 +89,7 @@ def client(sync_queue: Queue, startup_config: StartupConfig):
     """TestClient with queue override and startup config injected."""
     app = create_app(startup_config=startup_config)
     app.dependency_overrides[get_queue] = lambda: sync_queue
+    app.dependency_overrides[get_batch_queue] = lambda: sync_queue
     return TestClient(app)
 
 
@@ -786,6 +787,7 @@ class TestWebApi:
 
         app = create_app(startup_config=startup_config)
         app.dependency_overrides[get_queue] = lambda: queue
+        app.dependency_overrides[get_batch_queue] = lambda: queue
         client = TestClient(app)
 
         response = client.post(
@@ -1235,6 +1237,26 @@ class TestWebApi:
         assert second.json()['detail'] == 'Upload rate limit exceeded. Try again later.'
         assert third.status_code == 429
 
+    def test_ui_config_uses_env_override_for_max_batch_size(
+        self,
+        startup_config: StartupConfig,
+        sync_queue: Queue,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_MAX_BATCH_SIZE', '7')
+        app = create_app(startup_config=startup_config)
+        app.dependency_overrides[get_queue] = lambda: sync_queue
+        app.dependency_overrides[get_batch_queue] = lambda: sync_queue
+        client = TestClient(app)
+
+        response = client.get('/api/ui/config', headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()['data']
+        assert payload['batch_max_samples'] == 7
+        assert payload['sample_limit_per_minute'] == 7
+
     def test_ui_config_requires_auth_when_api_token_is_set(
         self,
         startup_config: StartupConfig,
@@ -1451,6 +1473,36 @@ class TestBatchProfileEndpoints:
         )
         assert response.status_code == 422
 
+    def test_batch_vcf_max_batch_size_uses_env_override(
+        self,
+        startup_config: StartupConfig,
+        sync_queue: Queue,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_MAX_BATCH_SIZE', '1')
+        app = create_app(startup_config=startup_config)
+        app.dependency_overrides[get_queue] = lambda: sync_queue
+        app.dependency_overrides[get_batch_queue] = lambda: sync_queue
+        client = TestClient(app)
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_paths': [str(web_sample_vcf), str(web_sample_vcf)],
+                'sample_names': ['sample-a', 'sample-b'],
+                'reference_fasta_path': str(web_sample_ref_fasta),
+                'db_path': default_db.name,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 422
+        assert 'maximum of 1 samples per batch' in response.json()['detail']
+
     def test_batch_fasta_exceeds_max_size(
         self,
         client: TestClient,
@@ -1472,4 +1524,115 @@ class TestBatchProfileEndpoints:
         assert response.status_code == 422
         detail = str(response.json())
         assert 'batch' in detail.lower() or '25' in detail
+
+    def test_batch_vcf_validation_error_does_not_enqueue_partial_jobs(
+        self,
+        client: TestClient,
+        sync_queue: Queue,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        missing_vcf = startup_config.uploads_dir / 'missing.vcf'
+        enqueue_calls = 0
+        original_enqueue = sync_queue.enqueue
+
+        def counting_enqueue(*args, **kwargs):
+            nonlocal enqueue_calls
+            enqueue_calls += 1
+            return original_enqueue(*args, **kwargs)
+
+        monkeypatch.setattr(sync_queue, 'enqueue', counting_enqueue)
+
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_paths': [str(web_sample_vcf), str(missing_vcf)],
+                'sample_names': ['sample-a', 'sample-b'],
+                'reference_fasta_path': str(web_sample_ref_fasta),
+                'db_path': default_db.name,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 404
+        assert "VCF file not found for sample 'sample-b'." in response.json()['detail']
+        assert enqueue_calls == 0
+
+    def test_batch_fasta_validation_error_does_not_enqueue_partial_jobs(
+        self,
+        client: TestClient,
+        sync_queue: Queue,
+        startup_config: StartupConfig,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        missing_fasta = startup_config.uploads_dir / 'missing.fasta'
+        enqueue_calls = 0
+        original_enqueue = sync_queue.enqueue
+
+        def counting_enqueue(*args, **kwargs):
+            nonlocal enqueue_calls
+            enqueue_calls += 1
+            return original_enqueue(*args, **kwargs)
+
+        monkeypatch.setattr(sync_queue, 'enqueue', counting_enqueue)
+
+        response = client.post(
+            '/api/profile/batch/fasta',
+            json={
+                'fasta_paths': [str(web_sample_ref_fasta), str(missing_fasta)],
+                'sample_names': ['fasta-a', 'fasta-b'],
+                'db_path': default_db.name,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 404
+        assert "FASTA file not found for sample 'fasta-b'." in response.json()['detail']
+        assert enqueue_calls == 0
+
+    def test_batch_fasta_sample_quota_uses_default_redis_url_when_env_missing(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        missing_fasta = startup_config.uploads_dir / 'missing.fasta'
+        redis_urls: list[str] = []
+
+        class FakeQuotaRedis:
+            def incrby(self, _key: str, _value: int) -> int:
+                return 1
+
+            def expire(self, _key: str, _seconds: int) -> bool:
+                return True
+
+        def fake_from_url(url: str):
+            redis_urls.append(url)
+            return FakeQuotaRedis()
+
+        monkeypatch.delenv('REDIS_URL', raising=False)
+        monkeypatch.setattr('web.backend.main.redis.Redis.from_url', fake_from_url)
+
+        response = client.post(
+            '/api/profile/batch/fasta',
+            json={
+                'fasta_paths': [str(missing_fasta)],
+                'sample_names': ['fasta-a'],
+                'db_path': default_db.name,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 404
+        assert redis_urls
+        assert redis_urls[-1] == WEB_BACKEND_CONFIG.defaults.redis_url
 

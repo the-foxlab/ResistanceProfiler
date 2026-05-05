@@ -247,7 +247,7 @@ Mark items done and update priorities after each completed milestone.
 
 ### Web — Batch analysis
 
-- [x] `RESPRO_WEB_BATCH_RATE_LIMIT` and `RESPRO_WEB_MAX_BATCH_SIZE` env config keys added to `defaults.toml` and `config.py`
+- [x] `RESPRO_WEB_MAX_BATCH_SIZE` env config key added to `defaults.toml` and `config.py`
 - [x] `BatchProfileVcfPayload`, `BatchProfileFastaPayload`, `BatchSubmitResponse`, `BatchSampleEntry` models added to `models.py`
 - [x] `POST /api/profile/batch/vcf` endpoint — rate-limited (2/min), max 25 samples, enqueues one `run_profile_vcf` job per sample
 - [x] `POST /api/profile/batch/fasta` endpoint — same pattern, no shared reference FASTA

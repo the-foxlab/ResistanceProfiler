@@ -59,7 +59,7 @@ from web.backend.models import (
     SessionCleanupResponse,
     UploadResponse,
 )
-from web.backend.queue import build_enqueue_job_options, get_queue
+from web.backend.queue import build_enqueue_job_options, get_batch_queue, get_queue
 from web.backend.services.browse import list_databases, list_rules
 from web.backend.services.upload import cleanup_session_files, save_upload_stream
 from web.backend.startup_config import (
@@ -99,7 +99,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     app.add_exception_handler(RateLimitExceeded, _handle_rate_limit_exceeded)
 
     upload_rate_limit = _resolve_upload_rate_limit()
-    sample_limit_per_minute = WEB_BACKEND_CONFIG.defaults.max_batch_size
+    sample_limit_per_minute = _resolve_max_batch_size()
 
     app.add_middleware(
         CORSMiddleware,
@@ -168,7 +168,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     def ui_config(_auth: None = Depends(require_api_token)) -> ApiEnvelope:
         return ApiEnvelope(
             data={
-                'batch_max_samples': WEB_BACKEND_CONFIG.defaults.max_batch_size,
+                'batch_max_samples': sample_limit_per_minute,
                 'sample_limit_per_minute': sample_limit_per_minute,
             }
         )
@@ -346,7 +346,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     def profile_batch_vcf_route(
         request: Request,
         payload: BatchProfileVcfPayload,
-        queue: Queue = Depends(get_queue),
+        queue: Queue = Depends(get_batch_queue),
         _auth: None = Depends(require_api_token),
     ) -> BatchSubmitResponse:
         if len(payload.vcf_paths) != len(payload.sample_names):
@@ -354,7 +354,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 status_code=422,
                 detail='vcf_paths and sample_names must have the same length.',
             )
-        max_batch = WEB_BACKEND_CONFIG.defaults.max_batch_size
+        max_batch = sample_limit_per_minute
         if len(payload.vcf_paths) > max_batch:
             raise HTTPException(
                 status_code=422,
@@ -372,7 +372,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         )
         project_db = resolve_project_db_path(config.project_databases_dir, payload.db_path)
         enqueue_options = build_enqueue_job_options()
-        samples = []
+        validated_vcf_inputs: list[tuple[Path, str]] = []
         for vcf_path_str, sample_name in zip(payload.vcf_paths, payload.sample_names):
             vcf_path = Path(vcf_path_str).expanduser().resolve()
             if not is_path_within_allowed_roots(vcf_path, config.allowed_roots):
@@ -382,6 +382,10 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 )
             if not vcf_path.is_file():
                 raise HTTPException(status_code=404, detail=f'VCF file not found for sample {sample_name!r}.')
+            validated_vcf_inputs.append((vcf_path, sample_name))
+
+        samples = []
+        for vcf_path, sample_name in validated_vcf_inputs:
             job_id = str(uuid4())
             queue.enqueue(
                 run_profile_vcf,
@@ -410,7 +414,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     def profile_batch_fasta_route(
         request: Request,
         payload: BatchProfileFastaPayload,
-        queue: Queue = Depends(get_queue),
+        queue: Queue = Depends(get_batch_queue),
         _auth: None = Depends(require_api_token),
     ) -> BatchSubmitResponse:
         if len(payload.fasta_paths) != len(payload.sample_names):
@@ -418,7 +422,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 status_code=422,
                 detail='fasta_paths and sample_names must have the same length.',
             )
-        max_batch = WEB_BACKEND_CONFIG.defaults.max_batch_size
+        max_batch = sample_limit_per_minute
         if len(payload.fasta_paths) > max_batch:
             raise HTTPException(
                 status_code=422,
@@ -431,7 +435,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         )
         project_db = resolve_project_db_path(config.project_databases_dir, payload.db_path)
         enqueue_options = build_enqueue_job_options()
-        samples = []
+        validated_fasta_inputs: list[tuple[Path, str]] = []
         for fasta_path_str, sample_name in zip(payload.fasta_paths, payload.sample_names):
             fasta_path = Path(fasta_path_str).expanduser().resolve()
             if not is_path_within_allowed_roots(fasta_path, config.allowed_roots):
@@ -441,6 +445,10 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 )
             if not fasta_path.is_file():
                 raise HTTPException(status_code=404, detail=f'FASTA file not found for sample {sample_name!r}.')
+            validated_fasta_inputs.append((fasta_path, sample_name))
+
+        samples = []
+        for fasta_path, sample_name in validated_fasta_inputs:
             job_id = str(uuid4())
             queue.enqueue(
                 run_profile_fasta,
@@ -833,10 +841,19 @@ def _resolve_upload_rate_limit() -> str:
     return os.getenv(WEB_ENV.upload_rate_limit, default).strip() or default
 
 
-def _resolve_batch_submit_rate_limit() -> str:
-    """Return the configured batch submission rate limit string."""
-    default = WEB_BACKEND_CONFIG.defaults.batch_submit_rate_limit
-    return os.getenv(WEB_ENV.batch_submit_rate_limit, default).strip() or default
+def _resolve_max_batch_size() -> int:
+    """Return the configured maximum number of samples accepted per batch request."""
+    default = WEB_BACKEND_CONFIG.defaults.max_batch_size
+    raw_value = os.getenv(WEB_ENV.max_batch_size, str(default)).strip()
+    if not raw_value:
+        return default
+    try:
+        parsed = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f'{WEB_ENV.max_batch_size} must be an integer value.') from exc
+    if parsed <= 0:
+        raise RuntimeError(f'{WEB_ENV.max_batch_size} must be > 0.')
+    return parsed
 
 
 def _extract_bearer_token(authorization: str | None) -> str:
@@ -868,7 +885,7 @@ def _consume_sample_quota(request: Request, sample_count: int, sample_limit_per_
 
     identity = _rate_limit_key(request)
     window_minute = _current_window_minute()
-    redis_url = os.getenv(WEB_ENV.redis_url, '').strip()
+    redis_url = os.getenv(WEB_ENV.redis_url, WEB_BACKEND_CONFIG.defaults.redis_url).strip()
     if redis_url:
         try:
             client = redis.Redis.from_url(redis_url)
