@@ -120,8 +120,8 @@ docker compose -f docker-compose.web.yml up --build
 Use a prebuilt GHCR release image:
 
 ```bash
-docker pull ghcr.io/jonas-fuchs/reistanceprofiler:<release-tag>
-docker tag ghcr.io/jonas-fuchs/reistanceprofiler:<release-tag> respro-web:latest
+docker pull ghcr.io/jonas-fuchs/resistanceprofiler:<release-tag>
+docker tag ghcr.io/jonas-fuchs/resistanceprofiler:<release-tag> respro-web:latest
 docker compose -f docker-compose.web.yml up
 ```
 
