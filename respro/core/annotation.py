@@ -679,8 +679,6 @@ def normalize_mutation(
     return None
 
 
-
-
 def classify_similarity(observed_aa: str, rule_aa: str) -> str:
     """
     Classify amino acid similarity based on BLOSUM62 score.
