@@ -958,9 +958,14 @@ export function useDashboardLogic() {
         pending.map(async (sample) => {
           try {
             const payload = await apiGet(`/api/jobs/${sample.job_id}`);
-            return { ...sample, status: payload.status, result: payload.result || null };
-          } catch {
-            return { ...sample, status: 'failed' };
+            return {
+              ...sample,
+              status: payload.status,
+              result: payload.result || null,
+              errorMessage: payload.error ? formatUserError(payload.error) : null,
+            };
+          } catch (error) {
+            return { ...sample, status: 'failed', errorMessage: formatUserError(error.message) };
           }
         })
       );
@@ -990,6 +995,7 @@ export function useDashboardLogic() {
           job_id: s.job_id,
           sample_name: s.sample_name,
           status: s.status,
+          errorMessage: s.errorMessage || null,
           report_url: s.result ? s.result.report_html_path : null,
           reportHtmlPath: s.result ? s.result.report_html_path : null,
           reportPdfPath: s.result ? s.result.report_pdf_path : null,
@@ -1067,6 +1073,7 @@ export function useDashboardLogic() {
       }
       const initialSamples = responseData.samples.map((s) => ({
         ...s,
+        errorMessage: null,
         report_url: null,
         reportHtmlPath: null,
         reportPdfPath: null,
