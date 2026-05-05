@@ -10,6 +10,7 @@ import sqlite3
 from pathlib import Path
 from typing import Literal
 
+from respro.config.core_settings import CORE_CONFIG
 from respro.core.alignment import (
     load_cached_mappings,
     load_genes_with_rules,
@@ -17,7 +18,6 @@ from respro.core.alignment import (
     sequence_checksum,
     store_mappings,
 )
-from respro.config.core_settings import CORE_CONFIG
 from respro.db.models import GeneMatch
 from respro.io.reference import read_fasta
 

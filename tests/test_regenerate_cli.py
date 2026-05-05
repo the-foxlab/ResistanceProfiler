@@ -5,6 +5,7 @@ Tests for CLI commands (regenerate, classify) and manage database/results flows.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import textwrap
 from pathlib import Path
@@ -39,6 +40,11 @@ from respro.db.results import (
 from respro.db.schema import init_results_db, open_project_db, open_results_db
 from respro.io.reference import load_genes_for_reference
 from respro.report.non_html_exports import export_results
+
+
+def _strip_ansi(text: str) -> str:
+    """Return text with ANSI escape sequences removed."""
+    return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
 
 def _init_split_project(
@@ -234,7 +240,7 @@ class TestRegenerate:
         ])
 
         assert result.exit_code != 0
-        assert '--project' in result.output
+        assert '--project' in _strip_ansi(result.output)
 
     def test_regenerate_missing_out_flag_is_an_error(
         self,
@@ -253,7 +259,7 @@ class TestRegenerate:
         ])
 
         assert result.exit_code != 0
-        assert '--output' in result.output
+        assert '--output' in _strip_ansi(result.output)
 
     def test_regenerate_unknown_run_id_raises_error(
         self,

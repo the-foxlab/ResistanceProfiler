@@ -232,6 +232,14 @@ Mark items done and update priorities after each completed milestone.
 ### Public release (done)
 
 - [X] Professional documentation — rewritten README with tested CLI/web quickstarts, linked user guides (install, database preparation, TSV format, workflow explanation, basic/detailed CLI tutorials, detailed web hosting, troubleshooting/FAQ, output interpretation), and development architecture/contribution documentation
+- [X] Example onboarding dataset in `example_data/` documented for first-time users
+- [X] README updates — link to `example_data/` and GitHub Pages example-report parity note
+- [X] GitHub Actions test workflow on push to `master`
+- [X] Mypy workflow plus mypy toolchain addition to development setup
+- [X] GitHub Pages workflow for publishing the example report
+- [X] Docker publish workflow triggered on release
+- [X] Dependabot configuration for dependencies and GitHub Actions
+- [X] GitHub Actions CI ruff lint check
 
 ### Databases
 
@@ -246,15 +254,10 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Overlapping ORFs
 
-- 🟡 VCF remap: emit one remapped variant per matching CDS for overlapping ORFs —
-  `remap_variants` in `respro/core/profile_vcf.py` currently `break`s after the first matching
-  CIGAR map; if a variant position is covered by two gene alignments the second is silently
-  dropped; the fix is to collect one remapped call per matching CDS and let `annotate_variants`
-  disambiguate per gene (rare in practice for resistance databases, but a correctness issue for
-  genuine overlapping reading frames)
 - 🟡 Regression tests for overlapping ORF annotation — no test currently verifies that a
   variant falling inside two genes simultaneously produces correct, independent annotations for
-  both; add tests for both the VCF and FASTA profiling paths
+  both across all profiling paths; VCF remap-level coverage now exists in `tests/test_profile_vcf.py`
+  and FASTA-path coverage is still required
 
 ### Usability and workflow
 
@@ -305,33 +308,11 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Public release
 
-- 🔴 GitHub Actions CI — run the full test suite against all supported Python versions on every
-  push to `main`; include a ruff lint check; add a PyPI publish workflow triggered by version tags
-- 🟡 Github action for building a docker image and storing it on github (open - so no pricing)
-- 🟡 Dependabot for dependencies and GitHub Actions — add `.github/dependabot.yml` with weekly
-  update checks for `pip` and `github-actions`, grouped PRs where sensible, and automatic security
-  update PRs enabled to reduce CVE exposure and dependency drift
-- 🟡 Reproducibility gate in CI — run the same example profiling command twice in a fresh
-  environment and assert deterministic outputs (`results.json` and report payload fields) to catch
-  accidental nondeterminism before release
-- 🟡 Example data for new users — add a small, self-contained example dataset (GenBank file,
-  rules TSV, and a matching VCF or consensus FASTA) to the repository so users can follow the
-  quick-start guide end-to-end without sourcing their own data; keep the files small enough to
-  live in `example/` without bloating the repo (ideally < 1 MB total)
-- 🟡 GitHub Pages example report — add a GitHub Actions workflow triggered on each versioned
-  release that runs `respro` against the example data, renders the HTML report, and publishes it
-  to GitHub Pages; gives prospective users a live, always-current preview of the report output
-  without downloading anything
-- 🟡 Bioconda package — write a Bioconda recipe (`meta.yaml`) and submit a PR to
+- 🔴 GitHub Actions CI — add a PyPI publish workflow triggered by version tags
+- 🔴 Bioconda package — write a Bioconda recipe (`meta.yaml`) and submit a PR to
   bioconda-recipes; Bioconda is the standard distribution channel for bioinformatics CLI tools
   and avoids requiring users to have a working pip/Python setup; dependency on pysam makes
   Bioconda the natural distribution path once pysam is a requirement
-- 🟢 README header badges — add coverage, Python version, license, PyPI version, and
-  Bioconda/conda version badges to the README header; coverage badge requires a codecov or
-  coveralls integration in CI; PyPI and Bioconda badges are available once packages are published
-- 🟢 PyPI release — changelog, version bump, and hatch-based build after CI and docs are in place
-- 🟢 Add mypy or pyright to the dev toolchain — type hints are comprehensive throughout the
-  codebase; a type checker run in CI would catch drift and wrong annotations before they reach tests
 
 ### WebUI
 

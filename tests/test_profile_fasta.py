@@ -6,6 +6,7 @@ and end-to-end CLI workflow.
 from __future__ import annotations
 
 import random
+import re
 from inspect import signature
 from pathlib import Path
 from typing import Literal
@@ -16,6 +17,7 @@ from conftest import TINY_REF_NAME, TINY_REF_SEQ
 from typer.testing import CliRunner
 
 from respro.cli.main import app
+from respro.config.core_settings import CORE_CONFIG
 from respro.core.alignment import (
     _align_cds_to_query,
     match_query_to_genes,
@@ -33,7 +35,6 @@ from respro.core.query import (
     resolve_cached_query_reference,
     resolve_fasta_query,
 )
-from respro.config.core_settings import CORE_CONFIG
 from respro.core.vcf_remap import (
     _build_query_to_cds_map,
     _cds_pos_to_genomic_pos,
@@ -41,6 +42,11 @@ from respro.core.vcf_remap import (
 )
 from respro.db.models import GeneMatch, GeneRecord, GeneSegment, VariantCall
 from respro.db.schema import create_schema, open_project_db
+
+
+def _strip_ansi(text: str) -> str:
+    """Return text with ANSI escape sequences removed."""
+    return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
 # ──────────────────────────────────────────────────────────────────────
 # Fixtures
@@ -566,8 +572,9 @@ class TestProfileFastaCli:
         ])
 
         assert result.exit_code != 0
-        assert 'Missing option' in result.output
-        assert '--ref-fasta' in result.output
+        clean_output = _strip_ansi(result.output)
+        assert 'Missing option' in clean_output
+        assert '--ref-fasta' in clean_output
 
     def test_fasta_profile_uses_metadata_of_matched_reference(
         self, fasta_db_multi_reference: Path, tmp_path: Path,

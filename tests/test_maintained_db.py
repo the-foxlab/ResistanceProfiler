@@ -5,6 +5,7 @@ Tests for the maintained-db IO client and databases CLI command.
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -74,6 +75,11 @@ _RULES_TSV_CONTENT = (
 _GENBANK_CONTENT = b'LOCUS       X04770    1000 bp    DNA     linear   VRL 01-JAN-2000\n//\n'
 
 runner = CliRunner()
+
+
+def _strip_ansi(text: str) -> str:
+    """Return text with ANSI escape sequences removed."""
+    return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
 
 # ── list_maintained_databases ─────────────────────────────────────────────────
@@ -308,12 +314,12 @@ class TestMaintainedDbListCommand:
             ['databases', '--list', '--download', 'hsv_daehne_jaki'],
         )
         assert result.exit_code != 0
-        assert 'Use either --list or --download' in result.output
+        assert 'Use either --list or --download' in _strip_ansi(result.output)
 
     def test_requires_list_or_download(self) -> None:
         result = runner.invoke(app, ['databases'])
         assert result.exit_code != 0
-        assert 'Provide either --list or --download NAME' in result.output
+        assert 'Provide either --list or --download NAME' in _strip_ansi(result.output)
 
 
 # ── CLI: databases --download ────────────────────────────────────────────
@@ -445,3 +451,29 @@ class TestMaintainedDbDownloadCommand:
         assert result.exit_code == 0
         call_kwargs = mock_init.call_args.kwargs
         assert call_kwargs['db_path'] == Path('example') / 'hsv_daehne_jaki.db'
+
+    def test_download_disables_additional_info_with_flag(self, tmp_path: Path) -> None:
+        fake_gb = tmp_path / 'X04770.gb'
+        fake_gb.write_bytes(_GENBANK_CONTENT)
+        fake_files = {
+            'rules': tmp_path / 'rules.tsv',
+            'metadata': tmp_path / 'metadata.json',
+            'formula_rules': None,
+            'genbank': [fake_gb],
+        }
+
+        output_path = tmp_path / 'custom.db'
+        with (
+            patch('respro.cli.maintained_db.download_database_files', return_value=fake_files),
+            patch('respro.cli.maintained_db.init_project') as mock_init,
+        ):
+            result = runner.invoke(app, [
+                'databases',
+                '--download', 'hsv_daehne_jaki',
+                '--no-additional-info',
+                '--output', str(output_path),
+            ])
+
+        assert result.exit_code == 0
+        call_kwargs = mock_init.call_args.kwargs
+        assert call_kwargs['additional_info'] is False

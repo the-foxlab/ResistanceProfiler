@@ -40,14 +40,15 @@ def remap_variants(
     query_len = len(query_sequence)
     query_upper = query_sequence.upper()
 
-    # Pre-build inverted coordinate maps for each match
-    match_maps: list[tuple[GeneMatch, dict[int, int]]] = []
+    # Pre-build coordinate maps for each match to avoid repeated per-variant scans.
+    match_maps: list[tuple[GeneMatch, dict[int, int], dict[int, int]]] = []
     for match in matches:
         q2c = _build_query_to_cds_map(
             match.cigar, match.query_start, match.query_end,
             match.strand, query_len, match.cds_start,
         )
-        match_maps.append((match, q2c))
+        c2q = {cds_pos: query_pos for query_pos, cds_pos in q2c.items()}
+        match_maps.append((match, q2c, c2q))
 
     remapped: list[VariantCall] = []
     warnings: list[str] = []
@@ -56,7 +57,7 @@ def remap_variants(
     for var in remap_input_variants:
         hit = False
         skip_reason = 'no match / outside mapped CDS'
-        for match, q2c in match_maps:
+        for match, q2c, c2q in match_maps:
             if var.pos not in q2c:
                 continue
 
@@ -113,7 +114,7 @@ def remap_variants(
 
             query_ref_codon = ''
             if codon_context_pos >= 0:
-                query_ref_codon = _extract_query_ref_codon(q2c, query_upper, codon_context_pos)
+                query_ref_codon = _extract_query_ref_codon(c2q, query_upper, codon_context_pos)
             if match.strand == '-' and len(query_ref_codon) == 3:
                 query_ref_codon = str(Seq(query_ref_codon).complement())
 
@@ -128,7 +129,6 @@ def remap_variants(
                 query_ref_codon=query_ref_codon,
             ))
             hit = True
-            break
 
         if not hit:
             logger.debug(
@@ -198,14 +198,14 @@ def _expand_anchor_changed_indels(
 
 
 def _extract_query_ref_codon(
-    query_to_cds: dict[int, int],
+    cds_to_query: dict[int, int],
     query_sequence: str,
     cds_pos: int,
 ) -> str:
     """
     Build the three-base query codon for one CDS nucleotide position.
 
-    :param query_to_cds: mapping of forward query position to CDS position
+    :param cds_to_query: mapping of CDS position to forward query position
     :param query_sequence: query sequence (upper-case)
     :param cds_pos: CDS position (0-based)
     :return: three-base codon in CDS orientation, or empty string if incomplete
@@ -213,7 +213,7 @@ def _extract_query_ref_codon(
     codon_start = (cds_pos // 3) * 3
     codon_bases: list[str] = []
     for codon_pos in range(codon_start, codon_start + 3):
-        query_pos = next((q for q, c in query_to_cds.items() if c == codon_pos), None)
+        query_pos = cds_to_query.get(codon_pos)
         if query_pos is None:
             return ''
         codon_bases.append(query_sequence[query_pos])

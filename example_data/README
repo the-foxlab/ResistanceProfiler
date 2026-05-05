@@ -1,0 +1,42 @@
+# Bundled example data
+
+This folder contains small, ready-to-run example inputs:
+
+- `example_fasta.fasta` for FASTA profiling
+- `example_vcf.vcf` for VCF profiling
+- `vcf_reference.fasta` as the required reference for the VCF example
+
+## Before you run the examples
+
+First download and build a maintained, HerpesDRG-compatible ResPro project database.
+Use the maintained database flow:
+
+```bash
+respro databases --list
+respro databases --download <db_name> --output data/project_databases/
+```
+
+After download, use the generated `.db` file path as `--project` in the commands below.
+
+## Run the bundled FASTA example
+
+```bash
+respro fasta \
+    --project data/project_databases/<downloaded_project>.db \
+    --fasta example_data/example_fasta.fasta \
+    --output output/example_fasta
+```
+
+## Run the bundled VCF example
+
+```bash
+respro vcf \
+    --project data/project_databases/<downloaded_project>.db \
+    --vcf example_data/example_vcf.vcf \
+    --ref-fasta example_data/vcf_reference.fasta \
+    --output output/example_vcf \
+    --export json \
+    --export tabular
+```
+
+The HTML report is written into the selected output folder.

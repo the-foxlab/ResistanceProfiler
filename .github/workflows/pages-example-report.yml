@@ -1,0 +1,90 @@
+name: Publish Example Report to Pages
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      db_name:
+        description: Maintained database name for report generation
+        required: false
+        default: herpesdrg
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-report:
+    name: Build example VCF report
+    runs-on: ubuntu-latest
+
+    env:
+      DB_NAME_DEFAULT: herpesdrg
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Resolve maintained DB name
+        shell: bash
+        run: |
+          set -euo pipefail
+          DB_NAME='${{ github.event.inputs.db_name }}'
+          if [[ -z "$DB_NAME" ]]; then
+            DB_NAME="$DB_NAME_DEFAULT"
+          fi
+          echo "DB_NAME=$DB_NAME" >> "$GITHUB_ENV"
+
+      - name: Generate example report
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data/project_databases ci/pages
+          respro databases --download "$DB_NAME" --no-additional-info --output "data/project_databases/${DB_NAME}.db"
+          respro vcf \
+            --project "data/project_databases/${DB_NAME}.db" \
+            --vcf example_data/example_vcf.vcf \
+            --ref-fasta example_data/vcf_reference.fasta \
+            --sample example_data \
+            --output ci/pages/index.html
+          test -s ci/pages/index.html
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ci/pages
+
+  deploy-pages:
+    name: Deploy to GitHub Pages
+    needs: build-report
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

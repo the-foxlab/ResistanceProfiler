@@ -1,6 +1,6 @@
 ![ResistanceProfiler logo](web/frontend/src/assets/logo.svg)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-2f6db3)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-2f6db3)
 
 Pathogen agnostic antiviral resistance profiling command-line interface (CLI) for FASTA consensus sequences or VCF-derived variants. Also comes with a WebApp and pre-ported databases.
 
@@ -36,6 +36,9 @@ Its lightning fast. No need to specify which pathogen or using a specific refere
 pip install -e ".[dev]"
 ```
 
+> [!NOTE]
+> If installation fails during a `mappy` build step (for example with `pip install .` or `pip install -e ".[dev]"`), see [docs/user/install.md](docs/user/install.md) for quick troubleshooting steps.
+
 ### 2) Initialize a project database
 
 Either initialize your own dataset with your own [custom rules](docs/user/database-preparation.md):
@@ -59,6 +62,13 @@ and then download:
 
 ```bash
 respro databases --download db_name --output my_folder/
+```
+
+For faster setup with less network-dependent enrichment, you can disable optional PubChem/PubMed
+lookups during build:
+
+```bash
+respro databases --download db_name --no-additional-info --output my_folder/
 ```
 
 In this step respro automatically downloads tsv rules and genbank files temporarily and then builds the respro compatible SQlite database from scratch. As ResPro automatically enriches the databases with Pubmed and Pubchem information database creation can take a bit. If you want to see what ResPro is doing, just add a `-vv` to your command: `respro -vv databases ...`. The database files are available [here](https://github.com/jonas-fuchs/respro-db/tree/main).
@@ -90,6 +100,9 @@ respro vcf \
     --export tabular
 ```
 
+For bundled, ready-to-run sample inputs, see [example_data/README](example_data/README).
+The exported VCF example report should look like the published GitHub Pages demo report for this project.
+
 ### 4) Regenerate from stored run
 
 ```bash
@@ -105,8 +118,18 @@ respro regenerate \
 
 ## Quickstart [Web App](docs/user/webapp-hosting.md) with docker
 
+Build locally:
+
 ```bash
 docker compose -f docker-compose.web.yml up --build
+```
+
+Use a prebuilt GHCR release image:
+
+```bash
+docker pull ghcr.io/jonas-fuchs/resistanceprofiler:<release-tag>
+docker tag ghcr.io/jonas-fuchs/resistanceprofiler:<release-tag> respro-web:latest
+docker compose -f docker-compose.web.yml up
 ```
 
 Open the app at: `http://127.0.0.1:8000/app/`
