@@ -257,26 +257,24 @@ def _apply_vcf_overlay(
     coding_positions: list[int | None],
     native_positions: list[int | None],
     native_anchor_positions: list[int],
-) -> tuple[str, str, list[int | None], list[bool]]:
-    """Apply one VCF event to the displayed window and return affected-cell mask."""
+) -> tuple[str, str, list[int | None], list[int | None], list[int]]:
+    """Apply one event to the displayed window when it is not already present."""
     ref_chars = list(ref_window)
     query_chars = list(query_window)
     coding_pos = list(coding_positions)
     native_pos = list(native_positions)
     native_anchor_pos = list(native_anchor_positions)
-    affected = [False] * len(ref_chars)
 
     anchor_pos = _variant_native_pos(ann, alignment)
     anchor_idx = next((i for i, pos in enumerate(native_pos) if pos == anchor_pos), None)
     if anchor_idx is None:
-        return ref_window, query_window, coding_positions, affected
+        return ref_window, query_window, coding_positions, native_positions, native_anchor_positions
 
     ref_allele = ann.variant.ref.upper()
     alt_allele = ann.variant.alt.upper()
     if len(ref_allele) == 1 and len(alt_allele) == 1:
-        affected[anchor_idx] = True
         query_chars[anchor_idx] = alt_allele
-        return ''.join(ref_chars), ''.join(query_chars), coding_pos, affected
+        return ''.join(ref_chars), ''.join(query_chars), coding_pos, native_pos, native_anchor_pos
 
     if len(alt_allele) > len(ref_allele):
         inserted = alt_allele[1:]
@@ -288,8 +286,7 @@ def _apply_vcf_overlay(
             coding_pos.insert(idx, None)
             native_pos.insert(idx, None)
             native_anchor_pos.insert(idx, anchor_pos)
-            affected.insert(idx, True)
-        return ''.join(ref_chars), ''.join(query_chars), coding_pos, affected
+        return ''.join(ref_chars), ''.join(query_chars), coding_pos, native_pos, native_anchor_pos
 
     if len(ref_allele) > len(alt_allele):
         deleted_len = len(ref_allele) - len(alt_allele)
@@ -308,8 +305,7 @@ def _apply_vcf_overlay(
                     break
         for idx in deleted_idxs:
             query_chars[idx] = '-'
-            affected[idx] = True
-        return ''.join(ref_chars), ''.join(query_chars), coding_pos, affected
+        return ''.join(ref_chars), ''.join(query_chars), coding_pos, native_pos, native_anchor_pos
 
     # Equal-length block replacement (e.g. MNV): replace aligned positions from anchor onward.
     block_len = len(ref_allele)
@@ -321,9 +317,91 @@ def _apply_vcf_overlay(
     replace_idxs.sort(key=lambda idx: native_pos[idx] if native_pos[idx] is not None else -1)
     for offset, idx in enumerate(replace_idxs[:len(alt_allele)]):
         query_chars[idx] = alt_allele[offset]
-        affected[idx] = True
 
-    return ''.join(ref_chars), ''.join(query_chars), coding_pos, affected
+    return ''.join(ref_chars), ''.join(query_chars), coding_pos, native_pos, native_anchor_pos
+
+
+def _window_displays_variant(
+    ann: AnnotatedVariant,
+    alignment: GeneAlignment,
+    ref_window: str,
+    query_window: str,
+    native_positions: list[int | None],
+    native_anchor_positions: list[int],
+    codon_nt_start: int,
+) -> bool:
+    """Return whether the current aligned window already shows the event."""
+    anchor_pos = _variant_native_pos(ann, alignment)
+    ref_allele = ann.variant.ref.upper()
+    alt_allele = ann.variant.alt.upper()
+
+    if len(alt_allele) > len(ref_allele):
+        inserted_len = len(alt_allele) - len(ref_allele)
+        insertion_idxs = [
+            idx
+            for idx, (ref_pos, cell_anchor_pos) in enumerate(zip(native_positions, native_anchor_positions))
+            if ref_pos is None and (
+                cell_anchor_pos == anchor_pos
+                or (alignment.strand == '-' and cell_anchor_pos - 1 == anchor_pos)
+            )
+        ]
+        return len(insertion_idxs) >= inserted_len and any(
+            query_window[idx] != '-' for idx in insertion_idxs[:inserted_len]
+        )
+
+    if len(ref_allele) > len(alt_allele):
+        deleted_len = len(ref_allele) - len(alt_allele)
+        deleted_positions = set(range(anchor_pos + 1, anchor_pos + 1 + deleted_len))
+        deleted_idxs = [
+            idx for idx, pos in enumerate(native_positions)
+            if pos is not None and pos in deleted_positions
+        ]
+        return len(deleted_idxs) >= deleted_len and all(
+            query_window[idx] == '-' for idx in deleted_idxs[:deleted_len]
+        )
+
+    affected_positions = _affected_nt_positions(ann, alignment, codon_nt_start)
+    visible_affected = [
+        idx for idx, pos in enumerate(native_positions)
+        if pos is not None and pos in affected_positions
+    ]
+    return bool(visible_affected) and any(
+        query_window[idx] != ref_window[idx] for idx in visible_affected
+    )
+
+
+def _build_affected_mask(
+    ann: AnnotatedVariant,
+    alignment: GeneAlignment,
+    native_positions: list[int | None],
+    native_anchor_positions: list[int],
+    codon_nt_start: int,
+) -> list[bool]:
+    """Build a shared affected-cell mask from native positions plus event semantics."""
+    affected_ref_positions = _affected_nt_positions(ann, alignment, codon_nt_start)
+    indel_like = {'insertion', 'deletion', 'frameshift', 'inframe_complex'}
+    is_indel_like = ann.consequence in indel_like or len(ann.variant.ref) != len(ann.variant.alt)
+    is_insertion_like = len(ann.variant.alt) > len(ann.variant.ref)
+    variant_anchor_pos = _variant_native_pos(ann, alignment)
+
+    affected_mask: list[bool] = []
+    for ref_pos, cell_anchor_pos in zip(native_positions, native_anchor_positions):
+        if ref_pos is None:
+            if is_insertion_like and alignment.strand == '-':
+                affected_mask.append(
+                    cell_anchor_pos in affected_ref_positions
+                    or (cell_anchor_pos - 1) in affected_ref_positions
+                )
+            else:
+                affected_mask.append(cell_anchor_pos in affected_ref_positions)
+            continue
+
+        if is_indel_like and ref_pos == variant_anchor_pos:
+            affected_mask.append(False)
+        else:
+            affected_mask.append(ref_pos in affected_ref_positions)
+
+    return affected_mask
 
 
 def _affected_nt_positions(
@@ -332,25 +410,23 @@ def _affected_nt_positions(
     codon_nt_start: int,
 ) -> set[int]:
     """Return native-direction positions that should be highlighted as directly affected."""
-    indel_like = {'insertion', 'deletion', 'frameshift', 'inframe_complex'}
-    if ann.consequence in indel_like or len(ann.variant.ref) != len(ann.variant.alt):
-        anchor_pos = _variant_native_pos(ann, alignment)
-        ref_len = len(ann.variant.ref)
-        alt_len = len(ann.variant.alt)
+    anchor_pos = _variant_native_pos(ann, alignment)
+    ref_len = len(ann.variant.ref)
+    alt_len = len(ann.variant.alt)
 
-        # Insertions are represented between reference bases; highlight inserted gap cells
-        # (which are anchored to the previous native position), but do not highlight anchor.
-        if alt_len > ref_len:
-            return {anchor_pos}
+    # Insertions are represented between reference bases; highlight inserted gap cells
+    # (which are anchored to the previous native position), but do not highlight anchor.
+    if alt_len > ref_len:
+        return {anchor_pos}
 
-        # Deletions affect reference positions after the anchor in VCF anchor convention.
-        if ref_len > alt_len:
-            deleted_len = ref_len - alt_len
-            return set(range(anchor_pos + 1, anchor_pos + 1 + deleted_len))
+    # Deletions affect reference positions after the anchor in VCF anchor convention.
+    if ref_len > alt_len:
+        deleted_len = ref_len - alt_len
+        return set(range(anchor_pos + 1, anchor_pos + 1 + deleted_len))
 
-        # Equal-length complex replacements: highlight replaced block including anchor.
-        block_len = max(ref_len, alt_len)
-        return set(range(anchor_pos, anchor_pos + block_len))
+    # Equal-length replacements (SNP/MNV) should always highlight the replaced block.
+    if ref_len == alt_len and ref_len > 0:
+        return set(range(anchor_pos, anchor_pos + ref_len))
 
     if len(ann.ref_codon) == 3 and len(ann.alt_codon) == 3:
         affected: set[int] = set()
@@ -364,7 +440,7 @@ def _affected_nt_positions(
                 affected.add(coding_pos)
         return affected
 
-    return {_variant_native_pos(ann, alignment)}
+    return {anchor_pos}
 
 
 def build_alignment_html(
@@ -437,31 +513,16 @@ def build_alignment_html(
     native_positions = alignment.aln_native_pos[aln_start:aln_end]
     native_anchor_positions = alignment.aln_native_anchor_pos[aln_start:aln_end]
 
-    if ann.is_fasta_mode:
-        affected_ref_positions = _affected_nt_positions(ann, alignment, codon_nt_start)
-        indel_like = {'insertion', 'deletion', 'frameshift', 'inframe_complex'}
-        is_indel_like = ann.consequence in indel_like or len(ann.variant.ref) != len(ann.variant.alt)
-        is_minus_fasta_insertion_like = (
-            alignment.strand == '-' and len(ann.variant.alt) > len(ann.variant.ref)
-        )
-        variant_anchor_pos = _variant_native_pos(ann, alignment)
-        affected_mask: list[bool] = []
-        for ref_pos, cell_anchor_pos in zip(native_positions, native_anchor_positions):
-            if ref_pos is None:
-                if is_minus_fasta_insertion_like:
-                    affected_mask.append(
-                        cell_anchor_pos in affected_ref_positions
-                        or (cell_anchor_pos - 1) in affected_ref_positions
-                    )
-                else:
-                    affected_mask.append(cell_anchor_pos in affected_ref_positions)
-            else:
-                if is_indel_like and ref_pos == variant_anchor_pos:
-                    affected_mask.append(False)
-                else:
-                    affected_mask.append(ref_pos in affected_ref_positions)
-    else:
-        ref_window, query_window, coding_positions, affected_mask = _apply_vcf_overlay(
+    if not _window_displays_variant(
+        ann,
+        alignment,
+        ref_window,
+        query_window,
+        native_positions,
+        native_anchor_positions,
+        codon_nt_start,
+    ):
+        ref_window, query_window, coding_positions, native_positions, native_anchor_positions = _apply_vcf_overlay(
             ann,
             alignment,
             ref_window,
@@ -470,6 +531,14 @@ def build_alignment_html(
             native_positions,
             native_anchor_positions,
         )
+
+    affected_mask = _build_affected_mask(
+        ann,
+        alignment,
+        native_positions,
+        native_anchor_positions,
+        codon_nt_start,
+    )
 
     ref_fmt = _render_spaced_line(
         ref_window,

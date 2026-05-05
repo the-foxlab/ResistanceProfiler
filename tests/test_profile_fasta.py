@@ -22,18 +22,18 @@ from respro.core.alignment import (
     sequence_checksum,
     store_mappings,
 )
-from respro.core.fasta_profile import (
-    _annotate_from_alignment,
-    _expand_iupac_codon,
+from respro.core.annotation import annotate_variants
+from respro.core.fasta_to_vcf import (
     _make_variant,
     _make_variant_from_coding_nt,
-    profile_fasta_consensus,
+    _variants_from_alignment,
+    fasta_to_vcf,
 )
 from respro.core.query import (
     resolve_cached_query_reference,
     resolve_fasta_query,
 )
-from respro.core.settings import CORE_CONFIG
+from respro.config.core_settings import CORE_CONFIG
 from respro.core.vcf_remap import (
     _build_query_to_cds_map,
     _cds_pos_to_genomic_pos,
@@ -78,7 +78,6 @@ def fasta_db(tmp_path: Path) -> Path:
     conn.commit()
     conn.close()
     return db_path
-
 
 @pytest.fixture()
 def fasta_db_multi_reference(tmp_path: Path) -> Path:
@@ -128,7 +127,6 @@ def fasta_db_multi_reference(tmp_path: Path) -> Path:
     conn.close()
     return db_path
 
-
 @pytest.fixture()
 def gene_fwd() -> GeneRecord:
     """Forward-strand gene spanning the tiny reference."""
@@ -137,7 +135,6 @@ def gene_fwd() -> GeneRecord:
         start=0, end=87, strand='+', codon_start=0,
         nt_sequence=TINY_REF_SEQ,
     )
-
 
 def _split_gene(*, strand: str) -> GeneRecord:
     """Build a two-segment CDS with a non-coding envelope gap."""
@@ -156,7 +153,6 @@ def _split_gene(*, strand: str) -> GeneRecord:
             GeneSegment(segment_index=1, start=12, end=18),
         ),
     )
-
 
 # ──────────────────────────────────────────────────────────────────────
 # Unit tests: coordinate mapping helpers
@@ -199,7 +195,6 @@ class TestBuildQueryToCdsMap:
         assert q2c[89] == 0
         # CDS pos 9 → RC pos 19 → fwd pos 99-19 = 80
         assert q2c[80] == 9
-
 
 class TestCdsPosToGenomic:
     def test_forward_strand(self) -> None:
@@ -269,7 +264,6 @@ class TestCdsPosToGenomic:
         assert _cds_pos_to_genomic_pos(gene, 6) == 5
         assert _cds_pos_to_genomic_pos(gene, 11) == 0
 
-
 class TestSplitGeneFastaProjection:
     def test_synthetic_variant_projection_uses_segment_coordinates(self) -> None:
         gene = _split_gene(strand='+')
@@ -279,7 +273,6 @@ class TestSplitGeneFastaProjection:
 
         assert codon_variant.pos == 12
         assert nt_variant.pos == 13
-
 
 # ──────────────────────────────────────────────────────────────────────
 # Unit tests: remap_variants
@@ -306,7 +299,6 @@ class TestRemapVariants:
         assert remapped[0].pos == 3
         assert remapped[0].ref == 'A'
         assert remapped[0].alt == 'G'
-
 
     def test_variant_outside_cds_excluded(self, gene_fwd: GeneRecord) -> None:
         """Variant in flanking region should be silently excluded."""
@@ -423,7 +415,6 @@ class TestRemapVariants:
         assert len(remapped) == 1
         assert remapped[0].query_ref_codon == 'ATG'
 
-
 # ──────────────────────────────────────────────────────────────────────
 # Integration: resolve_fasta_reference
 # ──────────────────────────────────────────────────────────────────────
@@ -489,7 +480,6 @@ class TestResolveFastaReference:
         assert len(matches) >= 1
         conn.close()
 
-
 class TestResolveCachedQueryReference:
     def test_resolves_stored_header(self, fasta_db: Path, tmp_path: Path) -> None:
         fasta_path = tmp_path / 'query.fasta'
@@ -554,7 +544,6 @@ class TestResolveCachedQueryReference:
         with pytest.raises(ValueError, match='ambiguous'):
             resolve_cached_query_reference(conn, 'dup_ref')
         conn.close()
-
 
 # ──────────────────────────────────────────────────────────────────────
 # CLI end-to-end: profile --ref-fasta
@@ -704,14 +693,12 @@ class TestProfileFastaCli:
         assert TINY_REF_NAME in html
         assert 'gag' in html
 
-
 # ──────────────────────────────────────────────────────────────────────
 # FASTA consensus profiling — unit + integration tests
 # ──────────────────────────────────────────────────────────────────────
 
 # Simple 12-nt CDS: ATG AAA GCT TAA = M K A *
 _SIMPLE_CDS = 'ATGAAAGCTTAA'
-
 
 @pytest.fixture()
 def simple_gene() -> GeneRecord:
@@ -722,7 +709,6 @@ def simple_gene() -> GeneRecord:
         nt_sequence=_SIMPLE_CDS,
         aa_sequence='MKA*',
     )
-
 
 def _make_match(gene: GeneRecord, query: str, strand: str = '+') -> GeneMatch:
     """Build a GeneMatch with a real CIGAR by aligning query against the gene CDS."""
@@ -744,155 +730,16 @@ def _make_match(gene: GeneRecord, query: str, strand: str = '+') -> GeneMatch:
         cds_start=result.cds_start,
     )
 
-
-class TestIupacExpansion:
-    def test_unambiguous_codon_returns_single_aa(self) -> None:
-        assert _expand_iupac_codon('ATG') == {'M'}
-
-    def test_r_expands_to_two_aas(self) -> None:
-        # RAA = AAA (K) or GAA (E)
-        aas = _expand_iupac_codon('RAA')
-        assert aas == {'K', 'E'}
-
-    def test_n_expands_to_all_possibilities(self) -> None:
-        # NNN covers all 64 codons; result must include at least standard AAs
-        aas = _expand_iupac_codon('NNN')
-        assert 'M' in aas
-        assert len(aas) > 5
-
-    def test_stop_codon_included(self) -> None:
-        # TAR = TAA or TAG = both stops
-        aas = _expand_iupac_codon('TAR')
-        assert aas == {'*'}
-
-
-class TestFastaConsensusProfile:
-    def test_perfect_match_produces_no_annotations(self, simple_gene: GeneRecord) -> None:
-        """Identical consensus emits zero annotations (all synonymous)."""
-        match = _make_match(simple_gene, _SIMPLE_CDS)
-        anns, gaps = profile_fasta_consensus(_SIMPLE_CDS, [match])
-        assert anns == []
-        assert gaps == []
-
-    def test_missense_snp_detected(self, simple_gene: GeneRecord) -> None:
-        """Single K→E substitution at codon 1 → one missense annotation."""
-        # ATGGAAGCTTAA: codon 1 = GAA = E (was AAA = K)
-        query = 'ATGGAAGCTTAA'
-        match = _make_match(simple_gene, query)
-        anns, gaps = profile_fasta_consensus(query, [match])
-
-        assert len(anns) == 1
-        ann = anns[0]
-        assert ann.gene_name == 'gag'
-        assert ann.ref_aa == 'K'
-        assert ann.alt_aa == 'E'
-        assert ann.consequence == 'missense'
-        assert ann.codon_pos == 1
-        assert ann.variant.ref == 'A'
-        assert ann.variant.alt == 'G'
-        assert ann.variant.allele_freq == pytest.approx(1.0)
-
-    def test_synonymous_change_not_emitted(self, simple_gene: GeneRecord) -> None:
-        """Synonymous codon change produces no annotations."""
-        # AAA → AAG: both encode K
-        query = 'ATGAAGGCTTAA'
-        match = _make_match(simple_gene, query)
-        anns, gaps = profile_fasta_consensus(query, [match])
-        assert anns == []
-
-    def test_stop_gained(self, simple_gene: GeneRecord) -> None:
-        """K → * at codon 1 → stop_gained annotation."""
-        # ATGTAAGCTTAA: codon 1 = TAA = *
-        query = 'ATGTAAGCTTAA'
-        match = _make_match(simple_gene, query)
-        anns, gaps = profile_fasta_consensus(query, [match])
-
-        assert len(anns) == 1
-        assert anns[0].alt_aa == '*'
-        assert anns[0].consequence == 'stop_gained'
-
-    def test_insertion_produces_frameshift_annotation(self, simple_gene: GeneRecord) -> None:
-        """Single-base insertion shifts the reading frame and produces a frameshift annotation."""
-        query = 'ATGAAAAGCTTAA'
-        match = _make_match(simple_gene, query)
-        anns, gaps = profile_fasta_consensus(query, [match])
-
-        assert any(a.consequence == 'frameshift' and a.alt_aa == 'MfsX' for a in anns)
-
-    def test_deletion_produces_frameshift_annotation(self, simple_gene: GeneRecord) -> None:
-        """Single-base deletion shifts the reading frame and produces a frameshift annotation."""
-        query = 'ATGAAGCTTAA'
-        match = _make_match(simple_gene, query)
-        anns, gaps = profile_fasta_consensus(query, [match])
-
-        assert any(a.consequence == 'frameshift' and a.alt_aa == 'MfsX' for a in anns)
-
-    def test_iupac_ambiguous_base_emits_split_frequency(self, simple_gene: GeneRecord) -> None:
-        """IUPAC 'R' at codon 1 → K (ref) or E: only E emitted with af=0.5."""
-        # 'ATGRAAGCTTAA': codon 1 = RAA = AAA (K) or GAA (E)
-        query = 'ATGRAAGCTTAA'
-        match = _make_match(simple_gene, query)
-        anns, gaps = profile_fasta_consensus(query, [match])
-
-        assert len(anns) == 1
-        ann = anns[0]
-        assert ann.alt_aa == 'E'
-        assert ann.consequence == 'missense'
-        assert ann.variant.allele_freq == pytest.approx(0.5)
-
-    def test_position_is_0based_genomic_codon_start(self, simple_gene: GeneRecord) -> None:
-        """Variant pos should be the 0-based genomic NT position of the affected codon."""
-        # K→E at codon 1 (codons: 0=ATG pos 0, 1=AAA pos 3, 2=GCT pos 6, 3=TAA pos 9)
-        query = 'ATGGAAGCTTAA'
-        match = _make_match(simple_gene, query)
-        anns, gaps = profile_fasta_consensus(query, [match])
-
-        assert len(anns) == 1
-        # Codon 1 starts at genomic pos 3 (0-based)
-        assert anns[0].variant.pos == 3
-
-    def test_no_nt_sequence_skips_gene(self, tmp_path: Path) -> None:
-        """Gene with empty nt_sequence should be silently skipped."""
-        gene_no_seq = GeneRecord(
-            id=1, reference_id=1, name='empty_gene', protein='',
-            start=0, end=12, strand='+', codon_start=0,
-            nt_sequence='',
-        )
-        match = _make_match(gene_no_seq, _SIMPLE_CDS)
-        anns, gaps = profile_fasta_consensus(_SIMPLE_CDS, [match])
-        assert anns == []
-        assert gaps == []
-
-
-class TestNStretchCoverageGaps:
-    """N-stretch detection in FASTA mode — full-codon NNN → CoverageGap, partial N → IUPAC."""
-
-    def test_all_n_codon_produces_gap_not_annotation(self, simple_gene: GeneRecord) -> None:
-        """NNN at codon 1 yields a CoverageGap stretch; no annotation emitted for that codon."""
-        # ATGNNNGCTTAA: codon 1 all-N
-        query = 'ATGNNNGCTTAA'
-        match = _make_match(simple_gene, query)
-        anns, gaps = profile_fasta_consensus(query, [match])
-
-        assert not any(a.codon_pos == 1 for a in anns)
-        assert any(g.gene_name == 'gag' and g.codon_start <= 1 <= g.codon_end for g in gaps)
-
-    def test_partial_n_codon_produces_iupac_expansion(self, simple_gene: GeneRecord) -> None:
-        """Single N in a codon stays as IUPAC expansion — no coverage gap emitted."""
-        # ATGAAN GCTTAA: codon 1 = AAN keeps internal ambiguity handling.
-        query = 'ATGAANGCTTAA'
-        match = _make_match(simple_gene, query)
-        anns, gaps = profile_fasta_consensus(query, [match])
-
-        codon1_anns = [a for a in anns if a.codon_pos == 1]
-        assert len(codon1_anns) > 0
-        assert not any(g.codon_start <= 1 <= g.codon_end for g in gaps)
-
-    def test_processing_continues_after_n_stretch(self, simple_gene: GeneRecord) -> None:
-        """Codons after an NNN gap are still annotated normally."""
+class TestFastaToVcf:
+    def test_compacts_consecutive_deletion_run_into_single_variant(
+        self,
+        simple_gene: GeneRecord,
+    ) -> None:
+        """A contiguous 3-nt deletion run should emit one compacted deletion variant."""
         aligned_ref = 'ATGAAAGCTTAA'
-        aligned_query = 'ATGNNNGAATAA'
-        anns, gaps = _annotate_from_alignment(
+        aligned_query = 'ATG---GCTTAA'
+
+        variants, gaps = _variants_from_alignment(
             aligned_ref,
             aligned_query,
             simple_gene,
@@ -900,46 +747,190 @@ class TestNStretchCoverageGaps:
             covered_cds_end=12,
         )
 
-        # Gap covers codon 1
-        assert any(g.codon_start <= 1 <= g.codon_end for g in gaps)
-        # Missense at codon 2 (A→E)
-        assert any(a.codon_pos == 2 and a.ref_aa == 'A' and a.alt_aa == 'E' for a in anns)
+        assert gaps == []
+        deletion_variants = [variant for variant in variants if len(variant.ref) > len(variant.alt)]
+        assert len(deletion_variants) == 1
+        deletion = deletion_variants[0]
+        assert deletion.ref == 'GAAA'
+        assert deletion.alt == 'G'
 
-    def test_consecutive_n_codons_merge_into_one_stretch(self, simple_gene: GeneRecord) -> None:
-        """Two consecutive all-N codons and uncovered tail merge into a single CoverageGap stretch."""
-        # ATGNNNNNN TAA: codons 1+2 all-N; aligner only reaches ATG, so codon 3 is also non-covered.
-        # All three non-covered codons (1, 2, 3) merge into one contiguous stretch.
-        query = 'ATGNNNNNNTAA'
-        match = _make_match(simple_gene, query)
-        anns, gaps = profile_fasta_consensus(query, [match])
+    def test_iupac_snp_emits_fractional_variants(self, simple_gene: GeneRecord) -> None:
+        """IUPAC bases should split into per-base alternatives with fractional AF."""
+        aligned_ref = 'ATGAAAGCTTAA'
+        aligned_query = 'ATGRAAGCTTAA'
 
-        assert len(gaps) == 1
-        assert gaps[0].codon_start == 1
-        assert gaps[0].codon_end == 3
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            simple_gene,
+            covered_cds_start=0,
+            covered_cds_end=12,
+        )
 
-    def test_lowercase_nnn_also_treated_as_gap(self, simple_gene: GeneRecord) -> None:
-        """Lower-case 'nnn' in a codon is treated as NNN (non-covered)."""
-        query = 'ATGnnnGCTTAA'
-        match = _make_match(simple_gene, query)
-        anns, gaps = profile_fasta_consensus(query, [match])
+        assert gaps == []
+        assert len(variants) == 1
+        variant = variants[0]
+        assert variant.ref == 'A'
+        assert variant.alt == 'G'
+        assert variant.allele_freq == pytest.approx(1.0)
+        assert variant.query_ref_codon == 'RAA'
 
-        assert any(g.codon_start <= 1 <= g.codon_end for g in gaps)
-
-    def test_terminal_missing_sequence_and_terminal_n_are_equivalent(
-        self, simple_gene: GeneRecord,
+    def test_full_n_codon_is_coverage_gap_and_not_emitted_as_variants(
+        self,
+        simple_gene: GeneRecord,
     ) -> None:
-        """Missing tail and trailing N tail produce identical uncovered codon stretches."""
-        trimmed_query = 'ATGAAAGCT'  # last codon missing
-        trailing_n_query = 'ATGAAAGCTNNN'
+        """A full NNN codon should be marked as uncovered and skipped for variant emission."""
+        aligned_ref = 'ATGAAAGCTTAA'
+        aligned_query = 'ATGNNNGCTTAA'
 
-        match_trimmed = _make_match(simple_gene, trimmed_query)
-        _, gaps_trimmed = profile_fasta_consensus(trimmed_query, [match_trimmed])
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            simple_gene,
+            covered_cds_start=0,
+            covered_cds_end=12,
+        )
 
-        match_n = _make_match(simple_gene, trailing_n_query)
-        _, gaps_n = profile_fasta_consensus(trailing_n_query, [match_n])
+        assert variants == []
+        assert len(gaps) == 1
+        assert gaps[0].gene_name == simple_gene.name
+        assert gaps[0].codon_start == 1
+        assert gaps[0].codon_end == 1
 
-        assert gaps_trimmed == gaps_n
+    def test_partial_n_codon_remains_assessable_for_iupac_variants(
+        self,
+        simple_gene: GeneRecord,
+    ) -> None:
+        """Partial ambiguity (e.g. AAN) should stay assessable and emit IUPAC SNP variants."""
+        aligned_ref = 'ATGAAAGCTTAA'
+        aligned_query = 'ATGAANGCTTAA'
 
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            simple_gene,
+            covered_cds_start=0,
+            covered_cds_end=12,
+        )
+
+        assert gaps == []
+        assert len(variants) == 3
+        assert {variant.alt for variant in variants} == {'C', 'G', 'T'}
+        assert all(variant.ref == 'A' for variant in variants)
+        assert all(variant.allele_freq == pytest.approx(1 / 3) for variant in variants)
+        assert all(variant.query_ref_codon == 'AAN' for variant in variants)
+
+    def test_minus_strand_insertion_keeps_anchor_first_in_genomic_orientation(self) -> None:
+        """Minus-strand insertion should emit VCF-style REF/ALT with anchor at ALT start."""
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='rev',
+            protein='Rev',
+            start=0,
+            end=6,
+            strand='-',
+            codon_start=0,
+            nt_sequence='CTCATC',
+            aa_sequence='',
+        )
+        aligned_ref = 'CTC------ATC'
+        aligned_query = 'CTCCCCAAAATC'
+
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            gene,
+            covered_cds_start=0,
+            covered_cds_end=6,
+        )
+
+        assert gaps == []
+        assert len(variants) == 1
+        variant = variants[0]
+        assert variant.pos == 2
+        assert variant.ref == 'T'
+        assert variant.alt == 'TTTTGGG'
+
+    def test_insertion_uses_reference_anchor_even_if_query_anchor_is_snp(
+        self,
+        simple_gene: GeneRecord,
+    ) -> None:
+        """Insertion REF/ALT must remain reference-anchored even with anchor SNP in query."""
+        aligned_ref = 'ATGA-AAGCTTAA'
+        aligned_query = 'ATGGTAAGCTTAA'
+
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            simple_gene,
+            covered_cds_start=0,
+            covered_cds_end=12,
+        )
+
+        assert gaps == []
+        insertion_variants = [v for v in variants if len(v.alt) > len(v.ref)]
+        assert len(insertion_variants) == 1
+        insertion = insertion_variants[0]
+        assert insertion.pos == 3
+        assert insertion.ref == 'A'
+        assert insertion.alt == 'AT'
+
+    def test_minus_strand_deletion_keeps_anchor_first_in_genomic_orientation(self) -> None:
+        """Minus-strand deletion should emit VCF-style REF/ALT with anchor at REF start."""
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='rev',
+            protein='Rev',
+            start=0,
+            end=8,
+            strand='-',
+            codon_start=0,
+            nt_sequence='CTCAAATC',
+            aa_sequence='',
+        )
+        aligned_ref = 'CTCAAATC'
+        aligned_query = 'CTC---TC'
+
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            gene,
+            covered_cds_start=0,
+            covered_cds_end=8,
+        )
+
+        assert gaps == []
+        assert len(variants) == 1
+        variant = variants[0]
+        assert variant.pos == 1
+        assert variant.ref == 'ATTT'
+        assert variant.alt == 'A'
+
+    def test_deletion_uses_reference_anchor_even_if_query_anchor_is_snp(
+        self,
+        simple_gene: GeneRecord,
+    ) -> None:
+        """Deletion REF/ALT must remain reference-anchored even with anchor SNP in query."""
+        aligned_ref = 'ATGAAAGCTTAA'
+        aligned_query = 'ATGG--GCTTAA'
+
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            simple_gene,
+            covered_cds_start=0,
+            covered_cds_end=12,
+        )
+
+        assert gaps == []
+        deletion_variants = [v for v in variants if len(v.ref) > len(v.alt)]
+        assert len(deletion_variants) == 1
+        deletion = deletion_variants[0]
+        assert deletion.pos == 3
+        assert deletion.ref == 'AAA'
+        assert deletion.alt == 'A'
 
 class TestFastaConsensusCli:
     """End-to-end CLI test for --fasta consensus input mode."""
@@ -1025,544 +1016,6 @@ class TestFastaConsensusCli:
         assert json_path.exists()
         assert tsv_path.exists()
 
-
-# ──────────────────────────────────────────────────────────────────────
-# FASTA alignment: insertion annotation
-# ──────────────────────────────────────────────────────────────────────
-
-def _make_fasta_gene(nt_seq: str, strand: str = '+') -> GeneRecord:
-    """Build a minimal GeneRecord for alignment annotation tests."""
-    return GeneRecord(
-        id=1, reference_id=1, name='gene', protein='P',
-        start=0, end=len(nt_seq), strand=strand, codon_start=0,
-        nt_sequence=nt_seq,
-    )
-
-
-class TestFastaInsertionAnnotation:
-    """Inline-frame and frameshift insertions detected in pairwise FASTA alignments."""
-
-    def test_inframe_insertion_at_codon_boundary(self) -> None:
-        """3-nt insertion before codon 1 uses preceding anchor codon: M -> MP."""
-        # Gene: ATG GGG TTT (M G F); insert CCC before codon 1
-        # aligned_ref:   ATG---GGGTTT  (12 chars)
-        # aligned_query: ATGCCCGGGTTT  (12 chars)
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = 'ATG---GGGTTT'
-        aligned_query = 'ATGCCCGGGTTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(gaps) == 0
-        assert len(anns) == 1
-        ann = anns[0]
-        assert ann.gene_name == 'gene'
-        assert ann.codon_pos == 0
-        assert ann.ref_aa == 'M'
-        assert ann.alt_aa == 'MP'
-        assert ann.consequence == 'insertion'
-        assert ann.is_fasta_mode is True
-        assert ann.variant.ref == 'G'
-        assert ann.variant.alt == 'GCCC'
-
-    def test_inframe_insertion_anchor_from_query_not_internal_ref(self) -> None:
-        """Anchor AA uses preceding query codon context, not internal reference codon."""
-        # Gene codon 0 = ATG -> M; query codon 0 = ACG -> T (divergent); insert CCC before codon 1.
-        # aligned_ref:   ATG---GGGTTT
-        # aligned_query: ACGCCCAGGTTT
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = 'ATG---GGGTTT'
-        aligned_query = 'ACGCCCAGGTTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(anns) == 2
-        ann = next(a for a in anns if a.consequence == 'insertion')
-        assert ann.codon_pos == 0
-        assert ann.ref_aa == 'T'      # anchor from QUERY ACG -> T (not internal ATG -> M)
-        assert ann.alt_aa == 'TP'     # T + CCC -> P
-        assert ann.consequence == 'insertion'
-
-    def test_frameshift_insertion_at_codon_boundary(self) -> None:
-        """1-nt insertion before codon 1 -> frameshift with preceding codon anchor."""
-        # aligned_ref:   ATG-GGGTTT  (10 chars)
-        # aligned_query: ATGCGGGTTT  (10 chars: insert C before codon 1)
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = 'ATG-GGGTTT'
-        aligned_query = 'ATGCGGGTTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(anns) == 1
-        ann = anns[0]
-        assert ann.codon_pos == 0
-        assert ann.ref_aa == 'M'
-        assert ann.alt_aa == 'MfsX'
-        assert ann.consequence == 'frameshift'
-        assert ann.is_fasta_mode is True
-        assert ann.variant.ref == 'G'
-        assert ann.variant.alt == 'GC'
-
-    def test_mid_codon_insertion_is_inframe_complex(self) -> None:
-        """Insertion embedded before position 2 of a codon → inframe_complex."""
-        # Gene: ATG GGG TTT; insert CCC between ref positions 1 (T) and 2 (G) of codon 0
-        # aligned_ref:   AT---GGGGTTT  (12 chars)
-        # aligned_query: ATCCCGGGGTTT  (12 chars)
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = 'AT---GGGGTTT'
-        aligned_query = 'ATCCCGGGGTTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(anns) == 1
-        ann = anns[0]
-        assert ann.codon_pos == 0
-        assert ann.ref_aa == 'M'
-        assert ann.alt_aa == '?'
-        assert ann.consequence == 'inframe_complex'
-        assert ann.is_fasta_mode is True
-
-    def test_single_nt_mid_codon_insertion_is_frameshift(self) -> None:
-        """A non-3n insertion within a codon is a frameshift, not inframe_complex."""
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref = 'AT-GGGGTTT'
-        aligned_query = 'ATCGGGGTTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(gaps) == 0
-        assert len(anns) == 1
-        ann = anns[0]
-        assert ann.consequence == 'frameshift'
-        assert ann.codon_pos == 0
-        assert ann.ref_aa == 'M'
-        assert ann.alt_aa == 'MfsX'
-        assert ann.variant.ref == 'T'
-        assert ann.variant.alt == 'TC'
-
-    def test_single_nt_mid_codon_insertion_is_frameshift_on_reverse_gene(self) -> None:
-        """Reverse-strand single-nt mid-codon insertion remains a frameshift indel event."""
-        gene = _make_fasta_gene('ATGGGGTTT', strand='-')
-        aligned_ref = 'AT-GGGGTTT'
-        aligned_query = 'ATCGGGGTTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(gaps) == 0
-        assert len(anns) == 1
-        ann = anns[0]
-        assert ann.consequence == 'frameshift'
-        assert ann.codon_pos == 0
-        assert ann.ref_aa == 'M'
-        assert ann.alt_aa == 'MfsX'
-        assert len(ann.variant.alt) - len(ann.variant.ref) == 1
-
-    def test_negative_strand_mid_codon_frameshift_insertion_anchors_previous_codon(self) -> None:
-        """Minus-strand mid-codon frameshift insertion anchors AA change on previous valid codon."""
-        gene = _make_fasta_gene('CCCAGCCTCCCCCCC', strand='-')
-        aligned_ref = 'CCCAGCCT-CCCCCCC'
-        aligned_query = 'CCCAGCCTCCCCCCCC'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(gaps) == 0
-        frameshift_anns = [ann for ann in anns if ann.consequence == 'frameshift']
-        assert len(frameshift_anns) == 1
-        ann = frameshift_anns[0]
-        assert ann.codon_pos == 1
-        assert ann.ref_aa == 'S'
-        assert ann.alt_aa == 'SfsX'
-        assert len(ann.variant.alt) - len(ann.variant.ref) == 1
-
-    def test_boundary_and_mid_codon_insertion_is_inframe_complex(self) -> None:
-        """Insertions at both codon boundary and mid-codon → inframe_complex."""
-        # Insert C before codon 0 AND CCC between positions 1 and 2 of codon 0
-        # aligned_ref:   -AT---GGGGTTT  (13 chars)
-        # aligned_query: CATCCCGGGGTTT  (13 chars)
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = '-AT---GGGGTTT'
-        aligned_query = 'CATCCCGGGGTTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(anns) == 1
-        assert anns[0].consequence == 'inframe_complex'
-
-    def test_insertion_followed_by_snp_annotated_separately(self) -> None:
-        """A 3-nt insertion before codon 1 and a SNP at codon 2 each emit one annotation."""
-        # Gene: ATG GGG TTT; insert CCC before codon 1; codon 2 TTT→ TAT (F→Y)
-        # aligned_ref:   ATG---GGGTTT  (12 chars)
-        # aligned_query: ATGCCCGGGTAT  (12 chars: codon 2 in query = TAT → Y)
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = 'ATG---GGGTTT'
-        aligned_query = 'ATGCCCGGGTAT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        consequences = {a.consequence for a in anns}
-        assert 'insertion' in consequences
-        assert 'missense' in consequences
-        ins_ann = next(a for a in anns if a.consequence == 'insertion')
-        snp_ann = next(a for a in anns if a.consequence == 'missense')
-        assert ins_ann.codon_pos == 0
-        assert snp_ann.alt_aa == 'Y'
-
-    def test_negative_strand_insertion_bases_already_cds_oriented(self) -> None:
-        """Minus-strand gene: inserted bases are passed in CDS orientation directly."""
-        # Minus-strand gene with coding seq ATG GGG TTT (M G F)
-        # _profile_gene aligns in CDS orientation; _annotate_from_alignment
-        # receives CDS-oriented strings, so no extra RC is needed here.
-        gene = _make_fasta_gene('ATGGGGTTT', strand='-')
-        # Same alignment as forward strand — already CDS oriented
-        aligned_ref   = 'ATG---GGGTTT'
-        aligned_query = 'ATGCCCGGGTTT'   # insert CCC before codon 1
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(anns) == 1
-        ann = anns[0]
-        assert ann.codon_pos == 0
-        assert ann.ref_aa == 'M'
-        assert ann.alt_aa == 'MP'
-        assert ann.consequence == 'insertion'
-        # For '-' strand insertion, NT anchor follows genomic 5'->3' mapping (coding idx 3 -> pos 5).
-        assert ann.variant.pos == 5
-
-    def test_negative_strand_insertion_uses_query_mapped_nt_anchor(self) -> None:
-        """Reverse-complement alignment reports NT anchor in genomic 5'->3' orientation."""
-        gene = _make_fasta_gene('ATGGGGTTT', strand='-')
-        aligned_ref = 'ATG---GGGTTT'
-        aligned_query = 'ATGTTTGGGTTT'  # inserted in coding orientation; report should use genomic RC
-
-        anns, _ = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        ann = next(a for a in anns if a.consequence == 'insertion')
-        assert ann.variant.ref == 'C'
-        assert ann.variant.alt == 'CAAA'
-
-    def test_negative_strand_frameshift_insertion_uses_genomic_indel_notation(self) -> None:
-        """Reverse-complement FASTA frameshift insertion uses genomic anchor-plus-payload alleles."""
-        gene = _make_fasta_gene('ATGGGGTTT', strand='-')
-        aligned_ref = 'ATG-GGGTTT'
-        aligned_query = 'ATGTGGGTTT'
-
-        anns, _ = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        ann = next(a for a in anns if a.consequence == 'frameshift')
-        assert ann.variant.ref == 'C'
-        assert ann.variant.alt == 'CA'
-
-
-# ──────────────────────────────────────────────────────────────────────
-# FASTA alignment: deletion annotation
-# ──────────────────────────────────────────────────────────────────────
-
-class TestFastaDeletionAnnotation:
-    """In-frame and frameshift deletions detected in pairwise FASTA alignments."""
-
-    def test_inframe_single_codon_deletion(self) -> None:
-        """Codon 1 (G) fully deleted: anchor M from codon 0, ref_aa MG, alt_aa M."""
-        # Gene: ATG GGG TTT; codon 1 deleted
-        # aligned_ref:   ATGGGGTTT  (9 chars)
-        # aligned_query: ATG---TTT  (9 chars)
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = 'ATGGGGTTT'
-        aligned_query = 'ATG---TTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(gaps) == 0
-        assert len(anns) == 1
-        ann = anns[0]
-        assert ann.gene_name == 'gene'
-        assert ann.codon_pos == 0   # anchor codon (M at codon 0), consistent with VCF mode
-        assert ann.ref_aa == 'MG'    # anchor M (codon 0 query ATG) + deleted G (codon 1 GGG)
-        assert ann.alt_aa == 'M'     # anchor only
-        assert ann.consequence == 'deletion'
-        assert ann.is_fasta_mode is True
-
-    def test_inframe_multi_codon_deletion_merged_into_one_annotation(self) -> None:
-        """Two consecutive deleted codons emit a single deletion annotation."""
-        # Gene: ATG GGG AAA TTT (M G K F, 12 nt); delete codons 1 (G) and 2 (K)
-        # aligned_ref:   ATGGGGAAATTT  (12 chars)
-        # aligned_query: ATG------TTT  (12 chars)
-        gene = _make_fasta_gene('ATGGGGAAATTT')
-        aligned_ref   = 'ATGGGGAAATTT'
-        aligned_query = 'ATG------TTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(gaps) == 0
-        assert len(anns) == 1
-        ann = anns[0]
-        assert ann.codon_pos == 0   # anchor at codon 0 (M)
-        assert ann.ref_aa == 'MGK'   # anchor M + deleted G + deleted K
-        assert ann.alt_aa == 'M'
-        assert ann.consequence == 'deletion'
-
-    def test_deletion_anchor_uses_query_codon_not_internal_ref(self) -> None:
-        """Anchor AA comes from the last valid query codon (query context)."""
-        # Gene: ATG GGG TTT; codon 0 in query = ACG (T, not M); codon 1 deleted
-        # aligned_ref:   ATGGGGTTT
-        # aligned_query: ACG---TTT  ← codon 0 query = ACG → T
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = 'ATGGGGTTT'
-        aligned_query = 'ACG---TTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        del_ann = next(a for a in anns if a.consequence == 'deletion')
-        assert del_ann.codon_pos == 0   # anchor at codon 0
-        assert del_ann.ref_aa == 'TG'   # anchor T (from query ACG) + deleted G
-        assert del_ann.alt_aa == 'T'    # anchor T
-
-    def test_partial_deletion_is_frameshift(self) -> None:
-        """1-gap query codon (partial deletion) → frameshift."""
-        # Gene: ATG GGG TTT; codon 1 has 1 gap → partial deletion
-        # aligned_ref:   ATGGGGTTT  (9 chars)
-        # aligned_query: ATG-GGTTT  (9 chars: codon 1 = '-GG')
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = 'ATGGGGTTT'
-        aligned_query = 'ATG-GGTTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(anns) == 1
-        ann = anns[0]
-        assert ann.codon_pos == 0
-        assert ann.ref_aa == 'M'     # first gap at codon pos 0 anchors to previous codon
-        assert ann.alt_aa == 'MfsX'
-        assert ann.consequence == 'frameshift'
-        assert ann.is_fasta_mode is True
-        assert ann.variant.ref == 'GG'
-        assert ann.variant.alt == 'G'
-
-    def test_two_gap_query_codon_is_also_frameshift(self) -> None:
-        """2-gap query codon (partial deletion) → frameshift."""
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = 'ATGGGGTTT'
-        aligned_query = 'ATGGG--TT'  # codon 2 = 'G--'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert any(a.consequence == 'frameshift' for a in anns)
-
-    def test_non_consecutive_partial_deletions_in_separate_codons_emit_separate_frameshifts(
-        self,
-    ) -> None:
-        """
-        Non-consecutive single-nt deletions in different codons emit two separate frameshifts.
-
-        Gene: ATG GGG AAA TTT (M G K F, 12 nt)
-        Query: ATG G-A A-A TTT  ← gap at codon 1 pos 1, gap at codon 2 pos 1
-        The deletions are separated by non-gap nucleotides, so they are NOT consecutive
-        and must not be merged → TWO separate frameshift annotations.
-        """
-        gene = _make_fasta_gene('ATGGGGAAATTT')
-        aligned_ref   = 'ATGGGGAAATTT'
-        aligned_query = 'ATGG-AA-ATTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        frameshift_anns = [a for a in anns if a.consequence == 'frameshift']
-        assert len(frameshift_anns) == 2, f'Expected 2 frameshifts, got {len(frameshift_anns)}'
-        codon_positions = {ann.codon_pos for ann in frameshift_anns}
-        assert 1 in codon_positions
-        assert 2 in codon_positions
-        for ann in frameshift_anns:
-            assert len(ann.variant.ref) - len(ann.variant.alt) == 1
-
-    def test_multi_codon_inframe_deletion_merged_into_one_annotation(self) -> None:
-        """
-        In-frame deletion spanning multiple codons (3n total) emits ONE deletion annotation.
-
-        Gene: ATG GGG AAA TTT CCC (M G K F P, 15 nt)
-        Query: ATG GGG --- --- CCC  ← codons 2-3 fully deleted (6 nt = 2 codons)
-        Anchor: codon 1 (last valid before deletion)
-        """
-        gene = _make_fasta_gene('ATGGGGAAATTTCCC')
-        aligned_ref   = 'ATGGGGAAATTTCCC'
-        aligned_query = 'ATGGGG------CCC'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(gaps) == 0
-        deletion_anns = [a for a in anns if a.consequence == 'deletion']
-        assert len(deletion_anns) == 1, f'Expected 1 deletion, got {len(deletion_anns)}'
-
-        ann = deletion_anns[0]
-        assert ann.codon_pos == 1  # anchor at codon 1 (G, last valid before deletion starts)
-        assert ann.ref_aa == 'GKF'  # anchor G + deleted K + deleted F
-        assert ann.alt_aa == 'G'
-
-    def test_frameshift_deletion_anchor_before_gap_not_after(self) -> None:
-        """
-        Frameshift deletion: AA anchor follows the NT anchor codon.
-
-        Gene: ATG GGG TTT (M G F, 9 nt)
-        Query: ATG -GG TTT  ← gap at position 0 of codon 1
-        AA anchor: previous codon 0 = ATG -> M (same codon as NT anchor)
-        NT anchor: from last valid codon 0 (last NT = G)
-        """
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = 'ATGGGGTTT'
-        aligned_query = 'ATG-GGTTT'  # codon 1 = '-GG' → gap at pos 0, anchor from codon 0
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        frameshift_anns = [a for a in anns if a.consequence == 'frameshift']
-        assert len(frameshift_anns) == 1
-        ann = frameshift_anns[0]
-        assert ann.codon_pos == 0
-        assert ann.ref_aa == 'M'
-        assert ann.alt_aa == 'MfsX'
-        # NT anchor should start with G (last NT of codon 0)
-        assert ann.variant.ref[0] == 'G'
-
-    def test_non_consecutive_deletions_emit_separate_frameshifts(self) -> None:
-        """
-        Non-consecutive single-nt deletions in different codons emit two separate frameshift events.
-
-        Gene: ATG GGG AAA TTT (M G K F, 12 nt)
-        Query: ATG GG- A-A TTT  ← gap at position 2 of codon 1, gap at position 1 of codon 2
-        The deletions are separated by a non-gap nucleotide, so they are NOT consecutive
-        and must not be merged → TWO separate frameshift annotations.
-        """
-        gene = _make_fasta_gene('ATGGGGAAATTT')
-        aligned_ref   = 'ATGGGGAAATTT'
-        aligned_query = 'ATGGG-A-ATTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        frameshift_anns = [a for a in anns if a.consequence == 'frameshift']
-        # Two non-consecutive deletions must produce two separate frameshift annotations
-        assert len(frameshift_anns) == 2, f'Expected 2 frameshifts, got {len(frameshift_anns)}'
-        codon_positions = {ann.codon_pos for ann in frameshift_anns}
-        assert 1 in codon_positions
-        assert 2 in codon_positions
-        for ann in frameshift_anns:
-            # Each deletion removes 1 nt
-            assert len(ann.variant.ref) - len(ann.variant.alt) == 1
-
-    def test_mixed_partial_and_full_deletion_run_is_one_frameshift(self) -> None:
-        """
-        Consecutive partial+full deletion codons emit one frameshift annotation.
-
-        Gene: ATG GGG AAA TTT (M G K F, 12 nt)
-        Query: ATG GG- --- TTT  ← gap at position 2 of codon 1, all gaps in codon 2
-        Total deleted: 4 nt (non-3n) -> one frameshift and no deletion annotation.
-        """
-        gene = _make_fasta_gene('ATGGGGAAATTT')
-        aligned_ref = 'ATGGGGAAATTT'
-        aligned_query = 'ATGGG----TTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(gaps) == 0
-        frameshift_anns = [a for a in anns if a.consequence == 'frameshift']
-        deletion_anns = [a for a in anns if a.consequence == 'deletion']
-        assert len(frameshift_anns) == 1
-        assert len(deletion_anns) == 0
-        ann = frameshift_anns[0]
-        assert len(ann.variant.ref) - len(ann.variant.alt) == 4
-
-    def test_deletion_at_gene_start_no_anchor_becomes_gap(self) -> None:
-        """Full-codon deletion at codon 0 with no preceding anchor → coverage gap."""
-        # Gene: ATG GGG TTT; codon 0 deleted
-        # aligned_ref:   ATGGGGTTT
-        # aligned_query: ---GGGTTT
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = 'ATGGGGTTT'
-        aligned_query = '---GGGTTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(anns) == 0
-        assert len(gaps) == 1
-        assert gaps[0].codon_start == 0
-        assert gaps[0].codon_end == 0
-
-    def test_negative_strand_deletion_correct_genomic_position(self) -> None:
-        """Minus-strand gene deletion uses correct codon genomic coordinate."""
-        # Minus-strand gene: coding sequence ATG GGG TTT stored in coding orientation
-        gene = _make_fasta_gene('ATGGGGTTT', strand='-')
-        aligned_ref   = 'ATGGGGTTT'
-        aligned_query = 'ATG---TTT'   # codon 1 deleted
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        assert len(anns) == 1
-        ann = anns[0]
-        assert ann.codon_pos == 0   # anchor at codon 0
-        assert ann.ref_aa == 'MG'
-        assert ann.alt_aa == 'M'
-        assert ann.consequence == 'deletion'
-        # Minus-strand VCF anchor is after the deletion in CDS order (5' genomically).
-        # First NT of next codon (TTT) is at CDS index 6; pos = (end-1) - 6 = 2.
-        assert ann.variant.pos == 2
-        assert ann.variant.ref == 'ACCC'
-        assert ann.variant.alt == 'A'
-
-    def test_negative_strand_frameshift_deletion_uses_genomic_indel_notation(self) -> None:
-        """Reverse-complement FASTA frameshift deletion uses genomic anchor-plus-payload alleles."""
-        gene = _make_fasta_gene('ATGGGGTTT', strand='-')
-        aligned_ref = 'ATGGGGTTT'
-        aligned_query = 'ATG-GGTTT'
-
-        anns, _ = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        ann = next(a for a in anns if a.consequence == 'frameshift')
-        assert ann.variant.ref == 'CC'
-        assert ann.variant.alt == 'C'
-
-    def test_negative_strand_frameshift_deletion_last_codon_base_anchors_previous_amino_acid(
-        self,
-    ) -> None:
-        gene = _make_fasta_gene('ATGCCCTTT', strand='-')
-        aligned_ref = 'ATGCCCTTT'
-        aligned_query = 'ATGCC-TTT'
-
-        anns, _ = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        ann = next(a for a in anns if a.consequence == 'frameshift')
-        assert ann.codon_pos == 0
-        assert ann.ref_aa == 'M'
-        assert ann.alt_aa == 'MfsX'
-        assert ann.variant.ref == 'AG'
-        assert ann.variant.alt == 'A'
-
-    def test_snp_before_deletion_is_emitted_separately(self) -> None:
-        """A start_lost at codon 0 and a deletion at codon 1 each emit their own annotation."""
-        # Gene: ATG GGG TTT; codon 0 ATG→ACG (M→T = start_lost); codon 1 GGG deleted
-        # aligned_ref:   ATGGGGTTT
-        # aligned_query: ACG---TTT
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = 'ATGGGGTTT'
-        aligned_query = 'ACG---TTT'
-
-        anns, gaps = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-
-        consequences = {a.consequence for a in anns}
-        assert 'start_lost' in consequences
-        assert 'deletion' in consequences
-
-    def test_deletion_rule_matching_compatible_format(self) -> None:
-        """Deletion annotation ref_aa/alt_aa follows anchor+deleted / anchor convention."""
-        # Ensures _matches_rule_alleles can match a rule with reference='MG', mutation='M'
-        from respro.core.rules import _matches_rule_alleles
-
-        gene = _make_fasta_gene('ATGGGGTTT')
-        aligned_ref   = 'ATGGGGTTT'
-        aligned_query = 'ATG---TTT'
-
-        anns, _ = _annotate_from_alignment(aligned_ref, aligned_query, gene)
-        ann = next(a for a in anns if a.consequence == 'deletion')
-
-        assert _matches_rule_alleles(
-            reference='MG', mutation='M', ann_ref=ann.ref_aa, ann_alt=ann.alt_aa,
-        )
-
-
 class TestReverseStrandMappyParity:
     """Regression tests for reverse-strand FASTA profiling with mappy CIGAR handling."""
 
@@ -1605,8 +1058,9 @@ class TestReverseStrandMappyParity:
         assert len(matches) == 1
         assert matches[0].strand == '-'
 
-        annotations, gaps = profile_fasta_consensus(query, [matches[0]])
+        variants, gaps = fasta_to_vcf(query, [matches[0]])
         assert gaps == []
+        annotations = annotate_variants(variants, [gene], is_fasta_mode=True)
         return [
             (ann.codon_pos, ann.consequence, ann.ref_aa, ann.alt_aa)
             for ann in annotations
@@ -1642,3 +1096,56 @@ class TestReverseStrandMappyParity:
         assert len(mappy) == 1
         assert mappy[0][1] == 'insertion'
 
+    def test_minus_strand_nucleotide_assessed_in_internal_reference_direction(self) -> None:
+        """
+        Verify that FASTA-profiled minus-strand variants are assessed in internal
+        reference coordinates (like VCF mode).
+
+        For a minus-strand gene, nt_sequence is stored in coding (5'→3') orientation.
+       When we profile a query on minus strand, aligned_ref and aligned_query are
+        built relative to this internal coding sequence, independent of the
+        actual genomic orientation.
+        """
+        # Tiny 18-nt ref: ATG CAA GTC GGA AAC TAA (M Q V G N * in protein)
+        internal_ref = 'ATGCAAGTCGGAAACTAA'
+
+        # Create mutation in internal frame: codon 1 CAA → AAG (Q → K)
+        internal_variant = 'ATGAAGGTCGGAAACTAA'
+
+        # Create a genomic RC query (how it appears when matching to minus-strand gene)
+        query_on_minus_strand = str(Seq(internal_variant).reverse_complement())
+
+        # After matching and reverse-complement handling in _profile_gene_to_variants,
+        # the region gets reverse-complemented back to coding orientation
+        region_in_coding_orientation = str(Seq(query_on_minus_strand).reverse_complement())
+        assert region_in_coding_orientation == internal_variant
+
+        # Create gene with internal ref
+        gene = GeneRecord(
+            id=1, reference_id=1, name='minus_gene', protein='Test',
+            start=0, end=18, strand='-', codon_start=0,
+            nt_sequence=internal_ref,
+        )
+
+        # Directly test variant emission using fasta_to_vcf logic
+        # Manually call _variants_from_alignment with aligned strings
+        aligned_ref = internal_ref.upper()
+        aligned_query = region_in_coding_orientation.upper()
+
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            gene,
+            covered_cds_start=0,
+            covered_cds_end=18,
+        )
+
+        # Annotate the variants
+        annotations = annotate_variants(variants, [gene], is_fasta_mode=True)
+
+        # Must detect Q→K at codon 1 in the internal reference frame
+        aa_changes = [(a.codon_pos, a.ref_aa, a.alt_aa) for a in annotations]
+        assert any(
+            pos == 1 and ref == 'Q' and alt == 'K'
+            for pos, ref, alt in aa_changes
+        ), f'Expected Q→K at codon 1, got: {aa_changes}'

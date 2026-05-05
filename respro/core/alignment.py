@@ -25,7 +25,7 @@ import mappy
 from Bio.Align import PairwiseAligner
 from Bio.Seq import Seq
 
-from respro.core.settings import CORE_CONFIG
+from respro.config.core_settings import CORE_CONFIG
 from respro.db.models import GeneMatch, GeneRecord, GeneSegment
 
 logger = logging.getLogger(__name__)

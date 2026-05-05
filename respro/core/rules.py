@@ -9,7 +9,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from respro.config.settings import CLI_CONFIG
+from respro.config.cli_settings import CLI_CONFIG
 from respro.db._rules_formula import _tokenize_formula_expression
 from respro.db._rules_publication import _report_publication_lookup_failures
 from respro.db.models import (

@@ -20,7 +20,8 @@ from respro.cli.profile_helpers import (
     _print_completion_panel,
     _resolve_reference,
 )
-from respro.core.fasta_profile import profile_fasta_consensus
+from respro.core.annotation import annotate_variants
+from respro.core.fasta_to_vcf import fasta_to_vcf
 from respro.core.query import resolve_fasta_query
 from respro.db.schema import open_project_db
 from respro.utils.logging import err_console
@@ -108,7 +109,8 @@ def _profile_fasta_command(
         )
         genes, rules, formula_rules, rule_gene_names = _load_reference_data(project_conn, ref_id)
 
-        annotations, coverage_gaps = profile_fasta_consensus(query_seq, fasta_matches)
+        variants, coverage_gaps = fasta_to_vcf(query_seq, fasta_matches)
+        annotations = annotate_variants(variants, genes, is_fasta_mode=True)
 
         if coverage_gaps:
             total_non_covered = sum(gap.codon_end - gap.codon_start + 1 for gap in coverage_gaps)

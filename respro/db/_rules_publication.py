@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 
-from respro.config.settings import CLI_CONFIG
+from respro.config.cli_settings import CLI_CONFIG
 from respro.io.publications import (
     fetch_publication_metadata,
     fetch_pubmed_id_for_doi,

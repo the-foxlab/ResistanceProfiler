@@ -229,6 +229,14 @@ class TestAnnotateVariantsForward:
         results = annotate_variants(variants, [tiny_gene])
         assert len(results) == 2
 
+    def test_marks_annotations_as_fasta_mode_when_requested(self, tiny_gene, tiny_ref_seq):
+        """All emitted annotations should carry is_fasta_mode=True in FASTA flow."""
+        var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [tiny_gene], is_fasta_mode=True)
+
+        assert len(results) == 1
+        assert results[0].is_fasta_mode is True
+
 
 class TestAnnotateVariantsReverse:
     """Test annotation on a reverse-strand gene."""

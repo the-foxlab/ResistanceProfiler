@@ -7,7 +7,6 @@ import sqlite3
 import matplotlib.pyplot as plt
 from Bio.Seq import Seq
 
-from respro.core.fasta_profile import _annotate_from_alignment
 from respro.db.models import (
     AnnotatedVariant,
     CoverageGap,
@@ -1175,6 +1174,87 @@ class TestAlignmentVisualization:
         html = str(build_alignment_html(ann, alignment, context_codons=1))
         assert html.count("<span class='aln-cell aln-match-cell'>|</span>") == 8
 
+    def test_fasta_snp_highlights_the_existing_aligned_base(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='FASTASNP',
+            protein='F',
+            start=0,
+            end=9,
+            strand='+',
+            codon_start=0,
+            nt_sequence='AAACCCGGG',
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=9,
+            strand='+',
+            cigar='9M',
+            cds_start=0,
+        )
+        alignment = build_gene_alignments('AAATCCGGG', [match])['FASTASNP']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='CCC', alt='TCC'),
+            gene_name='FASTASNP',
+            codon_pos=1,
+            ref_codon='CCC',
+            alt_codon='TCC',
+            ref_aa='P',
+            alt_aa='S',
+            consequence='missense',
+            af_bin='high',
+            is_fasta_mode=True,
+        )
+
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        assert "<span class='aln-cell aln-affected'>T</span>" in html
+
+    def test_fasta_synonymous_snp_still_highlights_anchor_base(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='FASTASYN',
+            protein='F',
+            start=0,
+            end=9,
+            strand='+',
+            codon_start=0,
+            nt_sequence='AAACCCGGG',
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=9,
+            strand='+',
+            cigar='9M',
+            cds_start=0,
+        )
+        alignment = build_gene_alignments('AAATCCGGG', [match])['FASTASYN']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='C', alt='T'),
+            gene_name='FASTASYN',
+            codon_pos=1,
+            ref_codon='GGC',
+            alt_codon='GGC',
+            ref_aa='G',
+            alt_aa='G',
+            consequence='synonymous',
+            af_bin='high',
+            is_fasta_mode=True,
+        )
+
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        assert html.count('aln-cell aln-affected') == 1
+        assert "<span class='aln-cell aln-affected'>T</span>" in html
+
     def test_vcf_alignment_renders_match_bars_from_overlay_query(self) -> None:
         gene = GeneRecord(
             id=1,
@@ -1289,6 +1369,44 @@ class TestAlignmentVisualization:
         assert html.count('aln-cell aln-affected') == 1
         assert "<span class='aln-cell aln-affected'>-</span>" in html
 
+    def test_fasta_insertion_uses_existing_alignment_without_duplication(self) -> None:
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='UL23INS',
+            protein='UL23',
+            start=0,
+            end=12,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATGCCCAAAGGG',
+        )
+        match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=13,
+            strand='+',
+            cigar='4M1I8M',
+            cds_start=0,
+        )
+        alignment = build_gene_alignments('ATGCGCCCAAAGGG', [match])['UL23INS']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='C', alt='CG'),
+            gene_name='UL23INS',
+            codon_pos=1,
+            consequence='insertion',
+            ref_aa='P',
+            alt_aa='P',
+            is_fasta_mode=True,
+        )
+
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        assert html.count('aln-cell aln-affected') == 1
+        assert html.count("<span class='aln-cell aln-affected'>G</span>") == 1
+
     def test_fasta_reverse_frameshift_deletion_highlights_gap_column_in_alignment(self) -> None:
         gene = GeneRecord(
             id=1,
@@ -1328,70 +1446,6 @@ class TestAlignmentVisualization:
         html = str(build_alignment_html(ann, alignment, context_codons=1))
         assert html.count('aln-cell aln-affected') == 1
         assert "<span class='aln-cell aln-affected'>-</span>" in html
-
-    def test_fasta_frameshift_insertion_highlights_inserted_column_in_alignment(self) -> None:
-        gene = GeneRecord(
-            id=1,
-            reference_id=1,
-            name='INSPLUS',
-            protein='INSPLUS',
-            start=0,
-            end=9,
-            strand='+',
-            codon_start=0,
-            nt_sequence='ATGGGGTTT',
-        )
-        match = GeneMatch(
-            gene=gene,
-            identity=1.0,
-            cds_coverage=1.0,
-            query_coverage=1.0,
-            query_start=0,
-            query_end=10,
-            strand='+',
-            cigar='2M1I7M',
-            cds_start=0,
-        )
-        alignment = build_gene_alignments('ATCGGGGTTT', [match])['INSPLUS']
-        annotations, _ = _annotate_from_alignment('AT-GGGGTTT', 'ATCGGGGTTT', gene)
-        ann = next(a for a in annotations if a.consequence == 'frameshift')
-
-        html = str(build_alignment_html(ann, alignment, context_codons=1))
-        assert html.count('aln-cell aln-affected') == 1
-        assert "<span class='aln-cell aln-affected'>C</span>" in html
-
-    def test_fasta_reverse_frameshift_insertion_highlights_inserted_column_in_alignment(self) -> None:
-        gene = GeneRecord(
-            id=1,
-            reference_id=1,
-            name='INSMINUS',
-            protein='INSMINUS',
-            start=0,
-            end=9,
-            strand='-',
-            codon_start=0,
-            nt_sequence='ATGGGGTTT',
-        )
-        coding_query = 'ATCGGGGTTT'
-        query = str(Seq(coding_query).reverse_complement())
-        match = GeneMatch(
-            gene=gene,
-            identity=1.0,
-            cds_coverage=1.0,
-            query_coverage=1.0,
-            query_start=0,
-            query_end=len(query),
-            strand='-',
-            cigar='2M1I7M',
-            cds_start=0,
-        )
-        alignment = build_gene_alignments(query, [match])['INSMINUS']
-        annotations, _ = _annotate_from_alignment('AT-GGGGTTT', 'ATCGGGGTTT', gene)
-        ann = next(a for a in annotations if a.consequence == 'frameshift')
-
-        html = str(build_alignment_html(ann, alignment, context_codons=1))
-        assert html.count('aln-cell aln-affected') == 1
-        assert "<span class='aln-cell aln-affected'>G</span>" in html
 
     def test_reverse_gene_codon_spacing_follows_cds_direction(self) -> None:
         gene = GeneRecord(
