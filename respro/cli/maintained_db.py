@@ -48,6 +48,13 @@ def _maintained_db_command(
             help='Output SQLite database path (directory or file). Defaults to <database_name>.db.',
         ),
     ] = None,
+    additional_info: Annotated[
+        bool,
+        typer.Option(
+            '--additional-info/--no-additional-info',
+            help='Fetch optional PubChem/PubMed enrichment while building the database (default: on).',
+        ),
+    ] = True,
 ) -> None:
     """
     List maintained project databases or download one and initialize a local project DB.
@@ -68,7 +75,7 @@ def _maintained_db_command(
         if output is not None
         else Path(f'{download}.db')
     )
-    _download_command(database_name=str(download), db_path=db_output)
+    _download_command(database_name=str(download), db_path=db_output, additional_info=additional_info)
 
 
 def _list_command() -> None:
@@ -129,6 +136,7 @@ def _download_command(
         ),
     ],
     db_path: Path,
+    additional_info: bool,
 ) -> None:
     """Download a maintained database and initialise a project database from it."""
     console = Console(highlight=False)
@@ -160,7 +168,7 @@ def _download_command(
                     formula_rules_tsv=files['formula_rules'],  # type: ignore[arg-type]
                     metadata_json=files['metadata'],  # type: ignore[arg-type]
                     overwrite=True,
-                    additional_info=True,
+                    additional_info=additional_info,
                 )
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(str(exc)) from exc

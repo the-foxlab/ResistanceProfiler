@@ -445,3 +445,29 @@ class TestMaintainedDbDownloadCommand:
         assert result.exit_code == 0
         call_kwargs = mock_init.call_args.kwargs
         assert call_kwargs['db_path'] == Path('example') / 'hsv_daehne_jaki.db'
+
+    def test_download_disables_additional_info_with_flag(self, tmp_path: Path) -> None:
+        fake_gb = tmp_path / 'X04770.gb'
+        fake_gb.write_bytes(_GENBANK_CONTENT)
+        fake_files = {
+            'rules': tmp_path / 'rules.tsv',
+            'metadata': tmp_path / 'metadata.json',
+            'formula_rules': None,
+            'genbank': [fake_gb],
+        }
+
+        output_path = tmp_path / 'custom.db'
+        with (
+            patch('respro.cli.maintained_db.download_database_files', return_value=fake_files),
+            patch('respro.cli.maintained_db.init_project') as mock_init,
+        ):
+            result = runner.invoke(app, [
+                'databases',
+                '--download', 'hsv_daehne_jaki',
+                '--no-additional-info',
+                '--output', str(output_path),
+            ])
+
+        assert result.exit_code == 0
+        call_kwargs = mock_init.call_args.kwargs
+        assert call_kwargs['additional_info'] is False

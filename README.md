@@ -64,6 +64,13 @@ and then download:
 respro databases --download db_name --output my_folder/
 ```
 
+For faster setup with less network-dependent enrichment, you can disable optional PubChem/PubMed
+lookups during build:
+
+```bash
+respro databases --download db_name --no-additional-info --output my_folder/
+```
+
 In this step respro automatically downloads tsv rules and genbank files temporarily and then builds the respro compatible SQlite database from scratch. As ResPro automatically enriches the databases with Pubmed and Pubchem information database creation can take a bit. If you want to see what ResPro is doing, just add a `-vv` to your command: `respro -vv databases ...`. The database files are available [here](https://github.com/jonas-fuchs/respro-db/tree/main).
 
 ### 3) Run profiling

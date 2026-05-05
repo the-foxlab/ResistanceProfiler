@@ -1,9 +1,6 @@
 name: Publish Example Report to Pages
 
 on:
-  push:
-    branches:
-      - master
   release:
     types:
       - published
@@ -61,7 +58,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p data/project_databases ci/pages
-          respro databases --download "$DB_NAME" --output "data/project_databases/${DB_NAME}.db"
+          respro databases --download "$DB_NAME" --no-additional-info --output "data/project_databases/${DB_NAME}.db"
           respro vcf \
             --project "data/project_databases/${DB_NAME}.db" \
             --vcf example_data/example_vcf.vcf \
