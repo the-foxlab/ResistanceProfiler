@@ -1,7 +1,7 @@
 ##fileformat=VCFv4.0
 ##FILTER=<ID=PASS,Description="All filters passed">
 ##fileDate=20260320
-##source=lofreq call --verbose --ref reference.fa --call-indels --min-cov 20 --max-depth 1000000 --min-bq 30 --min-alt-bq 30 --min-mq 20 --max-mq 255 --min-jq 0 --min-alt-jq 0 --def-alt-jq 0 --sig 0.001 --bonf dynamic --no-default-filter --no-default-filter -r HSV_1_UL23:1-404 -o /data/jwd07/main/098/547/98547959/tmp/lofreq2_call_parallelmb6ro91v/0.vcf.gz reads.bam 
+##source=lofreq call (example, sanitized)
 ##reference=reference.fa
 ##INFO=<ID=DP,Number=1,Type=Integer,Description="Raw Depth">
 ##INFO=<ID=AF,Number=1,Type=Float,Description="Allele Frequency">
