@@ -228,7 +228,7 @@ def _gapped_strings_from_cigar(
     Reconstruct gapped alignment strings from a CIGAR string without re-aligning.
 
     Leading and trailing unaligned CDS bases (when coverage < 100%) are represented
-    as query gaps so the frame walk in ``_annotate_from_alignment`` covers the full CDS.
+    as query gaps so nucleotide-level difference walking covers the full CDS.
 
     CIGAR operations are CDS-relative: M=match/mismatch, I=insertion in query, D=deletion in query.
 
@@ -413,6 +413,19 @@ def _make_fasta_insertion_from_alignment(
         if anchor_query_nt == '-':
             return None
 
+    if gene.strand == '-':
+        anchor_genomic = str(Seq(anchor_query_nt).reverse_complement())
+        inserted_genomic = str(Seq(inserted_bases).reverse_complement())
+        return VariantCall(
+            chrom=gene.name,
+            pos=_coding_nt_genomic_pos(gene, anchor_idx),
+            ref=anchor_genomic,
+            alt=anchor_genomic + inserted_genomic,
+            allele_freq=1.0,
+            depth=0,
+            filter_status='PASS',
+        )
+
     return _make_variant_from_coding_nt(
         gene,
         anchor_idx,
@@ -450,6 +463,19 @@ def _make_fasta_deletion_from_alignment(
         anchor_query_nt = coding[anchor_idx][1]
         if anchor_query_nt == '-':
             return None
+
+    if gene.strand == '-':
+        anchor_genomic = str(Seq(anchor_query_nt).reverse_complement())
+        deleted_genomic = str(Seq(deleted_bases).reverse_complement())
+        return VariantCall(
+            chrom=gene.name,
+            pos=_coding_nt_genomic_pos(gene, anchor_idx),
+            ref=anchor_genomic + deleted_genomic,
+            alt=anchor_genomic,
+            allele_freq=1.0,
+            depth=0,
+            filter_status='PASS',
+        )
 
     return _make_variant_from_coding_nt(
         gene,

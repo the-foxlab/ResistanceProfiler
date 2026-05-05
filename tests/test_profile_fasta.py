@@ -775,6 +775,70 @@ class TestFastaToVcf:
         assert variant.allele_freq == pytest.approx(1.0)
         assert variant.query_ref_codon == 'RAA'
 
+    def test_minus_strand_insertion_keeps_anchor_first_in_genomic_orientation(self) -> None:
+        """Minus-strand insertion should emit VCF-style REF/ALT with anchor at ALT start."""
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='rev',
+            protein='Rev',
+            start=0,
+            end=6,
+            strand='-',
+            codon_start=0,
+            nt_sequence='CTCATC',
+            aa_sequence='',
+        )
+        aligned_ref = 'CTC------ATC'
+        aligned_query = 'CTCCCCAAAATC'
+
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            gene,
+            covered_cds_start=0,
+            covered_cds_end=6,
+        )
+
+        assert gaps == []
+        assert len(variants) == 1
+        variant = variants[0]
+        assert variant.pos == 2
+        assert variant.ref == 'T'
+        assert variant.alt == 'TTTTGGG'
+
+    def test_minus_strand_deletion_keeps_anchor_first_in_genomic_orientation(self) -> None:
+        """Minus-strand deletion should emit VCF-style REF/ALT with anchor at REF start."""
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='rev',
+            protein='Rev',
+            start=0,
+            end=8,
+            strand='-',
+            codon_start=0,
+            nt_sequence='CTCAAATC',
+            aa_sequence='',
+        )
+        aligned_ref = 'CTCAAATC'
+        aligned_query = 'CTC---TC'
+
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            gene,
+            covered_cds_start=0,
+            covered_cds_end=8,
+        )
+
+        assert gaps == []
+        assert len(variants) == 1
+        variant = variants[0]
+        assert variant.pos == 1
+        assert variant.ref == 'ATTT'
+        assert variant.alt == 'A'
+
 class TestFastaConsensusCli:
     """End-to-end CLI test for --fasta consensus input mode."""
 

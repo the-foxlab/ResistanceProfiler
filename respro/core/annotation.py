@@ -429,7 +429,7 @@ def _annotate_insertion(
     Annotate an in-frame insertion or frameshift insertion.
 
     Non-in-frame insertions are always annotated as frameshift.
-    In-frame insertions whose anchor is at a codon boundary (frame_offset == 0) are
+    In-frame insertions whose anchor is at a codon boundary (frame_offset == 2) are
     annotated as insertion. Mid-codon in-frame insertions are annotated as inframe_complex
     because two neighbouring codons are partially rewritten; the AA consequence is not
     resolvable to a single canonical token.
@@ -444,7 +444,7 @@ def _annotate_insertion(
     if not _is_inframe(var.ref, var.alt):
         return _annotate_frameshift(var, gene, coding_nt, codon_idx)
 
-    if not _is_vcf_anchor_at_codon_boundary(frame_offset, gene.strand):
+    if not _is_vcf_anchor_at_codon_boundary(frame_offset):
         internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
         anchor_codon = _resolve_anchor_codon(var, internal_codon)
         anchor_aa = translate_codon(anchor_codon)
@@ -488,7 +488,7 @@ def _annotate_deletion(
     Annotate an in-frame deletion or frameshift deletion.
 
     Non-in-frame deletions are always annotated as frameshift.
-    In-frame deletions whose anchor is at a codon boundary (frame_offset == 0) are
+    In-frame deletions whose anchor is at a codon boundary (frame_offset == 2) are
     annotated as deletion. Mid-codon in-frame deletions are annotated as inframe_complex
     because two neighbouring codons are partially rewritten; the AA consequence is not
     resolvable to a single canonical token.
@@ -503,7 +503,7 @@ def _annotate_deletion(
     if not _is_inframe(var.ref, var.alt):
         return _annotate_frameshift(var, gene, coding_nt, codon_idx)
 
-    if not _is_vcf_anchor_at_codon_boundary(frame_offset, gene.strand):
+    if not _is_vcf_anchor_at_codon_boundary(frame_offset):
         internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
         anchor_codon = _resolve_anchor_codon(var, internal_codon)
         anchor_aa = translate_codon(anchor_codon)
@@ -542,12 +542,13 @@ def _resolve_anchor_codon(var: VariantCall, internal_codon: str) -> str:
     return query_codon if len(query_codon) == 3 else internal_codon
 
 
-def _is_vcf_anchor_at_codon_boundary(frame_offset: int, strand: str) -> bool:
+def _is_vcf_anchor_at_codon_boundary(frame_offset: int) -> bool:
     """
     Return True when a VCF anchor sits on a codon boundary in coding orientation.
 
     VCF stores the nucleotide immediately before an indel in genomic 5'->3' order.
-    In coding orientation this corresponds to frame offset 2 for '+' genes and 0 for '-' genes.
+    After remapping into coding orientation, codon-boundary anchors are represented
+    consistently as frame offset 2.
     """
     return frame_offset == 2
 
