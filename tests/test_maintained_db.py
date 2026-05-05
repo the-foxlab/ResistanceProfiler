@@ -5,6 +5,7 @@ Tests for the maintained-db IO client and databases CLI command.
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -74,6 +75,11 @@ _RULES_TSV_CONTENT = (
 _GENBANK_CONTENT = b'LOCUS       X04770    1000 bp    DNA     linear   VRL 01-JAN-2000\n//\n'
 
 runner = CliRunner()
+
+
+def _strip_ansi(text: str) -> str:
+    """Return text with ANSI escape sequences removed."""
+    return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
 
 # ── list_maintained_databases ─────────────────────────────────────────────────
@@ -308,12 +314,12 @@ class TestMaintainedDbListCommand:
             ['databases', '--list', '--download', 'hsv_daehne_jaki'],
         )
         assert result.exit_code != 0
-        assert 'Use either --list or --download' in result.output
+        assert 'Use either --list or --download' in _strip_ansi(result.output)
 
     def test_requires_list_or_download(self) -> None:
         result = runner.invoke(app, ['databases'])
         assert result.exit_code != 0
-        assert 'Provide either --list or --download NAME' in result.output
+        assert 'Provide either --list or --download NAME' in _strip_ansi(result.output)
 
 
 # ── CLI: databases --download ────────────────────────────────────────────

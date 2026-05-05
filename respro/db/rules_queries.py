@@ -9,7 +9,6 @@ import sqlite3
 
 from respro.db.models import is_internal_formula_component_drug_name
 
-
 _RE_LOGIC_TOKEN = re.compile(
     r'\(|\)|\bAND\b|\bOR\b|\bNOT\b|\bXOR\b|[A-Za-z0-9_.:-]+',
     re.IGNORECASE,
