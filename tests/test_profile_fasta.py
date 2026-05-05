@@ -23,7 +23,7 @@ from respro.core.alignment import (
     store_mappings,
 )
 from respro.core.annotation import annotate_variants
-from respro.core.fasta_profile import (
+from respro.core.fasta_to_vcf import (
     _make_variant,
     _make_variant_from_coding_nt,
     _variants_from_alignment,
@@ -33,7 +33,7 @@ from respro.core.query import (
     resolve_cached_query_reference,
     resolve_fasta_query,
 )
-from respro.core.settings import CORE_CONFIG
+from respro.config.core_settings import CORE_CONFIG
 from respro.core.vcf_remap import (
     _build_query_to_cds_map,
     _cds_pos_to_genomic_pos,

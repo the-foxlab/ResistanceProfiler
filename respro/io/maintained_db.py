@@ -14,7 +14,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from respro.config.settings import CLI_CONFIG
+from respro.config.cli_settings import CLI_CONFIG
 
 logger = logging.getLogger(__name__)
 

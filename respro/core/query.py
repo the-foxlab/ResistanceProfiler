@@ -17,7 +17,7 @@ from respro.core.alignment import (
     sequence_checksum,
     store_mappings,
 )
-from respro.core.settings import CORE_CONFIG
+from respro.config.core_settings import CORE_CONFIG
 from respro.db.models import GeneMatch
 from respro.io.reference import read_fasta
 

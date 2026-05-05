@@ -23,7 +23,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from respro.config.settings import CLI_CONFIG
+from respro.config.cli_settings import CLI_CONFIG
 
 logger = logging.getLogger(__name__)
 

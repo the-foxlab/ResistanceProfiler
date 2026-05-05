@@ -21,7 +21,7 @@ from respro.cli.profile_helpers import (
     _resolve_reference,
 )
 from respro.core.annotation import annotate_variants
-from respro.core.fasta_profile import fasta_to_vcf
+from respro.core.fasta_to_vcf import fasta_to_vcf
 from respro.core.query import resolve_fasta_query
 from respro.db.schema import open_project_db
 from respro.utils.logging import err_console

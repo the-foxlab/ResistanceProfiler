@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from respro.core.annotation import annotate_variants
-from respro.core.fasta_profile import fasta_to_vcf
+from respro.core.fasta_to_vcf import fasta_to_vcf
 from respro.core.query import (
     pick_best_reference_id,
     resolve_fasta_query,

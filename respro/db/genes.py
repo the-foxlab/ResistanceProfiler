@@ -8,7 +8,7 @@ import logging
 import re
 import sqlite3
 
-from respro.config.settings import CLI_CONFIG
+from respro.config.cli_settings import CLI_CONFIG
 from respro.io.genbank import ParsedGenBankGene, ParsedGenBankReference, validate_strand
 
 logger = logging.getLogger(__name__)

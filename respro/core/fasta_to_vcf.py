@@ -26,6 +26,7 @@ from respro.db.models import CoverageGap, GeneMatch, GeneRecord, VariantCall
 
 logger = logging.getLogger(__name__)
 
+
 def fasta_to_vcf(
     query_seq: str,
     matches: list[GeneMatch],
@@ -54,6 +55,7 @@ def fasta_to_vcf(
         sum(gap.codon_end - gap.codon_start + 1 for gap in coverage_gaps),
     )
     return variants, coverage_gaps
+
 
 def _profile_gene_to_variants(
     query_seq: str,
@@ -86,6 +88,7 @@ def _profile_gene_to_variants(
         covered_cds_start=covered_cds_start,
         covered_cds_end=covered_cds_end,
     )
+
 
 def _variants_from_alignment(
     aligned_ref: str,
@@ -128,7 +131,7 @@ def _variants_from_alignment(
 
     coding = ref_positions[frame:]  # Skip non-coding frame offset
 
-    # Detect N-runs for coverage gaps
+    # Detect non-assessable codons for coverage gaps
     codon_count = len(coding) // 3
     for codon_idx in range(codon_count):
         codon_start = codon_idx * 3
@@ -144,13 +147,26 @@ def _variants_from_alignment(
             continue
 
         query_codon = ''.join(q for _, q, _ in codon_slice)
-        if query_codon.upper() == 'NNN':
+        if 'N' in query_codon.upper():
             gap_codon_indices.append(codon_idx)
+
+    non_assessable_codons = set(gap_codon_indices)
 
     # Emit variants by iterating ungapped ref positions
     ref_idx = 0
     while ref_idx < len(coding):
         ref_base, query_base, ins_before = coding[ref_idx]
+        codon_idx = ref_idx // 3
+
+        if codon_idx in non_assessable_codons:
+            if query_base == '-':
+                del_end = ref_idx
+                while del_end + 1 < len(coding) and coding[del_end + 1][1] == '-':
+                    del_end += 1
+                ref_idx = del_end + 1
+                continue
+            ref_idx += 1
+            continue
 
         # Handle insertion before this reference position
         if ins_before:
@@ -171,9 +187,16 @@ def _variants_from_alignment(
             del_end = ref_idx
             while del_end + 1 < len(coding) and coding[del_end + 1][1] == '-':
                 del_end += 1
-            variant = _make_fasta_deletion_from_alignment(gene, coding, ref_idx, del_end)
-            if variant:
-                variants.append(variant)
+            if _deletion_run_within_coverage(
+                start_idx=ref_idx,
+                end_idx=del_end,
+                frame=frame,
+                covered_cds_start=covered_cds_start,
+                covered_cds_end=covered_cds_end,
+            ):
+                variant = _make_fasta_deletion_from_alignment(gene, coding, ref_idx, del_end)
+                if variant:
+                    variants.append(variant)
             ref_idx = del_end + 1
             continue
 
@@ -181,12 +204,14 @@ def _variants_from_alignment(
 
     return variants, _merge_codon_gaps(gene.name, gap_codon_indices)
 
+
 def _get_query_codon(coding: list[tuple[str, str, str]], coding_nt_idx: int) -> str:
     """Return the query codon string for one coding-nt index when available."""
     codon_start = (coding_nt_idx // 3) * 3
     if codon_start + 3 > len(coding):
         return ''
     return ''.join(coding[codon_start + offset][1] for offset in range(3))
+
 
 def _iupac_alt_bases(ref_base: str, query_base: str) -> list[tuple[str, float]]:
     """Expand an IUPAC query base into ALT alleles with fractional frequencies."""
@@ -214,9 +239,6 @@ def _iupac_alt_bases(ref_base: str, query_base: str) -> list[tuple[str, float]]:
     af_each = 1.0 / len(non_ref_alts)
     return [(alt, af_each) for alt in non_ref_alts]
 
-# ─────────────────────────────────────────────────────────────────────
-# Shared alignment helpers
-# ─────────────────────────────────────────────────────────────────────
 
 def _gapped_strings_from_cigar(
     cds: str,
@@ -271,6 +293,7 @@ def _gapped_strings_from_cigar(
 
     return ''.join(aligned_ref), ''.join(aligned_query)
 
+
 def _codon_outside_coverage(
     *,
     codon_idx: int,
@@ -284,6 +307,23 @@ def _codon_outside_coverage(
     codon_nt_start = frame + codon_idx * 3
     codon_nt_end = codon_nt_start + 3
     return codon_nt_start < covered_cds_start or codon_nt_end > covered_cds_end
+
+
+def _deletion_run_within_coverage(
+    *,
+    start_idx: int,
+    end_idx: int,
+    frame: int,
+    covered_cds_start: int | None,
+    covered_cds_end: int | None,
+) -> bool:
+    """Return whether an entire deletion run is inside the aligned/assessable CDS span."""
+    if covered_cds_start is None or covered_cds_end is None:
+        return True
+    deletion_nt_start = frame + start_idx
+    deletion_nt_end = frame + end_idx + 1
+    return deletion_nt_start >= covered_cds_start and deletion_nt_end <= covered_cds_end
+
 
 def _merge_codon_gaps(gene_name: str, codon_indices: list[int]) -> list[CoverageGap]:
     """
@@ -310,6 +350,7 @@ def _merge_codon_gaps(gene_name: str, codon_indices: list[int]) -> list[Coverage
     gaps.append(CoverageGap(gene_name=gene_name, codon_start=start, codon_end=end))
     return gaps
 
+
 def _codon_genomic_pos(gene: GeneRecord, codon_idx: int) -> int:
     """
     Return the 0-based internal genomic position of the first NT in a codon.
@@ -322,6 +363,7 @@ def _codon_genomic_pos(gene: GeneRecord, codon_idx: int) -> int:
     if genomic_pos is None:
         raise ValueError(f'Codon index {codon_idx} is outside CDS for gene {gene.name!r}')
     return genomic_pos
+
 
 def _coding_nt_genomic_pos(gene: GeneRecord, coding_nt_idx: int) -> int:
     """
@@ -337,6 +379,7 @@ def _coding_nt_genomic_pos(gene: GeneRecord, coding_nt_idx: int) -> int:
             f'Coding nucleotide index {coding_nt_idx} is outside CDS for gene {gene.name!r}'
         )
     return genomic_pos
+
 
 def _make_variant(
     gene: GeneRecord,
@@ -355,6 +398,7 @@ def _make_variant(
         depth=0,
         filter_status='PASS',
     )
+
 
 def _make_variant_from_coding_nt(
     gene: GeneRecord,
@@ -387,6 +431,7 @@ def _make_variant_from_coding_nt(
         depth=0,
         filter_status='PASS',
     )
+
 
 def _make_fasta_insertion_from_alignment(
     gene: GeneRecord,
@@ -432,6 +477,7 @@ def _make_fasta_insertion_from_alignment(
         anchor_query_nt,
         anchor_query_nt + inserted_bases,
     )
+
 
 def _make_fasta_deletion_from_alignment(
     gene: GeneRecord,
