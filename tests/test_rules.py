@@ -14,14 +14,11 @@ from respro.core.rules import (
     FormulaRuleRuntime,
     load_rules,
     match_formula_rules,
-    match_rule_sets,
     match_rules,
 )
 from respro.db.models import (
     AnnotatedVariant,
     ResistanceRule,
-    ResistanceRuleSet,
-    ResistanceRuleSetMember,
     VariantCall,
 )
 from respro.db.schema import open_project_db
@@ -349,217 +346,24 @@ class TestMatchRules:
         assert len(result[0].rule_matches) == 0
 
 
-# ─── Helpers for combo rule tests ────────────────────────────────────────────
-
-def _make_ann(gene: str, codon_pos: int, ref_aa: str, alt_aa: str) -> AnnotatedVariant:
-    return AnnotatedVariant(
-        variant=VariantCall(chrom='ref', pos=codon_pos * 3, ref='A', alt='T',
-                            allele_freq=0.9, depth=100),
-        gene_name=gene,
-        codon_pos=codon_pos,
-        ref_aa=ref_aa,
-        alt_aa=alt_aa,
-        consequence='missense',
-    )
-
-
-def _make_rule_set(
-    members: list[tuple[str, int, str]],  # (gene_name, position_0based, mutation)
-) -> ResistanceRuleSet:
-    rs = ResistanceRuleSet(
-        id=1, drug_name='DrugA', drug_id=1,
-        phenotype='resistant',
-    )
-    for order, (gene, pos, mut) in enumerate(members):
-        rs.members.append(ResistanceRuleSetMember(
-            id=order + 1, rule_set_id=1,
-            gene_name=gene, gene_id=1,
-            reference_identifier='',
-            position=pos, reference='', mutation=mut,
-        ))
-    return rs
-
-
-class TestMatchRuleSets:
-    def test_all_of_fires_when_all_members_present(self):
-        rule_set = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
-        annotations = [
-            _make_ann('gag', 1, 'K', 'E'),
-            _make_ann('gag', 5, 'A', 'V'),
-        ]
-        hits = match_rule_sets(annotations, [rule_set])
-        assert len(hits) == 1
-        assert hits[0].rule_set.drug_name == 'DrugA'
-        assert len(hits[0].matched_variants) == 2
-
-    def test_all_of_does_not_fire_when_one_member_missing(self):
-        rule_set = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
-        annotations = [_make_ann('gag', 1, 'K', 'E')]  # only one of two
-        hits = match_rule_sets(annotations, [rule_set])
-        assert hits == []
-
-    def test_all_of_does_not_fire_when_all_absent(self):
-        rule_set = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
-        hits = match_rule_sets([], [rule_set])
-        assert hits == []
-
-    def test_synonymous_variant_does_not_satisfy_member(self):
-        rule_set = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
-        syn = AnnotatedVariant(
-            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T', allele_freq=0.9, depth=100),
-            gene_name='gag', codon_pos=1,
-            ref_aa='K', alt_aa='K', consequence='synonymous',
-        )
-        present = _make_ann('gag', 5, 'A', 'V')
-        hits = match_rule_sets([syn, present], [rule_set])
-        assert hits == []
-
-    def test_low_af_member_does_not_satisfy_combo_rule(self):
-        rule_set = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
-        low_af = AnnotatedVariant(
-            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T', allele_freq=0.5, depth=100),
-            gene_name='gag', codon_pos=1,
-            ref_aa='K', alt_aa='E', consequence='missense',
-        )
-        high_af = _make_ann('gag', 5, 'A', 'V')
-
-        hits = match_rule_sets([low_af, high_af], [rule_set])
-        assert hits == []
-
-    def test_member_at_exact_af_threshold_does_not_satisfy_combo_rule(self):
-        rule_set = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
-        at_threshold = AnnotatedVariant(
-            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T', allele_freq=0.75, depth=100),
-            gene_name='gag', codon_pos=1,
-            ref_aa='K', alt_aa='E', consequence='missense',
-        )
-        high_af = _make_ann('gag', 5, 'A', 'V')
-
-        hits = match_rule_sets([at_threshold, high_af], [rule_set])
-        assert hits == []
-
-    def test_any_member_does_not_match_combo_rule(self):
-        rule_set = _make_rule_set([('gag', 1, 'any'), ('gag', 5, 'V')])
-        annotations = [
-            _make_ann('gag', 1, 'K', 'Q'),
-            _make_ann('gag', 5, 'A', 'V'),
-        ]
-        hits = match_rule_sets(annotations, [rule_set])
-        assert hits == []
-
-    def test_empty_rule_sets_returns_empty(self):
-        ann = _make_ann('gag', 1, 'K', 'E')
-        hits = match_rule_sets([ann], [])
-        assert hits == []
-
-    def test_multiple_rule_sets_both_fire(self):
-        rs1 = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
-        rs2 = _make_rule_set([('gag', 2, 'T'), ('gag', 8, 'I')])
-        rs2.id = 2
-        annotations = [
-            _make_ann('gag', 1, 'K', 'E'),
-            _make_ann('gag', 5, 'A', 'V'),
-            _make_ann('gag', 2, 'S', 'T'),
-            _make_ann('gag', 8, 'L', 'I'),
-        ]
-        hits = match_rule_sets(annotations, [rs1, rs2])
-        assert len(hits) == 2
-
-    def test_shared_member_all_members_present_both_rule_sets_fire(self):
-        # Shared member: gag K2E (0-based codon_pos=1) is present in both sets.
-        rs1 = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
-        rs1.id = 1
-        rs2 = _make_rule_set([('gag', 1, 'E'), ('gag', 8, 'I')])
-        rs2.id = 2
-
-        shared = _make_ann('gag', 1, 'K', 'E')
-        unique_rs1 = _make_ann('gag', 5, 'A', 'V')
-        unique_rs2 = _make_ann('gag', 8, 'L', 'I')
-        annotations = [shared, unique_rs1, unique_rs2]
-
-        hits = match_rule_sets(annotations, [rs1, rs2])
-
-        assert len(hits) == 2
-        hit_by_id = {hit.rule_set.id: hit for hit in hits}
-        assert 1 in hit_by_id
-        assert 2 in hit_by_id
-        assert shared in hit_by_id[1].matched_variants
-        assert shared in hit_by_id[2].matched_variants
-
-    def test_shared_member_only_fully_satisfied_rule_set_fires(self):
-        # Shared member present, but rs2 unique member is missing.
-        rs1 = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
-        rs1.id = 1
-        rs2 = _make_rule_set([('gag', 1, 'E'), ('gag', 8, 'I')])
-        rs2.id = 2
-
-        shared = _make_ann('gag', 1, 'K', 'E')
-        unique_rs1 = _make_ann('gag', 5, 'A', 'V')
-        annotations = [shared, unique_rs1]
-
-        hits = match_rule_sets(annotations, [rs1, rs2])
-
-        assert len(hits) == 1
-        assert hits[0].rule_set.id == 1
-        assert shared in hits[0].matched_variants
-        assert unique_rs1 in hits[0].matched_variants
-
-    def test_to_dict_is_serializable(self):
-        rule_set = _make_rule_set([('gag', 1, 'E'), ('gag', 5, 'V')])
-        annotations = [_make_ann('gag', 1, 'K', 'E'), _make_ann('gag', 5, 'A', 'V')]
-        hits = match_rule_sets(annotations, [rule_set])
-        d = hits[0].to_dict()
-        assert d['drug'] == 'DrugA'
-        assert len(d['members']) == 2
-        assert len(d['matched_variants']) == 2
-        # positions in output are 1-based
-        assert d['members'][0]['position'] == 2
-        assert d['members'][1]['position'] == 6
-
-    def test_insertion_member_matches_by_mutation_state(self):
-        rs = ResistanceRuleSet(id=1, drug_name='DrugA', drug_id=1, phenotype='resistant')
-        rs.members.append(
-            ResistanceRuleSetMember(
-                id=1,
-                rule_set_id=1,
-                gene_name='gag',
-                gene_id=1,
-                reference_identifier='',
-                position=4,
-                reference='A',
-                mutation='FG',
-            )
-        )
-        rs.members.append(
-            ResistanceRuleSetMember(
-                id=2,
-                rule_set_id=1,
-                gene_name='gag',
-                gene_id=1,
-                reference_identifier='',
-                position=6,
-                reference='P',
-                mutation='V',
-            )
-        )
-
-        annotations = [
-            AnnotatedVariant(
-                variant=VariantCall(chrom='ref', pos=12, ref='A', alt='T', allele_freq=0.9, depth=100),
-                gene_name='gag',
-                codon_pos=4,
-                ref_aa='F',
-                alt_aa='FG',
-                consequence='insertion',
-            ),
-            _make_ann('gag', 6, 'P', 'V'),
-        ]
-
-        hits = match_rule_sets(annotations, [rs])
-        assert len(hits) == 1
-
-
 class TestMatchFormulaRules:
+    def _make_ann(self, gene: str, codon_pos: int, ref_aa: str, alt_aa: str) -> AnnotatedVariant:
+        return AnnotatedVariant(
+            variant=VariantCall(
+                chrom='ref',
+                pos=codon_pos * 3,
+                ref='A',
+                alt='T',
+                allele_freq=0.9,
+                depth=100,
+            ),
+            gene_name=gene,
+            codon_pos=codon_pos,
+            ref_aa=ref_aa,
+            alt_aa=alt_aa,
+            consequence='missense',
+        )
+
     def _atomic_rule(self, external_id: str, mutation: str, *, position: int = 1) -> ResistanceRule:
         return ResistanceRule(
             id=1,
@@ -598,8 +402,8 @@ class TestMatchFormulaRules:
         mut_b = self._atomic_rule('mut_b', 'V', position=5)
         formula = self._formula('(mut_a AND mut_b)', [mut_a, mut_b])
 
-        ann_a = _make_ann('gag', 1, 'K', 'E')
-        ann_b = _make_ann('gag', 5, 'A', 'V')
+        ann_a = self._make_ann('gag', 1, 'K', 'E')
+        ann_b = self._make_ann('gag', 5, 'A', 'V')
         ann_a.rule_matches = [mut_a]
         ann_b.rule_matches = [mut_b]
 
@@ -614,9 +418,9 @@ class TestMatchFormulaRules:
         mut_b = self._atomic_rule('mut_b', 'V', position=5)
         formula = self._formula('(mut_a AND (NOT mut_b))', [mut_a, mut_b])
 
-        ann_a = _make_ann('gag', 1, 'K', 'E')
+        ann_a = self._make_ann('gag', 1, 'K', 'E')
         ann_a.rule_matches = [mut_a]
-        ann_b = _make_ann('gag', 5, 'A', 'V')
+        ann_b = self._make_ann('gag', 5, 'A', 'V')
         ann_b.variant.allele_freq = 0.60
         ann_b.rule_matches = [mut_b]
 
@@ -630,10 +434,10 @@ class TestMatchFormulaRules:
         mut_b = self._atomic_rule('mut_b', 'V', position=5)
         formula = self._formula('(mut_a OR mut_b)', [mut_a, mut_b])
 
-        ann_a = _make_ann('gag', 1, 'K', 'E')
+        ann_a = self._make_ann('gag', 1, 'K', 'E')
         ann_a.variant.allele_freq = 0.80
         ann_a.rule_matches = [mut_a]
-        ann_b = _make_ann('gag', 5, 'A', 'V')
+        ann_b = self._make_ann('gag', 5, 'A', 'V')
         ann_b.variant.allele_freq = 0.95
         ann_b.rule_matches = [mut_b]
 

@@ -380,11 +380,14 @@ class TestRegenerate:
             '--project', str(project_db),
             '--output', str(out_dir),
             '--export', 'pdf',
+            '--export', 'tabular',
         ])
 
         assert result.exit_code == 0, result.output
         pdf_files = list(out_dir.glob('*.report.pdf'))
+        tabular_files = list(out_dir.glob('*.mutations.tsv'))
         assert len(pdf_files) == 1
+        assert len(tabular_files) == 1
 
     def test_regenerate_from_json_rejects_invalid_json(
         self,

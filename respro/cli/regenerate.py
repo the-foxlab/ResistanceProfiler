@@ -78,10 +78,10 @@ def regenerate(
         ),
     ] = None,
     export: Annotated[
-        str | None,
+        list[str] | None,
         typer.Option(
             '--export',
-            help='Optional extra export format in addition to HTML: json, tabular, or pdf.',
+            help='Optional extra export format in addition to HTML. Can be provided multiple times.',
         ),
     ] = None,
 ) -> None:
@@ -93,8 +93,8 @@ def regenerate(
 
     try:
         extra_export_formats: set[str] = set()
-        if export is not None:
-            export_value = export.strip().lower()
+        for raw_export in export or []:
+            export_value = raw_export.strip().lower()
             if export_value not in ('json', 'tabular', 'pdf'):
                 raise click.ClickException(
                     'Invalid --export value. Choose one of: json, tabular, pdf.'

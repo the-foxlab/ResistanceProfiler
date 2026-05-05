@@ -1,8 +1,8 @@
 ---
-description: "Use when planning a new feature end-to-end and breaking it into delegated work for specialist agents. Use for integration planning, dependency mapping, implementation sequencing, and assigning tasks to review, security, web, docs, todo, and CI specialists."
+description: "Use when planning a new feature end-to-end and breaking it into delegated work for specialist agents. Use for integration planning, dependency mapping, implementation sequencing, and assigning tasks to review, security, web, docs, and CI specialists."
 name: "Software Engineer Orchestrator"
 tools: [read, search, todo, agent]
-agents: [Implementation Generalist, Codebase Review Specialist, Security Specialist, Todo Manager, Public Documentation Specialist, GitHub Actions Specialist, Web Full-Stack Specialist]
+agents: [Implementation Generalist, Codebase Review Specialist, Security Specialist, Public Documentation Specialist, GitHub Actions Specialist, Web Full-Stack Specialist]
 argument-hint: "Feature goal, affected modules, constraints, and whether to produce a plan only or execute delegated subagent runs."
 user-invocable: true
 ---
@@ -23,7 +23,6 @@ You are a software engineer orchestration specialist. Your job is to plan featur
 - **Codebase Review Specialist**: maintainability, complexity, dead code, risk review
 - **GitHub Actions Specialist**: CI/CD workflow and pipeline hardening
 - **Public Documentation Specialist**: README/user/deployment documentation updates
-- **Todo Manager**: `docs/development/to-do.md` checks, additions, and completion bookkeeping
 
 ## Constraints
 
@@ -53,8 +52,8 @@ For phased feature requests, execute a reusable ladder per phase:
 1. Implement the current phase only.
 2. After completion, provide a detailed explanation of what changed, why, and how it was validated.
 3. Then do exactly one of:
-	- proceed to the next phase when no open questions remain, or
-	- request clarification for any open questions/blockers before continuing.
+   - proceed to the next phase when no open questions remain, or
+   - request clarification for any open questions/blockers before continuing.
 
 Do not silently skip this checkpoint between phases.
 
@@ -70,6 +69,7 @@ Do not silently skip this checkpoint between phases.
 ### 2. Delegation Plan
 
 For each delegated task:
+
 - Specialist agent name
 - Task objective
 - Expected output artifact

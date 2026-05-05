@@ -245,6 +245,16 @@ Mark items done and update priorities after each completed milestone.
 
 - [X] `respro maintained.db` CLI command — `maintained.db --list` prints available databases (with full metadata panel) from the companion repository at `https://github.com/jonas-fuchs/respro-db`; `maintained.db --download <name> --output <path>` fetches `rules.tsv`, `metadata.json`, and optional `formula-rules.tsv` from the repo, resolves unique `reference_identifier` accessions from the rules TSV, downloads the corresponding GenBank records from NCBI, and calls `respro init` with `--overwrite` to produce a ready-to-use `<name>.db` (directory paths use `<name>.db` by default); implemented in `respro/io/maintained_db.py` and `respro/cli/maintained_db.py` using stdlib `urllib.request`
 
+### Web — Batch analysis
+
+- [x] `RESPRO_WEB_MAX_BATCH_SIZE` env config key added to `defaults.toml` and `config.py`
+- [x] `BatchProfileVcfPayload`, `BatchProfileFastaPayload`, `BatchSubmitResponse`, `BatchSampleEntry` models added to `models.py`
+- [x] `POST /api/profile/batch/vcf` endpoint — rate-limited (2/min), max 25 samples, enqueues one `run_profile_vcf` job per sample
+- [x] `POST /api/profile/batch/fasta` endpoint — same pattern, no shared reference FASTA
+- [x] Web profiling jobs pass `use_cache=True` so `query_reference` alignment mappings are reused across batch samples sharing the same project database and reference FASTA
+- [x] Batch tab in web dashboard — VCF and FASTA batch modes with multi-file upload (up to 25), shared reference FASTA for VCF, project selector, per-sample results table with status polling, live 429 rate-limit countdown, and "New batch" reset button
+- [x] 5 new tests in `tests/test_web_api.py` covering batch submit success (VCF + FASTA), max-size enforcement (VCF + FASTA), and mismatched sample-name/path lengths
+
 ---
 
 ## Next
@@ -321,4 +331,5 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   and report display; the test runner should be invokable via `npm test` inside `web/frontend/`
   and should run in CI alongside the Python tests
 - 🟡 Compose integration tests — add compose-backed smoke/integration tests for submit → poll → report retrieval using startup-configured paths
-- 🟢 CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
+- [X] CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
+- 🟢 Previous-results dropdown in batch UI — load past results.db runs into a batch results view from a dropdown; deferred until batch core is validated in production

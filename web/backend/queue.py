@@ -40,12 +40,22 @@ def build_enqueue_job_options() -> dict[str, int | Retry]:
 
 
 def get_queue() -> Queue:
-    """Return an RQ queue connected to Redis (configured via REDIS_URL)."""
+    """Return the standard profiling RQ queue connected to Redis."""
+    return _build_queue(WEB_BACKEND_CONFIG.defaults.profile_queue_name)
+
+
+def get_batch_queue() -> Queue:
+    """Return the batch profiling RQ queue connected to Redis."""
+    return _build_queue(WEB_BACKEND_CONFIG.defaults.batch_queue_name)
+
+
+def _build_queue(queue_name: str) -> Queue:
+    """Create an RQ queue with shared runtime settings and Redis connection."""
     redis_url = os.getenv(WEB_ENV.redis_url, WEB_BACKEND_CONFIG.defaults.redis_url)
     runtime = resolve_queue_runtime_settings()
     connection = redis.Redis.from_url(redis_url)
     return Queue(
-        WEB_BACKEND_CONFIG.defaults.profile_queue_name,
+        queue_name,
         connection=connection,
         default_timeout=runtime.timeout_seconds,
     )
