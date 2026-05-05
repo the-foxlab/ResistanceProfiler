@@ -50,13 +50,15 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A[respro/cli/fasta.py] --> B[respro/core/fasta_profile.py]
-    B --> C[respro/core/alignment.py]
+    A[respro/cli/fasta.py] --> B[respro/core/query.py]
+    B --> C[respro/core/fasta_profile.py]
     C --> D[respro/core/annotation.py]
     D --> E[respro/core/rules.py]
     E --> F[respro/report/html.py]
     E --> G[respro/db/results.py]
 ```
+
+**Integration note:** The refactored FASTA path now emits nucleotide-level VariantCall records via `fasta_to_vcf()` in `respro/core/fasta_profile.py`, feeding directly into the shared annotation pipeline. Alignment (via `respro/core/alignment.py`) is handled internally by `respro/core/query.py`. This design unifies VCF and FASTA variant interpretation paths.
 
 ### Regeneration Chain
 
