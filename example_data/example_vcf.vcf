@@ -1,0 +1,45 @@
+##fileformat=VCFv4.0
+##FILTER=<ID=PASS,Description="All filters passed">
+##fileDate=20260320
+##source=lofreq call --verbose --ref reference.fa --call-indels --min-cov 20 --max-depth 1000000 --min-bq 30 --min-alt-bq 30 --min-mq 20 --max-mq 255 --min-jq 0 --min-alt-jq 0 --def-alt-jq 0 --sig 0.001 --bonf dynamic --no-default-filter --no-default-filter -r HSV_1_UL23:1-404 -o /data/jwd07/main/098/547/98547959/tmp/lofreq2_call_parallelmb6ro91v/0.vcf.gz reads.bam 
+##reference=reference.fa
+##INFO=<ID=DP,Number=1,Type=Integer,Description="Raw Depth">
+##INFO=<ID=AF,Number=1,Type=Float,Description="Allele Frequency">
+##INFO=<ID=SB,Number=1,Type=Integer,Description="Phred-scaled strand bias at this position">
+##INFO=<ID=DP4,Number=4,Type=Integer,Description="Counts for ref-forward bases, ref-reverse, alt-forward and alt-reverse bases">
+##INFO=<ID=INDEL,Number=0,Type=Flag,Description="Indicates that the variant is an INDEL.">
+##INFO=<ID=CONSVAR,Number=0,Type=Flag,Description="Indicates that the variant is a consensus variant (as opposed to a low frequency variant).">
+##INFO=<ID=HRUN,Number=1,Type=Integer,Description="Homopolymer length to the right of report indel position">
+##FILTER=<ID=min_snvqual_58,Description="Minimum SNV Quality (Phred) 58">
+##FILTER=<ID=min_indelqual_44,Description="Minimum Indel Quality (Phred) 44">
+##contig=<ID=HSV_1_UL23>
+##FILTER=<ID=min_snvqual_55,Description="Minimum SNV Quality (Phred) 55">
+##FILTER=<ID=min_indelqual_42,Description="Minimum Indel Quality (Phred) 42">
+##FILTER=<ID=min_snvqual_56,Description="Minimum SNV Quality (Phred) 56">
+##FILTER=<ID=min_indelqual_45,Description="Minimum Indel Quality (Phred) 45">
+##FILTER=<ID=min_snvqual_57,Description="Minimum SNV Quality (Phred) 57">
+##FILTER=<ID=min_indelqual_43,Description="Minimum Indel Quality (Phred) 43">
+##FILTER=<ID=min_snvqual_54,Description="Minimum SNV Quality (Phred) 54">
+##FILTER=<ID=min_indelqual_39,Description="Minimum Indel Quality (Phred) 39">
+##bcftools_concatVersion=1.21+htslib-1.21
+##bcftools_concatCommand=concat -a -O z -o /data/jwd07/main/098/547/98547959/tmp/lofreq2_call_parallelmb6ro91v/concat.vcf.gz /data/jwd07/main/098/547/98547959/tmp/lofreq2_call_parallelmb6ro91v/0.vcf.gz /data/jwd07/main/098/547/98547959/tmp/lofreq2_call_parallelmb6ro91v/1.vcf.gz /data/jwd07/main/098/547/98547959/tmp/lofreq2_call_parallelmb6ro91v/2.vcf.gz /data/jwd07/main/098/547/98547959/tmp/lofreq2_call_parallelmb6ro91v/3.vcf.gz /data/jwd07/main/098/547/98547959/tmp/lofreq2_call_parallelmb6ro91v/4.vcf.gz /data/jwd07/main/098/547/98547959/tmp/lofreq2_call_parallelmb6ro91v/5.vcf.gz /data/jwd07/main/098/547/98547959/tmp/lofreq2_call_parallelmb6ro91v/6.vcf.gz; Date=Fri Mar 20 12:18:48 2026
+##FILTER=<ID=min_snvqual_65,Description="Minimum SNV Quality (Phred) 65">
+##FILTER=<ID=min_indelqual_52,Description="Minimum Indel Quality (Phred) 52">
+##FILTER=<ID=min_af_0.100000,Description="Minimum allele frequency 0.100000">
+##FILTER=<ID=min_dp_20,Description="Minimum Coverage 20">
+##FILTER=<ID=sb_fdr,Description="Strand-Bias Multiple Testing Correction: fdr corr. pvalue > 0.001000">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+HSV_1_UL23	290	.	A	G	49314	PASS	AF=0.962523;DP=5977;DP4=2,1,2880,3092;SB=2
+HSV_1_UL23	430	.	C	T	49314	PASS	AF=0.737029;DP=4799;DP4=13,638,2847,1294;SB=2595
+HSV_1_UL23	506	.	A	G	49314	PASS	AF=0.961275;DP=7437;DP4=1,0,3683,3750;SB=3
+HSV_1_UL23	681	.	C	T	49314	PASS	AF=0.363833;DP=7847;DP4=2436,2138,1697,1549;SB=4
+HSV_1_UL23	744	.	A	T	16373	PASS	AF=0.116529;DP=6153;DP4=2883,2346,479,397;SB=0
+HSV_1_UL23	748	.	G	T	16903	PASS	AF=0.1204;DP=6005;DP4=2833,2311,476,379;SB=1
+HSV_1_UL23	952	.	A	G	49314	PASS	AF=0.703324;DP=11703;DP4=29,13,5030,6575;SB=30
+HSV_1_UL23	957	.	C	T	49314	PASS	AF=0.814951;DP=11678;DP4=258,10,4922,6482;SB=774
+HSV_1_UL23	1052	.	G	A	49314	PASS	AF=0.871861;DP=12346;DP4=41,3,5981,6292;SB=93
+HSV_1_UL23	1117	.	T	C	49314	PASS	AF=0.968778;DP=12139;DP4=4,3,6155,5970;SB=0
+HSV_1_UL23	1155	.	T	C	49314	PASS	AF=0.956503;DP=11702;DP4=5,4,6099,5589;SB=0
+HSV_1_UL23	1243	.	G	T	49314	PASS	AF=0.971519;DP=21277;DP4=2,0,10601,10663;SB=6
+HSV_1_UL23	1247	.	G	A	49314	PASS	AF=0.967515;DP=21702;DP4=5,5,10794,10886;SB=0
+HSV_1_UL23	1330	.	A	G	49314	PASS	AF=0.962064;DP=20139;DP4=3,4,9540,10586;SB=0

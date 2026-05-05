@@ -128,7 +128,6 @@ def remap_variants(
                 query_ref_codon=query_ref_codon,
             ))
             hit = True
-            break
 
         if not hit:
             logger.debug(

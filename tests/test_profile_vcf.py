@@ -221,6 +221,46 @@ def test_example_e7_mismatch_column_projection() -> None:
     _assert_aa_token(anns[0], 'Q1H')
 
 
+def test_overlapping_cds_matches_emit_one_remap_per_match() -> None:
+    """A single query variant should remap once for each matching CDS map."""
+    query_seq = 'ATGAAATTT'
+    var = VariantCall(chrom='c', pos=4, ref='A', alt='G', allele_freq=0.9, depth=100)
+
+    gene_a = GeneRecord(
+        id=10,
+        reference_id=1,
+        name='orf_a',
+        protein='A',
+        start=0,
+        end=9,
+        strand='+',
+        codon_start=0,
+        nt_sequence='ATGAAATTT',
+    )
+    gene_b = GeneRecord(
+        id=11,
+        reference_id=1,
+        name='orf_b',
+        protein='B',
+        start=3,
+        end=12,
+        strand='+',
+        codon_start=0,
+        nt_sequence='ATGAAATTT',
+    )
+
+    matches = [
+        _make_match(gene_a, match_strand='+', query=query_seq, cigar='9M'),
+        _make_match(gene_b, match_strand='+', query=query_seq, cigar='9M'),
+    ]
+
+    remapped, warnings = remap_variants([var], matches, query_seq)
+
+    assert not warnings
+    assert len(remapped) == 2
+    assert {v.pos for v in remapped} == {4, 7}
+
+
 def test_anchor_ref_mismatch_produces_warning() -> None:
     """VCF REF anchor mismatch to query emits warning and excludes the variant."""
     gene = _make_gene(strand='+')

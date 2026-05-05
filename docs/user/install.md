@@ -21,6 +21,30 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+If you prefer a non-editable install, `pip install .` is also supported.
+
+## Troubleshooting: `mappy` fails to install
+
+On some systems, pip-based installs fail while building `mappy` (for example during `pip install .` or `pip install -e ".[dev]"`).
+
+Try these steps:
+
+1. Upgrade build tooling first:
+
+```bash
+python -m pip install --upgrade pip setuptools wheel
+```
+
+1. Ensure a working compiler/build environment is available (C/C++ toolchain and Python build headers), then rerun the install command.
+
+1. Fallback: preinstall `mappy` in a conda/mamba environment, then install ResistanceProfiler with pip:
+
+```bash
+mamba create -n respro -c conda-forge -c bioconda python=3.12 mappy
+mamba activate respro
+pip install .
+```
+
 ## Verify installation
 
 ```bash

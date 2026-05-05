@@ -1,6 +1,6 @@
 ![ResistanceProfiler logo](web/frontend/src/assets/logo.svg)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-2f6db3)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-2f6db3)
 
 Pathogen agnostic antiviral resistance profiling command-line interface (CLI) for FASTA consensus sequences or VCF-derived variants. Also comes with a WebApp and pre-ported databases.
 
@@ -35,6 +35,9 @@ Its lightning fast. No need to specify which pathogen or using a specific refere
 ```bash
 pip install -e ".[dev]"
 ```
+
+> [!NOTE]
+> If installation fails during a `mappy` build step (for example with `pip install .` or `pip install -e ".[dev]"`), see [docs/user/install.md](docs/user/install.md) for quick troubleshooting steps.
 
 ### 2) Initialize a project database
 
@@ -90,6 +93,9 @@ respro vcf \
     --export tabular
 ```
 
+For bundled, ready-to-run sample inputs, see [example_data/README](example_data/README).
+The exported VCF example report should look like the published GitHub Pages demo report for this project.
+
 ### 4) Regenerate from stored run
 
 ```bash
@@ -105,8 +111,18 @@ respro regenerate \
 
 ## Quickstart [Web App](docs/user/webapp-hosting.md) with docker
 
+Build locally:
+
 ```bash
 docker compose -f docker-compose.web.yml up --build
+```
+
+Use a prebuilt GHCR release image:
+
+```bash
+docker pull ghcr.io/jonas-fuchs/reistanceprofiler:<release-tag>
+docker tag ghcr.io/jonas-fuchs/reistanceprofiler:<release-tag> respro-web:latest
+docker compose -f docker-compose.web.yml up
 ```
 
 Open the app at: `http://127.0.0.1:8000/app/`
