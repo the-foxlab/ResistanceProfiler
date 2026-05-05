@@ -68,6 +68,25 @@ def profile_fasta_consensus(
     return annotations, coverage_gaps
 
 
+def fasta_to_vcf(
+    query_seq: str,
+    matches: list[GeneMatch],
+) -> tuple[list[VariantCall], list[CoverageGap]]:
+    """
+    Convert FASTA consensus differences into a VCF-like VariantCall stream.
+
+    This initial compatibility implementation reuses the existing FASTA consensus
+    annotation engine and returns the underlying synthetic VariantCall objects.
+
+    :param query_seq: full query FASTA sequence (forward strand, upper case)
+    :param matches: gene matches from sequence alignment
+    :return: (variant calls, coverage gaps)
+    """
+    annotations, coverage_gaps = profile_fasta_consensus(query_seq, matches)
+    variants = [annotation.variant for annotation in annotations]
+    return variants, coverage_gaps
+
+
 def _profile_gene(query_seq: str, match: GeneMatch) -> tuple[list[AnnotatedVariant], list[CoverageGap]]:
     """
     Align query region to one gene CDS and emit amino acid differences.

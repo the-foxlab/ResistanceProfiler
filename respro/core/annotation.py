@@ -29,6 +29,7 @@ def annotate_variants(
     variants: list[VariantCall],
     genes: list[GeneRecord],
     snp_combine_af_threshold: float = 0.75,
+    is_fasta_mode: bool = False,
 ) -> list[AnnotatedVariant]:
     """
     Annotate a list of variants with codon-aware amino acid consequences.
@@ -46,6 +47,7 @@ def annotate_variants(
 
     :param snp_combine_af_threshold: strict AF threshold for combining SNPs
         within one codon (must be greater than this value)
+    :param is_fasta_mode: mark emitted annotations as FASTA-derived
     :return: list of AnnotatedVariant
     """
     results: list[AnnotatedVariant] = []
@@ -55,7 +57,7 @@ def annotate_variants(
     for var_idx, var in enumerate(variants):
         matching_genes = [g for g in genes if g.contains(var.pos)]
         if not matching_genes:
-            results.append(AnnotatedVariant(variant=var))
+            results.append(AnnotatedVariant(variant=var, is_fasta_mode=is_fasta_mode))
             continue
 
         for gene in matching_genes:
@@ -65,12 +67,15 @@ def annotate_variants(
             if group is not None:
                 if var_idx == group[0]:
                     members = [variants[i] for i in group]
-                    results.append(_annotate_combined_snp_codon(members, gene))
+                    combined_annotation = _annotate_combined_snp_codon(members, gene)
+                    combined_annotation.is_fasta_mode = is_fasta_mode
+                    results.append(combined_annotation)
                 continue
             ann = _annotate_variant_in_gene(var, gene)
             if ann is None:
                 skipped_non_snp += 1
                 continue
+            ann.is_fasta_mode = is_fasta_mode
             results.append(ann)
 
     logger.info(

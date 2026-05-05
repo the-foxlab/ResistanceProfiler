@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from respro.core.annotation import annotate_variants
-from respro.core.fasta_profile import profile_fasta_consensus
+from respro.core.fasta_profile import fasta_to_vcf
 from respro.core.query import (
     pick_best_reference_id,
     resolve_fasta_query,
@@ -55,7 +55,8 @@ def profile_fasta(
         ref_name = _reference_name(project_conn, ref_id)
 
         genes, rules, formula_rules, rule_gene_names = _load_reference_data(project_conn, ref_id)
-        annotations, coverage_gaps = profile_fasta_consensus(query_seq, selected_matches)
+        variants, coverage_gaps = fasta_to_vcf(query_seq, selected_matches)
+        annotations = annotate_variants(variants, genes, is_fasta_mode=True)
 
         af_bins = {
             'high': (0.75, 1.0),

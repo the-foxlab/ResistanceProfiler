@@ -25,6 +25,7 @@ from respro.core.alignment import (
 from respro.core.fasta_profile import (
     _annotate_from_alignment,
     _expand_iupac_codon,
+    fasta_to_vcf,
     _make_variant,
     _make_variant_from_coding_nt,
     profile_fasta_consensus,
@@ -862,6 +863,20 @@ class TestFastaConsensusProfile:
         anns, gaps = profile_fasta_consensus(_SIMPLE_CDS, [match])
         assert anns == []
         assert gaps == []
+
+    def test_fasta_to_vcf_returns_variant_stream_compatible_with_current_engine(
+        self,
+        simple_gene: GeneRecord,
+    ) -> None:
+        """New API currently proxies legacy FASTA engine and should preserve event counts."""
+        query = 'ATGGAAGCTTAA'
+        match = _make_match(simple_gene, query)
+
+        annotations, annotation_gaps = profile_fasta_consensus(query, [match])
+        variants, variant_gaps = fasta_to_vcf(query, [match])
+
+        assert len(variants) == len(annotations)
+        assert variant_gaps == annotation_gaps
 
 
 class TestNStretchCoverageGaps:
