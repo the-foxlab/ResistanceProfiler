@@ -331,5 +331,5 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   and report display; the test runner should be invokable via `npm test` inside `web/frontend/`
   and should run in CI alongside the Python tests
 - 🟡 Compose integration tests — add compose-backed smoke/integration tests for submit → poll → report retrieval using startup-configured paths
-- 🟢 CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
+- [X] CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
 - 🟢 Previous-results dropdown in batch UI — load past results.db runs into a batch results view from a dropdown; deferred until batch core is validated in production

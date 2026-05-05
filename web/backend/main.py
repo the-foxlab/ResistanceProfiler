@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import importlib.metadata
 import logging
 import mimetypes
@@ -162,7 +164,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         return JSONResponse(status_code=503, content=payload.model_dump())
 
     @app.get('/api/ui/config', response_model=ApiEnvelope)
-    def ui_config() -> ApiEnvelope:
+    def ui_config(_auth: None = Depends(require_api_token)) -> ApiEnvelope:
         return ApiEnvelope(
             data={
                 'batch_max_samples': WEB_BACKEND_CONFIG.defaults.max_batch_size,
@@ -540,8 +542,10 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         _auth: None = Depends(require_api_token),
     ) -> FileResponse:
         report_path = Path(path).expanduser().resolve()
-        if not is_path_within_allowed_roots(report_path, config.allowed_roots):
+        if not is_path_within_allowed_roots(report_path, (config.results_dir,)):
             raise HTTPException(status_code=400, detail='Report path is outside allowed output directory.')
+        if not str(report_path).endswith('.report.html'):
+            raise HTTPException(status_code=400, detail='Unsupported report type. Allowed: .report.html.')
         if not report_path.is_file():
             raise HTTPException(status_code=404, detail='Report not found.')
         return FileResponse(str(report_path), media_type='text/html')
@@ -719,8 +723,7 @@ def _user_facing_error_message(raw_message: str | None) -> str:
     if not raw_message:
         return 'The operation failed on the server.'
 
-    lines = [line.strip() for line in raw_message.splitlines() if line.strip()]
-    message = lines[-1] if lines else raw_message.strip()
+    message = _extract_primary_error_message(raw_message)
     for prefix in ('ValueError: ', 'RuntimeError: ', 'Exception: ', 'OSError: '):
         if message.startswith(prefix):
             message = message[len(prefix):]
@@ -784,6 +787,25 @@ def _user_facing_error_message(raw_message: str | None) -> str:
     return message
 
 
+def _extract_primary_error_message(raw_message: str) -> str:
+    """Extract one meaningful error line from traceback or Rich panel output."""
+    raw_lines = [line.rstrip() for line in raw_message.splitlines() if line.strip()]
+    if not raw_lines:
+        return raw_message.strip()
+
+    boxed_lines: list[str] = []
+    for line in raw_lines:
+        stripped = line.strip()
+        if stripped.startswith('│') and stripped.endswith('│'):
+            inner = stripped.strip('│').strip()
+            if inner:
+                boxed_lines.append(inner)
+    if boxed_lines:
+        return ' '.join(boxed_lines)
+
+    return raw_lines[-1].strip()
+
+
 def _resolve_cors_origins(api_token: str) -> list[str]:
     """Resolve CORS origins from env with secure defaults for local development."""
     configured = os.getenv(WEB_ENV.cors_origins, '').strip()
@@ -810,6 +832,16 @@ def _resolve_batch_submit_rate_limit() -> str:
     """Return the configured batch submission rate limit string."""
     default = WEB_BACKEND_CONFIG.defaults.batch_submit_rate_limit
     return os.getenv(WEB_ENV.batch_submit_rate_limit, default).strip() or default
+
+
+def _extract_bearer_token(authorization: str | None) -> str:
+    """Extract the token value from a Bearer Authorization header."""
+    if not authorization:
+        return ''
+    scheme, _, token = authorization.strip().partition(' ')
+    if scheme.lower() != 'bearer' or not token:
+        return ''
+    return token.strip()
 
 
 def _current_window_minute() -> int:
@@ -864,14 +896,28 @@ def _consume_sample_quota(request: Request, sample_count: int, sample_limit_per_
 
 
 def _rate_limit_key(request: Request) -> str:
-    """Use token identity when present, otherwise fall back to client IP."""
-    authorization = request.headers.get('Authorization', '').strip()
-    if authorization:
-        return f'token:{authorization}'
+    """Use a validated token identity when present, otherwise fall back to client IP."""
+    token_identity = _rate_limit_token_identity(request)
+    if token_identity:
+        return token_identity
     client_host = request.client.host if request.client else ''
     if client_host:
         return f'ip:{client_host}'
     return f'ip:{get_remote_address(request)}'
+
+
+def _rate_limit_token_identity(request: Request) -> str:
+    """Return a hashed limiter identity only for valid configured bearer tokens."""
+    configured_token = request.app.state.startup_config.api_token
+    if not configured_token:
+        return ''
+    provided_token = _extract_bearer_token(request.headers.get('Authorization'))
+    if not provided_token:
+        return ''
+    if not hmac.compare_digest(configured_token, provided_token):
+        return ''
+    digest = hashlib.sha256(provided_token.encode('utf-8')).hexdigest()
+    return f'token:{digest}'
 
 
 def _create_rate_limiter() -> Limiter:
@@ -902,8 +948,8 @@ def require_api_token(
     """Require bearer token auth when RESPRO_WEB_API_TOKEN is configured."""
     if not config.api_token:
         return
-    expected = f'Bearer {config.api_token}'
-    if authorization != expected:
+    provided_token = _extract_bearer_token(authorization)
+    if not provided_token or not hmac.compare_digest(config.api_token, provided_token):
         raise HTTPException(status_code=401, detail='Unauthorized')
 
 

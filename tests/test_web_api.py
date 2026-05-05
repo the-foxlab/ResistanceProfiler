@@ -1233,7 +1233,45 @@ class TestWebApi:
         assert first.status_code == 200
         assert second.status_code == 429
         assert second.json()['detail'] == 'Upload rate limit exceeded. Try again later.'
-        assert third.status_code == 200
+        assert third.status_code == 429
+
+    def test_ui_config_requires_auth_when_api_token_is_set(
+        self,
+        startup_config: StartupConfig,
+    ) -> None:
+        client = TestClient(create_app(startup_config=startup_config))
+
+        response = client.get('/api/ui/config')
+
+        assert response.status_code == 401
+
+    def test_open_report_rejects_paths_outside_results_dir(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        auth_headers: dict[str, str],
+    ) -> None:
+        upload_path = startup_config.uploads_dir / 'not-a-report.report.html'
+        upload_path.write_text('<html><body>not allowed</body></html>')
+
+        response = client.get('/api/report', params={'path': str(upload_path)}, headers=auth_headers)
+
+        assert response.status_code == 400
+        assert response.json()['detail'] == 'Report path is outside allowed output directory.'
+
+    def test_open_report_rejects_non_report_html_types(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        auth_headers: dict[str, str],
+    ) -> None:
+        report_path = startup_config.results_dir / 'not-a-report.html'
+        report_path.write_text('<html><body>wrong suffix</body></html>')
+
+        response = client.get('/api/report', params={'path': str(report_path)}, headers=auth_headers)
+
+        assert response.status_code == 400
+        assert response.json()['detail'] == 'Unsupported report type. Allowed: .report.html.'
 
     def test_session_cleanup_deletes_uploaded_and_report_files(
         self,
