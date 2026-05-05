@@ -8,6 +8,7 @@ import importlib.metadata
 import logging
 import mimetypes
 import os
+import re
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -787,9 +788,13 @@ def _user_facing_error_message(raw_message: str | None) -> str:
     return message
 
 
+_ANSI_ESCAPE = re.compile(r'\x1b\[[0-9;]*[mK]')
+
+
 def _extract_primary_error_message(raw_message: str) -> str:
     """Extract one meaningful error line from traceback or Rich panel output."""
-    raw_lines = [line.rstrip() for line in raw_message.splitlines() if line.strip()]
+    cleaned = _ANSI_ESCAPE.sub('', raw_message)
+    raw_lines = [line.rstrip() for line in cleaned.splitlines() if line.strip()]
     if not raw_lines:
         return raw_message.strip()
 
