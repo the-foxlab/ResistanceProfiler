@@ -95,7 +95,6 @@ class BatchProfileFastaPayload(BaseModel):
     fasta_paths: list[str]
     sample_names: list[str]
     db_path: str
-    min_af: float = 0.01
     threads: int = 1
     aligner: str = 'mappy'
 
