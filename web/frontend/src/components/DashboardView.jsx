@@ -19,9 +19,11 @@ import { DatabaseDrugDistributionPlot } from './database-plots/DatabaseDrugDistr
 import { DatabaseSelectorBar } from './DatabaseSelectorBar';
 import { Spinner } from './Spinner';
 import regenerateIconSrc from '../assets/icon-regenerate.svg';
+import batchIconSrc from '../assets/icon-scope.svg';
 
 const MODES = [
   { id: 'profile', label: 'Analyze', iconSrc: analyzeIconSrc },
+  { id: 'batch', label: 'Batch', iconSrc: batchIconSrc },
   { id: 'regenerate', label: 'Regenerate', iconSrc: regenerateIconSrc },
   { id: 'database', label: 'Database', iconSrc: databaseIconSrc },
   { id: 'mutations', label: 'Browse mutations', iconSrc: mutationsIconSrc },
@@ -141,6 +143,24 @@ export function DashboardView({
   downloadMutationsAsTsv,
   downloadFormulaRulesAsTsv,
   uploadProgress,
+  // Batch
+  batchMode,
+  setBatchMode,
+  batchVcfFiles,
+  batchFastaFiles,
+  batchReferenceFasta,
+  batchSamples,
+  batchSubmitting,
+  batchError,
+  batchRateLimitCooldown,
+  setBatchRateLimitCooldown,
+  batchSubmitted,
+  addBatchVcfFiles,
+  addBatchFastaFiles,
+  removeBatchFile,
+  uploadBatchReferenceFasta,
+  submitBatch,
+  resetBatch,
 }) {
   // These controls only affect database charts, not mutation browsing or profiling.
   const [requestedPhenotypeMode, setRequestedPhenotypeMode] = useState('auto');
@@ -213,6 +233,21 @@ export function DashboardView({
       setRequestedPhenotypeMode('auto');
     }
   }, [phenotypeMode.hasClinical, phenotypeMode.hasPhenotype]);
+
+  useEffect(() => {
+    // Count down the batch rate-limit cooldown each second until it reaches zero.
+    if (batchRateLimitCooldown <= 0) return undefined;
+    const timer = setInterval(() => {
+      setBatchRateLimitCooldown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [batchRateLimitCooldown, setBatchRateLimitCooldown]);
 
   return (
     <main className="dashboard-shell">
@@ -470,6 +505,205 @@ export function DashboardView({
               </article>
 
             </>
+          ) : null}
+
+          {/* BATCH TAB: submit multiple samples for profiling */}
+          {activeMode === 'batch' ? (
+            <article className="card profile-input-card tab-primary-tile">
+              <div className="workspace-output-header workspace-output-header-with-db section-header">
+                <div>
+                  <h2>Batch analysis</h2>
+                  <p>Submit multiple samples for profiling in one go</p>
+                </div>
+                <DatabaseSelectorBar
+                  databases={databases}
+                  selectedDatabase={selectedDatabase}
+                  selectedDatabaseId={selectedDatabaseId}
+                  onDatabaseChange={setSelectedDatabaseId}
+                  selectId="batch-db-select"
+                  className="profile-db-bar"
+                />
+              </div>
+
+              {!batchSubmitted ? (
+                <div className="profile-input-subtile section-subtile">
+                  {/* Mode sub-selector */}
+                  <div className="profile-mode-row">
+                    <div className="database-phenotype-switch" role="group" aria-label="Batch mode">
+                      <button
+                        type="button"
+                        className={batchMode === 'vcf' ? 'active' : ''}
+                        onClick={() => setBatchMode('vcf')}
+                        disabled={batchSubmitting}
+                      >
+                        VCF batch
+                      </button>
+                      <button
+                        type="button"
+                        className={batchMode === 'fasta' ? 'active' : ''}
+                        onClick={() => setBatchMode('fasta')}
+                        disabled={batchSubmitting}
+                      >
+                        FASTA batch
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* File upload area */}
+                  <div className="profile-upload-row">
+                    <label>
+                      {batchMode === 'vcf' ? 'VCF files' : 'FASTA files'}
+                      <input
+                        type="file"
+                        multiple
+                        accept={batchMode === 'vcf' ? '.vcf,.vcf.gz' : '.fasta,.fa,.fna'}
+                        disabled={batchSubmitting}
+                        onChange={(event) => {
+                          if (!event.target.files) return;
+                          if (batchMode === 'vcf') {
+                            addBatchVcfFiles(event.target.files);
+                          } else {
+                            addBatchFastaFiles(event.target.files);
+                          }
+                          // Reset so same files can be re-added after removal.
+                          event.target.value = '';
+                        }}
+                      />
+                    </label>
+                  </div>
+
+                  {/* Uploaded file list */}
+                  {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length > 0 ? (
+                    <div className="profile-upload-row">
+                      <p className="field-optional">
+                        {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length} / 25 files
+                        {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length >= 25 ? (
+                          <span style={{ color: 'var(--color-error, #c2410c)', marginLeft: '0.4em' }}>Limit reached</span>
+                        ) : null}
+                      </p>
+                      <ul style={{ listStyle: 'none', padding: 0, margin: '0.4rem 0' }}>
+                        {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).map((file, index) => (
+                          <li key={file.path} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                            <span>{file.name}</span>
+                            <span className="field-optional">({Math.round(file.size / 1024)} KB)</span>
+                            <button
+                              type="button"
+                              className="button-link"
+                              onClick={() => removeBatchFile(index)}
+                              disabled={batchSubmitting}
+                              aria-label={`Remove ${file.name}`}
+                            >
+                              ✕
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {/* Shared reference FASTA — VCF mode only */}
+                  {batchMode === 'vcf' ? (
+                    <div className="profile-upload-row">
+                      <label>
+                        Shared reference FASTA <span className="field-optional">(required for VCF batch)</span>
+                        <input
+                          type="file"
+                          accept=".fasta,.fa,.fna"
+                          disabled={batchSubmitting}
+                          onChange={(event) => {
+                            if (event.target.files && event.target.files[0]) {
+                              uploadBatchReferenceFasta(event.target.files[0]);
+                            }
+                          }}
+                        />
+                      </label>
+                      {batchReferenceFasta ? (
+                        <p className="field-optional">Uploaded: {batchReferenceFasta.name}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {/* Rate-limit notice and submit */}
+                  <div className="profile-analyze-row">
+                    <p className="status analyze-status-inline">
+                      {batchRateLimitCooldown > 0
+                        ? `Rate limit reached. Try again in ${batchRateLimitCooldown}s.`
+                        : 'Batch submissions are limited to 2 per minute, max 25 samples.'}
+                    </p>
+                    {batchError ? <p className="status" style={{ color: 'var(--color-error, #c2410c)' }}>{batchError}</p> : null}
+                    <button
+                      type="button"
+                      className="analyze-primary"
+                      onClick={() => submitBatch()}
+                      disabled={
+                        batchSubmitting
+                        || batchRateLimitCooldown > 0
+                        || (batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length === 0
+                        || (batchMode === 'vcf' && !batchReferenceFasta)
+                      }
+                    >
+                      {batchSubmitting ? (
+                        <>
+                          <Spinner /> Submitting...
+                        </>
+                      ) : (
+                        'Submit batch'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                // Results table
+                <div className="profile-input-subtile section-subtile">
+                  {batchError ? (
+                    <p className="status" style={{ color: 'var(--color-error, #c2410c)' }}>{batchError}</p>
+                  ) : null}
+                  <div className="table-wrap mutation-table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Sample</th>
+                          <th>Status</th>
+                          <th>Report</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {batchSamples.map((sample) => (
+                          <tr key={sample.job_id}>
+                            <td>{sample.sample_name}</td>
+                            <td>
+                              <span className={`job-status-badge status-${sample.status}`}>
+                                {sample.status}
+                              </span>
+                            </td>
+                            <td>
+                              {sample.report_url ? (
+                                <a
+                                  href={`${API_BASE}/api/report?path=${encodeURIComponent(sample.report_url)}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  Download
+                                </a>
+                              ) : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="profile-analyze-row">
+                    <button
+                      type="button"
+                      className="analyze-primary"
+                      onClick={() => resetBatch()}
+                    >
+                      New batch
+                    </button>
+                  </div>
+                </div>
+              )}
+            </article>
           ) : null}
 
           {/* REGENERATE TAB: upload results JSON and regenerate report artifacts */}

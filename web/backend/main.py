@@ -11,6 +11,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
 import redis
 import uvicorn
@@ -42,6 +43,10 @@ from web.backend.config import (
 from web.backend.jobs import run_profile_fasta, run_profile_vcf, run_regenerate_json
 from web.backend.models import (
     ApiEnvelope,
+    BatchProfileFastaPayload,
+    BatchProfileVcfPayload,
+    BatchSampleEntry,
+    BatchSubmitResponse,
     JobStatusResponse,
     JobSubmitResponse,
     ProfileFastaPayload,
@@ -89,6 +94,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     app.add_exception_handler(RateLimitExceeded, _handle_rate_limit_exceeded)
 
     upload_rate_limit = _resolve_upload_rate_limit()
+    batch_submit_rate_limit = _resolve_batch_submit_rate_limit()
 
     app.add_middleware(
         CORSMiddleware,
@@ -309,6 +315,119 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         )
         logger.info('Queue job enqueued: job_id=%s mode=vcf database_id=%s', job.id, project_db.name)
         return JobSubmitResponse(job_id=job.id)
+
+    @app.post('/api/profile/batch/vcf', response_model=BatchSubmitResponse)
+    @limiter.limit(batch_submit_rate_limit)
+    def profile_batch_vcf_route(
+        request: Request,
+        payload: BatchProfileVcfPayload,
+        queue: Queue = Depends(get_queue),
+        _auth: None = Depends(require_api_token),
+    ) -> BatchSubmitResponse:
+        del request
+        if len(payload.vcf_paths) != len(payload.sample_names):
+            raise HTTPException(
+                status_code=422,
+                detail='vcf_paths and sample_names must have the same length.',
+            )
+        max_batch = WEB_BACKEND_CONFIG.defaults.max_batch_size
+        if len(payload.vcf_paths) > max_batch:
+            raise HTTPException(
+                status_code=422,
+                detail=f'Batch size {len(payload.vcf_paths)} exceeds the maximum of {max_batch} samples per batch.',
+            )
+        ref_fasta_path = Path(payload.reference_fasta_path).expanduser().resolve()
+        if not is_path_within_allowed_roots(ref_fasta_path, config.allowed_roots):
+            raise HTTPException(status_code=400, detail='Reference FASTA path is outside allowed upload directory.')
+        if not ref_fasta_path.is_file():
+            raise HTTPException(status_code=404, detail='Reference FASTA file not found.')
+        project_db = resolve_project_db_path(config.project_databases_dir, payload.db_path)
+        enqueue_options = build_enqueue_job_options()
+        samples = []
+        for vcf_path_str, sample_name in zip(payload.vcf_paths, payload.sample_names):
+            vcf_path = Path(vcf_path_str).expanduser().resolve()
+            if not is_path_within_allowed_roots(vcf_path, config.allowed_roots):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f'VCF path for sample {sample_name!r} is outside allowed upload directory.',
+                )
+            if not vcf_path.is_file():
+                raise HTTPException(status_code=404, detail=f'VCF file not found for sample {sample_name!r}.')
+            job_id = str(uuid4())
+            queue.enqueue(
+                run_profile_vcf,
+                project_db=str(project_db),
+                output_dir=str(config.results_dir),
+                vcf_path=str(vcf_path),
+                ref_fasta_path=str(ref_fasta_path),
+                sample=sample_name,
+                min_af=payload.min_af,
+                min_depth=payload.min_depth,
+                bam_path=None,
+                threads=payload.threads,
+                aligner=payload.aligner,
+                job_id=job_id,
+                **enqueue_options,
+            )
+            samples.append(BatchSampleEntry(job_id=job_id, sample_name=sample_name))
+        logger.info(
+            'Batch VCF jobs enqueued: count=%d database_id=%s',
+            len(samples),
+            project_db.name,
+        )
+        return BatchSubmitResponse(samples=samples, total=len(samples))
+
+    @app.post('/api/profile/batch/fasta', response_model=BatchSubmitResponse)
+    @limiter.limit(batch_submit_rate_limit)
+    def profile_batch_fasta_route(
+        request: Request,
+        payload: BatchProfileFastaPayload,
+        queue: Queue = Depends(get_queue),
+        _auth: None = Depends(require_api_token),
+    ) -> BatchSubmitResponse:
+        del request
+        if len(payload.fasta_paths) != len(payload.sample_names):
+            raise HTTPException(
+                status_code=422,
+                detail='fasta_paths and sample_names must have the same length.',
+            )
+        max_batch = WEB_BACKEND_CONFIG.defaults.max_batch_size
+        if len(payload.fasta_paths) > max_batch:
+            raise HTTPException(
+                status_code=422,
+                detail=f'Batch size {len(payload.fasta_paths)} exceeds the maximum of {max_batch} samples per batch.',
+            )
+        project_db = resolve_project_db_path(config.project_databases_dir, payload.db_path)
+        enqueue_options = build_enqueue_job_options()
+        samples = []
+        for fasta_path_str, sample_name in zip(payload.fasta_paths, payload.sample_names):
+            fasta_path = Path(fasta_path_str).expanduser().resolve()
+            if not is_path_within_allowed_roots(fasta_path, config.allowed_roots):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f'FASTA path for sample {sample_name!r} is outside allowed upload directory.',
+                )
+            if not fasta_path.is_file():
+                raise HTTPException(status_code=404, detail=f'FASTA file not found for sample {sample_name!r}.')
+            job_id = str(uuid4())
+            queue.enqueue(
+                run_profile_fasta,
+                project_db=str(project_db),
+                output_dir=str(config.results_dir),
+                fasta_path=str(fasta_path),
+                sample=sample_name,
+                threads=payload.threads,
+                aligner=payload.aligner,
+                job_id=job_id,
+                **enqueue_options,
+            )
+            samples.append(BatchSampleEntry(job_id=job_id, sample_name=sample_name))
+        logger.info(
+            'Batch FASTA jobs enqueued: count=%d database_id=%s',
+            len(samples),
+            project_db.name,
+        )
+        return BatchSubmitResponse(samples=samples, total=len(samples))
 
     @app.post('/api/regenerate/json', response_model=JobSubmitResponse)
     def regenerate_json_route(
@@ -656,6 +775,12 @@ def _resolve_upload_rate_limit() -> str:
     """Return the configured upload rate limit string."""
     default = WEB_BACKEND_CONFIG.defaults.upload_rate_limit
     return os.getenv(WEB_ENV.upload_rate_limit, default).strip() or default
+
+
+def _resolve_batch_submit_rate_limit() -> str:
+    """Return the configured batch submission rate limit string."""
+    default = WEB_BACKEND_CONFIG.defaults.batch_submit_rate_limit
+    return os.getenv(WEB_ENV.batch_submit_rate_limit, default).strip() or default
 
 
 def _rate_limit_key(request: Request) -> str:

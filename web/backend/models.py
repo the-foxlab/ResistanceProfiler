@@ -58,6 +58,45 @@ class JobStatusResponse(BaseModel):
     # queued | running | succeeded | failed
     status: str
     result: dict | None = None
+
+
+class BatchSampleEntry(BaseModel):
+    """A single sample entry within a batch submission response."""
+
+    job_id: str
+    sample_name: str
+    status: str = 'queued'
+
+
+class BatchSubmitResponse(BaseModel):
+    """Response returned after a batch of profiling jobs is enqueued."""
+
+    samples: list[BatchSampleEntry]
+    total: int
+
+
+class BatchProfileVcfPayload(BaseModel):
+    """Payload for submitting a VCF-mode batch profiling job."""
+
+    vcf_paths: list[str]
+    sample_names: list[str]
+    reference_fasta_path: str
+    db_path: str
+    min_af: float = 0.01
+    min_depth: int = 10
+    threads: int = 1
+    aligner: str = 'mappy'
+
+
+class BatchProfileFastaPayload(BaseModel):
+    """Payload for submitting a FASTA-mode batch profiling job."""
+
+    fasta_paths: list[str]
+    sample_names: list[str]
+    db_path: str
+    min_af: float = 0.01
+    threads: int = 1
+    aligner: str = 'mappy'
     error: str | None = None
 
 

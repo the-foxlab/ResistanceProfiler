@@ -354,6 +354,17 @@ export function useDashboardLogic() {
     fileName: '',
   });
 
+  // --- Batch state ---
+  const [batchMode, setBatchMode] = useState('vcf');
+  const [batchVcfFiles, setBatchVcfFiles] = useState([]);
+  const [batchFastaFiles, setBatchFastaFiles] = useState([]);
+  const [batchReferenceFasta, setBatchReferenceFastaState] = useState(null);
+  const [batchSamples, setBatchSamples] = useState([]);
+  const [batchSubmitting, setBatchSubmitting] = useState(false);
+  const [batchError, setBatchError] = useState(null);
+  const [batchRateLimitCooldown, setBatchRateLimitCooldown] = useState(0);
+  const [batchSubmitted, setBatchSubmitted] = useState(false);
+
   // Resolve currently selected database once for all consumers.
   const selectedDatabase = databases.find((item) => item.id === selectedDatabaseId) || null;
 
@@ -845,6 +856,161 @@ export function useDashboardLogic() {
   };
 
   const isProfileBusy = activeProfileMode === 'fasta' ? isProcessingFasta : isProcessingVcf;
+
+  // --- Batch functions ---
+
+  const addBatchVcfFiles = async (files) => {
+    const MAX = 25;
+    const toUpload = Array.from(files).slice(0, MAX - batchVcfFiles.length);
+    for (const file of toUpload) {
+      try {
+        const response = await apiUpload('/api/upload/vcf', file);
+        setBatchVcfFiles((prev) => [...prev, { path: response.file_path, name: file.name, size: file.size }]);
+        addUploadedPath(response.file_path);
+      } catch (error) {
+        setBatchError(formatUserError(error.message));
+      }
+    }
+  };
+
+  const addBatchFastaFiles = async (files) => {
+    const MAX = 25;
+    const toUpload = Array.from(files).slice(0, MAX - batchFastaFiles.length);
+    for (const file of toUpload) {
+      try {
+        const response = await apiUpload('/api/upload/fasta', file);
+        setBatchFastaFiles((prev) => [...prev, { path: response.file_path, name: file.name, size: file.size }]);
+        addUploadedPath(response.file_path);
+      } catch (error) {
+        setBatchError(formatUserError(error.message));
+      }
+    }
+  };
+
+  const removeBatchFile = (index) => {
+    if (batchMode === 'vcf') {
+      setBatchVcfFiles((prev) => prev.filter((_, i) => i !== index));
+    } else {
+      setBatchFastaFiles((prev) => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  const uploadBatchReferenceFasta = async (file) => {
+    try {
+      const response = await apiUpload('/api/upload/fasta', file);
+      setBatchReferenceFastaState({ path: response.file_path, name: file.name });
+      addUploadedPath(response.file_path);
+    } catch (error) {
+      setBatchError(formatUserError(error.message));
+    }
+  };
+
+  const pollBatchJobs = async (initialSamples) => {
+    const terminal = new Set(['succeeded', 'failed']);
+    let samples = initialSamples.map((s) => ({ ...s }));
+    for (;;) {
+      const pending = samples.filter((s) => !terminal.has(s.status));
+      if (pending.length === 0) break;
+      await new Promise((resolve) => setTimeout(resolve, FRONTEND_CONFIG.profile.jobPollIntervalMs));
+      const updated = await Promise.all(
+        pending.map(async (sample) => {
+          try {
+            const payload = await apiGet(`/api/jobs/${sample.job_id}`);
+            return { ...sample, status: payload.status, result: payload.result || null };
+          } catch {
+            return { ...sample, status: 'failed' };
+          }
+        })
+      );
+      samples = samples.map((s) => updated.find((u) => u.job_id === s.job_id) || s);
+      setBatchSamples(
+        samples.map((s) => ({
+          job_id: s.job_id,
+          sample_name: s.sample_name,
+          status: s.status,
+          report_url: s.result ? s.result.report_html_path : null,
+        }))
+      );
+    }
+  };
+
+  const submitBatch = async () => {
+    setBatchError(null);
+    setBatchSubmitting(true);
+    const files = batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles;
+    if (files.length === 0) {
+      setBatchError('No files uploaded.');
+      setBatchSubmitting(false);
+      return;
+    }
+    try {
+      let responseData;
+      if (batchMode === 'vcf') {
+        const body = {
+          vcf_paths: batchVcfFiles.map((f) => f.path),
+          sample_names: batchVcfFiles.map((f) => f.name),
+          reference_fasta_path: batchReferenceFasta.path,
+          db_path: selectedDatabaseId,
+        };
+        const response = await fetch(`${API_BASE}/api/profile/batch/vcf`, {
+          method: 'POST',
+          headers: buildHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify(body),
+        });
+        if (response.status === 429) {
+          setBatchRateLimitCooldown(60);
+          setBatchError('Rate limit reached. Please wait before submitting another batch.');
+          return;
+        }
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
+        }
+        responseData = await response.json();
+      } else {
+        const body = {
+          fasta_paths: batchFastaFiles.map((f) => f.path),
+          sample_names: batchFastaFiles.map((f) => f.name),
+          db_path: selectedDatabaseId,
+        };
+        const response = await fetch(`${API_BASE}/api/profile/batch/fasta`, {
+          method: 'POST',
+          headers: buildHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify(body),
+        });
+        if (response.status === 429) {
+          setBatchRateLimitCooldown(60);
+          setBatchError('Rate limit reached. Please wait before submitting another batch.');
+          return;
+        }
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
+        }
+        responseData = await response.json();
+      }
+      const initialSamples = responseData.samples.map((s) => ({ ...s, report_url: null }));
+      setBatchSamples(initialSamples);
+      setBatchSubmitted(true);
+      await pollBatchJobs(initialSamples);
+    } catch (error) {
+      setBatchError(formatUserError(error.message));
+    } finally {
+      setBatchSubmitting(false);
+    }
+  };
+
+  const resetBatch = () => {
+    setBatchVcfFiles([]);
+    setBatchFastaFiles([]);
+    setBatchReferenceFastaState(null);
+    setBatchSamples([]);
+    setBatchSubmitting(false);
+    setBatchError(null);
+    setBatchRateLimitCooldown(0);
+    setBatchSubmitted(false);
+  };
+
   const canCancelJob = Boolean(activeJobId) && ['queued', 'running'].includes(activeJobStatus);
 
   const runSelectedProfile = async () => {
@@ -966,5 +1132,23 @@ export function useDashboardLogic() {
     downloadMutationsAsTsv,
     downloadFormulaRulesAsTsv,
     uploadProgress,
+    // Batch
+    batchMode,
+    setBatchMode,
+    batchVcfFiles,
+    batchFastaFiles,
+    batchReferenceFasta,
+    batchSamples,
+    batchSubmitting,
+    batchError,
+    batchRateLimitCooldown,
+    setBatchRateLimitCooldown,
+    batchSubmitted,
+    addBatchVcfFiles,
+    addBatchFastaFiles,
+    removeBatchFile,
+    uploadBatchReferenceFasta,
+    submitBatch,
+    resetBatch,
   };
 }

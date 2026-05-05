@@ -42,7 +42,7 @@ def profile_fasta(
             query_name, query_seq, fasta_matches = resolve_fasta_query(
                 project_conn,
                 fasta_path,
-                use_cache=False,
+                use_cache=True,
                 threads=threads,
                 aligner=aligner,  # type: ignore[arg-type]
             )
@@ -138,7 +138,7 @@ def profile_vcf(
             query_name, query_seq, fasta_matches = resolve_fasta_query(
                 project_conn,
                 ref_fasta_path,
-                use_cache=False,
+                use_cache=True,
                 threads=threads,
                 aligner=aligner,  # type: ignore[arg-type]
             )

@@ -24,6 +24,8 @@ class WebEnvKeys:
     job_retry_intervals: str = 'RESPRO_WEB_JOB_RETRY_INTERVALS'
     maintained_bootstrap: str = 'RESPRO_WEB_MAINTAINED_BOOTSTRAP'
     trusted_proxies: str = 'RESPRO_WEB_TRUSTED_PROXIES'
+    batch_submit_rate_limit: str = 'RESPRO_WEB_BATCH_RATE_LIMIT'
+    max_batch_size: str = 'RESPRO_WEB_MAX_BATCH_SIZE'
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,9 @@ class WebDefaults:
     job_retry_intervals_seconds: tuple[int, ...]
     sweep_frequency_seconds: int
     upload_rate_limit: str
+    batch_submit_rate_limit: str
+    max_batch_size: int
+    batch_queue_name: str
     cors_local_origins: tuple[str, ...]
     profile_queue_name: str
     frontend_base_path: str
@@ -86,6 +91,8 @@ def _load_web_backend_config() -> WebBackendConfig:
         allowed_roots=str(env_payload['allowed_roots']),
         cors_origins=str(env_payload['cors_origins']),
         upload_rate_limit=str(env_payload['upload_rate_limit']),
+        batch_submit_rate_limit=str(env_payload['batch_submit_rate_limit']),
+        max_batch_size=str(env_payload['max_batch_size']),
         host=str(env_payload['host']),
         port=str(env_payload['port']),
         redis_url=str(env_payload['redis_url']),
@@ -107,6 +114,9 @@ def _load_web_backend_config() -> WebBackendConfig:
         ),
         sweep_frequency_seconds=int(defaults_payload['sweep_frequency_seconds']),
         upload_rate_limit=str(defaults_payload['upload_rate_limit']),
+        batch_submit_rate_limit=str(defaults_payload['batch_submit_rate_limit']),
+        max_batch_size=int(defaults_payload['max_batch_size']),
+        batch_queue_name=str(defaults_payload['batch_queue_name']),
         cors_local_origins=tuple(str(item) for item in defaults_payload['cors_local_origins']),
         profile_queue_name=str(defaults_payload['profile_queue_name']),
         frontend_base_path=str(defaults_payload['frontend_base_path']),

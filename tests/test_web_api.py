@@ -1301,3 +1301,137 @@ class TestWebApi:
         assert not bam_path.exists()
         assert not bam_index_path.exists()
 
+
+# ---------------------------------------------------------------------------
+# Batch profiling endpoint tests
+# ---------------------------------------------------------------------------
+
+
+class TestBatchProfileEndpoints:
+    def test_batch_vcf_submit_success(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        project_db: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        vcf2 = startup_config.uploads_dir / 'sample2.vcf'
+        vcf2.write_text(web_sample_vcf.read_text())
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_paths': [str(web_sample_vcf), str(vcf2)],
+                'sample_names': ['sample-a', 'sample-b'],
+                'reference_fasta_path': str(web_sample_ref_fasta),
+                'db_path': default_db.name,
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data['total'] == 2
+        assert len(data['samples']) == 2
+        for entry in data['samples']:
+            assert entry['job_id']
+            assert entry['status'] == 'queued'
+
+    def test_batch_fasta_submit_success(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_ref_fasta: Path,
+        project_db: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        fasta2 = startup_config.uploads_dir / 'sample2.fasta'
+        fasta2.write_text(web_sample_ref_fasta.read_text())
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+
+        response = client.post(
+            '/api/profile/batch/fasta',
+            json={
+                'fasta_paths': [str(web_sample_ref_fasta), str(fasta2)],
+                'sample_names': ['fasta-a', 'fasta-b'],
+                'db_path': default_db.name,
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data['total'] == 2
+        assert len(data['samples']) == 2
+        for entry in data['samples']:
+            assert entry['job_id']
+            assert entry['status'] == 'queued'
+
+    def test_batch_vcf_exceeds_max_size(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        vcf_path = str(web_sample_vcf)
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_paths': [vcf_path] * 26,
+                'sample_names': [f'sample-{i}' for i in range(26)],
+                'reference_fasta_path': str(web_sample_ref_fasta),
+                'db_path': default_db.name,
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+        detail = str(response.json())
+        assert 'batch' in detail.lower() or '25' in detail
+
+    def test_batch_vcf_mismatched_lengths(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_paths': [str(web_sample_vcf), str(web_sample_vcf)],
+                'sample_names': ['only-one'],
+                'reference_fasta_path': str(web_sample_ref_fasta),
+                'db_path': default_db.name,
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_batch_fasta_exceeds_max_size(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        fasta_path = str(web_sample_ref_fasta)
+        response = client.post(
+            '/api/profile/batch/fasta',
+            json={
+                'fasta_paths': [fasta_path] * 26,
+                'sample_names': [f'fasta-{i}' for i in range(26)],
+                'db_path': default_db.name,
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+        detail = str(response.json())
+        assert 'batch' in detail.lower() or '25' in detail
+
