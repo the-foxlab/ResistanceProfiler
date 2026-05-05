@@ -83,8 +83,8 @@ class BatchProfileVcfPayload(BaseModel):
     sample_names: list[str]
     reference_fasta_path: str
     db_path: str
-    min_af: float = 0.01
-    min_depth: int = 10
+    min_af: float = Field(default=0.01, ge=0.0, le=1.0)
+    min_depth: int = Field(default=10, ge=0)
     threads: int = 1
     aligner: str = 'mappy'
 
