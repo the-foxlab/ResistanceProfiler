@@ -147,7 +147,7 @@ def _variants_from_alignment(
             continue
 
         query_codon = ''.join(q for _, q, _ in codon_slice)
-        if 'N' in query_codon.upper():
+        if query_codon.upper() == 'NNN':
             gap_codon_indices.append(codon_idx)
 
     non_assessable_codons = set(gap_codon_indices)
@@ -237,7 +237,7 @@ def _iupac_alt_bases(ref_base: str, query_base: str) -> list[tuple[str, float]]:
     non_ref_alts = sorted(base for base in options if base != ref_base_upper)
     if not non_ref_alts:
         return []
-    af_each = 1.0 / len(options)
+    af_each = 1.0 / len(non_ref_alts)
     return [(alt, af_each) for alt in non_ref_alts]
 
 
@@ -450,17 +450,13 @@ def _make_fasta_insertion_from_alignment(
         anchor_idx = idx - 1
         if anchor_idx < 0:
             return None
-        anchor_query_nt = coding[anchor_idx][1]
-        if anchor_query_nt == '-':
-            return None
+        anchor_ref_nt = coding[anchor_idx][0]
     else:
         anchor_idx = idx
-        anchor_query_nt = coding[anchor_idx][1]
-        if anchor_query_nt == '-':
-            return None
+        anchor_ref_nt = coding[anchor_idx][0]
 
     if gene.strand == '-':
-        anchor_genomic = str(Seq(anchor_query_nt).reverse_complement())
+        anchor_genomic = str(Seq(anchor_ref_nt).reverse_complement())
         inserted_genomic = str(Seq(inserted_bases).reverse_complement())
         return VariantCall(
             chrom=gene.name,
@@ -475,8 +471,8 @@ def _make_fasta_insertion_from_alignment(
     return _make_variant_from_coding_nt(
         gene,
         anchor_idx,
-        anchor_query_nt,
-        anchor_query_nt + inserted_bases,
+        anchor_ref_nt,
+        anchor_ref_nt + inserted_bases,
     )
 
 
@@ -500,19 +496,15 @@ def _make_fasta_deletion_from_alignment(
         anchor_idx = start_idx - 1
         if anchor_idx < 0:
             return None
-        anchor_query_nt = coding[anchor_idx][1]
-        if anchor_query_nt == '-':
-            return None
+        anchor_ref_nt = coding[anchor_idx][0]
     else:
         anchor_idx = end_idx + 1
         if anchor_idx >= len(coding):
             return None
-        anchor_query_nt = coding[anchor_idx][1]
-        if anchor_query_nt == '-':
-            return None
+        anchor_ref_nt = coding[anchor_idx][0]
 
     if gene.strand == '-':
-        anchor_genomic = str(Seq(anchor_query_nt).reverse_complement())
+        anchor_genomic = str(Seq(anchor_ref_nt).reverse_complement())
         deleted_genomic = str(Seq(deleted_bases).reverse_complement())
         return VariantCall(
             chrom=gene.name,
@@ -527,6 +519,6 @@ def _make_fasta_deletion_from_alignment(
     return _make_variant_from_coding_nt(
         gene,
         anchor_idx,
-        anchor_query_nt + deleted_bases,
-        anchor_query_nt,
+        anchor_ref_nt + deleted_bases,
+        anchor_ref_nt,
     )

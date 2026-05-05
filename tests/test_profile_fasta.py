@@ -775,6 +775,51 @@ class TestFastaToVcf:
         assert variant.allele_freq == pytest.approx(1.0)
         assert variant.query_ref_codon == 'RAA'
 
+    def test_full_n_codon_is_coverage_gap_and_not_emitted_as_variants(
+        self,
+        simple_gene: GeneRecord,
+    ) -> None:
+        """A full NNN codon should be marked as uncovered and skipped for variant emission."""
+        aligned_ref = 'ATGAAAGCTTAA'
+        aligned_query = 'ATGNNNGCTTAA'
+
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            simple_gene,
+            covered_cds_start=0,
+            covered_cds_end=12,
+        )
+
+        assert variants == []
+        assert len(gaps) == 1
+        assert gaps[0].gene_name == simple_gene.name
+        assert gaps[0].codon_start == 1
+        assert gaps[0].codon_end == 1
+
+    def test_partial_n_codon_remains_assessable_for_iupac_variants(
+        self,
+        simple_gene: GeneRecord,
+    ) -> None:
+        """Partial ambiguity (e.g. AAN) should stay assessable and emit IUPAC SNP variants."""
+        aligned_ref = 'ATGAAAGCTTAA'
+        aligned_query = 'ATGAANGCTTAA'
+
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            simple_gene,
+            covered_cds_start=0,
+            covered_cds_end=12,
+        )
+
+        assert gaps == []
+        assert len(variants) == 3
+        assert {variant.alt for variant in variants} == {'C', 'G', 'T'}
+        assert all(variant.ref == 'A' for variant in variants)
+        assert all(variant.allele_freq == pytest.approx(1 / 3) for variant in variants)
+        assert all(variant.query_ref_codon == 'AAN' for variant in variants)
+
     def test_minus_strand_insertion_keeps_anchor_first_in_genomic_orientation(self) -> None:
         """Minus-strand insertion should emit VCF-style REF/ALT with anchor at ALT start."""
         gene = GeneRecord(
@@ -807,6 +852,30 @@ class TestFastaToVcf:
         assert variant.ref == 'T'
         assert variant.alt == 'TTTTGGG'
 
+    def test_insertion_uses_reference_anchor_even_if_query_anchor_is_snp(
+        self,
+        simple_gene: GeneRecord,
+    ) -> None:
+        """Insertion REF/ALT must remain reference-anchored even with anchor SNP in query."""
+        aligned_ref = 'ATGA-AAGCTTAA'
+        aligned_query = 'ATGGTAAGCTTAA'
+
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            simple_gene,
+            covered_cds_start=0,
+            covered_cds_end=12,
+        )
+
+        assert gaps == []
+        insertion_variants = [v for v in variants if len(v.alt) > len(v.ref)]
+        assert len(insertion_variants) == 1
+        insertion = insertion_variants[0]
+        assert insertion.pos == 3
+        assert insertion.ref == 'A'
+        assert insertion.alt == 'AT'
+
     def test_minus_strand_deletion_keeps_anchor_first_in_genomic_orientation(self) -> None:
         """Minus-strand deletion should emit VCF-style REF/ALT with anchor at REF start."""
         gene = GeneRecord(
@@ -838,6 +907,30 @@ class TestFastaToVcf:
         assert variant.pos == 1
         assert variant.ref == 'ATTT'
         assert variant.alt == 'A'
+
+    def test_deletion_uses_reference_anchor_even_if_query_anchor_is_snp(
+        self,
+        simple_gene: GeneRecord,
+    ) -> None:
+        """Deletion REF/ALT must remain reference-anchored even with anchor SNP in query."""
+        aligned_ref = 'ATGAAAGCTTAA'
+        aligned_query = 'ATGG--GCTTAA'
+
+        variants, gaps = _variants_from_alignment(
+            aligned_ref,
+            aligned_query,
+            simple_gene,
+            covered_cds_start=0,
+            covered_cds_end=12,
+        )
+
+        assert gaps == []
+        deletion_variants = [v for v in variants if len(v.ref) > len(v.alt)]
+        assert len(deletion_variants) == 1
+        deletion = deletion_variants[0]
+        assert deletion.pos == 3
+        assert deletion.ref == 'AAA'
+        assert deletion.alt == 'A'
 
 class TestFastaConsensusCli:
     """End-to-end CLI test for --fasta consensus input mode."""
