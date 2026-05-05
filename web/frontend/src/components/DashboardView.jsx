@@ -11,6 +11,7 @@ import databaseIconSrc from '../assets/icon-database.svg';
 import githubIconSrc from '../assets/icon-github.svg';
 import websiteIconSrc from '../assets/website.svg';
 import mutationsIconSrc from '../assets/icon-mutations.svg';
+import batchIconSrc from '../assets/batch.svg';
 import { FRONTEND_CONFIG } from '../config';
 import { buildDatabasePlots } from './database-plots/buildDatabasePlots';
 import { DatabasePieSummaryRow } from './database-plots/DatabasePieSummaryTile';
@@ -19,11 +20,10 @@ import { DatabaseDrugDistributionPlot } from './database-plots/DatabaseDrugDistr
 import { DatabaseSelectorBar } from './DatabaseSelectorBar';
 import { Spinner } from './Spinner';
 import regenerateIconSrc from '../assets/icon-regenerate.svg';
-import batchIconSrc from '../assets/icon-scope.svg';
 
 const MODES = [
   { id: 'profile', label: 'Analyze', iconSrc: analyzeIconSrc },
-  { id: 'batch', label: 'Batch', iconSrc: batchIconSrc },
+  { id: 'batch', label: 'Batch Analyze', iconSrc: batchIconSrc },
   { id: 'regenerate', label: 'Regenerate', iconSrc: regenerateIconSrc },
   { id: 'database', label: 'Database', iconSrc: databaseIconSrc },
   { id: 'mutations', label: 'Browse mutations', iconSrc: mutationsIconSrc },
@@ -155,6 +155,10 @@ export function DashboardView({
   batchRateLimitCooldown,
   setBatchRateLimitCooldown,
   batchSubmitted,
+  batchMaxSamples,
+  sampleLimitPerMinute,
+  batchVcfCutoffs,
+  setBatchVcfCutoffs,
   addBatchVcfFiles,
   addBatchFastaFiles,
   removeBatchFile,
@@ -306,18 +310,21 @@ export function DashboardView({
                   {activeProfileMode === 'vcf' ? (
                     <>
                       <div className="profile-mode-row">
-                        <label className="inline-mode-label" aria-label="Profiling mode">
-                          <span>Mode</span>
-                          <select
-                            value={activeProfileMode}
-                            disabled={isProfileBusy}
-                            onChange={(event) => setActiveProfileMode(event.target.value)}
-                          >
+                        <div className="profile-settings-row" role="group" aria-label="Profiling mode">
+                          <div className="database-phenotype-switch">
                             {PROFILE_MODES.map((mode) => (
-                              <option key={mode.id} value={mode.id}>{mode.label}</option>
+                              <button
+                                key={mode.id}
+                                type="button"
+                                className={activeProfileMode === mode.id ? 'active' : ''}
+                                onClick={() => setActiveProfileMode(mode.id)}
+                                disabled={isProfileBusy}
+                              >
+                                {mode.label}
+                              </button>
                             ))}
-                          </select>
-                        </label>
+                          </div>
+                        </div>
                         <div className="upload-progress" aria-label="Upload progress">
                           <div className="upload-progress-head">
                             <span>Upload progress</span>
@@ -421,18 +428,21 @@ export function DashboardView({
                   ) : (
                     <>
                       <div className="profile-mode-row">
-                        <label className="inline-mode-label" aria-label="Profiling mode">
-                          <span>Mode</span>
-                          <select
-                            value={activeProfileMode}
-                            disabled={isProfileBusy}
-                            onChange={(event) => setActiveProfileMode(event.target.value)}
-                          >
+                        <div className="profile-settings-row" role="group" aria-label="Profiling mode">
+                          <div className="database-phenotype-switch">
                             {PROFILE_MODES.map((mode) => (
-                              <option key={mode.id} value={mode.id}>{mode.label}</option>
+                              <button
+                                key={mode.id}
+                                type="button"
+                                className={activeProfileMode === mode.id ? 'active' : ''}
+                                onClick={() => setActiveProfileMode(mode.id)}
+                                disabled={isProfileBusy}
+                              >
+                                {mode.label}
+                              </button>
                             ))}
-                          </select>
-                        </label>
+                          </div>
+                        </div>
                         <div className="upload-progress" aria-label="Upload progress">
                           <div className="upload-progress-head">
                             <span>Upload progress</span>
@@ -529,66 +539,146 @@ export function DashboardView({
                 <div className="profile-input-subtile section-subtile">
                   {/* Mode sub-selector */}
                   <div className="profile-mode-row">
-                    <div className="database-phenotype-switch" role="group" aria-label="Batch mode">
-                      <button
-                        type="button"
-                        className={batchMode === 'vcf' ? 'active' : ''}
-                        onClick={() => setBatchMode('vcf')}
-                        disabled={batchSubmitting}
-                      >
-                        VCF batch
-                      </button>
-                      <button
-                        type="button"
-                        className={batchMode === 'fasta' ? 'active' : ''}
-                        onClick={() => setBatchMode('fasta')}
-                        disabled={batchSubmitting}
-                      >
-                        FASTA batch
-                      </button>
+                    <div className="profile-settings-row" role="group" aria-label="Batch mode">
+                      <div className="database-phenotype-switch">
+                        <button
+                          type="button"
+                          className={batchMode === 'vcf' ? 'active' : ''}
+                          onClick={() => setBatchMode('vcf')}
+                          disabled={batchSubmitting}
+                        >
+                          VCF batch
+                        </button>
+                        <button
+                          type="button"
+                          className={batchMode === 'fasta' ? 'active' : ''}
+                          onClick={() => setBatchMode('fasta')}
+                          disabled={batchSubmitting}
+                        >
+                          FASTA batch
+                        </button>
+                      </div>
+                    </div>
+                    <div className="upload-progress" aria-label="Batch upload progress">
+                      <div className="upload-progress-head">
+                        <span>Upload progress</span>
+                        <span>{uploadProgress.percent}%</span>
+                      </div>
+                      <div className="upload-progress-track" aria-hidden="true">
+                        <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
+                      </div>
+                      <p className="upload-progress-file" title={uploadProgress.fileName || 'No upload yet'}>
+                        {uploadProgress.fileName || 'No upload yet'}
+                      </p>
                     </div>
                   </div>
 
                   {/* File upload area */}
-                  <div className="profile-upload-row">
-                    <label>
-                      {batchMode === 'vcf' ? 'VCF files' : 'FASTA files'}
-                      <input
-                        type="file"
-                        multiple
-                        accept={batchMode === 'vcf' ? '.vcf,.vcf.gz' : '.fasta,.fa,.fna'}
-                        disabled={batchSubmitting}
-                        onChange={(event) => {
-                          if (!event.target.files) return;
-                          if (batchMode === 'vcf') {
+                  {batchMode === 'vcf' ? (
+                    <div className="profile-upload-row profile-upload-row-batch-vcf">
+                      <label>
+                        VCF files
+                        <input
+                          type="file"
+                          multiple
+                          accept=".vcf,.vcf.gz"
+                          disabled={batchSubmitting}
+                          onChange={(event) => {
+                            if (!event.target.files) {
+                              return;
+                            }
                             addBatchVcfFiles(event.target.files);
-                          } else {
+                            event.target.value = '';
+                          }}
+                        />
+                      </label>
+                      <label>
+                        <span className="label-text">Shared reference FASTA <span className="field-optional">(required)</span></span>
+                        <input
+                          type="file"
+                          accept=".fasta,.fa,.fna"
+                          disabled={batchSubmitting}
+                          onChange={(event) => {
+                            if (event.target.files && event.target.files[0]) {
+                              uploadBatchReferenceFasta(event.target.files[0]);
+                            }
+                          }}
+                        />
+                      </label>
+                      <label className="batch-settings-label">
+                        <span className="label-text">Frequency cutoff <span className="field-optional">(min AF)</span></span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.001"
+                          value={batchVcfCutoffs.min_af}
+                          disabled={batchSubmitting}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            if (!Number.isFinite(value)) {
+                              return;
+                            }
+                            setBatchVcfCutoffs((prev) => ({ ...prev, min_af: value }));
+                          }}
+                        />
+                      </label>
+                      <label className="batch-settings-label">
+                        <span className="label-text">Coverage cutoff <span className="field-optional">(min depth)</span></span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={batchVcfCutoffs.min_depth}
+                          disabled={batchSubmitting}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            if (!Number.isFinite(value)) {
+                              return;
+                            }
+                            setBatchVcfCutoffs((prev) => ({ ...prev, min_depth: Math.trunc(value) }));
+                          }}
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="profile-upload-row">
+                      <label>
+                        FASTA files
+                        <input
+                          type="file"
+                          multiple
+                          accept=".fasta,.fa,.fna"
+                          disabled={batchSubmitting}
+                          onChange={(event) => {
+                            if (!event.target.files) {
+                              return;
+                            }
                             addBatchFastaFiles(event.target.files);
-                          }
-                          // Reset so same files can be re-added after removal.
-                          event.target.value = '';
-                        }}
-                      />
-                    </label>
-                  </div>
+                            event.target.value = '';
+                          }}
+                        />
+                      </label>
+                    </div>
+                  )}
 
                   {/* Uploaded file list */}
                   {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length > 0 ? (
                     <div className="profile-upload-row">
                       <p className="field-optional">
-                        {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length} / 25 files
-                        {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length >= 25 ? (
+                        {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length} / {batchMaxSamples} files
+                        {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length >= batchMaxSamples ? (
                           <span style={{ color: 'var(--color-error, #c2410c)', marginLeft: '0.4em' }}>Limit reached</span>
                         ) : null}
                       </p>
-                      <ul style={{ listStyle: 'none', padding: 0, margin: '0.4rem 0' }}>
+                      <ul className="batch-uploaded-file-list">
                         {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).map((file, index) => (
-                          <li key={file.path} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                            <span>{file.name}</span>
-                            <span className="field-optional">({Math.round(file.size / 1024)} KB)</span>
+                          <li key={file.path} className="batch-uploaded-file-row">
+                            <span className="batch-uploaded-file-name" title={file.name}>{file.name}</span>
+                            <span className="batch-uploaded-file-size field-optional">{Math.round(file.size / 1024)} KB</span>
                             <button
                               type="button"
-                              className="button-link"
+                              className="button-link batch-remove-file-btn"
                               onClick={() => removeBatchFile(index)}
                               disabled={batchSubmitting}
                               aria-label={`Remove ${file.name}`}
@@ -601,26 +691,9 @@ export function DashboardView({
                     </div>
                   ) : null}
 
-                  {/* Shared reference FASTA — VCF mode only */}
-                  {batchMode === 'vcf' ? (
-                    <div className="profile-upload-row">
-                      <label>
-                        Shared reference FASTA <span className="field-optional">(required for VCF batch)</span>
-                        <input
-                          type="file"
-                          accept=".fasta,.fa,.fna"
-                          disabled={batchSubmitting}
-                          onChange={(event) => {
-                            if (event.target.files && event.target.files[0]) {
-                              uploadBatchReferenceFasta(event.target.files[0]);
-                            }
-                          }}
-                        />
-                      </label>
-                      {batchReferenceFasta ? (
-                        <p className="field-optional">Uploaded: {batchReferenceFasta.name}</p>
-                      ) : null}
-                    </div>
+                  {/* Shared reference FASTA selection status (VCF mode) */}
+                  {batchMode === 'vcf' && batchReferenceFasta ? (
+                    <p className="field-optional">Uploaded reference: {batchReferenceFasta.name}</p>
                   ) : null}
 
                   {/* Rate-limit notice and submit */}
@@ -628,7 +701,7 @@ export function DashboardView({
                     <p className="status analyze-status-inline">
                       {batchRateLimitCooldown > 0
                         ? `Rate limit reached. Try again in ${batchRateLimitCooldown}s.`
-                        : 'Batch submissions are limited to 2 per minute, max 25 samples.'}
+                        : `Batch submissions are limited by policy: at most ${sampleLimitPerMinute} samples per minute, max ${batchMaxSamples} samples per batch.`}
                     </p>
                     {batchError ? <p className="status" style={{ color: 'var(--color-error, #c2410c)' }}>{batchError}</p> : null}
                     <button
@@ -664,7 +737,10 @@ export function DashboardView({
                         <tr>
                           <th>Sample</th>
                           <th>Status</th>
-                          <th>Report</th>
+                          <th>HTML</th>
+                          <th>PDF</th>
+                          <th>JSON</th>
+                          <th>TSV</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -676,17 +752,10 @@ export function DashboardView({
                                 {sample.status}
                               </span>
                             </td>
-                            <td>
-                              {sample.report_url ? (
-                                <a
-                                  href={`${API_BASE}/api/report?path=${encodeURIComponent(sample.report_url)}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  Download
-                                </a>
-                              ) : '—'}
-                            </td>
+                            <td>{sample.reportHtmlPath ? <a href={buildReportUrl(sample.reportHtmlPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                            <td>{sample.reportPdfPath ? <a href={buildArtifactUrl(sample.reportPdfPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                            <td>{sample.reportJsonPath ? <a href={buildArtifactUrl(sample.reportJsonPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                            <td>{sample.reportTabularPath ? <a href={buildArtifactUrl(sample.reportTabularPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
                           </tr>
                         ))}
                       </tbody>

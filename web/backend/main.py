@@ -68,6 +68,8 @@ from web.backend.startup_config import (
 )
 
 logger = logging.getLogger(__name__)
+_SAMPLE_QUOTA_LOCK = threading.Lock()
+_SAMPLE_QUOTA_COUNTER: dict[tuple[str, int], int] = {}
 
 
 @asynccontextmanager
@@ -94,7 +96,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     app.add_exception_handler(RateLimitExceeded, _handle_rate_limit_exceeded)
 
     upload_rate_limit = _resolve_upload_rate_limit()
-    batch_submit_rate_limit = _resolve_batch_submit_rate_limit()
+    sample_limit_per_minute = WEB_BACKEND_CONFIG.defaults.max_batch_size
 
     app.add_middleware(
         CORSMiddleware,
@@ -158,6 +160,15 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         if payload.status == 'ok':
             return payload
         return JSONResponse(status_code=503, content=payload.model_dump())
+
+    @app.get('/api/ui/config', response_model=ApiEnvelope)
+    def ui_config() -> ApiEnvelope:
+        return ApiEnvelope(
+            data={
+                'batch_max_samples': WEB_BACKEND_CONFIG.defaults.max_batch_size,
+                'sample_limit_per_minute': sample_limit_per_minute,
+            }
+        )
 
     @app.post('/api/upload/fasta', response_model=UploadResponse)
     @limiter.limit(upload_rate_limit)
@@ -247,6 +258,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
 
     @app.post('/api/profile/fasta', response_model=JobSubmitResponse)
     def profile_fasta_route(
+        request: Request,
         payload: ProfileFastaPayload,
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
@@ -256,6 +268,11 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail='FASTA path is outside allowed upload directory.')
         if not fasta_path.is_file():
             raise HTTPException(status_code=404, detail='FASTA file not found.')
+        _consume_sample_quota(
+            request,
+            sample_count=1,
+            sample_limit_per_minute=sample_limit_per_minute,
+        )
         project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
         defaults = WEB_BACKEND_CONFIG.defaults
         enqueue_options = build_enqueue_job_options()
@@ -274,6 +291,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
 
     @app.post('/api/profile/vcf', response_model=JobSubmitResponse)
     def profile_vcf_route(
+        request: Request,
         payload: ProfileVcfPayload,
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
@@ -296,6 +314,11 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             if not resolved_bam.is_file():
                 raise HTTPException(status_code=404, detail='BAM file not found.')
             bam_path = str(resolved_bam)
+        _consume_sample_quota(
+            request,
+            sample_count=1,
+            sample_limit_per_minute=sample_limit_per_minute,
+        )
         project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
         defaults = WEB_BACKEND_CONFIG.defaults
         enqueue_options = build_enqueue_job_options()
@@ -317,14 +340,12 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         return JobSubmitResponse(job_id=job.id)
 
     @app.post('/api/profile/batch/vcf', response_model=BatchSubmitResponse)
-    @limiter.limit(batch_submit_rate_limit)
     def profile_batch_vcf_route(
         request: Request,
         payload: BatchProfileVcfPayload,
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> BatchSubmitResponse:
-        del request
         if len(payload.vcf_paths) != len(payload.sample_names):
             raise HTTPException(
                 status_code=422,
@@ -341,6 +362,11 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail='Reference FASTA path is outside allowed upload directory.')
         if not ref_fasta_path.is_file():
             raise HTTPException(status_code=404, detail='Reference FASTA file not found.')
+        _consume_sample_quota(
+            request,
+            sample_count=len(payload.vcf_paths),
+            sample_limit_per_minute=sample_limit_per_minute,
+        )
         project_db = resolve_project_db_path(config.project_databases_dir, payload.db_path)
         enqueue_options = build_enqueue_job_options()
         samples = []
@@ -378,14 +404,12 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         return BatchSubmitResponse(samples=samples, total=len(samples))
 
     @app.post('/api/profile/batch/fasta', response_model=BatchSubmitResponse)
-    @limiter.limit(batch_submit_rate_limit)
     def profile_batch_fasta_route(
         request: Request,
         payload: BatchProfileFastaPayload,
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> BatchSubmitResponse:
-        del request
         if len(payload.fasta_paths) != len(payload.sample_names):
             raise HTTPException(
                 status_code=422,
@@ -397,6 +421,11 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 status_code=422,
                 detail=f'Batch size {len(payload.fasta_paths)} exceeds the maximum of {max_batch} samples per batch.',
             )
+        _consume_sample_quota(
+            request,
+            sample_count=len(payload.fasta_paths),
+            sample_limit_per_minute=sample_limit_per_minute,
+        )
         project_db = resolve_project_db_path(config.project_databases_dir, payload.db_path)
         enqueue_options = build_enqueue_job_options()
         samples = []
@@ -781,6 +810,57 @@ def _resolve_batch_submit_rate_limit() -> str:
     """Return the configured batch submission rate limit string."""
     default = WEB_BACKEND_CONFIG.defaults.batch_submit_rate_limit
     return os.getenv(WEB_ENV.batch_submit_rate_limit, default).strip() or default
+
+
+def _current_window_minute() -> int:
+    """Return the current minute window for sample quota accounting."""
+    return int(time.time() // 60)
+
+
+def _consume_sample_quota(request: Request, sample_count: int, sample_limit_per_minute: int) -> None:
+    """Consume sample quota for the request identity in the current minute window."""
+    if sample_count <= 0:
+        return
+
+    detail = (
+        f'Sample rate limit exceeded. At most {sample_limit_per_minute} '
+        'samples can be analyzed per minute.'
+    )
+    if sample_count > sample_limit_per_minute:
+        raise HTTPException(status_code=429, detail=detail)
+
+    identity = _rate_limit_key(request)
+    window_minute = _current_window_minute()
+    redis_url = os.getenv(WEB_ENV.redis_url, '').strip()
+    if redis_url:
+        try:
+            client = redis.Redis.from_url(redis_url)
+            redis_key = f'respro:sample_quota:{identity}:{window_minute}'
+            total = client.incrby(redis_key, sample_count)
+            client.expire(redis_key, 120)
+            if total > sample_limit_per_minute:
+                raise HTTPException(status_code=429, detail=detail)
+            return
+        except HTTPException:
+            raise
+        except (redis.RedisError, OSError, RuntimeError) as exc:
+            logger.debug('Sample quota Redis check failed for identity %s: %s', identity, exc)
+
+    with _SAMPLE_QUOTA_LOCK:
+        stale_before = window_minute - 1
+        stale_keys = [
+            counter_key
+            for counter_key in _SAMPLE_QUOTA_COUNTER
+            if counter_key[1] < stale_before
+        ]
+        for stale_key in stale_keys:
+            del _SAMPLE_QUOTA_COUNTER[stale_key]
+
+        counter_key = (identity, window_minute)
+        total = _SAMPLE_QUOTA_COUNTER.get(counter_key, 0) + sample_count
+        if total > sample_limit_per_minute:
+            raise HTTPException(status_code=429, detail=detail)
+        _SAMPLE_QUOTA_COUNTER[counter_key] = total
 
 
 def _rate_limit_key(request: Request) -> str:

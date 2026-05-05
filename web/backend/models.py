@@ -58,6 +58,7 @@ class JobStatusResponse(BaseModel):
     # queued | running | succeeded | failed
     status: str
     result: dict | None = None
+    error: str | None = None
 
 
 class BatchSampleEntry(BaseModel):
@@ -97,7 +98,6 @@ class BatchProfileFastaPayload(BaseModel):
     min_af: float = 0.01
     threads: int = 1
     aligner: str = 'mappy'
-    error: str | None = None
 
 
 class UploadResponse(BaseModel):

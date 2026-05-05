@@ -364,6 +364,12 @@ export function useDashboardLogic() {
   const [batchError, setBatchError] = useState(null);
   const [batchRateLimitCooldown, setBatchRateLimitCooldown] = useState(0);
   const [batchSubmitted, setBatchSubmitted] = useState(false);
+  const [batchMaxSamples, setBatchMaxSamples] = useState(25);
+  const [sampleLimitPerMinute, setSampleLimitPerMinute] = useState(25);
+  const [batchVcfCutoffs, setBatchVcfCutoffs] = useState({
+    min_af: FRONTEND_CONFIG.profile.vcf.minAf,
+    min_depth: FRONTEND_CONFIG.profile.vcf.minDepth,
+  });
 
   // Resolve currently selected database once for all consumers.
   const selectedDatabase = databases.find((item) => item.id === selectedDatabaseId) || null;
@@ -372,6 +378,14 @@ export function useDashboardLogic() {
     const initData = async () => {
       try {
         setStatus('Loading available databases...');
+        const uiConfigPayload = await apiGet('/api/ui/config').catch(() => null);
+        const uiConfig = uiConfigPayload?.data || {};
+        if (Number.isFinite(uiConfig.batch_max_samples) && uiConfig.batch_max_samples > 0) {
+          setBatchMaxSamples(uiConfig.batch_max_samples);
+        }
+        if (Number.isFinite(uiConfig.sample_limit_per_minute) && uiConfig.sample_limit_per_minute > 0) {
+          setSampleLimitPerMinute(uiConfig.sample_limit_per_minute);
+        }
         const payload = await apiGet('/api/databases');
         const items = payload.data.items || [];
         setDatabases(items);
@@ -860,11 +874,20 @@ export function useDashboardLogic() {
   // --- Batch functions ---
 
   const addBatchVcfFiles = async (files) => {
-    const MAX = 25;
-    const toUpload = Array.from(files).slice(0, MAX - batchVcfFiles.length);
+    const toUpload = Array.from(files).slice(0, batchMaxSamples - batchVcfFiles.length);
     for (const file of toUpload) {
       try {
-        const response = await apiUpload('/api/upload/vcf', file);
+        setUploadProgress({
+          percent: 0,
+          fileName: `BATCH VCF - ${file.name}`,
+        });
+        const response = await apiUpload('/api/upload/vcf', file, (percent) => {
+          setUploadProgress((prev) => ({
+            ...prev,
+            percent,
+          }));
+        });
+        setUploadProgress((prev) => ({ ...prev, percent: 100 }));
         setBatchVcfFiles((prev) => [...prev, { path: response.file_path, name: file.name, size: file.size }]);
         addUploadedPath(response.file_path);
       } catch (error) {
@@ -874,11 +897,20 @@ export function useDashboardLogic() {
   };
 
   const addBatchFastaFiles = async (files) => {
-    const MAX = 25;
-    const toUpload = Array.from(files).slice(0, MAX - batchFastaFiles.length);
+    const toUpload = Array.from(files).slice(0, batchMaxSamples - batchFastaFiles.length);
     for (const file of toUpload) {
       try {
-        const response = await apiUpload('/api/upload/fasta', file);
+        setUploadProgress({
+          percent: 0,
+          fileName: `BATCH FASTA - ${file.name}`,
+        });
+        const response = await apiUpload('/api/upload/fasta', file, (percent) => {
+          setUploadProgress((prev) => ({
+            ...prev,
+            percent,
+          }));
+        });
+        setUploadProgress((prev) => ({ ...prev, percent: 100 }));
         setBatchFastaFiles((prev) => [...prev, { path: response.file_path, name: file.name, size: file.size }]);
         addUploadedPath(response.file_path);
       } catch (error) {
@@ -897,7 +929,17 @@ export function useDashboardLogic() {
 
   const uploadBatchReferenceFasta = async (file) => {
     try {
-      const response = await apiUpload('/api/upload/fasta', file);
+      setUploadProgress({
+        percent: 0,
+        fileName: `BATCH REF - ${file.name}`,
+      });
+      const response = await apiUpload('/api/upload/fasta', file, (percent) => {
+        setUploadProgress((prev) => ({
+          ...prev,
+          percent,
+        }));
+      });
+      setUploadProgress((prev) => ({ ...prev, percent: 100 }));
       setBatchReferenceFastaState({ path: response.file_path, name: file.name });
       addUploadedPath(response.file_path);
     } catch (error) {
@@ -923,12 +965,36 @@ export function useDashboardLogic() {
         })
       );
       samples = samples.map((s) => updated.find((u) => u.job_id === s.job_id) || s);
+      const succeededResults = samples
+        .filter((sample) => sample.status === 'succeeded' && sample.result)
+        .map((sample) => sample.result);
+      succeededResults.forEach((result) => {
+        addResultArtifactPaths(result);
+      });
+      if (succeededResults.length > 0) {
+        setSessionResults((prev) => {
+          const next = [...prev];
+          succeededResults.forEach((result) => {
+            const alreadyPresent = result.run_id
+              ? next.some((existing) => existing.run_id === result.run_id)
+              : next.some((existing) => existing.report_html_path === result.report_html_path);
+            if (!alreadyPresent) {
+              next.push(result);
+            }
+          });
+          return next;
+        });
+      }
       setBatchSamples(
         samples.map((s) => ({
           job_id: s.job_id,
           sample_name: s.sample_name,
           status: s.status,
           report_url: s.result ? s.result.report_html_path : null,
+          reportHtmlPath: s.result ? s.result.report_html_path : null,
+          reportPdfPath: s.result ? s.result.report_pdf_path : null,
+          reportJsonPath: s.result ? s.result.report_json_path : null,
+          reportTabularPath: s.result ? s.result.report_tabular_path : null,
         }))
       );
     }
@@ -946,11 +1012,21 @@ export function useDashboardLogic() {
     try {
       let responseData;
       if (batchMode === 'vcf') {
+        if (!Number.isFinite(batchVcfCutoffs.min_af) || batchVcfCutoffs.min_af < 0 || batchVcfCutoffs.min_af > 1) {
+          throw new Error('Frequency cutoff (min AF) must be a number between 0 and 1.');
+        }
+        if (!Number.isInteger(batchVcfCutoffs.min_depth) || batchVcfCutoffs.min_depth < 0) {
+          throw new Error('Coverage cutoff (min depth) must be an integer greater than or equal to 0.');
+        }
         const body = {
           vcf_paths: batchVcfFiles.map((f) => f.path),
           sample_names: batchVcfFiles.map((f) => f.name),
           reference_fasta_path: batchReferenceFasta.path,
           db_path: selectedDatabaseId,
+          min_af: batchVcfCutoffs.min_af,
+          min_depth: batchVcfCutoffs.min_depth,
+          aligner: FRONTEND_CONFIG.profile.aligner,
+          threads: FRONTEND_CONFIG.profile.threads,
         };
         const response = await fetch(`${API_BASE}/api/profile/batch/vcf`, {
           method: 'POST',
@@ -959,7 +1035,7 @@ export function useDashboardLogic() {
         });
         if (response.status === 429) {
           setBatchRateLimitCooldown(60);
-          setBatchError('Rate limit reached. Please wait before submitting another batch.');
+          setBatchError(`Rate limit reached. At most ${sampleLimitPerMinute} samples can be analyzed per minute.`);
           return;
         }
         if (!response.ok) {
@@ -980,7 +1056,7 @@ export function useDashboardLogic() {
         });
         if (response.status === 429) {
           setBatchRateLimitCooldown(60);
-          setBatchError('Rate limit reached. Please wait before submitting another batch.');
+          setBatchError(`Rate limit reached. At most ${sampleLimitPerMinute} samples can be analyzed per minute.`);
           return;
         }
         if (!response.ok) {
@@ -989,7 +1065,14 @@ export function useDashboardLogic() {
         }
         responseData = await response.json();
       }
-      const initialSamples = responseData.samples.map((s) => ({ ...s, report_url: null }));
+      const initialSamples = responseData.samples.map((s) => ({
+        ...s,
+        report_url: null,
+        reportHtmlPath: null,
+        reportPdfPath: null,
+        reportJsonPath: null,
+        reportTabularPath: null,
+      }));
       setBatchSamples(initialSamples);
       setBatchSubmitted(true);
       await pollBatchJobs(initialSamples);
@@ -1144,6 +1227,10 @@ export function useDashboardLogic() {
     batchRateLimitCooldown,
     setBatchRateLimitCooldown,
     batchSubmitted,
+    batchMaxSamples,
+    sampleLimitPerMinute,
+    batchVcfCutoffs,
+    setBatchVcfCutoffs,
     addBatchVcfFiles,
     addBatchFastaFiles,
     removeBatchFile,

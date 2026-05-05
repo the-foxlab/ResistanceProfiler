@@ -869,13 +869,32 @@ th {
 
 .profile-mode-row {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
 }
 
 .profile-mode-row label {
   margin: 0;
+}
+
+.profile-settings-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.profile-settings-title {
+  font-size: 0.88rem;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 0.34rem;
+}
+
+.batch-settings-label {
+  margin: 0;
+  min-width: 185px;
 }
 
 .upload-progress {
@@ -939,8 +958,57 @@ th {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
+.profile-upload-row-batch-vcf {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .profile-upload-row label {
   margin: 0;
+}
+
+.batch-uploaded-file-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.4rem 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.batch-uploaded-file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 84px 34px;
+  gap: 0.5rem;
+  align-items: center;
+  border: 1px solid #dce6ef;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 0.28rem 0.45rem;
+}
+
+.batch-uploaded-file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-uploaded-file-size {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.batch-remove-file-btn {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  border-radius: 6px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.88rem;
+  line-height: 1;
 }
 
 .report-actions {
@@ -1301,6 +1369,10 @@ th.sortable-col {
 
   .profile-upload-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .batch-uploaded-file-row {
+    grid-template-columns: minmax(0, 1fr) 76px 34px;
   }
 
   .profile-mode-row {
