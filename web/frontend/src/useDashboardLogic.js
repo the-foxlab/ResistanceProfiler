@@ -965,7 +965,7 @@ export function useDashboardLogic() {
               errorMessage: payload.error ? formatUserError(payload.error) : null,
             };
           } catch (error) {
-            return { ...sample, status: 'failed', errorMessage: formatUserError(error.message) };
+            return { ...sample, errorMessage: formatUserError(error.message) };
           }
         })
       );
