@@ -232,11 +232,12 @@ def _iupac_alt_bases(ref_base: str, query_base: str) -> list[tuple[str, float]]:
         'V': {'A', 'C', 'G'},
         'N': {'A', 'C', 'G', 'T'},
     }
+    ref_base_upper = ref_base.upper()
     options = iupac_options.get(query_base.upper(), {query_base.upper()})
-    non_ref_alts = sorted(base for base in options if base != ref_base.upper())
+    non_ref_alts = sorted(base for base in options if base != ref_base_upper)
     if not non_ref_alts:
         return []
-    af_each = 1.0 / len(non_ref_alts)
+    af_each = 1.0 / len(options)
     return [(alt, af_each) for alt in non_ref_alts]
 
 
