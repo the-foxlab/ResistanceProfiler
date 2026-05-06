@@ -107,6 +107,12 @@ class UploadResponse(BaseModel):
     size_bytes: int
 
 
+class ArtifactBundlePayload(BaseModel):
+    """Artifact paths requested for bundled download."""
+
+    paths: list[str] = Field(default_factory=list)
+
+
 class SessionCleanupPayload(BaseModel):
     """Client-provided upload file paths to delete at session end."""
 

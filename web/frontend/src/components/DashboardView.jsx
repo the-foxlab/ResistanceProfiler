@@ -151,6 +151,7 @@ export function DashboardView({
   batchReferenceFasta,
   batchSamples,
   batchSubmitting,
+  isBatchDownloadBusy,
   batchError,
   batchRateLimitCooldown,
   setBatchRateLimitCooldown,
@@ -164,6 +165,7 @@ export function DashboardView({
   removeBatchFile,
   uploadBatchReferenceFasta,
   submitBatch,
+  downloadAllBatchArtifacts,
   resetBatch,
 }) {
   // These controls only affect database charts, not mutation browsing or profiling.
@@ -764,6 +766,20 @@ export function DashboardView({
                     </table>
                   </div>
                   <div className="profile-analyze-row">
+                    <button
+                      type="button"
+                      className="analyze-primary"
+                      onClick={() => downloadAllBatchArtifacts()}
+                      disabled={isBatchDownloadBusy}
+                    >
+                      {isBatchDownloadBusy ? (
+                        <>
+                          <Spinner /> Preparing...
+                        </>
+                      ) : (
+                        'Download all'
+                      )}
+                    </button>
                     <button
                       type="button"
                       className="analyze-primary"

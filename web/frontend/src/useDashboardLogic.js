@@ -361,6 +361,7 @@ export function useDashboardLogic() {
   const [batchReferenceFasta, setBatchReferenceFastaState] = useState(null);
   const [batchSamples, setBatchSamples] = useState([]);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
+  const [isBatchDownloadBusy, setIsBatchDownloadBusy] = useState(false);
   const [batchError, setBatchError] = useState(null);
   const [batchRateLimitCooldown, setBatchRateLimitCooldown] = useState(0);
   const [batchSubmitted, setBatchSubmitted] = useState(false);
@@ -1101,6 +1102,47 @@ export function useDashboardLogic() {
     setBatchSubmitted(false);
   };
 
+  const downloadAllBatchArtifacts = async () => {
+    const artifactPaths = batchSamples.flatMap((sample) => [
+      sample.reportHtmlPath,
+      sample.reportPdfPath,
+      sample.reportJsonPath,
+      sample.reportTabularPath,
+    ].filter(Boolean));
+
+    if (artifactPaths.length === 0) {
+      setBatchError('No completed batch artifacts are available for download.');
+      return;
+    }
+
+    setBatchError(null);
+    setIsBatchDownloadBusy(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/artifact-bundle`, {
+        method: 'POST',
+        headers: buildHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ paths: artifactPaths }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
+      }
+
+      const href = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a');
+      anchor.href = href;
+      anchor.download = 'respro-batch-artifacts.zip';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(href);
+    } catch (error) {
+      setBatchError(formatUserError(error.message));
+    } finally {
+      setIsBatchDownloadBusy(false);
+    }
+  };
+
   const canCancelJob = Boolean(activeJobId) && ['queued', 'running'].includes(activeJobStatus);
 
   const runSelectedProfile = async () => {
@@ -1230,6 +1272,7 @@ export function useDashboardLogic() {
     batchReferenceFasta,
     batchSamples,
     batchSubmitting,
+    isBatchDownloadBusy,
     batchError,
     batchRateLimitCooldown,
     setBatchRateLimitCooldown,
@@ -1243,6 +1286,7 @@ export function useDashboardLogic() {
     removeBatchFile,
     uploadBatchReferenceFasta,
     submitBatch,
+    downloadAllBatchArtifacts,
     resetBatch,
   };
 }

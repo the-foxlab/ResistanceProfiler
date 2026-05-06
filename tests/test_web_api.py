@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import json
 import shutil
 import sqlite3
 import textwrap
+import zipfile
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -575,6 +577,77 @@ class TestWebApi:
         response = client.get(
             '/api/artifact',
             params={'path': str(web_sample_vcf)},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert 'outside allowed results directory' in response.json()['detail']
+
+    def test_artifact_bundle_download_packs_multiple_results_artifacts(
+        self,
+        client: TestClient,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        submit = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(web_sample_vcf),
+                'ref_fasta_path': str(web_sample_ref_fasta),
+                'sample': 'artifact-bundle',
+            },
+            headers=auth_headers,
+        )
+        assert submit.status_code == 200
+
+        job_id = submit.json()['job_id']
+        payload: dict[str, object] | None = None
+        for _ in range(10):
+            status = client.get(f'/api/jobs/{job_id}', headers=auth_headers)
+            assert status.status_code == 200
+            payload = status.json()
+            if payload['status'] in ('succeeded', 'failed'):
+                break
+
+        assert payload is not None
+        assert payload['status'] == 'succeeded'
+        result = payload['result']
+        assert isinstance(result, dict)
+
+        bundle = client.post(
+            '/api/artifact-bundle',
+            json={
+                'paths': [
+                    result['report_json_path'],
+                    result['report_tabular_path'],
+                ],
+            },
+            headers=auth_headers,
+        )
+
+        assert bundle.status_code == 200
+        assert bundle.headers['content-type'] == 'application/zip'
+        assert 'respro-batch-artifacts.zip' in bundle.headers['content-disposition']
+
+        json_name = Path(result['report_json_path']).name
+        tabular_name = Path(result['report_tabular_path']).name
+        with zipfile.ZipFile(io.BytesIO(bundle.content)) as archive:
+            names = set(archive.namelist())
+            assert json_name in names
+            assert tabular_name in names
+            report_payload = json.loads(archive.read(json_name).decode('utf-8'))
+            assert report_payload['run']['sample_name'] == 'artifact-bundle'
+
+    def test_artifact_bundle_rejects_paths_outside_results_dir(
+        self,
+        client: TestClient,
+        web_sample_vcf: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        response = client.post(
+            '/api/artifact-bundle',
+            json={'paths': [str(web_sample_vcf)]},
             headers=auth_headers,
         )
 

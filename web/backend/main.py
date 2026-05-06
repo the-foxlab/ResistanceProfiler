@@ -5,12 +5,15 @@ from __future__ import annotations
 import hashlib
 import hmac
 import importlib.metadata
+import io
 import logging
 import mimetypes
 import os
 import re
 import threading
 import time
+import zipfile
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -46,6 +49,7 @@ from web.backend.config import (
 from web.backend.jobs import run_profile_fasta, run_profile_vcf, run_regenerate_json
 from web.backend.models import (
     ApiEnvelope,
+    ArtifactBundlePayload,
     BatchProfileFastaPayload,
     BatchProfileVcfPayload,
     BatchSampleEntry,
@@ -582,6 +586,25 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             filename=artifact_path.name,
         )
 
+    @app.post('/api/artifact-bundle')
+    def download_artifact_bundle(
+        payload: ArtifactBundlePayload,
+        _auth: None = Depends(require_api_token),
+    ) -> Response:
+        if not payload.paths:
+            raise HTTPException(status_code=400, detail='At least one artifact path is required.')
+
+        bundle_bytes = _build_artifact_bundle(
+            payload.paths,
+            config.results_dir,
+            _is_allowed_artifact_path,
+        )
+        return Response(
+            content=bundle_bytes,
+            media_type='application/zip',
+            headers={'Content-Disposition': 'attachment; filename="respro-batch-artifacts.zip"'},
+        )
+
     @app.get('/api/branding/logo.svg')
     def branding_logo() -> FileResponse:
         logo_path = branding_dir / 'logo.svg'
@@ -597,6 +620,54 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         return FileResponse(str(favicon_path), media_type='image/svg+xml')
 
     return app
+
+
+def _build_artifact_bundle(
+    artifact_paths: list[str],
+    results_dir: Path,
+    is_allowed_artifact_path: Callable[[Path], bool],
+) -> bytes:
+    """Pack validated result artifacts into one zip archive."""
+    buffer = io.BytesIO()
+    used_names: set[str] = set()
+
+    with zipfile.ZipFile(buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as archive:
+        for raw_path in artifact_paths:
+            artifact_path = Path(raw_path).expanduser().resolve()
+            if not is_path_within_allowed_roots(artifact_path, (results_dir,)):
+                raise HTTPException(status_code=400, detail='Artifact path is outside allowed results directory.')
+            if not is_allowed_artifact_path(artifact_path):
+                raise HTTPException(
+                    status_code=400,
+                    detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .mutations.tsv, .report.html.',
+                )
+            if not artifact_path.is_file():
+                raise HTTPException(status_code=404, detail='Artifact not found.')
+
+            archive.write(
+                artifact_path,
+                arcname=_deduplicate_archive_name(artifact_path.name, used_names),
+            )
+
+    return buffer.getvalue()
+
+
+def _deduplicate_archive_name(file_name: str, used_names: set[str]) -> str:
+    """Keep archive member names unique while preserving readable basenames."""
+    if file_name not in used_names:
+        used_names.add(file_name)
+        return file_name
+
+    path = Path(file_name)
+    stem = path.stem
+    suffix = ''.join(path.suffixes)
+    counter = 2
+    while True:
+        candidate = f'{stem}-{counter}{suffix}'
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+        counter += 1
 
 
 def _sweep_expired_files(results_dir: Path, uploads_dir: Path, ttl_seconds: int) -> None:
