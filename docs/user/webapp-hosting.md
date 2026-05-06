@@ -117,8 +117,9 @@ Set secrets and deployment-specific values in `.env` (loaded by Docker Compose).
 | ----------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------- |
 | `RESPRO_WEB_TRUSTED_PROXIES`      | Trusted reverse-proxy IPs/CIDRs for forwarded headers (`X-Forwarded-*`). Set only behind a known proxy.       | `127.0.0.1` or `10.0.0.0/8`                         | `.env`                        |
 | `RESPRO_WEB_UPLOAD_RATE_LIMIT`    | Upload request throttle (`slowapi` syntax).                                                                   | default `5/minute`; example `10/minute`             | `.env`                        |
+| `RESPRO_WEB_MAX_BATCH_SIZE`       | Maximum samples accepted per batch request and per-minute sample quota (must be a positive integer).         | default `25`; example `50`                          | `.env`                        |
 | `RESPRO_WEB_JOB_TIMEOUT`          | Queue job timeout in seconds.                                                                                   | default `3600`; example `7200`                      | `.env`                        |
-| `RESPRO_WEB_JOB_RETRY_MAX`        | Retry count for failed queued jobs. Set > 0 only if you want automatic retries for transient failures.        | default `1`; example `2`                            | `.env`                        |
+| `RESPRO_WEB_JOB_RETRY_MAX`        | Retry count for failed queued jobs. Set > 0 only if you want automatic retries for transient failures.        | default `0`; example `2`                            | `.env`                        |
 | `RESPRO_WEB_JOB_RETRY_INTERVALS`  | Comma-separated retry delays in seconds (used only when `RESPRO_WEB_JOB_RETRY_MAX` > 0).                      | default `30`; example `30,120`                      | `.env`                        |
 | `RESPRO_WEB_DATA_DIR`             | Startup data root override (normally mounted as `/data` in compose).                                          | default `/data`; example `/data`                    | `.env` (only when overriding) |
 | `RESPRO_WEB_ALLOWED_ROOTS`        | Comma-separated absolute path allowlist for upload/regenerate path checks.                                      | `/data/project_databases,/data/uploads,/data/results` | `.env` (only when overriding) |
@@ -152,4 +153,33 @@ RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
 RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
 RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
 RESPRO_WEB_JOB_TIMEOUT=3600
+RESPRO_WEB_MAX_BATCH_SIZE=25
 ```
+
+## Scale workers
+
+Batch and single-sample profiling jobs are processed by the RQ worker service (`respro-worker`). Increase worker replicas when queue wait time grows.
+
+Scale the worker service to multiple replicas:
+
+```bash
+docker compose -f docker-compose.web.yml up -d --scale respro-worker=4
+```
+
+Check worker containers:
+
+```bash
+docker compose -f docker-compose.web.yml ps respro-worker
+```
+
+Scale back down:
+
+```bash
+docker compose -f docker-compose.web.yml up -d --scale respro-worker=1
+```
+
+Operational notes:
+
+- Keep one `redis` container and one `respro-web` container, then scale only `respro-worker`.
+- `RESPRO_WEB_MAX_BATCH_SIZE` controls how many samples a single batch request can submit. Scaling workers increases throughput, while this variable controls per-request/per-minute sample limits.
+- In the default configuration, both profile and batch jobs use the `profiling` queue, so additional worker replicas automatically process both.
