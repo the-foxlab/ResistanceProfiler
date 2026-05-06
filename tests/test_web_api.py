@@ -246,6 +246,20 @@ class TestWebApi:
         payload = response.json()
         assert payload['status'] == 'ok'
 
+    def test_root_serves_frontend_without_shadowing_api_routes(
+        self,
+        startup_config: StartupConfig,
+    ) -> None:
+        client = TestClient(create_app(startup_config=startup_config))
+
+        root_response = client.get('/')
+        api_response = client.get('/api/health')
+
+        assert root_response.status_code == 200
+        assert 'text/html' in root_response.headers['content-type']
+        assert api_response.status_code == 200
+        assert api_response.json()['status'] == 'ok'
+
     def test_readiness_endpoint_reports_redis_and_project_db_readiness(
         self,
         startup_config: StartupConfig,

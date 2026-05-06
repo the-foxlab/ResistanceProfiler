@@ -21,6 +21,6 @@ export const FRONTEND_CONFIG = {
     sampleName: 'sample',
   },
   ui: {
-    explorerUrl: 'http://127.0.0.1:8000/app',
+    explorerUrl: 'http://127.0.0.1:8000',
   },
 };

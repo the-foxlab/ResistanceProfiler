@@ -113,14 +113,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         allow_headers=['*'],
     )
 
-    frontend_dist = Path(__file__).resolve().parents[1] / 'frontend' / 'dist'
-    if frontend_dist.is_dir():
-        app.mount(
-            WEB_BACKEND_CONFIG.defaults.frontend_base_path,
-            StaticFiles(directory=str(frontend_dist), html=True),
-            name='frontend',
-        )
-
     branding_dir = Path(__file__).resolve().parents[2] / 'respro' / 'report' / 'static'
 
     def _is_allowed_artifact_path(artifact_path: Path) -> bool:
@@ -618,6 +610,14 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         if not favicon_path.is_file():
             raise HTTPException(status_code=404, detail='Favicon not found.')
         return FileResponse(str(favicon_path), media_type='image/svg+xml')
+
+    frontend_dist = Path(__file__).resolve().parents[1] / 'frontend' / 'dist'
+    if frontend_dist.is_dir():
+        app.mount(
+            WEB_BACKEND_CONFIG.defaults.frontend_base_path,
+            StaticFiles(directory=str(frontend_dist), html=True),
+            name='frontend',
+        )
 
     return app
 

@@ -24,7 +24,7 @@ docker compose -f docker-compose.web.yml up --build
 
 3. Open the app and API checks:
 
-- App: `http://127.0.0.1:8000/app/`
+- App: `http://127.0.0.1:8000/`
 - Health: `http://127.0.0.1:8000/api/health`
 - Readiness: `http://127.0.0.1:8000/api/readiness`
 
@@ -98,6 +98,112 @@ server {
     return 301 https://$host$request_uri;
 }
 ```
+
+### nginx step-by-step (local network)
+
+Use this when your app is currently reachable directly on a LAN or intranet host and you want nginx in front of it.
+
+1. Keep `respro-web` private to the host.
+
+In `docker-compose.web.yml`, bind the app to loopback only so clients cannot bypass nginx:
+
+```yaml
+services:
+    respro-web:
+        ports:
+            - '127.0.0.1:8000:8000'
+```
+
+Then restart:
+
+```bash
+docker compose -f docker-compose.web.yml up -d --build
+```
+
+2. Install nginx on the same machine as Docker.
+
+Example for Debian/Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install -y nginx
+```
+
+3. Choose the hostname clients should use.
+
+Use either:
+
+- a fixed LAN IP such as `http://192.168.1.50/`
+- an internal DNS name such as `http://respro.internal/`
+- a host entry on client machines if no internal DNS is available
+
+4. Create an nginx site config for HTTP on the local network.
+
+Create `/etc/nginx/sites-available/respro`:
+
+```nginx
+server {
+        listen 80;
+    server_name respro.internal;
+
+        client_max_body_size 1024m;
+        proxy_read_timeout 3600s;
+
+        location / {
+                proxy_pass http://127.0.0.1:8000;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_http_version 1.1;
+        }
+}
+```
+
+Notes:
+
+- Replace `respro.internal` with the hostname or IP that clients will use.
+- `client_max_body_size` is important for larger uploads.
+- `proxy_read_timeout` avoids premature timeouts for longer profiling requests.
+
+5. Enable the site and reload nginx.
+
+```bash
+sudo ln -s /etc/nginx/sites-available/respro /etc/nginx/sites-enabled/respro
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+If you use another firewall, allow inbound TCP traffic to the nginx port you selected.
+
+6. Configure backend trust and auth settings.
+
+Set in `.env`:
+
+```bash
+RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
+RESPRO_WEB_CORS_ORIGINS=http://respro.internal
+RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
+```
+
+If clients will access the app by IP instead of hostname, set `RESPRO_WEB_CORS_ORIGINS` to that exact origin, for example `http://192.168.1.50`.
+
+Then restart the stack:
+
+```bash
+docker compose -f docker-compose.web.yml up -d
+```
+
+7. Validate end-to-end from another client on the same network.
+
+- App: `http://respro.internal/`
+- Health: `http://respro.internal/api/health`
+
+If you use an IP-based setup instead of a hostname, replace `respro.internal` with your server IP.
+
+At this point, direct access to `http://<server>:8000` should no longer be required.
+
+When you later add TLS on the LAN or VPN edge, reuse the HTTPS nginx example above and switch `RESPRO_WEB_CORS_ORIGINS` to `https://...`.
 
 ## Environment variables
 
