@@ -183,3 +183,32 @@ Operational notes:
 - Keep one `redis` container and one `respro-web` container, then scale only `respro-worker`.
 - `RESPRO_WEB_MAX_BATCH_SIZE` controls how many samples a single batch request can submit. Scaling workers increases throughput, while this variable controls per-request/per-minute sample limits.
 - In the default configuration, both profile and batch jobs use the `profiling` queue, so additional worker replicas automatically process both.
+
+### Example: set CPU allocation for all services
+
+Add CPU limits in your compose file when you want predictable resource sharing between API, worker, and Redis.
+
+```yaml
+services:
+    redis:
+        image: redis:7-alpine
+        cpus: 0.50
+
+    respro-web:
+        image: respro-web:latest
+        cpus: 1.00
+
+    respro-worker:
+        image: respro-web:latest
+        command: rq worker --url redis://redis:6379/0 profiling
+        cpus: 2.00
+```
+
+If you also scale workers (for example `--scale respro-worker=4`), the CPU limit applies per worker container.
+In this example, four workers can use up to 8 CPU cores total.
+
+Verify resolved values:
+
+```bash
+docker compose -f docker-compose.web.yml config
+```
