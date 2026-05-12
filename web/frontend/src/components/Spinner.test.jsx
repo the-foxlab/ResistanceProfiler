@@ -7,7 +7,7 @@ describe('Spinner Component', () => {
     const { container } = render(<Spinner />);
     const svg = container.querySelector('svg');
 
-    expect(svg).toBeDefined();
+    expect(svg).not.toBeNull();
     expect(svg).toHaveClass('spinner');
   });
 
