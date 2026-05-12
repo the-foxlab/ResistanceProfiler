@@ -229,6 +229,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Queue runtime safeguards — added configurable queue timeout/retry defaults plus explicit enqueue/start/fail/finish lifecycle logging for background jobs
 - [X] API readiness checks — added `/api/readiness` with Redis connectivity and startup workspace/project-db readiness diagnostics without exposing sensitive paths or credentials
 - [X] CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
+- [X] Frontend tests — Vitest + React Testing Library setup added to `web/frontend/`; covers critical user flows: file upload with progress tracking (mocked XHR), job polling state transitions (queued → running → succeeded/failed), and report display and selection; `npm test` runs the test suite locally, and CI integrates frontend tests into `tests.yml` alongside Python tests
 
 ### Public release (done)
 
@@ -329,12 +330,3 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   bioconda-recipes; Bioconda is the standard distribution channel for bioinformatics CLI tools
   and avoids requiring users to have a working pip/Python setup; dependency on pysam makes
   Bioconda the natural distribution path once pysam is a requirement
-
-### WebUI
-
-- 🟢 Frontend tests — add a Vitest + React Testing Library setup to `web/frontend/`; cover the
-  critical user flows: file selection and upload flow (mocked XHR), job polling until completion,
-  and report display; the test runner should be invokable via `npm test` inside `web/frontend/`
-  and should run in CI alongside the Python tests
-- 🟡 Compose integration tests — add compose-backed smoke/integration tests for submit → poll → report retrieval using startup-configured paths
-- 🟢 Previous-results dropdown in batch UI — load past results.db runs into a batch results view from a dropdown; deferred until batch core is validated in production
