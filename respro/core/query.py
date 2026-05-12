@@ -8,9 +8,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Literal
 
-from respro.config.core_settings import CORE_CONFIG
 from respro.core.alignment import (
     load_cached_mappings,
     load_genes_with_rules,
@@ -28,11 +26,9 @@ def resolve_fasta_query(
     conn: sqlite3.Connection,
     fasta_path: Path,
     *,
-    min_identity: float = CORE_CONFIG.alignment.min_identity,
-    min_coverage: float = CORE_CONFIG.alignment.min_coverage,
+    min_identity: float = 0.9,
     use_cache: bool = True,
     threads: int = 1,
-    aligner: Literal['pairwise', 'mappy'] = 'pairwise',
 ) -> tuple[str, str, list[GeneMatch]]:
     """
     Read a user FASTA and align to internal CDS annotations.
@@ -40,10 +36,8 @@ def resolve_fasta_query(
     :param conn: project database connection
     :param fasta_path: path to single-record user FASTA
     :param min_identity: minimum nucleotide identity
-    :param min_coverage: minimum CDS coverage fraction
     :param use_cache: if True, reuse/store mapping cache in project DB
-    :param threads: number of worker processes for parallel gene alignment (pairwise only)
-    :param aligner: alignment backend (``'pairwise'`` or ``'mappy'``)
+    :param threads: number of worker processes for parallel gene alignment
     :return: (query_name, query_sequence, gene_matches)
     """
     seqs = read_fasta(fasta_path)
@@ -74,15 +68,12 @@ def resolve_fasta_query(
     matches = match_query_to_genes(
         query_seq, genes,
         min_identity=min_identity,
-        min_coverage=min_coverage,
         threads=threads,
-        aligner=aligner,
     )
     if not matches:
         raise ValueError(
             f'No CDS matches above thresholds '
-            f'(identity>={min_identity:.0%}, coverage>={min_coverage:.0%}) '
-            f'in {fasta_path.name}'
+            f'(identity>={min_identity:.0%}) in {fasta_path.name}'
         )
 
     if use_cache:

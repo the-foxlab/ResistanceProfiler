@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 from Bio.Seq import Seq
 
-import respro.core.alignment as alignment
 from respro.core.alignment import (
     _normalize_mappy_cigar,
     _reverse_cigar_operations,
@@ -212,11 +211,24 @@ class TestMatchQueryToGenes:
         assert matches[0].strand == '-'
         assert matches[0].identity == pytest.approx(1.0)
 
-    def test_partial_query_accepted_via_query_coverage(self, gene_with_rules: GeneRecord) -> None:
-        # A short prefix of the CDS — CDS coverage will be well below 0.90,
-        # but query coverage should be ~1.0 (the whole query aligns).
-        partial = _CDS_SEQ[:12]  # first 12 of 30 nt → 40% CDS coverage
-        matches = match_query_to_genes(partial, [gene_with_rules], min_coverage=0.90)
+    def test_partial_query_accepted_when_identity_passes(self, gene_with_rules: GeneRecord) -> None:
+        # A partial query is accepted when identity passes.
+        # CDS coverage is low, but query coverage is ~1.0 for the aligned query.
+        long_cds = _CDS_SEQ * 3  # 90 nt
+        gene = GeneRecord(
+            id=gene_with_rules.id,
+            reference_id=gene_with_rules.reference_id,
+            name=gene_with_rules.name,
+            protein=gene_with_rules.protein,
+            start=0,
+            end=len(long_cds),
+            strand=gene_with_rules.strand,
+            codon_start=gene_with_rules.codon_start,
+            nt_sequence=long_cds,
+            aa_sequence='',
+        )
+        partial = long_cds[:36]  # first 36 of 90 nt → 40% CDS coverage
+        matches = match_query_to_genes(partial, [gene])
         assert len(matches) == 1
         m = matches[0]
         assert m.query_coverage == pytest.approx(1.0)
@@ -228,40 +240,6 @@ class TestMatchQueryToGenes:
         m = matches[0]
         assert m.cds_coverage == pytest.approx(1.0)
         assert m.query_coverage == pytest.approx(1.0)
-
-
-class TestAlignerOverflowSafety:
-    def test_align_does_not_use_len_on_alignments(self, monkeypatch) -> None:
-        class _FakeAlignments:
-            def __len__(self) -> int:
-                raise OverflowError('too many optimal alignments')
-
-            def __getitem__(self, idx: int):
-                if idx != 0:
-                    raise IndexError
-                return object()
-
-        class _FakeAligner:
-            def __init__(self) -> None:
-                self.mode = 'local'
-                self.match_score = 1.0
-                self.mismatch_score = -1.0
-                self.open_gap_score = -2.0
-                self.extend_gap_score = -0.5
-
-            def align(self, query: str, cds: str):
-                return _FakeAlignments()
-
-        monkeypatch.setattr(alignment, 'PairwiseAligner', _FakeAligner)
-        monkeypatch.setattr(
-            alignment,
-            '_alignment_to_cigar',
-            lambda alignment, query, cds: ('10M', 1.0, 10, 0, 10, 0),
-        )
-
-        result = alignment._align_cds_to_query('ATGATGATGA', 'ATGATGATGA', '+')
-        assert result.identity == pytest.approx(1.0)
-        assert result.cigar == '10M'
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -362,7 +340,7 @@ class TestNormalizeMappyCigar:
 
 
 class TestMappyBackend:
-    """Tests for the mappy alignment backend via match_query_to_genes(..., aligner='mappy')."""
+    """Tests for the mappy alignment backend via match_query_to_genes(...)."""
 
     def _make_gene(
         self, cds: str, strand: str = '+', name: str = 'gene1',
@@ -375,7 +353,7 @@ class TestMappyBackend:
 
     def test_exact_match_forward_strand(self) -> None:
         gene = self._make_gene(_LONG_CDS)
-        matches = match_query_to_genes(_LONG_CDS, [gene], aligner='mappy')
+        matches = match_query_to_genes(_LONG_CDS, [gene])
         assert len(matches) == 1
         m = matches[0]
         assert m.identity == pytest.approx(1.0, abs=0.01)
@@ -386,7 +364,7 @@ class TestMappyBackend:
         flanking = 'A' * 500
         query = flanking + _LONG_CDS + flanking
         gene = self._make_gene(_LONG_CDS)
-        matches = match_query_to_genes(query, [gene], aligner='mappy')
+        matches = match_query_to_genes(query, [gene])
         assert len(matches) == 1
         m = matches[0]
         assert m.identity == pytest.approx(1.0, abs=0.01)
@@ -400,7 +378,7 @@ class TestMappyBackend:
         # CDS appears in reverse orientation relative to the query
         query = flanking + rc_cds + flanking
         gene = self._make_gene(_LONG_CDS, strand='-')
-        matches = match_query_to_genes(query, [gene], aligner='mappy')
+        matches = match_query_to_genes(query, [gene])
         assert len(matches) == 1
         assert matches[0].strand == '-'
         assert matches[0].identity == pytest.approx(1.0, abs=0.01)
@@ -412,14 +390,14 @@ class TestMappyBackend:
             mutated[i] = 'A' if mutated[i] != 'A' else 'C'
         query = ''.join(mutated)
         gene = self._make_gene(_LONG_CDS)
-        matches = match_query_to_genes(query, [gene], min_identity=0.80, aligner='mappy')
+        matches = match_query_to_genes(query, [gene], min_identity=0.80)
         assert len(matches) == 1
         assert matches[0].identity < 1.0
 
     def test_unrelated_sequence_rejected(self) -> None:
         gene = self._make_gene(_LONG_CDS)
         unrelated = 'GATTACA' * 300
-        matches = match_query_to_genes(unrelated, [gene], aligner='mappy')
+        matches = match_query_to_genes(unrelated, [gene])
         assert len(matches) == 0
 
     def test_skips_gene_without_nt_sequence(self) -> None:
@@ -427,7 +405,7 @@ class TestMappyBackend:
             id=2, reference_id=1, name='empty', protein='', start=0, end=30,
             strand='+', codon_start=0, nt_sequence='', aa_sequence='',
         )
-        matches = match_query_to_genes(_LONG_CDS, [gene], aligner='mappy')
+        matches = match_query_to_genes(_LONG_CDS, [gene])
         assert len(matches) == 0
 
     def test_cigar_coordinate_map_compatible(self) -> None:
@@ -435,52 +413,10 @@ class TestMappyBackend:
         flanking = 'T' * 300
         query = flanking + _LONG_CDS + flanking
         gene = self._make_gene(_LONG_CDS)
-        matches = match_query_to_genes(query, [gene], aligner='mappy')
+        matches = match_query_to_genes(query, [gene])
         assert len(matches) == 1
         m = matches[0]
         coord = cigar_to_coordinate_map(m.cigar, m.query_start)
         # Position 0 in CDS should map to query position 300 (after flanking)
         assert coord[0] == 300
-
-
-class TestMappyPairwiseEquivalence:
-    """Verify that mappy and pairwise backends agree on matches and coordinates."""
-
-    def _make_gene(self, cds: str, name: str = 'gene') -> GeneRecord:
-        return GeneRecord(
-            id=1, reference_id=1, name=name, protein='',
-            start=0, end=len(cds), strand='+', codon_start=0,
-            nt_sequence=cds, aa_sequence='',
-        )
-
-    def test_same_gene_selected(self) -> None:
-        gene = self._make_gene(_LONG_CDS)
-        pw = match_query_to_genes(_LONG_CDS, [gene], aligner='pairwise')
-        mm = match_query_to_genes(_LONG_CDS, [gene], aligner='mappy')
-        assert len(pw) == len(mm) == 1
-        assert pw[0].gene.name == mm[0].gene.name
-
-    def test_comparable_identity(self) -> None:
-        gene = self._make_gene(_LONG_CDS)
-        query = 'G' * 200 + _LONG_CDS + 'G' * 200
-        pw = match_query_to_genes(query, [gene], aligner='pairwise')
-        mm = match_query_to_genes(query, [gene], aligner='mappy')
-        assert len(pw) == len(mm) == 1
-        # Both should report near-perfect identity for an exact match
-        assert pw[0].identity == pytest.approx(mm[0].identity, abs=0.02)
-
-    def test_same_query_start(self) -> None:
-        gene = self._make_gene(_LONG_CDS)
-        query = 'T' * 400 + _LONG_CDS + 'T' * 400
-        pw = match_query_to_genes(query, [gene], aligner='pairwise')
-        mm = match_query_to_genes(query, [gene], aligner='mappy')
-        assert len(pw) == len(mm) == 1
-        assert pw[0].query_start == mm[0].query_start
-
-    def test_both_reject_below_threshold(self) -> None:
-        gene = self._make_gene(_LONG_CDS)
-        unrelated = 'GATTACAGATTACA' * 200
-        pw = match_query_to_genes(unrelated, [gene], aligner='pairwise')
-        mm = match_query_to_genes(unrelated, [gene], aligner='mappy')
-        assert pw == mm == []
 

@@ -9,7 +9,6 @@ import random
 import re
 from inspect import signature
 from pathlib import Path
-from typing import Literal
 
 import pytest
 from Bio.Seq import Seq
@@ -17,9 +16,7 @@ from conftest import TINY_REF_NAME, TINY_REF_SEQ
 from typer.testing import CliRunner
 
 from respro.cli.main import app
-from respro.config.core_settings import CORE_CONFIG
 from respro.core.alignment import (
-    _align_cds_to_query,
     match_query_to_genes,
     sequence_checksum,
     store_mappings,
@@ -426,10 +423,9 @@ class TestRemapVariants:
 # ──────────────────────────────────────────────────────────────────────
 
 class TestResolveFastaReference:
-    def test_defaults_follow_core_alignment_config(self) -> None:
+    def test_defaults_use_fixed_alignment_constants(self) -> None:
         parameters = signature(resolve_fasta_query).parameters
-        assert parameters['min_identity'].default == CORE_CONFIG.alignment.min_identity
-        assert parameters['min_coverage'].default == CORE_CONFIG.alignment.min_coverage
+        assert parameters['min_identity'].default == 0.9
 
     def test_resolves_and_caches(self, fasta_db: Path, tmp_path: Path) -> None:
         fasta_path = tmp_path / 'query.fasta'
@@ -601,7 +597,6 @@ class TestProfileFastaCli:
             '--output', str(output_dir),
             '--min-af', '0.01',
             '--min-depth', '0',
-            '--aligner', 'pairwise',
         ])
 
         assert result.exit_code == 0, result.output
@@ -715,26 +710,6 @@ def simple_gene() -> GeneRecord:
         start=0, end=12, strand='+', codon_start=0,
         nt_sequence=_SIMPLE_CDS,
         aa_sequence='MKA*',
-    )
-
-def _make_match(gene: GeneRecord, query: str, strand: str = '+') -> GeneMatch:
-    """Build a GeneMatch with a real CIGAR by aligning query against the gene CDS."""
-    if not gene.nt_sequence:
-        return GeneMatch(
-            gene=gene, identity=0.0, cds_coverage=0.0, query_coverage=0.0,
-            query_start=0, query_end=len(query), strand=strand, cigar='',
-        )
-    result = _align_cds_to_query(gene.nt_sequence.upper(), query.upper(), strand)
-    return GeneMatch(
-        gene=gene,
-        identity=result.identity,
-        cds_coverage=result.cds_coverage,
-        query_coverage=result.query_coverage,
-        query_start=result.query_start,
-        query_end=result.query_end,
-        strand=strand,
-        cigar=result.cigar,
-        cds_start=result.cds_start,
     )
 
 class TestFastaToVcf:
@@ -1039,7 +1014,6 @@ class TestReverseStrandMappyParity:
         self,
         coding_reference: str,
         coding_query: str,
-        aligner: Literal['mappy', 'pairwise'],
     ) -> list[tuple[int, str, str, str]]:
         query = str(Seq(coding_query).reverse_complement())
         gene = GeneRecord(
@@ -1059,8 +1033,6 @@ class TestReverseStrandMappyParity:
             query,
             [gene],
             min_identity=0.7,
-            min_coverage=0.7,
-            aligner=aligner,
         )
         assert len(matches) == 1
         assert matches[0].strand == '-'
@@ -1078,7 +1050,7 @@ class TestReverseStrandMappyParity:
         event_pos = 901
         coding_query = coding_reference[:event_pos] + coding_reference[event_pos + 1:]
 
-        mappy = self._profile_reverse_query(coding_reference, coding_query, 'mappy')
+        mappy = self._profile_reverse_query(coding_reference, coding_query)
 
         assert len(mappy) == 1
         assert mappy[0][1] == 'frameshift'
@@ -1088,7 +1060,7 @@ class TestReverseStrandMappyParity:
         event_pos = 900
         coding_query = coding_reference[:event_pos] + coding_reference[event_pos + 3:]
 
-        mappy = self._profile_reverse_query(coding_reference, coding_query, 'mappy')
+        mappy = self._profile_reverse_query(coding_reference, coding_query)
 
         assert len(mappy) == 1
         assert mappy[0][1] == 'deletion'
@@ -1098,7 +1070,7 @@ class TestReverseStrandMappyParity:
         event_pos = 900
         coding_query = coding_reference[:event_pos] + 'GCC' + coding_reference[event_pos:]
 
-        mappy = self._profile_reverse_query(coding_reference, coding_query, 'mappy')
+        mappy = self._profile_reverse_query(coding_reference, coding_query)
 
         assert len(mappy) == 1
         assert mappy[0][1] == 'insertion'

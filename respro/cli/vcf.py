@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated
 
 import click
 import typer
@@ -80,13 +80,13 @@ def _profile_vcf_command(
             help='Reuse/store FASTA reference mapping cache in the project database (default: off).',
         )
     ] = False,
-    aligner: Annotated[
-        Literal['mappy', 'pairwise'],
+    min_identity: Annotated[
+        float,
         typer.Option(
-            '--aligner', '-a',
-            help="Alignment backend for query FASTA matching: 'pairwise' (Biopython) or 'mappy' (minimap2, default). Mappy is faster for long references.",
+            '--min-identity', '-mi', min=0.0, max=1.0,
+            help='Minimum nucleotide identity for FASTA-to-reference matching (0-1).',
         )
-    ] = 'mappy',
+    ] = 0.9,
     export: Annotated[
         list[str] | None,
         typer.Option(
@@ -107,8 +107,11 @@ def _profile_vcf_command(
         if ref_fasta is None:
             raise click.ClickException('Missing option --ref-fasta.')
 
-        if aligner not in ('pairwise', 'mappy'):
-            raise click.ClickException(f"Unknown aligner {aligner!r}; choose 'pairwise' or 'mappy'.")
+        if min_identity <= 0.75:
+            logger.warning(
+                'Low min-identity threshold (%.2f) may increase mismatches and false-positive mappings.',
+                min_identity,
+            )
 
         export_formats = _parse_export_formats(export)
 
@@ -124,7 +127,7 @@ def _profile_vcf_command(
         with err_console.status('[dim]Aligning reference to internal references…[/dim]'):
             query_name, query_seq, fasta_matches = resolve_fasta_query(
                 project_conn, ref_fasta, use_cache=use_cache, threads=threads,
-                aligner=aligner,  # type: ignore[arg-type]
+                min_identity=min_identity,
             )
 
         ref_id, ref_name, fasta_matches = _resolve_reference(
