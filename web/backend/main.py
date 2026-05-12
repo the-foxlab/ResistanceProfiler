@@ -282,7 +282,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             fasta_path=str(fasta_path),
             sample=payload.sample or defaults.profile_sample_name,
             threads=payload.threads if payload.threads is not None else defaults.profile_threads,
-            aligner=payload.aligner or defaults.profile_aligner,
             **enqueue_options,
         )
         logger.info('Queue job enqueued: job_id=%s mode=fasta database_id=%s', job.id, project_db.name)
@@ -332,7 +331,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             min_depth=payload.min_depth if payload.min_depth is not None else defaults.profile_min_depth,
             bam_path=bam_path,
             threads=payload.threads if payload.threads is not None else defaults.profile_threads,
-            aligner=payload.aligner or defaults.profile_aligner,
             **enqueue_options,
         )
         logger.info('Queue job enqueued: job_id=%s mode=vcf database_id=%s', job.id, project_db.name)
@@ -394,7 +392,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 min_depth=payload.min_depth,
                 bam_path=None,
                 threads=payload.threads,
-                aligner=payload.aligner,
                 job_id=job_id,
                 **enqueue_options,
             )
@@ -453,7 +450,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 fasta_path=str(fasta_path),
                 sample=sample_name,
                 threads=payload.threads,
-                aligner=payload.aligner,
                 job_id=job_id,
                 **enqueue_options,
             )
@@ -858,10 +854,8 @@ def _user_facing_error_message(raw_message: str | None) -> str:
         return 'Coverage annotation needs a coordinate-sorted BAM. The server could not create an index for this file.'
     if 'bam reference' in lowered and 'not found' in lowered:
         return 'BAM and reference FASTA do not match. Use files derived from the same reference sequence.'
-    if 'no cds matches above thresholds' in lowered:
+    if 'no cds matches above identity threshold' in lowered:
         return 'No sequence match found. The uploaded sequence did not align to any reference CDS with sufficient identity and coverage.'
-    if 'unknown aligner' in lowered:
-        return 'Unsupported aligner selection.'
     if message.startswith('Upload failed:'):
         return 'The upload failed on the server.'
     return message

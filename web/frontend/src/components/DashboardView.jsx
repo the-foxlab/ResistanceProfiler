@@ -1291,11 +1291,10 @@ export function DashboardView({
                     References and rules are matched during database creation to ensure internal consistency.
                     Mutations are stored in a project database, and new sequences are compared against internal
                     references to identify resistance patterns. Importantly, the reference is determined automatically
-                    by pairwise mapping, and the sequence with the highest identity is selected. Currently, the tool
-                    requires a sequence identity of at least 80% and coverage of at least 90% of either the reference
-                    or the query sequence. This allows flexible use across a wide range of viruses and gene targets
-                    without strict input-format requirements, but results can become unreliable when the input is
-                    highly divergent from the reference sequences in the database.
+                    from mappy-based CDS matching, and the sequence with the highest identity is selected. The default
+                    identity threshold is 90%, which supports robust matching for closely related inputs. Lowering the
+                    identity threshold can increase the risk of mismatched references and less reliable resistance calls
+                    when sequences are highly divergent from database references.
                   </p>
                   <ul>
                     <li>Input can be consensus FASTA or VCF plus matching reference FASTA and an optional BAM file for coverage analysis.</li>

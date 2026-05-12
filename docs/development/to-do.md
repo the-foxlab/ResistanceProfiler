@@ -41,7 +41,7 @@ Mark items done and update priorities after each completed milestone.
 
 - [X] VCF ingestion — allele frequency, read depth, filter status
 - [X] Allele-frequency and depth filtering (`--min-af`, `--min-depth`)
-- [X] Reference FASTA alignment via Biopython `PairwiseAligner` with CIGAR maps
+- [X] Reference FASTA alignment via minimap2 `mappy` backend with CIGAR maps
 - [X] CIGAR-based coordinate remapping — VCF variants from user-reference to internal CDS coordinates
 - [X] Alignment result caching in `project.db` (`query_reference`, `query_gene_mapping`)
 - [X] Query-reference cache reuse on repeated FASTA inputs
@@ -61,11 +61,11 @@ Mark items done and update priorities after each completed milestone.
 
 ### Alignment performance
 
-- [X] Dual alignment backend — added `mappy` (minimap2) as an optional alternative to `PairwiseAligner`;
-  benchmarked on HSV whole-genome (152 KB) and partial FASTAs; all 8 resistance genes found with equivalent
-  identity scores; 440×–14 000× faster on large sequences; `--aligner pairwise|mappy` added to
-  `profile-vcf` and `profile-fasta`; CIGAR convention verified compatible with downstream VCF remap and
-  coordinate mapping; `mappy>=2.24` added as a dependency
+- [X] mappy/minimap2 alignment backend standardized for profiling; benchmarked on HSV whole-genome (152 KB)
+  and partial FASTAs; all 8 resistance genes found with equivalent identity scores; 440×–14 000× faster on
+  large sequences; pairwise backend and `--aligner` selection were removed after equivalence validation;
+  CIGAR convention verified compatible with downstream VCF remap and coordinate mapping; `mappy>=2.24`
+  added as a dependency
 
 ### Codon-aware annotation
 
@@ -135,9 +135,9 @@ Mark items done and update priorities after each completed milestone.
 - [X] Move shared profiling orchestration helpers out of `respro/cli.py` into `respro/cli_helpers.py` — `_init_results_db_connection`, `_resolve_reference`, `_load_reference_data`, and `_finalize_and_export`; behavior unchanged
 - [X] Split `respro/core/profile.py` — shared helpers (CIGAR inversion, query-sequence resolution) moved to `respro/core/profile_helpers.py`; VCF-specific remapping kept in `respro/core/vcf_profile.py`
 - [X] Split FASTA annotation helpers into `respro/core/annotate_fasta.py` — orchestration (`profile_fasta_consensus`, `_profile_gene`) in `profile_fasta.py`; codon/indel annotation, IUPAC expansion, and consequence helpers extracted; VCF remapping in `annotate_vcf.py`
-- [X] mappy alignment backend — `_match_with_mappy` and `_match_with_pairwise` extracted as backend
-  functions; `match_query_to_genes` accepts `aligner='pairwise'|'mappy'`; mappy CIGAR I/D swap verified;
-  coordinate convention proven equivalent; 16 new tests in `TestMappyBackend` and `TestMappyPairwiseEquivalence`
+- [X] mappy alignment backend consolidation — pairwise backend helpers/options were removed; gene matching
+  now uses a mappy-only implementation with verified CIGAR I/D convention and equivalent coordinate mapping;
+  test coverage retained for mappy backend behavior after backend-option removal
 - [X] Add `markupsafe>=2.1` as an explicit dependency in `pyproject.toml`
 - [X] VCF depth fallback — `_extract_depth` now returns `-1` sentinel when no depth field is found; depth filter in `profile-vcf` skips depth checking for sentinel variants so depth-free VCFs are not silently discarded
 - [X] Parallel gene alignment — `match_query_to_genes` now accepts `cores` parameter; per-gene alignment extracted into picklable `_align_gene_worker`; `--cores` added to both `profile-vcf` and `profile-fasta` (default 1)

@@ -134,6 +134,7 @@ def _match_with_mappy(
     ``_build_query_to_cds_map`` for both strand orientations.
     """
     query_upper = query_sequence.upper()
+    # 'sr' is used here for closely related consensus-vs-CDS matching, not read mapping.
     preset = 'sr' if len(query_upper) < 5000 else 'map-ont'
     aligner_kwargs: dict[str, int | str] = {
         'seq': query_upper,

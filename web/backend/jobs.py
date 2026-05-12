@@ -28,7 +28,6 @@ def run_profile_fasta(
     fasta_path: str,
     sample: str,
     threads: int,
-    aligner: str,
 ) -> dict:
     """RQ job wrapper for FASTA profiling."""
     output_html_path = _build_web_output_html_path(
@@ -45,7 +44,6 @@ def run_profile_fasta(
             fasta_path=Path(fasta_path),
             sample=sample,
             threads=threads,
-            aligner=aligner,
         ),
     )
 
@@ -61,7 +59,6 @@ def run_profile_vcf(
     min_depth: int,
     bam_path: str | None,
     threads: int,
-    aligner: str,
 ) -> dict:
     """RQ job wrapper for VCF profiling."""
     output_html_path = _build_web_output_html_path(
@@ -82,7 +79,6 @@ def run_profile_vcf(
             min_depth=min_depth,
             bam_path=Path(bam_path) if bam_path else None,
             threads=threads,
-            aligner=aligner,
         ),
     )
 
@@ -117,7 +113,6 @@ def _run_profile_fasta_subprocess(
     fasta_path: Path,
     sample: str,
     threads: int,
-    aligner: str,
 ) -> dict:
     """Execute FASTA profiling through the respro CLI and return the web API payload."""
     command = [
@@ -174,7 +169,6 @@ def _run_profile_vcf_subprocess(
     min_depth: int,
     bam_path: Path | None,
     threads: int,
-    aligner: str,
 ) -> dict:
     """Execute VCF profiling through the respro CLI and return the web API payload."""
     command = [

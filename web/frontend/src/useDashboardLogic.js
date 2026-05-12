@@ -690,7 +690,6 @@ export function useDashboardLogic() {
       const submitResponse = await apiPost('/api/profile/fasta', {
         ...fastaInput,
         database_id: databaseId,
-        aligner: FRONTEND_CONFIG.profile.aligner,
         threads: FRONTEND_CONFIG.profile.threads,
       });
       setActiveJobId(submitResponse.job_id);
@@ -748,7 +747,6 @@ export function useDashboardLogic() {
       const submitResponse = await apiPost('/api/profile/vcf', {
         ...vcfInput,
         database_id: databaseId,
-        aligner: FRONTEND_CONFIG.profile.aligner,
         threads: FRONTEND_CONFIG.profile.threads,
       });
       setActiveJobId(submitResponse.job_id);
@@ -1032,7 +1030,6 @@ export function useDashboardLogic() {
           db_path: selectedDatabaseId,
           min_af: batchVcfCutoffs.min_af,
           min_depth: batchVcfCutoffs.min_depth,
-          aligner: FRONTEND_CONFIG.profile.aligner,
           threads: FRONTEND_CONFIG.profile.threads,
         };
         const response = await fetch(`${API_BASE}/api/profile/batch/vcf`, {

@@ -12,7 +12,6 @@ class ProfileFastaPayload(BaseModel):
     database_id: str | None = None
     sample: str | None = None
     threads: int | None = None
-    aligner: str | None = None
 
 
 class ProfileVcfPayload(BaseModel):
@@ -26,7 +25,6 @@ class ProfileVcfPayload(BaseModel):
     min_depth: int | None = Field(default=None, ge=0)
     bam_path: str | None = None
     threads: int | None = None
-    aligner: str | None = None
 
 
 class RegenerateJsonPayload(BaseModel):
@@ -86,7 +84,6 @@ class BatchProfileVcfPayload(BaseModel):
     min_af: float = Field(default=0.01, ge=0.0, le=1.0)
     min_depth: int = Field(default=10, ge=0)
     threads: int = 1
-    aligner: str = 'mappy'
 
 
 class BatchProfileFastaPayload(BaseModel):
@@ -96,7 +93,6 @@ class BatchProfileFastaPayload(BaseModel):
     sample_names: list[str]
     db_path: str
     threads: int = 1
-    aligner: str = 'mappy'
 
 
 class UploadResponse(BaseModel):
