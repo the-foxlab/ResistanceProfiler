@@ -325,7 +325,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     });
 
     await act(async () => {
-      await result.current.submitFasta();
+      result.current.setActiveProfileMode('fasta');
+    });
+
+    await act(async () => {
+      await result.current.runSelectedProfile();
     });
 
     // Verify job was submitted
@@ -402,12 +406,16 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     });
 
     await act(async () => {
-      await result.current.submitFasta();
+      result.current.setActiveProfileMode('fasta');
+    });
+
+    await act(async () => {
+      await result.current.runSelectedProfile();
     });
 
     // Verify status reflects failure
     expect(result.current.status).toMatch(/failed|error/);
-    expect(result.current.isProcessingFasta).toBe(false);
+    expect(result.current.isProfileBusy).toBe(false);
   });
 
   it('should cancel active job via DELETE request', async () => {
@@ -460,9 +468,13 @@ describe('useDashboardLogic - Job Polling Flow', () => {
       expect(result.current.databases.length).toBeGreaterThan(0);
     });
 
+    act(() => {
+      result.current.setActiveProfileMode('fasta');
+    });
+
     // Start job but don't wait for completion
     act(() => {
-      result.current.submitFasta();
+      result.current.runSelectedProfile();
     });
 
     await waitFor(() => {
@@ -559,7 +571,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     });
 
     await act(async () => {
-      await result.current.submitFasta();
+      result.current.setActiveProfileMode('fasta');
+    });
+
+    await act(async () => {
+      await result.current.runSelectedProfile();
     });
 
     expect(result.current.activeJobStatus).toBe('queued');
@@ -640,7 +656,11 @@ describe('useDashboardLogic - Report Display Flow', () => {
     });
 
     await act(async () => {
-      await result.current.submitFasta();
+      result.current.setActiveProfileMode('fasta');
+    });
+
+    await act(async () => {
+      await result.current.runSelectedProfile();
     });
 
     // Verify report paths are set
@@ -727,9 +747,13 @@ describe('useDashboardLogic - Report Display Flow', () => {
       expect(result.current.databases.length).toBeGreaterThan(0);
     });
 
+    await act(async () => {
+      result.current.setActiveProfileMode('fasta');
+    });
+
     // Run first job
     await act(async () => {
-      await result.current.submitFasta();
+      await result.current.runSelectedProfile();
     });
 
     // Setup second job
@@ -758,7 +782,7 @@ describe('useDashboardLogic - Report Display Flow', () => {
 
     // Run second job
     await act(async () => {
-      await result.current.submitFasta();
+      await result.current.runSelectedProfile();
     });
 
     // Verify both results are stored and ordered (newest first)
