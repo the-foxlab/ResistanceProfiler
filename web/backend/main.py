@@ -929,7 +929,10 @@ def _user_facing_error_message(raw_message: str | None) -> str:
         return 'Coverage annotation needs a coordinate-sorted BAM. The server could not create an index for this file.'
     if 'bam reference' in lowered and 'not found' in lowered:
         return 'BAM and reference FASTA do not match. Use files derived from the same reference sequence.'
-    if 'no cds matches above identity threshold' in lowered:
+    if (
+        'no cds matches above identity threshold' in lowered
+        or 'no cds matches above thresholds' in lowered
+    ):
         return 'No sequence match found. The uploaded sequence did not align to any reference CDS with sufficient identity and coverage.'
     if message.startswith('Upload failed:'):
         return 'The upload failed on the server.'
