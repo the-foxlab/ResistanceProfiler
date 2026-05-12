@@ -483,7 +483,7 @@ class TestWebApi:
         assert Path(result['report_tabular_path']).is_file()
         assert Path(result['report_pdf_path']).is_file()
         report_payload = json.loads(Path(result['report_json_path']).read_text(encoding='utf-8'))
-        assert report_payload['run']['vcf_name'] == 'original-upload.fasta'
+        assert report_payload['run']['vcf_path'] == 'original-upload.fasta'
 
     def test_profile_fasta_path_outside_uploads_rejected(
         self,
@@ -545,7 +545,7 @@ class TestWebApi:
         assert Path(result['report_tabular_path']).is_file()
         assert Path(result['report_pdf_path']).is_file()
         report_payload = json.loads(Path(result['report_json_path']).read_text(encoding='utf-8'))
-        assert report_payload['run']['vcf_name'] == 'original-upload.vcf'
+        assert report_payload['run']['vcf_path'] == 'original-upload.vcf'
 
     def test_artifact_download_serves_pdf_from_results_dir(
         self,
