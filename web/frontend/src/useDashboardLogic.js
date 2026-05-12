@@ -218,6 +218,15 @@ function formatPathBasename(path) {
   return parts.length > 0 ? parts[parts.length - 1] : normalized;
 }
 
+function formatPathStem(path) {
+  const basename = formatPathBasename(path);
+  const dotIndex = basename.lastIndexOf('.');
+  if (dotIndex <= 0) {
+    return basename;
+  }
+  return basename.slice(0, dotIndex);
+}
+
 async function apiGet(path, params = {}) {
   // Shared fetch helper keeps all GET error handling consistent.
   const response = await fetch(buildApiUrl(path, params), {
@@ -1019,6 +1028,7 @@ export function useDashboardLogic() {
     try {
       let responseData;
       if (batchMode === 'vcf') {
+        const sampleNames = batchVcfFiles.map((file) => formatPathStem(file.name));
         if (!Number.isFinite(batchVcfCutoffs.min_af) || batchVcfCutoffs.min_af < 0 || batchVcfCutoffs.min_af > 1) {
           throw new Error('Frequency cutoff (min AF) must be a number between 0 and 1.');
         }
@@ -1027,7 +1037,7 @@ export function useDashboardLogic() {
         }
         const body = {
           vcf_paths: batchVcfFiles.map((f) => f.path),
-          sample_names: batchVcfFiles.map((_, index) => `sample_${index + 1}`),
+          sample_names: sampleNames,
           input_display_names: batchVcfFiles.map((f) => f.name),
           reference_fasta_path: batchReferenceFasta.path,
           db_path: selectedDatabaseId,
@@ -1051,9 +1061,10 @@ export function useDashboardLogic() {
         }
         responseData = await response.json();
       } else {
+        const sampleNames = batchFastaFiles.map((file) => formatPathStem(file.name));
         const body = {
           fasta_paths: batchFastaFiles.map((f) => f.path),
-          sample_names: batchFastaFiles.map((_, index) => `sample_${index + 1}`),
+          sample_names: sampleNames,
           input_display_names: batchFastaFiles.map((f) => f.name),
           db_path: selectedDatabaseId,
         };
