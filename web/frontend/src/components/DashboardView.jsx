@@ -756,7 +756,7 @@ export function DashboardView({
                               </span>
                             </td>
                             <td>{sample.errorMessage || '—'}</td>
-                            <td>{sample.reportHtmlPath ? <a href={buildReportUrl(sample.reportHtmlPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                            <td>{sample.reportHtmlPath ? <a href={buildArtifactUrl(sample.reportHtmlPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
                             <td>{sample.reportPdfPath ? <a href={buildArtifactUrl(sample.reportPdfPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
                             <td>{sample.reportJsonPath ? <a href={buildArtifactUrl(sample.reportJsonPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
                             <td>{sample.reportTabularPath ? <a href={buildArtifactUrl(sample.reportTabularPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>

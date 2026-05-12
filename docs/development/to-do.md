@@ -228,6 +228,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Job status contract hardening — standardized and tested queued/running/succeeded/failed mapping with consistent failed-job and missing-job error payload behavior for `/api/jobs/{job_id}`
 - [X] Queue runtime safeguards — added configurable queue timeout/retry defaults plus explicit enqueue/start/fail/finish lifecycle logging for background jobs
 - [X] API readiness checks — added `/api/readiness` with Redis connectivity and startup workspace/project-db readiness diagnostics without exposing sensitive paths or credentials
+- [X] CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
 
 ### Public release (done)
 
@@ -247,13 +248,13 @@ Mark items done and update priorities after each completed milestone.
 
 ### Web — Batch analysis
 
-- [x] `RESPRO_WEB_MAX_BATCH_SIZE` env config key added to `defaults.toml` and `config.py`
-- [x] `BatchProfileVcfPayload`, `BatchProfileFastaPayload`, `BatchSubmitResponse`, `BatchSampleEntry` models added to `models.py`
-- [x] `POST /api/profile/batch/vcf` endpoint — rate-limited (2/min), max 25 samples, enqueues one `run_profile_vcf` job per sample
-- [x] `POST /api/profile/batch/fasta` endpoint — same pattern, no shared reference FASTA
-- [x] Web profiling jobs pass `use_cache=True` so `query_reference` alignment mappings are reused across batch samples sharing the same project database and reference FASTA
-- [x] Batch tab in web dashboard — VCF and FASTA batch modes with multi-file upload (up to 25), shared reference FASTA for VCF, project selector, per-sample results table with status polling, live 429 rate-limit countdown, and "New batch" reset button
-- [x] 5 new tests in `tests/test_web_api.py` covering batch submit success (VCF + FASTA), max-size enforcement (VCF + FASTA), and mismatched sample-name/path lengths
+- [X] `RESPRO_WEB_MAX_BATCH_SIZE` env config key added to `defaults.toml` and `config.py`
+- [X] `BatchProfileVcfPayload`, `BatchProfileFastaPayload`, `BatchSubmitResponse`, `BatchSampleEntry` models added to `models.py`
+- [X] `POST /api/profile/batch/vcf` endpoint — rate-limited (2/min), max 25 samples, enqueues one `run_profile_vcf` job per sample
+- [X] `POST /api/profile/batch/fasta` endpoint — same pattern, no shared reference FASTA
+- [X] Web profiling jobs pass `use_cache=True` so `query_reference` alignment mappings are reused across batch samples sharing the same project database and reference FASTA
+- [X] Batch tab in web dashboard — VCF and FASTA batch modes with multi-file upload (up to 25), shared reference FASTA for VCF, project selector, per-sample results table with status polling, live 429 rate-limit countdown, and "New batch" reset button
+- [X] 5 new tests in `tests/test_web_api.py` covering batch submit success (VCF + FASTA), max-size enforcement (VCF + FASTA), and mismatched sample-name/path lengths
 
 ---
 
@@ -289,6 +290,11 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   chrom the gene's query FASTA record came from; (3) a single-chrom VCF with the existing test
   reference still produces byte-identical report output as before the change (guard against
   inadvertent regression)
+- 🟡 Drug-level cumulative score interpretation (Stanford-like) — add score aggregation across
+  all matched single and formula rules per drug, expose per-drug totals in report/JSON output,
+  and support optional metadata-driven score-to-classification threshold maps (global defaults
+  with optional per-drug overrides) so cumulative scores can be translated into resistance
+  classes when curated mappings are provided
 - 🟢 Sanger AB1 input — add `respro profile-ab1` that reads an AB1 trace file via
   `SeqIO.read(..., 'abi')` and derives a quality-aware consensus sequence that feeds directly into
   the existing FASTA profiling pipeline; the quality model uses raw trace peak data
@@ -331,5 +337,4 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   and report display; the test runner should be invokable via `npm test` inside `web/frontend/`
   and should run in CI alongside the Python tests
 - 🟡 Compose integration tests — add compose-backed smoke/integration tests for submit → poll → report retrieval using startup-configured paths
-- [X] CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
 - 🟢 Previous-results dropdown in batch UI — load past results.db runs into a batch results view from a dropdown; deferred until batch core is validated in production

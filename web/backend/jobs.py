@@ -28,11 +28,13 @@ def run_profile_fasta(
     fasta_path: str,
     sample: str,
     threads: int,
+    input_display_name: str | None = None,
+    artifact_base_name: str | None = None,
 ) -> dict:
     """RQ job wrapper for FASTA profiling."""
     output_html_path = _build_web_output_html_path(
         output_dir=Path(output_dir),
-        input_name=Path(fasta_path).name,
+        input_name=artifact_base_name or input_display_name or Path(fasta_path).name,
     )
     return _run_job_with_logging(
         mode='fasta',
@@ -44,6 +46,7 @@ def run_profile_fasta(
             fasta_path=Path(fasta_path),
             sample=sample,
             threads=threads,
+            input_display_name=input_display_name,
         ),
     )
 
@@ -59,11 +62,13 @@ def run_profile_vcf(
     min_depth: int,
     bam_path: str | None,
     threads: int,
+    input_display_name: str | None = None,
+    artifact_base_name: str | None = None,
 ) -> dict:
     """RQ job wrapper for VCF profiling."""
     output_html_path = _build_web_output_html_path(
         output_dir=Path(output_dir),
-        input_name=Path(vcf_path).name,
+        input_name=artifact_base_name or input_display_name or Path(vcf_path).name,
     )
     return _run_job_with_logging(
         mode='vcf',
@@ -79,6 +84,7 @@ def run_profile_vcf(
             min_depth=min_depth,
             bam_path=Path(bam_path) if bam_path else None,
             threads=threads,
+            input_display_name=input_display_name,
         ),
     )
 
@@ -113,6 +119,7 @@ def _run_profile_fasta_subprocess(
     fasta_path: Path,
     sample: str,
     threads: int,
+    input_display_name: str | None,
 ) -> dict:
     """Execute FASTA profiling through the respro CLI and return the web API payload."""
     command = [
@@ -136,6 +143,9 @@ def _run_profile_fasta_subprocess(
         '--export',
         'pdf',
     ]
+    if input_display_name:
+        command.extend(['--input-display-name', input_display_name])
+
     _run_respro_command(command)
     artifacts = _artifact_paths_for_html(output_html_path)
     run_payload = _load_run_payload(artifacts['json'])
@@ -169,6 +179,7 @@ def _run_profile_vcf_subprocess(
     min_depth: int,
     bam_path: Path | None,
     threads: int,
+    input_display_name: str | None,
 ) -> dict:
     """Execute VCF profiling through the respro CLI and return the web API payload."""
     command = [
@@ -198,6 +209,8 @@ def _run_profile_vcf_subprocess(
         '--export',
         'pdf',
     ]
+    if input_display_name:
+        command.extend(['--input-display-name', input_display_name])
     if bam_path is not None:
         command.extend(['--bam', str(bam_path)])
 

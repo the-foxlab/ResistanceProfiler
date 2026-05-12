@@ -9,6 +9,7 @@ class ProfileFastaPayload(BaseModel):
     """Payload for FASTA profiling."""
 
     fasta_path: str
+    input_display_name: str | None = None
     database_id: str | None = None
     sample: str | None = None
     threads: int | None = None
@@ -19,6 +20,7 @@ class ProfileVcfPayload(BaseModel):
 
     vcf_path: str
     ref_fasta_path: str
+    input_display_name: str | None = None
     database_id: str | None = None
     sample: str | None = None
     min_af: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -79,6 +81,7 @@ class BatchProfileVcfPayload(BaseModel):
 
     vcf_paths: list[str]
     sample_names: list[str]
+    input_display_names: list[str] | None = None
     reference_fasta_path: str
     db_path: str
     min_af: float = Field(default=0.01, ge=0.0, le=1.0)
@@ -91,6 +94,7 @@ class BatchProfileFastaPayload(BaseModel):
 
     fasta_paths: list[str]
     sample_names: list[str]
+    input_display_names: list[str] | None = None
     db_path: str
     threads: int = 1
 

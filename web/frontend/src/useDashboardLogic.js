@@ -308,6 +308,7 @@ export function useDashboardLogic() {
   // Profile input state for each supported workflow mode.
   const [vcfInput, setVcfInput] = useState({
     vcf_path: '',
+    input_display_name: '',
     ref_fasta_path: '',
     bam_path: null,
     sample: FRONTEND_CONFIG.defaults.sampleName,
@@ -316,6 +317,7 @@ export function useDashboardLogic() {
   });
   const [fastaInput, setFastaInput] = useState({
     fasta_path: '',
+    input_display_name: '',
     sample: FRONTEND_CONFIG.defaults.sampleName,
   });
   const [jsonInputPath, setJsonInputPath] = useState('');
@@ -807,13 +809,13 @@ export function useDashboardLogic() {
 
   const uploadFastaFile = async (file) => {
     await uploadFile(file, 'fasta', (path) => {
-      setFastaInput((prev) => ({ ...prev, fasta_path: path }));
+      setFastaInput((prev) => ({ ...prev, fasta_path: path, input_display_name: file.name }));
     });
   };
 
   const uploadVcfFile = async (file) => {
     await uploadFile(file, 'vcf', (path) => {
-      setVcfInput((prev) => ({ ...prev, vcf_path: path }));
+      setVcfInput((prev) => ({ ...prev, vcf_path: path, input_display_name: file.name }));
     });
   };
 
@@ -1025,7 +1027,8 @@ export function useDashboardLogic() {
         }
         const body = {
           vcf_paths: batchVcfFiles.map((f) => f.path),
-          sample_names: batchVcfFiles.map((f) => f.name),
+          sample_names: batchVcfFiles.map((_, index) => `sample_${index + 1}`),
+          input_display_names: batchVcfFiles.map((f) => f.name),
           reference_fasta_path: batchReferenceFasta.path,
           db_path: selectedDatabaseId,
           min_af: batchVcfCutoffs.min_af,
@@ -1050,7 +1053,8 @@ export function useDashboardLogic() {
       } else {
         const body = {
           fasta_paths: batchFastaFiles.map((f) => f.path),
-          sample_names: batchFastaFiles.map((f) => f.name),
+          sample_names: batchFastaFiles.map((_, index) => `sample_${index + 1}`),
+          input_display_names: batchFastaFiles.map((f) => f.name),
           db_path: selectedDatabaseId,
         };
         const response = await fetch(`${API_BASE}/api/profile/batch/fasta`, {

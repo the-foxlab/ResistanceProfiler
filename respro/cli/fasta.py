@@ -74,6 +74,14 @@ def _profile_fasta_command(
             help='Optional extra export format in addition to HTML. Can be provided multiple times.',
         ),
     ] = None,
+    input_display_name: Annotated[
+        str | None,
+        typer.Option(
+            '--input-display-name',
+            hidden=True,
+            help='Optional display filename shown in exported reports.',
+        ),
+    ] = None,
 ) -> None:
     """
     Run resistance profiling on a consensus FASTA sequence.
@@ -139,7 +147,7 @@ def _profile_fasta_command(
             project_name=project_row['name'],
             ref_name=ref_name,
             sample=sample,
-            input_basename=consensus_fasta.name,
+            input_basename=input_display_name or consensus_fasta.name,
             total_variants=len(annotations),
             variants_in_cds=len(annotations),
             output_target=output,

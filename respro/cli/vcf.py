@@ -94,6 +94,14 @@ def _profile_vcf_command(
             help='Optional extra export format in addition to HTML. Can be provided multiple times.',
         ),
     ] = None,
+    input_display_name: Annotated[
+        str | None,
+        typer.Option(
+            '--input-display-name',
+            hidden=True,
+            help='Optional display filename shown in exported reports.',
+        ),
+    ] = None,
 ) -> None:
     """
     Run resistance profiling on a VCF file.
@@ -179,7 +187,7 @@ def _profile_vcf_command(
             project_name=project_row['name'],
             ref_name=ref_name,
             sample=sample,
-            input_basename=vcf.name,
+            input_basename=input_display_name or vcf.name,
             total_variants=total_variants,
             variants_in_cds=variants_in_cds,
             output_target=output,
