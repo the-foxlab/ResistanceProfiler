@@ -534,12 +534,20 @@ function _buildIc50DistributionSections(rules, plotMeta) {
         ? [minLog - 0.3, maxLog + 0.3]
         : [minLog, maxLog];
       const tickConfig = _buildLogTicks(minValue, maxValue);
-      const axisMetricLabel = metricLabels.size === 1
-        ? Array.from(metricLabels)[0].replace('IC50', 'IC₅₀')
-        : 'IC₅₀ / Fold IC₅₀';
-      const subtitleMetricHint = metricLabels.size === 1
-        ? Array.from(metricLabels)[0].replace('IC50', 'IC₅₀')
+      const metricLabelList = Array.from(metricLabels).map((label) => label.replace('IC50', 'IC₅₀'));
+      const axisMetricLabel = metricLabelList.length === 1
+        ? metricLabelList[0]
+        : metricLabelList.includes('IC₅₀')
+          ? 'IC₅₀ / Fold IC₅₀'
+          : metricLabelList.join(' / ');
+      const subtitleMetricHint = metricLabelList.length === 1
+        ? metricLabelList[0]
         : 'IC₅₀ preferred, Fold IC₅₀ fallback';
+      const xAxisUnitLabel = metricLabelList.length === 1
+        ? (metricLabelList[0] === 'IC₅₀'
+          ? 'IC₅₀ (µM, log scale)'
+          : `${metricLabelList[0]} (log scale)`)
+        : 'IC₅₀ (µM, log scale) / Fold IC₅₀ (log scale)';
 
       return {
         kind: 'ic50-distribution',
@@ -549,7 +557,7 @@ function _buildIc50DistributionSections(rules, plotMeta) {
         footer: group.skippedNonPositive > 0
           ? `${group.skippedNonPositive} non-positive value(s) were ignored for log-scale plotting`
           : 'Each point is one rule-level measurement',
-        xAxisLabel: `${axisMetricLabel} (log scale)`,
+        xAxisLabel: xAxisUnitLabel,
         yAxisLabel: 'Drug',
         xDomain,
         xTicks: tickConfig.ticks,

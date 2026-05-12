@@ -42,12 +42,6 @@ def _bytes_mock(content: bytes) -> MagicMock:
     return mock
 
 
-_DB_LISTING = [
-    {'name': 'hsv_daehne_jaki', 'type': 'dir'},
-    {'name': 'hiv_hivdb', 'type': 'dir'},
-    {'name': 'README.md', 'type': 'file'},  # should be filtered out
-]
-
 _METADATA = {
     'maintainers': ['Daehne, Theo'],
     'contact': 'test@example.com',
@@ -59,11 +53,35 @@ _METADATA = {
     'tsv_checksum': 'sha256:abc123',
 }
 
-_OUTPUT_LISTING = [
-    {'name': 'rules.tsv', 'download_url': 'https://raw.test/rules.tsv'},
-    {'name': 'metadata.json', 'download_url': 'https://raw.test/metadata.json'},
-    {'name': 'formula-rules.tsv', 'download_url': 'https://raw.test/formula-rules.tsv'},
-]
+_MANIFEST = {
+    'manifest_version': 1,
+    'databases': [
+        {
+            'source_name': 'hsv_daehne_jaki',
+            'metadata_path': 'databases/hsv_daehne_jaki/output/metadata.json',
+            'rules_path': 'databases/hsv_daehne_jaki/output/rules.tsv',
+            'formula_rules_path': 'databases/hsv_daehne_jaki/output/formula-rules.tsv',
+            'metadata': _METADATA,
+        },
+        {
+            'source_name': 'hiv_hivdb',
+            'metadata_path': 'databases/hiv_hivdb/output/metadata.json',
+            'rules_path': 'databases/hiv_hivdb/output/rules.tsv',
+            'formula_rules_path': 'databases/hiv_hivdb/output/formula-rules.tsv',
+            'metadata': {
+                'description': 'HIV resistance database.',
+                'license': 'CC-BY-4.0',
+            },
+        },
+    ],
+}
+
+
+def _manifest_with_formula_rules_path(formula_rules_path: str) -> dict:
+    """Return a manifest copy with a custom formula-rules path for hsv entry."""
+    manifest = json.loads(json.dumps(_MANIFEST))
+    manifest['databases'][0]['formula_rules_path'] = formula_rules_path
+    return manifest
 
 _RULES_TSV_CONTENT = (
     'gene\tposition\tref_aa\tmut_aa\tphenotype\treference_identifier\n'
@@ -86,14 +104,14 @@ def _strip_ansi(text: str) -> str:
 
 class TestListMaintainedDatabases:
     def test_returns_sorted_dir_names(self) -> None:
-        with patch('urllib.request.urlopen', return_value=_json_mock(_DB_LISTING)):
+        with patch('urllib.request.urlopen', return_value=_json_mock(_MANIFEST)):
             result = list_maintained_databases()
         assert result == ['hiv_hivdb', 'hsv_daehne_jaki']
 
-    def test_filters_out_non_dir_entries(self) -> None:
-        with patch('urllib.request.urlopen', return_value=_json_mock(_DB_LISTING)):
+    def test_returns_source_names_from_manifest(self) -> None:
+        with patch('urllib.request.urlopen', return_value=_json_mock(_MANIFEST)):
             result = list_maintained_databases()
-        assert 'README.md' not in result
+        assert result == ['hiv_hivdb', 'hsv_daehne_jaki']
 
     def test_raises_on_http_error(self) -> None:
         with patch('urllib.request.urlopen', side_effect=urllib.error.HTTPError(
@@ -112,7 +130,7 @@ class TestListMaintainedDatabases:
 
 class TestFetchDatabaseMetadata:
     def test_returns_parsed_metadata(self) -> None:
-        with patch('urllib.request.urlopen', return_value=_json_mock(_METADATA)):
+        with patch('urllib.request.urlopen', return_value=_json_mock(_MANIFEST)):
             result = fetch_database_metadata('hsv_daehne_jaki')
         assert result['description'] == 'HSV resistance database.'
         assert result['license'] == 'CC-BY-4.0'
@@ -129,10 +147,10 @@ class TestFetchDatabaseMetadata:
 
 class TestListOutputFiles:
     def test_returns_file_listing(self) -> None:
-        with patch('urllib.request.urlopen', return_value=_json_mock(_OUTPUT_LISTING)):
+        with patch('urllib.request.urlopen', return_value=_json_mock(_MANIFEST)):
             result = list_output_files('hsv_daehne_jaki')
         assert len(result) == 3
-        assert result[0]['name'] == 'rules.tsv'
+        assert {'rules.tsv', 'metadata.json', 'formula-rules.tsv'} == {entry['name'] for entry in result}
 
     def test_raises_on_http_error(self) -> None:
         with patch('urllib.request.urlopen', side_effect=urllib.error.HTTPError(
@@ -200,7 +218,7 @@ class TestDownloadDatabaseFiles:
         """Return a side_effect callable that serves different content per URL."""
         call_count = [0]
         responses = [
-            _json_mock(json.loads(json.dumps(_OUTPUT_LISTING))),  # list_output_files
+            _json_mock(json.loads(json.dumps(_MANIFEST))),         # manifest fetch
             _bytes_mock(rules_content),                           # rules.tsv download
             _bytes_mock(metadata_content),                        # metadata.json download
             _bytes_mock(b'gene\tformula\n'),                      # formula-rules.tsv download
@@ -229,31 +247,31 @@ class TestDownloadDatabaseFiles:
         assert 'genbank' in result
 
     def test_raises_when_rules_tsv_missing(self, tmp_path: Path) -> None:
-        listing_no_rules = [
-            {'name': 'metadata.json', 'download_url': 'https://raw.test/metadata.json'},
-        ]
-        with patch('urllib.request.urlopen', return_value=_json_mock(listing_no_rules)):
+        with patch(
+            'respro.io.maintained_db.list_output_files',
+            return_value=[
+                {'name': 'metadata.json', 'download_url': 'https://raw.test/metadata.json'},
+            ],
+        ):
             with pytest.raises(RuntimeError, match='missing required rules.tsv'):
                 download_database_files('hsv_daehne_jaki', tmp_path)
 
     def test_raises_when_metadata_json_missing(self, tmp_path: Path) -> None:
-        listing_no_meta = [
-            {'name': 'rules.tsv', 'download_url': 'https://raw.test/rules.tsv'},
-        ]
-        with patch('urllib.request.urlopen', return_value=_json_mock(listing_no_meta)):
+        with patch(
+            'respro.io.maintained_db.list_output_files',
+            return_value=[
+                {'name': 'rules.tsv', 'download_url': 'https://raw.test/rules.tsv'},
+            ],
+        ):
             with pytest.raises(RuntimeError, match='missing required metadata.json'):
                 download_database_files('hsv_daehne_jaki', tmp_path)
 
     def test_formula_rules_is_none_when_absent(self, tmp_path: Path) -> None:
-        listing_no_formula = [
-            {'name': 'rules.tsv', 'download_url': 'https://raw.test/rules.tsv'},
-            {'name': 'metadata.json', 'download_url': 'https://raw.test/metadata.json'},
-        ]
         rules_bytes = _RULES_TSV_CONTENT.encode()
         meta_bytes = json.dumps(_METADATA).encode()
 
         responses = [
-            _json_mock(listing_no_formula),
+            _json_mock(_manifest_with_formula_rules_path('')),
             _bytes_mock(rules_bytes),
             _bytes_mock(meta_bytes),
             _bytes_mock(_GENBANK_CONTENT),  # X04770

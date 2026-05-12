@@ -5,12 +5,15 @@ from __future__ import annotations
 import hashlib
 import hmac
 import importlib.metadata
+import io
 import logging
 import mimetypes
 import os
 import re
 import threading
 import time
+import zipfile
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -46,6 +49,7 @@ from web.backend.config import (
 from web.backend.jobs import run_profile_fasta, run_profile_vcf, run_regenerate_json
 from web.backend.models import (
     ApiEnvelope,
+    ArtifactBundlePayload,
     BatchProfileFastaPayload,
     BatchProfileVcfPayload,
     BatchSampleEntry,
@@ -73,6 +77,9 @@ from web.backend.startup_config import (
 logger = logging.getLogger(__name__)
 _SAMPLE_QUOTA_LOCK = threading.Lock()
 _SAMPLE_QUOTA_COUNTER: dict[tuple[str, int], int] = {}
+_WEB_TIMESTAMP_TOKEN = re.compile(
+    r'\.(\d{20})(?=\.(?:report\.html|report\.pdf|results\.json|mutations\.tsv)$)'
+)
 
 
 @asynccontextmanager
@@ -108,14 +115,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         allow_methods=['*'],
         allow_headers=['*'],
     )
-
-    frontend_dist = Path(__file__).resolve().parents[1] / 'frontend' / 'dist'
-    if frontend_dist.is_dir():
-        app.mount(
-            WEB_BACKEND_CONFIG.defaults.frontend_base_path,
-            StaticFiles(directory=str(frontend_dist), html=True),
-            name='frontend',
-        )
 
     branding_dir = Path(__file__).resolve().parents[2] / 'respro' / 'report' / 'static'
 
@@ -286,7 +285,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             fasta_path=str(fasta_path),
             sample=payload.sample or defaults.profile_sample_name,
             threads=payload.threads if payload.threads is not None else defaults.profile_threads,
-            aligner=payload.aligner or defaults.profile_aligner,
+            input_display_name=payload.input_display_name,
             **enqueue_options,
         )
         logger.info('Queue job enqueued: job_id=%s mode=fasta database_id=%s', job.id, project_db.name)
@@ -336,7 +335,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             min_depth=payload.min_depth if payload.min_depth is not None else defaults.profile_min_depth,
             bam_path=bam_path,
             threads=payload.threads if payload.threads is not None else defaults.profile_threads,
-            aligner=payload.aligner or defaults.profile_aligner,
+            input_display_name=payload.input_display_name,
             **enqueue_options,
         )
         logger.info('Queue job enqueued: job_id=%s mode=vcf database_id=%s', job.id, project_db.name)
@@ -354,6 +353,12 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 status_code=422,
                 detail='vcf_paths and sample_names must have the same length.',
             )
+        input_display_names = _resolve_batch_input_display_names(
+            input_paths=payload.vcf_paths,
+            input_display_names=payload.input_display_names,
+            path_label='vcf_paths',
+        )
+        artifact_base_names = _derive_unique_artifact_base_names(input_display_names)
         max_batch = sample_limit_per_minute
         if len(payload.vcf_paths) > max_batch:
             raise HTTPException(
@@ -385,7 +390,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             validated_vcf_inputs.append((vcf_path, sample_name))
 
         samples = []
-        for vcf_path, sample_name in validated_vcf_inputs:
+        for index, (vcf_path, sample_name) in enumerate(validated_vcf_inputs):
             job_id = str(uuid4())
             queue.enqueue(
                 run_profile_vcf,
@@ -398,7 +403,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 min_depth=payload.min_depth,
                 bam_path=None,
                 threads=payload.threads,
-                aligner=payload.aligner,
+                input_display_name=input_display_names[index],
+                artifact_base_name=artifact_base_names[index],
                 job_id=job_id,
                 **enqueue_options,
             )
@@ -422,6 +428,12 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 status_code=422,
                 detail='fasta_paths and sample_names must have the same length.',
             )
+        input_display_names = _resolve_batch_input_display_names(
+            input_paths=payload.fasta_paths,
+            input_display_names=payload.input_display_names,
+            path_label='fasta_paths',
+        )
+        artifact_base_names = _derive_unique_artifact_base_names(input_display_names)
         max_batch = sample_limit_per_minute
         if len(payload.fasta_paths) > max_batch:
             raise HTTPException(
@@ -448,7 +460,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             validated_fasta_inputs.append((fasta_path, sample_name))
 
         samples = []
-        for fasta_path, sample_name in validated_fasta_inputs:
+        for index, (fasta_path, sample_name) in enumerate(validated_fasta_inputs):
             job_id = str(uuid4())
             queue.enqueue(
                 run_profile_fasta,
@@ -457,7 +469,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
                 fasta_path=str(fasta_path),
                 sample=sample_name,
                 threads=payload.threads,
-                aligner=payload.aligner,
+                input_display_name=input_display_names[index],
+                artifact_base_name=artifact_base_names[index],
                 job_id=job_id,
                 **enqueue_options,
             )
@@ -579,7 +592,26 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         return FileResponse(
             str(artifact_path),
             media_type=media_type,
-            filename=artifact_path.name,
+            filename=_derive_download_filename(artifact_path),
+        )
+
+    @app.post('/api/artifact-bundle')
+    def download_artifact_bundle(
+        payload: ArtifactBundlePayload,
+        _auth: None = Depends(require_api_token),
+    ) -> Response:
+        if not payload.paths:
+            raise HTTPException(status_code=400, detail='At least one artifact path is required.')
+
+        bundle_bytes = _build_artifact_bundle(
+            payload.paths,
+            config.results_dir,
+            _is_allowed_artifact_path,
+        )
+        return Response(
+            content=bundle_bytes,
+            media_type='application/zip',
+            headers={'Content-Disposition': 'attachment; filename="respro-batch-artifacts.zip"'},
         )
 
     @app.get('/api/branding/logo.svg')
@@ -596,7 +628,117 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail='Favicon not found.')
         return FileResponse(str(favicon_path), media_type='image/svg+xml')
 
+    frontend_dist = Path(__file__).resolve().parents[1] / 'frontend' / 'dist'
+    if frontend_dist.is_dir():
+        app.mount(
+            WEB_BACKEND_CONFIG.defaults.frontend_base_path,
+            StaticFiles(directory=str(frontend_dist), html=True),
+            name='frontend',
+        )
+
     return app
+
+
+def _build_artifact_bundle(
+    artifact_paths: list[str],
+    results_dir: Path,
+    is_allowed_artifact_path: Callable[[Path], bool],
+) -> bytes:
+    """Pack validated result artifacts into one zip archive."""
+    buffer = io.BytesIO()
+    used_names: set[str] = set()
+
+    with zipfile.ZipFile(buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as archive:
+        for raw_path in artifact_paths:
+            artifact_path = Path(raw_path).expanduser().resolve()
+            if not is_path_within_allowed_roots(artifact_path, (results_dir,)):
+                raise HTTPException(status_code=400, detail='Artifact path is outside allowed results directory.')
+            if not is_allowed_artifact_path(artifact_path):
+                raise HTTPException(
+                    status_code=400,
+                    detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .mutations.tsv, .report.html.',
+                )
+            if not artifact_path.is_file():
+                raise HTTPException(status_code=404, detail='Artifact not found.')
+
+            archive.write(
+                artifact_path,
+                arcname=_deduplicate_archive_name(_derive_download_filename(artifact_path), used_names),
+            )
+
+    return buffer.getvalue()
+
+
+def _deduplicate_archive_name(file_name: str, used_names: set[str]) -> str:
+    """Keep archive member names unique while preserving readable basenames."""
+    if file_name not in used_names:
+        used_names.add(file_name)
+        return file_name
+
+    path = Path(file_name)
+    stem = path.stem
+    suffix = ''.join(path.suffixes)
+    counter = 1
+    while True:
+        candidate = f'{stem}_{counter}{suffix}'
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+        counter += 1
+
+
+def _resolve_batch_input_display_names(
+    *,
+    input_paths: list[str],
+    input_display_names: list[str] | None,
+    path_label: str,
+) -> list[str]:
+    """Resolve batch input display names, defaulting to uploaded file basenames."""
+    if input_display_names is None:
+        return [Path(path).name for path in input_paths]
+    if len(input_display_names) != len(input_paths):
+        raise HTTPException(
+            status_code=422,
+            detail=f'{path_label} and input_display_names must have the same length.',
+        )
+    return [Path(name).name for name in input_display_names]
+
+
+def _derive_unique_artifact_base_names(input_display_names: list[str]) -> list[str]:
+    """Build deterministic unique artifact base names from display names."""
+    seen_counts: dict[str, int] = {}
+    artifact_base_names: list[str] = []
+    for display_name in input_display_names:
+        base_name = _sanitize_artifact_base_name(display_name)
+        duplicate_count = seen_counts.get(base_name, 0)
+        if duplicate_count == 0:
+            artifact_base_names.append(base_name)
+        else:
+            artifact_base_names.append(f'{base_name}_{duplicate_count}')
+        seen_counts[base_name] = duplicate_count + 1
+    return artifact_base_names
+
+
+def _sanitize_artifact_base_name(input_name: str) -> str:
+    """Normalize one input name to a stable report-artifact base name."""
+    raw_stem = Path(input_name).stem.strip() or 'profile'
+    raw_stem = raw_stem.removesuffix('.results')
+    safe_stem = ''.join(ch if ch.isalnum() or ch in '._-' else '_' for ch in raw_stem) or 'profile'
+    return safe_stem
+
+
+def _derive_download_filename(artifact_path: Path) -> str:
+    """Map internal artifact names to user-facing download names."""
+    file_name = _WEB_TIMESTAMP_TOKEN.sub('', artifact_path.name)
+    if file_name.endswith('.report.html'):
+        return file_name[:-12] + '.html'
+    if file_name.endswith('.report.pdf'):
+        return file_name[:-11] + '.pdf'
+    if file_name.endswith('.results.json'):
+        return file_name[:-13] + '.json'
+    if file_name.endswith('.mutations.tsv'):
+        return file_name[:-14] + '.tsv'
+    return file_name
 
 
 def _sweep_expired_files(results_dir: Path, uploads_dir: Path, ttl_seconds: int) -> None:
@@ -787,10 +929,11 @@ def _user_facing_error_message(raw_message: str | None) -> str:
         return 'Coverage annotation needs a coordinate-sorted BAM. The server could not create an index for this file.'
     if 'bam reference' in lowered and 'not found' in lowered:
         return 'BAM and reference FASTA do not match. Use files derived from the same reference sequence.'
-    if 'no cds matches above thresholds' in lowered:
+    if (
+        'no cds matches above identity threshold' in lowered
+        or 'no cds matches above thresholds' in lowered
+    ):
         return 'No sequence match found. The uploaded sequence did not align to any reference CDS with sufficient identity and coverage.'
-    if 'unknown aligner' in lowered:
-        return 'Unsupported aligner selection.'
     if message.startswith('Upload failed:'):
         return 'The upload failed on the server.'
     return message

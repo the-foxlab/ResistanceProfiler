@@ -9,7 +9,6 @@ export const FRONTEND_CONFIG = {
   apiBase: import.meta.env.VITE_RESPRO_API_BASE || defaultApiBase,
   apiToken: (import.meta.env.VITE_RESPRO_API_TOKEN || '').trim(),
   profile: {
-    aligner: 'mappy',
     threads: 1,
     vcf: {
       minAf: 0.01,
@@ -21,6 +20,6 @@ export const FRONTEND_CONFIG = {
     sampleName: 'sample',
   },
   ui: {
-    explorerUrl: 'http://127.0.0.1:8000/app',
+    explorerUrl: 'http://127.0.0.1:8000',
   },
 };

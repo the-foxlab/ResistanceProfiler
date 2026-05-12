@@ -27,14 +27,13 @@ max_batch_size = 25
 batch_queue_name = 'profiling'
 cors_local_origins = ['http://127.0.0.1:5173', 'http://localhost:5173']
 profile_queue_name = 'profiling'
-frontend_base_path = '/app'
+frontend_base_path = '/'
 service_name = 'respro-web-api'
 maintained_bootstrap = false
 
 [defaults.profile]
 sample_name = 'sample'
 threads = 1
-aligner = 'mappy'
 min_af = 0.01
 min_depth = 10
 

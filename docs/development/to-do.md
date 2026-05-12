@@ -41,7 +41,7 @@ Mark items done and update priorities after each completed milestone.
 
 - [X] VCF ingestion — allele frequency, read depth, filter status
 - [X] Allele-frequency and depth filtering (`--min-af`, `--min-depth`)
-- [X] Reference FASTA alignment via Biopython `PairwiseAligner` with CIGAR maps
+- [X] Reference FASTA alignment via minimap2 `mappy` backend with CIGAR maps
 - [X] CIGAR-based coordinate remapping — VCF variants from user-reference to internal CDS coordinates
 - [X] Alignment result caching in `project.db` (`query_reference`, `query_gene_mapping`)
 - [X] Query-reference cache reuse on repeated FASTA inputs
@@ -61,11 +61,11 @@ Mark items done and update priorities after each completed milestone.
 
 ### Alignment performance
 
-- [X] Dual alignment backend — added `mappy` (minimap2) as an optional alternative to `PairwiseAligner`;
-  benchmarked on HSV whole-genome (152 KB) and partial FASTAs; all 8 resistance genes found with equivalent
-  identity scores; 440×–14 000× faster on large sequences; `--aligner pairwise|mappy` added to
-  `profile-vcf` and `profile-fasta`; CIGAR convention verified compatible with downstream VCF remap and
-  coordinate mapping; `mappy>=2.24` added as a dependency
+- [X] mappy/minimap2 alignment backend standardized for profiling; benchmarked on HSV whole-genome (152 KB)
+  and partial FASTAs; all 8 resistance genes found with equivalent identity scores; 440×–14 000× faster on
+  large sequences; pairwise backend and `--aligner` selection were removed after equivalence validation;
+  CIGAR convention verified compatible with downstream VCF remap and coordinate mapping; `mappy>=2.24`
+  added as a dependency
 
 ### Codon-aware annotation
 
@@ -135,9 +135,9 @@ Mark items done and update priorities after each completed milestone.
 - [X] Move shared profiling orchestration helpers out of `respro/cli.py` into `respro/cli_helpers.py` — `_init_results_db_connection`, `_resolve_reference`, `_load_reference_data`, and `_finalize_and_export`; behavior unchanged
 - [X] Split `respro/core/profile.py` — shared helpers (CIGAR inversion, query-sequence resolution) moved to `respro/core/profile_helpers.py`; VCF-specific remapping kept in `respro/core/vcf_profile.py`
 - [X] Split FASTA annotation helpers into `respro/core/annotate_fasta.py` — orchestration (`profile_fasta_consensus`, `_profile_gene`) in `profile_fasta.py`; codon/indel annotation, IUPAC expansion, and consequence helpers extracted; VCF remapping in `annotate_vcf.py`
-- [X] mappy alignment backend — `_match_with_mappy` and `_match_with_pairwise` extracted as backend
-  functions; `match_query_to_genes` accepts `aligner='pairwise'|'mappy'`; mappy CIGAR I/D swap verified;
-  coordinate convention proven equivalent; 16 new tests in `TestMappyBackend` and `TestMappyPairwiseEquivalence`
+- [X] mappy alignment backend consolidation — pairwise backend helpers/options were removed; gene matching
+  now uses a mappy-only implementation with verified CIGAR I/D convention and equivalent coordinate mapping;
+  test coverage retained for mappy backend behavior after backend-option removal
 - [X] Add `markupsafe>=2.1` as an explicit dependency in `pyproject.toml`
 - [X] VCF depth fallback — `_extract_depth` now returns `-1` sentinel when no depth field is found; depth filter in `profile-vcf` skips depth checking for sentinel variants so depth-free VCFs are not silently discarded
 - [X] Parallel gene alignment — `match_query_to_genes` now accepts `cores` parameter; per-gene alignment extracted into picklable `_align_gene_worker`; `--cores` added to both `profile-vcf` and `profile-fasta` (default 1)
@@ -228,6 +228,8 @@ Mark items done and update priorities after each completed milestone.
 - [X] Job status contract hardening — standardized and tested queued/running/succeeded/failed mapping with consistent failed-job and missing-job error payload behavior for `/api/jobs/{job_id}`
 - [X] Queue runtime safeguards — added configurable queue timeout/retry defaults plus explicit enqueue/start/fail/finish lifecycle logging for background jobs
 - [X] API readiness checks — added `/api/readiness` with Redis connectivity and startup workspace/project-db readiness diagnostics without exposing sensitive paths or credentials
+- [X] CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
+- [X] Frontend tests — Vitest + React Testing Library setup added to `web/frontend/`; covers critical user flows: file upload with progress tracking (mocked XHR), job polling state transitions (queued → running → succeeded/failed), and report display and selection; `npm test` runs the test suite locally, and CI integrates frontend tests into `tests.yml` alongside Python tests
 
 ### Public release (done)
 
@@ -247,13 +249,13 @@ Mark items done and update priorities after each completed milestone.
 
 ### Web — Batch analysis
 
-- [x] `RESPRO_WEB_MAX_BATCH_SIZE` env config key added to `defaults.toml` and `config.py`
-- [x] `BatchProfileVcfPayload`, `BatchProfileFastaPayload`, `BatchSubmitResponse`, `BatchSampleEntry` models added to `models.py`
-- [x] `POST /api/profile/batch/vcf` endpoint — rate-limited (2/min), max 25 samples, enqueues one `run_profile_vcf` job per sample
-- [x] `POST /api/profile/batch/fasta` endpoint — same pattern, no shared reference FASTA
-- [x] Web profiling jobs pass `use_cache=True` so `query_reference` alignment mappings are reused across batch samples sharing the same project database and reference FASTA
-- [x] Batch tab in web dashboard — VCF and FASTA batch modes with multi-file upload (up to 25), shared reference FASTA for VCF, project selector, per-sample results table with status polling, live 429 rate-limit countdown, and "New batch" reset button
-- [x] 5 new tests in `tests/test_web_api.py` covering batch submit success (VCF + FASTA), max-size enforcement (VCF + FASTA), and mismatched sample-name/path lengths
+- [X] `RESPRO_WEB_MAX_BATCH_SIZE` env config key added to `defaults.toml` and `config.py`
+- [X] `BatchProfileVcfPayload`, `BatchProfileFastaPayload`, `BatchSubmitResponse`, `BatchSampleEntry` models added to `models.py`
+- [X] `POST /api/profile/batch/vcf` endpoint — rate-limited (2/min), max 25 samples, enqueues one `run_profile_vcf` job per sample
+- [X] `POST /api/profile/batch/fasta` endpoint — same pattern, no shared reference FASTA
+- [X] Web profiling jobs pass `use_cache=True` so `query_reference` alignment mappings are reused across batch samples sharing the same project database and reference FASTA
+- [X] Batch tab in web dashboard — VCF and FASTA batch modes with multi-file upload (up to 25), shared reference FASTA for VCF, project selector, per-sample results table with status polling, live 429 rate-limit countdown, and "New batch" reset button
+- [X] 5 new tests in `tests/test_web_api.py` covering batch submit success (VCF + FASTA), max-size enforcement (VCF + FASTA), and mismatched sample-name/path lengths
 
 ---
 
@@ -289,6 +291,11 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   chrom the gene's query FASTA record came from; (3) a single-chrom VCF with the existing test
   reference still produces byte-identical report output as before the change (guard against
   inadvertent regression)
+- 🟡 Drug-level cumulative score interpretation (Stanford-like) — add score aggregation across
+  all matched single and formula rules per drug, expose per-drug totals in report/JSON output,
+  and support optional metadata-driven score-to-classification threshold maps (global defaults
+  with optional per-drug overrides) so cumulative scores can be translated into resistance
+  classes when curated mappings are provided
 - 🟢 Sanger AB1 input — add `respro profile-ab1` that reads an AB1 trace file via
   `SeqIO.read(..., 'abi')` and derives a quality-aware consensus sequence that feeds directly into
   the existing FASTA profiling pipeline; the quality model uses raw trace peak data
@@ -323,13 +330,3 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   bioconda-recipes; Bioconda is the standard distribution channel for bioinformatics CLI tools
   and avoids requiring users to have a working pip/Python setup; dependency on pysam makes
   Bioconda the natural distribution path once pysam is a requirement
-
-### WebUI
-
-- 🟢 Frontend tests — add a Vitest + React Testing Library setup to `web/frontend/`; cover the
-  critical user flows: file selection and upload flow (mocked XHR), job polling until completion,
-  and report display; the test runner should be invokable via `npm test` inside `web/frontend/`
-  and should run in CI alongside the Python tests
-- 🟡 Compose integration tests — add compose-backed smoke/integration tests for submit → poll → report retrieval using startup-configured paths
-- [X] CLI subprocess worker adapter (post-prototype) — execute profiling/regenerate through explicit `respro` subprocess commands in worker jobs instead of direct in-process Python calls
-- 🟢 Previous-results dropdown in batch UI — load past results.db runs into a batch results view from a dropdown; deferred until batch core is validated in production

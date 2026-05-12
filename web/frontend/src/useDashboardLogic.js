@@ -143,7 +143,7 @@ function buildHeaders(baseHeaders = {}) {
   };
 }
 
-function buildApiUrl(path, params = {}) {
+export function buildApiUrl(path, params = {}) {
   // Drop empty query params so generated URLs stay compact and predictable.
   const filteredParams = Object.fromEntries(
     Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
@@ -153,7 +153,7 @@ function buildApiUrl(path, params = {}) {
   return queryString ? `${API_BASE}${path}?${queryString}` : `${API_BASE}${path}`;
 }
 
-function formatUserError(message) {
+export function formatUserError(message) {
   // Convert backend/internal error wording into actionable UI-friendly messages.
   const lines = String(message || '')
     .split('\n')
@@ -216,6 +216,15 @@ function formatPathBasename(path) {
   const normalized = String(path).replace(/\\/g, '/');
   const parts = normalized.split('/').filter(Boolean);
   return parts.length > 0 ? parts[parts.length - 1] : normalized;
+}
+
+function formatPathStem(path) {
+  const basename = formatPathBasename(path);
+  const dotIndex = basename.lastIndexOf('.');
+  if (dotIndex <= 0) {
+    return basename;
+  }
+  return basename.slice(0, dotIndex);
 }
 
 async function apiGet(path, params = {}) {
@@ -308,6 +317,7 @@ export function useDashboardLogic() {
   // Profile input state for each supported workflow mode.
   const [vcfInput, setVcfInput] = useState({
     vcf_path: '',
+    input_display_name: '',
     ref_fasta_path: '',
     bam_path: null,
     sample: FRONTEND_CONFIG.defaults.sampleName,
@@ -316,6 +326,7 @@ export function useDashboardLogic() {
   });
   const [fastaInput, setFastaInput] = useState({
     fasta_path: '',
+    input_display_name: '',
     sample: FRONTEND_CONFIG.defaults.sampleName,
   });
   const [jsonInputPath, setJsonInputPath] = useState('');
@@ -361,6 +372,7 @@ export function useDashboardLogic() {
   const [batchReferenceFasta, setBatchReferenceFastaState] = useState(null);
   const [batchSamples, setBatchSamples] = useState([]);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
+  const [isBatchDownloadBusy, setIsBatchDownloadBusy] = useState(false);
   const [batchError, setBatchError] = useState(null);
   const [batchRateLimitCooldown, setBatchRateLimitCooldown] = useState(0);
   const [batchSubmitted, setBatchSubmitted] = useState(false);
@@ -689,7 +701,6 @@ export function useDashboardLogic() {
       const submitResponse = await apiPost('/api/profile/fasta', {
         ...fastaInput,
         database_id: databaseId,
-        aligner: FRONTEND_CONFIG.profile.aligner,
         threads: FRONTEND_CONFIG.profile.threads,
       });
       setActiveJobId(submitResponse.job_id);
@@ -747,7 +758,6 @@ export function useDashboardLogic() {
       const submitResponse = await apiPost('/api/profile/vcf', {
         ...vcfInput,
         database_id: databaseId,
-        aligner: FRONTEND_CONFIG.profile.aligner,
         threads: FRONTEND_CONFIG.profile.threads,
       });
       setActiveJobId(submitResponse.job_id);
@@ -808,13 +818,13 @@ export function useDashboardLogic() {
 
   const uploadFastaFile = async (file) => {
     await uploadFile(file, 'fasta', (path) => {
-      setFastaInput((prev) => ({ ...prev, fasta_path: path }));
+      setFastaInput((prev) => ({ ...prev, fasta_path: path, input_display_name: file.name }));
     });
   };
 
   const uploadVcfFile = async (file) => {
     await uploadFile(file, 'vcf', (path) => {
-      setVcfInput((prev) => ({ ...prev, vcf_path: path }));
+      setVcfInput((prev) => ({ ...prev, vcf_path: path, input_display_name: file.name }));
     });
   };
 
@@ -1018,6 +1028,7 @@ export function useDashboardLogic() {
     try {
       let responseData;
       if (batchMode === 'vcf') {
+        const sampleNames = batchVcfFiles.map((file) => formatPathStem(file.name));
         if (!Number.isFinite(batchVcfCutoffs.min_af) || batchVcfCutoffs.min_af < 0 || batchVcfCutoffs.min_af > 1) {
           throw new Error('Frequency cutoff (min AF) must be a number between 0 and 1.');
         }
@@ -1026,12 +1037,12 @@ export function useDashboardLogic() {
         }
         const body = {
           vcf_paths: batchVcfFiles.map((f) => f.path),
-          sample_names: batchVcfFiles.map((f) => f.name),
+          sample_names: sampleNames,
+          input_display_names: batchVcfFiles.map((f) => f.name),
           reference_fasta_path: batchReferenceFasta.path,
           db_path: selectedDatabaseId,
           min_af: batchVcfCutoffs.min_af,
           min_depth: batchVcfCutoffs.min_depth,
-          aligner: FRONTEND_CONFIG.profile.aligner,
           threads: FRONTEND_CONFIG.profile.threads,
         };
         const response = await fetch(`${API_BASE}/api/profile/batch/vcf`, {
@@ -1050,9 +1061,11 @@ export function useDashboardLogic() {
         }
         responseData = await response.json();
       } else {
+        const sampleNames = batchFastaFiles.map((file) => formatPathStem(file.name));
         const body = {
           fasta_paths: batchFastaFiles.map((f) => f.path),
-          sample_names: batchFastaFiles.map((f) => f.name),
+          sample_names: sampleNames,
+          input_display_names: batchFastaFiles.map((f) => f.name),
           db_path: selectedDatabaseId,
         };
         const response = await fetch(`${API_BASE}/api/profile/batch/fasta`, {
@@ -1099,6 +1112,47 @@ export function useDashboardLogic() {
     setBatchError(null);
     setBatchRateLimitCooldown(0);
     setBatchSubmitted(false);
+  };
+
+  const downloadAllBatchArtifacts = async () => {
+    const artifactPaths = batchSamples.flatMap((sample) => [
+      sample.reportHtmlPath,
+      sample.reportPdfPath,
+      sample.reportJsonPath,
+      sample.reportTabularPath,
+    ].filter(Boolean));
+
+    if (artifactPaths.length === 0) {
+      setBatchError('No completed batch artifacts are available for download.');
+      return;
+    }
+
+    setBatchError(null);
+    setIsBatchDownloadBusy(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/artifact-bundle`, {
+        method: 'POST',
+        headers: buildHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ paths: artifactPaths }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
+      }
+
+      const href = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a');
+      anchor.href = href;
+      anchor.download = 'respro-batch-artifacts.zip';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(href);
+    } catch (error) {
+      setBatchError(formatUserError(error.message));
+    } finally {
+      setIsBatchDownloadBusy(false);
+    }
   };
 
   const canCancelJob = Boolean(activeJobId) && ['queued', 'running'].includes(activeJobStatus);
@@ -1230,6 +1284,7 @@ export function useDashboardLogic() {
     batchReferenceFasta,
     batchSamples,
     batchSubmitting,
+    isBatchDownloadBusy,
     batchError,
     batchRateLimitCooldown,
     setBatchRateLimitCooldown,
@@ -1243,6 +1298,7 @@ export function useDashboardLogic() {
     removeBatchFile,
     uploadBatchReferenceFasta,
     submitBatch,
+    downloadAllBatchArtifacts,
     resetBatch,
   };
 }

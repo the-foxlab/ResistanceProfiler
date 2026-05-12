@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import io
 import json
 import shutil
 import sqlite3
 import textwrap
+import zipfile
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -244,6 +246,24 @@ class TestWebApi:
         payload = response.json()
         assert payload['status'] == 'ok'
 
+    @pytest.mark.skipif(
+        not (Path(__file__).resolve().parents[2] / 'web' / 'frontend' / 'dist').is_dir(),
+        reason='Frontend dist directory not built',
+    )
+    def test_root_serves_frontend_without_shadowing_api_routes(
+        self,
+        startup_config: StartupConfig,
+    ) -> None:
+        client = TestClient(create_app(startup_config=startup_config))
+
+        root_response = client.get('/')
+        api_response = client.get('/api/health')
+
+        assert root_response.status_code == 200
+        assert 'text/html' in root_response.headers['content-type']
+        assert api_response.status_code == 200
+        assert api_response.json()['status'] == 'ok'
+
     def test_readiness_endpoint_reports_redis_and_project_db_readiness(
         self,
         startup_config: StartupConfig,
@@ -437,6 +457,7 @@ class TestWebApi:
             '/api/profile/fasta',
             json={
                 'fasta_path': str(web_sample_ref_fasta),
+                'input_display_name': 'original-upload.fasta',
                 'sample': 'web-fasta',
             },
             headers=auth_headers,
@@ -456,6 +477,7 @@ class TestWebApi:
         assert result['sample_name'] == 'web-fasta'
         assert result['run_id'] is None
         assert result['input_path'] == str(web_sample_ref_fasta.resolve())
+        assert Path(result['report_html_path']).name.startswith('original-upload.')
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
         assert result['report_tabular_path'].endswith('.mutations.tsv')
@@ -464,6 +486,8 @@ class TestWebApi:
         assert Path(result['report_json_path']).is_file()
         assert Path(result['report_tabular_path']).is_file()
         assert Path(result['report_pdf_path']).is_file()
+        report_payload = json.loads(Path(result['report_json_path']).read_text(encoding='utf-8'))
+        assert report_payload['run']['vcf_path'] == 'original-upload.fasta'
 
     def test_profile_fasta_path_outside_uploads_rejected(
         self,
@@ -494,6 +518,7 @@ class TestWebApi:
             json={
                 'vcf_path': str(web_sample_vcf),
                 'ref_fasta_path': str(web_sample_ref_fasta),
+                'input_display_name': 'original-upload.vcf',
                 'sample': 'web-vcf',
             },
             headers=auth_headers,
@@ -514,6 +539,7 @@ class TestWebApi:
         assert result['database_path'] == str(default_db.resolve())
         assert result['input_path'] == str(web_sample_vcf.resolve())
         assert result['reference_fasta_path'] == str(web_sample_ref_fasta.resolve())
+        assert Path(result['report_html_path']).name.startswith('original-upload.')
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
         assert result['report_tabular_path'].endswith('.mutations.tsv')
@@ -522,6 +548,8 @@ class TestWebApi:
         assert Path(result['report_json_path']).is_file()
         assert Path(result['report_tabular_path']).is_file()
         assert Path(result['report_pdf_path']).is_file()
+        report_payload = json.loads(Path(result['report_json_path']).read_text(encoding='utf-8'))
+        assert report_payload['run']['vcf_path'] == 'original-upload.vcf'
 
     def test_artifact_download_serves_pdf_from_results_dir(
         self,
@@ -535,6 +563,7 @@ class TestWebApi:
             json={
                 'vcf_path': str(web_sample_vcf),
                 'ref_fasta_path': str(web_sample_ref_fasta),
+                'input_display_name': 'download-name-check.vcf',
                 'sample': 'artifact-pdf',
             },
             headers=auth_headers,
@@ -564,6 +593,7 @@ class TestWebApi:
 
         assert artifact.status_code == 200
         assert artifact.headers['content-type'].startswith('application/pdf')
+        assert 'filename="download-name-check.pdf"' in artifact.headers['content-disposition']
         assert artifact.content.startswith(b'%PDF')
 
     def test_artifact_download_rejects_uploads_dir_file(
@@ -575,6 +605,76 @@ class TestWebApi:
         response = client.get(
             '/api/artifact',
             params={'path': str(web_sample_vcf)},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert 'outside allowed results directory' in response.json()['detail']
+
+    def test_artifact_bundle_download_packs_multiple_results_artifacts(
+        self,
+        client: TestClient,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        submit = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(web_sample_vcf),
+                'ref_fasta_path': str(web_sample_ref_fasta),
+                'input_display_name': 'bundle-name-check.vcf',
+                'sample': 'artifact-bundle',
+            },
+            headers=auth_headers,
+        )
+        assert submit.status_code == 200
+
+        job_id = submit.json()['job_id']
+        payload: dict[str, object] | None = None
+        for _ in range(10):
+            status = client.get(f'/api/jobs/{job_id}', headers=auth_headers)
+            assert status.status_code == 200
+            payload = status.json()
+            if payload['status'] in ('succeeded', 'failed'):
+                break
+
+        assert payload is not None
+        assert payload['status'] == 'succeeded'
+        result = payload['result']
+        assert isinstance(result, dict)
+
+        bundle = client.post(
+            '/api/artifact-bundle',
+            json={
+                'paths': [
+                    result['report_json_path'],
+                    result['report_tabular_path'],
+                ],
+            },
+            headers=auth_headers,
+        )
+
+        assert bundle.status_code == 200
+        assert bundle.headers['content-type'] == 'application/zip'
+        assert 'respro-batch-artifacts.zip' in bundle.headers['content-disposition']
+
+        with zipfile.ZipFile(io.BytesIO(bundle.content)) as archive:
+            names = set(archive.namelist())
+            assert 'bundle-name-check.json' in names
+            assert 'bundle-name-check.tsv' in names
+            report_payload = json.loads(archive.read('bundle-name-check.json').decode('utf-8'))
+            assert report_payload['run']['sample_name'] == 'artifact-bundle'
+
+    def test_artifact_bundle_rejects_paths_outside_results_dir(
+        self,
+        client: TestClient,
+        web_sample_vcf: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        response = client.post(
+            '/api/artifact-bundle',
+            json={'paths': [str(web_sample_vcf)]},
             headers=auth_headers,
         )
 
@@ -1386,6 +1486,7 @@ class TestBatchProfileEndpoints:
             json={
                 'vcf_paths': [str(web_sample_vcf), str(vcf2)],
                 'sample_names': ['sample-a', 'sample-b'],
+                'input_display_names': ['batch-a.vcf', 'batch-b.vcf'],
                 'reference_fasta_path': str(web_sample_ref_fasta),
                 'db_path': default_db.name,
             },
@@ -1416,6 +1517,7 @@ class TestBatchProfileEndpoints:
             json={
                 'fasta_paths': [str(web_sample_ref_fasta), str(fasta2)],
                 'sample_names': ['fasta-a', 'fasta-b'],
+                'input_display_names': ['batch-a.fasta', 'batch-b.fasta'],
                 'db_path': default_db.name,
             },
             headers=auth_headers,
@@ -1427,6 +1529,52 @@ class TestBatchProfileEndpoints:
         for entry in data['samples']:
             assert entry['job_id']
             assert entry['status'] == 'queued'
+
+    def test_batch_duplicate_display_names_use_suffix_disambiguation_in_bundle(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        vcf2 = startup_config.uploads_dir / 'sample2.vcf'
+        vcf2.write_text(web_sample_vcf.read_text())
+        default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+
+        submit = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_paths': [str(web_sample_vcf), str(vcf2)],
+                'sample_names': ['sample-a', 'sample-b'],
+                'input_display_names': ['duplicate-name.vcf', 'duplicate-name.vcf'],
+                'reference_fasta_path': str(web_sample_ref_fasta),
+                'db_path': default_db.name,
+            },
+            headers=auth_headers,
+        )
+        assert submit.status_code == 200
+        submitted = submit.json()['samples']
+
+        result_paths: list[str] = []
+        for sample in submitted:
+            status = client.get(f"/api/jobs/{sample['job_id']}", headers=auth_headers)
+            assert status.status_code == 200
+            payload = status.json()
+            assert payload['status'] == 'succeeded'
+            result_paths.append(payload['result']['report_json_path'])
+
+        bundle = client.post(
+            '/api/artifact-bundle',
+            json={'paths': result_paths},
+            headers=auth_headers,
+        )
+        assert bundle.status_code == 200
+
+        with zipfile.ZipFile(io.BytesIO(bundle.content)) as archive:
+            names = set(archive.namelist())
+            assert 'duplicate-name.json' in names
+            assert 'duplicate-name_1.json' in names
 
     def test_batch_vcf_exceeds_max_size(
         self,

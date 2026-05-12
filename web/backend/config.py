@@ -49,7 +49,6 @@ class WebDefaults:
     # Profile defaults
     profile_sample_name: str
     profile_threads: int
-    profile_aligner: str
     profile_min_af: float
     profile_min_depth: int
     # Upload defaults
@@ -120,7 +119,6 @@ def _load_web_backend_config() -> WebBackendConfig:
         maintained_bootstrap=bool(defaults_payload['maintained_bootstrap']),
         profile_sample_name=str(profile_payload['sample_name']),
         profile_threads=int(profile_payload['threads']),
-        profile_aligner=str(profile_payload['aligner']),
         profile_min_af=float(profile_payload['min_af']),
         profile_min_depth=int(profile_payload['min_depth']),
         upload_max_fasta_size=int(upload_payload['max_fasta_size']),

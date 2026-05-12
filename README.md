@@ -132,7 +132,7 @@ docker tag ghcr.io/jonas-fuchs/resistanceprofiler:<release-tag> respro-web:lates
 docker compose -f docker-compose.web.yml up
 ```
 
-Open the app at: `http://127.0.0.1:8000/app/`
+Open the app at: `http://127.0.0.1:8000/`
 
 > [!CAUTION]
 > At initial startup, the app can download maintained databases if none are available in `./data/project_databases/`. To disable this, set `RESPRO_WEB_MAINTAINED_BOOTSTRAP=false` in `docker-compose.web.yml`.

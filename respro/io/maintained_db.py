@@ -11,6 +11,7 @@ import csv
 import json
 import logging
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -27,9 +28,8 @@ def list_maintained_databases() -> list[str]:
 
     :return: sorted list of database folder names (e.g. ['hsv_daehne_jaki'])
     """
-    url = CLI_CONFIG.urls.github_respro_db_api
-    data = _fetch_json(url, context='database listing')
-    return sorted(entry['name'] for entry in data if entry.get('type') == 'dir')
+    manifest = _fetch_manifest()
+    return sorted(entry['source_name'] for entry in manifest['databases'])
 
 
 def fetch_database_metadata(db_name: str) -> dict:
@@ -39,8 +39,8 @@ def fetch_database_metadata(db_name: str) -> dict:
     :param db_name: folder name of the database (e.g. 'hsv_daehne_jaki')
     :return: parsed metadata dict
     """
-    url = f'{CLI_CONFIG.urls.github_respro_db_raw}/{db_name}/output/metadata.json'
-    return _fetch_json(url, context=f'metadata for {db_name!r}')
+    entry = _find_manifest_database_entry(db_name)
+    return entry['metadata']
 
 
 def download_database_files(db_name: str, dest_dir: Path) -> dict[str, object]:
@@ -96,13 +96,114 @@ def list_output_files(db_name: str) -> list[dict]:
     :param db_name: folder name of the database
     :return: list of dicts with at least ``name`` and ``download_url`` keys
     """
-    url = f'{CLI_CONFIG.urls.github_respro_db_api}/{db_name}/output'
-    return _fetch_json(url, context=f'output listing for {db_name!r}')
+    entry = _find_manifest_database_entry(db_name)
+    output_files = [
+        {
+            'name': 'rules.tsv',
+            'download_url': _resolve_manifest_path_to_download_url(entry['rules_path']),
+        },
+        {
+            'name': 'metadata.json',
+            'download_url': _resolve_manifest_path_to_download_url(entry['metadata_path']),
+        },
+    ]
+
+    formula_rules_path = entry['formula_rules_path']
+    if formula_rules_path:
+        output_files.append(
+            {
+                'name': 'formula-rules.tsv',
+                'download_url': _resolve_manifest_path_to_download_url(formula_rules_path),
+            }
+        )
+
+    return output_files
 
 
 # ──────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────
+
+def _fetch_manifest() -> dict:
+    """Fetch and validate the global maintained database manifest."""
+    manifest_url = f"{CLI_CONFIG.urls.github_respro_db_raw.rstrip('/')}/manifest.json"
+    payload = _fetch_json(manifest_url, context='maintained database manifest')
+
+    if not isinstance(payload, dict):
+        raise RuntimeError('Malformed manifest: top-level JSON value must be an object')
+
+    manifest_version = payload.get('manifest_version')
+    if not isinstance(manifest_version, int):
+        raise RuntimeError('Malformed manifest: manifest_version must be an integer')
+
+    databases = payload.get('databases')
+    if not isinstance(databases, list):
+        raise RuntimeError('Malformed manifest: databases must be a list')
+
+    for idx, entry in enumerate(databases):
+        _validate_manifest_entry(entry, idx)
+
+    return payload
+
+
+def _validate_manifest_entry(entry: object, idx: int) -> None:
+    """Validate one database entry in the manifest."""
+    if not isinstance(entry, dict):
+        raise RuntimeError(f'Malformed manifest: databases[{idx}] must be an object')
+
+    source_name = entry.get('source_name')
+    if not isinstance(source_name, str) or not source_name.strip():
+        raise RuntimeError(f'Malformed manifest: databases[{idx}].source_name must be a non-empty string')
+
+    metadata_path = entry.get('metadata_path')
+    if not isinstance(metadata_path, str) or not metadata_path.strip():
+        raise RuntimeError(
+            f'Malformed manifest: databases[{idx}].metadata_path must be a non-empty string'
+        )
+
+    rules_path = entry.get('rules_path')
+    if not isinstance(rules_path, str) or not rules_path.strip():
+        raise RuntimeError(f'Malformed manifest: databases[{idx}].rules_path must be a non-empty string')
+
+    formula_rules_path = entry.get('formula_rules_path')
+    if not isinstance(formula_rules_path, str):
+        raise RuntimeError(f'Malformed manifest: databases[{idx}].formula_rules_path must be a string')
+
+    metadata = entry.get('metadata')
+    if not isinstance(metadata, dict):
+        raise RuntimeError(f'Malformed manifest: databases[{idx}].metadata must be an object')
+
+
+def _find_manifest_database_entry(db_name: str) -> dict:
+    """Return the manifest database entry for a source name."""
+    manifest = _fetch_manifest()
+    for entry in manifest['databases']:
+        if entry['source_name'] == db_name:
+            return entry
+    raise RuntimeError(f'Unknown maintained database {db_name!r}')
+
+
+def _resolve_manifest_path_to_download_url(path: str) -> str:
+    """Resolve a manifest path to a raw GitHub download URL."""
+    cleaned_path = path.lstrip('/')
+    if not cleaned_path:
+        raise RuntimeError('Malformed manifest: output path must not be empty')
+
+    if cleaned_path.startswith('databases/'):
+        base_url = _derive_raw_repo_root_url()
+        return urllib.parse.urljoin(f"{base_url.rstrip('/')}/", cleaned_path)
+
+    raw_base = CLI_CONFIG.urls.github_respro_db_raw.rstrip('/')
+    return urllib.parse.urljoin(f'{raw_base}/', cleaned_path)
+
+
+def _derive_raw_repo_root_url() -> str:
+    """Derive raw repo root from configured raw databases URL."""
+    raw_base = CLI_CONFIG.urls.github_respro_db_raw.rstrip('/')
+    if raw_base.endswith('/databases'):
+        return raw_base[: -len('/databases')]
+    return raw_base
+
 
 def _fetch_json(url: str, *, context: str) -> object:
     """Fetch URL and parse response as JSON; raise RuntimeError on failure."""

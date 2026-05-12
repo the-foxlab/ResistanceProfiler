@@ -69,3 +69,27 @@ jobs:
         shell: bash
         run: |
           pytest
+
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd web/frontend && npm ci
+
+      - name: Run frontend tests
+        run: |
+          cd web/frontend && npm test
+
