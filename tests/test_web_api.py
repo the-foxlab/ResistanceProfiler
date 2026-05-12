@@ -246,6 +246,10 @@ class TestWebApi:
         payload = response.json()
         assert payload['status'] == 'ok'
 
+    @pytest.mark.skipif(
+        not (Path(__file__).resolve().parents[2] / 'web' / 'frontend' / 'dist').is_dir(),
+        reason='Frontend dist directory not built',
+    )
     def test_root_serves_frontend_without_shadowing_api_routes(
         self,
         startup_config: StartupConfig,
