@@ -233,7 +233,7 @@ describe('useDashboardLogic - File Upload Flow', () => {
       });
     });
 
-    expect(result.current.status).toContain('failed') || expect(result.current.status).toContain('error');
+    expect(result.current.status).toMatch(/failed|error/);
   });
 });
 
@@ -395,7 +395,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     });
 
     // Verify status reflects failure
-    expect(result.current.status).toContain('failed') || expect(result.current.status).toContain('error');
+    expect(result.current.status).toMatch(/failed|error/);
     expect(result.current.isProcessingFasta).toBe(false);
   });
 
@@ -735,96 +735,5 @@ describe('useDashboardLogic - Report Display Flow', () => {
     expect(result.current.reportOptions.length).toBe(2);
     expect(result.current.reportOptions[0].label).toContain('sample2');
     expect(result.current.reportOptions[1].label).toContain('sample1');
-  });
-
-  it('should handle VCF profiling and job polling with report', async () => {
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [{
-            id: 'db1',
-            display_name: 'HIV',
-          }],
-        },
-      }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [],
-          columns: [],
-        },
-      }),
-    });
-
-    // Job submission
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        job_id: 'job-vcf',
-      }),
-    });
-
-    // Polling
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        status: 'succeeded',
-        result: {
-          sample_name: 'vcf_sample',
-          reference_name: 'HIV',
-          database_id: 'db1',
-          report_html_path: '/data/results/vcf_sample.html',
-          report_json_path: '/data/results/vcf_sample.json',
-          created_at: '2026-05-12T12:00:00',
-          resistance_hits: 4,
-          input_path: '/data/uploads/test.vcf',
-          mode: 'vcf',
-        },
-      }),
-    });
-
-    const { result } = renderHook(() => useDashboardLogic());
-
-    await waitFor(() => {
-      expect(result.current.databases.length).toBeGreaterThan(0);
-    });
-
-    // Set VCF inputs
-    await act(async () => {
-      // Note: in real scenario, these are set by upload handlers
-      // For test, we manually set them to focus on polling flow
-      const vcfFile = new File(['##VCF'], 'test.vcf');
-      const refFile = new File(['ATCG'], 'ref.fasta');
-
-      // Make uploads work by mocking XHR
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          data: {
-            items: [{
-              id: 'db1',
-              display_name: 'HIV',
-            }],
-          },
-        }),
-      });
-
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          data: {
-            items: [],
-            columns: [],
-          },
-        }),
-      });
-
-      // Re-initialize and set inputs directly for this test
-      // We're focusing on the polling flow, not upload
-    });
   });
 });

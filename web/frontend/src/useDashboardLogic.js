@@ -143,7 +143,7 @@ function buildHeaders(baseHeaders = {}) {
   };
 }
 
-function buildApiUrl(path, params = {}) {
+export function buildApiUrl(path, params = {}) {
   // Drop empty query params so generated URLs stay compact and predictable.
   const filteredParams = Object.fromEntries(
     Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== '')
@@ -153,7 +153,7 @@ function buildApiUrl(path, params = {}) {
   return queryString ? `${API_BASE}${path}?${queryString}` : `${API_BASE}${path}`;
 }
 
-function formatUserError(message) {
+export function formatUserError(message) {
   // Convert backend/internal error wording into actionable UI-friendly messages.
   const lines = String(message || '')
     .split('\n')
