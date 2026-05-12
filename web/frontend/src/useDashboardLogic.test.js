@@ -248,6 +248,12 @@ describe('useDashboardLogic - Job Polling Flow', () => {
   });
 
   it('should poll job until completion with succeeded status', async () => {
+    // Setup: ui/config is fetched before databases on init
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: {} }),
+    });
+
     // Setup: Initialize with a database
     global.fetch.mockResolvedValueOnce({
       ok: true,
@@ -337,6 +343,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
   });
 
   it('should handle job polling with failed status', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: {} }),
+    });
+
     // Setup: Initialize with a database
     global.fetch.mockResolvedValueOnce({
       ok: true,
@@ -400,6 +411,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
   });
 
   it('should cancel active job via DELETE request', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: {} }),
+    });
+
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({
@@ -469,6 +485,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
   });
 
   it('should update job status during polling transitions', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: {} }),
+    });
+
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({
@@ -558,6 +579,11 @@ describe('useDashboardLogic - Report Display Flow', () => {
   it('should set report path when job succeeds', async () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
+      json: () => Promise.resolve({ data: {} }),
+    });
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
       json: () => Promise.resolve({
         data: {
           items: [{
@@ -640,10 +666,15 @@ describe('useDashboardLogic - Report Display Flow', () => {
 
     expect(reportUrl).toContain('/api/report');
     expect(reportUrl).toContain('path=');
-    expect(reportUrl).toContain('/data/results/test.report.html');
+    expect(decodeURIComponent(reportUrl)).toContain('/data/results/test.report.html');
   });
 
   it('should display multiple report options in order (newest first)', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: {} }),
+    });
+
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({
