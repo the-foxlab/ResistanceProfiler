@@ -332,18 +332,19 @@ describe('useDashboardLogic - Job Polling Flow', () => {
       await result.current.runSelectedProfile();
     });
 
-    // Verify job was submitted
-    expect(result.current.activeJobId).toBe('job-123');
+    // Verify job submission request used FASTA endpoint
+    expect(global.fetch.mock.calls.some(([url, options]) => (
+      String(url).includes('/api/profile/fasta') && options?.method === 'POST'
+    ))).toBe(true);
 
     // Verify status transitions in polling
     await waitFor(() => {
-      expect(result.current.sessionResults.length).toBe(1);
+      expect(result.current.reportOptions.length).toBe(1);
     });
 
     // Verify result was stored
-    const lastResult = result.current.sessionResults[0];
-    expect(lastResult.report_html_path).toBe('/data/results/test.report.html');
-    expect(lastResult.sample_name).toBe('test_sample');
+    expect(result.current.reportOptions[0].path).toBe('/data/results/test.report.html');
+    expect(result.current.reportOptions[0].label).toContain('test_sample');
   });
 
   it('should handle job polling with failed status', async () => {
@@ -414,7 +415,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     });
 
     // Verify status reflects failure
-    expect(result.current.status).toMatch(/failed|error/);
+    expect(result.current.status).toContain('Unsupported FASTA format');
     expect(result.current.isProfileBusy).toBe(false);
   });
 
@@ -478,7 +479,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     });
 
     await waitFor(() => {
-      expect(result.current.activeJobId).toBe('job-to-cancel');
+      expect(result.current.canCancelJob).toBe(true);
     });
 
     // Now cancel
@@ -493,7 +494,13 @@ describe('useDashboardLogic - Job Polling Flow', () => {
       await result.current.cancelActiveJob();
     });
 
-    expect(result.current.activeJobStatus).toBe('canceling');
+    await waitFor(() => {
+      expect(result.current.status).toContain('cancellation requested');
+    });
+
+    expect(global.fetch.mock.calls.some(([url, options]) => (
+      url.includes('/api/jobs/job-to-cancel') && options?.method === 'DELETE'
+    ))).toBe(true);
   });
 
   it('should update job status during polling transitions', async () => {
@@ -524,43 +531,53 @@ describe('useDashboardLogic - Job Polling Flow', () => {
       }),
     });
 
-    // Job submission
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        job_id: 'job-status-test',
-      }),
-    });
-
     // Polling: track status transitions
     const statuses = ['queued', 'running', 'running', 'succeeded'];
     let pollCount = 0;
 
-    global.fetch.mockImplementation(() => {
-      const status = statuses[pollCount];
-      pollCount += 1;
+    global.fetch.mockImplementation((url) => {
+      const requestUrl = String(url);
 
-      if (status === 'succeeded') {
+      if (requestUrl.includes('/api/profile/fasta')) {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            status: 'succeeded',
-            result: {
-              sample_name: 'test',
-              reference_name: 'ref',
-              database_id: 'db1',
-              report_html_path: '/data/test.html',
-              created_at: '2026-05-12T10:00:00',
-              resistance_hits: 0,
-              mode: 'fasta',
-            },
+            job_id: 'job-status-test',
           }),
+        });
+      }
+
+      if (requestUrl.includes('/api/jobs/job-status-test')) {
+        const status = statuses[pollCount] || 'succeeded';
+        pollCount += 1;
+
+        if (status === 'succeeded') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({
+              status: 'succeeded',
+              result: {
+                sample_name: 'test',
+                reference_name: 'ref',
+                database_id: 'db1',
+                report_html_path: '/data/test.html',
+                created_at: '2026-05-12T10:00:00',
+                resistance_hits: 0,
+                mode: 'fasta',
+              },
+            }),
+          });
+        }
+
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ status }),
         });
       }
 
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve({ status }),
+        json: () => Promise.resolve({ data: {} }),
       });
     });
 
@@ -578,7 +595,8 @@ describe('useDashboardLogic - Job Polling Flow', () => {
       await result.current.runSelectedProfile();
     });
 
-    expect(result.current.activeJobStatus).toBe('queued');
+    const pollCalls = global.fetch.mock.calls.filter(([url]) => String(url).includes('/api/jobs/job-status-test'));
+    expect(pollCalls.length).toBeGreaterThanOrEqual(3);
   });
 });
 
@@ -593,60 +611,72 @@ describe('useDashboardLogic - Report Display Flow', () => {
   });
 
   it('should set report path when job succeeds', async () => {
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: {} }),
-    });
+    global.fetch.mockImplementation((url, options = {}) => {
+      const request_url = String(url);
 
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [{
-            id: 'db1',
-            display_name: 'HIV',
-          }],
-        },
-      }),
-    });
+      if (request_url.includes('/api/ui/config')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ data: {} }),
+        });
+      }
 
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [],
-          columns: [],
-        },
-      }),
-    });
+      if (request_url.includes('/api/databases')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            data: {
+              items: [{ id: 'db1', display_name: 'HIV' }],
+            },
+          }),
+        });
+      }
 
-    // Job submission
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        job_id: 'job-report',
-      }),
-    });
+      if (request_url.includes('/api/mutations')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            data: {
+              items: [],
+              columns: [],
+            },
+          }),
+        });
+      }
 
-    // Polling: immediate success
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        status: 'succeeded',
-        result: {
-          sample_name: 'sample1',
-          reference_name: 'HIV',
-          database_id: 'db1',
-          report_html_path: '/data/results/sample1.report.html',
-          report_json_path: '/data/results/sample1.report.json',
-          report_tabular_path: '/data/results/sample1.mutations.tsv',
-          report_pdf_path: '/data/results/sample1.report.pdf',
-          created_at: '2026-05-12T14:30:00',
-          resistance_hits: 3,
-          input_path: '/data/uploads/sample1.fasta',
-          mode: 'fasta',
-        },
-      }),
+      if (request_url.includes('/api/profile/fasta') && options.method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ job_id: 'job-report' }),
+        });
+      }
+
+      if (request_url.includes('/api/jobs/job-report')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            status: 'succeeded',
+            result: {
+              sample_name: 'sample1',
+              reference_name: 'HIV',
+              database_id: 'db1',
+              report_html_path: '/data/results/sample1.report.html',
+              report_json_path: '/data/results/sample1.report.json',
+              report_tabular_path: '/data/results/sample1.mutations.tsv',
+              report_pdf_path: '/data/results/sample1.report.pdf',
+              created_at: '2026-05-12T14:30:00',
+              resistance_hits: 3,
+              input_path: '/data/uploads/sample1.fasta',
+              mode: 'fasta',
+            },
+          }),
+        });
+      }
+
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({}),
+      });
     });
 
     const { result } = renderHook(() => useDashboardLogic());
@@ -659,13 +689,19 @@ describe('useDashboardLogic - Report Display Flow', () => {
       result.current.setActiveProfileMode('fasta');
     });
 
+    await waitFor(() => {
+      expect(result.current.activeProfileMode).toBe('fasta');
+    });
+
     await act(async () => {
       await result.current.runSelectedProfile();
     });
 
     // Verify report paths are set
-    expect(result.current.selectedProfileReportPath).toBe('/data/results/sample1.report.html');
-    expect(result.current.inlineReportPath).toBe('/data/results/sample1.report.html');
+    await waitFor(() => {
+      expect(result.current.selectedProfileReportPath).toBe('/data/results/sample1.report.html');
+      expect(result.current.inlineReportPath).toBe('/data/results/sample1.report.html');
+    });
     expect(result.current.inlineReportLabel).toContain('sample1');
   });
 
@@ -690,55 +726,90 @@ describe('useDashboardLogic - Report Display Flow', () => {
   });
 
   it('should display multiple report options in order (newest first)', async () => {
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ data: {} }),
-    });
+    let profileSubmissionCount = 0;
 
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [{
-            id: 'db1',
-            display_name: 'HIV',
-          }],
-        },
-      }),
-    });
+    global.fetch.mockImplementation((url, options = {}) => {
+      const request_url = String(url);
 
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        data: {
-          items: [],
-          columns: [],
-        },
-      }),
-    });
+      if (request_url.includes('/api/ui/config')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ data: {} }),
+        });
+      }
 
-    // First job submission
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        job_id: 'job-1',
-      }),
-    });
+      if (request_url.includes('/api/databases')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            data: {
+              items: [{ id: 'db1', display_name: 'HIV' }],
+            },
+          }),
+        });
+      }
 
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        status: 'succeeded',
-        result: {
-          sample_name: 'sample1',
-          reference_name: 'HIV',
-          database_id: 'db1',
-          report_html_path: '/data/results/sample1.html',
-          created_at: '2026-05-12T10:00:00',
-          resistance_hits: 1,
-          mode: 'fasta',
-        },
-      }),
+      if (request_url.includes('/api/mutations')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            data: {
+              items: [],
+              columns: [],
+            },
+          }),
+        });
+      }
+
+      if (request_url.includes('/api/profile/fasta') && options.method === 'POST') {
+        profileSubmissionCount += 1;
+        const job_id = profileSubmissionCount === 1 ? 'job-1' : 'job-2';
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ job_id }),
+        });
+      }
+
+      if (request_url.includes('/api/jobs/job-1')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            status: 'succeeded',
+            result: {
+              sample_name: 'sample1',
+              reference_name: 'HIV',
+              database_id: 'db1',
+              report_html_path: '/data/results/sample1.html',
+              created_at: '2026-05-12T10:00:00',
+              resistance_hits: 1,
+              mode: 'fasta',
+            },
+          }),
+        });
+      }
+
+      if (request_url.includes('/api/jobs/job-2')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            status: 'succeeded',
+            result: {
+              sample_name: 'sample2',
+              reference_name: 'HIV',
+              database_id: 'db1',
+              report_html_path: '/data/results/sample2.html',
+              created_at: '2026-05-12T11:00:00',
+              resistance_hits: 2,
+              mode: 'fasta',
+            },
+          }),
+        });
+      }
+
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({}),
+      });
     });
 
     const { result } = renderHook(() => useDashboardLogic());
@@ -756,38 +827,16 @@ describe('useDashboardLogic - Report Display Flow', () => {
       await result.current.runSelectedProfile();
     });
 
-    // Setup second job
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        job_id: 'job-2',
-      }),
-    });
-
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({
-        status: 'succeeded',
-        result: {
-          sample_name: 'sample2',
-          reference_name: 'HIV',
-          database_id: 'db1',
-          report_html_path: '/data/results/sample2.html',
-          created_at: '2026-05-12T11:00:00',
-          resistance_hits: 2,
-          mode: 'fasta',
-        },
-      }),
-    });
-
     // Run second job
     await act(async () => {
       await result.current.runSelectedProfile();
     });
 
     // Verify both results are stored and ordered (newest first)
-    expect(result.current.sessionResults.length).toBe(2);
-    expect(result.current.reportOptions.length).toBe(2);
+    await waitFor(() => {
+      expect(result.current.reportOptions.length).toBe(2);
+    });
+
     expect(result.current.reportOptions[0].label).toContain('sample2');
     expect(result.current.reportOptions[1].label).toContain('sample1');
   });
