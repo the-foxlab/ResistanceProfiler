@@ -47,13 +47,9 @@ def match_query_to_genes(
     """
     Match a query nucleotide sequence against internal gene CDS sequences.
 
-    A match is accepted when ``identity >= min_identity`` AND at least one of:
-
-    - ``cds_coverage >= min_coverage`` — the alignment covers enough of the CDS
-      (typical for full-length query sequences such as whole-genome FASTAs)
-    - ``query_coverage >= min_coverage`` — the query is almost entirely consumed
-      by the alignment (correct for short partial sequences such as Sanger reads
-      or amplicons that span only part of a gene)
+    A match is accepted when ``identity >= min_identity``. Coverage metrics
+    (``cds_coverage`` and ``query_coverage``) are computed and used as tiebreakers
+    during reference selection, but are not enforced as hard filters.
 
     The ``aligner`` parameter selects the alignment backend:
 
@@ -69,7 +65,8 @@ def match_query_to_genes(
     :param query_sequence: user-provided nucleotide sequence
     :param genes: gene records to screen (typically only those with rules)
     :param min_identity: minimum nucleotide identity to accept
-    :param min_coverage: minimum CDS or query coverage fraction required
+    :param min_coverage: minimum coverage threshold used as tiebreaker in reference
+        selection, not as a hard filter for match acceptance
     :param threads: number of workers; used as process count for ``'pairwise'`` and as
         thread count (``n_threads``) for ``'mappy'``
     :param aligner: alignment backend to use (``'pairwise'`` or ``'mappy'``)
@@ -227,12 +224,8 @@ def _match_with_mappy(
         identity = h.mlen / h.blen if h.blen else 0.0
         cds_coverage = (h.q_en - h.q_st) / len(cds)
         query_coverage = (h.r_en - h.r_st) / len(query_upper)
-
         if identity < min_identity:
-            logger.debug('%s — Gene %r: identity %.2f below threshold', gene.reference_accession, gene.name, identity)
-            continue
-        if cds_coverage < min_coverage and query_coverage < min_coverage:
-            logger.debug('%s — Gene %r: coverage %.2f/%.2f below threshold', gene.reference_accession, gene.name, cds_coverage, query_coverage)
+            logger.debug('%s — Gene %r: identity %.2f below threshold', gene.reference_accession or str(gene.reference_id), gene.name, identity)
             continue
 
         strand = '+' if h.strand == 1 else '-'
@@ -551,12 +544,9 @@ def _align_gene_worker(
             cds_start=best.cds_start,
         )
 
-    # Accept when identity passes AND either coverage metric meets the threshold.
-    # query_coverage handles short partial sequences (Sanger reads, amplicons)
-    # that fully consume the query but cover only part of the CDS.
+    # Accept when identity passes. Coverage is computed but not enforced as a
+    # hard filter; coverage metrics are used as tiebreakers during reference selection.
     if best.identity < min_identity:
-        return None
-    if best.cds_coverage < min_coverage and best.query_coverage < min_coverage:
         return None
 
     return GeneMatch(

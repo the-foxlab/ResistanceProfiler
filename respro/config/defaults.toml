@@ -21,7 +21,7 @@ github_respro_db_raw = 'https://raw.githubusercontent.com/jonas-fuchs/respro-db/
 doi_prefixes = ['https://doi.org/', 'http://doi.org/']
 
 [alignment]
-min_identity = 0.85
+min_identity = 0.90
 min_coverage = 0.9
 
 [matching]

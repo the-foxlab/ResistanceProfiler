@@ -156,7 +156,7 @@ def pick_best_reference_id(matches: list[GeneMatch]) -> int:
     Select the most likely internal reference from FASTA gene matches.
 
     The best single gene match defines the reference. Sorting keys are:
-    identity desc, coverage desc, gene id asc.
+    identity desc, cds_coverage desc, query_coverage desc, gene name asc (lexicographic).
 
     :param matches: accepted gene matches
     :return: internal reference id
@@ -164,7 +164,7 @@ def pick_best_reference_id(matches: list[GeneMatch]) -> int:
     if not matches:
         raise ValueError('No FASTA gene matches available for reference selection')
 
-    best = max(matches, key=lambda m: (m.identity, m.cds_coverage, -m.gene.id))
+    best = max(matches, key=lambda m: (m.identity, m.cds_coverage, m.query_coverage, m.gene.name))
     return best.gene.reference_id
 
 
