@@ -17,6 +17,7 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 
+from respro.config.cli_settings import CLI_CONFIG
 from respro.core.annotation import assign_af_bins
 from respro.core.query import pick_best_reference_id, select_matches_for_reference
 from respro.core.rules import load_formula_rules, load_rules, match_formula_rules, match_rules
@@ -240,7 +241,11 @@ def _finalize_and_export(
     """
     annotations = _suppress_ruleless_overlap_annotations(ctx.annotations, ctx.rule_gene_names)
     annotations = match_rules(annotations, ctx.rules)
-    formula_hits = match_formula_rules(annotations, ctx.formula_rules)
+    formula_hits = match_formula_rules(
+        annotations,
+        ctx.formula_rules,
+        member_af_threshold=float(CLI_CONFIG.matching.combination_member_af_threshold),
+    )
     annotations = assign_af_bins(annotations, bins=ctx.af_bins)
 
     reference_row = project_conn.execute(
