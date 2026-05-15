@@ -13,7 +13,8 @@ from markupsafe import Markup, escape
 
 from respro import __version__
 from respro.core.annotation import classify_similarity
-from respro.db._rules_formula import _FORMULA_OPERATORS as _LOGIC_OPERATORS, _RE_FORMULA_TOKEN as _RE_LOGIC_TOKEN
+from respro.db._rules_formula import _FORMULA_OPERATORS as _LOGIC_OPERATORS
+from respro.db._rules_formula import _RE_FORMULA_TOKEN as _RE_LOGIC_TOKEN
 from respro.db.models import (
     AnnotatedVariant,
     CoverageGap,

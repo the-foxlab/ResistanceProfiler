@@ -15,7 +15,7 @@ import sqlite3
 
 import mappy
 
-from respro.db.models import GeneMatch, GeneRecord, GeneSegment
+from respro.db.models import GeneMatch, GeneRecord
 from respro.io.reference import load_gene_segments_by_gene_id
 
 logger = logging.getLogger(__name__)

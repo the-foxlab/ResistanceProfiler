@@ -13,9 +13,9 @@ from rich.console import Console
 from rich.panel import Panel
 
 from respro.cli.profile_helpers import (
-    _ProfilingRunContext,
     _finalize_and_export,
     _load_reference_data,
+    _ProfilingRunContext,
 )
 from respro.core.query import resolve_cached_query_reference
 from respro.db.models import AnnotatedVariant, GeneMatch, VariantCall

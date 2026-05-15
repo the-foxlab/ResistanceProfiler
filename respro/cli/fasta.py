@@ -13,12 +13,12 @@ import typer
 from rich.console import Console
 
 from respro.cli.profile_helpers import (
-    _ProfilingRunContext,
     _finalize_and_export,
     _init_results_db_connection,
     _load_reference_data,
     _parse_export_formats,
     _print_completion_panel,
+    _ProfilingRunContext,
     _resolve_reference,
 )
 from respro.core.annotation import annotate_variants
