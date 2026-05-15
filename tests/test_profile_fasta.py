@@ -24,7 +24,6 @@ from respro.core.alignment import (
 )
 from respro.core.annotation import annotate_variants
 from respro.core.fasta_to_vcf import (
-    _make_variant,
     _make_variant_from_coding_nt,
     _variants_from_alignment,
     fasta_to_vcf,
@@ -35,7 +34,6 @@ from respro.core.query import (
 )
 from respro.core.vcf_remap import (
     _build_query_to_cds_map,
-    _cds_pos_to_genomic_pos,
     remap_variants,
 )
 from respro.db.models import GeneMatch, GeneRecord, GeneSegment, VariantCall
@@ -200,32 +198,32 @@ class TestBuildQueryToCdsMap:
         # CDS pos 9 → RC pos 19 → fwd pos 99-19 = 80
         assert q2c[80] == 9
 
-class TestCdsPosToGenomic:
+class TestCdsToGenomicPosition:
     def test_forward_strand(self) -> None:
         gene = GeneRecord(
             id=1, reference_id=1, name='g', protein='',
             start=10, end=40, strand='+', codon_start=0,
         )
-        assert _cds_pos_to_genomic_pos(gene, 0) == 10
-        assert _cds_pos_to_genomic_pos(gene, 29) == 39
+        assert gene.cds_to_genomic_position(0) == 10
+        assert gene.cds_to_genomic_position(29) == 39
 
     def test_reverse_strand(self) -> None:
         gene = GeneRecord(
             id=1, reference_id=1, name='g', protein='',
             start=10, end=40, strand='-', codon_start=0,
         )
-        assert _cds_pos_to_genomic_pos(gene, 0) == 39
-        assert _cds_pos_to_genomic_pos(gene, 29) == 10
+        assert gene.cds_to_genomic_position(0) == 39
+        assert gene.cds_to_genomic_position(29) == 10
 
-    def test_roundtrip_with_nt_offset(self) -> None:
-        """cds_pos_to_genomic_0based should be the inverse of GeneRecord.nt_offset."""
+    def test_roundtrip(self) -> None:
+        """cds_to_genomic_position and genomic_to_cds_position should be inverses."""
         gene = GeneRecord(
             id=1, reference_id=1, name='g', protein='',
             start=5, end=35, strand='+', codon_start=0,
         )
         for cds in range(30):
-            genomic = _cds_pos_to_genomic_pos(gene, cds)
-            assert gene.nt_offset(genomic) == cds
+            genomic = gene.cds_to_genomic_position(cds)
+            assert gene.genomic_to_cds_position(genomic) == cds
 
     def test_roundtrip_reverse_strand(self) -> None:
         gene = GeneRecord(
@@ -233,8 +231,8 @@ class TestCdsPosToGenomic:
             start=5, end=35, strand='-', codon_start=0,
         )
         for cds in range(30):
-            genomic = _cds_pos_to_genomic_pos(gene, cds)
-            assert gene.nt_offset(genomic) == cds
+            genomic = gene.cds_to_genomic_position(cds)
+            assert gene.genomic_to_cds_position(genomic) == cds
 
     def test_split_gene_roundtrip_forward_strand(self) -> None:
         gene = _split_gene(strand='+')
@@ -242,15 +240,15 @@ class TestCdsPosToGenomic:
         assert gene.contains(0)
         assert gene.contains(12)
         assert not gene.contains(6)
-        assert gene.nt_offset(0) == 0
-        assert gene.nt_offset(5) == 5
-        assert gene.nt_offset(12) == 6
-        assert gene.nt_offset(17) == 11
-        assert gene.nt_offset(6) is None
-        assert _cds_pos_to_genomic_pos(gene, 0) == 0
-        assert _cds_pos_to_genomic_pos(gene, 5) == 5
-        assert _cds_pos_to_genomic_pos(gene, 6) == 12
-        assert _cds_pos_to_genomic_pos(gene, 11) == 17
+        assert gene.genomic_to_cds_position(0) == 0
+        assert gene.genomic_to_cds_position(5) == 5
+        assert gene.genomic_to_cds_position(12) == 6
+        assert gene.genomic_to_cds_position(17) == 11
+        assert gene.genomic_to_cds_position(6) is None
+        assert gene.cds_to_genomic_position(0) == 0
+        assert gene.cds_to_genomic_position(5) == 5
+        assert gene.cds_to_genomic_position(6) == 12
+        assert gene.cds_to_genomic_position(11) == 17
 
     def test_split_gene_roundtrip_reverse_strand(self) -> None:
         gene = _split_gene(strand='-')
@@ -258,24 +256,22 @@ class TestCdsPosToGenomic:
         assert gene.contains(0)
         assert gene.contains(17)
         assert not gene.contains(6)
-        assert gene.nt_offset(17) == 0
-        assert gene.nt_offset(12) == 5
-        assert gene.nt_offset(5) == 6
-        assert gene.nt_offset(0) == 11
-        assert gene.nt_offset(6) is None
-        assert _cds_pos_to_genomic_pos(gene, 0) == 17
-        assert _cds_pos_to_genomic_pos(gene, 5) == 12
-        assert _cds_pos_to_genomic_pos(gene, 6) == 5
-        assert _cds_pos_to_genomic_pos(gene, 11) == 0
+        assert gene.genomic_to_cds_position(17) == 0
+        assert gene.genomic_to_cds_position(12) == 5
+        assert gene.genomic_to_cds_position(5) == 6
+        assert gene.genomic_to_cds_position(0) == 11
+        assert gene.genomic_to_cds_position(6) is None
+        assert gene.cds_to_genomic_position(0) == 17
+        assert gene.cds_to_genomic_position(5) == 12
+        assert gene.cds_to_genomic_position(6) == 5
+        assert gene.cds_to_genomic_position(11) == 0
 
 class TestSplitGeneFastaProjection:
     def test_synthetic_variant_projection_uses_segment_coordinates(self) -> None:
         gene = _split_gene(strand='+')
 
-        codon_variant = _make_variant(gene, 2, 'G', 'A')
         nt_variant = _make_variant_from_coding_nt(gene, 7, 'G', 'A')
 
-        assert codon_variant.pos == 12
         assert nt_variant.pos == 13
 
 # ──────────────────────────────────────────────────────────────────────

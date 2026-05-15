@@ -103,15 +103,6 @@ class GeneRecord:
         """
         return self.genomic_to_cds_position(pos) is not None
 
-    def nt_offset(self, pos: int) -> int | None:
-        """
-        Return 0-based nucleotide offset within the gene.
-
-        :param pos: 0-based genomic position
-        :return: 0-based offset within the gene
-        """
-        return self.genomic_to_cds_position(pos)
-
     def codon_index(self, pos: int) -> int | None:
         """
         Return 0-based codon index for a 0-based genomic position.
@@ -119,7 +110,7 @@ class GeneRecord:
         :param pos: 0-based genomic position
         :return: 0-based codon index
         """
-        nt_offset = self.nt_offset(pos)
+        nt_offset = self.genomic_to_cds_position(pos)
         if nt_offset is None:
             return None
         return (nt_offset - self.codon_start) // 3
@@ -131,7 +122,7 @@ class GeneRecord:
         :param pos: 0-based genomic position
         :return: 0-based position within codon
         """
-        nt_offset = self.nt_offset(pos)
+        nt_offset = self.genomic_to_cds_position(pos)
         if nt_offset is None:
             return None
         return (nt_offset - self.codon_start) % 3

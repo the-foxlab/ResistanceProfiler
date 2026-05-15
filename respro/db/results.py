@@ -128,18 +128,11 @@ def project_updated_at(project_conn: sqlite3.Connection) -> str:
     """
     Return the last-updated timestamp of the project database.
 
-    Falls back to an empty string for older DBs that lack the column.
-
     :param project_conn: open project DB connection
     :return: ISO timestamp string or empty string
     """
-    try:
-        row = project_conn.execute('SELECT updated_at FROM project LIMIT 1').fetchone()
-        return row['updated_at'] or '' if row else ''
-    except sqlite3.OperationalError as exc:
-        if 'no such column: updated_at' in str(exc).lower():
-            return ''
-        raise
+    row = project_conn.execute('SELECT updated_at FROM project LIMIT 1').fetchone()
+    return row['updated_at'] or '' if row else ''
 
 
 def list_runs(results_conn: sqlite3.Connection) -> list[dict]:
@@ -592,7 +585,6 @@ def load_run_from_json(
     run_dict = dict(run_dict)
     run_dict.setdefault('project_db_path', '')
     run_dict.setdefault('project_fingerprint', '')
-    run_dict.setdefault('project_updated_at', '')
     run_dict.setdefault('formula_hits', len(formula_rows))
     run_dict.setdefault('status', 'complete')
 

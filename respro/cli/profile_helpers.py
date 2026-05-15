@@ -10,12 +10,14 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
 from rich.console import Console
 from rich.panel import Panel
 
+from respro.core.annotation import assign_af_bins
 from respro.core.query import pick_best_reference_id, select_matches_for_reference
 from respro.core.rules import load_formula_rules, load_rules, match_formula_rules, match_rules
 from respro.db.models import AnnotatedVariant, CoverageGap, GeneMatch, ProfilingResult
@@ -188,62 +190,58 @@ def _suppress_ruleless_overlap_annotations(
     return filtered
 
 
+@dataclass
+class _ProfilingRunContext:
+    """Pipeline data assembled before finalization and export."""
+
+    annotations: list[AnnotatedVariant]
+    formula_rules: list
+    genes: list
+    rule_gene_names: set[str]
+    rules: list
+    total_variants: int
+    variants_in_cds: int
+    coverage_gaps: list[CoverageGap]
+    query_sequence: str
+    gene_matches: list[GeneMatch]
+    af_bins: dict[str, tuple[float, float]] | None
+
+
 def _finalize_and_export(
-    annotations: list,
-    formula_rules: list,
+    ctx: _ProfilingRunContext,
     project_conn: sqlite3.Connection,
     ref_id: int,
     project_name: str,
     ref_name: str,
     sample: str,
     input_basename: str,
-    total_variants: int,
-    variants_in_cds: int,
     output_target: Path,
-    genes: list,
-    rule_gene_names: set[str],
-    rules: list,
     results_conn: sqlite3.Connection | None,
     project_path: Path,
     logger: logging.Logger,
-    af_bins: dict[str, tuple[float, float]] | None = None,
-    coverage_gaps: list[CoverageGap] | None = None,
-    query_sequence: str = '',
-    gene_matches: list[GeneMatch] | None = None,
     extra_export_formats: set[str] | None = None,
 ) -> tuple[ProfilingResult, dict]:
     """
     Apply rule matching and AF binning, build the result object, export, and optionally persist.
 
-    :param annotations: list of annotated variants
-    :param formula_rules: formula rules
+    :param ctx: pipeline data assembled from the profiling run
     :param project_conn: open project database connection
     :param ref_id: internal reference id
     :param project_name: project name for the report
     :param ref_name: resolved reference name
     :param sample: sample name
     :param input_basename: filename of the input VCF or FASTA
-    :param total_variants: total variant count
-    :param variants_in_cds: variant count within CDS regions
     :param output_target: output path option; interpreted as directory or explicit HTML file
-    :param genes: gene list for the reference
-    :param rule_gene_names: set of gene names covered by any rule
-    :param rules: resistance rules for the reference
     :param results_conn: open results database connection, or None
     :param project_path: path to the project database file
     :param logger: logger instance
-    :param af_bins: optional custom AF bin thresholds; defaults to VCF-mode bins
-    :param coverage_gaps: optional list of non-covered codon positions (FASTA mode)
-    :param query_sequence: query FASTA sequence used during profiling
-    :param gene_matches: gene alignment matches used during profiling
     :param extra_export_formats: optional additional output formats ('json', 'tabular', 'pdf')
     :return: (ProfilingResult, export path dict)
     """
-    # Filter out spurious annotations for ruleless genes when overlapping with ruled genes.
-    annotations = _suppress_ruleless_overlap_annotations(annotations, rule_gene_names)
-    annotations = match_rules(annotations, rules)
-    formula_hits = match_formula_rules(annotations, formula_rules)
-    annotations = assign_af_bins(annotations, bins=af_bins)
+    annotations = _suppress_ruleless_overlap_annotations(ctx.annotations, ctx.rule_gene_names)
+    annotations = match_rules(annotations, ctx.rules)
+    formula_hits = match_formula_rules(annotations, ctx.formula_rules)
+    annotations = assign_af_bins(annotations, bins=ctx.af_bins)
 
     reference_row = project_conn.execute(
         'SELECT organism, length FROM reference WHERE id = ?', (ref_id,)
@@ -258,14 +256,14 @@ def _finalize_and_export(
         reference_length_nt=reference_length_nt,
         sample_name=sample,
         vcf_name=input_basename,
-        total_variants=total_variants,
-        variants_in_cds=variants_in_cds,
+        total_variants=ctx.total_variants,
+        variants_in_cds=ctx.variants_in_cds,
         resistance_hits=sum(1 for a in annotations if a.is_resistance_hit),
         annotations=annotations,
         formula_hits=formula_hits,
-        coverage_gaps=coverage_gaps or [],
-        query_sequence=query_sequence,
-        gene_matches=gene_matches or [],
+        coverage_gaps=ctx.coverage_gaps,
+        query_sequence=ctx.query_sequence,
+        gene_matches=ctx.gene_matches,
     )
 
     raw_stem = Path(input_basename).stem.strip() or 'profile'
@@ -275,10 +273,10 @@ def _finalize_and_export(
     outputs = export_results(
         result,
         html_output_path.parent,
-        genes=genes,
-        rule_gene_names=rule_gene_names,
+        genes=ctx.genes,
+        rule_gene_names=ctx.rule_gene_names,
         project_conn=project_conn,
-        rules=rules,
+        rules=ctx.rules,
         extra_export_formats=extra_export_formats,
         project_db_path=project_path.resolve(),
         output_html_path=html_output_path,
@@ -289,39 +287,6 @@ def _finalize_and_export(
         logger.info('Run saved to results database with id %d', run_id)
 
     return result, outputs
-
-def assign_af_bins(
-    annotations: list[AnnotatedVariant],
-    bins: dict[str, tuple[float, float]] | None = None,
-) -> list[AnnotatedVariant]:
-    """
-    Assign an allele-frequency bin label to each annotated variant.
-
-    Mutates ``af_bin`` in place and returns the same list.
-
-    :param annotations: annotated variants to bin
-    :param bins: mapping of bin label to (lower_inclusive, upper_inclusive);
-        defaults to the built-in high/intermediate/low bins
-    :return: the same annotations list with af_bin populated
-    """
-    if bins is None:
-        bins = {
-            'high': (0.75, 1.0),
-            'intermediate': (0.25, 0.7499),
-            'low': (0.01, 0.2499),
-        }
-
-    # Sort bins by lower bound descending so higher bins are checked first
-    sorted_bins = sorted(bins.items(), key=lambda x: -x[1][0])
-
-    for ann in annotations:
-        af = ann.variant.allele_freq
-        for label, (lo, hi) in sorted_bins:
-            if lo <= af <= hi:
-                ann.af_bin = label
-
-    return annotations
-
 
 def _print_completion_panel(console: Console, title: str, result: ProfilingResult, outputs: dict) -> None:
     """Render a summary panel after a profiling run."""

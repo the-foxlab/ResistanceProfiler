@@ -4,16 +4,19 @@ Read-only query helpers for resistance rules — reusable without any CLI depend
 
 from __future__ import annotations
 
-import re
 import sqlite3
 
+from respro.db._rules_formula import _FORMULA_OPERATORS as _LOGIC_OPERATORS
+from respro.db._rules_formula import _RE_FORMULA_TOKEN as _RE_LOGIC_TOKEN
 from respro.db.models import is_internal_formula_component_drug_name
 
-_RE_LOGIC_TOKEN = re.compile(
-    r'\(|\)|\bAND\b|\bOR\b|\bNOT\b|\bXOR\b|[A-Za-z0-9_.:-]+',
-    re.IGNORECASE,
-)
-_LOGIC_OPERATORS = {'AND', 'OR', 'NOT', 'XOR'}
+
+def _is_empty_cell(value: object) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip() == ''
+    return False
 
 
 def list_rules_for_display(
@@ -78,18 +81,11 @@ def list_rules_for_display(
     if not row_dicts:
         return []
 
-    def _is_empty(value: object) -> bool:
-        if value is None:
-            return True
-        if isinstance(value, str):
-            return value.strip() == ''
-        return False
-
     column_names = list(row_dicts[0].keys())
     non_empty_columns = [
         column_name
         for column_name in column_names
-        if any(not _is_empty(row[column_name]) for row in row_dicts)
+        if any(not _is_empty_cell(row[column_name]) for row in row_dicts)
     ]
 
     return [
@@ -172,18 +168,11 @@ def list_formula_rules_for_display(
                 labels_by_formula_id[formula_id],
             )
 
-    def _is_empty(value: object) -> bool:
-        if value is None:
-            return True
-        if isinstance(value, str):
-            return value.strip() == ''
-        return False
-
     column_names = list(row_dicts[0].keys())
     non_empty_columns = [
         column_name
         for column_name in column_names
-        if any(not _is_empty(row[column_name]) for row in row_dicts)
+        if any(not _is_empty_cell(row[column_name]) for row in row_dicts)
     ]
 
     return [

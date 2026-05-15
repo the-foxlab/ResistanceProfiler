@@ -52,7 +52,7 @@ from respro.db.models import _INTERNAL_FORMULA_COMPONENT_DRUG_NAME
 logger = logging.getLogger(__name__)
 
 
-def _load_resistance_rules(
+def load_resistance_rules(
     conn: sqlite3.Connection,
     project_id: int,
     rules_tsv: Path,
@@ -444,7 +444,7 @@ def _load_resistance_rules(
     return count, grouped_ids, declared_external_ids, skipped_external_ids
 
 
-def _load_formula_rules(
+def load_formula_rules(
     conn: sqlite3.Connection,
     project_id: int,
     formula_rules_tsv: Path,

@@ -9,7 +9,6 @@ import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from respro.config.cli_settings import CLI_CONFIG
 from respro.db._rules_formula import _tokenize_formula_expression
 from respro.db._rules_publication import _report_publication_lookup_failures
 from respro.db.models import (
@@ -22,8 +21,10 @@ from respro.db.models import (
     is_internal_formula_component_drug_name,
 )
 from respro.db.rules_import import (
-    _load_formula_rules,
-    _load_resistance_rules,
+    load_formula_rules as _db_load_formula_rules,
+)
+from respro.db.rules_import import (
+    load_resistance_rules as _db_load_resistance_rules,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,7 @@ def import_rules_with_summary(
     )
     publication_lookup_failures: list[str] = []
 
-    single_rules, grouped_ids, declared_external_ids, skipped_external_ids = _load_resistance_rules(
+    single_rules, grouped_ids, declared_external_ids, skipped_external_ids = _db_load_resistance_rules(
         conn,
         project_id,
         rules_tsv,
@@ -84,7 +85,7 @@ def import_rules_with_summary(
         publication_lookup_failures=publication_lookup_failures,
     )
     if formula_rules_tsv is not None:
-        _load_formula_rules(
+        _db_load_formula_rules(
             conn,
             project_id,
             formula_rules_tsv,
@@ -392,11 +393,7 @@ def match_formula_rules(
     if not formula_rules:
         return []
 
-    threshold = (
-        float(member_af_threshold)
-        if member_af_threshold is not None
-        else float(CLI_CONFIG.matching.combination_member_af_threshold)
-    )
+    threshold = float(member_af_threshold) if member_af_threshold is not None else 0.75
 
     best_ann_by_member: dict[str, AnnotatedVariant] = {}
     for ann in annotations:

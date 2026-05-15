@@ -2,7 +2,8 @@
 Tests for codon-aware annotation logic.
 """
 
-from respro.cli.profile_helpers import _suppress_ruleless_overlap_annotations, assign_af_bins
+from respro.cli.profile_helpers import _suppress_ruleless_overlap_annotations
+from respro.core.annotation import assign_af_bins
 from respro.core.annotation import (
     _annotate_combined_snp_codon,
     _annotate_variant_in_gene,
