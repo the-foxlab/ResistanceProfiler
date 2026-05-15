@@ -185,6 +185,7 @@ CREATE TABLE IF NOT EXISTS query_gene_mapping (
     identity        REAL    NOT NULL,
     cds_coverage    REAL    NOT NULL DEFAULT 0,
     query_coverage  REAL    NOT NULL DEFAULT 0,
+    cds_start       INTEGER NOT NULL DEFAULT 0,
     query_start     INTEGER NOT NULL,
     query_end       INTEGER NOT NULL,
     strand          TEXT    NOT NULL DEFAULT '+',
@@ -428,6 +429,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
     },
     'query_gene_mapping': {
         'query_coverage': 'REAL NOT NULL DEFAULT 0',
+        'cds_start': 'INTEGER NOT NULL DEFAULT 0',
     },
 }
 

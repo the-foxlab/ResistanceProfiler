@@ -21,7 +21,7 @@ from respro.core.alignment import (
     sequence_checksum,
     store_mappings,
 )
-from respro.db.models import GeneRecord
+from respro.db.models import GeneMatch, GeneRecord
 from respro.db.schema import create_schema
 
 # ──────────────────────────────────────────────────────────────────────
@@ -291,6 +291,47 @@ class TestDbCaching:
         assert loaded[0].identity == pytest.approx(matches[0].identity)
         assert loaded[0].cds_coverage == pytest.approx(matches[0].cds_coverage)
         assert loaded[0].query_coverage == pytest.approx(matches[0].query_coverage)
+        assert loaded[0].cds_start == matches[0].cds_start
+
+    def test_store_and_load_preserves_nonzero_cds_start(self, project_db: Path) -> None:
+        from respro.db.schema import open_project_db
+        conn = open_project_db(project_db)
+
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='gag',
+            protein='Gag',
+            start=0,
+            end=30,
+            strand='+',
+            codon_start=0,
+            nt_sequence=_CDS_SEQ,
+            aa_sequence='MKAFGPKFGP',
+        )
+        match = [
+            GeneMatch(
+                gene=gene,
+                identity=1.0,
+                cds_coverage=0.8,
+                query_coverage=0.8,
+                query_start=0,
+                query_end=24,
+                strand='+',
+                cigar='24M',
+                cds_start=6,
+            )
+        ]
+        query = _CDS_SEQ[:24]
+        chk = sequence_checksum(query)
+        store_mappings(conn, 'test_ref_nonzero_start', query, chk, match)
+
+        loaded = load_cached_mappings(conn, chk)
+        conn.close()
+
+        assert loaded is not None
+        assert len(loaded) == 1
+        assert loaded[0].cds_start == 6
 
     def test_cache_miss_returns_none(self, project_db: Path) -> None:
         from respro.db.schema import open_project_db

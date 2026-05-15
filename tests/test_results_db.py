@@ -232,6 +232,16 @@ class TestProjectSchemaBoundary:
             'INSERT INTO resistance_rule (gene_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
             (1, 1, 1, 'E'),
         )
+        conn.execute(
+            'INSERT INTO query_reference (name, sequence, length, checksum) VALUES (?, ?, ?, ?)',
+            ('legacy_query_ref', 'ATGAAACCC', 9, 'legacy_checksum'),
+        )
+        conn.execute(
+            'INSERT INTO query_gene_mapping ('
+            'query_ref_id, gene_id, identity, cds_coverage, query_start, query_end, strand, cigar'
+            ') VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (1, 1, 0.95, 0.75, 0, 9, '+', '9M'),
+        )
         conn.commit()
         conn.close()
 
@@ -255,10 +265,21 @@ class TestProjectSchemaBoundary:
             'SELECT reference_identifier, reference, phenotype, clinical_phenotype '
             'FROM resistance_rule WHERE id = 1'
         ).fetchone()
+        mapping_count = migrated_conn.execute(
+            'SELECT COUNT(*) AS total FROM query_gene_mapping'
+        ).fetchone()
+        migrated_mapping_stats = migrated_conn.execute(
+            'SELECT COUNT(*) AS total, COALESCE(MAX(cds_start), 0) AS max_cds_start '
+            'FROM query_gene_mapping'
+        ).fetchone()
+        reference_count = migrated_conn.execute(
+            'SELECT COUNT(*) AS total FROM query_reference'
+        ).fetchone()
         migrated_conn.close()
 
         assert 'organism' in reference_columns
         assert 'query_coverage' in mapping_columns  # auto-added by optional migration
+        assert 'cds_start' in mapping_columns  # auto-added by optional migration
         assert 'reference_identifier' in rule_columns
         assert 'clinical_phenotype' in rule_columns
         assert migrated_reference is not None
@@ -270,6 +291,13 @@ class TestProjectSchemaBoundary:
         assert migrated_rule['reference'] == ''
         assert migrated_rule['phenotype'] == 'unknown'
         assert migrated_rule['clinical_phenotype'] == 'unknown'
+        assert migrated_mapping_stats is not None
+        assert int(migrated_mapping_stats['total']) == 1
+        assert int(migrated_mapping_stats['max_cds_start']) == 0
+        assert mapping_count is not None
+        assert int(mapping_count['total']) == 1
+        assert reference_count is not None
+        assert int(reference_count['total']) == 1
 
 
 class TestResultsDbSchema:
