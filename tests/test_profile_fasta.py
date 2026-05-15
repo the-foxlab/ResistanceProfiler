@@ -17,6 +17,7 @@ from typer.testing import CliRunner
 
 from respro.cli.main import app
 from respro.core.alignment import (
+    load_cached_mappings,
     match_query_to_genes,
     sequence_checksum,
     store_mappings,
@@ -546,6 +547,75 @@ class TestResolveCachedQueryReference:
         with pytest.raises(ValueError, match='ambiguous'):
             resolve_cached_query_reference(conn, 'dup_ref')
         conn.close()
+
+
+class TestFastaCacheRegression:
+    def test_cached_minus_strand_partial_coverage_matches_uncached(self, tmp_path: Path) -> None:
+        db_path = tmp_path / 'minus_cache_regression.db'
+        conn = create_schema(db_path)
+        conn.execute(
+            'INSERT INTO project (name, schema_version) VALUES (?, ?)',
+            ('Minus Cache Regression', 1),
+        )
+        conn.execute(
+            'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
+            (1, 'ref1', 18),
+        )
+        gene_nt = 'ATGCAAGTCGGAAACTAA'
+        conn.execute(
+            'INSERT INTO gene (reference_id, name, protein, start, end, strand, nt_sequence) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (1, 'minus_gene', 'Minus', 0, 18, '-', gene_nt),
+        )
+        conn.execute('UPDATE gene SET codon_start = ? WHERE id = ?', (1, 1))
+        conn.commit()
+
+        gene = GeneRecord(
+            id=1,
+            reference_id=1,
+            name='minus_gene',
+            protein='Minus',
+            start=0,
+            end=18,
+            strand='-',
+            codon_start=1,
+            nt_sequence=gene_nt,
+        )
+        coding_region = 'NNNNN' + gene_nt[6:]
+        query_seq = str(Seq(coding_region).reverse_complement())
+        direct_match = GeneMatch(
+            gene=gene,
+            identity=1.0,
+            cds_coverage=12 / 18,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=len(query_seq),
+            strand='-',
+            cigar='5I12M',
+            cds_start=6,
+        )
+
+        uncached_variants, uncached_gaps = fasta_to_vcf(query_seq, [direct_match])
+        assert not any(len(v.alt) > len(v.ref) for v in uncached_variants)
+
+        checksum = sequence_checksum(query_seq)
+        store_mappings(conn, 'minus_cached', query_seq, checksum, [direct_match])
+        loaded = load_cached_mappings(conn, checksum)
+        conn.close()
+
+        assert loaded is not None
+        assert len(loaded) == 1
+        assert loaded[0].cds_start == 6
+
+        cached_variants, cached_gaps = fasta_to_vcf(query_seq, loaded)
+
+        uncached_signature = sorted((v.pos, v.ref, v.alt) for v in uncached_variants)
+        cached_signature = sorted((v.pos, v.ref, v.alt) for v in cached_variants)
+        assert cached_signature == uncached_signature
+        assert [(g.gene_name, g.codon_start, g.codon_end) for g in cached_gaps] == [
+            (g.gene_name, g.codon_start, g.codon_end) for g in uncached_gaps
+        ]
+        assert not any(len(v.alt) > len(v.ref) for v in cached_variants)
 
 # ──────────────────────────────────────────────────────────────────────
 # CLI end-to-end: profile --ref-fasta

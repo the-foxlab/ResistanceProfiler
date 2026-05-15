@@ -326,7 +326,7 @@ def load_cached_mappings(
 
     rows = conn.execute(
         'SELECT qgm.gene_id, qgm.identity, qgm.cds_coverage, qgm.query_coverage, '
-        'qgm.query_start, qgm.query_end, qgm.strand, qgm.cigar, '
+        'qgm.cds_start, qgm.query_start, qgm.query_end, qgm.strand, qgm.cigar, '
         'g.reference_id, g.name, g.protein, g.start, g.end, g.strand AS gene_strand, '
         'g.codon_start, g.nt_sequence, g.aa_sequence, '
         'r.accession AS reference_accession '
@@ -361,6 +361,7 @@ def load_cached_mappings(
             identity=r['identity'],
             cds_coverage=r['cds_coverage'],
             query_coverage=r['query_coverage'],
+            cds_start=r['cds_start'],
             query_start=r['query_start'],
             query_end=r['query_end'],
             strand=r['strand'],
@@ -427,14 +428,15 @@ def store_mappings(
         conn.execute(
             'INSERT OR REPLACE INTO query_gene_mapping '
             '(query_ref_id, gene_id, identity, cds_coverage, query_coverage, '
-            'query_start, query_end, strand, cigar) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'cds_start, query_start, query_end, strand, cigar) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 qref_id,
                 match.gene.id,
                 match.identity,
                 match.cds_coverage,
                 match.query_coverage,
+                match.cds_start,
                 match.query_start,
                 match.query_end,
                 match.strand,
