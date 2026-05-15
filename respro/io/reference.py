@@ -33,6 +33,39 @@ def read_fasta(fasta_path: Path) -> dict[str, str]:
     return seqs
 
 
+def load_gene_segments_by_gene_id(
+    conn: sqlite3.Connection,
+    gene_ids: list[int],
+) -> dict[int, tuple[GeneSegment, ...]]:
+    """
+    Load gene segment records grouped by gene id.
+
+    :param conn: project database connection
+    :param gene_ids: list of gene ids to load segments for
+    :return: mapping from gene_id to ordered tuple of GeneSegment objects
+    """
+    if not gene_ids:
+        return {}
+
+    placeholders = ','.join(['?'] * len(gene_ids))
+    rows = conn.execute(
+        f'SELECT gene_id, segment_index, start, end FROM gene_segment '
+        f'WHERE gene_id IN ({placeholders}) ORDER BY gene_id, segment_index',
+        gene_ids,
+    ).fetchall()
+    grouped: dict[int, list[GeneSegment]] = {}
+    for row in rows:
+        gene_id = int(row['gene_id'])
+        grouped.setdefault(gene_id, []).append(
+            GeneSegment(
+                segment_index=int(row['segment_index']),
+                start=int(row['start']),
+                end=int(row['end']),
+            )
+        )
+    return {gene_id: tuple(items) for gene_id, items in grouped.items()}
+
+
 def load_genes_for_reference(conn: sqlite3.Connection, reference_id: int) -> list[GeneRecord]:
     """
     Load all gene records for a given reference.
@@ -48,25 +81,7 @@ def load_genes_for_reference(conn: sqlite3.Connection, reference_id: int) -> lis
     ).fetchall()
 
     gene_ids = [int(row['id']) for row in rows]
-    segments_by_gene: dict[int, tuple[GeneSegment, ...]] = {}
-    if gene_ids:
-        placeholders = ','.join(['?'] * len(gene_ids))
-        segment_rows = conn.execute(
-            f'SELECT gene_id, segment_index, start, end FROM gene_segment '
-            f'WHERE gene_id IN ({placeholders}) ORDER BY gene_id, segment_index',
-            gene_ids,
-        ).fetchall()
-        grouped: dict[int, list[GeneSegment]] = {}
-        for segment_row in segment_rows:
-            gene_id = int(segment_row['gene_id'])
-            grouped.setdefault(gene_id, []).append(
-                GeneSegment(
-                    segment_index=int(segment_row['segment_index']),
-                    start=int(segment_row['start']),
-                    end=int(segment_row['end']),
-                )
-            )
-        segments_by_gene = {gene_id: tuple(items) for gene_id, items in grouped.items()}
+    segments_by_gene = load_gene_segments_by_gene_id(conn, gene_ids)
 
     genes = [
         GeneRecord(

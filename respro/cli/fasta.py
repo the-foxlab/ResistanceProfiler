@@ -18,6 +18,7 @@ from respro.cli.profile_helpers import (
     _load_reference_data,
     _parse_export_formats,
     _print_completion_panel,
+    _ProfilingRunContext,
     _resolve_reference,
 )
 from respro.core.annotation import annotate_variants
@@ -139,28 +140,31 @@ def _profile_fasta_command(
             'low': (0.01, 0.34),
         }
 
-        result, outputs = _finalize_and_export(
+        ctx = _ProfilingRunContext(
             annotations=annotations,
             formula_rules=formula_rules,
+            genes=genes,
+            rule_gene_names=rule_gene_names,
+            rules=rules,
+            total_variants=len(annotations),
+            variants_in_cds=len(annotations),
+            coverage_gaps=coverage_gaps or [],
+            query_sequence=query_seq,
+            gene_matches=fasta_matches or [],
+            af_bins=fasta_af_bins,
+        )
+        result, outputs = _finalize_and_export(
+            ctx=ctx,
             project_conn=project_conn,
             ref_id=ref_id,
             project_name=project_row['name'],
             ref_name=ref_name,
             sample=sample,
             input_basename=input_display_name or consensus_fasta.name,
-            total_variants=len(annotations),
-            variants_in_cds=len(annotations),
             output_target=output,
-            genes=genes,
-            rule_gene_names=rule_gene_names,
-            rules=rules,
             results_conn=results_conn,
             project_path=project,
             logger=logger,
-            af_bins=fasta_af_bins,
-            coverage_gaps=coverage_gaps,
-            query_sequence=query_seq,
-            gene_matches=fasta_matches,
             extra_export_formats=export_formats,
         )
 

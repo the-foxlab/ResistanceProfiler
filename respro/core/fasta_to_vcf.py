@@ -22,6 +22,7 @@ import re
 
 from Bio.Seq import Seq
 
+from respro.core.vcf_coverage import _merge_codon_gaps
 from respro.db.models import CoverageGap, GeneMatch, GeneRecord, VariantCall
 
 logger = logging.getLogger(__name__)
@@ -326,31 +327,6 @@ def _deletion_run_within_coverage(
     return deletion_nt_start >= covered_cds_start and deletion_nt_end <= covered_cds_end
 
 
-def _merge_codon_gaps(gene_name: str, codon_indices: list[int]) -> list[CoverageGap]:
-    """
-    Merge a list of non-covered codon indices into contiguous CoverageGap stretches.
-
-    :param gene_name: gene the indices belong to
-    :param codon_indices: unsorted list of 0-based codon indices without coverage
-    :return: list of CoverageGap objects with merged codon ranges
-    """
-    if not codon_indices:
-        return []
-
-    sorted_indices = sorted(codon_indices)
-    gaps: list[CoverageGap] = []
-    start = sorted_indices[0]
-    end = sorted_indices[0]
-    for idx in sorted_indices[1:]:
-        if idx == end + 1:
-            end = idx
-        else:
-            gaps.append(CoverageGap(gene_name=gene_name, codon_start=start, codon_end=end))
-            start = idx
-            end = idx
-    gaps.append(CoverageGap(gene_name=gene_name, codon_start=start, codon_end=end))
-    return gaps
-
 
 def _codon_genomic_pos(gene: GeneRecord, codon_idx: int) -> int:
     """
@@ -380,25 +356,6 @@ def _coding_nt_genomic_pos(gene: GeneRecord, coding_nt_idx: int) -> int:
             f'Coding nucleotide index {coding_nt_idx} is outside CDS for gene {gene.name!r}'
         )
     return genomic_pos
-
-
-def _make_variant(
-    gene: GeneRecord,
-    codon_idx: int,
-    ref: str,
-    alt: str,
-    af: float = 1.0,
-) -> VariantCall:
-    """Build a synthetic VariantCall for a FASTA-derived amino acid difference."""
-    return VariantCall(
-        chrom=gene.name,
-        pos=_codon_genomic_pos(gene, codon_idx),
-        ref=ref,
-        alt=alt,
-        allele_freq=af,
-        depth=0,
-        filter_status='PASS',
-    )
 
 
 def _make_variant_from_coding_nt(

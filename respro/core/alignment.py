@@ -15,9 +15,12 @@ import sqlite3
 
 import mappy
 
-from respro.db.models import GeneMatch, GeneRecord, GeneSegment
+from respro.db.models import GeneMatch, GeneRecord
+from respro.io.reference import load_gene_segments_by_gene_id
 
 logger = logging.getLogger(__name__)
+
+_RE_CIGAR = re.compile(r'(\d+)([MIDNSHP=X])')
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -92,7 +95,7 @@ def load_genes_with_rules(
             (reference_id,),
         ).fetchall()
     gene_ids = [int(row['id']) for row in rows]
-    segments_by_gene = _load_gene_segments_by_gene_id(conn, gene_ids)
+    segments_by_gene = load_gene_segments_by_gene_id(conn, gene_ids)
     return [
         GeneRecord(
             id=r['id'],
@@ -258,7 +261,7 @@ def parse_cigar(cigar: str) -> list[tuple[int, str]]:
     :param cigar: CIGAR string, e.g. ``'10M2I5M1D8M'``
     :return: list of (length, operation) pairs
     """
-    return [(int(m.group(1)), m.group(2)) for m in re.compile(r'(\d+)([MIDNSHP=X])').finditer(cigar)]
+    return [(int(m.group(1)), m.group(2)) for m in _RE_CIGAR.finditer(cigar)]
 
 
 def cigar_to_coordinate_map(cigar: str, query_start: int) -> dict[int, int | None]:
@@ -338,7 +341,7 @@ def load_cached_mappings(
     ).fetchall()
 
     gene_ids = [int(row['gene_id']) for row in rows]
-    segments_by_gene = _load_gene_segments_by_gene_id(conn, gene_ids)
+    segments_by_gene = load_gene_segments_by_gene_id(conn, gene_ids)
 
     matches: list[GeneMatch] = []
     for r in rows:
@@ -372,31 +375,7 @@ def load_cached_mappings(
     return matches
 
 
-def _load_gene_segments_by_gene_id(
-    conn: sqlite3.Connection,
-    gene_ids: list[int],
-) -> dict[int, tuple[GeneSegment, ...]]:
-    """Return gene_id -> ordered tuple of GeneSegment objects."""
-    if not gene_ids:
-        return {}
 
-    placeholders = ','.join(['?'] * len(gene_ids))
-    rows = conn.execute(
-        f'SELECT gene_id, segment_index, start, end FROM gene_segment '
-        f'WHERE gene_id IN ({placeholders}) ORDER BY gene_id, segment_index',
-        gene_ids,
-    ).fetchall()
-    grouped: dict[int, list[GeneSegment]] = {}
-    for row in rows:
-        gene_id = int(row['gene_id'])
-        grouped.setdefault(gene_id, []).append(
-            GeneSegment(
-                segment_index=int(row['segment_index']),
-                start=int(row['start']),
-                end=int(row['end']),
-            )
-        )
-    return {gene_id: tuple(items) for gene_id, items in grouped.items()}
 
 
 def store_mappings(

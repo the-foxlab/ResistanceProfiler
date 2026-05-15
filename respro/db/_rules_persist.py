@@ -73,14 +73,13 @@ def _formula_rule_exists(
     return id_exists, expression_exists
 
 
-def _build_gene_lookup(conn: sqlite3.Connection) -> dict[str, list[sqlite3.Row]]:
+def _build_gene_lookup(conn: sqlite3.Connection) -> dict[str, list[dict]]:
     """
     Build a gene lookup table from the project database.
 
     :param conn: SQLite database connection
     :return: dictionary mapping gene names to lists of gene rows
     """
-    conn.row_factory = sqlite3.Row
     gene_lookup_rows = conn.execute(
         """
         SELECT
@@ -97,7 +96,7 @@ def _build_gene_lookup(conn: sqlite3.Connection) -> dict[str, list[sqlite3.Row]]
         """
     ).fetchall()
 
-    genes_by_name: dict[str, list[sqlite3.Row]] = {}
+    genes_by_name: dict[str, list[dict]] = {}
     for row in gene_lookup_rows:
         entries = [
             (row['gene_name'], 0),

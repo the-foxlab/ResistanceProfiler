@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from markupsafe import Markup, escape
 
+from respro.core.annotation import reverse_complement
+from respro.core.fasta_to_vcf import _gapped_strings_from_cigar
 from respro.db.models import AnnotatedVariant, GeneMatch
 
 
@@ -27,50 +28,6 @@ class GeneAlignment:
     aln_native_pos: list[int | None]
     aln_native_anchor_pos: list[int]
     coding_to_aln_idx: list[int]
-
-
-def _reverse_complement(seq: str) -> str:
-    table = str.maketrans('ACGTNacgtn', 'TGCANtgcan')
-    return seq.translate(table)[::-1].upper()
-
-
-def _gapped_strings_from_cigar(
-    cds: str,
-    region: str,
-    cigar: str,
-    cds_start: int,
-) -> tuple[str, str]:
-    """Rebuild gapped reference/query strings from CIGAR."""
-    aligned_ref: list[str] = []
-    aligned_query: list[str] = []
-
-    if cds_start > 0:
-        aligned_ref.append(cds[:cds_start])
-        aligned_query.append('-' * cds_start)
-
-    ref_pos = cds_start
-    query_pos = 0
-    for n_str, op in re.findall(r'(\d+)([MID])', cigar):
-        n = int(n_str)
-        if op == 'M':
-            aligned_ref.append(cds[ref_pos:ref_pos + n])
-            aligned_query.append(region[query_pos:query_pos + n])
-            ref_pos += n
-            query_pos += n
-        elif op == 'I':
-            aligned_ref.append('-' * n)
-            aligned_query.append(region[query_pos:query_pos + n])
-            query_pos += n
-        elif op == 'D':
-            aligned_ref.append(cds[ref_pos:ref_pos + n])
-            aligned_query.append('-' * n)
-            ref_pos += n
-
-    if ref_pos < len(cds):
-        aligned_ref.append(cds[ref_pos:])
-        aligned_query.append('-' * (len(cds) - ref_pos))
-
-    return ''.join(aligned_ref), ''.join(aligned_query)
 
 
 def _build_alignment_index(aligned_ref: str) -> tuple[list[int | None], list[int], list[int]]:
@@ -130,7 +87,7 @@ def build_gene_alignments(
 
         region = query_upper[match.query_start:match.query_end]
         if match.strand == '-':
-            region = _reverse_complement(region)
+            region = reverse_complement(region)
 
         aligned_ref_coding, aligned_query_coding = _gapped_strings_from_cigar(
             gene.nt_sequence.upper(), region, match.cigar, match.cds_start,

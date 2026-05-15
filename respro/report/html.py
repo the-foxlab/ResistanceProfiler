@@ -13,6 +13,8 @@ from markupsafe import Markup, escape
 
 from respro import __version__
 from respro.core.annotation import classify_similarity
+from respro.db._rules_formula import _FORMULA_OPERATORS as _LOGIC_OPERATORS
+from respro.db._rules_formula import _RE_FORMULA_TOKEN as _RE_LOGIC_TOKEN
 from respro.db.models import (
     AnnotatedVariant,
     CoverageGap,
@@ -35,9 +37,6 @@ from respro.report.palette import (
 )
 
 logger = logging.getLogger(__name__)
-
-_RE_LOGIC_TOKEN = re.compile(r'\(|\)|\bAND\b|\bOR\b|\bNOT\b|\bXOR\b|[A-Za-z0-9_.:-]+')
-_LOGIC_OPERATORS = {'AND', 'OR', 'NOT', 'XOR'}
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -85,7 +85,7 @@ def remap_variants(
                 continue
 
             # Convert CDS position to internal genomic position.
-            genomic_pos = _cds_pos_to_genomic_pos(gene, cds_pos)
+            genomic_pos = gene.cds_to_genomic_position(cds_pos)
             if genomic_pos is None:
                 skip_reason = (
                     'projected CDS position cannot map back to an internal coding genomic '
@@ -359,13 +359,3 @@ def _build_query_to_cds_map(
     return query_to_cds
 
 
-def _cds_pos_to_genomic_pos(gene: GeneRecord, cds_pos: int) -> int | None:
-    """
-    Convert a 0-based CDS nucleotide position to a 0-based internal genomic position.
-    Inverse of ``GeneRecord.nt_offset()``.
-
-    :param gene: gene record
-    :param cds_pos: 0-based CDS nucleotide offset
-    :return: 0-based genomic position on the internal reference
-    """
-    return gene.cds_to_genomic_position(cds_pos)

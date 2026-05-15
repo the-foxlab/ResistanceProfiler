@@ -15,6 +15,7 @@ from rich.panel import Panel
 from respro.cli.profile_helpers import (
     _finalize_and_export,
     _load_reference_data,
+    _ProfilingRunContext,
 )
 from respro.core.query import resolve_cached_query_reference
 from respro.db.models import AnnotatedVariant, GeneMatch, VariantCall
@@ -173,27 +174,31 @@ def _sync_single_run(
             )
 
     with err_console.status(f'[dim]Re-annotating run #{run_id}…[/dim]'):
-        result, _outputs = _finalize_and_export(
+        ctx = _ProfilingRunContext(
             annotations=raw_annotations,
             formula_rules=formula_rules,
+            genes=genes,
+            rule_gene_names=rule_gene_names,
+            rules=rules,
+            total_variants=run_dict.get('total_variants', 0),
+            variants_in_cds=run_dict.get('variants_in_cds', 0),
+            coverage_gaps=coverage_gaps or [],
+            query_sequence=query_sequence,
+            gene_matches=gene_matches or [],
+            af_bins=None,
+        )
+        result, _outputs = _finalize_and_export(
+            ctx=ctx,
             project_conn=project_conn,
             ref_id=ref_id,
             project_name=run_dict['project_name'],
             ref_name=run_dict['reference_name'],
             sample=sample_name,
             input_basename=run_dict['vcf_path'],
-            query_sequence=query_sequence,
-            gene_matches=gene_matches,
-            total_variants=run_dict.get('total_variants', 0),
-            variants_in_cds=run_dict.get('variants_in_cds', 0),
             output_target=Path('.'),
-            genes=genes,
-            rule_gene_names=rule_gene_names,
-            rules=rules,
-            results_conn=None,  # we write manually below
+            results_conn=None,
             project_path=project_path,
             logger=logger,
-            coverage_gaps=coverage_gaps,
         )
 
     # Replace stored variant rows and re-write formula hits.
