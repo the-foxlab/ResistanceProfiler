@@ -17,7 +17,6 @@ This document is the source of truth for curated rules TSV files used by `respro
 
 | Column                   | Meaning                          | Constraints                                                         |
 | ------------------------ | -------------------------------- | ------------------------------------------------------------------- |
-| `member_id`            | Stable atomic member identifier  | Required for rows that belong to a combination group (`group_id`) |
 | `gene`                 | CDS/gene name                    | Must match a gene loaded from GenBank                               |
 | `reference_identifier` | Reference accession or name      | Must match a reference in the project DB                            |
 | `position`             | Amino-acid position              | File-wide 0-based or 1-based, auto-detected                         |
@@ -27,20 +26,23 @@ This document is the source of truth for curated rules TSV files used by `respro
 
 ### Optional columns
 
-| Column                         | Meaning                               |
-| ------------------------------ | ------------------------------------- |
-| `phenotype`                  | Rule-level phenotype interpretation   |
-| `clinical_phenotype`         | Clinical interpretation field         |
-| `ic50` / `ic_50`           | Absolute IC50 value                   |
-| `fold_ic50` / `fold_ic_50` | Fold IC50 value                       |
-| `publication`                | DOI, PMID, or source publication text |
-| `source`                     | Provenance label                      |
-| `comment`                    | Free-text curator note                |
-| `group_id`                   | Combination group key                 |
-| `score`                      | Numeric quality/evidence score        |
+| Column                         | Meaning                               | Constraints                                            |
+| ------------------------------ | ------------------------------------- | ------------------------------------------------------ |
+| `phenotype`                  | Rule-level phenotype interpretation   |                                                        |
+| `clinical_phenotype`         | Clinical interpretation field         |                                                        |
+| `ic50` / `ic_50`           | Absolute IC50 value                   |                                                        |
+| `fold_ic50` / `fold_ic_50` | Fold IC50 value                       |                                                        |
+| `publication`                | DOI, PMID, or source publication text |                                                        |
+| `source`                     | Provenance label                      |                                                        |
+| `comment`                    | Free-text curator note                |                                                        |
+| `group_id`                   | Combination group key                 |                                                        |
+| `member_id`                  | Stable atomic member identifier       | Required only if `group_id` is present                 |
+| `score`                      | Numeric quality/evidence score        |                                                        |
 
 Notes:
 
+- Single rules (without `group_id`) do not require `member_id`.
+- `member_id` is only used when a row belongs to a combination group (`group_id` is present).
 - `member_id` values must be unique when provided.
 - `member_id` values must not use reserved boolean keywords such as `AND`, `OR`, `NOT`, or `XOR`.
 - Rows with `group_id` must also provide `member_id` when `--formula-rules` is used.

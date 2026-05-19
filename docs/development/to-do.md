@@ -322,6 +322,7 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟢 Optional lightweight run cache for active session UX — if needed for frontend refresh
   resilience, keep a short-lived in-memory or Redis-backed session cache keyed by browser session
   ID (no durable per-user storage)
+- 🟡 Paste sequence ?
 
 ### Public release
 
@@ -330,3 +331,14 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   bioconda-recipes; Bioconda is the standard distribution channel for bioinformatics CLI tools
   and avoids requiring users to have a working pip/Python setup; dependency on pysam makes
   Bioconda the natural distribution path once pysam is a requirement
+- 🟡 Established wet-lab protocols
+
+### Smaller Issues
+
+- 🟡 only show relevant combinations and not all (remove badges etc)?
+- 🟡 overlapping orfs minialignments
+- 🟡 init short arguments
+- 🟡 show scores in combinations and singles
+- 🟡 show all mutations in the lolliplot even if they are only part of combinations
+- 🟡 "Phenotypes are interpreted as resistant = reduced susceptibility, sensitive = expected susceptibility, intermediate = partial or uncertain effect, and contradictory = conflicting evidence." --> only when relevant
+- 🔴 we should both save the CDS alongside the mature_peptide

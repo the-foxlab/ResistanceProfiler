@@ -26,8 +26,8 @@ NON_COVERED_COLOUR = '#6b7280'
 GENE_HIGHLIGHTED_COLOUR = 'steelblue'
 GENE_INTRON_COLOUR = "#b2b2b2"  # muted blue-grey for intron / non-coding intervals within split genes
 GENE_DEFAULT_COLOUR = '#d9dde3'
-GENE_HIGHLIGHTED_EDGE = 'slategrey'
-GENE_DEFAULT_EDGE = '#8d99a6'
+GENE_HIGHLIGHTED_EDGE = 'black'
+GENE_DEFAULT_EDGE = "#a2a2a2"
 GENE_BASELINE_COLOUR = 'dimgrey'
 
 # Phenotype badge colours — key is the raw phenotype value

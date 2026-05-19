@@ -75,7 +75,8 @@ def load_genes_for_reference(conn: sqlite3.Connection, reference_id: int) -> lis
     :return: list of GeneRecord objects
     """
     rows = conn.execute(
-        'SELECT id, reference_id, name, protein, start, end, strand, codon_start, nt_sequence, aa_sequence '
+        'SELECT id, reference_id, name, protein, start, end, strand, codon_start, nt_sequence, aa_sequence, '
+        'feature_type, parent_gene_name '
         'FROM gene WHERE reference_id = ? ORDER BY start',
         (reference_id,),
     ).fetchall()
@@ -95,6 +96,8 @@ def load_genes_for_reference(conn: sqlite3.Connection, reference_id: int) -> lis
             codon_start=row['codon_start'],
             nt_sequence=row['nt_sequence'] or '',
             aa_sequence=row['aa_sequence'] or '',
+            feature_type=(row['feature_type'] or 'CDS'),
+            parent_gene_name=(row['parent_gene_name'] or ''),
             segments=segments_by_gene.get(int(row['id']), tuple()),
         )
         for row in rows

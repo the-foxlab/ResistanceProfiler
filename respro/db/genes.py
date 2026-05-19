@@ -9,7 +9,12 @@ import re
 import sqlite3
 
 from respro.config.cli_settings import CLI_CONFIG
-from respro.io.genbank import ParsedGenBankGene, ParsedGenBankReference, validate_strand
+from respro.io.genbank import (
+    ParsedGenBankGene,
+    ParsedGenBankReference,
+   
+    validate_strand,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +156,7 @@ def _get_or_create_gene(
     conn.row_factory = sqlite3.Row
     existing = conn.execute(
         'SELECT start, end, strand, codon_start, nt_sequence, aa_sequence, protein, '
-        'protein_id, ncbi_protein_url, locus_tag, note '
+        'protein_id, ncbi_protein_url, locus_tag, note, feature_type, parent_gene_name '
         'FROM gene WHERE reference_id = ? AND name = ?',
         (reference_id, gene.gene_name),
     ).fetchone()
@@ -162,8 +167,8 @@ def _get_or_create_gene(
         cur = conn.execute(
             'INSERT INTO gene '
             '(reference_id, name, protein, protein_id, ncbi_protein_url, locus_tag, note, '
-            'start, end, strand, codon_start, nt_sequence, aa_sequence) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'start, end, strand, codon_start, nt_sequence, aa_sequence, feature_type, parent_gene_name) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 reference_id,
                 gene.gene_name,
@@ -178,6 +183,8 @@ def _get_or_create_gene(
                 gene.codon_start,
                 gene.nt_sequence,
                 gene.aa_sequence,
+                gene.feature_type,
+                gene.parent_gene_name,
             ),
         )
         return int(cur.lastrowid), True
@@ -189,12 +196,31 @@ def _get_or_create_gene(
         and int(existing['codon_start']) == gene.codon_start
         and (existing['nt_sequence'] or '') == gene.nt_sequence
         and (existing['aa_sequence'] or '') == gene.aa_sequence
+        and (existing['feature_type'] or 'CDS') == gene.feature_type
+        and (existing['parent_gene_name'] or '') == gene.parent_gene_name
     )
     if not same_gene:
-        raise ValueError(
-            f'Gene {gene.gene_name!r} already exists for this reference with different '
-            'coordinates/sequence; refusing to append incompatible data'
+        can_fill_parent_gene_name = (
+            (existing['parent_gene_name'] or '').strip() == ''
+            and gene.parent_gene_name
+            and int(existing['start']) == gene.start
+            and int(existing['end']) == gene.end
+            and existing['strand'] == strand
+            and int(existing['codon_start']) == gene.codon_start
+            and (existing['nt_sequence'] or '') == gene.nt_sequence
+            and (existing['aa_sequence'] or '') == gene.aa_sequence
+            and (existing['feature_type'] or 'CDS') == gene.feature_type
         )
+        if can_fill_parent_gene_name:
+            conn.execute(
+                'UPDATE gene SET parent_gene_name = ? WHERE reference_id = ? AND name = ?',
+                (gene.parent_gene_name, reference_id, gene.gene_name),
+            )
+        else:
+            raise ValueError(
+                f'Gene {gene.gene_name!r} already exists for this reference with different '
+                'coordinates/sequence; refusing to append incompatible data'
+            )
 
     update_needed = False
     if not (existing['protein'] or '').strip() and gene.protein:
@@ -207,10 +233,13 @@ def _get_or_create_gene(
         update_needed = True
     if not (existing['note'] or '').strip() and gene.note:
         update_needed = True
+    if not (existing['parent_gene_name'] or '').strip() and gene.parent_gene_name:
+        update_needed = True
 
     if update_needed:
         conn.execute(
-            'UPDATE gene SET protein = ?, protein_id = ?, ncbi_protein_url = ?, locus_tag = ?, note = ? '
+            'UPDATE gene SET protein = ?, protein_id = ?, ncbi_protein_url = ?, locus_tag = ?, note = ?, '
+            'parent_gene_name = ? '
             'WHERE reference_id = ? AND name = ?',
             (
                 (existing['protein'] or '').strip() or gene.protein,
@@ -218,6 +247,7 @@ def _get_or_create_gene(
                 (existing['ncbi_protein_url'] or '').strip() or ncbi_protein_url,
                 (existing['locus_tag'] or '').strip() or gene.locus_tag,
                 (existing['note'] or '').strip() or gene.note,
+                (existing['parent_gene_name'] or '').strip() or gene.parent_gene_name,
                 reference_id,
                 gene.gene_name,
             ),

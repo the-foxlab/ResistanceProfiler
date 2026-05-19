@@ -118,6 +118,7 @@ def _build_lollipop_figure(
         return None
 
     gene_annotations = _group_annotations_by_gene(cds, plot_genes)
+    gene_by_name = {gene.name: gene for gene in genes}
 
     # One row for overview, then two rows per gene (track + lollipop)
     height_ratios = [2.0, 0.5] * len(plot_genes) + [0.5]
@@ -165,7 +166,10 @@ def _build_lollipop_figure(
             coverage_gaps=coverage_gaps_by_gene.get(gene.name, []),
             shared_track_ax=track_ax,
         )
-        _draw_gene_track(track_ax, gene)
+        parent_gene = None
+        if gene.parent_gene_name:
+            parent_gene = gene_by_name.get(gene.parent_gene_name)
+        _draw_gene_track(track_ax, gene, parent_gene=parent_gene)
 
     gene_pair_axes[0].legend(handles=handles, loc='upper right', fontsize=7, ncol=len(handles), frameon=False, bbox_to_anchor=(1, 1.25), borderaxespad=0.0)
     plt.tight_layout()
@@ -368,7 +372,7 @@ def _resolve_overview_bounds(
     return 1, max(gene.end for gene in genes)
 
 
-def _draw_gene_track(ax, gene: GeneRecord) -> None:
+def _draw_gene_track(ax, gene: GeneRecord, parent_gene: GeneRecord | None = None) -> None:
     """
     Draw a simple gene track visualization above the lollipop plot.
 
@@ -419,11 +423,54 @@ def _draw_gene_track(ax, gene: GeneRecord) -> None:
     ax.set_ylim(0, 1)
     ax.set_yticks([])
     ax.set_xlim(max(1, gene.start + 1 - pad), gene.end + pad)
+
+    if gene.feature_type == 'mat_peptide' and gene.parent_gene_name:
+        strip_start, strip_end = _resolve_precursor_strip_bounds(ax, parent_gene)
+        strip_width = max(1, strip_end - strip_start)
+        ax.add_patch(mpatches.Rectangle(
+            (strip_start, 0.84),
+            strip_width,
+            0.09,
+            facecolor=GENE_DEFAULT_COLOUR,
+            edgecolor=GENE_DEFAULT_EDGE,
+            alpha=0.55,
+            linewidth=0.6,
+            zorder=4,
+        ))
+        label_x = strip_start + (strip_width / 2.0)
+        ax.text(
+            label_x,
+            0.945,
+            f'precursor: {gene.parent_gene_name}',
+            ha='center',
+            va='bottom',
+            fontsize=7,
+            color=GENE_DEFAULT_EDGE,
+        )
+
     ax.spines['top'].set_visible(False)
     ax.spines['left'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.set_xlabel('')
     ax.set_ylabel('')
+
+
+def _resolve_precursor_strip_bounds(
+    ax,
+    parent_gene: GeneRecord | None,
+) -> tuple[float, float]:
+    """Return precursor strip x-bounds from parent interval or current visible limits."""
+    x_left, x_right = ax.get_xlim()
+    if parent_gene is None:
+        return x_left, x_right
+
+    parent_left = parent_gene.start + 1
+    parent_right = parent_gene.end
+    visible_left = max(x_left, parent_left)
+    visible_right = min(x_right, parent_right)
+    if visible_right <= visible_left:
+        return x_left, x_right
+    return visible_left, visible_right
 
 
 def _draw_gene_panel(

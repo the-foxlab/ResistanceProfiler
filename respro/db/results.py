@@ -414,13 +414,13 @@ def _match_formula_variants(
     by_key_weak: dict[tuple, AnnotatedVariant] = {}
     for ann in annotations:
         key = (
-            ann.gene_name,
+            ann.protein_key,
             ann.codon_pos + 1,
             ann.ref_aa,
             ann.alt_aa,
             round(ann.variant.allele_freq, 6),
         )
-        weak_key = (ann.gene_name, ann.codon_pos + 1, ann.ref_aa, ann.alt_aa)
+        weak_key = (ann.protein_key, ann.codon_pos + 1, ann.ref_aa, ann.alt_aa)
         by_key.setdefault(key, ann)
         by_key_weak.setdefault(weak_key, ann)
 

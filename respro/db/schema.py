@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS gene (
     codon_start INTEGER NOT NULL DEFAULT 0,  -- 0-based offset (GenBank codon_start qualifier minus 1)
     nt_sequence TEXT    NOT NULL DEFAULT '',  -- CDS nucleotide slice in coding orientation
     aa_sequence TEXT    NOT NULL DEFAULT '',  -- pre-translated protein sequence
+    feature_type TEXT   NOT NULL DEFAULT 'CDS',
+    parent_gene_name TEXT NOT NULL DEFAULT '',
     UNIQUE(reference_id, name)
 );
 
@@ -389,6 +391,8 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'codon_start': 'INTEGER NOT NULL DEFAULT 0',
         'nt_sequence': "TEXT NOT NULL DEFAULT ''",
         'aa_sequence': "TEXT NOT NULL DEFAULT ''",
+        'feature_type': "TEXT NOT NULL DEFAULT 'CDS'",
+        'parent_gene_name': "TEXT NOT NULL DEFAULT ''",
     },
     'drug': {
         'badge_color': "TEXT DEFAULT ''",

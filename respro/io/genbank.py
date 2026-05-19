@@ -33,6 +33,8 @@ class ParsedGenBankGene:
     codon_start: int = 0  # 0-based offset (GenBank codon_start qualifier minus 1)
     nt_sequence: str = ''  # CDS nucleotide slice in coding orientation
     aa_sequence: str = ''  # pre-translated amino acid sequence (stop codon excluded)
+    feature_type: str = 'CDS'
+    parent_gene_name: str = ''
     segments: tuple[tuple[int, int], ...] = field(default_factory=tuple)
 
 
@@ -193,6 +195,8 @@ def _parse_cds_features(
     """
     genes: list[ParsedGenBankGene] = []
     seen_gene_names: set[str] = set()
+    cds_genes: list[ParsedGenBankGene] = []
+    mat_peptide_index = 0
 
     for feature in record.features or []:
         if feature.type != 'CDS':
@@ -219,7 +223,60 @@ def _parse_cds_features(
         end = int(feature.location.end)
         segments = _extract_segments(feature)
         nt_sequence = str(feature.extract(record.seq)).upper().replace('U', 'T')
-        aa_sequence = _translate_cds(
+        aa_sequence = _translate_feature(
+            feature,
+            nt_sequence=nt_sequence,
+            codon_start=codon_start,
+            reference_name=reference_name,
+            gene_name=gene_name,
+        )
+
+        cds_gene = ParsedGenBankGene(
+            reference_name=reference_name,
+            reference_accession=accession,
+            gene_name=gene_name,
+            protein=product,
+            protein_id=protein_id,
+            locus_tag=locus_tag,
+            note=note,
+            start=start,
+            end=end,
+            strand=strand,
+            codon_start=codon_start,
+            nt_sequence=nt_sequence,
+            aa_sequence=aa_sequence,
+            feature_type='CDS',
+            parent_gene_name='',
+            segments=segments,
+        )
+        cds_genes.append(cds_gene)
+        genes.append(cds_gene)
+
+    for feature in record.features or []:
+        if feature.type != 'mat_peptide':
+            continue
+
+        mat_peptide_index += 1
+        strand = '+' if feature.location.strand != -1 else '-'
+        start = int(feature.location.start)
+        end = int(feature.location.end)
+        parent_gene_name = _find_parent_cds_gene_name(cds_genes, start, end, strand)
+        gene_name = _build_mat_peptide_gene_name(
+            feature,
+            parent_gene_name=parent_gene_name,
+            index=mat_peptide_index,
+            seen_names=seen_gene_names,
+        )
+        seen_gene_names.add(gene_name)
+
+        product = _first_qualifier(feature, 'product', 'protein', default=gene_name)
+        protein_id = _first_qualifier(feature, 'protein_id', default='')
+        locus_tag = _first_qualifier(feature, 'locus_tag', default='')
+        note = _first_qualifier(feature, 'note', default='')
+        codon_start = int(_first_qualifier(feature, 'codon_start', default='1')) - 1
+        segments = _extract_segments(feature)
+        nt_sequence = str(feature.extract(record.seq)).upper().replace('U', 'T')
+        aa_sequence = _translate_feature(
             feature,
             nt_sequence=nt_sequence,
             codon_start=codon_start,
@@ -242,11 +299,58 @@ def _parse_cds_features(
                 codon_start=codon_start,
                 nt_sequence=nt_sequence,
                 aa_sequence=aa_sequence,
+                feature_type='mat_peptide',
+                parent_gene_name=parent_gene_name,
                 segments=segments,
             )
         )
 
     return genes
+
+
+def _find_parent_cds_gene_name(
+    cds_genes: list[ParsedGenBankGene],
+    start: int,
+    end: int,
+    strand: str,
+) -> str:
+    """Return the first CDS gene name that contains the given interval on the same strand."""
+    for cds_gene in cds_genes:
+        if cds_gene.strand != strand:
+            continue
+        if start >= cds_gene.start and end <= cds_gene.end:
+            return cds_gene.gene_name
+    return ''
+
+
+def _build_mat_peptide_gene_name(
+    feature: SeqFeature,
+    *,
+    parent_gene_name: str,
+    index: int,
+    seen_names: set[str],
+) -> str:
+    """Return a unique mat_peptide gene name using the configured fallback order."""
+    base_name = _first_qualifier(feature, 'gene', 'protein_id', 'product', default='')
+    if not base_name:
+        if parent_gene_name:
+            base_name = f'{parent_gene_name}_mat_peptide_{index}'
+        else:
+            base_name = f'mat_peptide_{index}'
+    return _deduplicate_gene_name(base_name, seen_names)
+
+
+def _deduplicate_gene_name(base_name: str, seen_names: set[str]) -> str:
+    """Return base_name or a suffixed variant (_2, _3, ...) not present in seen_names."""
+    if base_name not in seen_names:
+        return base_name
+
+    suffix = 2
+    while True:
+        candidate = f'{base_name}_{suffix}'
+        if candidate not in seen_names:
+            return candidate
+        suffix += 1
 
 
 def _extract_segments(feature: SeqFeature) -> tuple[tuple[int, int], ...]:
@@ -263,7 +367,7 @@ def _extract_segments(feature: SeqFeature) -> tuple[tuple[int, int], ...]:
     return ((int(location.start), int(location.end)),)
 
 
-def _translate_cds(
+def _translate_feature(
     feature: SeqFeature,
     *,
     nt_sequence: str,
@@ -272,13 +376,13 @@ def _translate_cds(
     gene_name: str,
 ) -> str:
     """
-    Return the amino acid sequence for a CDS feature.
+    Return the amino acid sequence for a coding feature.
 
     Uses the pre-computed ``translation`` qualifier from the GenBank file when
     available (quality-controlled by the submitter). Falls back to in-house
     translation only when no qualifier is present.
 
-    :param feature: CDS SeqFeature
+    :param feature: coding SeqFeature
     :param nt_sequence: CDS nucleotide slice in coding orientation
     :param codon_start: 0-based codon start offset (GenBank codon_start qualifier minus 1)
     :param reference_name: GenBank reference identifier for error context

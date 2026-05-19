@@ -93,6 +93,15 @@ def _build_gene_lookup(conn: sqlite3.Connection) -> dict[str, list[dict]]:
             r.accession AS reference_accession
         FROM gene g
         JOIN reference r ON r.id = g.reference_id
+        WHERE NOT (
+            g.feature_type = 'CDS'
+            AND EXISTS (
+                SELECT 1 FROM gene child
+                WHERE child.reference_id = g.reference_id
+                  AND child.parent_gene_name = g.name
+                  AND child.feature_type = 'mat_peptide'
+            )
+        )
         """
     ).fetchall()
 
