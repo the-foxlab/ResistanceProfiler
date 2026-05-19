@@ -1,12 +1,50 @@
-:root { --accent: #2c3e50; --hit: #e74c3c; --ok: #27ae60; --bg: #fafbfc; }
+:root {
+  --accent: #2c3e50;
+  --hit: #e74c3c;
+  --ok: #27ae60;
+  --bg: #fafbfc;
+  --text: #333333;
+  --surface: #ffffff;
+  --line: #e1e4e8;
+  --line-soft: #eeeeee;
+  --font-size-xs: 0.72rem;
+  --font-size-sm: 0.78rem;
+  --font-size-md: 0.86rem;
+  --font-size-lg: 0.95rem;
+  --font-size-xl: 1.1rem;
+  --font-size-xxl: 1.2rem;
+  --font-size-body: var(--font-size-md);
+  --font-size-heading-1: var(--font-size-xl);
+  --font-size-heading-2: var(--font-size-lg);
+  --font-size-heading-3: var(--font-size-md);
+  --font-size-caption: var(--font-size-xs);
+  --font-size-table: var(--font-size-sm);
+  --font-size-button: var(--font-size-sm);
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: Arial, sans-serif; font-size: 15px; color: #333; background: var(--bg); padding: 2rem; line-height: 1.5; }
+body {
+  font-family: Arial, sans-serif;
+  font-size: var(--font-size-body);
+  color: var(--text);
+  background: var(--bg);
+  padding: 2rem;
+  line-height: 1.5;
+}
 .report-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.6rem; }
 .logo-wrap svg { width: 420px; height: auto; display: block; }
-h1 { color: var(--accent); margin-bottom: .5rem; }
-h2 { margin: 1.5rem 0 .5rem; color: var(--accent); border-bottom: 2px solid #eee; padding-bottom: .3rem; font-size: 1.2rem; }
+h1 { color: var(--accent); margin-bottom: .5rem; font-size: var(--font-size-heading-1); }
+h2 {
+  margin: 1.5rem 0 .5rem;
+  color: var(--accent);
+  border-bottom: 2px solid var(--line-soft);
+  padding-bottom: .3rem;
+  font-size: var(--font-size-heading-2);
+}
+h3, h4, h5, h6 { font-size: var(--font-size-heading-3); }
+caption, small { font-size: var(--font-size-caption); }
+button { font-size: var(--font-size-button); }
 .meta { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: .5rem; }
-.meta dt { font-weight: 600; font-size: .85rem; color: #666; }
+.meta dt { font-weight: 600; font-size: var(--font-size-md); color: #666; }
 .meta dd { margin-bottom: .4rem; }
 .meta-grid {
   background: #fff;
@@ -30,14 +68,14 @@ h2 { margin: 1.5rem 0 .5rem; color: var(--accent); border-bottom: 2px solid #eee
 .meta-label {
   display: block;
   font-weight: 600;
-  font-size: .76rem;
+  font-size: var(--font-size-sm);
   color: #66788a;
   margin-bottom: .1rem;
 }
 
 .meta-value {
   display: block;
-  font-size: .84rem;
+  font-size: var(--font-size-md);
   color: #2f3b47;
   overflow-wrap: anywhere;
 }
@@ -56,15 +94,15 @@ h2 { margin: 1.5rem 0 .5rem; color: var(--accent); border-bottom: 2px solid #eee
 }
 a.stat-card { cursor: pointer; }
 a.stat-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,0,.1); }
-.stat-card .number { font-size: 2rem; font-weight: 700; }
-.stat-card .label { font-size: .85rem; color: #666; }
+.stat-card .number { font-size: var(--font-size-xxl); font-weight: 700; }
+.stat-card .label { font-size: var(--font-size-md); color: #666; }
 .stat-card.hit .number { color: var(--hit); }
 .stat-card.warn .number { color: #e67e22; }
 .stat-sub { margin-top: .35rem; display: flex; gap: .3rem; justify-content: center; flex-wrap: wrap; }
-.stat-pill { font-size: .68rem; font-weight: 700; padding: 1px 7px; border-radius: 8px; }
+.stat-pill { font-size: var(--font-size-xs); font-weight: 700; padding: 1px 7px; border-radius: 8px; }
 .stat-pill.zero { opacity: .28; }
-.stat-note { font-size: .72rem; color: #999; margin-top: .25rem; }
-.table-note { font-size: .85rem; color: #666; margin-bottom: .5rem; }
+.stat-note { font-size: var(--font-size-caption); color: #999; margin-top: .25rem; }
+.table-note { font-size: var(--font-size-md); color: #666; margin-bottom: .5rem; }
 .summary-text-box {
   background: #fff;
   border: 1px solid #e1e4e8;
@@ -84,7 +122,7 @@ a.stat-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,
   padding: .2rem .7rem;
   background: #f8fafc;
   color: #334155;
-  font-size: .78rem;
+  font-size: var(--font-size-button);
   font-weight: 700;
   cursor: pointer;
 }
@@ -95,7 +133,7 @@ a.stat-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,
 }
 .summary-text {
   color: #334155;
-  font-size: .92rem;
+  font-size: var(--font-size-md);
   line-height: 1.55;
 }
 .manual-classification-grid {
@@ -106,17 +144,17 @@ a.stat-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,
 .manual-label {
   display: block;
   color: #64748b;
-  font-size: .72rem;
+  font-size: var(--font-size-caption);
   font-weight: 700;
   margin-bottom: .12rem;
 }
 .manual-value {
   color: #1f2937;
-  font-size: .86rem;
+  font-size: var(--font-size-body);
 }
 .manual-note {
   margin-top: .65rem;
-  font-size: .85rem;
+  font-size: var(--font-size-md);
   color: #374151;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
@@ -142,7 +180,7 @@ a.stat-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,
   flex-wrap: wrap;
 }
 .table-controls label {
-  font-size: .78rem;
+  font-size: var(--font-size-button);
   color: #4b5563;
   font-weight: 600;
 }
@@ -151,7 +189,7 @@ a.stat-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   padding: .25rem .45rem;
-  font-size: .8rem;
+  font-size: var(--font-size-sm);
   background: #fff;
 }
 .table-controls button {
@@ -159,7 +197,7 @@ a.stat-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,0,
   border-radius: 6px;
   background: #fff;
   padding: .25rem .5rem;
-  font-size: .78rem;
+  font-size: var(--font-size-button);
   cursor: pointer;
 }
 .table-controls button:hover {
@@ -174,7 +212,7 @@ table {
   width: max(100%, 1100px);
   border-collapse: collapse;
   margin-bottom: 0;
-  font-size: .86rem;
+  font-size: var(--font-size-table);
 }
 th { background: var(--accent); color: #fff; text-align: left; padding: .5rem .7rem; white-space: nowrap; }
 td { padding: .45rem .7rem; border-bottom: 1px solid #e1e4e8; white-space: nowrap; }
@@ -198,7 +236,7 @@ tr:hover td { background: #f0f4f8; }
   border-bottom: 1px solid #d7dee7;
 }
 .row-detail-title {
-  font-size: .76rem;
+  font-size: var(--font-size-sm);
   color: #64748b;
   margin-bottom: .4rem;
   font-weight: 600;
@@ -210,7 +248,7 @@ tr:hover td { background: #f0f4f8; }
   background: #ffffff;
 }
 .aln-meta {
-  font-size: .7rem;
+  font-size: var(--font-size-xs);
   color: #64748b;
   margin-bottom: .35rem;
 }
@@ -225,7 +263,7 @@ tr:hover td { background: #f0f4f8; }
 }
 .aln-label {
   width: 2.1rem;
-  font-size: .72rem;
+  font-size: var(--font-size-caption);
   color: #64748b;
   font-weight: 700;
 }
@@ -233,7 +271,7 @@ tr:hover td { background: #f0f4f8; }
   font-family: 'Courier New', Courier, 'Liberation Mono', monospace;
   font-variant-ligatures: none;
   font-feature-settings: 'liga' 0, 'calt' 0;
-  font-size: .78rem;
+  font-size: var(--font-size-sm);
   line-height: 1.25;
   color: #334155;
   white-space: nowrap;
@@ -264,12 +302,12 @@ tr:hover td { background: #f0f4f8; }
   background: #fecaca;
   box-shadow: inset 0 -2px 0 #991b1b;
 }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: .75rem; font-weight: 600; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: var(--font-size-xs); font-weight: 600; }
 .drug-badge {
   display: inline-block;
   padding: 2px 9px;
   border-radius: 999px;
-  font-size: .74rem;
+  font-size: var(--font-size-xs);
   font-weight: 700;
   letter-spacing: .01em;
 }
@@ -355,9 +393,9 @@ tr:hover td { background: #f0f4f8; }
 .drug-card { background: #fff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 1rem; display: flex; gap: 1rem; align-items: stretch; min-height: 240px; }
 .drug-card img { width: 220px; height: 100%; max-height: 220px; object-fit: contain; border: 1px solid #eee; border-radius: 4px; background: #fff; }
 .drug-card .drug-info { flex: 1; }
-.drug-card .drug-name { font-weight: 700; font-size: 1rem; color: var(--accent); }
-.drug-card .drug-desc { font-size: .85rem; color: #555; margin-top: .3rem; }
-.drug-card a { font-size: .8rem; color: #2980b9; text-decoration: none; }
+.drug-card .drug-name { font-weight: 700; font-size: var(--font-size-lg); color: var(--accent); }
+.drug-card .drug-desc { font-size: var(--font-size-md); color: #555; margin-top: .3rem; }
+.drug-card a { font-size: var(--font-size-sm); color: #2980b9; text-decoration: none; }
 .drug-card a:hover { text-decoration: underline; }
 .db-indicator { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; border: 1.5px solid #bdc3c7; }
 .db-yes { background: #e67e22; border-color: #e67e22; }
@@ -366,7 +404,7 @@ th.sortable-col { cursor: pointer; user-select: none; position: relative; }
 th.sortable-col::after { content: ' ↕'; opacity: .6; font-weight: 400; }
 th.sortable-col[data-order='asc']::after { content: ' ↑'; opacity: 1; }
 th.sortable-col[data-order='desc']::after { content: ' ↓'; opacity: 1; }
-footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; font-size: .8rem; color: #999; }
+footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; font-size: var(--font-size-sm); color: #999; }
 .bibliography { padding-left: 1.5rem; margin-left: 1.5rem; }
 
 /* Collapsible sections */
@@ -379,7 +417,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
 }
 .section-toggle:hover { opacity: .8; }
 .toggle-arrow {
-  font-size: .75rem;
+  font-size: var(--font-size-xs);
   color: #aaa;
   transition: transform .18s ease;
   display: inline-block;
@@ -412,7 +450,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
 }
 .gene-seq {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
-  font-size: .75rem;
+  font-size: var(--font-size-xs);
   line-height: 1.3;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -421,18 +459,18 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
   width: 100%;
 }
 .gene-meta-block { display: grid; gap: .25rem; }
-.gene-card .gene-name { font-weight: 700; font-size: 1rem; color: var(--accent); }
-.gene-card .gene-note { color: #555; font-size: .85rem; }
-.gene-card a { font-size: .8rem; color: #2980b9; text-decoration: none; }
+.gene-card .gene-name { font-weight: 700; font-size: var(--font-size-lg); color: var(--accent); }
+.gene-card .gene-note { color: #555; font-size: var(--font-size-md); }
+.gene-card a { font-size: var(--font-size-sm); color: #2980b9; text-decoration: none; }
 .gene-card a:hover { text-decoration: underline; }
 
 /* Responsive adjustments for tablets and smaller screens */
 @media (max-width: 1200px) {
   body { padding: 1.5rem; }
   .logo-wrap svg { width: 360px; }
-  table { font-size: .85rem; }
+  table { font-size: var(--font-size-md); }
   th, td { padding: .4rem .6rem; }
-  .badge { padding: 1px 6px; font-size: .7rem; }
+  .badge { padding: 1px 6px; font-size: var(--font-size-xs); }
 }
 
 /* Stats: switch to 2 rows (3 columns) when single row gets tight */
@@ -451,25 +489,25 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
   }
   .stats { grid-template-columns: repeat(2, 1fr); gap: 0.8rem; }
   .stat-card { padding: .8rem 1rem; }
-  .stat-card .number { font-size: 1.5rem; }
-  .stat-card .label { font-size: .75rem; }
-  .stat-note { font-size: .68rem; }
+  .stat-card .number { font-size: var(--font-size-xxl); }
+  .stat-card .label { font-size: var(--font-size-xs); }
+  .stat-note { font-size: var(--font-size-xs); }
   .meta { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .3rem; padding: .8rem 1rem; }
-  .meta dt { font-size: .8rem; }
-  .meta dd { font-size: .9rem; }
-  h2 { margin: 1rem 0 .4rem; font-size: 1.2rem; }
-  table { font-size: .8rem; }
+  .meta dt { font-size: var(--font-size-sm); }
+  .meta dd { font-size: var(--font-size-md); }
+  h2 { margin: 1rem 0 .4rem; font-size: var(--font-size-xxl); }
+  table { font-size: var(--font-size-sm); }
   th, td { padding: .3rem .5rem; }
-  .badge { padding: 1px 5px; font-size: .65rem; }
+  .badge { padding: 1px 5px; font-size: var(--font-size-xs); }
   .drug-cards { grid-template-columns: 1fr; }
   .drug-card { flex-direction: row; min-height: 180px; }
   .drug-card img { width: 140px; height: 140px; margin-bottom: 0; margin-right: 0.5rem; flex-shrink: 0; }
   .drug-card .drug-info { min-width: 0; }
-  .drug-card .drug-name { font-size: .95rem; }
-  .drug-card .drug-desc { font-size: .8rem; }
+  .drug-card .drug-name { font-size: var(--font-size-lg); }
+  .drug-card .drug-desc { font-size: var(--font-size-sm); }
   .gene-cards { grid-template-columns: 1fr; }
   .gene-card { grid-template-columns: 1fr; }
-  .gene-seq { font-size: .72rem; }
+  .gene-seq { font-size: var(--font-size-caption); }
 }
 
 @media (max-width: 700px) {
@@ -484,17 +522,17 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
   .logo-wrap svg { width: 250px; }
   .stats { grid-template-columns: 1fr; gap: 0.5rem; }
   .stat-card { padding: .6rem .8rem; }
-  .stat-card .number { font-size: 1.2rem; }
-  .stat-card .label { font-size: .7rem; }
+  .stat-card .number { font-size: var(--font-size-xxl); }
+  .stat-card .label { font-size: var(--font-size-xs); }
   .meta { grid-template-columns: 1fr; gap: .2rem; padding: .6rem .8rem; }
-  .meta dt { font-size: .75rem; }
-  .meta dd { font-size: .85rem; }
-  h2 { font-size: 1.1rem; margin: .8rem 0 .3rem; }
-  table { font-size: .75rem; }
+  .meta dt { font-size: var(--font-size-xs); }
+  .meta dd { font-size: var(--font-size-md); }
+  h2 { font-size: var(--font-size-xl); margin: .8rem 0 .3rem; }
+  table { font-size: var(--font-size-xs); }
   th, td { padding: .25rem .4rem; }
-  .badge { padding: 0px 4px; font-size: .6rem; }
-  .table-note { font-size: .75rem; }
+  .badge { padding: 0px 4px; font-size: var(--font-size-xs); }
+  .table-note { font-size: var(--font-size-xs); }
   .drug-card { flex-direction: column; min-height: auto; }
   .drug-card img { width: 100%; height: 120px; margin-bottom: 0.5rem; margin-right: 0; }
-  footer { font-size: .7rem; }
+  footer { font-size: var(--font-size-xs); }
 }
