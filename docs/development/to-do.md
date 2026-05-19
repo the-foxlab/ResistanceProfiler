@@ -341,4 +341,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 show scores in combinations and singles
 - 🟡 show all mutations in the lolliplot even if they are only part of combinations
 - 🟡 "Phenotypes are interpreted as resistant = reduced susceptibility, sensitive = expected susceptibility, intermediate = partial or uncertain effect, and contradictory = conflicting evidence." --> only when relevant
-- 🔴 we should both save the CDS alongside the mature_peptide
+- 🔴 we should both save the CDS alongside the mature_peptide --> basically treat them as overlapping orfs (if both have resistance rules)
+- 🔴 rename gene to feature (and then diff between CDS/mat_peptide)
+- 🔴 fix tests
