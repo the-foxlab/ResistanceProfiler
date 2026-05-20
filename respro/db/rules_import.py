@@ -39,6 +39,7 @@ from respro.db._rules_persist import (
     _build_feature_lookup,
     _external_rule_id_exists,
     _formula_rule_exists,
+    _load_known_reference_identifiers,
     _load_rule_ids_by_external_id,
     _rule_exists,
 )
@@ -81,8 +82,11 @@ def load_resistance_rules(
 
     conn.row_factory = sqlite3.Row
     features_by_name = _build_feature_lookup(conn)
+    known_reference_identifiers = _load_known_reference_identifiers(conn)
 
     errors: list[str] = []
+    skipped_missing_ref_ids: set[str] = set()
+    skipped_missing_ref_count = 0
     skipped_ref: list[str] = []
     skipped_feature: list[str] = []
     skipped_feature_pairs: list[tuple[str, str]] = []
@@ -160,13 +164,26 @@ def load_resistance_rules(
         raise ValueError(f'Rules validation failed:\n{formatted}')
 
     # Detect coordinate base once globally and use it consistently for all rows.
-    coord_base = _detect_coordinate_base(all_rows, features_by_name)
+    coord_base = _detect_coordinate_base(
+        all_rows,
+        features_by_name,
+        allowed_reference_identifiers=known_reference_identifiers,
+    )
     logger.info('Detected %d-based amino acid positions in rules TSV', coord_base)
-    mismatch_keys = _validate_reference_amino_acids(all_rows, features_by_name, coord_base)
+    mismatch_keys = _validate_reference_amino_acids(
+        all_rows,
+        features_by_name,
+        coord_base,
+        allowed_reference_identifiers=known_reference_identifiers,
+    )
 
     for row_number, row in enumerate(all_rows, start=2):
         feature_name = _get_value(row, 'feature')
         reference_identifier = _get_value(row, 'reference_identifier')
+        if reference_identifier and reference_identifier not in known_reference_identifiers:
+            skipped_missing_ref_ids.add(reference_identifier)
+            skipped_missing_ref_count += 1
+            continue
         if not feature_name or feature_name not in features_by_name:
             feature_label = feature_name or '<empty>'
             reference_label = reference_identifier or '<empty>'
@@ -384,6 +401,13 @@ def load_resistance_rules(
                 publication_lookup_failures,
             )
         count += 1
+
+    if skipped_missing_ref_ids:
+        logger.warning(
+            '%d rule(s) skipped — reference(s) not provided (no GenBank supplied): %s',
+            skipped_missing_ref_count,
+            ', '.join(repr(r) for r in sorted(skipped_missing_ref_ids)),
+        )
 
     if skipped_feature:
         unique_rows = sorted(set(skipped_feature))

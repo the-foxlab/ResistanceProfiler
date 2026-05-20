@@ -34,6 +34,7 @@ def _resolve_rule_feature_id(candidates: list[sqlite3.Row], reference_identifier
 def _detect_coordinate_base(
     rows: list[dict],
     features_by_name: dict[str, list[sqlite3.Row]],
+    allowed_reference_identifiers: set[str] | None = None,
 ) -> int:
     """
     Detect whether the rules TSV uses 0-based or 1-based amino acid positions.
@@ -44,6 +45,9 @@ def _detect_coordinate_base(
 
     :param rows: all parsed rows from the rules TSV
     :param features_by_name: feature lookup built from the project DB
+    :param allowed_reference_identifiers: optional set of reference identifiers
+        present in supplied GenBank files; rows targeting other references are
+        ignored for detection
     :return: 0 or 1 indicating the detected coordinate base
     :raises ValueError: if positions match neither system consistently
     """
@@ -62,6 +66,12 @@ def _detect_coordinate_base(
         anchor_ref = ref_aa[0].upper()
 
         reference_identifier = _get_value(row, 'reference_identifier')
+        if (
+            allowed_reference_identifiers is not None
+            and reference_identifier
+            and reference_identifier not in allowed_reference_identifiers
+        ):
+            continue
         aa_seq = _get_feature_aa_sequence(features_by_name[feature_name], reference_identifier)
         if not aa_seq:
             continue
@@ -119,6 +129,7 @@ def _validate_reference_amino_acids(
     rows: list[dict],
     features_by_name: dict[str, list[sqlite3.Row]],
     coord_base: int,
+    allowed_reference_identifiers: set[str] | None = None,
 ) -> set[tuple[str, str, str, str]]:
     """
     Check reference AAs in the rules TSV against the stored feature aa_sequence.
@@ -130,6 +141,9 @@ def _validate_reference_amino_acids(
     :param rows: all parsed rows from the rules TSV
     :param features_by_name: feature lookup with aa_sequence from the project DB
     :param coord_base: detected coordinate base (0 or 1)
+    :param allowed_reference_identifiers: optional set of reference identifiers
+        present in supplied GenBank files; rows targeting other references are
+        ignored for mismatch/out-of-range reporting
     :return: set of ``(feature_name, position_raw, reference_identifier, ref_aa)``
              tuples for rows whose reference AA does not match the feature sequence
     """
@@ -146,6 +160,12 @@ def _validate_reference_amino_acids(
             continue
 
         reference_identifier = _get_value(row, 'reference_identifier')
+        if (
+            allowed_reference_identifiers is not None
+            and reference_identifier
+            and reference_identifier not in allowed_reference_identifiers
+        ):
+            continue
         aa_seq = _get_feature_aa_sequence(features_by_name[feature_name], reference_identifier)
         if not aa_seq:
             continue
@@ -215,6 +235,7 @@ def _get_feature_aa_sequence(
         for c in narrowed:
             if reference_identifier in {c['reference_name'], c['reference_accession']}:
                 return c['aa_sequence'] or ''
+        return ''
     if len(narrowed) == 1:
         return narrowed[0]['aa_sequence'] or ''
     return ''

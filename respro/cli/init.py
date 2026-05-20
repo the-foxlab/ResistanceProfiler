@@ -263,7 +263,7 @@ def _init_add_command(
         Path, typer.Option('--rules', '-r', exists=True, help='Resistance rules TSV to add.')
     ],
     formula_rules: Annotated[
-        Path | None, typer.Option('--formula-rules', exists=True, help='Optional formula rules TSV.')
+        Path | None, typer.Option('--formula-rules',  exists=True, help='Optional formula rules TSV.')
     ] = None,
     genbank_paths: Annotated[
         list[Path] | None, typer.Option(

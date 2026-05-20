@@ -53,6 +53,18 @@ def _load_rule_ids_by_external_id(
     return {row['external_id']: int(row['id']) for row in rows}
 
 
+def _load_known_reference_identifiers(conn: sqlite3.Connection) -> set[str]:
+    """Return all reference names and accessions registered in the project DB."""
+    rows = conn.execute('SELECT name, accession FROM reference').fetchall()
+    result: set[str] = set()
+    for row in rows:
+        if row['name']:
+            result.add(row['name'])
+        if row['accession']:
+            result.add(row['accession'])
+    return result
+
+
 def _formula_rule_exists(
     conn: sqlite3.Connection,
     *,

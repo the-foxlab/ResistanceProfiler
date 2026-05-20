@@ -177,6 +177,15 @@ class TestDetectCoordinateBase:
         result = _detect_coordinate_base(rows, _features('gX', _AA_SEQ))
         assert result == 1
 
+    def test_ignores_rows_with_unknown_reference_identifier(self) -> None:
+        rows = [_rule('gX', position=1, reference='M', reference_identifier='UNKNOWN_REF')]
+        result = _detect_coordinate_base(
+            rows,
+            _features('gX', _AA_SEQ),
+            allowed_reference_identifiers={'tiny_ref'},
+        )
+        assert result == 1
+
 
 # ──────────────────────────────────────────────────────────────────────
 # _validate_reference_amino_acids
@@ -293,6 +302,22 @@ class TestValidateReferenceAminoAcids:
             mismatch_keys = _validate_reference_amino_acids(rows, features_by_name, coord_base=1)
         assert ('gX', '1', 'ACC1', 'M') in mismatch_keys
         assert any('mismatch' in r.message.lower() for r in caplog.records)
+
+    def test_ignores_rows_with_unknown_reference_identifier(self, caplog) -> None:
+        import logging
+
+        rows = [_rule('gX', position=1, reference='Z', reference_identifier='UNKNOWN_REF')]
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+            mismatch_keys = _validate_reference_amino_acids(
+                rows,
+                _features('gX', _AA_SEQ),
+                coord_base=1,
+                allowed_reference_identifiers={'tiny_ref'},
+            )
+
+        assert mismatch_keys == set()
+        assert not any('mismatch' in r.message.lower() for r in caplog.records)
+        assert not any('out of range' in r.message.lower() for r in caplog.records)
 
 
 class TestSchemaFormulaRules:
@@ -1291,17 +1316,20 @@ class TestMissingFeatureWarnings:
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv,
                          additional_info=False)
 
-        warning_messages = [
+        warning_messages = {
             record.message
             for record in caplog.records
-            if 'feature(s) not found in GenBank annotations' in record.message
-        ]
+            if record.levelno == logging.WARNING
+        }
+        feature_warnings = [m for m in warning_messages if 'feature(s) not found' in m]
+        ref_warnings = [m for m in warning_messages if 'reference(s) not provided' in m]
 
-        assert warning_messages
-        warning_text = warning_messages[0]
+        assert feature_warnings, 'Expected feature-not-found warning'
+        assert "row 2: feature 'pol', reference_identifier 'tiny_ref'" in feature_warnings[0]
+        assert 'UL89' not in feature_warnings[0]
 
-        assert "row 2: feature 'pol', reference_identifier 'tiny_ref'" in warning_text
-        assert "row 3: feature 'UL89', reference_identifier 'ref_ul89'" in warning_text
+        assert ref_warnings, 'Expected references-not-provided warning'
+        assert "'ref_ul89'" in ref_warnings[0]
 
 
 class TestGenbankAliasFallbacks:
