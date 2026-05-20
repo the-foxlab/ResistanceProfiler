@@ -11,7 +11,7 @@ import re
 from Bio.Align.substitution_matrices import load as _load_matrix
 from Bio.Seq import Seq
 
-from respro.db.models import AnnotatedVariant, GeneRecord, VariantCall
+from respro.db.models import AnnotatedVariant, FeatureRecord, VariantCall
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ _RE_BARE_AA = re.compile(r'^[A-Z]$', re.IGNORECASE)
 
 def annotate_variants(
     variants: list[VariantCall],
-    genes: list[GeneRecord],
+    features: list[FeatureRecord],
     snp_combine_af_threshold: float = 0.75,
     is_fasta_mode: bool = False,
 ) -> list[AnnotatedVariant]:
@@ -35,15 +35,15 @@ def annotate_variants(
     Annotate a list of variants with codon-aware amino acid consequences.
 
     Handles SNPs, in-frame insertions, in-frame deletions, frameshifts, and in-frame complex
-    indels in CDS regions. Only variants outside any CDS are skipped (included with empty gene_name).
+    indels in CDS regions. Only variants outside any CDS are skipped (included with empty feature_name).
 
     SNP consequences can use a query codon from FASTA-based remapping when
     available (``VariantCall.query_ref_codon``).
 
     :param variants: parsed variant calls (0-based positions). Variants with no CDS hit are
-        included with empty gene_name. If two or more SNPs in the same gene codon all have
+        included with empty feature_name. If two or more SNPs in the same feature codon all have
         AF > threshold, they are annotated as one combined codon event.
-    :param genes: gene annotations for the reference
+    :param features: feature annotations for the reference
 
     :param snp_combine_af_threshold: strict AF threshold for combining SNPs
         within one codon (must be greater than this value)
@@ -52,26 +52,26 @@ def annotate_variants(
     """
     results: list[AnnotatedVariant] = []
     skipped_non_snp = 0
-    group_plan = _plan_combined_snp_groups(variants, genes, snp_combine_af_threshold)
+    group_plan = _plan_combined_snp_groups(variants, features, snp_combine_af_threshold)
 
     for var_idx, var in enumerate(variants):
-        matching_genes = [g for g in genes if g.contains(var.pos)]
-        if not matching_genes:
+        matching_features = [f for f in features if f.contains(var.pos)]
+        if not matching_features:
             results.append(AnnotatedVariant(variant=var, is_fasta_mode=is_fasta_mode))
             continue
 
-        for gene in matching_genes:
-            codon_idx = gene.codon_index(var.pos)
-            codon_key = (gene.id, codon_idx)
+        for feature in matching_features:
+            codon_idx = feature.codon_index(var.pos)
+            codon_key = (feature.id, codon_idx)
             group = group_plan.get(codon_key)
             if group is not None:
                 if var_idx == group[0]:
                     members = [variants[i] for i in group]
-                    combined_annotation = _annotate_combined_snp_codon(members, gene)
+                    combined_annotation = _annotate_combined_snp_codon(members, feature)
                     combined_annotation.is_fasta_mode = is_fasta_mode
                     results.append(combined_annotation)
                 continue
-            ann = _annotate_variant_in_gene(var, gene)
+            ann = _annotate_variant_in_feature(var, feature)
             if ann is None:
                 skipped_non_snp += 1
                 continue
@@ -82,7 +82,7 @@ def annotate_variants(
         'Annotated %d variant(s) -> %d annotation(s) (%d in CDS, %d non-assessable skipped)',
         len(variants),
         len(results),
-        sum(1 for a in results if a.gene_name),
+        sum(1 for a in results if a.feature_name),
         skipped_non_snp,
     )
     return results
@@ -142,7 +142,7 @@ def _translate_indel_bases(bases: str, strand: str) -> str:
     """
     Translate inserted or deleted nucleotide bases to amino acids.
 
-    For negative-strand genes the bases (given in genomic / VCF orientation) are
+    For negative-strand features the bases (given in genomic / VCF orientation) are
     reverse-complemented before translation so they are in coding orientation.
 
     :param bases: nucleotide string in VCF (genomic) orientation; must be a multiple of 3
@@ -155,29 +155,29 @@ def _translate_indel_bases(bases: str, strand: str) -> str:
 
 def _plan_combined_snp_groups(
     variants: list[VariantCall],
-    genes: list[GeneRecord],
+    features: list[FeatureRecord],
     threshold: float,
 ) -> dict[tuple[int, int], list[int]]:
     """
     Return codon groups that should be annotated as one combined SNP event.
 
     :param variants: input variant list
-    :param genes: gene records
+    :param features: feature records
     :param threshold: strict AF threshold for SNP combination
-    :return: {(gene_id, codon_idx): [variant_index, ...]}
+    :return: {(feature_id, codon_idx): [variant_index, ...]}
     """
     grouped: dict[tuple[int, int], list[int]] = {}
     for idx, var in enumerate(variants):
         if not _is_snp(var.ref, var.alt):
             continue
-        for gene in genes:
-            if not gene.contains(var.pos):
+        for feature in features:
+            if not feature.contains(var.pos):
                 continue
-            # Group SNPs per gene-codon so linked high-AF changes can be evaluated jointly.
-            codon_idx = gene.codon_index(var.pos)
+            # Group SNPs per feature-codon so linked high-AF changes can be evaluated jointly.
+            codon_idx = feature.codon_index(var.pos)
             if codon_idx is None or codon_idx < 0:
                 continue
-            key = (gene.id, codon_idx)
+            key = (feature.id, codon_idx)
             grouped.setdefault(key, []).append(idx)
 
     planned: dict[tuple[int, int], list[int]] = {}
@@ -194,27 +194,27 @@ def _plan_combined_snp_groups(
 
 def _annotate_combined_snp_codon(
     variants: list[VariantCall],
-    gene: GeneRecord,
+    feature: FeatureRecord,
 ) -> AnnotatedVariant:
     """
     Annotate multiple SNPs in one codon as a single codon event.
 
-    :param variants: SNPs from the same codon (same gene)
-    :param gene: gene containing the codon
+    :param variants: SNPs from the same codon (same feature)
+    :param feature: feature containing the codon
     :return: one combined annotation
     """
     if not variants:
         raise ValueError('Combined SNP annotation requires at least one variant')
 
-    seq_cds = gene.nt_sequence.upper()
+    seq_cds = feature.nt_sequence.upper()
     anchor = sorted(variants, key=lambda v: v.pos)[0]
-    codon_idx = gene.codon_index(anchor.pos)
+    codon_idx = feature.codon_index(anchor.pos)
     if codon_idx is None:
         raise ValueError(
-            f'Combined SNP annotation requires coding codon index for gene {gene.name!r} '
+            f'Combined SNP annotation requires coding codon index for feature {feature.name!r} '
             f'at genomic position {anchor.pos}'
         )
-    codon_start = gene.codon_start + (codon_idx * 3)
+    codon_start = feature.codon_start + (codon_idx * 3)
     internal_codon = seq_cds[codon_start:codon_start + 3]
     ref_aa = translate_codon(internal_codon)
 
@@ -225,17 +225,17 @@ def _annotate_combined_snp_codon(
     alt_codon_bases = list(affected_codon)
     seen: dict[int, str] = {}
     for var in sorted(variants, key=lambda v: v.pos):
-        codon_pos = gene.codon_position_in_codon(var.pos)
+        codon_pos = feature.codon_position_in_codon(var.pos)
         if codon_pos is None:
             raise ValueError(
-                f'Combined SNP annotation requires coding codon position for gene {gene.name!r} '
+                f'Combined SNP annotation requires coding codon position for feature {feature.name!r} '
                 f'at genomic position {var.pos}'
             )
-        alt_base = reverse_complement(var.alt) if gene.strand == '-' else var.alt.upper()
+        alt_base = reverse_complement(var.alt) if feature.strand == '-' else var.alt.upper()
         # Conflicting ALTs at the same codon base indicate inconsistent input; fail fast.
         if codon_pos in seen and seen[codon_pos] != alt_base:
             raise ValueError(
-                f'Conflicting SNPs in same codon for gene {gene.name!r} at codon {codon_idx + 1}'
+                f'Conflicting SNPs in same codon for feature {feature.name!r} at codon {codon_idx + 1}'
             )
         seen[codon_pos] = alt_base
         alt_codon_bases[codon_pos] = alt_base
@@ -258,7 +258,7 @@ def _annotate_combined_snp_codon(
 
     return AnnotatedVariant(
         variant=combined_var,
-        gene_name=gene.name,
+        feature_name=feature.name,
         codon_pos=codon_idx,
         ref_codon=affected_codon,
         alt_codon=alt_codon,
@@ -270,29 +270,29 @@ def _annotate_combined_snp_codon(
     )
 
 
-def _annotate_variant_in_gene(
+def _annotate_variant_in_feature(
     var: VariantCall,
-    gene: GeneRecord,
+    feature: FeatureRecord,
 ) -> AnnotatedVariant | None:
     """
-    Annotate a single variant within a gene.
+    Annotate a single variant within a feature.
 
     Handles SNPs, in-frame insertions, in-frame deletions, frameshifts, and mid-codon in-frame
     indels (annotated as inframe_complex).
     """
-    seq_cds = gene.nt_sequence.upper()
+    seq_cds = feature.nt_sequence.upper()
     if not seq_cds:
-        return AnnotatedVariant(variant=var, gene_name=gene.name)
+        return AnnotatedVariant(variant=var, feature_name=feature.name)
 
-    coding_nt = seq_cds[gene.codon_start:]
+    coding_nt = seq_cds[feature.codon_start:]
 
-    cds_variant_pos = gene.genomic_to_cds_position(var.pos)
+    cds_variant_pos = feature.genomic_to_cds_position(var.pos)
     if cds_variant_pos is None:
-        return AnnotatedVariant(variant=var, gene_name=gene.name)
+        return AnnotatedVariant(variant=var, feature_name=feature.name)
 
-    coding_variant_pos = cds_variant_pos - gene.codon_start
+    coding_variant_pos = cds_variant_pos - feature.codon_start
     if coding_variant_pos < 0:
-        return AnnotatedVariant(variant=var, gene_name=gene.name)
+        return AnnotatedVariant(variant=var, feature_name=feature.name)
 
     codon_idx = coding_variant_pos // 3
     frame_offset = coding_variant_pos % 3
@@ -300,29 +300,29 @@ def _annotate_variant_in_gene(
     if _is_snp(var.ref, var.alt):
         cds_codons = [list(coding_nt[i:i + 3]) for i in range(0, len(coding_nt), 3)]
         if codon_idx >= len(cds_codons):
-            return AnnotatedVariant(variant=var, gene_name=gene.name)
-        mut = reverse_complement(var.alt) if gene.strand == '-' else var.alt
-        return _annotate_snp(var, gene, cds_codons, codon_idx, frame_offset, mut)
+            return AnnotatedVariant(variant=var, feature_name=feature.name)
+        mut = reverse_complement(var.alt) if feature.strand == '-' else var.alt
+        return _annotate_snp(var, feature, cds_codons, codon_idx, frame_offset, mut)
 
     if _is_insertion(var.ref, var.alt):
-        indel_anchor_pos = _indel_anchor_coding_pos(coding_variant_pos, len(var.ref), gene.strand)
+        indel_anchor_pos = _indel_anchor_coding_pos(coding_variant_pos, len(var.ref), feature.strand)
         if indel_anchor_pos < 0:
-            return AnnotatedVariant(variant=var, gene_name=gene.name)
+            return AnnotatedVariant(variant=var, feature_name=feature.name)
         return _annotate_insertion(
             var,
-            gene,
+            feature,
             coding_nt,
             indel_anchor_pos // 3,
             indel_anchor_pos % 3,
         )
 
     if _is_deletion(var.ref, var.alt):
-        indel_anchor_pos = _indel_anchor_coding_pos(coding_variant_pos, len(var.ref), gene.strand)
+        indel_anchor_pos = _indel_anchor_coding_pos(coding_variant_pos, len(var.ref), feature.strand)
         if indel_anchor_pos < 0:
-            return AnnotatedVariant(variant=var, gene_name=gene.name)
+            return AnnotatedVariant(variant=var, feature_name=feature.name)
         return _annotate_deletion(
             var,
-            gene,
+            feature,
             coding_nt,
             indel_anchor_pos // 3,
             indel_anchor_pos % 3,
@@ -333,7 +333,7 @@ def _annotate_variant_in_gene(
 
 def _annotate_snp(
     var: VariantCall,
-    gene: GeneRecord,
+    feature: FeatureRecord,
     cds_codons: list[list[str]],
     mut_codon_idx: int,
     codon_pos: int,
@@ -360,7 +360,7 @@ def _annotate_snp(
 
     return AnnotatedVariant(
         variant=var,
-        gene_name=gene.name,
+        feature_name=feature.name,
         codon_pos=mut_codon_idx,
         ref_codon=affected_codon,
         alt_codon=alt_codon_str,
@@ -387,7 +387,7 @@ def _classify_snp_consequence(ref_aa: str, alt_aa: str, codon_idx: int) -> str:
 
 def _annotate_frameshift(
     var: VariantCall,
-    gene: GeneRecord,
+    feature: FeatureRecord,
     coding_nt: str,
     codon_idx: int,
 ) -> AnnotatedVariant:
@@ -398,7 +398,7 @@ def _annotate_frameshift(
     nomenclature (e.g. ``KfsX``).
 
     :param var: variant call
-    :param gene: gene record
+    :param feature: feature record
     :param coding_nt: coding nucleotide sequence (from codon_start onward)
     :param codon_idx: 0-based codon index of the anchor base
     :return: AnnotatedVariant with consequence='frameshift'
@@ -408,7 +408,7 @@ def _annotate_frameshift(
     anchor_aa = translate_codon(anchor_codon)
     return AnnotatedVariant(
         variant=var,
-        gene_name=gene.name,
+        feature_name=feature.name,
         codon_pos=codon_idx,
         ref_codon=anchor_codon,
         alt_codon='',
@@ -420,7 +420,7 @@ def _annotate_frameshift(
 
 def _annotate_insertion(
     var: VariantCall,
-    gene: GeneRecord,
+    feature: FeatureRecord,
     coding_nt: str,
     codon_idx: int,
     frame_offset: int,
@@ -435,14 +435,14 @@ def _annotate_insertion(
     resolvable to a single canonical token.
 
     :param var: variant call; ALT uses VCF anchor-base convention (alt[1:] are inserted bases)
-    :param gene: gene record
+    :param feature: feature record
     :param coding_nt: coding nucleotide sequence (from codon_start onward)
     :param codon_idx: 0-based codon index of the anchor base
     :param frame_offset: position of anchor base within its codon (0, 1, or 2)
     :return: AnnotatedVariant
     """
     if not _is_inframe(var.ref, var.alt):
-        return _annotate_frameshift(var, gene, coding_nt, codon_idx)
+        return _annotate_frameshift(var, feature, coding_nt, codon_idx)
 
     if not _is_vcf_anchor_at_codon_boundary(frame_offset):
         internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
@@ -450,7 +450,7 @@ def _annotate_insertion(
         anchor_aa = translate_codon(anchor_codon)
         return AnnotatedVariant(
             variant=var,
-            gene_name=gene.name,
+            feature_name=feature.name,
             codon_pos=codon_idx,
             ref_codon=anchor_codon,
             alt_codon='',
@@ -463,11 +463,11 @@ def _annotate_insertion(
     anchor_codon = _resolve_anchor_codon(var, internal_codon)
     anchor_aa = translate_codon(anchor_codon)
     inserted_bases = var.alt[1:]  # strip anchor base
-    inserted_aas = _translate_indel_bases(inserted_bases, gene.strand)
+    inserted_aas = _translate_indel_bases(inserted_bases, feature.strand)
 
     return AnnotatedVariant(
         variant=var,
-        gene_name=gene.name,
+        feature_name=feature.name,
         codon_pos=codon_idx,
         ref_codon=anchor_codon,
         alt_codon='',
@@ -479,7 +479,7 @@ def _annotate_insertion(
 
 def _annotate_deletion(
     var: VariantCall,
-    gene: GeneRecord,
+    feature: FeatureRecord,
     coding_nt: str,
     codon_idx: int,
     frame_offset: int,
@@ -494,14 +494,14 @@ def _annotate_deletion(
     resolvable to a single canonical token.
 
     :param var: variant call; REF uses VCF anchor-base convention (ref[1:] are deleted bases)
-    :param gene: gene record
+    :param feature: feature record
     :param coding_nt: coding nucleotide sequence (from codon_start onward)
     :param codon_idx: 0-based codon index of the anchor base
     :param frame_offset: position of anchor base within its codon (0, 1, or 2)
     :return: AnnotatedVariant
     """
     if not _is_inframe(var.ref, var.alt):
-        return _annotate_frameshift(var, gene, coding_nt, codon_idx)
+        return _annotate_frameshift(var, feature, coding_nt, codon_idx)
 
     if not _is_vcf_anchor_at_codon_boundary(frame_offset):
         internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
@@ -509,7 +509,7 @@ def _annotate_deletion(
         anchor_aa = translate_codon(anchor_codon)
         return AnnotatedVariant(
             variant=var,
-            gene_name=gene.name,
+            feature_name=feature.name,
             codon_pos=codon_idx,
             ref_codon=anchor_codon,
             alt_codon='',
@@ -522,11 +522,11 @@ def _annotate_deletion(
     anchor_codon = _resolve_anchor_codon(var, internal_codon)
     anchor_aa = translate_codon(anchor_codon)
     deleted_bases = var.ref[1:]  # strip anchor base
-    deleted_aas = _translate_indel_bases(deleted_bases, gene.strand)
+    deleted_aas = _translate_indel_bases(deleted_bases, feature.strand)
 
     return AnnotatedVariant(
         variant=var,
-        gene_name=gene.name,
+        feature_name=feature.name,
         codon_pos=codon_idx,
         ref_codon=anchor_codon,
         alt_codon='',
@@ -557,8 +557,8 @@ def _indel_anchor_coding_pos(coding_variant_pos: int, ref_len: int, strand: str)
     """
     Return coding-position anchor for VCF indels.
 
-    On '+' genes, VCF anchor already refers to the coding-preceding nucleotide.
-    On '-' genes, genomic 5'->3' VCF anchors are downstream in coding orientation,
+    On '+' features, VCF anchor already refers to the coding-preceding nucleotide.
+    On '-' features, genomic 5'->3' VCF anchors are downstream in coding orientation,
     so the coding anchor shifts left by the REF length.
     """
     if strand == '+':

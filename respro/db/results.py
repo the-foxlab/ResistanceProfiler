@@ -68,7 +68,7 @@ def save_run(
         results_conn.execute(
             'INSERT INTO variant_result '
             '(run_id, chrom, pos, ref, alt, allele_freq, depth, '
-            'gene_name, codon_pos, ref_codon, alt_codon, ref_aa, alt_aa, '
+            'feature_name, codon_pos, ref_codon, alt_codon, ref_aa, alt_aa, '
             'consequence, af_bin, rule_match, drug_hits) '
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
@@ -79,7 +79,7 @@ def save_run(
                 v.alt,
                 v.allele_freq,
                 v.depth,
-                ann.gene_name,
+                ann.feature_name,
                 ann.codon_pos,
                 ann.ref_codon,
                 ann.alt_codon,
@@ -94,8 +94,8 @@ def save_run(
 
     for gap in result.coverage_gaps:
         results_conn.execute(
-            'INSERT INTO coverage_gap (run_id, gene_name, codon_start, codon_end) VALUES (?, ?, ?, ?)',
-            (run_id, gap.gene_name, gap.codon_start, gap.codon_end),
+            'INSERT INTO coverage_gap (run_id, feature_name, codon_start, codon_end) VALUES (?, ?, ?, ?)',
+            (run_id, gap.feature_name, gap.codon_start, gap.codon_end),
         )
 
     for formula_hit in result.formula_hits:
@@ -214,7 +214,7 @@ def load_coverage_gaps(
 
     :param results_conn: open results DB connection
     :param run_id: id of the run to load gaps for
-    :return: list of CoverageGap objects ordered by gene_name, codon_start
+    :return: list of CoverageGap objects ordered by feature_name, codon_start
     """
     tables = {
         row['name']
@@ -226,12 +226,12 @@ def load_coverage_gaps(
         return []
 
     rows = results_conn.execute(
-        'SELECT gene_name, codon_start, codon_end FROM coverage_gap '
-        'WHERE run_id = ? ORDER BY gene_name, codon_start',
+        'SELECT feature_name, codon_start, codon_end FROM coverage_gap '
+        'WHERE run_id = ? ORDER BY feature_name, codon_start',
         (run_id,),
     ).fetchall()
     return [
-        CoverageGap(gene_name=row['gene_name'], codon_start=row['codon_start'], codon_end=row['codon_end'])
+        CoverageGap(feature_name=row['feature_name'], codon_start=row['codon_start'], codon_end=row['codon_end'])
         for row in rows
     ]
 
@@ -281,10 +281,10 @@ def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
             allele_freq=row.get('allele_freq') or 0.0,
             depth=row.get('depth') or 0,
         )
-        rule_matches = [_rule_from_hit(hit, row.get('gene_name', '')) for hit in drug_hits]
+        rule_matches = [_rule_from_hit(hit, row.get('feature_name', '')) for hit in drug_hits]
         ann = AnnotatedVariant(
             variant=v,
-            gene_name=row.get('gene_name', ''),
+            feature_name=row.get('feature_name', ''),
             codon_pos=row.get('codon_pos') or 0,
             ref_codon=row.get('ref_codon', ''),
             alt_codon=row.get('alt_codon', ''),
@@ -327,7 +327,7 @@ def reconstruct_formula_rule_hits(
     return hits
 
 
-def _rule_from_hit(hit: dict, gene_name: str) -> ResistanceRule:
+def _rule_from_hit(hit: dict, feature_name: str) -> ResistanceRule:
     """Reconstruct a ResistanceRule shell from a stored drug_hits JSON entry."""
     publications = [
         Publication(
@@ -341,8 +341,8 @@ def _rule_from_hit(hit: dict, gene_name: str) -> ResistanceRule:
     ]
     return ResistanceRule(
         id=0,
-        gene_name=gene_name,
-        gene_id=0,
+        feature_name=feature_name,
+        feature_id=0,
         drug_name=hit.get('drug', ''),
         drug_id=0,
         reference_identifier=hit.get('reference_identifier', ''),
@@ -393,8 +393,8 @@ def _rule_set_from_formula_hit(payload: dict) -> ResistanceRuleSet:
             ResistanceRuleSetMember(
                 id=idx,
                 rule_set_id=0,
-                gene_name=member.get('gene', ''),
-                gene_id=0,
+                feature_name=member.get('feature', ''),
+                feature_id=0,
                 reference_identifier='',
                 position=max(0, position_1based - 1),
                 reference=member.get('reference', ''),
@@ -414,13 +414,13 @@ def _match_formula_variants(
     by_key_weak: dict[tuple, AnnotatedVariant] = {}
     for ann in annotations:
         key = (
-            ann.protein_key,
+            ann.feature_name,
             ann.codon_pos + 1,
             ann.ref_aa,
             ann.alt_aa,
             round(ann.variant.allele_freq, 6),
         )
-        weak_key = (ann.protein_key, ann.codon_pos + 1, ann.ref_aa, ann.alt_aa)
+        weak_key = (ann.feature_name, ann.codon_pos + 1, ann.ref_aa, ann.alt_aa)
         by_key.setdefault(key, ann)
         by_key_weak.setdefault(weak_key, ann)
 
@@ -429,14 +429,14 @@ def _match_formula_variants(
         af = float(item.get('allele_freq', 0.0) or 0.0)
         codon_pos_1based = int(item.get('codon_pos', 1) or 1)
         key = (
-            item.get('gene', ''),
+            item.get('feature', ''),
             codon_pos_1based,
             item.get('ref_aa', ''),
             item.get('alt_aa', ''),
             round(af, 6),
         )
         weak_key = (
-            item.get('gene', ''),
+            item.get('feature', ''),
             codon_pos_1based,
             item.get('ref_aa', ''),
             item.get('alt_aa', ''),
@@ -450,7 +450,7 @@ def _match_formula_variants(
         matched.append(
             AnnotatedVariant(
                 variant=VariantCall(chrom='', pos=0, ref='', alt='', allele_freq=af, depth=0),
-                gene_name=item.get('gene', ''),
+                feature_name=item.get('feature', ''),
                 codon_pos=max(0, codon_pos_1based - 1),
                 ref_aa=item.get('ref_aa', ''),
                 alt_aa=item.get('alt_aa', ''),
@@ -590,12 +590,12 @@ def load_run_from_json(
 
     coverage_gaps: list[CoverageGap] = []
     for idx, row in enumerate(coverage_rows, start=1):
-        for key in ('gene_name', 'codon_start', 'codon_end'):
+        for key in ('feature_name', 'codon_start', 'codon_end'):
             if key not in row:
                 raise ValueError(f'Invalid results JSON: coverage_gap[{idx}] missing {key!r}')
         coverage_gaps.append(
             CoverageGap(
-                gene_name=str(row.get('gene_name', '')),
+                feature_name=str(row.get('feature_name', '')),
                 codon_start=int(row.get('codon_start', 0)),
                 codon_end=int(row.get('codon_end', 0)),
             )

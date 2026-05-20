@@ -1,5 +1,5 @@
 """
-Shared report colour palette for mutation consequences and genome/gene track elements.
+Shared report colour palette for mutation consequences and genome/feature track elements.
 """
 
 from __future__ import annotations
@@ -22,13 +22,13 @@ MUTATION_COLOURS = {
 # Non-covered region overlay
 NON_COVERED_COLOUR = '#6b7280'
 
-# Genome overview gene track colours
-GENE_HIGHLIGHTED_COLOUR = 'steelblue'
-GENE_INTRON_COLOUR = "#b2b2b2"  # muted blue-grey for intron / non-coding intervals within split genes
-GENE_DEFAULT_COLOUR = '#d9dde3'
-GENE_HIGHLIGHTED_EDGE = 'black'
-GENE_DEFAULT_EDGE = "#a2a2a2"
-GENE_BASELINE_COLOUR = 'dimgrey'
+# Genome overview feature track colours
+FEATURE_HIGHLIGHTED_COLOUR = 'steelblue'
+FEATURE_INTRON_COLOUR = "#b2b2b2"  # muted blue-grey for intron / non-coding intervals within split genes
+FEATURE_DEFAULT_COLOUR = '#d9dde3'
+FEATURE_HIGHLIGHTED_EDGE = 'black'
+FEATURE_DEFAULT_EDGE = "#a2a2a2"
+FEATURE_BASELINE_COLOUR = 'dimgrey'
 
 # Phenotype badge colours — key is the raw phenotype value
 PHENOTYPE_COLOURS = {

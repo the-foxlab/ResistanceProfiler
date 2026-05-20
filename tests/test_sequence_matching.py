@@ -15,13 +15,13 @@ from respro.core.alignment import (
     _swap_cigar_indels,
     cigar_to_coordinate_map,
     load_cached_mappings,
-    load_genes_with_rules,
-    match_query_to_genes,
+    load_features_with_rules,
+    match_query_to_features,
     parse_cigar,
     sequence_checksum,
     store_mappings,
 )
-from respro.db.models import GeneMatch, GeneRecord
+from respro.db.models import FeatureMatch, FeatureRecord
 from respro.db.schema import create_schema
 
 # ──────────────────────────────────────────────────────────────────────
@@ -32,8 +32,8 @@ _CDS_SEQ = 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC'  # 30 nt, 10 codons
 
 
 @pytest.fixture()
-def gene_with_rules() -> GeneRecord:
-    return GeneRecord(
+def feature_with_rules() -> FeatureRecord:
+    return FeatureRecord(
         id=1,
         reference_id=1,
         name='gag',
@@ -48,8 +48,8 @@ def gene_with_rules() -> GeneRecord:
 
 
 @pytest.fixture()
-def gene_no_seq() -> GeneRecord:
-    return GeneRecord(
+def feature_no_seq() -> FeatureRecord:
+    return FeatureRecord(
         id=2, reference_id=1, name='empty', protein='', start=0, end=30,
         strand='+', codon_start=0, nt_sequence='', aa_sequence='',
     )
@@ -71,29 +71,29 @@ def project_db(tmp_path: Path) -> Path:
         (1, 'ref2', 30),
     )
     conn.execute(
-        'INSERT INTO gene (reference_id, name, protein, start, end, strand, nt_sequence, aa_sequence) '
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence, aa_sequence) '
         'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         (1, 'gag', 'Gag', 0, 30, '+', _CDS_SEQ, 'MKAFGPKFGP'),
     )
     conn.execute(
-        'INSERT INTO gene (reference_id, name, protein, start, end, strand, nt_sequence, aa_sequence) '
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence, aa_sequence) '
         'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         (1, 'pol', 'Pol', 30, 60, '+', 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC', 'MKAFGPKFGP'),
     )
     conn.execute(
-        'INSERT INTO gene (reference_id, name, protein, start, end, strand, nt_sequence, aa_sequence) '
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence, aa_sequence) '
         'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         (2, 'rt', 'RT', 0, 30, '+', _CDS_SEQ, 'MKAFGPKFGP'),
     )
     conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'drugx'))
     # Only gag has a rule
     conn.execute(
-        'INSERT INTO resistance_rule (gene_id, drug_id, position, reference, mutation, phenotype) '
+        'INSERT INTO resistance_rule (feature_id, drug_id, position, reference, mutation, phenotype) '
         'VALUES (?, ?, ?, ?, ?, ?)',
         (1, 1, 1, 'K', 'E', 'resistant'),
     )
     conn.execute(
-        'INSERT INTO resistance_rule (gene_id, drug_id, position, reference, mutation, phenotype) '
+        'INSERT INTO resistance_rule (feature_id, drug_id, position, reference, mutation, phenotype) '
         'VALUES (?, ?, ?, ?, ?, ?)',
         (3, 1, 2, 'A', 'V', 'resistant'),
     )
@@ -155,87 +155,87 @@ class TestCigarToCoordinateMap:
 # Sequence matching
 # ──────────────────────────────────────────────────────────────────────
 
-class TestMatchQueryToGenes:
-    def test_exact_match(self, gene_with_rules: GeneRecord) -> None:
-        matches = match_query_to_genes(_CDS_SEQ, [gene_with_rules])
+class TestMatchQueryToFeatures:
+    def test_exact_match(self, feature_with_rules: FeatureRecord) -> None:
+        matches = match_query_to_features(_CDS_SEQ, [feature_with_rules])
         assert len(matches) == 1
         m = matches[0]
-        assert m.gene.name == 'gag'
+        assert m.feature.name == 'gag'
         assert m.identity == pytest.approx(1.0)
         assert m.cds_coverage == pytest.approx(1.0)
         assert m.query_coverage == pytest.approx(1.0)
         assert m.strand == '+'
         assert m.cigar == '30M'
 
-    def test_cds_within_larger_query(self, gene_with_rules: GeneRecord) -> None:
+    def test_cds_within_larger_query(self, feature_with_rules: FeatureRecord) -> None:
         flanking = 'NNNNNNNNNN'
         query = flanking + _CDS_SEQ + flanking
-        matches = match_query_to_genes(query, [gene_with_rules])
+        matches = match_query_to_features(query, [feature_with_rules])
         assert len(matches) == 1
         m = matches[0]
         assert m.identity == pytest.approx(1.0)
         assert m.query_start == 10
         assert m.query_end == 40
 
-    def test_snps_reduce_identity(self, gene_with_rules: GeneRecord) -> None:
+    def test_snps_reduce_identity(self, feature_with_rules: FeatureRecord) -> None:
         # Introduce mismatches in the middle so the local aligner must include them
         mutated = list(_CDS_SEQ)
         mutated[10] = 'A' if mutated[10] != 'A' else 'C'
         mutated[20] = 'A' if mutated[20] != 'A' else 'C'
         query = ''.join(mutated)
-        matches = match_query_to_genes(query, [gene_with_rules], min_identity=0.80)
+        matches = match_query_to_features(query, [feature_with_rules], min_identity=0.80)
         assert len(matches) == 1
         assert matches[0].identity < 1.0
 
-    def test_unrelated_sequence_rejected(self, gene_with_rules: GeneRecord) -> None:
+    def test_unrelated_sequence_rejected(self, feature_with_rules: FeatureRecord) -> None:
         unrelated = 'GATTACA' * 10
-        matches = match_query_to_genes(unrelated, [gene_with_rules])
+        matches = match_query_to_features(unrelated, [feature_with_rules])
         assert len(matches) == 0
 
-    def test_skips_gene_without_nt_sequence(self, gene_no_seq: GeneRecord) -> None:
-        matches = match_query_to_genes(_CDS_SEQ, [gene_no_seq])
+    def test_skips_feature_without_nt_sequence(self, feature_no_seq: FeatureRecord) -> None:
+        matches = match_query_to_features(_CDS_SEQ, [feature_no_seq])
         assert len(matches) == 0
 
     def test_reverse_complement_match(self) -> None:
         from Bio.Seq import Seq
         cds = 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC'
         rc_cds = str(Seq(cds).reverse_complement())
-        gene = GeneRecord(
-            id=1, reference_id=1, name='minus_gene', protein='',
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='minus_feature', protein='',
             start=0, end=30, strand='-', codon_start=0,
             nt_sequence=cds, aa_sequence='',
         )
         # Query is the RC of the CDS → should match on '-' strand
-        matches = match_query_to_genes(rc_cds, [gene])
+        matches = match_query_to_features(rc_cds, [feature])
         assert len(matches) == 1
         assert matches[0].strand == '-'
         assert matches[0].identity == pytest.approx(1.0)
 
-    def test_partial_query_accepted_when_identity_passes(self, gene_with_rules: GeneRecord) -> None:
+    def test_partial_query_accepted_when_identity_passes(self, feature_with_rules: FeatureRecord) -> None:
         # A partial query is accepted when identity passes.
         # CDS coverage is low, but query coverage is ~1.0 for the aligned query.
         long_cds = _CDS_SEQ * 3  # 90 nt
-        gene = GeneRecord(
-            id=gene_with_rules.id,
-            reference_id=gene_with_rules.reference_id,
-            name=gene_with_rules.name,
-            protein=gene_with_rules.protein,
+        feature = FeatureRecord(
+            id=feature_with_rules.id,
+            reference_id=feature_with_rules.reference_id,
+            name=feature_with_rules.name,
+            protein=feature_with_rules.protein,
             start=0,
             end=len(long_cds),
-            strand=gene_with_rules.strand,
-            codon_start=gene_with_rules.codon_start,
+            strand=feature_with_rules.strand,
+            codon_start=feature_with_rules.codon_start,
             nt_sequence=long_cds,
             aa_sequence='',
         )
         partial = long_cds[:36]  # first 36 of 90 nt → 40% CDS coverage
-        matches = match_query_to_genes(partial, [gene])
+        matches = match_query_to_features(partial, [feature])
         assert len(matches) == 1
         m = matches[0]
         assert m.query_coverage == pytest.approx(1.0)
         assert m.cds_coverage < 0.90  # confirms it would have been rejected under old logic
 
-    def test_cds_and_query_coverage_both_stored(self, gene_with_rules: GeneRecord) -> None:
-        matches = match_query_to_genes(_CDS_SEQ, [gene_with_rules])
+    def test_cds_and_query_coverage_both_stored(self, feature_with_rules: FeatureRecord) -> None:
+        matches = match_query_to_features(_CDS_SEQ, [feature_with_rules])
         assert len(matches) == 1
         m = matches[0]
         assert m.cds_coverage == pytest.approx(1.0)
@@ -243,25 +243,25 @@ class TestMatchQueryToGenes:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# DB: load_genes_with_rules
+# DB: load_features_with_rules
 # ──────────────────────────────────────────────────────────────────────
 
-class TestLoadGenesWithRules:
-    def test_returns_only_genes_with_rules(self, project_db: Path) -> None:
+class TestLoadFeaturesWithRules:
+    def test_returns_only_features_with_rules(self, project_db: Path) -> None:
         from respro.db.schema import open_project_db
         conn = open_project_db(project_db)
-        genes = load_genes_with_rules(conn, reference_id=1)
+        features = load_features_with_rules(conn, reference_id=1)
         conn.close()
-        names = {g.name for g in genes}
+        names = {g.name for g in features}
         assert 'gag' in names
         assert 'pol' not in names
 
-    def test_without_reference_filter_loads_all_rule_genes(self, project_db: Path) -> None:
+    def test_without_reference_filter_loads_all_rule_features(self, project_db: Path) -> None:
         from respro.db.schema import open_project_db
         conn = open_project_db(project_db)
-        genes = load_genes_with_rules(conn)
+        features = load_features_with_rules(conn)
         conn.close()
-        names = {g.name for g in genes}
+        names = {g.name for g in features}
         assert names == {'gag', 'rt'}
 
 
@@ -274,8 +274,8 @@ class TestDbCaching:
         from respro.db.schema import open_project_db
         conn = open_project_db(project_db)
 
-        genes = load_genes_with_rules(conn, reference_id=1)
-        matches = match_query_to_genes(_CDS_SEQ, genes)
+        features = load_features_with_rules(conn, reference_id=1)
+        matches = match_query_to_features(_CDS_SEQ, features)
         assert len(matches) == 1
 
         chk = sequence_checksum(_CDS_SEQ)
@@ -286,7 +286,7 @@ class TestDbCaching:
 
         assert loaded is not None
         assert len(loaded) == 1
-        assert loaded[0].gene.name == 'gag'
+        assert loaded[0].feature.name == 'gag'
         assert loaded[0].cigar == matches[0].cigar
         assert loaded[0].identity == pytest.approx(matches[0].identity)
         assert loaded[0].cds_coverage == pytest.approx(matches[0].cds_coverage)
@@ -297,7 +297,7 @@ class TestDbCaching:
         from respro.db.schema import open_project_db
         conn = open_project_db(project_db)
 
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='gag',
@@ -310,8 +310,8 @@ class TestDbCaching:
             aa_sequence='MKAFGPKFGP',
         )
         match = [
-            GeneMatch(
-                gene=gene,
+            FeatureMatch(
+                feature=feature,
                 identity=1.0,
                 cds_coverage=0.8,
                 query_coverage=0.8,
@@ -351,7 +351,7 @@ class TestDbCaching:
 # mappy backend
 # ──────────────────────────────────────────────────────────────────────
 
-# A realistic gene-scale CDS (repeated to exceed mappy's minimum k-mer seeding length)
+# A realistic feature-scale CDS (repeated to exceed mappy's minimum k-mer seeding length)
 _LONG_CDS = (_CDS_SEQ * 80)[:2000]  # ~2 KB
 
 
@@ -381,20 +381,20 @@ class TestNormalizeMappyCigar:
 
 
 class TestMappyBackend:
-    """Tests for the mappy alignment backend via match_query_to_genes(...)."""
+    """Tests for the mappy alignment backend via match_query_to_features(...)."""
 
-    def _make_gene(
-        self, cds: str, strand: str = '+', name: str = 'gene1',
-    ) -> GeneRecord:
-        return GeneRecord(
+    def _make_feature(
+        self, cds: str, strand: str = '+', name: str = 'feature1',
+    ) -> FeatureRecord:
+        return FeatureRecord(
             id=1, reference_id=1, name=name, protein='',
             start=0, end=len(cds), strand=strand, codon_start=0,
             nt_sequence=cds, aa_sequence='',
         )
 
     def test_exact_match_forward_strand(self) -> None:
-        gene = self._make_gene(_LONG_CDS)
-        matches = match_query_to_genes(_LONG_CDS, [gene])
+        feature = self._make_feature(_LONG_CDS)
+        matches = match_query_to_features(_LONG_CDS, [feature])
         assert len(matches) == 1
         m = matches[0]
         assert m.identity == pytest.approx(1.0, abs=0.01)
@@ -404,8 +404,8 @@ class TestMappyBackend:
     def test_cds_within_larger_query(self) -> None:
         flanking = 'A' * 500
         query = flanking + _LONG_CDS + flanking
-        gene = self._make_gene(_LONG_CDS)
-        matches = match_query_to_genes(query, [gene])
+        feature = self._make_feature(_LONG_CDS)
+        matches = match_query_to_features(query, [feature])
         assert len(matches) == 1
         m = matches[0]
         assert m.identity == pytest.approx(1.0, abs=0.01)
@@ -418,8 +418,8 @@ class TestMappyBackend:
         flanking = 'A' * 500
         # CDS appears in reverse orientation relative to the query
         query = flanking + rc_cds + flanking
-        gene = self._make_gene(_LONG_CDS, strand='-')
-        matches = match_query_to_genes(query, [gene])
+        feature = self._make_feature(_LONG_CDS, strand='-')
+        matches = match_query_to_features(query, [feature])
         assert len(matches) == 1
         assert matches[0].strand == '-'
         assert matches[0].identity == pytest.approx(1.0, abs=0.01)
@@ -430,31 +430,31 @@ class TestMappyBackend:
         for i in range(0, len(mutated), 20):
             mutated[i] = 'A' if mutated[i] != 'A' else 'C'
         query = ''.join(mutated)
-        gene = self._make_gene(_LONG_CDS)
-        matches = match_query_to_genes(query, [gene], min_identity=0.80)
+        feature = self._make_feature(_LONG_CDS)
+        matches = match_query_to_features(query, [feature], min_identity=0.80)
         assert len(matches) == 1
         assert matches[0].identity < 1.0
 
     def test_unrelated_sequence_rejected(self) -> None:
-        gene = self._make_gene(_LONG_CDS)
+        feature = self._make_feature(_LONG_CDS)
         unrelated = 'GATTACA' * 300
-        matches = match_query_to_genes(unrelated, [gene])
+        matches = match_query_to_features(unrelated, [feature])
         assert len(matches) == 0
 
-    def test_skips_gene_without_nt_sequence(self) -> None:
-        gene = GeneRecord(
+    def test_skips_feature_without_nt_sequence(self) -> None:
+        feature = FeatureRecord(
             id=2, reference_id=1, name='empty', protein='', start=0, end=30,
             strand='+', codon_start=0, nt_sequence='', aa_sequence='',
         )
-        matches = match_query_to_genes(_LONG_CDS, [gene])
+        matches = match_query_to_features(_LONG_CDS, [feature])
         assert len(matches) == 0
 
     def test_cigar_coordinate_map_compatible(self) -> None:
         """CIGAR produced by mappy backend must generate a valid coordinate map."""
         flanking = 'T' * 300
         query = flanking + _LONG_CDS + flanking
-        gene = self._make_gene(_LONG_CDS)
-        matches = match_query_to_genes(query, [gene])
+        feature = self._make_feature(_LONG_CDS)
+        matches = match_query_to_features(query, [feature])
         assert len(matches) == 1
         m = matches[0]
         coord = cigar_to_coordinate_map(m.cigar, m.query_start)

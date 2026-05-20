@@ -147,7 +147,7 @@ def validate_rules_tsv(
 
 def load_rules(conn: sqlite3.Connection, reference_id: int) -> list[ResistanceRule]:
     """
-    Load all resistance rules for genes belonging to a reference.
+    Load all resistance rules for features belonging to a reference.
 
     :param conn: SQLite database connection
     :param reference_id: ID of the reference
@@ -156,7 +156,7 @@ def load_rules(conn: sqlite3.Connection, reference_id: int) -> list[ResistanceRu
     rows = conn.execute(
         """
         SELECT
-            rr.id, g.name AS gene_name, rr.gene_id,
+            rr.id, g.name AS feature_name, rr.feature_id,
             d.name AS drug_name, rr.drug_id,
             d.pubchem_url, d.description,
             rr.external_id,
@@ -164,7 +164,7 @@ def load_rules(conn: sqlite3.Connection, reference_id: int) -> list[ResistanceRu
             rr.position, rr.reference, rr.mutation,
             rr.phenotype, rr.clinical_phenotype, rr.ic50, rr.fold_ic50, rr.score, rr.source, rr.comment
         FROM resistance_rule rr
-        JOIN gene g ON g.id = rr.gene_id
+        JOIN feature g ON g.id = rr.feature_id
         JOIN drug d ON d.id = rr.drug_id
         WHERE g.reference_id = ?
         ORDER BY g.name, rr.position
@@ -210,7 +210,7 @@ def load_formula_rules(conn: sqlite3.Connection, reference_id: int) -> list[Form
         JOIN drug d ON d.id = fr.drug_id
         JOIN resistance_formula_rule_member frm ON frm.formula_rule_id = fr.id
         JOIN resistance_rule rr ON rr.id = frm.rule_id
-        JOIN gene g ON g.id = rr.gene_id
+        JOIN feature g ON g.id = rr.feature_id
         WHERE g.reference_id = ?
         ORDER BY fr.id
         """,
@@ -262,13 +262,13 @@ def load_formula_rules(conn: sqlite3.Connection, reference_id: int) -> list[Form
             d.name AS drug_name,
             d.pubchem_url,
             d.description,
-            g.name AS gene_name,
-            g.id AS gene_id,
+            g.name AS feature_name,
+            g.id AS feature_id,
             g.reference_id AS member_reference_id
         FROM resistance_formula_rule_member frm
         JOIN resistance_rule rr ON rr.id = frm.rule_id
         JOIN drug d ON d.id = rr.drug_id
-        JOIN gene g ON g.id = rr.gene_id
+        JOIN feature g ON g.id = rr.feature_id
         WHERE frm.formula_rule_id IN ({placeholders})
         ORDER BY frm.formula_rule_id, rr.external_id, rr.id
         """,
@@ -286,8 +286,8 @@ def load_formula_rules(conn: sqlite3.Connection, reference_id: int) -> list[Form
             continue
         formulas[formula_rule_id].member_rules[external_id] = ResistanceRule(
             id=int(row['id']),
-            gene_name=row['gene_name'] or '',
-            gene_id=int(row['gene_id']),
+            feature_name=row['feature_name'] or '',
+            feature_id=int(row['feature_id']),
             drug_name=row['drug_name'] or '',
             drug_id=int(row['drug_id']),
             external_id=external_id,
@@ -338,19 +338,19 @@ def match_rules(
     :param rules: list of resistance rules to match against
     :return: the same annotations list with rule_matches populated
     """
-    # Build a lookup by gene and codon position.
+    # Build a lookup by feature and codon position.
     rule_index: dict[tuple[str, int], list[ResistanceRule]] = {}
     for rule in rules:
-        key = (rule.gene_name, rule.position)
+        key = (rule.feature_name, rule.position)
         rule_index.setdefault(key, []).append(rule)
 
     hit_count = 0
     anchor_warning_cache: set[str] = set()
     for ann in annotations:
-        if not ann.gene_name or not ann.alt_aa or ann.consequence == 'synonymous':
+        if not ann.feature_name or not ann.alt_aa or ann.consequence == 'synonymous':
             continue
 
-        key = (ann.gene_name, ann.codon_pos)
+        key = (ann.feature_name, ann.codon_pos)
         candidates = rule_index.get(key, [])
         for rule in candidates:
             anchor_warning = _indel_anchor_mismatch_warning(
@@ -359,7 +359,7 @@ def match_rules(
                 ann_ref=ann.ref_aa,
                 ann_alt=ann.alt_aa,
                 ann_consequence=ann.consequence,
-                gene_name=ann.gene_name,
+                feature_name=ann.feature_name,
                 codon_pos=ann.codon_pos,
             )
             if anchor_warning and anchor_warning not in anchor_warning_cache:
@@ -410,8 +410,8 @@ def match_formula_rules(
                 best_ann_by_member[rule.external_id] = ann
                 continue
             if ann.variant.allele_freq == existing.variant.allele_freq:
-                ann_key = (ann.gene_name, ann.codon_pos, ann.alt_aa)
-                existing_key = (existing.gene_name, existing.codon_pos, existing.alt_aa)
+                ann_key = (ann.feature_name, ann.codon_pos, ann.alt_aa)
+                existing_key = (existing.feature_name, existing.codon_pos, existing.alt_aa)
                 if ann_key < existing_key:
                     best_ann_by_member[rule.external_id] = ann
 
@@ -438,8 +438,8 @@ def match_formula_rules(
                 ResistanceRuleSetMember(
                     id=idx,
                     rule_set_id=formula.id,
-                    gene_name=member_rule.gene_name,
-                    gene_id=member_rule.gene_id,
+                    feature_name=member_rule.feature_name,
+                    feature_id=member_rule.feature_id,
                     reference_identifier=member_rule.reference_identifier,
                     position=member_rule.position,
                     reference=member_rule.reference,
@@ -521,8 +521,8 @@ def _rule_from_row(row: sqlite3.Row) -> ResistanceRule:
     """Build one ResistanceRule object from a SQLite row."""
     return ResistanceRule(
         id=row['id'],
-        gene_name=row['gene_name'],
-        gene_id=row['gene_id'],
+        feature_name=row['feature_name'],
+        feature_id=row['feature_id'],
         drug_name=row['drug_name'],
         drug_id=row['drug_id'],
         external_id=row['external_id'] or '',
@@ -744,14 +744,14 @@ def _indel_anchor_mismatch_warning(
     ann_ref: str,
     ann_alt: str,
     ann_consequence: str,
-    gene_name: str,
+    feature_name: str,
     codon_pos: int,
 ) -> str | None:
     """Return a warning text when a matched-position indel has a different anchor AA."""
     if ann_consequence == 'insertion' and len(rule_mutation) > len(rule_reference):
         if ann_ref != rule_reference:
             return (
-                f'Indel anchor mismatch at {gene_name}:{codon_pos + 1} (insertion): '
+                f'Indel anchor mismatch at {feature_name}:{codon_pos + 1} (insertion): '
                 f'rule anchor {rule_reference!r} vs observed anchor {ann_ref!r}. '
                 'Matching by inserted payload only.'
             )
@@ -760,7 +760,7 @@ def _indel_anchor_mismatch_warning(
     if ann_consequence == 'deletion' and len(rule_reference) > len(rule_mutation):
         if ann_alt != rule_mutation:
             return (
-                f'Indel anchor mismatch at {gene_name}:{codon_pos + 1} (deletion): '
+                f'Indel anchor mismatch at {feature_name}:{codon_pos + 1} (deletion): '
                 f'rule anchor {rule_mutation!r} vs observed anchor {ann_alt!r}. '
                 'Matching by deleted payload only.'
             )

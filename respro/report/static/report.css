@@ -331,7 +331,7 @@ tr:hover td { background: #f0f4f8; }
   font-weight: 600;
 }
 
-.formula-member-gene,
+.formula-member-feature,
 .formula-member-mutation {
   display: inline-block;
   padding: 0 6px;
@@ -341,7 +341,7 @@ tr:hover td { background: #f0f4f8; }
   color: #f0fdf4;
 }
 
-.formula-member-detected .formula-member-gene {
+.formula-member-detected .formula-member-feature {
   background: #14532d;
 }
 
@@ -356,7 +356,7 @@ tr:hover td { background: #f0f4f8; }
   opacity: .95;
 }
 
-.formula-member-missing .formula-member-gene {
+.formula-member-missing .formula-member-feature {
   background: #cbd5e1;
 }
 
@@ -427,8 +427,8 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
 .section.open .toggle-arrow { transform: rotate(90deg); }
 .section:not(.open) .section-body { display: none; }
 
-.gene-cards { display: grid; grid-template-columns: 1fr; gap: .75rem; margin-bottom: 1.5rem; }
-.gene-card {
+.feature-cards { display: grid; grid-template-columns: 1fr; gap: .75rem; margin-bottom: 1.5rem; }
+.feature-card {
   background: #fff;
   border: 1px solid #e1e4e8;
   border-radius: 6px;
@@ -438,7 +438,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
   gap: .75rem;
   align-items: start;
 }
-.gene-seq-block {
+.feature-seq-block {
   background: #f8fafc;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
@@ -448,7 +448,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
   flex-direction: column;
   justify-content: flex-start;
 }
-.gene-seq {
+.feature-seq {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   font-size: var(--font-size-xs);
   line-height: 1.3;
@@ -458,11 +458,11 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
   margin: 0;
   width: 100%;
 }
-.gene-meta-block { display: grid; gap: .25rem; }
-.gene-card .gene-name { font-weight: 700; font-size: var(--font-size-lg); color: var(--accent); }
-.gene-card .gene-note { color: #555; font-size: var(--font-size-md); }
-.gene-card a { font-size: var(--font-size-sm); color: #2980b9; text-decoration: none; }
-.gene-card a:hover { text-decoration: underline; }
+.feature-meta-block { display: grid; gap: .25rem; }
+.feature-card .feature-name { font-weight: 700; font-size: var(--font-size-lg); color: var(--accent); }
+.feature-card .feature-note { color: #555; font-size: var(--font-size-md); }
+.feature-card a { font-size: var(--font-size-sm); color: #2980b9; text-decoration: none; }
+.feature-card a:hover { text-decoration: underline; }
 
 /* Responsive adjustments for tablets and smaller screens */
 @media (max-width: 1200px) {
@@ -505,9 +505,9 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e1e4e8; fon
   .drug-card .drug-info { min-width: 0; }
   .drug-card .drug-name { font-size: var(--font-size-lg); }
   .drug-card .drug-desc { font-size: var(--font-size-sm); }
-  .gene-cards { grid-template-columns: 1fr; }
-  .gene-card { grid-template-columns: 1fr; }
-  .gene-seq { font-size: var(--font-size-caption); }
+  .feature-cards { grid-template-columns: 1fr; }
+  .feature-card { grid-template-columns: 1fr; }
+  .feature-seq { font-size: var(--font-size-caption); }
 }
 
 @media (max-width: 700px) {

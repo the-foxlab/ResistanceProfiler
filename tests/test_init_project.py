@@ -17,8 +17,8 @@ from Bio.SeqRecord import SeqRecord
 from conftest import TINY_REF_SEQ, write_genbank
 
 from respro.cli.init import init_project
-from respro.core.alignment import load_cached_mappings, load_genes_with_rules, sequence_checksum
-from respro.db.genes import _is_ncbi_protein_accession
+from respro.core.alignment import load_cached_mappings, load_features_with_rules, sequence_checksum
+from respro.db.features import _is_ncbi_protein_accession
 from respro.db.models import is_internal_formula_component_drug_name
 from respro.db.rules_import import (
     _detect_coordinate_base,
@@ -27,7 +27,7 @@ from respro.db.rules_import import (
 )
 from respro.db.rules_queries import list_rules_for_display
 from respro.db.schema import create_schema, open_project_db
-from respro.io.reference import load_genes_for_reference
+from respro.io.reference import load_features_for_reference
 
 # Amino acid sequence used across tests:
 #   index:  0  1  2  3  4  5
@@ -41,23 +41,23 @@ _AA_SEQ = 'MKAFGP'
 _AA_SEQ_TIE = 'MMKAFG'
 
 
-def _genes(gene_name: str, aa_seq: str, **kwargs) -> dict[str, list[dict]]:
-    """Convenience wrapper — single-gene lookup dict."""
-    return {gene_name: [_gene_row(gene_name, aa_seq, **kwargs)]}
+def _features(feature_name: str, aa_seq: str, **kwargs) -> dict[str, list[dict]]:
+    """Convenience wrapper — single-feature lookup dict."""
+    return {feature_name: [_feature_row(feature_name, aa_seq, **kwargs)]}
 
 
-def _gene_row(
-    gene_name: str,
+def _feature_row(
+    feature_name: str,
     aa_sequence: str,
     reference_name: str = 'ref1',
     reference_accession: str = 'ACC1',
-    gene_id: int = 1,
+    feature_id: int = 1,
     alias_rank: int = 0,
 ) -> dict:
-    """Build a dict that mimics a sqlite3.Row for gene lookups."""
+    """Build a dict that mimics a sqlite3.Row for feature lookups."""
     return {
-        'gene_id': gene_id,
-        'gene_name': gene_name,
+        'feature_id': feature_id,
+        'feature_name': feature_name,
         'aa_sequence': aa_sequence,
         'reference_name': reference_name,
         'reference_accession': reference_accession,
@@ -66,7 +66,7 @@ def _gene_row(
 
 
 def _rule(
-    gene: str,
+    feature: str,
     position: int | str,
     reference: str,
     mutation: str = 'E',
@@ -74,7 +74,7 @@ def _rule(
 ) -> dict[str, str]:
     """Build a minimal TSV row dict for a single resistance rule."""
     row = {
-        'gene': gene,
+        'feature': feature,
         'position': str(position),
         'reference': reference,
         'mutation': mutation,
@@ -96,7 +96,7 @@ class TestDetectCoordinateBase:
             _rule('gX', position=1, reference='M'),
             _rule('gX', position=2, reference='K'),
         ]
-        result = _detect_coordinate_base(rows, _genes('gX', _AA_SEQ))
+        result = _detect_coordinate_base(rows, _features('gX', _AA_SEQ))
         assert result == 1
 
     def test_detects_0based_when_all_positions_are_0indexed(self) -> None:
@@ -105,34 +105,34 @@ class TestDetectCoordinateBase:
             _rule('gX', position=0, reference='M'),
             _rule('gX', position=1, reference='K'),
         ]
-        result = _detect_coordinate_base(rows, _genes('gX', _AA_SEQ))
+        result = _detect_coordinate_base(rows, _features('gX', _AA_SEQ))
         assert result == 0
 
     def test_defaults_to_1based_when_no_verifiable_rows(self) -> None:
         # rows with no reference AA → nothing to verify
         rows = [
-            {'gene': 'gX', 'position': '3', 'mutation': 'E', 'antiviral': 'DrugX'},
+            {'feature': 'gX', 'position': '3', 'mutation': 'E', 'antiviral': 'DrugX'},
         ]
-        result = _detect_coordinate_base(rows, _genes('gX', _AA_SEQ))
+        result = _detect_coordinate_base(rows, _features('gX', _AA_SEQ))
         assert result == 1
 
-    def test_defaults_to_1based_when_gene_not_in_lookup(self) -> None:
-        rows = [_rule('unknown_gene', position=1, reference='M')]
-        result = _detect_coordinate_base(rows, _genes('gX', _AA_SEQ))
+    def test_defaults_to_1based_when_feature_not_in_lookup(self) -> None:
+        rows = [_rule('unknown_feature', position=1, reference='M')]
+        result = _detect_coordinate_base(rows, _features('gX', _AA_SEQ))
         assert result == 1
 
-    def test_defaults_to_1based_when_gene_has_no_aa_sequence(self) -> None:
+    def test_defaults_to_1based_when_feature_has_no_aa_sequence(self) -> None:
         rows = [_rule('gX', position=1, reference='M')]
-        result = _detect_coordinate_base(rows, _genes('gX', aa_seq=''))
+        result = _detect_coordinate_base(rows, _features('gX', aa_seq=''))
         assert result == 1
 
     def test_prefers_1based_when_majority_of_rows_match(self) -> None:
-        # Two rules clearly 1-based, one ambiguous (skipped because gene missing)
+        # Two rules clearly 1-based, one ambiguous (skipped because feature missing)
         rows = [
             _rule('gX', position=1, reference='M'),   # 1-based match only
             _rule('gX', position=2, reference='K'),   # 1-based match only
         ]
-        result = _detect_coordinate_base(rows, _genes('gX', _AA_SEQ))
+        result = _detect_coordinate_base(rows, _features('gX', _AA_SEQ))
         assert result == 1
 
     def test_prefers_0based_when_majority_of_rows_match(self) -> None:
@@ -142,14 +142,14 @@ class TestDetectCoordinateBase:
             _rule('gX', position=1, reference='K'),
             _rule('gX', position=2, reference='A'),
         ]
-        result = _detect_coordinate_base(rows, _genes('gX', _AA_SEQ))
+        result = _detect_coordinate_base(rows, _features('gX', _AA_SEQ))
         assert result == 0
 
     def test_warns_and_returns_1based_on_tie(self) -> None:
         # _AA_SEQ_TIE = 'MMKAFG': pos=1 with ref='M' matches BOTH systems
         #   1-based: aa_seq[0]='M' ✓   0-based: aa_seq[1]='M' ✓
         rows = [_rule('gX', position=1, reference='M')]
-        result = _detect_coordinate_base(rows, _genes('gX', _AA_SEQ_TIE))
+        result = _detect_coordinate_base(rows, _features('gX', _AA_SEQ_TIE))
         assert result == 1
 
     def test_raises_when_ref_aa_matches_neither_system(self) -> None:
@@ -157,24 +157,24 @@ class TestDetectCoordinateBase:
         #   1-based: aa_seq[2]='A' ≠ 'Z'   0-based: aa_seq[3]='F' ≠ 'Z'
         rows = [_rule('gX', position=3, reference='Z')]
         with pytest.raises(ValueError, match='coordinate system could not be determined'):
-            _detect_coordinate_base(rows, _genes('gX', _AA_SEQ))
+            _detect_coordinate_base(rows, _features('gX', _AA_SEQ))
 
-    def test_uses_reference_identifier_to_resolve_correct_gene(self) -> None:
-        # Two genes with same name but different references — pick ACC2
-        genes_by_name = {
+    def test_uses_reference_identifier_to_resolve_correct_feature(self) -> None:
+        # Two features with same name but different references — pick ACC2
+        features_by_name = {
             'gX': [
-                _gene_row('gX', 'QQQQQQ', reference_name='ref1', reference_accession='ACC1', gene_id=1),
-                _gene_row('gX', _AA_SEQ,  reference_name='ref2', reference_accession='ACC2', gene_id=2),
+                _feature_row('gX', 'QQQQQQ', reference_name='ref1', reference_accession='ACC1', feature_id=1),
+                _feature_row('gX', _AA_SEQ,  reference_name='ref2', reference_accession='ACC2', feature_id=2),
             ]
         }
         rows = [_rule('gX', position=1, reference='M', reference_identifier='ACC2')]
-        result = _detect_coordinate_base(rows, genes_by_name)
+        result = _detect_coordinate_base(rows, features_by_name)
         assert result == 1
 
     def test_skips_row_with_non_integer_position(self) -> None:
         rows = [_rule('gX', position='n/a', reference='M')]
         # non-integer position → verifiable=0 → defaults to 1-based
-        result = _detect_coordinate_base(rows, _genes('gX', _AA_SEQ))
+        result = _detect_coordinate_base(rows, _features('gX', _AA_SEQ))
         assert result == 1
 
 
@@ -190,7 +190,7 @@ class TestValidateReferenceAminoAcids:
             _rule('gX', position=6, reference='P'),  # aa_seq[5]='P'
         ]
         # Should complete without raising
-        _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
+        _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
 
     def test_passes_when_all_0based_rules_match(self) -> None:
         rows = [
@@ -198,18 +198,18 @@ class TestValidateReferenceAminoAcids:
             _rule('gX', position=2, reference='A'),  # aa_seq[2]='A'
             _rule('gX', position=5, reference='P'),  # aa_seq[5]='P'
         ]
-        _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=0)
+        _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=0)
 
     def test_warns_and_returns_key_on_single_ref_aa_mismatch(self, caplog) -> None:
 
         # pos=1 (1-based) → aa_seq[0]='M', rule says 'K' → mismatch; must warn, not raise
         rows = [_rule('gX', position=1, reference='K')]
         with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
-            mismatch_keys = _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
+            mismatch_keys = _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
         assert ('gX', '1', '', 'K') in mismatch_keys
         assert any('mismatch' in r.message.lower() for r in caplog.records)
         assert any("rule says 'K'" in r.message for r in caplog.records)
-        assert any("gene sequence has 'M'" in r.message for r in caplog.records)
+        assert any("feature sequence has 'M'" in r.message for r in caplog.records)
 
     def test_warns_on_out_of_range_position(self, caplog) -> None:
         # _AA_SEQ has length 6; pos=10 (1-based) → index 9 → out of range.
@@ -217,7 +217,7 @@ class TestValidateReferenceAminoAcids:
         import logging
         rows = [_rule('gX', position=10, reference='M')]
         with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
-            _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
+            _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
         assert any('out of range' in r.message for r in caplog.records)
 
     def test_warns_on_out_of_range_0based_position(self, caplog) -> None:
@@ -226,7 +226,7 @@ class TestValidateReferenceAminoAcids:
         import logging
         rows = [_rule('gX', position=6, reference='M')]
         with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
-            _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=0)
+            _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=0)
         assert any('out of range' in r.message for r in caplog.records)
 
     def test_collects_all_mismatch_keys(self, caplog) -> None:
@@ -238,59 +238,59 @@ class TestValidateReferenceAminoAcids:
             _rule('gX', position=3, reference='Z'),  # mismatch 3
         ]
         with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
-            mismatch_keys = _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
+            mismatch_keys = _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
         assert len(mismatch_keys) == 3
         assert any('3' in r.message and 'mismatch' in r.message.lower() for r in caplog.records)
 
     def test_skips_rows_without_ref_aa(self) -> None:
         # Row has no 'reference'/'ref_aa' key — must not raise
         rows = [
-            {'gene': 'gX', 'position': '1', 'mutation': 'E', 'antiviral': 'DrugX'},
+            {'feature': 'gX', 'position': '1', 'mutation': 'E', 'antiviral': 'DrugX'},
         ]
-        _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
+        _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
 
-    def test_skips_rows_with_gene_not_in_lookup(self) -> None:
-        rows = [_rule('unknown_gene', position=1, reference='Z')]
-        _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
+    def test_skips_rows_with_feature_not_in_lookup(self) -> None:
+        rows = [_rule('unknown_feature', position=1, reference='Z')]
+        _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
 
-    def test_skips_rows_where_gene_has_no_aa_sequence(self) -> None:
+    def test_skips_rows_where_feature_has_no_aa_sequence(self) -> None:
         rows = [_rule('gX', position=1, reference='M')]
-        _validate_reference_amino_acids(rows, _genes('gX', aa_seq=''), coord_base=1)
+        _validate_reference_amino_acids(rows, _features('gX', aa_seq=''), coord_base=1)
 
     def test_skips_rows_with_non_integer_position(self) -> None:
         rows = [_rule('gX', position='n/a', reference='Z')]
-        _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
+        _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
 
     def test_case_insensitive_comparison(self) -> None:
         # Rule ref in lowercase, aa_seq in uppercase — must match
         rows = [_rule('gX', position=1, reference='m')]
-        _validate_reference_amino_acids(rows, _genes('gX', _AA_SEQ), coord_base=1)
+        _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
 
-    def test_uses_reference_identifier_to_pick_correct_gene(self) -> None:
-        # Two genes under the same name; ACC1 has wrong AA, ACC2 has correct one
-        genes_by_name = {
+    def test_uses_reference_identifier_to_pick_correct_feature(self) -> None:
+        # Two features under the same name; ACC1 has wrong AA, ACC2 has correct one
+        features_by_name = {
             'gX': [
-                _gene_row('gX', 'QQQQQQ', reference_name='ref1', reference_accession='ACC1', gene_id=1),
-                _gene_row('gX', _AA_SEQ,  reference_name='ref2', reference_accession='ACC2', gene_id=2),
+                _feature_row('gX', 'QQQQQQ', reference_name='ref1', reference_accession='ACC1', feature_id=1),
+                _feature_row('gX', _AA_SEQ,  reference_name='ref2', reference_accession='ACC2', feature_id=2),
             ]
         }
         rows = [_rule('gX', position=1, reference='M', reference_identifier='ACC2')]
-        # Should pass: ACC2 gene has 'M' at position 1 (1-based)
-        _validate_reference_amino_acids(rows, genes_by_name, coord_base=1)
+        # Should pass: ACC2 feature has 'M' at position 1 (1-based)
+        _validate_reference_amino_acids(rows, features_by_name, coord_base=1)
 
-    def test_warns_and_returns_key_for_wrong_gene_via_reference_identifier(self, caplog) -> None:
+    def test_warns_and_returns_key_for_wrong_feature_via_reference_identifier(self, caplog) -> None:
         import logging
 
-        genes_by_name = {
+        features_by_name = {
             'gX': [
-                _gene_row('gX', 'QQQQQQ', reference_name='ref1', reference_accession='ACC1', gene_id=1),
-                _gene_row('gX', _AA_SEQ,  reference_name='ref2', reference_accession='ACC2', gene_id=2),
+                _feature_row('gX', 'QQQQQQ', reference_name='ref1', reference_accession='ACC1', feature_id=1),
+                _feature_row('gX', _AA_SEQ,  reference_name='ref2', reference_accession='ACC2', feature_id=2),
             ]
         }
         # Pointing to ACC1 which has 'Q' at pos 1, not 'M' — must warn, not raise
         rows = [_rule('gX', position=1, reference='M', reference_identifier='ACC1')]
         with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
-            mismatch_keys = _validate_reference_amino_acids(rows, genes_by_name, coord_base=1)
+            mismatch_keys = _validate_reference_amino_acids(rows, features_by_name, coord_base=1)
         assert ('gX', '1', 'ACC1', 'M') in mismatch_keys
         assert any('mismatch' in r.message.lower() for r in caplog.records)
 
@@ -326,7 +326,7 @@ class TestSchemaFormulaRules:
             (1, 'ref1', 100),
         )
         conn.execute(
-            'INSERT INTO gene (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
             (1, 'gag', 0, 90, '+'),
         )
         conn.execute(
@@ -334,7 +334,7 @@ class TestSchemaFormulaRules:
             (1, 'druga'),
         )
         conn.execute(
-            'INSERT INTO resistance_rule (gene_id, drug_id, external_id, position, reference, mutation) '
+            'INSERT INTO resistance_rule (feature_id, drug_id, external_id, position, reference, mutation) '
             'VALUES (?, ?, ?, ?, ?, ?)',
             (1, 1, 'mut_k1e', 1, 'K', 'E'),
         )
@@ -369,7 +369,7 @@ class TestComboRuleParsing:
                 'id': 'tiny_ref',
                 'accession': 'tiny_ref',
                 'sequence': TINY_REF_SEQ,
-                'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+                'features': [{'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
             }
         ])
         return gb
@@ -377,7 +377,7 @@ class TestComboRuleParsing:
     def test_grouped_rows_without_formula_still_load_atomic_rules(self, tmp_path, tiny_genbank, caplog) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
             gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_1\tmut_A
             gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tgroup_1\tmut_B
             gag\ttiny_ref\t4\tF\tL\tDrugA\tresistant\t\t
@@ -401,7 +401,7 @@ class TestComboRuleParsing:
     def test_grouped_rows_require_member_id_even_without_formula_tsv(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id
             gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_1
         """))
         db = tmp_path / 'proj.db'
@@ -412,7 +412,7 @@ class TestComboRuleParsing:
     def test_formula_member_placeholder_rows_are_hidden_from_rule_display(self, tmp_path, tiny_genbank) -> None:
         rules_tsv = tmp_path / 'rules.tsv'
         rules_tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tphenotype\tgroup_id\tmember_id
+            feature\treference_identifier\tposition\treference\tmutation\tphenotype\tgroup_id\tmember_id
             gag\ttiny_ref\t2\tK\tE\tunknown\tgroup_1\tmut_A
             gag\ttiny_ref\t6\tP\tV\tunknown\tgroup_1\tmut_B
         """))
@@ -444,7 +444,7 @@ class TestComboRuleParsing:
     def test_formula_member_rows_without_group_id_are_allowed(self, tmp_path, tiny_genbank) -> None:
         rules_tsv = tmp_path / 'rules.tsv'
         rules_tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tphenotype\tmember_id
+            feature\treference_identifier\tposition\treference\tmutation\tphenotype\tmember_id
             gag\ttiny_ref\t2\tK\tE\tunknown\tmut_A
             gag\ttiny_ref\t6\tP\tV\tunknown\tmut_B
         """))
@@ -477,7 +477,7 @@ class TestComboRuleParsing:
     def test_member_ids_must_be_unique(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
             gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_1\tmut_dup
             gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tgroup_2\tmut_dup
         """))
@@ -489,7 +489,7 @@ class TestComboRuleParsing:
     def test_identical_duplicate_member_id_rows_are_skipped_with_warning(self, tmp_path, tiny_genbank, caplog) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
             gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_1\tmut_same
             gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_2\tmut_same
         """))
@@ -512,7 +512,7 @@ class TestComboRuleParsing:
     def test_single_mixed_anchor_change_insertion_splits_into_atomic_rows(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t2\tK\tK2EW\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
@@ -533,7 +533,7 @@ class TestComboRuleParsing:
     def test_single_mixed_anchor_change_deletion_splits_into_atomic_rows(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t5\tGP\tGP5A\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
@@ -554,7 +554,7 @@ class TestComboRuleParsing:
     def test_single_rule_publication_doi_is_stored_in_publication_table(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
             gag\ttiny_ref\t2\tK\tE\tDrugA\tdoi.org/10.1086/590668
         """))
         db = tmp_path / 'proj.db'
@@ -572,7 +572,7 @@ class TestComboRuleParsing:
     def test_drug_badge_color_is_persisted_and_stable(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral
             gag\ttiny_ref\t2\tK\tE\tDrugA
             gag\ttiny_ref\t6\tP\tV\tdruga
         """))
@@ -590,7 +590,7 @@ class TestComboRuleParsing:
     def test_single_rule_publication_https_doi_is_stored(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
             gag\ttiny_ref\t2\tK\tE\tDrugA\thttps://doi.org/10.1086/590668
         """))
         db = tmp_path / 'proj.db'
@@ -612,7 +612,7 @@ class TestComboRuleParsing:
     ) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
             gag\ttiny_ref\t2\tK\tE\tDrugA\tdoi.org/10.1086/590668
         """))
         db = tmp_path / 'proj.db'
@@ -643,7 +643,7 @@ class TestComboRuleParsing:
     def test_doi_lookup_logs_concise_success_messages(self, tmp_path, tiny_genbank, caplog) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
             gag\ttiny_ref\t2\tK\tE\tDrugA\tdoi.org/10.1086/590668
         """))
         db = tmp_path / 'proj.db'
@@ -681,7 +681,7 @@ class TestComboRuleParsing:
     ) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
             gag\ttiny_ref\t2\tK\tE\tDrugA\tPMID:3034575
         """))
         db = tmp_path / 'proj.db'
@@ -713,7 +713,7 @@ class TestComboRuleParsing:
     ) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
             gag\ttiny_ref\t2\tK\tE\tDrugA\tdoi.org/10.1086/590668
             gag\ttiny_ref\t6\tP\tV\tDrugA\tPMID:3034575
         """))
@@ -742,7 +742,7 @@ class TestComboRuleParsing:
     ) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
             gag\ttiny_ref\t2\tK\tE\tDrugA\tdoi.org/10.1093/infdis/jiz577
         """))
         db = tmp_path / 'proj.db'
@@ -767,7 +767,7 @@ class TestComboRuleParsing:
     def test_single_rule_publication_pmid_is_stored(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
             gag\ttiny_ref\t2\tK\tE\tDrugA\tPMID:12345678
         """))
         db = tmp_path / 'proj.db'
@@ -794,7 +794,7 @@ class TestComboRuleParsing:
         # The same PMID appears on three rules; the NCBI lookup must fire exactly once.
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
             gag\ttiny_ref\t2\tK\tE\tDrugA\tPMID:12345678
             gag\ttiny_ref\t4\tF\tL\tDrugA\tPMID:12345678
             gag\ttiny_ref\t6\tP\tV\tDrugA\tPMID:12345678
@@ -811,7 +811,7 @@ class TestComboRuleParsing:
     def test_formula_rule_publication_doi_is_stored(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
             gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tcombo_KE_PV\tmut_A
             gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_KE_PV\tmut_B
         """))
@@ -865,7 +865,7 @@ class TestIc50ParsingAndAggregation:
                 'id': 'tiny_ref',
                 'accession': 'tiny_ref',
                 'sequence': TINY_REF_SEQ,
-                'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+                'features': [{'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
             }
         ])
         return gb
@@ -873,7 +873,7 @@ class TestIc50ParsingAndAggregation:
     def test_accepts_ic50_alias_columns_and_extracts_numeric(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tfold_ic50
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tfold_ic50
             gag\ttiny_ref\t2\tK\tE\tDrugA\t>10x
         """))
         db = tmp_path / 'proj.db'
@@ -888,7 +888,7 @@ class TestIc50ParsingAndAggregation:
     def test_allows_empty_or_none_ic50(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tic_50
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tic_50
             gag\ttiny_ref\t2\tK\tE\tDrugA\t
             gag\ttiny_ref\t6\tP\tV\tDrugA\tNone
         """))
@@ -903,7 +903,7 @@ class TestIc50ParsingAndAggregation:
     def test_raises_on_non_numeric_ic50(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tic_50
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tic_50
             gag\ttiny_ref\t2\tK\tE\tDrugA\tnot_numeric
         """))
         db = tmp_path / 'proj.db'
@@ -913,7 +913,7 @@ class TestIc50ParsingAndAggregation:
     def test_formula_rule_uses_declared_numeric_ic50_values(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tgroup_id\tmember_id
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tgroup_id\tmember_id
             gag\ttiny_ref\t2\tK\tE\tDrugA\tcombo_1\tmut_A
             gag\ttiny_ref\t6\tP\tV\tDrugA\tcombo_1\tmut_B
         """))
@@ -941,7 +941,7 @@ class TestIc50ParsingAndAggregation:
     def test_allows_ic50_and_fold_ic50_together(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tic50\tfold_ic50
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tic50\tfold_ic50
             gag\ttiny_ref\t2\tK\tE\tDrugA\t4\t5
         """))
         db = tmp_path / 'proj.db'
@@ -956,7 +956,7 @@ class TestIc50ParsingAndAggregation:
     def test_rejects_two_ic50_alias_columns(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tic50\tic_50
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tic50\tic_50
             gag\ttiny_ref\t2\tK\tE\tDrugA\t4\t5
         """))
         db = tmp_path / 'proj.db'
@@ -966,7 +966,7 @@ class TestIc50ParsingAndAggregation:
     def test_rejects_two_fold_ic50_alias_columns(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tfold_ic50\tfold_ic_50
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tfold_ic50\tfold_ic_50
             gag\ttiny_ref\t2\tK\tE\tDrugA\t4\t5
         """))
         db = tmp_path / 'proj.db'
@@ -983,7 +983,7 @@ class TestPhenotypeNormalization:
                 'id': 'tiny_ref',
                 'accession': 'tiny_ref',
                 'sequence': TINY_REF_SEQ,
-                'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+                'features': [{'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
             }
         ])
         return gb
@@ -991,7 +991,7 @@ class TestPhenotypeNormalization:
     def test_normalizes_supported_phenotype_inputs(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t2\tK\tE\tDrugR\tTrue
             gag\ttiny_ref\t3\tA\tV\tDrugI\tinterm
             gag\ttiny_ref\t4\tF\tL\tDrugS\tSENSI
@@ -1019,7 +1019,7 @@ class TestPhenotypeNormalization:
     def test_allows_phenotype_and_clinical_phenotype_when_consistent(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tclinical_phenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tclinical_phenotype
             gag\ttiny_ref\t2\tK\tE\tDrugA\tres\tR
         """))
         db = tmp_path / 'proj.db'
@@ -1036,7 +1036,7 @@ class TestPhenotypeNormalization:
     def test_allows_distinct_phenotype_and_clinical_phenotype(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tclinical_phenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tclinical_phenotype
             gag\ttiny_ref\t2\tK\tE\tDrugA\tres\ts
         """))
         db = tmp_path / 'proj.db'
@@ -1052,10 +1052,10 @@ class TestPhenotypeNormalization:
 
     def test_rejects_ambiguous_deletion_tokens(self, tmp_path, tiny_genbank) -> None:
         # F67del at position 2 with reference K: deleted block 'F' does not match
-        # the gene sequence at position 2 (which is 'K') — resolution must fail.
+        # the feature sequence at position 2 (which is 'K') — resolution must fail.
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t2\tK\tF67del\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
@@ -1065,7 +1065,7 @@ class TestPhenotypeNormalization:
     def test_rejects_noop_single_rule(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t2\tK\tK\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
@@ -1075,7 +1075,7 @@ class TestPhenotypeNormalization:
     def test_rejects_noop_combo_member(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
             gag\ttiny_ref\t2\tK\tK\tDrugA\tresistant\tcombo_noop\tmut_A
             gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_noop\tmut_B
         """))
@@ -1088,7 +1088,7 @@ class TestPhenotypeNormalization:
 
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t2\tK\tK2Z\tDrugBad\tresistant
             gag\ttiny_ref\t6\tP\tV\tDrugGood\tresistant
         """))
@@ -1109,7 +1109,7 @@ class TestPhenotypeNormalization:
     def test_skips_single_rule_with_wildcard_like_any_token(self, tmp_path, tiny_genbank, caplog) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t2\tK\tany\tDrugBad\tresistant
             gag\ttiny_ref\t6\tP\tV\tDrugGood\tresistant
         """))
@@ -1130,7 +1130,7 @@ class TestPhenotypeNormalization:
     def test_skips_single_rule_with_wildcard_like_x_token(self, tmp_path, tiny_genbank, caplog) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t2\tK\tx\tDrugBad\tresistant
             gag\ttiny_ref\t6\tP\tV\tDrugGood\tresistant
         """))
@@ -1153,7 +1153,7 @@ class TestPhenotypeNormalization:
 
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
             gag\ttiny_ref\t2\tK\tK2Z\tDrugA\tresistant\tcombo_bad\tmut_bad
             gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_bad\tmut_ok
         """))
@@ -1181,7 +1181,7 @@ class TestRefAaMismatchSkip:
                 'id': 'tiny_ref',
                 'accession': 'tiny_ref',
                 'sequence': TINY_REF_SEQ,
-                'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+                'features': [{'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
             }
         ])
         return gb
@@ -1193,7 +1193,7 @@ class TestRefAaMismatchSkip:
         # gag pos 2 with correct ref 'K' → loads fine
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral
             gag\ttiny_ref\t2\tZ\tE\tDrugBad
             gag\ttiny_ref\t2\tK\tE\tDrugGood
         """))
@@ -1221,7 +1221,7 @@ class TestRefAaMismatchSkip:
         # pos 2 has 'K', not 'Z' → mismatching row is skipped while valid atomic rows still load.
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
             gag\ttiny_ref\t2\tZ\tE\tDrugA\tresistant\tcombo_bad\tmut_bad
             gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_bad\tmut_ok
         """))
@@ -1244,7 +1244,7 @@ class TestRefAaMismatchSkip:
         # One mismatching rule and one correct rule at the same position — only the correct one loads
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral
             gag\ttiny_ref\t2\tZ\tE\tDrugBad
             gag\ttiny_ref\t6\tP\tV\tDrugGood
         """))
@@ -1261,7 +1261,7 @@ class TestRefAaMismatchSkip:
         assert 'druggood' in drugs
 
 
-class TestMissingGeneWarnings:
+class TestMissingFeatureWarnings:
     @pytest.fixture()
     def tiny_genbank(self, tmp_path):
         gb = tmp_path / 'tiny.gb'
@@ -1270,17 +1270,17 @@ class TestMissingGeneWarnings:
                 'id': 'tiny_ref',
                 'accession': 'tiny_ref',
                 'sequence': TINY_REF_SEQ,
-                'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+                'features': [{'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
             }
         ])
         return gb
 
-    def test_missing_gene_warning_includes_reference_identifier(
+    def test_missing_feature_warning_includes_reference_identifier(
         self, tmp_path, tiny_genbank, caplog
     ) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             pol\ttiny_ref\t2\tK\tE\tDrugBad\tresistant
             UL89\tref_ul89\t6\tP\tV\tDrugBad\tresistant
             gag\ttiny_ref\t2\tK\tE\tDrugGood\tresistant
@@ -1294,17 +1294,53 @@ class TestMissingGeneWarnings:
         warning_messages = [
             record.message
             for record in caplog.records
-            if 'gene(s) not found in GenBank annotations' in record.message
+            if 'feature(s) not found in GenBank annotations' in record.message
         ]
 
         assert warning_messages
         warning_text = warning_messages[0]
 
-        assert "row 2: gene 'pol', reference_identifier 'tiny_ref'" in warning_text
-        assert "row 3: gene 'UL89', reference_identifier 'ref_ul89'" in warning_text
+        assert "row 2: feature 'pol', reference_identifier 'tiny_ref'" in warning_text
+        assert "row 3: feature 'UL89', reference_identifier 'ref_ul89'" in warning_text
 
 
 class TestGenbankAliasFallbacks:
+    def test_gene_qualifier_is_used_for_feature_name(self, tmp_path) -> None:
+        """CDS with standard GenBank gene qualifier must be matched by rules TSV feature column."""
+        gb = tmp_path / 'gene_qualifier.gb'
+        record = SeqRecord(Seq('GCT' * 40), id='tiny_ref', name='tiny_ref', description='')
+        record.annotations['molecule_type'] = 'DNA'
+        record.annotations['accessions'] = ['tiny_ref']
+        record.features = [
+            SeqFeature(
+                FeatureLocation(0, 36, strand=1),
+                type='CDS',
+                qualifiers={
+                    'gene': ['UL23'],
+                    'product': ['thymidine kinase'],
+                    'codon_start': ['1'],
+                },
+            )
+        ]
+        with open(gb, 'w') as handle:
+            SeqIO.write([record], handle, 'genbank')
+
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            UL23\ttiny_ref\t2\tA\tV\tDrugA\tresistant
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
+
+        conn = open_project_db(db)
+        rule_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
+        feature_name = conn.execute('SELECT name FROM feature').fetchone()[0]
+        conn.close()
+
+        assert feature_name == 'UL23'
+        assert rule_count == 1
+
     def test_compound_cds_persists_segments_and_populates_loaders(self, tmp_path) -> None:
         gb = tmp_path / 'compound_product_only.gb'
 
@@ -1332,7 +1368,7 @@ class TestGenbankAliasFallbacks:
 
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             split_pol\ttiny_ref\t2\tA\tV\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
@@ -1341,15 +1377,15 @@ class TestGenbankAliasFallbacks:
 
         conn = open_project_db(db)
         conn.row_factory = sqlite3.Row
-        gene_row = conn.execute(
-            'SELECT id, start, end FROM gene WHERE name = ?',
+        feature_row = conn.execute(
+            'SELECT id, start, end FROM feature WHERE name = ?',
             ('split_pol',),
         ).fetchone()
-        assert gene_row is not None
+        assert feature_row is not None
 
         segments = conn.execute(
-            'SELECT segment_index, start, end FROM gene_segment WHERE gene_id = ? ORDER BY segment_index',
-            (gene_row['id'],),
+            'SELECT segment_index, start, end FROM feature_segment WHERE feature_id = ? ORDER BY segment_index',
+            (feature_row['id'],),
         ).fetchall()
         assert [
             (row['segment_index'], row['start'], row['end'])
@@ -1360,11 +1396,11 @@ class TestGenbankAliasFallbacks:
             'SELECT id FROM reference WHERE name = ?',
             ('tiny_ref',),
         ).fetchone()['id']
-        by_reference = load_genes_for_reference(conn, ref_id)
+        by_reference = load_features_for_reference(conn, ref_id)
         assert len(by_reference) == 1
         assert len(by_reference[0].segments) == 2
 
-        with_rules = load_genes_with_rules(conn, ref_id)
+        with_rules = load_features_with_rules(conn, ref_id)
         assert len(with_rules) == 1
         assert len(with_rules[0].segments) == 2
 
@@ -1379,17 +1415,17 @@ class TestGenbankAliasFallbacks:
             (checksum,),
         ).fetchone()['id']
         conn.execute(
-            'INSERT INTO query_gene_mapping '
-            '(query_ref_id, gene_id, identity, cds_coverage, query_coverage, query_start, '
+            'INSERT INTO query_feature_mapping '
+            '(query_ref_id, feature_id, identity, cds_coverage, query_coverage, query_start, '
             'query_end, strand, cigar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            (query_ref_id, gene_row['id'], 1.0, 1.0, 1.0, 0, 36, '+', '36M'),
+            (query_ref_id, feature_row['id'], 1.0, 1.0, 1.0, 0, 36, '+', '36M'),
         )
         conn.commit()
 
         cached_matches = load_cached_mappings(conn, checksum)
         assert cached_matches is not None
         assert len(cached_matches) == 1
-        assert len(cached_matches[0].gene.segments) == 2
+        assert len(cached_matches[0].feature.segments) == 2
         conn.close()
 
     def test_negative_strand_compound_cds_persists_segments(self, tmp_path) -> None:
@@ -1419,7 +1455,7 @@ class TestGenbankAliasFallbacks:
 
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             split_neg\ttiny_ref\t2\tS\tA\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
@@ -1428,17 +1464,17 @@ class TestGenbankAliasFallbacks:
 
         conn = open_project_db(db)
         conn.row_factory = sqlite3.Row
-        gene_row = conn.execute(
-            'SELECT id, strand, start, end FROM gene WHERE name = ?',
+        feature_row = conn.execute(
+            'SELECT id, strand, start, end FROM feature WHERE name = ?',
             ('split_neg',),
         ).fetchone()
-        assert gene_row is not None
-        assert gene_row['strand'] == '-'
-        assert (gene_row['start'], gene_row['end']) == (30, 108)
+        assert feature_row is not None
+        assert feature_row['strand'] == '-'
+        assert (feature_row['start'], feature_row['end']) == (30, 108)
 
         segments = conn.execute(
-            'SELECT segment_index, start, end FROM gene_segment WHERE gene_id = ? ORDER BY segment_index',
-            (gene_row['id'],),
+            'SELECT segment_index, start, end FROM feature_segment WHERE feature_id = ? ORDER BY segment_index',
+            (feature_row['id'],),
         ).fetchall()
         conn.close()
 
@@ -1448,8 +1484,8 @@ class TestGenbankAliasFallbacks:
         ] == [(0, 30, 48), (1, 90, 108)]
 
 
-class TestGeneSegmentMigration:
-    def test_open_project_db_backfills_gene_segment_rows_for_legacy_genes(self, tmp_path) -> None:
+class TestFeatureSegmentMigration:
+    def test_open_project_db_backfills_feature_segment_rows_for_legacy_features(self, tmp_path) -> None:
         db_path = tmp_path / 'legacy_project.db'
         conn = sqlite3.connect(str(db_path))
         conn.execute(
@@ -1469,7 +1505,7 @@ class TestGeneSegmentMigration:
             ')'
         )
         conn.execute(
-            'CREATE TABLE gene ('
+            'CREATE TABLE feature ('
             'id INTEGER PRIMARY KEY AUTOINCREMENT, '
             'reference_id INTEGER NOT NULL, '
             'name TEXT NOT NULL, '
@@ -1488,7 +1524,7 @@ class TestGeneSegmentMigration:
         conn.execute(
             'CREATE TABLE resistance_rule ('
             'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'gene_id INTEGER NOT NULL, '
+            'feature_id INTEGER NOT NULL, '
             'drug_id INTEGER NOT NULL, '
             'position INTEGER NOT NULL, '
             'mutation TEXT NOT NULL'
@@ -1505,17 +1541,17 @@ class TestGeneSegmentMigration:
             ')'
         )
         conn.execute(
-            'CREATE TABLE query_gene_mapping ('
+            'CREATE TABLE query_feature_mapping ('
             'id INTEGER PRIMARY KEY AUTOINCREMENT, '
             'query_ref_id INTEGER NOT NULL, '
-            'gene_id INTEGER NOT NULL, '
+            'feature_id INTEGER NOT NULL, '
             'identity REAL NOT NULL, '
             'cds_coverage REAL NOT NULL, '
             'query_start INTEGER NOT NULL, '
             'query_end INTEGER NOT NULL, '
             "strand TEXT NOT NULL DEFAULT '+', "
             'cigar TEXT NOT NULL, '
-            'UNIQUE(query_ref_id, gene_id)'
+            'UNIQUE(query_ref_id, feature_id)'
             ')'
         )
         conn.execute(
@@ -1527,7 +1563,7 @@ class TestGeneSegmentMigration:
             (1, 'ref_legacy', 100),
         )
         conn.execute(
-            'INSERT INTO gene (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
             (1, 'gag', 11, 41, '+'),
         )
         conn.execute(
@@ -1535,7 +1571,7 @@ class TestGeneSegmentMigration:
             (1, 'drugx'),
         )
         conn.execute(
-            'INSERT INTO resistance_rule (gene_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
+            'INSERT INTO resistance_rule (feature_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
             (1, 1, 1, 'E'),
         )
         conn.commit()
@@ -1544,13 +1580,13 @@ class TestGeneSegmentMigration:
         migrated_conn = open_project_db(db_path)
         migrated_conn.row_factory = sqlite3.Row
         segments = migrated_conn.execute(
-            'SELECT gene_id, segment_index, start, end FROM gene_segment WHERE gene_id = 1 '
+            'SELECT feature_id, segment_index, start, end FROM feature_segment WHERE feature_id = 1 '
             'ORDER BY segment_index'
         ).fetchall()
         migrated_conn.close()
 
         assert [
-            (row['gene_id'], row['segment_index'], row['start'], row['end'])
+            (row['feature_id'], row['segment_index'], row['start'], row['end'])
             for row in segments
         ] == [(1, 0, 11, 41)]
 
@@ -1561,7 +1597,7 @@ class TestGeneSegmentMigration:
                 'id': 'tiny_ref',
                 'accession': 'tiny_ref',
                 'sequence': TINY_REF_SEQ,
-                'genes': [
+                'features': [
                     {
                         'product': 'DNA polymerase',
                         'start': 1,
@@ -1574,7 +1610,7 @@ class TestGeneSegmentMigration:
 
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             DNA polymerase\ttiny_ref\t2\tK\tE\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
@@ -1582,17 +1618,17 @@ class TestGeneSegmentMigration:
         init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
-        gene_name, protein_name = conn.execute(
-            'SELECT name, protein FROM gene'
+        feature_name, protein_name = conn.execute(
+            'SELECT name, protein FROM feature'
         ).fetchone()
         rule_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
         conn.close()
 
-        assert gene_name == 'DNA polymerase'
+        assert feature_name == 'DNA polymerase'
         assert protein_name == 'DNA polymerase'
         assert rule_count == 1
 
-    def test_rule_gene_can_match_product_alias_when_gene_name_differs(
+    def test_rule_feature_can_match_product_alias_when_feature_name_differs(
         self, tmp_path, caplog
     ) -> None:
         gb = tmp_path / 'alias.gb'
@@ -1601,9 +1637,9 @@ class TestGeneSegmentMigration:
                 'id': 'tiny_ref',
                 'accession': 'tiny_ref',
                 'sequence': TINY_REF_SEQ,
-                'genes': [
+                'features': [
                     {
-                        'gene': 'UL30',
+                        'feature': 'UL30',
                         'protein': 'DNA polymerase',
                         'start': 1,
                         'end': 87,
@@ -1615,7 +1651,7 @@ class TestGeneSegmentMigration:
 
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             DNA polymerase\ttiny_ref\t2\tK\tE\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
@@ -1624,15 +1660,15 @@ class TestGeneSegmentMigration:
             init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
-        stored_gene = conn.execute('SELECT name FROM gene').fetchone()[0]
+        stored_feature = conn.execute('SELECT name FROM feature').fetchone()[0]
         rule_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
         conn.close()
 
-        assert stored_gene == 'UL30'
+        assert stored_feature == 'UL30'
         assert rule_count == 1
-        assert not any('gene(s) not found in GenBank annotations' in rec.message for rec in caplog.records)
+        assert not any('feature(s) not found in GenBank annotations' in rec.message for rec in caplog.records)
 
-    def test_canonical_gene_name_match_wins_over_alias_match(self, tmp_path, caplog) -> None:
+    def test_canonical_feature_name_match_wins_over_alias_match(self, tmp_path, caplog) -> None:
         sequence = TINY_REF_SEQ + TINY_REF_SEQ
         gb = tmp_path / 'canonical_vs_alias.gb'
         write_genbank(gb, [
@@ -1640,9 +1676,9 @@ class TestGeneSegmentMigration:
                 'id': 'tiny_ref',
                 'accession': 'tiny_ref',
                 'sequence': sequence,
-                'genes': [
+                'features': [
                     {
-                        'gene': 'DNA polymerase',
+                        'feature': 'DNA polymerase',
                         'protein': 'Polymerase alpha',
                         'translation': 'MKAAAAAAAAAAAAAAAAAAAAAAAAAAA',
                         'start': 1,
@@ -1650,7 +1686,7 @@ class TestGeneSegmentMigration:
                         'strand': '+',
                     },
                     {
-                        'gene': 'UL30',
+                        'feature': 'UL30',
                         'protein': 'DNA polymerase',
                         'translation': 'MKAAAAAAAAAAAAAAAAAAAAAAAAAAA',
                         'start': 88,
@@ -1663,7 +1699,7 @@ class TestGeneSegmentMigration:
 
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             DNA polymerase\ttiny_ref\t2\tK\tE\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
@@ -1672,13 +1708,13 @@ class TestGeneSegmentMigration:
             init_project(db_path=db, name='test', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
-        matched_gene = conn.execute(
-            'SELECT g.name FROM resistance_rule rr JOIN gene g ON g.id = rr.gene_id'
+        matched_feature = conn.execute(
+            'SELECT g.name FROM resistance_rule rr JOIN feature g ON g.id = rr.feature_id'
         ).fetchone()[0]
         conn.close()
 
-        assert matched_gene == 'DNA polymerase'
-        assert not any('gene(s) not found in GenBank annotations' in rec.message for rec in caplog.records)
+        assert matched_feature == 'DNA polymerase'
+        assert not any('feature(s) not found in GenBank annotations' in rec.message for rec in caplog.records)
 
 
 class TestGenbankTranslationQuality:
@@ -1690,7 +1726,7 @@ class TestGenbankTranslationQuality:
                 'id': 'tiny_ref',
                 'accession': 'tiny_ref',
                 'sequence': TINY_REF_SEQ,
-                'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+                'features': [{'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
             }
         ])
         return gb
@@ -1702,9 +1738,9 @@ class TestGenbankTranslationQuality:
                 'id': 'tiny_ref',
                 'accession': 'tiny_ref',
                 'sequence': TINY_REF_SEQ,
-                'genes': [
+                'features': [
                     {
-                        'gene': 'gag',
+                        'feature': 'gag',
                         'protein': 'Gag',
                         'start': 1,
                         'end': 87,
@@ -1717,7 +1753,7 @@ class TestGenbankTranslationQuality:
 
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant
         """))
 
@@ -1728,7 +1764,7 @@ class TestGenbankTranslationQuality:
     def test_raises_when_reference_identifier_is_missing(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\tposition\treference\tmutation\tantiviral
+            feature\tposition\treference\tmutation\tantiviral
             gag\t2\tK\tE\tDrugA
         """))
         db = tmp_path / 'proj.db'
@@ -1738,7 +1774,7 @@ class TestGenbankTranslationQuality:
     def test_raises_when_reference_aa_is_missing(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\tmutation\tantiviral
+            feature\treference_identifier\tposition\tmutation\tantiviral
             gag\ttiny_ref\t2\tE\tDrugA
         """))
         db = tmp_path / 'proj.db'
@@ -1747,7 +1783,7 @@ class TestGenbankTranslationQuality:
 
 
 # ── TINY_REF_SEQ AA sequence (1-based) ────────────────────────────────────────
-# Translated from TINY_REF_SEQ (gene positions 1-87, + strand, 28 AAs + stop):
+# Translated from TINY_REF_SEQ (feature positions 1-87, + strand, 28 AAs + stop):
 #   pos: 1   2  3  4  5  6  7  8  9  10 11 12 13 14 15 16 17 18 19 20 ...
 #   AA:  M   K  A  F  G  P  K  F  G  P  K  A  F  G  P  K  F  G  P  K  ...
 # (repeating MKAFGP / KFGP pattern)
@@ -1803,7 +1839,7 @@ class TestAnchorlessDeletion:
                 'id': 'tiny_ref',
                 'accession': 'tiny_ref',
                 'sequence': TINY_REF_SEQ,
-                'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+                'features': [{'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
             }
         ])
         return gb
@@ -1812,7 +1848,7 @@ class TestAnchorlessDeletion:
         # A at pos 3 (1-based); anchor K at pos 2; stored as reference=KA, mutation=K.
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t3\tA\tA3del\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
@@ -1835,7 +1871,7 @@ class TestAnchorlessDeletion:
         # FG at pos 4-5 (1-based); anchor A at pos 3; stored as reference=AFG, mutation=A.
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
             gag\ttiny_ref\t4\tF\tFG4del\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
@@ -1856,7 +1892,7 @@ class TestAnchorlessDeletion:
     def test_accepts_direct_indel_columns_and_keeps_storage(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral
             gag\ttiny_ref\t4\tF\tFDDD\tDrugIns
             gag\ttiny_ref\t6\tPK\tP\tDrugDel
         """))
@@ -1886,7 +1922,7 @@ class TestAnchorlessDeletion:
     def test_legacy_indel_rewrite_is_stored_as_split_columns(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral
             gag\ttiny_ref\t4\tF\tF4FDDD\tDrugIns
             gag\ttiny_ref\t6\tP\tPK6P\tDrugDel
         """))
@@ -1915,10 +1951,10 @@ class TestAnchorlessDeletion:
 
     def test_block_mismatch_raises(self, tmp_path, tiny_genbank) -> None:
         # reference=A is correct at pos 3, but mutation token claims 'Q' is deleted —
-        # Q does not match the gene sequence at pos 3 (which has A), so resolution fails.
+        # Q does not match the feature sequence at pos 3 (which has A), so resolution fails.
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral
             gag\ttiny_ref\t3\tA\tQ3del\tDrugA
         """))
         db = tmp_path / 'proj.db'
@@ -1930,7 +1966,7 @@ class TestAnchorlessDeletion:
         # Deleting M at pos 1 (1-based) — no preceding anchor, must fail
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral
             gag\ttiny_ref\t1\tM\tM1del\tDrugA
         """))
         db = tmp_path / 'proj.db'
@@ -1948,15 +1984,15 @@ class TestProjectMetadataInit:
                     'id': 'myref',
                     'accession': 'MYREF001',
                     'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
                     ],
                 },
             ],
         )
         rules_path = tmp_path / 'rules.tsv'
         rules_path.write_text(
-            'gene\treference_identifier\tposition\treference\tmutation\tantiviral\n'
+            'feature\treference_identifier\tposition\treference\tmutation\tantiviral\n'
             'gag\tMYREF001\t2\tK\tE\tTestDrug\n'
         )
         metadata_path = tmp_path / 'metadata.json'
@@ -2014,15 +2050,15 @@ class TestProjectMetadataInit:
                     'id': 'myref',
                     'accession': 'MYREF001',
                     'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
                     ],
                 },
             ],
         )
         rules_path = tmp_path / 'rules.tsv'
         rules_path.write_text(
-            'gene\treference_identifier\tposition\treference\tmutation\tantiviral\n'
+            'feature\treference_identifier\tposition\treference\tmutation\tantiviral\n'
             'gag\tMYREF001\t2\tK\tE\tTestDrug\n'
         )
         metadata_path = tmp_path / 'metadata.json'
@@ -2049,8 +2085,8 @@ class TestFormulaRuleImport:
                     'id': 'myref',
                     'accession': 'MYREF001',
                     'sequence': TINY_REF_SEQ,
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
                     ],
                 },
             ],
@@ -2059,7 +2095,7 @@ class TestFormulaRuleImport:
         rules_path.write_text(
             textwrap.dedent(
                 """\
-                group_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral
+                group_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral
                 group_1\tgag\tmyref\t2\tK\tE\tDrugA
                 """
             )
@@ -2092,8 +2128,8 @@ class TestFormulaRuleImport:
                     'id': 'myref',
                     'accession': 'MYREF001',
                     'sequence': TINY_REF_SEQ,
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
                     ],
                 },
             ],
@@ -2102,7 +2138,7 @@ class TestFormulaRuleImport:
         rules_path.write_text(
             textwrap.dedent(
                 """\
-                member_id\tgroup_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+                member_id\tgroup_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
                 mut_k2e\tgroup_1\tgag\tmyref\t2\tK\tE\tDrugA\tunknown
                 mut_f4l\tgroup_1\tgag\tmyref\t4\tF\tL\tDrugA\tunknown
                 mut_a6v\tgroup_1\tgag\tmyref\t6\tP\tV\tDrugA\tunknown
@@ -2163,8 +2199,8 @@ class TestFormulaRuleImport:
                     'id': 'myref',
                     'accession': 'MYREF001',
                     'sequence': TINY_REF_SEQ,
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
                     ],
                 },
             ],
@@ -2173,7 +2209,7 @@ class TestFormulaRuleImport:
         rules_path.write_text(
             textwrap.dedent(
                 """\
-                member_id\tgroup_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+                member_id\tgroup_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
                 mut_shared\tgroup_a,group_b\tgag\tmyref\t2\tK\tE\tDrugSingle\tresistant
                 mut_only_a\tgroup_a\tgag\tmyref\t4\tF\tL\tDrugSingle\tunknown
                 mut_only_b\tgroup_b\tgag\tmyref\t6\tP\tV\tDrugSingle\tunknown
@@ -2250,8 +2286,8 @@ class TestFormulaRuleImport:
                     'id': 'myref',
                     'accession': 'MYREF001',
                     'sequence': TINY_REF_SEQ,
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
                     ],
                 },
             ],
@@ -2260,7 +2296,7 @@ class TestFormulaRuleImport:
         rules_path.write_text(
             textwrap.dedent(
                 """\
-                gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+                feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
                 gag\tmyref\t2\tK\tE\tDrugA\tcontradictory
                 """
             )
@@ -2290,8 +2326,8 @@ class TestFormulaRuleImport:
                     'id': 'myref',
                     'accession': 'MYREF001',
                     'sequence': TINY_REF_SEQ,
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
                     ],
                 },
             ],
@@ -2300,7 +2336,7 @@ class TestFormulaRuleImport:
         rules_path.write_text(
             textwrap.dedent(
                 """\
-                member_id\tgroup_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+                member_id\tgroup_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
                 mut_k2e\tgroup_1\tgag\tmyref\t2\tK\tE\tDrugA\tunknown
                 mut_p6v\tgroup_1\tgag\tmyref\t6\tP\tV\tDrugA\tunknown
                 """
@@ -2341,8 +2377,8 @@ class TestFormulaRuleImport:
                     'id': 'myref',
                     'accession': 'MYREF001',
                     'sequence': TINY_REF_SEQ,
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
                     ],
                 },
             ],
@@ -2351,7 +2387,7 @@ class TestFormulaRuleImport:
         rules_path.write_text(
             textwrap.dedent(
                 """\
-                member_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral
+                member_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral
                 mut_dup\tgag\tmyref\t2\tK\tE\tDrugA
                 mut_dup\tgag\tmyref\t4\tF\tL\tDrugA
                 """
@@ -2377,8 +2413,8 @@ class TestFormulaRuleImport:
                     'id': 'myref',
                     'accession': 'MYREF001',
                     'sequence': TINY_REF_SEQ,
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'},
                     ],
                 },
             ],
@@ -2388,7 +2424,7 @@ class TestFormulaRuleImport:
         initial_rules.write_text(
             textwrap.dedent(
                 """\
-                member_id\tgroup_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral
+                member_id\tgroup_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral
                 mut_k2e\tgroup_1\tgag\tmyref\t2\tK\tE\tDrugA
                 """
             )
@@ -2405,7 +2441,7 @@ class TestFormulaRuleImport:
         additional_rules.write_text(
             textwrap.dedent(
                 """\
-                member_id\tgroup_id\tgene\treference_identifier\tposition\treference\tmutation\tantiviral
+                member_id\tgroup_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral
                 mut_a6v\tgroup_1\tgag\tmyref\t6\tP\tV\tDrugA
                 """
             )

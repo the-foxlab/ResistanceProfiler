@@ -21,11 +21,11 @@ from respro.config.cli_settings import CLI_CONFIG
 from respro.core.annotation import assign_af_bins
 from respro.core.query import pick_best_reference_id, select_matches_for_reference
 from respro.core.rules import load_formula_rules, load_rules, match_formula_rules, match_rules
-from respro.db.models import AnnotatedVariant, CoverageGap, GeneMatch, ProfilingResult
+from respro.db.models import AnnotatedVariant, CoverageGap, FeatureMatch, ProfilingResult
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.results import save_run
 from respro.db.schema import init_results_db
-from respro.io.reference import load_genes_for_reference
+from respro.io.reference import load_features_for_reference
 from respro.report.non_html_exports import export_results
 from respro.utils.files import resolve_output_file
 
@@ -94,10 +94,10 @@ def _resolve_reference(
     logger: logging.Logger,
 ) -> tuple[int, str, list]:
     """
-    Pick the best reference, filter fasta_matches, and log matched genes.
+    Pick the best reference, filter fasta_matches, and log matched features.
 
     :param project_conn: open project database connection
-    :param fasta_matches: list of gene alignment matches
+    :param fasta_matches: list of feature alignment matches
     :param query_name: query sequence name for logging
     :param logger: logger instance
     :return: (ref_id, ref_name, filtered fasta_matches)
@@ -113,12 +113,12 @@ def _resolve_reference(
     ref_name = ref_name_row['name']
 
     logger.info('Matched query reference %r to internal reference %r', query_name, ref_name)
-    matched_gene_names = sorted({match.gene.name for match in fasta_matches})
-    logger.info('Matched %d gene(s): %s', len(matched_gene_names), ', '.join(matched_gene_names))
+    matched_feature_names = sorted({match.feature.name for match in fasta_matches})
+    logger.info('Matched %d feature(s): %s', len(matched_feature_names), ', '.join(matched_feature_names))
     for match in fasta_matches:
         logger.debug(
-            'gene=%s identity=%.2f%% cds_coverage=%.2f%% query_coverage=%.2f%% strand=%s cigar=%s',
-            match.gene.name, match.identity * 100, match.cds_coverage * 100,
+            'feature=%s identity=%.2f%% cds_coverage=%.2f%% query_coverage=%.2f%% strand=%s cigar=%s',
+            match.feature.name, match.identity * 100, match.cds_coverage * 100,
             match.query_coverage * 100, match.strand, match.cigar,
         )
 
@@ -130,38 +130,38 @@ def _load_reference_data(
     ref_id: int,
 ) -> tuple[list, list, list, set[str]]:
     """
-    Load genes, atomic rules, formula rules, and the union of rule-covered genes.
+    Load features, atomic rules, formula rules, and the union of rule-covered features.
 
     :param project_conn: open project database connection
     :param ref_id: internal reference id
-    :return: (genes, rules, formula_rules, rule_gene_names)
+    :return: (features, rules, formula_rules, rule_feature_names)
     """
-    genes = load_genes_for_reference(project_conn, ref_id)
+    features = load_features_for_reference(project_conn, ref_id)
     rules = load_rules(project_conn, ref_id)
     formula_rules = load_formula_rules(project_conn, ref_id)
-    rule_gene_names: set[str] = {rule.gene_name for rule in rules}
+    rule_feature_names: set[str] = {rule.feature_name for rule in rules}
     for formula_rule in formula_rules:
         for member_rule in formula_rule.member_rules.values():
-            rule_gene_names.add(member_rule.gene_name)
-    return genes, rules, formula_rules, rule_gene_names
+            rule_feature_names.add(member_rule.feature_name)
+    return features, rules, formula_rules, rule_feature_names
 
 
 def _suppress_ruleless_overlap_annotations(
     annotations: list[AnnotatedVariant],
-    rule_gene_names: set[str],
+    rule_feature_names: set[str],
 ) -> list[AnnotatedVariant]:
     """
-    Filter out annotations for genes that have no rules when multiple genes overlap a variant.
+    Filter out annotations for features that have no rules when multiple features overlap a variant.
 
     Groups annotations by the underlying variant object identity (same VariantCall).
-    For groups with more than one annotation (overlapping genes):
-    - If at least one gene_name is in rule_gene_names, keep only those annotations.
-    - If no gene_name is in rule_gene_names, keep all (variants in ruleless genes alone).
+    For groups with more than one annotation (overlapping features):
+    - If at least one feature_name is in rule_feature_names, keep only those annotations.
+    - If no feature_name is in rule_feature_names, keep all (variants in ruleless features alone).
 
     Single-annotation groups (common case) are always left unchanged.
 
     :param annotations: list of annotated variants
-    :param rule_gene_names: set of gene names that have at least one rule
+    :param rule_feature_names: set of feature names that have at least one rule
     :return: filtered list of annotated variants
     """
     # Group by variant object identity (each annotation for the same underlying variant
@@ -180,11 +180,11 @@ def _suppress_ruleless_overlap_annotations(
             filtered.extend(group)
             continue
 
-        # Multi-annotation group: check if any gene_name is in rule_gene_names.
-        has_ruled_gene = any(ann.gene_name in rule_gene_names for ann in group)
+        # Multi-annotation group: check if any feature_name is in rule_feature_names.
+        has_ruled_feature = any(ann.feature_name in rule_feature_names for ann in group)
 
-        if has_ruled_gene:
-            filtered.extend(ann for ann in group if ann.gene_name in rule_gene_names)
+        if has_ruled_feature:
+            filtered.extend(ann for ann in group if ann.feature_name in rule_feature_names)
         else:
             filtered.extend(group)
 
@@ -197,14 +197,14 @@ class _ProfilingRunContext:
 
     annotations: list[AnnotatedVariant]
     formula_rules: list
-    genes: list
-    rule_gene_names: set[str]
+    features: list
+    rule_feature_names: set[str]
     rules: list
     total_variants: int
     variants_in_cds: int
     coverage_gaps: list[CoverageGap]
     query_sequence: str
-    gene_matches: list[GeneMatch]
+    feature_matches: list[FeatureMatch]
     af_bins: dict[str, tuple[float, float]] | None
 
 
@@ -239,7 +239,7 @@ def _finalize_and_export(
     :param extra_export_formats: optional additional output formats ('json', 'tabular', 'pdf')
     :return: (ProfilingResult, export path dict)
     """
-    annotations = _suppress_ruleless_overlap_annotations(ctx.annotations, ctx.rule_gene_names)
+    annotations = _suppress_ruleless_overlap_annotations(ctx.annotations, ctx.rule_feature_names)
     annotations = match_rules(annotations, ctx.rules)
     formula_hits = match_formula_rules(
         annotations,
@@ -268,7 +268,7 @@ def _finalize_and_export(
         formula_hits=formula_hits,
         coverage_gaps=ctx.coverage_gaps,
         query_sequence=ctx.query_sequence,
-        gene_matches=ctx.gene_matches,
+        feature_matches=ctx.feature_matches,
     )
 
     raw_stem = Path(input_basename).stem.strip() or 'profile'
@@ -278,8 +278,8 @@ def _finalize_and_export(
     outputs = export_results(
         result,
         html_output_path.parent,
-        genes=ctx.genes,
-        rule_gene_names=ctx.rule_gene_names,
+        features=ctx.features,
+        rule_feature_names=ctx.rule_feature_names,
         project_conn=project_conn,
         rules=ctx.rules,
         extra_export_formats=extra_export_formats,

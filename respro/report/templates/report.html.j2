@@ -169,7 +169,7 @@
 <div class='table-wrapper'>
 <table class='sortable expandable-table'>
 <thead><tr>
-  <th>Gene</th><th>AA change</th><th>Drug</th>
+  <th>Feature</th><th>AA change</th><th>Drug</th>
   {% if db_cols.ic50 %}<th>IC50</th>{% endif %}
   {% if db_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
   <th>Phenotype</th>
@@ -182,7 +182,7 @@
 <tbody>
 {% for r in db_hit_rows %}
 <tr class='hit-row data-row{% if r.has_alignment %} expandable-row{% endif %}' data-row-id='db-{{ loop.index }}'>
-  <td>{{ r.gene }}</td>
+  <td>{{ r.feature }}</td>
   <td>{{ r.aa_change }}</td>
   <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
   {% if db_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
@@ -280,7 +280,7 @@
 <div class='table-wrapper'>
 <table class='sortable'>
 <thead><tr>
-  <th>Gene</th><th>Observed AA change</th><th>Known rule</th><th>Similarity</th><th>Drug</th>
+  <th>Feature</th><th>Observed AA change</th><th>Known rule</th><th>Similarity</th><th>Drug</th>
   {% if pot_cols.ic50 %}<th>IC50</th>{% endif %}
   {% if pot_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
   {% if pot_cols.score %}<th>Score</th>{% endif %}
@@ -293,7 +293,7 @@
 <tbody>
 {% for r in potential_rows %}
 <tr class='data-row{% if r.has_alignment %} expandable-row{% endif %}' data-row-id='pot-{{ loop.index }}'>
-  <td>{{ r.gene }}</td>
+  <td>{{ r.feature }}</td>
   <td>{{ r.observed_change }}</td>
   <td>{{ r.rule_change }}</td>
   <td><span class='badge badge-sim-{{ r.similarity }}'>{{ r.similarity }}</span></td>
@@ -340,12 +340,12 @@
 <div class='table-wrapper'>
 <table class='sortable expandable-table'>
 <thead><tr>
-  <th>Gene</th><th>Nt change</th><th>AA change</th><th>Consequence</th><th>Frequency</th><th>Frequency classification</th><th>In database</th>
+  <th>Feature</th><th>Nt change</th><th>AA change</th><th>Consequence</th><th>Frequency</th><th>Frequency classification</th><th>In database</th>
 </tr></thead>
 <tbody>
 {% for r in cds_rows %}
 <tr class='{{ 'hit-row ' if r.database_hit else '' }}data-row{% if r.has_alignment %} expandable-row{% endif %}' data-row-id='cds-{{ loop.index }}'>
-  <td>{{ r.gene }}</td>
+  <td>{{ r.feature }}</td>
   <td>{{ r.nt_change }}</td>
   <td>{% if r.aa_change %}{{ r.aa_change }}{% endif %}</td>
   <td><span class='badge badge-{{ r.consequence }}'>{{ r.consequence }}</span></td>
@@ -368,23 +368,23 @@
 </div>
 </div>
 
-{% if gene_cards %}
+{% if feature_cards %}
 <div class='section'>
-<h2 class='section-toggle'>Gene overview <span class='toggle-arrow'>&#9654;</span></h2>
+<h2 class='section-toggle'>Feature overview <span class='toggle-arrow'>&#9654;</span></h2>
 <div class='section-body'>
-<div class='gene-cards'>
-{% for g in gene_cards %}
-<div class='gene-card'>
-  <div class='gene-meta-block'>
-    <div class='gene-name'>{{ g.name }}</div>
+<div class='feature-cards'>
+{% for g in feature_cards %}
+<div class='feature-card'>
+  <div class='feature-meta-block'>
+    <div class='feature-name'>{{ g.name }}</div>
     <div><strong>Product:</strong> {{ g.protein or '-' }}</div>
     <div><strong>Protein ID:</strong> {{ g.protein_id or '-' }}</div>
     <div><strong>Locus tag:</strong> {{ g.locus_tag or '-' }}</div>
-    {% if g.note %}<div class='gene-note'><strong>Note:</strong> {{ g.note }}</div>{% endif %}
+    {% if g.note %}<div class='feature-note'><strong>Note:</strong> {{ g.note }}</div>{% endif %}
     {% if g.ncbi_protein_url %}<a href='{{ g.ncbi_protein_url }}' target='_blank'>NCBI protein ↗</a>{% endif %}
   </div>
-  <div class='gene-seq-block'>
-    <pre class='gene-seq'>{% if g.protein_id %}>{{ g.protein_id }}{% else %}>{{ g.name }}{% endif %}
+  <div class='feature-seq-block'>
+    <pre class='feature-seq'>{% if g.protein_id %}>{{ g.protein_id }}{% else %}>{{ g.name }}{% endif %}
 {{ g.aa_sequence or '-' }}</pre>
   </div>
 </div>

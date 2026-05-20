@@ -142,7 +142,7 @@ def _profile_vcf_command(
         ref_id, ref_name, fasta_matches = _resolve_reference(
             project_conn, fasta_matches, query_name, logger,
         )
-        genes, rules, formula_rules, rule_gene_names = _load_reference_data(project_conn, ref_id)
+        features, rules, formula_rules, rule_feature_names = _load_reference_data(project_conn, ref_id)
 
         variants = parse_vcf(vcf, expected_query_name=query_name)
         logger.info('Parsed %d variant(s)', len(variants))
@@ -176,21 +176,21 @@ def _profile_vcf_command(
                     len(coverage_gaps),
                     min_depth,
                 )
-        annotations = annotate_variants(variants, genes)
+        annotations = annotate_variants(variants, features)
         total_variants = len(variants)
-        variants_in_cds = sum(1 for a in annotations if a.gene_name)
+        variants_in_cds = sum(1 for a in annotations if a.feature_name)
 
         ctx = _ProfilingRunContext(
             annotations=annotations,
             formula_rules=formula_rules,
-            genes=genes,
-            rule_gene_names=rule_gene_names,
+            features=features,
+            rule_feature_names=rule_feature_names,
             rules=rules,
             total_variants=total_variants,
             variants_in_cds=variants_in_cds,
             coverage_gaps=coverage_gaps or [],
             query_sequence=query_seq,
-            gene_matches=fasta_matches or [],
+            feature_matches=fasta_matches or [],
             af_bins=None,
         )
         result, outputs = _finalize_and_export(

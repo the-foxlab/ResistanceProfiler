@@ -105,7 +105,7 @@ class TestProfileCli:
         tsv_path = output_dir / f'{sample_vcf.stem}.mutations.tsv'
         assert tsv_path.exists()
         first_line = tsv_path.read_text(encoding='utf-8').splitlines()[0]
-        assert first_line.startswith('Gene\tAA change\tDrug')
+        assert first_line.startswith('Feature\tAA change\tDrug')
 
     def test_profile_vcf_writes_repeated_export_formats(
         self,
@@ -322,7 +322,7 @@ class TestProfileCli:
         assert result.exit_code != 0
         assert 'schema mismatch' in result.output.lower()
 
-    def test_profile_fails_when_ref_fasta_does_not_match_any_rule_gene(
+    def test_profile_fails_when_ref_fasta_does_not_match_any_rule_feature(
         self,
         project_db: Path,
         sample_vcf: Path,
@@ -413,8 +413,8 @@ class TestInitCli:
                     'id': 'myref',
                     'accession': 'MYREF001',
                     'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
                     ],
                 }
             ],
@@ -422,7 +422,7 @@ class TestInitCli:
 
         rules_tsv = tmp_path / 'rules.tsv'
         rules_tsv.write_text(
-            'reference_identifier\tgene\tposition\treference\tmutation\tantiviral\tphenotype\n'
+            'reference_identifier\tfeature\tposition\treference\tmutation\tantiviral\tphenotype\n'
             'NC_000001\tgag\t2\tK\tE\tDrugX\tresistant\n'
         )
 
@@ -448,8 +448,8 @@ class TestInitCli:
                     'organism': 'Human alphaherpesvirus 1',
                     'taxonomy': ['Viruses', 'Herpesvirales', 'Herpesviridae'],
                     'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
                     ],
                 }
             ],
@@ -457,7 +457,7 @@ class TestInitCli:
 
         rules_tsv = tmp_path / 'rules.tsv'
         rules_tsv.write_text(
-            'reference_identifier\tgene\tposition\treference\tmutation\tantiviral\tphenotype\tic50\tpublication\tsource\n'
+            'reference_identifier\tfeature\tposition\treference\tmutation\tantiviral\tphenotype\tic50\tpublication\tsource\n'
             'NC_000001\tgag\t2\tK\tE\tDrugY\tresistant\t>10x\tPMID:12345\therpesdrg-db\n'
         )
 
@@ -479,7 +479,7 @@ class TestInitCli:
             'r.organism, r.taxonomy '
             'FROM resistance_rule rr '
             'JOIN drug d ON d.id = rr.drug_id '
-            'JOIN gene g ON g.id = rr.gene_id '
+            'JOIN feature g ON g.id = rr.feature_id '
             'JOIN reference r ON r.id = g.reference_id '
             'LIMIT 1'
         ).fetchone()
@@ -507,8 +507,8 @@ class TestInitCli:
                     'id': 'refA.1',
                     'accession': 'refA',
                     'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
                     ],
                 }
             ],
@@ -520,8 +520,8 @@ class TestInitCli:
                     'id': 'refB.1',
                     'accession': 'refB',
                     'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'pol', 'protein': 'Pol', 'start': 1, 'end': 30, 'strand': '+'},
+                    'features': [
+                        {'feature': 'pol', 'protein': 'Pol', 'start': 1, 'end': 30, 'strand': '+'},
                     ],
                 }
             ],
@@ -529,7 +529,7 @@ class TestInitCli:
 
         rules_tsv = tmp_path / 'rules_multi_input.tsv'
         rules_tsv.write_text(
-            'reference_identifier\tgene\tposition\treference\tmutation\tantiviral\tphenotype\n'
+            'reference_identifier\tfeature\tposition\treference\tmutation\tantiviral\tphenotype\n'
             'refA\tgag\t2\tK\tE\tDrugA\tresistant\n'
             'refB\tpol\t2\tK\tE\tDrugB\tresistant\n'
         )
@@ -549,8 +549,8 @@ class TestInitCli:
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         reference_count = conn.execute('SELECT COUNT(*) AS n FROM reference').fetchone()['n']
-        gene_names = {
-            row['name'] for row in conn.execute('SELECT name FROM gene').fetchall()
+        feature_names = {
+            row['name'] for row in conn.execute('SELECT name FROM feature').fetchall()
         }
         drug_names = {
             row['name'] for row in conn.execute('SELECT name FROM drug').fetchall()
@@ -558,7 +558,7 @@ class TestInitCli:
         conn.close()
 
         assert reference_count == 2
-        assert gene_names == {'gag', 'pol'}
+        assert feature_names == {'gag', 'pol'}
         assert drug_names == {'druga', 'drugb'}
 
     def test_init_normalizes_flexible_mutation_inputs(self, tmp_path: Path):
@@ -569,8 +569,8 @@ class TestInitCli:
                     'id': 'NC_000001.1',
                     'accession': 'NC_000001',
                     'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
                     ],
                 }
             ],
@@ -578,7 +578,7 @@ class TestInitCli:
 
         rules_tsv = tmp_path / 'rules_norm.tsv'
         rules_tsv.write_text(
-            'reference_identifier\tgene\tposition\treference\tmutation\tantiviral\tphenotype\n'
+            'reference_identifier\tfeature\tposition\treference\tmutation\tantiviral\tphenotype\n'
             'NC_000001\tgag\t2\tK\tF2STOP\tDrugStop\tresistant\n'
             'NC_000001\tgag\t2\tK\tK2frameshift\tDrugFs\tresistant\n'
             'NC_000001\tgag\t2\tK\tK2delQ\tDrugDel\tresistant\n'
@@ -619,8 +619,8 @@ class TestInitCli:
                     'id': 'ref1',
                     'accession': 'REF1',
                     'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
                     ],
                 }
             ],
@@ -628,7 +628,7 @@ class TestInitCli:
 
         rules_initial = tmp_path / 'rules_initial.tsv'
         rules_initial.write_text(
-            'reference_identifier\tgene\tposition\treference\tmutation\tantiviral\tphenotype\tic50\n'
+            'reference_identifier\tfeature\tposition\treference\tmutation\tantiviral\tphenotype\tic50\n'
             'ref1\tgag\t2\tK\tE\tDrugX\tresistant\t2x\n'
         )
 
@@ -646,7 +646,7 @@ class TestInitCli:
 
         rules_append = tmp_path / 'rules_append.tsv'
         rules_append.write_text(
-            'reference_identifier\tgene\tposition\treference\tmutation\tantiviral\tphenotype\tic50\n'
+            'reference_identifier\tfeature\tposition\treference\tmutation\tantiviral\tphenotype\tic50\n'
             'ref1\tgag\t2\tK\tE\tdRuGx\tresistant\t999x\n'
             'ref1\tgag\t3\tA\tV\tDRUGX\tresistant\t5x\n'
         )
@@ -687,15 +687,15 @@ class TestInitCli:
                     'id': 'ref1',
                     'accession': 'REF1',
                     'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
                     ],
                 }
             ],
         )
         rules_tsv = tmp_path / 'rules.tsv'
         rules_tsv.write_text(
-            'reference_identifier\tgene\tposition\treference\tmutation\tantiviral\n'
+            'reference_identifier\tfeature\tposition\treference\tmutation\tantiviral\n'
             'ref1\tgag\t2\tK\tE\tDrugX\n'
         )
 
@@ -718,7 +718,7 @@ class TestInitCli:
 
         rules_tsv = tmp_path / 'rules.tsv'
         rules_tsv.write_text(
-            'reference_identifier\tgene\tposition\treference\tmutation\tantiviral\n'
+            'reference_identifier\tfeature\tposition\treference\tmutation\tantiviral\n'
             'REF1\tgag\t2\tK\tE\tDrugX\n'
         )
 
@@ -744,7 +744,7 @@ class TestInitCli:
 
         rules_tsv = tmp_path / 'rules.tsv'
         rules_tsv.write_text(
-            'gene\tposition\treference\tmutation\tantiviral\n'
+            'feature\tposition\treference\tmutation\tantiviral\n'
             'gag\t2\tK\tE\tDrugX\n'
         )
 
@@ -756,31 +756,31 @@ class TestInitCli:
         ])
 
         assert result.exit_code != 0
-        assert 'no stored references/genes' in result.output.lower()
+        assert 'no stored references/features' in result.output.lower()
 
-    def test_init_warns_on_rule_gene_missing_in_genbank(self, tmp_path: Path):
+    def test_init_warns_on_rule_feature_missing_in_genbank(self, tmp_path: Path):
         genbank_path = write_genbank(
-            tmp_path / 'missing_gene.gb',
+            tmp_path / 'missing_feature.gb',
             [
                 {
                     'id': 'ref1',
                     'accession': 'REF1',
                     'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
                     ],
                 }
             ],
         )
         rules_tsv = tmp_path / 'rules_missing.tsv'
         rules_tsv.write_text(
-            'reference_identifier\tgene\tposition\treference\tmutation\tantiviral\n'
+            'reference_identifier\tfeature\tposition\treference\tmutation\tantiviral\n'
             'REF1\tpol\t2\tK\tE\tDrugX\n'
         )
 
         result = CliRunner().invoke(app, [
             'init',
-            '--name', 'Missing Gene Test',
+            '--name', 'Missing Feature Test',
             '--genbank', str(genbank_path),
             '--rules', str(rules_tsv),
             '--output', str(tmp_path / 'missing.db'),
@@ -789,7 +789,7 @@ class TestInitCli:
         assert result.exit_code == 0, result.output
         assert 'skipped' in result.output.lower() or (tmp_path / 'missing.db').exists()
 
-    def test_init_requires_reference_identifier_for_ambiguous_multirecord_gene(self, tmp_path: Path):
+    def test_init_requires_reference_identifier_for_ambiguous_multirecord_feature(self, tmp_path: Path):
         genbank_path = write_genbank(
             tmp_path / 'ambiguous.gb',
             [
@@ -797,23 +797,23 @@ class TestInitCli:
                     'id': 'refA.1',
                     'accession': 'refA',
                     'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'GagA', 'start': 1, 'end': 30, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'GagA', 'start': 1, 'end': 30, 'strand': '+'},
                     ],
                 },
                 {
                     'id': 'refB.1',
                     'accession': 'refB',
                     'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
-                    'genes': [
-                        {'gene': 'gag', 'protein': 'GagB', 'start': 1, 'end': 30, 'strand': '+'},
+                    'features': [
+                        {'feature': 'gag', 'protein': 'GagB', 'start': 1, 'end': 30, 'strand': '+'},
                     ],
                 },
             ],
         )
         rules_tsv = tmp_path / 'rules_ambiguous.tsv'
         rules_tsv.write_text(
-            'gene\tposition\treference\tmutation\tantiviral\n'
+            'feature\tposition\treference\tmutation\tantiviral\n'
             'gag\t2\tK\tE\tDrugX\n'
         )
 

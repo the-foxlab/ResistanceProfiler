@@ -18,7 +18,7 @@ from respro.cli.profile_helpers import (
     _ProfilingRunContext,
 )
 from respro.core.query import resolve_cached_query_reference
-from respro.db.models import AnnotatedVariant, GeneMatch, VariantCall
+from respro.db.models import AnnotatedVariant, FeatureMatch, VariantCall
 from respro.db.results import (
     list_runs,
     load_coverage_gaps,
@@ -131,7 +131,7 @@ def _sync_single_run(
         )
     ref_id = int(ref_row['id'])
 
-    genes, rules, formula_rules, rule_gene_names = _load_reference_data(project_conn, ref_id)
+    features, rules, formula_rules, rule_feature_names = _load_reference_data(project_conn, ref_id)
     coverage_gaps = load_coverage_gaps(results_conn, run_id)
 
     # Reconstruct raw AnnotatedVariant objects without rule matches so re-annotation is clean.
@@ -147,7 +147,7 @@ def _sync_single_run(
         )
         raw_annotations.append(AnnotatedVariant(
             variant=v,
-            gene_name=row.get('gene_name', ''),
+            feature_name=row.get('feature_name', ''),
             codon_pos=row.get('codon_pos') or 0,
             ref_codon=row.get('ref_codon', ''),
             alt_codon=row.get('alt_codon', ''),
@@ -157,13 +157,13 @@ def _sync_single_run(
             af_bin=row.get('af_bin', ''),
         ))
 
-    # Try to recover query sequence and gene matches for FASTA-mode runs.
+    # Try to recover query sequence and feature matches for FASTA-mode runs.
     query_sequence = ''
-    gene_matches: list[GeneMatch] = []
+    feature_matches: list[FeatureMatch] = []
     sample_name = run_dict.get('sample_name', '')
     if sample_name:
         try:
-            _, query_sequence, gene_matches = resolve_cached_query_reference(
+            _, query_sequence, feature_matches = resolve_cached_query_reference(
                 project_conn, sample_name,
             )
         except ValueError as exc:
@@ -177,14 +177,14 @@ def _sync_single_run(
         ctx = _ProfilingRunContext(
             annotations=raw_annotations,
             formula_rules=formula_rules,
-            genes=genes,
-            rule_gene_names=rule_gene_names,
+            features=features,
+            rule_feature_names=rule_feature_names,
             rules=rules,
             total_variants=run_dict.get('total_variants', 0),
             variants_in_cds=run_dict.get('variants_in_cds', 0),
             coverage_gaps=coverage_gaps or [],
             query_sequence=query_sequence,
-            gene_matches=gene_matches or [],
+            feature_matches=feature_matches or [],
             af_bins=None,
         )
         result, _outputs = _finalize_and_export(
@@ -210,7 +210,7 @@ def _sync_single_run(
         results_conn.execute(
             'INSERT INTO variant_result '
             '(run_id, chrom, pos, ref, alt, allele_freq, depth, '
-            'gene_name, codon_pos, ref_codon, alt_codon, ref_aa, alt_aa, '
+            'feature_name, codon_pos, ref_codon, alt_codon, ref_aa, alt_aa, '
             'consequence, af_bin, rule_match, drug_hits) '
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
@@ -221,7 +221,7 @@ def _sync_single_run(
                 vv.alt,
                 vv.allele_freq,
                 vv.depth,
-                ann.gene_name,
+                ann.feature_name,
                 ann.codon_pos,
                 ann.ref_codon,
                 ann.alt_codon,

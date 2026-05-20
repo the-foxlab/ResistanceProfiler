@@ -26,8 +26,8 @@ def list_rules_for_display(
     """
     Return resistance rules as plain dicts suitable for tabular display.
 
-    Rows are ordered by gene name, position, then drug name.
-    When ``ref_id`` is given, only rules for genes belonging to that reference are returned.
+    Rows are ordered by feature name, position, then drug name.
+    When ``ref_id`` is given, only rules for features belonging to that reference are returned.
 
     :param conn: open project DB connection
     :param ref_id: optional reference id to filter by
@@ -48,12 +48,12 @@ def list_rules_for_display(
 
     if ref_id is not None:
         rows = conn.execute(
-            'SELECT r.name AS reference_name, g.name AS gene, '
+            'SELECT r.name AS reference_name, g.name AS feature, '
             'rr.position, rr.reference, rr.mutation, '
             'd.name AS drug, rr.phenotype, rr.clinical_phenotype, '
             'rr.ic50, rr.fold_ic50, rr.score, ' + publication_doi_expr + ', rr.source, rr.comment '
             'FROM resistance_rule rr '
-            'JOIN gene g ON g.id = rr.gene_id '
+            'JOIN feature g ON g.id = rr.feature_id '
             'JOIN reference r ON r.id = g.reference_id '
             'JOIN drug d ON d.id = rr.drug_id '
             'WHERE g.reference_id = ? '
@@ -62,12 +62,12 @@ def list_rules_for_display(
         ).fetchall()
     else:
         rows = conn.execute(
-            'SELECT r.name AS reference_name, g.name AS gene, '
+            'SELECT r.name AS reference_name, g.name AS feature, '
             'rr.position, rr.reference, rr.mutation, '
             'd.name AS drug, rr.phenotype, rr.clinical_phenotype, '
             'rr.ic50, rr.fold_ic50, rr.score, ' + publication_doi_expr + ', rr.source, rr.comment '
             'FROM resistance_rule rr '
-            'JOIN gene g ON g.id = rr.gene_id '
+            'JOIN feature g ON g.id = rr.feature_id '
             'JOIN reference r ON r.id = g.reference_id '
             'JOIN drug d ON d.id = rr.drug_id '
             'ORDER BY r.name, g.name, rr.position, d.name',
@@ -125,7 +125,7 @@ def list_formula_rules_for_display(
         "COALESCE((SELECT r.name "
         "FROM resistance_formula_rule_member frm "
         "JOIN resistance_rule rr ON rr.id = frm.rule_id "
-        "JOIN gene g ON g.id = rr.gene_id "
+        "JOIN feature g ON g.id = rr.feature_id "
         "JOIN reference r ON r.id = g.reference_id "
         'WHERE frm.formula_rule_id = fr.id '
         'ORDER BY r.name LIMIT 1), \'\') AS reference_name, '
@@ -144,7 +144,7 @@ def list_formula_rules_for_display(
             base_sql
             + 'WHERE EXISTS (SELECT 1 FROM resistance_formula_rule_member frm '
             'JOIN resistance_rule rr ON rr.id = frm.rule_id '
-            'JOIN gene g ON g.id = rr.gene_id '
+            'JOIN feature g ON g.id = rr.feature_id '
             'WHERE frm.formula_rule_id = fr.id AND g.reference_id = ?) '
             'ORDER BY reference_name, d.name, fr.formula_id',
             (ref_id,),
@@ -187,12 +187,12 @@ def _load_formula_member_labels_for_display(
 ) -> dict[str, dict[str, str]]:
     """Return formula_id -> (member_id -> display label) mapping for expression rendering."""
     sql = (
-        'SELECT fr.formula_id, rr.external_id, g.name AS gene_name, '
+        'SELECT fr.formula_id, rr.external_id, g.name AS feature_name, '
         'rr.position, rr.reference, rr.mutation '
         'FROM resistance_formula_rule fr '
         'JOIN resistance_formula_rule_member frm ON frm.formula_rule_id = fr.id '
         'JOIN resistance_rule rr ON rr.id = frm.rule_id '
-        'JOIN gene g ON g.id = rr.gene_id '
+        'JOIN feature g ON g.id = rr.feature_id '
     )
     params: tuple[int, ...] = ()
     if ref_id is not None:
@@ -209,7 +209,7 @@ def _load_formula_member_labels_for_display(
             continue
 
         position = int(row['position']) + 1
-        label = f"{row['gene_name']}:{row['reference']}{position}{row['mutation']}"
+        label = f"{row['feature_name']}:{row['reference']}{position}{row['mutation']}"
         labels.setdefault(formula_id, {})[member_id] = label
     return labels
 
@@ -253,22 +253,22 @@ def list_plot_metadata_for_display(
     ref_id: int | None = None,
 ) -> dict:
     """
-    Return reference and gene metadata used by the web plotting layer.
+    Return reference and feature metadata used by the web plotting layer.
 
     :param conn: open project DB connection
     :param ref_id: optional reference id to filter by
-    :return: dict with ``references`` and ``genes`` arrays
+    :return: dict with ``references`` and ``features`` arrays
     """
     reference_sql = (
         'SELECT DISTINCT r.id AS reference_id, r.name AS reference_name, '
         "r.accession AS reference_accession, r.organism AS reference_organism "
         'FROM reference r '
-        'JOIN gene g ON g.reference_id = r.id '
+        'JOIN feature g ON g.reference_id = r.id '
     )
-    gene_sql = (
-        'SELECT r.id AS reference_id, r.name AS reference_name, g.name AS gene_name, '
+    feature_sql = (
+        'SELECT r.id AS reference_id, r.name AS reference_name, g.name AS feature_name, '
         'LENGTH(g.aa_sequence) AS aa_length '
-        'FROM gene g '
+        'FROM feature g '
         'JOIN reference r ON r.id = g.reference_id '
     )
 
@@ -276,13 +276,13 @@ def list_plot_metadata_for_display(
     if ref_id is not None:
         params = (ref_id,)
         reference_sql += 'WHERE r.id = ? '
-        gene_sql += 'WHERE r.id = ? '
+        feature_sql += 'WHERE r.id = ? '
 
     reference_sql += 'ORDER BY r.name'
-    gene_sql += 'ORDER BY r.name, g.name'
+    feature_sql += 'ORDER BY r.name, g.name'
 
     reference_rows = conn.execute(reference_sql, params).fetchall()
-    gene_rows = conn.execute(gene_sql, params).fetchall()
+    feature_rows = conn.execute(feature_sql, params).fetchall()
 
     references = []
     for row in reference_rows:
@@ -298,11 +298,11 @@ def list_plot_metadata_for_display(
             'reference_display_name': display_name,
         })
 
-    genes = [dict(row) for row in gene_rows]
+    features = [dict(row) for row in feature_rows]
 
     return {
         'references': references,
-        'genes': genes,
+        'features': features,
     }
 
 

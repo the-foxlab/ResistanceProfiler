@@ -23,13 +23,13 @@ In both modes, input is converted into a common internal representation before r
 
 ### Reference matching and coordinate mapping
 
-- Query sequence context is aligned to the internal project references and genes.
+- Query sequence context is aligned to the internal project references and features.
 - VCF-derived variants are remapped from the sample reference space into the internal project
   coordinate system.
 
 ### Amino-acid consequence interpretation
 
-- Per-gene nucleotide changes are translated into amino-acid consequences.
+- Per-feature nucleotide changes are translated into amino-acid consequences.
 - Supported classes include synonymous, missense, stop changes, frameshift, insertion, deletion, and unknown.
 
 ### Rule matching

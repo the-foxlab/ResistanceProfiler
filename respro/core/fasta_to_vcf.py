@@ -23,14 +23,14 @@ import re
 from Bio.Seq import Seq
 
 from respro.core.vcf_coverage import _merge_codon_gaps
-from respro.db.models import CoverageGap, GeneMatch, GeneRecord, VariantCall
+from respro.db.models import CoverageGap, FeatureMatch, FeatureRecord, VariantCall
 
 logger = logging.getLogger(__name__)
 
 
 def fasta_to_vcf(
     query_seq: str,
-    matches: list[GeneMatch],
+    matches: list[FeatureMatch],
 ) -> tuple[list[VariantCall], list[CoverageGap]]:
     """
     Convert FASTA consensus differences into a VCF-like VariantCall stream.
@@ -39,18 +39,18 @@ def fasta_to_vcf(
     consequence interpretation to the shared annotation pipeline.
 
     :param query_seq: full query FASTA sequence (forward strand, upper case)
-    :param matches: gene matches from sequence alignment
+    :param matches: feature matches from sequence alignment
     :return: (variant calls, coverage gaps)
     """
     variants: list[VariantCall] = []
     coverage_gaps: list[CoverageGap] = []
     for match in matches:
-        gene_variants, gene_gaps = _profile_gene_to_variants(query_seq, match)
-        variants.extend(gene_variants)
-        coverage_gaps.extend(gene_gaps)
+        feature_variants, feature_gaps = _profile_feature_to_variants(query_seq, match)
+        variants.extend(feature_variants)
+        coverage_gaps.extend(feature_gaps)
 
     logger.info(
-        'FASTA to VCF: %d variant call(s) from %d gene(s), %d non-covered stretch(es) '
+        'FASTA to VCF: %d variant call(s) from %d feature(s), %d non-covered stretch(es) '
         '(%d codon position(s) total)',
         len(variants), len(matches), len(coverage_gaps),
         sum(gap.codon_end - gap.codon_start + 1 for gap in coverage_gaps),
@@ -58,14 +58,14 @@ def fasta_to_vcf(
     return variants, coverage_gaps
 
 
-def _profile_gene_to_variants(
+def _profile_feature_to_variants(
     query_seq: str,
-    match: GeneMatch,
+    match: FeatureMatch,
 ) -> tuple[list[VariantCall], list[CoverageGap]]:
-    """Project one aligned gene match to VariantCall records plus coverage gaps."""
-    gene = match.gene
-    if not gene.nt_sequence:
-        logger.warning('Gene %r has no stored CDS sequence — skipping', gene.name)
+    """Project one aligned feature match to VariantCall records plus coverage gaps."""
+    feature = match.feature
+    if not feature.nt_sequence:
+        logger.warning('Feature %r has no stored CDS sequence — skipping', feature.name)
         return [], []
 
     region = query_seq[match.query_start:match.query_end].upper()
@@ -77,7 +77,7 @@ def _profile_gene_to_variants(
     covered_cds_end = match.cds_start + aligned_cds_len
 
     aligned_ref, aligned_query = _gapped_strings_from_cigar(
-        gene.nt_sequence.upper(),
+        feature.nt_sequence.upper(),
         region,
         match.cigar,
         match.cds_start,
@@ -85,7 +85,7 @@ def _profile_gene_to_variants(
     return _variants_from_alignment(
         aligned_ref,
         aligned_query,
-        gene,
+        feature,
         covered_cds_start=covered_cds_start,
         covered_cds_end=covered_cds_end,
     )
@@ -94,7 +94,7 @@ def _profile_gene_to_variants(
 def _variants_from_alignment(
     aligned_ref: str,
     aligned_query: str,
-    gene: GeneRecord,
+    feature: FeatureRecord,
     covered_cds_start: int | None = None,
     covered_cds_end: int | None = None,
 ) -> tuple[list[VariantCall], list[CoverageGap]]:
@@ -111,12 +111,12 @@ def _variants_from_alignment(
 
     :param aligned_ref: reference CDS with gap characters
     :param aligned_query: query CDS with gap characters
-    :param gene: gene record with stored nt_sequence
+    :param feature: feature record with stored nt_sequence
     :param covered_cds_start: CDS nt start of aligned region (for gap detection)
     :param covered_cds_end: CDS nt end of aligned region (for gap detection)
     :return: (variant calls, coverage gaps)
     """
-    frame = gene.codon_start
+    frame = feature.codon_start
     variants: list[VariantCall] = []
     gap_codon_indices: list[int] = []
 
@@ -171,7 +171,7 @@ def _variants_from_alignment(
 
         # Handle insertion before this reference position
         if ins_before:
-            variant = _make_fasta_insertion_from_alignment(gene, coding, ref_idx, ins_before)
+            variant = _make_fasta_insertion_from_alignment(feature, coding, ref_idx, ins_before)
             if variant:
                 variants.append(variant)
 
@@ -179,7 +179,7 @@ def _variants_from_alignment(
         if query_base != '-' and ref_base != query_base:
             query_codon = _get_query_codon(coding, ref_idx)
             for alt_base, af in _iupac_alt_bases(ref_base, query_base):
-                var = _make_variant_from_coding_nt(gene, ref_idx, ref_base, alt_base, af=af)
+                var = _make_variant_from_coding_nt(feature, ref_idx, ref_base, alt_base, af=af)
                 var.query_ref_codon = query_codon
                 variants.append(var)
 
@@ -195,7 +195,7 @@ def _variants_from_alignment(
                 covered_cds_start=covered_cds_start,
                 covered_cds_end=covered_cds_end,
             ):
-                variant = _make_fasta_deletion_from_alignment(gene, coding, ref_idx, del_end)
+                variant = _make_fasta_deletion_from_alignment(feature, coding, ref_idx, del_end)
                 if variant:
                     variants.append(variant)
             ref_idx = del_end + 1
@@ -203,7 +203,7 @@ def _variants_from_alignment(
 
         ref_idx += 1
 
-    return variants, _merge_codon_gaps(gene.name, gap_codon_indices)
+    return variants, _merge_codon_gaps(feature.name, gap_codon_indices)
 
 
 def _get_query_codon(coding: list[tuple[str, str, str]], coding_nt_idx: int) -> str:
@@ -328,38 +328,38 @@ def _deletion_run_within_coverage(
 
 
 
-def _codon_genomic_pos(gene: GeneRecord, codon_idx: int) -> int:
+def _codon_genomic_pos(feature: FeatureRecord, codon_idx: int) -> int:
     """
     Return the 0-based internal genomic position of the first NT in a codon.
 
-    :param gene: gene record
+    :param feature: feature record
     :param codon_idx: 0-based codon index in the protein
     :return: 0-based genomic position on the internal reference
     """
-    genomic_pos = gene.cds_to_genomic_position(gene.codon_start + codon_idx * 3)
+    genomic_pos = feature.cds_to_genomic_position(feature.codon_start + codon_idx * 3)
     if genomic_pos is None:
-        raise ValueError(f'Codon index {codon_idx} is outside CDS for gene {gene.name!r}')
+        raise ValueError(f'Codon index {codon_idx} is outside CDS for feature {feature.name!r}')
     return genomic_pos
 
 
-def _coding_nt_genomic_pos(gene: GeneRecord, coding_nt_idx: int) -> int:
+def _coding_nt_genomic_pos(feature: FeatureRecord, coding_nt_idx: int) -> int:
     """
     Return the 0-based internal genomic position of one coding nucleotide index.
 
-    :param gene: gene record
+    :param feature: feature record
     :param coding_nt_idx: 0-based nucleotide index in coding orientation (after codon_start)
     :return: 0-based genomic position on the internal reference
     """
-    genomic_pos = gene.cds_to_genomic_position(gene.codon_start + coding_nt_idx)
+    genomic_pos = feature.cds_to_genomic_position(feature.codon_start + coding_nt_idx)
     if genomic_pos is None:
         raise ValueError(
-            f'Coding nucleotide index {coding_nt_idx} is outside CDS for gene {gene.name!r}'
+            f'Coding nucleotide index {coding_nt_idx} is outside CDS for feature {feature.name!r}'
         )
     return genomic_pos
 
 
 def _make_variant_from_coding_nt(
-    gene: GeneRecord,
+    feature: FeatureRecord,
     coding_nt_idx: int,
     ref: str,
     alt: str,
@@ -368,21 +368,21 @@ def _make_variant_from_coding_nt(
     """
     Build a synthetic VariantCall anchored at one coding nucleotide position.
 
-    For minus-strand genes, reverse-complements ref/alt to match genomic orientation.
+    For minus-strand features, reverse-complements ref/alt to match genomic orientation.
     """
     ref_out = ref
     alt_out = alt
 
-    # For minus-strand genes, nucleotides are in coding orientation but positions
+    # For minus-strand features, nucleotides are in coding orientation but positions
     # will be reversed by cds_to_genomic_position. Apply reverse-complement to
     # nucleotides to maintain the invariant that ref=genomic_ref, alt=genomic_alt.
-    if gene.strand == '-':
+    if feature.strand == '-':
         ref_out = str(Seq(ref).reverse_complement())
         alt_out = str(Seq(alt).reverse_complement())
 
     return VariantCall(
-        chrom=gene.name,
-        pos=_coding_nt_genomic_pos(gene, coding_nt_idx),
+        chrom=feature.name,
+        pos=_coding_nt_genomic_pos(feature, coding_nt_idx),
         ref=ref_out,
         alt=alt_out,
         allele_freq=af,
@@ -392,7 +392,7 @@ def _make_variant_from_coding_nt(
 
 
 def _make_fasta_insertion_from_alignment(
-    gene: GeneRecord,
+    feature: FeatureRecord,
     coding: list[tuple[str, str, str]],
     idx: int,
     inserted_bases: str,
@@ -403,7 +403,7 @@ def _make_fasta_insertion_from_alignment(
     The anchor is the base immediately before the insertion in the codon walk.
     For plus-strand, use the previous position; for minus, use current position.
     """
-    if gene.strand == '+':
+    if feature.strand == '+':
         anchor_idx = idx - 1
         if anchor_idx < 0:
             return None
@@ -412,12 +412,12 @@ def _make_fasta_insertion_from_alignment(
         anchor_idx = idx
         anchor_ref_nt = coding[anchor_idx][0]
 
-    if gene.strand == '-':
+    if feature.strand == '-':
         anchor_genomic = str(Seq(anchor_ref_nt).reverse_complement())
         inserted_genomic = str(Seq(inserted_bases).reverse_complement())
         return VariantCall(
-            chrom=gene.name,
-            pos=_coding_nt_genomic_pos(gene, anchor_idx),
+            chrom=feature.name,
+            pos=_coding_nt_genomic_pos(feature, anchor_idx),
             ref=anchor_genomic,
             alt=anchor_genomic + inserted_genomic,
             allele_freq=1.0,
@@ -426,7 +426,7 @@ def _make_fasta_insertion_from_alignment(
         )
 
     return _make_variant_from_coding_nt(
-        gene,
+        feature,
         anchor_idx,
         anchor_ref_nt,
         anchor_ref_nt + inserted_bases,
@@ -434,7 +434,7 @@ def _make_fasta_insertion_from_alignment(
 
 
 def _make_fasta_deletion_from_alignment(
-    gene: GeneRecord,
+    feature: FeatureRecord,
     coding: list[tuple[str, str, str]],
     start_idx: int,
     end_idx: int,
@@ -449,7 +449,7 @@ def _make_fasta_deletion_from_alignment(
     if not deleted_bases:
         return None
 
-    if gene.strand == '+':
+    if feature.strand == '+':
         anchor_idx = start_idx - 1
         if anchor_idx < 0:
             return None
@@ -460,12 +460,12 @@ def _make_fasta_deletion_from_alignment(
             return None
         anchor_ref_nt = coding[anchor_idx][0]
 
-    if gene.strand == '-':
+    if feature.strand == '-':
         anchor_genomic = str(Seq(anchor_ref_nt).reverse_complement())
         deleted_genomic = str(Seq(deleted_bases).reverse_complement())
         return VariantCall(
-            chrom=gene.name,
-            pos=_coding_nt_genomic_pos(gene, anchor_idx),
+            chrom=feature.name,
+            pos=_coding_nt_genomic_pos(feature, anchor_idx),
             ref=anchor_genomic + deleted_genomic,
             alt=anchor_genomic,
             allele_freq=1.0,
@@ -474,7 +474,7 @@ def _make_fasta_deletion_from_alignment(
         )
 
     return _make_variant_from_coding_nt(
-        gene,
+        feature,
         anchor_idx,
         anchor_ref_nt + deleted_bases,
         anchor_ref_nt,

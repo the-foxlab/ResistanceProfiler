@@ -9,14 +9,14 @@ import logging
 from Bio.Seq import Seq
 
 from respro.core.alignment import cigar_to_coordinate_map
-from respro.db.models import GeneMatch, GeneRecord, VariantCall
+from respro.db.models import FeatureMatch, FeatureRecord, VariantCall
 
 logger = logging.getLogger(__name__)
 
 
 def remap_variants(
     variants: list[VariantCall],
-    matches: list[GeneMatch],
+    matches: list[FeatureMatch],
     query_sequence: str,
 ) -> tuple[list[VariantCall], list[str]]:
     """
@@ -30,10 +30,10 @@ def remap_variants(
     4. Stores the query codon context in every remapped variant for downstream annotation.
     5. Converts the CDS position to an internal genomic position and transforms
        REF/ALT alleles to the internal forward strand (anchor complement + payload RC
-       for indels when the alignment strand and gene strand differ).
+       for indels when the alignment strand and feature strand differ).
 
     :param variants: parsed VCF variants (0-based on user reference)
-    :param matches: gene matches from FASTA alignment
+    :param matches: feature matches from FASTA alignment
     :param query_sequence: user query nucleotide sequence
     :return: (remapped_variants, warnings)
     """
@@ -41,7 +41,7 @@ def remap_variants(
     query_upper = query_sequence.upper()
 
     # Pre-build coordinate maps for each match to avoid repeated per-variant scans.
-    match_maps: list[tuple[GeneMatch, dict[int, int], dict[int, int]]] = []
+    match_maps: list[tuple[FeatureMatch, dict[int, int], dict[int, int]]] = []
     for match in matches:
         q2c = _build_query_to_cds_map(
             match.cigar, match.query_start, match.query_end,
@@ -61,10 +61,10 @@ def remap_variants(
             if var.pos not in q2c:
                 continue
 
-            gene = match.gene
-            reverse_to_reference = (match.strand != gene.strand)
+            feature = match.feature
+            reverse_to_reference = (match.strand != feature.strand)
 
-            cds_pos = _map_variant_anchor_cds_pos(var, q2c, reverse_to_reference, gene.strand)
+            cds_pos = _map_variant_anchor_cds_pos(var, q2c, reverse_to_reference, feature.strand)
             if cds_pos is None:
                 skip_reason = 'no match / outside mapped CDS'
                 continue
@@ -85,7 +85,7 @@ def remap_variants(
                 continue
 
             # Convert CDS position to internal genomic position.
-            genomic_pos = gene.cds_to_genomic_position(cds_pos)
+            genomic_pos = feature.cds_to_genomic_position(cds_pos)
             if genomic_pos is None:
                 skip_reason = (
                     'projected CDS position cannot map back to an internal coding genomic '
@@ -96,7 +96,7 @@ def remap_variants(
             # Transform REF/ALT to internal reference forward strand.
             # Reverse-orientation indels also switch anchor side.
             if _is_indel(var.ref, var.alt) and reverse_to_reference:
-                ref_base, alt_base = _remap_reverse_indel_alleles(var, gene, genomic_pos)
+                ref_base, alt_base = _remap_reverse_indel_alleles(var, feature, genomic_pos)
             else:
                 ref_base = _transform_allele(var.ref, reverse_to_reference)
                 alt_base = _transform_allele(var.alt, reverse_to_reference)
@@ -110,7 +110,7 @@ def remap_variants(
 
             codon_context_pos = cds_pos
             if _is_indel(var.ref, var.alt):
-                codon_context_pos = _indel_anchor_cds_pos(cds_pos, len(var.ref), gene.strand)
+                codon_context_pos = _indel_anchor_cds_pos(cds_pos, len(var.ref), feature.strand)
 
             query_ref_codon = ''
             if codon_context_pos >= 0:
@@ -228,7 +228,7 @@ def _transform_allele(allele: str, need_comp: bool) -> str:
     base (allele[0]) and reverse-complements the payload (allele[1:]).
 
     :param allele: VCF allele string (REF or ALT)
-    :param need_comp: True when alignment strand and gene strand differ
+    :param need_comp: True when alignment strand and feature strand differ
     :return: transformed allele string
     """
     if not need_comp or not allele:
@@ -242,7 +242,7 @@ def _map_variant_anchor_cds_pos(
     var: VariantCall,
     query_to_cds: dict[int, int],
     reverse_to_reference: bool,
-    gene_strand: str,
+    feature_strand: str,
 ) -> int | None:
     """
     Map variant anchor to CDS position, including reverse-orientation indel anchor switching.
@@ -259,7 +259,7 @@ def _map_variant_anchor_cds_pos(
     cds_ref_end = query_to_cds.get(query_ref_end)
     if cds_ref_end is None:
         return None
-    shift = -1 if gene_strand == '+' else 1
+    shift = -1 if feature_strand == '+' else 1
     mapped = cds_ref_end + shift
     if mapped < 0:
         return None
@@ -273,7 +273,7 @@ def _is_indel(ref: str, alt: str) -> bool:
 
 def _remap_reverse_indel_alleles(
     var: VariantCall,
-    gene: GeneRecord,
+    feature: FeatureRecord,
     genomic_anchor_pos: int,
 ) -> tuple[str, str]:
     """
@@ -282,7 +282,7 @@ def _remap_reverse_indel_alleles(
     The anchor nucleotide must come from the projected internal reference position,
     while the inserted/deleted payload is reverse-complemented.
     """
-    anchor = _internal_forward_base(gene, genomic_anchor_pos)
+    anchor = _internal_forward_base(feature, genomic_anchor_pos)
     if len(var.alt) > len(var.ref):
         inserted = str(Seq(var.alt[1:]).reverse_complement())
         return anchor, anchor + inserted
@@ -291,22 +291,22 @@ def _remap_reverse_indel_alleles(
     return anchor + deleted, anchor
 
 
-def _internal_forward_base(gene: GeneRecord, genomic_pos: int) -> str:
+def _internal_forward_base(feature: FeatureRecord, genomic_pos: int) -> str:
     """Return the internal forward-reference nucleotide at one genomic position."""
-    cds_pos = gene.genomic_to_cds_position(genomic_pos)
+    cds_pos = feature.genomic_to_cds_position(genomic_pos)
     if cds_pos is None:
         return ''
-    if cds_pos < 0 or cds_pos >= len(gene.nt_sequence):
+    if cds_pos < 0 or cds_pos >= len(feature.nt_sequence):
         return ''
-    coding_base = gene.nt_sequence.upper()[cds_pos]
-    if gene.strand == '+':
+    coding_base = feature.nt_sequence.upper()[cds_pos]
+    if feature.strand == '+':
         return coding_base
     return str(Seq(coding_base).complement())
 
 
-def _indel_anchor_cds_pos(cds_pos: int, ref_len: int, gene_strand: str) -> int:
+def _indel_anchor_cds_pos(cds_pos: int, ref_len: int, feature_strand: str) -> int:
     """Return CDS anchor position used for indel amino-acid context extraction."""
-    if gene_strand == '+':
+    if feature_strand == '+':
         return cds_pos
     return cds_pos - ref_len
 
@@ -327,8 +327,8 @@ def _build_query_to_cds_map(
     query, so positions are first converted back to forward-strand coordinates.
 
     :param cigar: CIGAR string from alignment
-    :param query_start: 0-based forward-strand start (from GeneMatch)
-    :param query_end: 0-based forward-strand end (from GeneMatch)
+    :param query_start: 0-based forward-strand start (from FeatureMatch)
+    :param query_end: 0-based forward-strand end (from FeatureMatch)
     :param strand: alignment strand ('+' or '-')
     :param query_len: total query sequence length
     :param cds_start: 0-based CDS offset where this alignment starts

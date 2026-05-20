@@ -384,7 +384,7 @@ class TestWebApi:
         assert rules_response.status_code == 200
         rules = rules_response.json()['data']['items']
         assert len(rules) >= 1
-        assert rules[0]['gene'] == 'gag'
+        assert rules[0]['feature'] == 'gag'
 
     def test_databases_endpoint(self, client: TestClient, auth_headers: dict[str, str]) -> None:
         response = client.get('/api/databases', headers=auth_headers)

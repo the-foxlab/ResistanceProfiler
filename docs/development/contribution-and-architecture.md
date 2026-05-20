@@ -111,7 +111,7 @@ This section mirrors the implementation-level logic used by CLI and web paths.
 ### Shared model
 
 - Internal reference coordinates are the canonical reporting frame.
-- Gene strand affects coding interpretation but not global coordinate frame.
+- Feature strand affects coding interpretation but not global coordinate frame.
 - Rule matching is allele/state-driven at amino-acid level.
 
 This is the main architectural advantage of ResPro: curated rules live in one internal reference space, while incoming sample data can start in a different reference space and be normalized back before profiling.
@@ -120,7 +120,7 @@ This is the main architectural advantage of ResPro: curated rules live in one in
 
 1. Parse VCF into `VariantCall` records.
 2. Apply AF/depth filtering.
-3. Resolve the query reference FASTA against project references/genes.
+3. Resolve the query reference FASTA against project references/features.
 4. Remap query-space variants to internal coordinates via CIGAR mappings.
 5. Convert remapped nucleotide events into amino-acid consequences (SNP/indel/frameshift classes).
 6. Match single and combination rules.
@@ -128,11 +128,10 @@ This is the main architectural advantage of ResPro: curated rules live in one in
 
 ### FASTA path
 
-1. Resolve FASTA query against project references/genes.
-2. Build an alignment-based per-gene walk against the internal reference genes.
-3. Emit annotated variants and coverage-gap stretches.
-4. Match single and combination rules.
-5. Export and optionally persist results.
+1. Resolve FASTA query against project references/features.
+2. Emit annotated variants and coverage-gap stretches.
+3. Match single and combination rules.
+4. Export and optionally persist results.
 
 ### Regeneration path
 

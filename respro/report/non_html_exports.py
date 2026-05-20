@@ -18,7 +18,7 @@ except ImportError:
     HTML = None
 
 from respro import __version__
-from respro.db.models import GeneRecord, ProfilingResult, ResistanceRule
+from respro.db.models import FeatureRecord, ProfilingResult, ResistanceRule
 from respro.db.results import project_fingerprint, project_updated_at
 from respro.report.html import build_report_context, write_html
 from respro.report.plots import render_lollipop_plot_bytes
@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 def export_results(
     result: ProfilingResult,
     output_dir: Path,
-    genes: list[GeneRecord] | None = None,
-    rule_gene_names: set[str] | None = None,
+    features: list[FeatureRecord] | None = None,
+    rule_feature_names: set[str] | None = None,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
     extra_export_formats: set[str] | None = None,
@@ -42,8 +42,8 @@ def export_results(
 
     :param result: ProfilingResult object
     :param output_dir: directory to write outputs to
-    :param genes: optional list of genes for plotting
-    :param rule_gene_names: optional set of rule-backed gene names for focused plotting
+    :param features: optional list of features for plotting
+    :param rule_feature_names: optional set of rule-backed feature names for focused plotting
     :param project_conn: optional project DB connection for drug overview in reports
     :param rules: optional resistance rules for potential effects analysis
     :param extra_export_formats: optional set of additional output formats ('json', 'tabular', 'pdf')
@@ -75,24 +75,24 @@ def export_results(
 
     plot_svg_data: bytes | None = None
     plot_png_data: bytes | None = None
-    if genes:
+    if features:
         plot_svg_data = render_lollipop_plot_bytes(
             result,
-            genes,
+            features,
             fmt='svg',
-            rule_gene_names=rule_gene_names,
+            rule_feature_names=rule_feature_names,
         )
         plot_png_data = render_lollipop_plot_bytes(
             result,
-            genes,
+            features,
             fmt='png',
-            rule_gene_names=rule_gene_names,
+            rule_feature_names=rule_feature_names,
         )
 
     write_html(
         result,
         html_path,
-        genes=genes,
+        features=features,
         plot_svg_data=plot_svg_data,
         project_conn=project_conn,
         rules=rules,
@@ -167,7 +167,7 @@ def write_json(
             'alt': v.alt,
             'allele_freq': v.allele_freq,
             'depth': v.depth,
-            'gene_name': ann.gene_name,
+            'feature_name': ann.feature_name,
             'codon_pos': ann.codon_pos,
             'ref_codon': ann.ref_codon,
             'alt_codon': ann.alt_codon,
@@ -182,7 +182,7 @@ def write_json(
     coverage_rows = [
         {
             'id': None,
-            'gene_name': gap.gene_name,
+            'feature_name': gap.feature_name,
             'codon_start': gap.codon_start,
             'codon_end': gap.codon_end,
         }
@@ -229,7 +229,7 @@ def write_json(
 def write_tabular(output_path: Path, db_hit_rows: list[dict], db_cols: dict[str, bool]) -> Path:
     """Write database-hit rows in a tab-separated table format."""
     output_path = Path(output_path)
-    headers = ['Gene', 'AA change', 'Drug']
+    headers = ['Feature', 'AA change', 'Drug']
     if db_cols.get('ic50', False):
         headers.append('IC50')
     if db_cols.get('fold_ic50', False):
@@ -253,7 +253,7 @@ def write_tabular(output_path: Path, db_hit_rows: list[dict], db_cols: dict[str,
                 filter(None, (_format_publication(pub) for pub in row.get('publications', [])))
             )
             output_row = [
-                row.get('gene', ''),
+                row.get('feature', ''),
                 _strip_html(str(row.get('aa_change', ''))),
                 row.get('drug', ''),
             ]
@@ -332,7 +332,7 @@ def _build_pdf_mutation_entries(result: ProfilingResult, report_context: dict) -
     potential_rows_by_key: dict[tuple[str, int, str], list[dict]] = {}
     for potential_row in report_context.get('potential_rows', []):
         key = (
-            potential_row.get('gene', ''),
+            potential_row.get('feature', ''),
             int(potential_row.get('codon_pos', -1) or -1),
             potential_row.get('observed_change', ''),
         )
@@ -343,7 +343,7 @@ def _build_pdf_mutation_entries(result: ProfilingResult, report_context: dict) -
         if ann.consequence == 'synonymous':
             continue
         variant = ann.variant
-        gene_name = ann.gene_name or 'Intergenic'
+        feature_name = ann.feature_name or 'Intergenic'
         aa_change = ''
         if ann.ref_aa and ann.alt_aa:
             aa_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
@@ -363,7 +363,7 @@ def _build_pdf_mutation_entries(result: ProfilingResult, report_context: dict) -
 
         similarity_hits: list[dict] = []
         if not hits:
-            key = (gene_name, ann.codon_pos if ann.codon_pos is not None else -1, aa_change)
+            key = (feature_name, ann.codon_pos if ann.codon_pos is not None else -1, aa_change)
             for potential_row in potential_rows_by_key.get(key, []):
                 similarity = str(potential_row.get('similarity', '') or '')
                 similarity_hits.append({
@@ -389,17 +389,17 @@ def _build_pdf_mutation_entries(result: ProfilingResult, report_context: dict) -
             'db_hits': hits,
             'similarity_hits': similarity_hits,
         }
-        rows.append((gene_name, codon_pos, variant.pos, row))
+        rows.append((feature_name, codon_pos, variant.pos, row))
 
     rows.sort(key=lambda item: (item[0].lower(), item[1], item[2]))
     grouped: list[dict] = []
-    current_gene: str | None = None
+    current_feature: str | None = None
     current_group: dict | None = None
-    for gene_name, _, _, row in rows:
-        if gene_name != current_gene:
-            current_group = {'gene': gene_name, 'mutations': []}
+    for feature_name, _, _, row in rows:
+        if feature_name != current_feature:
+            current_group = {'feature': feature_name, 'mutations': []}
             grouped.append(current_group)
-            current_gene = gene_name
+            current_feature = feature_name
         current_group['mutations'].append(row)
     return grouped
 

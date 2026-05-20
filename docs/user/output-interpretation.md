@@ -13,7 +13,7 @@ What to inspect first:
 
 - sample and project identity
 - total hits and matched rules
-- per-gene mutation details and consequences
+- per-feature mutation details and consequences
 - phenotype and clinical phenotype context
 - optional manual classifications
 
@@ -56,7 +56,7 @@ respro regenerate \
 
 Compact table of matched mutation-level outputs.
 
-Typical columns include gene, nucleotide/amino-acid changes, drug, and interpretation fields.
+Typical columns include feature, nucleotide/amino-acid changes, drug, and interpretation fields.
 
 Best use:
 

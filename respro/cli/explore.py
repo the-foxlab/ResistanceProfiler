@@ -26,7 +26,7 @@ from respro.db.schema import open_project_db, open_results_db
 
 RULE_COLUMN_LABELS = {
     'reference_name': 'Reference',
-    'gene': 'Gene',
+    'feature': 'Feature',
     'position': 'Pos',
     'reference': 'Reference AA',
     'mutation': 'Mutation',

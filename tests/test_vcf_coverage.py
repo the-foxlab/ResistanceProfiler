@@ -9,11 +9,11 @@ from pathlib import Path
 import pytest
 
 from respro.core.vcf_coverage import _ensure_bam_index, compute_coverage_gaps_from_depth
-from respro.db.models import GeneMatch, GeneRecord
+from respro.db.models import FeatureMatch, FeatureRecord
 
 
-def _make_gene() -> GeneRecord:
-    return GeneRecord(
+def _make_feature() -> FeatureRecord:
+    return FeatureRecord(
         id=1,
         reference_id=1,
         name='gag',
@@ -26,9 +26,9 @@ def _make_gene() -> GeneRecord:
     )
 
 
-def _make_match(gene: GeneRecord, cigar: str, query_len: int) -> GeneMatch:
-    return GeneMatch(
-        gene=gene,
+def _make_match(feature: FeatureRecord, cigar: str, query_len: int) -> FeatureMatch:
+    return FeatureMatch(
+        feature=feature,
         identity=1.0,
         cds_coverage=1.0,
         query_coverage=1.0,
@@ -42,10 +42,10 @@ def _make_match(gene: GeneRecord, cigar: str, query_len: int) -> GeneMatch:
 
 class TestVcfCoverageProjection:
     def test_cds_start_offset_is_respected_for_projection(self) -> None:
-        gene = _make_gene()
+        feature = _make_feature()
         # Alignment starts at CDS offset 3, so query nt 0 maps to CDS nt 3.
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -65,21 +65,21 @@ class TestVcfCoverageProjection:
         assert (gaps[0].codon_start, gaps[0].codon_end) == (0, 0)
 
     def test_marks_codon_non_covered_when_internal_nt_not_projectable(self) -> None:
-        gene = _make_gene()
+        feature = _make_feature()
         # One deletion in query relative to CDS: codon 2 loses one projected nt.
-        match = _make_match(gene, cigar='4M1D4M', query_len=8)
+        match = _make_match(feature, cigar='4M1D4M', query_len=8)
         depths = [30] * 8
 
         gaps = compute_coverage_gaps_from_depth(depths, [match], min_depth=10, query_len=8)
 
         assert len(gaps) == 1
-        assert gaps[0].gene_name == 'gag'
+        assert gaps[0].feature_name == 'gag'
         assert gaps[0].codon_start == 1
         assert gaps[0].codon_end == 1
 
     def test_marks_codon_non_covered_when_depth_below_threshold(self) -> None:
-        gene = _make_gene()
-        match = _make_match(gene, cigar='9M', query_len=9)
+        feature = _make_feature()
+        match = _make_match(feature, cigar='9M', query_len=9)
         depths = [20, 20, 20, 20, 20, 20, 20, 2, 20]
 
         gaps = compute_coverage_gaps_from_depth(depths, [match], min_depth=10, query_len=9)
@@ -89,8 +89,8 @@ class TestVcfCoverageProjection:
         assert gaps[0].codon_end == 2
 
     def test_merges_adjacent_non_covered_codons(self) -> None:
-        gene = _make_gene()
-        match = _make_match(gene, cigar='9M', query_len=9)
+        feature = _make_feature()
+        match = _make_match(feature, cigar='9M', query_len=9)
         # Codon 2 and 3 are below depth threshold.
         depths = [20, 20, 20, 2, 2, 2, 1, 1, 1]
 

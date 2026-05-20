@@ -15,8 +15,8 @@ import sqlite3
 
 import mappy
 
-from respro.db.models import GeneMatch, GeneRecord
-from respro.io.reference import load_gene_segments_by_gene_id
+from respro.db.models import FeatureMatch, FeatureRecord
+from respro.io.reference import load_feature_segments_by_feature_id
 
 logger = logging.getLogger(__name__)
 
@@ -27,33 +27,33 @@ _RE_CIGAR = re.compile(r'(\d+)([MIDNSHP=X])')
 # Public API
 # ──────────────────────────────────────────────────────────────────────
 
-def match_query_to_genes(
+def match_query_to_features(
     query_sequence: str,
-    genes: list[GeneRecord],
+    features: list[FeatureRecord],
     *,
     min_identity: float = 0.9,
     threads: int = 1,
-) -> list[GeneMatch]:
+) -> list[FeatureMatch]:
     """
-    Match a query nucleotide sequence against internal gene CDS sequences.
+    Match a query nucleotide sequence against internal feature sequences.
 
     A match is accepted when ``identity >= min_identity``. Coverage metrics
     (``cds_coverage`` and ``query_coverage``) are computed and included in results.
 
     :param query_sequence: user-provided nucleotide sequence
-    :param genes: gene records to screen (typically only those with rules)
+    :param features: feature records to screen (typically only those with rules)
     :param min_identity: minimum nucleotide identity to accept
     :param threads: number of mapper threads forwarded to mappy as ``n_threads``
-    :return: accepted GeneMatch list sorted by identity descending
+    :return: accepted FeatureMatch list sorted by identity descending
     """
-    matches = _match_with_mappy(query_sequence, genes, min_identity, threads)
+    matches = _match_with_mappy(query_sequence, features, min_identity, threads)
 
     for m in matches:
-        ref = m.gene.reference_accession or str(m.gene.reference_id)
+        ref = m.feature.reference_accession or str(m.feature.reference_id)
         logger.info(
-            '%s — Gene %r matched: identity=%.1f%%, cds_coverage=%.1f%%, '
+            '%s — Feature %r matched: identity=%.1f%%, cds_coverage=%.1f%%, '
             'query_coverage=%.1f%%, strand=%s',
-            ref, m.gene.name, m.identity * 100,
+            ref, m.feature.name, m.identity * 100,
             m.cds_coverage * 100, m.query_coverage * 100, m.strand,
         )
 
@@ -61,25 +61,25 @@ def match_query_to_genes(
     return matches
 
 
-def load_genes_with_rules(
+def load_features_with_rules(
     conn: sqlite3.Connection,
     reference_id: int | None = None,
-) -> list[GeneRecord]:
+) -> list[FeatureRecord]:
     """
-    Load only genes that have at least one resistance rule.
+    Load only features that have at least one resistance rule.
 
     :param conn: project database connection
     :param reference_id: optional internal reference id filter
-    :return: list of GeneRecord objects
+    :return: list of FeatureRecord objects
     """
     if reference_id is None:
         rows = conn.execute(
             'SELECT DISTINCT g.id, g.reference_id, g.name, g.protein, '
             'g.start, g.end, g.strand, g.codon_start, g.nt_sequence, g.aa_sequence, '
             'r.accession AS reference_accession '
-            'FROM gene g '
+            'FROM feature g '
             'JOIN reference r ON r.id = g.reference_id '
-            'JOIN resistance_rule rr ON rr.gene_id = g.id '
+            'JOIN resistance_rule rr ON rr.feature_id = g.id '
             'ORDER BY g.reference_id, g.start',
         ).fetchall()
     else:
@@ -87,17 +87,17 @@ def load_genes_with_rules(
             'SELECT DISTINCT g.id, g.reference_id, g.name, g.protein, '
             'g.start, g.end, g.strand, g.codon_start, g.nt_sequence, g.aa_sequence, '
             'r.accession AS reference_accession '
-            'FROM gene g '
+            'FROM feature g '
             'JOIN reference r ON r.id = g.reference_id '
-            'JOIN resistance_rule rr ON rr.gene_id = g.id '
+            'JOIN resistance_rule rr ON rr.feature_id = g.id '
             'WHERE g.reference_id = ? '
             'ORDER BY g.start',
             (reference_id,),
         ).fetchall()
-    gene_ids = [int(row['id']) for row in rows]
-    segments_by_gene = load_gene_segments_by_gene_id(conn, gene_ids)
+    feature_ids = [int(row['id']) for row in rows]
+    segments_by_feature = load_feature_segments_by_feature_id(conn, feature_ids)
     return [
-        GeneRecord(
+        FeatureRecord(
             id=r['id'],
             reference_id=r['reference_id'],
             name=r['name'],
@@ -109,7 +109,7 @@ def load_genes_with_rules(
             nt_sequence=r['nt_sequence'] or '',
             aa_sequence=r['aa_sequence'] or '',
             reference_accession=r['reference_accession'] or '',
-            segments=segments_by_gene.get(int(r['id']), tuple()),
+            segments=segments_by_feature.get(int(r['id']), tuple()),
         )
         for r in rows
     ]
@@ -121,15 +121,15 @@ def load_genes_with_rules(
 
 def _match_with_mappy(
     query_sequence: str,
-    genes: list[GeneRecord],
+    features: list[FeatureRecord],
     min_identity: float,
     threads: int,
-) -> list[GeneMatch]:
+) -> list[FeatureMatch]:
     """
-    Run mappy (minimap2) gene matching.
+    Run mappy (minimap2) feature matching.
 
     Indexes the query once using an adaptive minimap2 preset, then maps each
-    CDS against the index. The mappy CIGAR (gene=query, genome=reference) is
+    CDS against the index. The mappy CIGAR (feature=query, genome=reference) is
     converted to the pipeline convention (genome=query, CDS=reference) by
     swapping I and D operations.  Coordinate fields ``query_start``/``query_end``
     and ``cds_start`` are mapped from mappy's ``r_st``/``r_en`` and ``q_st``
@@ -155,19 +155,19 @@ def _match_with_mappy(
     if not aligner:
         raise RuntimeError('mappy: failed to build index for query sequence')
 
-    matches: list[GeneMatch] = []
-    for gene in genes:
-        if not gene.nt_sequence:
+    matches: list[FeatureMatch] = []
+    for feature in features:
+        if not feature.nt_sequence:
             continue
 
-        cds = gene.nt_sequence.upper()
+        cds = feature.nt_sequence.upper()
         hits = list(aligner.map(cds))
         primary = [h for h in hits if h.is_primary]
 
         if not primary:
             logger.debug(
-                '%s — Gene %r: no mappy hit',
-                gene.reference_accession or str(gene.reference_id), gene.name,
+                '%s — Feature %r: no mappy hit',
+                feature.reference_accession or str(feature.reference_id), feature.name,
             )
             continue
 
@@ -177,9 +177,9 @@ def _match_with_mappy(
         query_coverage = (h.r_en - h.r_st) / len(query_upper)
         if identity < min_identity:
             logger.debug(
-                '%s — Gene %r: identity %.2f below threshold',
-                gene.reference_accession or str(gene.reference_id),
-                gene.name,
+                '%s — Feature %r: identity %.2f below threshold',
+                feature.reference_accession or str(feature.reference_id),
+                feature.name,
                 identity,
             )
             continue
@@ -187,8 +187,8 @@ def _match_with_mappy(
         strand = '+' if h.strand == 1 else '-'
         cigar = _normalize_mappy_cigar(h.cigar_str, strand)
 
-        matches.append(GeneMatch(
-            gene=gene,
+        matches.append(FeatureMatch(
+            feature=feature,
             identity=identity,
             cds_coverage=cds_coverage,
             query_coverage=query_coverage,
@@ -206,7 +206,7 @@ def _swap_cigar_indels(cigar: str) -> str:
     """
     Swap I and D operations in a CIGAR string.
 
-    Converts from mappy convention (gene=query, genome=reference) to the
+    Converts from mappy convention (feature=query, genome=reference) to the
     pipeline convention (CDS=reference, genome=query).
 
     :param cigar: CIGAR string with I/D in mappy orientation
@@ -234,7 +234,7 @@ def _normalize_mappy_cigar(cigar: str, strand: str) -> str:
     """
     Convert a mappy CIGAR to pipeline CDS-vs-query convention.
 
-    mappy reports CIGAR for gene=query, genome=reference. The pipeline uses
+    mappy reports CIGAR for feature=query, genome=reference. The pipeline uses
     CDS=reference, genome=query, so I/D are swapped. For reverse-strand hits,
     the query region is reverse-complemented before FASTA codon-walking and
     therefore requires reversed CIGAR operation order to keep indel positions
@@ -312,13 +312,13 @@ def sequence_checksum(sequence: str) -> str:
 def load_cached_mappings(
     conn: sqlite3.Connection,
     checksum: str,
-) -> list[GeneMatch] | None:
+) -> list[FeatureMatch] | None:
     """
-    Load previously stored gene mappings for a query reference checksum.
+    Load previously stored feature mappings for a query reference checksum.
 
     :param conn: project database connection
     :param checksum: SHA-256 of the query sequence
-    :return: list of GeneMatch objects, or None if no cache entry exists
+    :return: list of FeatureMatch objects, or None if no cache entry exists
     """
     qref = conn.execute(
         'SELECT id, name, sequence FROM query_reference WHERE checksum = ?',
@@ -328,39 +328,39 @@ def load_cached_mappings(
         return None
 
     rows = conn.execute(
-        'SELECT qgm.gene_id, qgm.identity, qgm.cds_coverage, qgm.query_coverage, '
+        'SELECT qgm.feature_id, qgm.identity, qgm.cds_coverage, qgm.query_coverage, '
         'qgm.cds_start, qgm.query_start, qgm.query_end, qgm.strand, qgm.cigar, '
-        'g.reference_id, g.name, g.protein, g.start, g.end, g.strand AS gene_strand, '
+        'g.reference_id, g.name, g.protein, g.start, g.end, g.strand AS feature_strand, '
         'g.codon_start, g.nt_sequence, g.aa_sequence, '
         'r.accession AS reference_accession '
-        'FROM query_gene_mapping qgm '
-        'JOIN gene g ON g.id = qgm.gene_id '
+        'FROM query_feature_mapping qgm '
+        'JOIN feature g ON g.id = qgm.feature_id '
         'JOIN reference r ON r.id = g.reference_id '
         'WHERE qgm.query_ref_id = ?',
         (qref['id'],),
     ).fetchall()
 
-    gene_ids = [int(row['gene_id']) for row in rows]
-    segments_by_gene = load_gene_segments_by_gene_id(conn, gene_ids)
+    feature_ids = [int(row['feature_id']) for row in rows]
+    segments_by_feature = load_feature_segments_by_feature_id(conn, feature_ids)
 
-    matches: list[GeneMatch] = []
+    matches: list[FeatureMatch] = []
     for r in rows:
-        gene = GeneRecord(
-            id=r['gene_id'],
+        feature = FeatureRecord(
+            id=r['feature_id'],
             reference_id=r['reference_id'],
             name=r['name'],
             protein=r['protein'] or '',
             start=r['start'],
             end=r['end'],
-            strand=r['gene_strand'],
+            strand=r['feature_strand'],
             codon_start=r['codon_start'],
             nt_sequence=r['nt_sequence'] or '',
             aa_sequence=r['aa_sequence'] or '',
             reference_accession=r['reference_accession'] or '',
-            segments=segments_by_gene.get(int(r['gene_id']), tuple()),
+            segments=segments_by_feature.get(int(r['feature_id']), tuple()),
         )
-        matches.append(GeneMatch(
-            gene=gene,
+        matches.append(FeatureMatch(
+            feature=feature,
             identity=r['identity'],
             cds_coverage=r['cds_coverage'],
             query_coverage=r['query_coverage'],
@@ -383,16 +383,16 @@ def store_mappings(
     name: str,
     sequence: str,
     checksum: str,
-    matches: list[GeneMatch],
+    matches: list[FeatureMatch],
 ) -> None:
     """
-    Cache gene mappings for a query reference in the project database.
+    Cache feature mappings for a query reference in the project database.
 
     :param conn: project database connection
     :param name: human-readable name for the query reference
     :param sequence: full query nucleotide sequence
     :param checksum: SHA-256 of the sequence
-    :param matches: accepted GeneMatch results to store
+    :param matches: accepted FeatureMatch results to store
     """
     conn.execute(
         'INSERT OR IGNORE INTO query_reference (name, sequence, length, checksum) '
@@ -405,13 +405,13 @@ def store_mappings(
 
     for match in matches:
         conn.execute(
-            'INSERT OR REPLACE INTO query_gene_mapping '
-            '(query_ref_id, gene_id, identity, cds_coverage, query_coverage, '
+            'INSERT OR REPLACE INTO query_feature_mapping '
+            '(query_ref_id, feature_id, identity, cds_coverage, query_coverage, '
             'cds_start, query_start, query_end, strand, cigar) '
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 qref_id,
-                match.gene.id,
+                match.feature.id,
                 match.identity,
                 match.cds_coverage,
                 match.query_coverage,

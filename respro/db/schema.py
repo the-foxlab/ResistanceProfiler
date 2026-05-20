@@ -43,8 +43,8 @@ CREATE TABLE IF NOT EXISTS reference (
     UNIQUE(project_id, name)
 );
 
--- Genes / ORFs / CDS
-CREATE TABLE IF NOT EXISTS gene (
+-- features / ORFs / CDS
+CREATE TABLE IF NOT EXISTS feature (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     reference_id INTEGER NOT NULL REFERENCES reference(id),
     name        TEXT    NOT NULL,
@@ -60,20 +60,20 @@ CREATE TABLE IF NOT EXISTS gene (
     nt_sequence TEXT    NOT NULL DEFAULT '',  -- CDS nucleotide slice in coding orientation
     aa_sequence TEXT    NOT NULL DEFAULT '',  -- pre-translated protein sequence
     feature_type TEXT   NOT NULL DEFAULT 'CDS',
-    parent_gene_name TEXT NOT NULL DEFAULT '',
+    parent_feature_name TEXT NOT NULL DEFAULT '',
     UNIQUE(reference_id, name)
 );
 
-CREATE TABLE IF NOT EXISTS gene_segment (
+CREATE TABLE IF NOT EXISTS feature_segment (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    gene_id     INTEGER NOT NULL REFERENCES gene(id),
+    feature_id     INTEGER NOT NULL REFERENCES feature(id),
     segment_index INTEGER NOT NULL,
     start       INTEGER NOT NULL,  -- 0-based inclusive
     end         INTEGER NOT NULL,  -- 0-based exclusive
-    UNIQUE(gene_id, segment_index)
+    UNIQUE(feature_id, segment_index)
 );
 
-CREATE INDEX IF NOT EXISTS idx_gene_segment_gene ON gene_segment(gene_id);
+CREATE INDEX IF NOT EXISTS idx_feature_segment_feature ON feature_segment(feature_id);
 
 -- Drugs
 CREATE TABLE IF NOT EXISTS drug (
@@ -91,11 +91,11 @@ CREATE TABLE IF NOT EXISTS drug (
 -- Resistance rules
 CREATE TABLE IF NOT EXISTS resistance_rule (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    gene_id     INTEGER NOT NULL REFERENCES gene(id),
+    feature_id     INTEGER NOT NULL REFERENCES feature(id),
     drug_id     INTEGER NOT NULL REFERENCES drug(id),
     external_id TEXT    NOT NULL DEFAULT '',
     reference_identifier TEXT DEFAULT '',
-    position    INTEGER NOT NULL,  -- 0-based AA position within gene
+    position    INTEGER NOT NULL,  -- 0-based AA position within feature
     reference   TEXT    DEFAULT '',
     mutation    TEXT    NOT NULL,
     phenotype   TEXT    NOT NULL DEFAULT 'unknown',
@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS resistance_rule (
     comment     TEXT    DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS idx_rule_gene_pos ON resistance_rule(gene_id, position);
+CREATE INDEX IF NOT EXISTS idx_rule_feature_pos ON resistance_rule(feature_id, position);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rule_external_id_unique
 ON resistance_rule(external_id)
 WHERE external_id != '';
@@ -180,10 +180,10 @@ CREATE TABLE IF NOT EXISTS query_reference (
     UNIQUE(checksum)
 );
 
-CREATE TABLE IF NOT EXISTS query_gene_mapping (
+CREATE TABLE IF NOT EXISTS query_feature_mapping (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     query_ref_id    INTEGER NOT NULL REFERENCES query_reference(id),
-    gene_id         INTEGER NOT NULL REFERENCES gene(id),
+    feature_id         INTEGER NOT NULL REFERENCES feature(id),
     identity        REAL    NOT NULL,
     cds_coverage    REAL    NOT NULL DEFAULT 0,
     query_coverage  REAL    NOT NULL DEFAULT 0,
@@ -192,7 +192,7 @@ CREATE TABLE IF NOT EXISTS query_gene_mapping (
     query_end       INTEGER NOT NULL,
     strand          TEXT    NOT NULL DEFAULT '+',
     cigar           TEXT    NOT NULL,
-    UNIQUE(query_ref_id, gene_id)
+    UNIQUE(query_ref_id, feature_id)
 );
 """
 
@@ -229,7 +229,7 @@ CREATE TABLE IF NOT EXISTS variant_result (
     alt         TEXT    NOT NULL,
     allele_freq REAL,
     depth       INTEGER,
-    gene_name   TEXT    DEFAULT '',
+    feature_name   TEXT    DEFAULT '',
     codon_pos   INTEGER,
     ref_codon   TEXT    DEFAULT '',
     alt_codon   TEXT    DEFAULT '',
@@ -242,12 +242,12 @@ CREATE TABLE IF NOT EXISTS variant_result (
 );
 
 CREATE INDEX IF NOT EXISTS idx_vr_run ON variant_result(run_id);
-CREATE INDEX IF NOT EXISTS idx_vr_gene ON variant_result(gene_name, codon_pos);
+CREATE INDEX IF NOT EXISTS idx_vr_feature ON variant_result(feature_name, codon_pos);
 
 CREATE TABLE IF NOT EXISTS coverage_gap (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id      INTEGER NOT NULL REFERENCES run(id),
-    gene_name   TEXT    NOT NULL,
+    feature_name   TEXT    NOT NULL,
     codon_start INTEGER NOT NULL,
     codon_end   INTEGER NOT NULL
 );
@@ -289,7 +289,7 @@ _RESULTS_OPTIONAL_TABLES_SQL = """\
 CREATE TABLE IF NOT EXISTS coverage_gap (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id      INTEGER NOT NULL REFERENCES run(id),
-    gene_name   TEXT    NOT NULL,
+    feature_name   TEXT    NOT NULL,
     codon_start INTEGER NOT NULL,
     codon_end   INTEGER NOT NULL
 );
@@ -333,7 +333,7 @@ _OPTIONAL_RESULTS_COLUMN_DEFS = {
     'variant_result': {
         'allele_freq': 'REAL',
         'depth': 'INTEGER',
-        'gene_name': "TEXT DEFAULT ''",
+        'feature_name': "TEXT DEFAULT ''",
         'codon_pos': 'INTEGER',
         'ref_codon': "TEXT DEFAULT ''",
         'alt_codon': "TEXT DEFAULT ''",
@@ -349,13 +349,13 @@ _OPTIONAL_RESULTS_COLUMN_DEFS = {
 _REQUIRED_PROJECT_COLUMNS = {
     'project': {'id', 'name', 'created_at', 'schema_version'},
     'reference': {'id', 'project_id', 'name', 'length'},
-    'gene': {'id', 'reference_id', 'name', 'start', 'end', 'strand'},
-    'gene_segment': {'id', 'gene_id', 'segment_index', 'start', 'end'},
+    'feature': {'id', 'reference_id', 'name', 'start', 'end', 'strand'},
+    'feature_segment': {'id', 'feature_id', 'segment_index', 'start', 'end'},
     'drug': {'id', 'project_id', 'name'},
-    'resistance_rule': {'id', 'gene_id', 'drug_id', 'position', 'mutation'},
+    'resistance_rule': {'id', 'feature_id', 'drug_id', 'position', 'mutation'},
     'query_reference': {'id', 'name', 'sequence', 'length', 'checksum'},
-    'query_gene_mapping': {
-        'id', 'query_ref_id', 'gene_id', 'identity', 'cds_coverage',
+    'query_feature_mapping': {
+        'id', 'query_ref_id', 'feature_id', 'identity', 'cds_coverage',
         'query_start', 'query_end', 'strand', 'cigar',
     },
     'publication': {'id', 'doi', 'title', 'pubmed_id', 'raw_input'},
@@ -382,7 +382,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'organism': "TEXT DEFAULT ''",
         'taxonomy': "TEXT DEFAULT ''",
     },
-    'gene': {
+    'feature': {
         'protein': "TEXT DEFAULT ''",
         'protein_id': "TEXT DEFAULT ''",
         'ncbi_protein_url': "TEXT DEFAULT ''",
@@ -392,7 +392,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'nt_sequence': "TEXT NOT NULL DEFAULT ''",
         'aa_sequence': "TEXT NOT NULL DEFAULT ''",
         'feature_type': "TEXT NOT NULL DEFAULT 'CDS'",
-        'parent_gene_name': "TEXT NOT NULL DEFAULT ''",
+        'parent_feature_name': "TEXT NOT NULL DEFAULT ''",
     },
     'drug': {
         'badge_color': "TEXT DEFAULT ''",
@@ -431,7 +431,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
     'query_reference': {
         'created_at': "TEXT DEFAULT ''",
     },
-    'query_gene_mapping': {
+    'query_feature_mapping': {
         'query_coverage': 'REAL NOT NULL DEFAULT 0',
         'cds_start': 'INTEGER NOT NULL DEFAULT 0',
     },
@@ -636,7 +636,7 @@ def open_project_db(db_path: Path) -> sqlite3.Connection:
     changed = False
     if _add_missing_optional_columns(conn, _OPTIONAL_PROJECT_COLUMN_DEFS):
         changed = True
-    if _backfill_gene_segments(conn):
+    if _backfill_feature_segments(conn):
         changed = True
     if changed:
         _ensure_project_indexes(conn)
@@ -661,15 +661,15 @@ CREATE TABLE IF NOT EXISTS publication (
     pubmed_id  TEXT    NOT NULL DEFAULT '',
     raw_input  TEXT    NOT NULL DEFAULT ''
 );
-CREATE TABLE IF NOT EXISTS gene_segment (
+CREATE TABLE IF NOT EXISTS feature_segment (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    gene_id     INTEGER NOT NULL REFERENCES gene(id),
+    feature_id     INTEGER NOT NULL REFERENCES feature(id),
     segment_index INTEGER NOT NULL,
     start       INTEGER NOT NULL,
     end         INTEGER NOT NULL,
-    UNIQUE(gene_id, segment_index)
+    UNIQUE(feature_id, segment_index)
 );
-CREATE INDEX IF NOT EXISTS idx_gene_segment_gene ON gene_segment(gene_id);
+CREATE INDEX IF NOT EXISTS idx_feature_segment_feature ON feature_segment(feature_id);
 CREATE TABLE IF NOT EXISTS rule_publication (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     rule_id        INTEGER NOT NULL REFERENCES resistance_rule(id),
@@ -714,18 +714,18 @@ CREATE INDEX IF NOT EXISTS idx_resistance_formula_rule_pub ON resistance_formula
     conn.commit()
 
 
-def _backfill_gene_segments(conn: sqlite3.Connection) -> bool:
-    """Ensure every existing gene has at least one gene_segment row."""
+def _backfill_feature_segments(conn: sqlite3.Connection) -> bool:
+    """Ensure every existing feature has at least one feature_segment row."""
     rows = conn.execute(
-        'SELECT g.id, g.start, g.end FROM gene g '
-        'LEFT JOIN gene_segment gs ON gs.gene_id = g.id '
+        'SELECT g.id, g.start, g.end FROM feature g '
+        'LEFT JOIN feature_segment gs ON gs.feature_id = g.id '
         'GROUP BY g.id HAVING COUNT(gs.id) = 0'
     ).fetchall()
     if not rows:
         return False
 
     conn.executemany(
-        'INSERT INTO gene_segment (gene_id, segment_index, start, end) VALUES (?, 0, ?, ?)',
+        'INSERT INTO feature_segment (feature_id, segment_index, start, end) VALUES (?, 0, ?, ?)',
         [(int(row['id']), int(row['start']), int(row['end'])) for row in rows],
     )
     return True

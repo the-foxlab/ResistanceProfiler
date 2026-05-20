@@ -5,7 +5,7 @@ Tests for codon-aware annotation logic.
 from respro.cli.profile_helpers import _suppress_ruleless_overlap_annotations
 from respro.core.annotation import (
     _annotate_combined_snp_codon,
-    _annotate_variant_in_gene,
+    _annotate_variant_in_feature,
     _classify_snp_consequence,
     annotate_variants,
     assign_af_bins,
@@ -13,7 +13,7 @@ from respro.core.annotation import (
     reverse_complement,
     translate_codon,
 )
-from respro.db.models import AnnotatedVariant, GeneRecord, VariantCall
+from respro.db.models import AnnotatedVariant, FeatureRecord, VariantCall
 
 # ─── translate_codon ──────────────────────────────────────────────────
 
@@ -139,16 +139,16 @@ class TestNormalizeMutation:
 # ─── annotate_variants — forward strand ──────────────────────────────
 
 class TestAnnotateVariantsForward:
-    """Test annotation on a simple forward-strand gene."""
+    """Test annotation on a simple forward-strand feature."""
 
-    def test_missense_in_codon_2(self, tiny_gene, tiny_ref_seq):
+    def test_missense_in_codon_2(self, tiny_feature, tiny_ref_seq):
         """Position 3 (A→G) is the first base of codon 2 (AAA→GAA = K→E)."""
         var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
-        results = annotate_variants([var], [tiny_gene])
+        results = annotate_variants([var], [tiny_feature])
 
         assert len(results) == 1
         ann = results[0]
-        assert ann.gene_name == 'gag'
+        assert ann.feature_name == 'gag'
         assert ann.codon_pos == 1  # 0-based: codon index 1 = 2nd codon
         assert ann.ref_codon == 'AAA'
         assert ann.alt_codon == 'GAA'
@@ -156,49 +156,49 @@ class TestAnnotateVariantsForward:
         assert ann.alt_aa == 'E'
         assert ann.consequence == 'missense'
 
-    def test_synonymous_in_codon_3(self, tiny_gene, tiny_ref_seq):
+    def test_synonymous_in_codon_3(self, tiny_feature, tiny_ref_seq):
         """Position 8 (T→C) is the third base of codon 3 (GCT→GCC = A→A)."""
         var = VariantCall(chrom='ref', pos=8, ref='T', alt='C', allele_freq=0.5, depth=50)
-        results = annotate_variants([var], [tiny_gene])
+        results = annotate_variants([var], [tiny_feature])
 
         assert len(results) == 1
         ann = results[0]
-        assert ann.gene_name == 'gag'
+        assert ann.feature_name == 'gag'
         assert ann.codon_pos == 2  # 0-based: codon index 2 = 3rd codon
         assert ann.ref_aa == 'A'
         assert ann.alt_aa == 'A'
         assert ann.consequence == 'synonymous'
 
-    def test_variant_outside_gene(self, tiny_gene, tiny_ref_seq):
-        """Variant at position 89 is outside the 87-nt gene."""
+    def test_variant_outside_feature(self, tiny_feature, tiny_ref_seq):
+        """Variant at position 89 is outside the 87-nt feature."""
         var = VariantCall(chrom='ref', pos=89, ref='N', alt='A', allele_freq=0.5, depth=50)
-        results = annotate_variants([var], [tiny_gene])
+        results = annotate_variants([var], [tiny_feature])
 
         assert len(results) == 1
-        assert results[0].gene_name == ''
+        assert results[0].feature_name == ''
 
-    def test_frameshift_deletion_in_gene_is_annotated(self, tiny_gene, tiny_ref_seq):
+    def test_frameshift_deletion_in_feature_is_annotated(self, tiny_feature, tiny_ref_seq):
         """1-nt deletion at a codon boundary produces a frameshift annotation."""
-        # tiny_gene codon 1: pos 3–5, AAA (K); 1-nt deletion → frameshift
+        # tiny_feature codon 1: pos 3–5, AAA (K); 1-nt deletion → frameshift
         var = VariantCall(chrom='ref', pos=3, ref='AA', alt='A', allele_freq=0.5, depth=50)
-        results = annotate_variants([var], [tiny_gene])
+        results = annotate_variants([var], [tiny_feature])
 
         assert len(results) == 1
         ann = results[0]
-        assert ann.gene_name == 'gag'
+        assert ann.feature_name == 'gag'
         assert ann.codon_pos == 1
         assert ann.ref_aa == 'K'
         assert ann.alt_aa == 'KfsX'
         assert ann.consequence == 'frameshift'
 
-    def test_combines_two_high_af_snps_in_same_codon(self, tiny_gene, tiny_ref_seq):
+    def test_combines_two_high_af_snps_in_same_codon(self, tiny_feature, tiny_ref_seq):
         """Two SNPs in one codon with AF > 0.7 are annotated as one codon event."""
         variants = [
             VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.90, depth=100),
             VariantCall(chrom='ref', pos=4, ref='A', alt='G', allele_freq=0.80, depth=100),
         ]
 
-        results = annotate_variants(variants, [tiny_gene])
+        results = annotate_variants(variants, [tiny_feature])
 
         assert len(results) == 1
         ann = results[0]
@@ -210,48 +210,48 @@ class TestAnnotateVariantsForward:
         assert ann.consequence == 'missense'
         assert ann.variant.allele_freq == 0.80
 
-    def test_does_not_combine_when_af_is_exactly_threshold(self, tiny_gene, tiny_ref_seq):
+    def test_does_not_combine_when_af_is_exactly_threshold(self, tiny_feature, tiny_ref_seq):
         """AF must be strictly greater than 0.7 for codon-level SNP combination."""
         variants = [
             VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.90, depth=100),
             VariantCall(chrom='ref', pos=4, ref='A', alt='G', allele_freq=0.70, depth=100),
         ]
 
-        results = annotate_variants(variants, [tiny_gene])
+        results = annotate_variants(variants, [tiny_feature])
         assert len(results) == 2
 
-    def test_does_not_combine_when_any_snp_is_low_af(self, tiny_gene, tiny_ref_seq):
+    def test_does_not_combine_when_any_snp_is_low_af(self, tiny_feature, tiny_ref_seq):
         """A single low-AF SNP keeps per-variant annotation behavior."""
         variants = [
             VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.90, depth=100),
             VariantCall(chrom='ref', pos=4, ref='A', alt='G', allele_freq=0.20, depth=100),
         ]
 
-        results = annotate_variants(variants, [tiny_gene])
+        results = annotate_variants(variants, [tiny_feature])
         assert len(results) == 2
 
-    def test_marks_annotations_as_fasta_mode_when_requested(self, tiny_gene, tiny_ref_seq):
+    def test_marks_annotations_as_fasta_mode_when_requested(self, tiny_feature, tiny_ref_seq):
         """All emitted annotations should carry is_fasta_mode=True in FASTA flow."""
         var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
-        results = annotate_variants([var], [tiny_gene], is_fasta_mode=True)
+        results = annotate_variants([var], [tiny_feature], is_fasta_mode=True)
 
         assert len(results) == 1
         assert results[0].is_fasta_mode is True
 
 
 class TestAnnotateVariantsReverse:
-    """Test annotation on a reverse-strand gene."""
+    """Test annotation on a reverse-strand feature."""
 
     def test_reverse_strand_codon(self):
-        # 12-nt gene on minus strand.
+        # 12-nt feature on minus strand.
         # Genomic: A A A A A A A A C A T G  (pos 0–11)
         # revcomp: C A T G T T T T T T T T  (coding orientation)
         # Codons:  CAT GTT TTT TTT → H V F F
 
         ref_seq = 'AAAAAAAACATG'
         nt_coding = reverse_complement(ref_seq)  # coding orientation for minus strand
-        gene = GeneRecord(
-            id=1, reference_id=1, name='rev_gene', protein='RevP',
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='rev_feature', protein='RevP',
             start=0, end=12, strand='-', codon_start=0,
             nt_sequence=nt_coding,
         )
@@ -282,11 +282,11 @@ class TestAnnotateVariantsReverse:
         # ref_aa = H, alt_aa = D → missense
 
         var = VariantCall(chrom='ref', pos=11, ref='G', alt='C', allele_freq=0.8, depth=200)
-        results = annotate_variants([var], [gene])
+        results = annotate_variants([var], [feature])
 
         assert len(results) == 1
         ann = results[0]
-        assert ann.gene_name == 'rev_gene'
+        assert ann.feature_name == 'rev_feature'
         assert ann.codon_pos == 0
         assert ann.ref_aa == 'H'
         assert ann.alt_aa == 'D'
@@ -295,10 +295,10 @@ class TestAnnotateVariantsReverse:
 
 class TestAnnotateCombinedSnpCodon:
     def test_raises_clear_error_when_anchor_has_no_codon_index(self):
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
-            name='split_gene',
+            name='split_feature',
             protein='SplitP',
             start=0,
             end=9,
@@ -308,20 +308,20 @@ class TestAnnotateCombinedSnpCodon:
         variant = VariantCall(chrom='ref', pos=99, ref='A', alt='G', allele_freq=0.9, depth=100)
 
         try:
-            _annotate_combined_snp_codon([variant], gene)
+            _annotate_combined_snp_codon([variant], feature)
         except ValueError as exc:
             assert str(exc) == (
-                "Combined SNP annotation requires coding codon index for gene 'split_gene' at "
+                "Combined SNP annotation requires coding codon index for feature 'split_feature' at "
                 'genomic position 99'
             )
         else:
             raise AssertionError('Expected ValueError for missing codon index')
 
     def test_raises_clear_error_when_member_has_no_codon_position(self):
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
-            name='split_gene',
+            name='split_feature',
             protein='SplitP',
             start=0,
             end=9,
@@ -334,10 +334,10 @@ class TestAnnotateCombinedSnpCodon:
         ]
 
         try:
-            _annotate_combined_snp_codon(variants, gene)
+            _annotate_combined_snp_codon(variants, feature)
         except ValueError as exc:
             assert str(exc) == (
-                "Combined SNP annotation requires coding codon position for gene 'split_gene' at "
+                "Combined SNP annotation requires coding codon position for feature 'split_feature' at "
                 'genomic position 99'
             )
         else:
@@ -355,11 +355,11 @@ class TestAnnotateDivergentReference:
         Internal codon CGA (R) plus SNP C->T gives TGA (*).
         With query codon CGG (R), the same SNP gives TGG (W).
         """
-        # 9-nt gene, 3 codons, forward strand.
+        # 9-nt feature, 3 codons, forward strand.
         # Internal CDS: ATG CGA AAA → M R K
         internal_seq = 'ATGCGAAAA'
-        gene = GeneRecord(
-            id=1, reference_id=1, name='test_gene', protein='TestP',
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='test_feature', protein='TestP',
             start=0, end=9, strand='+', codon_start=0,
             nt_sequence=internal_seq,
         )
@@ -368,11 +368,11 @@ class TestAnnotateDivergentReference:
         var = VariantCall(
             chrom='ref', pos=3, ref='C', alt='T',
             allele_freq=0.9, depth=100, query_ref_codon='CGG')
-        results = annotate_variants([var], [gene])
+        results = annotate_variants([var], [feature])
 
         assert len(results) == 1
         ann = results[0]
-        assert ann.gene_name == 'test_gene'
+        assert ann.feature_name == 'test_feature'
         assert ann.codon_pos == 1
         assert ann.ref_aa == 'R'
         assert ann.alt_codon == 'TGG'
@@ -382,8 +382,8 @@ class TestAnnotateDivergentReference:
     def test_identical_codon_path(self):
         """Baseline SNP behavior for an internal CDS codon."""
         internal_seq = 'ATGCGAAAA'
-        gene = GeneRecord(
-            id=1, reference_id=1, name='test_gene', protein='TestP',
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='test_feature', protein='TestP',
             start=0, end=9, strand='+', codon_start=0,
             nt_sequence=internal_seq,
         )
@@ -392,7 +392,7 @@ class TestAnnotateDivergentReference:
             chrom='ref', pos=3, ref='C', alt='T',
             allele_freq=0.9, depth=100
         )
-        results = annotate_variants([var], [gene])
+        results = annotate_variants([var], [feature])
 
         ann = results[0]
         assert ann.ref_aa == 'R'   # CGA -> R
@@ -402,8 +402,8 @@ class TestAnnotateDivergentReference:
     def test_annotation_uses_internal_without_query_codon(self):
         """Without query codon, SNP annotation stays on the internal CDS."""
         internal_seq = 'ATGCGAAAA'
-        gene = GeneRecord(
-            id=1, reference_id=1, name='test_gene', protein='TestP',
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='test_feature', protein='TestP',
             start=0, end=9, strand='+', codon_start=0,
             nt_sequence=internal_seq,
         )
@@ -412,7 +412,7 @@ class TestAnnotateDivergentReference:
             chrom='ref', pos=3, ref='C', alt='T',
             allele_freq=0.9, depth=100,
         )
-        results = annotate_variants([var], [gene])
+        results = annotate_variants([var], [feature])
 
         ann = results[0]
         assert ann.ref_aa == 'R'
@@ -421,12 +421,12 @@ class TestAnnotateDivergentReference:
 
 
 class TestCodonStartOffset:
-    def test_codon_start_shift_forward_gene(self):
+    def test_codon_start_shift_forward_feature(self):
         """codon_start offset shifts codon indexing for rule-compatible positions."""
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
-            name='offset_gene',
+            name='offset_feature',
             protein='Offset',
             start=0,
             end=10,
@@ -436,7 +436,7 @@ class TestCodonStartOffset:
         )
         # Position 1 is first coding base (codon AAA), A->G => GAA (K->E)
         var = VariantCall(chrom='ref', pos=1, ref='A', alt='G', allele_freq=0.8, depth=100)
-        ann = annotate_variants([var], [gene])[0]
+        ann = annotate_variants([var], [feature])[0]
 
         assert ann.codon_pos == 0
         assert ann.ref_aa == 'K'
@@ -494,13 +494,13 @@ class TestAssignAfBins:
 
 # ─── Helper ──────────────────────────────────────────────────────────
 
-def _make_gene(nt_sequence: str, strand: str = '+') -> GeneRecord:
+def _make_feature(nt_sequence: str, strand: str = '+') -> FeatureRecord:
     end = len(nt_sequence)
-    return GeneRecord(
-        id=1, reference_id=1, name='gene', protein='P',
+    return FeatureRecord(
+        id=1, reference_id=1, name='feature', protein='P',
         start=0, end=end, strand=strand, codon_start=0,
         nt_sequence=nt_sequence,
-        # For minus-strand genes, nt_sequence is stored in coding orientation
+        # For minus-strand features, nt_sequence is stored in coding orientation
         # (reverse-complement of the genomic slice), but we override below.
     )
 
@@ -510,31 +510,31 @@ def _make_gene(nt_sequence: str, strand: str = '+') -> GeneRecord:
 class TestInsertionAnnotation:
     """Codon-aware annotation for VCF insertions."""
 
-    def _fwd_gene(self) -> GeneRecord:
+    def _fwd_feature(self) -> FeatureRecord:
         # ATG GGG TTT → M G F (9 nt, forward strand)
-        return GeneRecord(
-            id=1, reference_id=1, name='gene', protein='P',
+        return FeatureRecord(
+            id=1, reference_id=1, name='feature', protein='P',
             start=0, end=9, strand='+', codon_start=0, nt_sequence='ATGGGGTTT',
         )
 
-    def _rev_gene(self) -> GeneRecord:
-        # Minus-strand gene with coding sequence ATG GGG TTT → M G F
+    def _rev_feature(self) -> FeatureRecord:
+        # Minus-strand feature with coding sequence ATG GGG TTT → M G F
         # Genomic sequence is revcomp('ATGGGGTTT') = 'AAACCCCAT'
         # But nt_sequence stores coding orientation: 'ATGGGGTTT'
-        return GeneRecord(
-            id=1, reference_id=1, name='gene', protein='P',
+        return FeatureRecord(
+            id=1, reference_id=1, name='feature', protein='P',
             start=0, end=9, strand='-', codon_start=0, nt_sequence='ATGGGGTTT',
         )
 
     def test_inframe_insertion_at_codon_boundary(self) -> None:
         """In-frame insertion at codon 0 boundary: anchor M, inserted G → alt_aa MG."""
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         # VCF anchor is the preceding nucleotide in genomic 5'->3': boundary after codon 0 -> pos=2.
         var = VariantCall(chrom='c', pos=2, ref='G', alt='GGGG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
-        assert ann.gene_name == 'gene'
+        assert ann.feature_name == 'feature'
         assert ann.codon_pos == 0
         assert ann.ref_aa == 'M'
         assert ann.alt_aa == 'MG'
@@ -542,10 +542,10 @@ class TestInsertionAnnotation:
 
     def test_inframe_insertion_second_codon(self) -> None:
         """In-frame insertion at codon 1 boundary: anchor G, inserted G → alt_aa GG."""
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         # Boundary after codon 1 -> anchor at pos=5.
         var = VariantCall(chrom='c', pos=5, ref='G', alt='GGGG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'G'
@@ -554,9 +554,9 @@ class TestInsertionAnnotation:
 
     def test_frameshift_insertion(self) -> None:
         """1-nt insertion at codon boundary is annotated as frameshift."""
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         var = VariantCall(chrom='c', pos=2, ref='G', alt='GG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'M'
@@ -565,10 +565,10 @@ class TestInsertionAnnotation:
 
     def test_inframe_insertion_at_mid_codon_is_complex(self) -> None:
         """In-frame insertion anchored mid-codon is annotated as inframe_complex."""
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         # pos=1 is mid-codon for codon 0 under VCF-anchor semantics.
         var = VariantCall(chrom='c', pos=1, ref='T', alt='TGGG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'M'
@@ -577,10 +577,10 @@ class TestInsertionAnnotation:
 
     def test_mid_codon_non_inframe_insertion_is_frameshift(self) -> None:
         """Non-in-frame insertion is frameshift even when anchored mid-codon."""
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         # pos=1 is frame_offset 1 within codon 0; 1-nt payload insertion -> frameshift
         var = VariantCall(chrom='c', pos=1, ref='T', alt='TG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'M'
@@ -588,11 +588,11 @@ class TestInsertionAnnotation:
         assert ann.consequence == 'frameshift'
 
     def test_inframe_insertion_negative_strand(self) -> None:
-        """In-frame insertion on a negative-strand gene uses revcomp of inserted bases."""
-        gene = self._rev_gene()
+        """In-frame insertion on a negative-strand feature uses revcomp of inserted bases."""
+        feature = self._rev_feature()
         # Boundary after codon 0 on '-' strand maps to genomic anchor pos=5.
         var = VariantCall(chrom='c', pos=5, ref='C', alt='CGGG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'M'
@@ -600,15 +600,15 @@ class TestInsertionAnnotation:
         assert ann.consequence == 'insertion'
 
     def test_insertion_uses_query_anchor_codon_positive_strand(self) -> None:
-        """Forward-strand gene: query_ref_codon overrides internal CDS for anchor AA."""
-        gene = self._fwd_gene()
+        """Forward-strand feature: query_ref_codon overrides internal CDS for anchor AA."""
+        feature = self._fwd_feature()
         # Internal codon 1 = 'GGG' → G; user's query codon 1 = 'AGG' → R (divergent anchor).
         # Rule in the DB says reference='R', mutation='RG' → only matches when anchor comes from query.
         var = VariantCall(
             chrom='c', pos=5, ref='G', alt='GGGG', allele_freq=0.9, depth=100,
             query_ref_codon='AGG',
         )
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'R'
@@ -616,18 +616,18 @@ class TestInsertionAnnotation:
         assert ann.consequence == 'insertion'
 
     def test_insertion_uses_query_anchor_codon_negative_strand(self) -> None:
-        """Minus-strand gene: query_ref_codon is expected in CDS orientation."""
-        gene = self._rev_gene()
-        # Minus-strand gene coding 'ATGGGGTTT' (M G F).
+        """Minus-strand feature: query_ref_codon is expected in CDS orientation."""
+        feature = self._rev_feature()
+        # Minus-strand feature coding 'ATGGGGTTT' (M G F).
         # Anchor at CDS pos 3 (start of codon 1) → genomic pos = (9-1)-3 = 5.
-        # Genomic base at 5 = 'C' (from AAACCCCAT, the genomic forward for this gene).
+        # Genomic base at 5 = 'C' (from AAACCCCAT, the genomic forward for this feature).
         # Insert 'CCC' on forward strand → RC = 'GGG' → G (glycine in coding).
         # query_ref_codon='AGG' → R instead of internal G.
         var = VariantCall(
             chrom='c', pos=5, ref='C', alt='CCCC', allele_freq=0.9, depth=100,
             query_ref_codon='AGG',
         )
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'R'
@@ -640,22 +640,22 @@ class TestInsertionAnnotation:
 class TestDeletionAnnotation:
     """Codon-aware annotation for VCF deletions."""
 
-    def _fwd_gene(self) -> GeneRecord:
+    def _fwd_feature(self) -> FeatureRecord:
         # ATG GGG TTT → M G F (9 nt, forward strand)
-        return GeneRecord(
-            id=1, reference_id=1, name='gene', protein='P',
+        return FeatureRecord(
+            id=1, reference_id=1, name='feature', protein='P',
             start=0, end=9, strand='+', codon_start=0, nt_sequence='ATGGGGTTT',
         )
 
     def test_inframe_deletion(self) -> None:
         """3-nt deletion at codon 0 boundary: ref_aa MG (deleted G), alt_aa M."""
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         # Boundary after codon 0 -> anchor at pos=2.
         var = VariantCall(chrom='c', pos=2, ref='GTGG', alt='G', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
-        assert ann.gene_name == 'gene'
+        assert ann.feature_name == 'feature'
         assert ann.codon_pos == 0
         assert ann.ref_aa == 'MW'
         assert ann.alt_aa == 'M'
@@ -663,10 +663,10 @@ class TestDeletionAnnotation:
 
     def test_inframe_deletion_multi_codon(self) -> None:
         """6-nt deletion spans two payload codons: ref_aa has three AAs, alt_aa has anchor only."""
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         # Boundary after codon 0, deleting 6-nt payload.
         var = VariantCall(chrom='c', pos=2, ref='GTGGGGT', alt='G', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.codon_pos == 0
@@ -676,9 +676,9 @@ class TestDeletionAnnotation:
 
     def test_frameshift_deletion(self) -> None:
         """1-nt deletion at codon boundary is annotated as frameshift."""
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         var = VariantCall(chrom='c', pos=2, ref='GT', alt='G', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'M'
@@ -687,10 +687,10 @@ class TestDeletionAnnotation:
 
     def test_inframe_deletion_at_mid_codon_is_complex(self) -> None:
         """In-frame deletion anchored mid-codon is annotated as inframe_complex."""
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         # pos=1 is frame_offset 1 within codon 0
         var = VariantCall(chrom='c', pos=1, ref='TGGG', alt='T', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'M'
@@ -699,10 +699,10 @@ class TestDeletionAnnotation:
 
     def test_mid_codon_non_inframe_deletion_is_frameshift(self) -> None:
         """Non-in-frame deletion is frameshift even when anchored mid-codon."""
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         # pos=1 is frame_offset 1 within codon 0; delete 1 nt payload -> frameshift
         var = VariantCall(chrom='c', pos=1, ref='TG', alt='T', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'M'
@@ -710,14 +710,14 @@ class TestDeletionAnnotation:
         assert ann.consequence == 'frameshift'
 
     def test_inframe_deletion_negative_strand(self) -> None:
-        """In-frame deletion on a negative-strand gene uses revcomp of deleted bases."""
-        gene = GeneRecord(
-            id=1, reference_id=1, name='gene', protein='P',
+        """In-frame deletion on a negative-strand feature uses revcomp of deleted bases."""
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='feature', protein='P',
             start=0, end=9, strand='-', codon_start=0, nt_sequence='ATGGGGTTT',
         )
         # Boundary after codon 0 on '-' strand maps to genomic anchor pos=2.
         var = VariantCall(chrom='c', pos=2, ref='AAAA', alt='A', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'MF'
@@ -725,15 +725,15 @@ class TestDeletionAnnotation:
         assert ann.consequence == 'deletion'
 
     def test_deletion_uses_query_anchor_codon_positive_strand(self) -> None:
-        """Forward-strand gene: query_ref_codon overrides internal CDS for anchor AA."""
-        gene = self._fwd_gene()
+        """Forward-strand feature: query_ref_codon overrides internal CDS for anchor AA."""
+        feature = self._fwd_feature()
         # Internal codon 1 = 'GGG' → G; user's query codon 1 = 'AGG' → R (divergent anchor).
         # Deletion of 'GGG' (next codon, G) from anchor codon 1.
         var = VariantCall(
             chrom='c', pos=5, ref='GGGG', alt='G', allele_freq=0.9, depth=100,
             query_ref_codon='AGG',
         )
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'RG'   # anchor from query (R) + deleted G
@@ -741,9 +741,9 @@ class TestDeletionAnnotation:
         assert ann.consequence == 'deletion'
 
     def test_deletion_uses_query_anchor_codon_negative_strand(self) -> None:
-        """Minus-strand gene: query_ref_codon (CDS orientation) used as anchor."""
-        gene = GeneRecord(
-            id=1, reference_id=1, name='gene', protein='P',
+        """Minus-strand feature: query_ref_codon (CDS orientation) used as anchor."""
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='feature', protein='P',
             start=0, end=9, strand='-', codon_start=0, nt_sequence='ATGGGGTTT',
         )
         # Boundary after codon 0 on '-' strand maps to genomic anchor pos=2.
@@ -751,7 +751,7 @@ class TestDeletionAnnotation:
             chrom='c', pos=2, ref='AAAA', alt='A', allele_freq=0.9, depth=100,
             query_ref_codon='AGG',
         )
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'RF'   # anchor R (from query) + deleted F
@@ -764,16 +764,16 @@ class TestDeletionAnnotation:
 class TestFrameshiftAnnotation:
     """Frameshift annotations store anchor AA and use anchored alt_aa token (e.g. GfsX)."""
 
-    def _fwd_gene(self) -> GeneRecord:
-        return GeneRecord(
-            id=1, reference_id=1, name='gene', protein='P',
+    def _fwd_feature(self) -> FeatureRecord:
+        return FeatureRecord(
+            id=1, reference_id=1, name='feature', protein='P',
             start=0, end=9, strand='+', codon_start=0, nt_sequence='ATGGGGTTT',
         )
 
     def test_frameshift_insertion_stores_anchor_aa(self) -> None:
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         var = VariantCall(chrom='c', pos=3, ref='G', alt='GG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.codon_pos == 1
@@ -783,9 +783,9 @@ class TestFrameshiftAnnotation:
         assert ann.ref_codon == 'GGG'
 
     def test_frameshift_deletion_stores_anchor_aa(self) -> None:
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         var = VariantCall(chrom='c', pos=3, ref='GG', alt='G', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'G'
@@ -794,22 +794,22 @@ class TestFrameshiftAnnotation:
 
     def test_frameshift_through_annotate_variants(self) -> None:
         """annotate_variants correctly includes frameshift results."""
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         var = VariantCall(chrom='c', pos=0, ref='AT', alt='A', allele_freq=0.8, depth=100)
-        results = annotate_variants([var], [gene])
+        results = annotate_variants([var], [feature])
 
         assert len(results) == 1
         assert results[0].consequence == 'frameshift'
 
     def test_frameshift_uses_query_anchor_codon(self) -> None:
         """query_ref_codon used as anchor codon for frameshift too."""
-        gene = self._fwd_gene()
+        feature = self._fwd_feature()
         # Internal codon 1 = 'GGG' → G; user's query codon 1 = 'AGG' → R.
         var = VariantCall(
             chrom='c', pos=3, ref='GG', alt='G', allele_freq=0.9, depth=100,
             query_ref_codon='AGG',
         )
-        ann = _annotate_variant_in_gene(var, gene)
+        ann = _annotate_variant_in_feature(var, feature)
 
         assert ann is not None
         assert ann.ref_aa == 'R'   # from query, not internal G
@@ -820,18 +820,18 @@ class TestFrameshiftAnnotation:
 # ─── _suppress_ruleless_overlap_annotations ───────────────────────────
 
 class TestSuppressRulelessOverlapAnnotations:
-    """Test filtering of spurious annotations from overlapping ruleless genes."""
+    """Test filtering of spurious annotations from overlapping ruleless features."""
 
-    def test_overlapping_genes_removes_ruleless_when_ruled_exists(self) -> None:
+    def test_overlapping_features_removes_ruleless_when_ruled_exists(self) -> None:
         """
-        Variant at overlap of two genes: one with rules, one without.
-        Result: only the ruled gene annotation survives.
+        Variant at overlap of two features: one with rules, one without.
+        Result: only the ruled feature annotation survives.
         """
-        # Gene A: positions 0–29, with rules
-        gene_a = GeneRecord(
+        # feature A: positions 0–29, with rules
+        feature_a = FeatureRecord(
             id=1,
             reference_id=1,
-            name='GeneA',
+            name='FeatureA',
             protein='ProteinA',
             start=0,
             end=30,
@@ -840,11 +840,11 @@ class TestSuppressRulelessOverlapAnnotations:
             nt_sequence='ATG' + 'AAA' * 9,
         )
 
-        # Gene B: positions 10–40, no rules
-        gene_b = GeneRecord(
+        # feature B: positions 10–40, no rules
+        feature_b = FeatureRecord(
             id=2,
             reference_id=1,
-            name='GeneB',
+            name='FeatureB',
             protein='ProteinB',
             start=10,
             end=40,
@@ -853,33 +853,33 @@ class TestSuppressRulelessOverlapAnnotations:
             nt_sequence='ATG' + 'GGG' * 10,
         )
 
-        # Variant at position 15, falls in both genes
+        # Variant at position 15, falls in both features
         var = VariantCall(chrom='ref', pos=15, ref='A', alt='G', allele_freq=0.9, depth=100)
-        annotations = annotate_variants([var], [gene_a, gene_b])
+        annotations = annotate_variants([var], [feature_a, feature_b])
 
-        # Should have two annotations (one per gene)
+        # Should have two annotations (one per feature)
         assert len(annotations) == 2
-        gene_names = {ann.gene_name for ann in annotations}
-        assert gene_names == {'GeneA', 'GeneB'}
+        feature_names = {ann.feature_name for ann in annotations}
+        assert feature_names == {'FeatureA', 'FeatureB'}
 
-        # Filter with GeneA in rule_gene_names
-        rule_gene_names = {'GeneA'}
-        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_gene_names)
+        # Filter with FeatureA in rule_feature_names
+        rule_feature_names = {'FeatureA'}
+        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_feature_names)
 
-        # Only GeneA should survive
+        # Only FeatureA should survive
         assert len(filtered) == 1
-        assert filtered[0].gene_name == 'GeneA'
+        assert filtered[0].feature_name == 'FeatureA'
 
-    def test_overlapping_genes_keeps_both_when_neither_has_rules(self) -> None:
+    def test_overlapping_features_keeps_both_when_neither_has_rules(self) -> None:
         """
-        Variant at overlap of two genes, neither with rules.
-        Result: both annotations survive (no ruled genes to filter against).
+        Variant at overlap of two features, neither with rules.
+        Result: both annotations survive (no ruled features to filter against).
         """
-        # Gene A: positions 0–30, no rules
-        gene_a = GeneRecord(
+        # feature A: positions 0–30, no rules
+        feature_a = FeatureRecord(
             id=1,
             reference_id=1,
-            name='GeneA',
+            name='FeatureA',
             protein='ProteinA',
             start=0,
             end=30,
@@ -888,11 +888,11 @@ class TestSuppressRulelessOverlapAnnotations:
             nt_sequence='ATG' + 'AAA' * 9,
         )
 
-        # Gene B: positions 10–40, no rules
-        gene_b = GeneRecord(
+        # feature B: positions 10–40, no rules
+        feature_b = FeatureRecord(
             id=2,
             reference_id=1,
-            name='GeneB',
+            name='FeatureB',
             protein='ProteinB',
             start=10,
             end=40,
@@ -901,31 +901,31 @@ class TestSuppressRulelessOverlapAnnotations:
             nt_sequence='ATG' + 'GGG' * 10,
         )
 
-        # Variant at position 15, falls in both genes
+        # Variant at position 15, falls in both features
         var = VariantCall(chrom='ref', pos=15, ref='A', alt='G', allele_freq=0.9, depth=100)
-        annotations = annotate_variants([var], [gene_a, gene_b])
+        annotations = annotate_variants([var], [feature_a, feature_b])
 
         # Should have two annotations
         assert len(annotations) == 2
 
-        # Filter with empty rule_gene_names (neither gene has rules)
-        rule_gene_names: set[str] = set()
-        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_gene_names)
+        # Filter with empty rule_feature_names (neither feature has rules)
+        rule_feature_names: set[str] = set()
+        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_feature_names)
 
         # Both should survive since neither has rules
         assert len(filtered) == 2
-        gene_names = {ann.gene_name for ann in filtered}
-        assert gene_names == {'GeneA', 'GeneB'}
+        feature_names = {ann.feature_name for ann in filtered}
+        assert feature_names == {'FeatureA', 'FeatureB'}
 
-    def test_single_gene_annotation_always_passes(self) -> None:
+    def test_single_feature_annotation_always_passes(self) -> None:
         """
-        Single-gene annotations should always pass through unchanged,
-        regardless of rule_gene_names.
+        Single-feature annotations should always pass through unchanged,
+        regardless of rule_feature_names.
         """
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
-            name='GeneX',
+            name='FeatureX',
             protein='ProteinX',
             start=0,
             end=30,
@@ -934,29 +934,29 @@ class TestSuppressRulelessOverlapAnnotations:
             nt_sequence='ATG' + 'AAA' * 9,
         )
 
-        # Variant within single gene
+        # Variant within single feature
         var = VariantCall(chrom='ref', pos=5, ref='A', alt='G', allele_freq=0.9, depth=100)
-        annotations = annotate_variants([var], [gene])
+        annotations = annotate_variants([var], [feature])
 
         # Should have one annotation
         assert len(annotations) == 1
 
-        # Filter with GeneX not in rule_gene_names
-        rule_gene_names: set[str] = set()
-        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_gene_names)
+        # Filter with FeatureX not in rule_feature_names
+        rule_feature_names: set[str] = set()
+        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_feature_names)
 
         # Should survive unchanged
         assert len(filtered) == 1
-        assert filtered[0].gene_name == 'GeneX'
+        assert filtered[0].feature_name == 'FeatureX'
 
-    def test_variant_outside_all_genes_passes(self) -> None:
+    def test_variant_outside_all_features_passes(self) -> None:
         """
-        Variants outside all genes (gene_name='') should pass through unchanged.
+        Variants outside all features (feature_name='') should pass through unchanged.
         """
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
-            name='GeneA',
+            name='FeatureA',
             protein='ProteinA',
             start=0,
             end=30,
@@ -965,18 +965,18 @@ class TestSuppressRulelessOverlapAnnotations:
             nt_sequence='ATG' + 'AAA' * 9,
         )
 
-        # Variant far outside the gene
+        # Variant far outside the feature
         var = VariantCall(chrom='ref', pos=100, ref='A', alt='G', allele_freq=0.9, depth=100)
-        annotations = annotate_variants([var], [gene])
+        annotations = annotate_variants([var], [feature])
 
-        # Should have one annotation with empty gene_name
+        # Should have one annotation with empty feature_name
         assert len(annotations) == 1
-        assert annotations[0].gene_name == ''
+        assert annotations[0].feature_name == ''
 
-        # Filter with any rule_gene_names
-        rule_gene_names = {'GeneA'}
-        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_gene_names)
+        # Filter with any rule_feature_names
+        rule_feature_names = {'FeatureA'}
+        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_feature_names)
 
         # Should survive unchanged
         assert len(filtered) == 1
-        assert filtered[0].gene_name == ''
+        assert filtered[0].feature_name == ''

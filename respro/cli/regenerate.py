@@ -27,7 +27,7 @@ from respro.db.results import (
 )
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.schema import open_project_db, open_results_db
-from respro.io.reference import load_genes_for_reference
+from respro.io.reference import load_features_for_reference
 from respro.report.non_html_exports import export_results
 from respro.utils.files import resolve_output_file
 from respro.utils.logging import err_console
@@ -172,13 +172,13 @@ def regenerate(
             sample_classifications=sample_classifications,
         )
 
-        genes = []
+        features = []
         rules = []
-        rule_gene_names: set[str] = set()
+        rule_feature_names: set[str] = set()
         if ref_id is not None:
-            genes = load_genes_for_reference(project_conn, ref_id)
+            features = load_features_for_reference(project_conn, ref_id)
             rules = load_rules(project_conn, ref_id)
-            rule_gene_names = {rule.gene_name for rule in rules}
+            rule_feature_names = {rule.feature_name for rule in rules}
 
         default_stem = Path(run_dict['vcf_path']).stem.strip() or 'profile'
         html_output_path = resolve_output_file(out, f'{default_stem}.report.html')
@@ -187,8 +187,8 @@ def regenerate(
             outputs = export_results(
                 result,
                 html_output_path.parent,
-                genes=genes,
-                rule_gene_names=rule_gene_names,
+                features=features,
+                rule_feature_names=rule_feature_names,
                 project_conn=project_conn,
                 rules=rules,
                 extra_export_formats=extra_export_formats,

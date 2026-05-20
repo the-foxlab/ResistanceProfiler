@@ -30,14 +30,14 @@ class Publication:
 class CoverageGap:
     """A codon stretch that could not be assessed due to N-bases or missing alignment in FASTA mode."""
 
-    gene_name: str
+    feature_name: str
     codon_start: int  # 0-based codon index, inclusive
     codon_end: int    # 0-based codon index, inclusive
 
 
 @dataclass
-class GeneRecord:
-    """A gene or CDS annotation loaded from the database."""
+class FeatureRecord:
+    """A annotation loaded from the database."""
 
     id: int
     reference_id: int
@@ -50,19 +50,19 @@ class GeneRecord:
     nt_sequence: str = ''  # CDS nucleotide slice in coding orientation
     aa_sequence: str = ''  # pre-translated protein sequence stored at init time
     feature_type: str = 'CDS'
-    parent_gene_name: str = ''
+    parent_feature_name: str = ''
     reference_accession: str = ''  # accession of the parent reference (e.g. NC_001806)
-    segments: tuple[GeneSegment, ...] = field(default_factory=tuple)
+    segments: tuple[FeatureSegment, ...] = field(default_factory=tuple)
 
     @property
     def length_nt(self) -> int:
         return self.end - self.start
 
     @property
-    def _coding_segments(self) -> tuple[GeneSegment, ...]:
+    def _coding_segments(self) -> tuple[FeatureSegment, ...]:
         """Return CDS segments in 5'->3' coding orientation."""
         if not self.segments:
-            return (GeneSegment(segment_index=0, start=self.start, end=self.end),)
+            return (FeatureSegment(segment_index=0, start=self.start, end=self.end),)
         if self.strand == '+':
             return self.segments
         return tuple(reversed(self.segments))
@@ -98,10 +98,10 @@ class GeneRecord:
 
     def contains(self, pos: int) -> bool:
         """
-        Return True if pos (0-based) falls within this gene.
+        Return True if pos (0-based) falls within this feature.
 
         :param pos: 0-based genomic position
-        :return: True if position is within gene bounds
+        :return: True if position is within feature bounds
         """
         return self.genomic_to_cds_position(pos) is not None
 
@@ -131,7 +131,7 @@ class GeneRecord:
 
 
 @dataclass(frozen=True)
-class GeneSegment:
+class FeatureSegment:
     """One CDS genomic segment as a 0-based [start, end) interval."""
 
     segment_index: int
@@ -144,8 +144,8 @@ class ResistanceRule:
     """A single resistance rule loaded from the database."""
 
     id: int
-    gene_name: str
-    gene_id: int
+    feature_name: str
+    feature_id: int
     drug_name: str
     drug_id: int
     reference_identifier: str
@@ -172,8 +172,8 @@ class ResistanceRuleSetMember:
 
     id: int
     rule_set_id: int
-    gene_name: str
-    gene_id: int
+    feature_name: str
+    feature_id: int
     reference_identifier: str
     position: int
     reference: str
@@ -222,7 +222,7 @@ class AnnotatedVariant:
     """A variant with codon-aware amino acid annotation and rule matches."""
 
     variant: VariantCall
-    gene_name: str = ''
+    feature_name: str = ''
     codon_pos: int = 0
     ref_codon: str = ''
     alt_codon: str = ''
@@ -305,7 +305,7 @@ class FormulaRuleHit:
             'members': [
                 {
                     'member_id': m.external_id,
-                    'gene': m.gene_name,
+                    'feature': m.feature_name,
                     'position': m.position + 1,  # 1-based for output
                     'reference': m.reference,
                     'mutation': m.mutation,
@@ -315,7 +315,7 @@ class FormulaRuleHit:
             'matched_member_ids': list(self.matched_member_ids),
             'matched_variants': [
                 {
-                    'gene': v.gene_name,
+                    'feature': v.feature_name,
                     'codon_pos': v.codon_pos + 1,
                     'ref_aa': v.ref_aa,
                     'alt_aa': v.alt_aa,
@@ -327,10 +327,10 @@ class FormulaRuleHit:
 
 
 @dataclass(frozen=True)
-class GeneMatch:
-    """Result of aligning a query sequence to an internal gene CDS."""
+class FeatureMatch:
+    """Result of aligning a query sequence to an internal feature CDS."""
 
-    gene: GeneRecord
+    feature: FeatureRecord
     identity: float
     cds_coverage: float   # fraction of CDS bases covered by the alignment
     query_coverage: float  # fraction of query bases consumed by the alignment
@@ -362,16 +362,16 @@ class ProfilingResult:
     coverage_gaps: list[CoverageGap] = field(default_factory=list)
     sample_classifications: list[dict] = field(default_factory=list)
     query_sequence: str = ''
-    gene_matches: list[GeneMatch] = field(default_factory=list)
+    feature_matches: list[FeatureMatch] = field(default_factory=list)
 
     @property
     def cds_annotations(self) -> list[AnnotatedVariant]:
         """
         Return annotations that fall within a coding region.
 
-        :return: list of AnnotatedVariant with gene_name set
+        :return: list of AnnotatedVariant with feature_name set
         """
-        return [a for a in self.annotations if a.gene_name]
+        return [a for a in self.annotations if a.feature_name]
 
     def summary_dict(self) -> dict:
         """
