@@ -11,15 +11,15 @@ import pytest
 
 from respro.core.annotation import annotate_variants, reverse_complement
 from respro.core.vcf_remap import _transform_allele, remap_variants
-from respro.db.models import GeneMatch, GeneRecord, GeneSegment, VariantCall
+from respro.db.models import FeatureMatch, FeatureRecord, FeatureSegment, VariantCall
 
 
-def _make_gene(*, strand: str) -> GeneRecord:
-    """Build the shared 18-nt test gene (MQVGN* coding sequence)."""
-    return GeneRecord(
+def _make_feature(*, strand: str) -> FeatureRecord:
+    """Build the shared 18-nt test feature (MQVGN* coding sequence)."""
+    return FeatureRecord(
         id=1,
         reference_id=1,
-        name='gene',
+        name='feature',
         protein='P',
         start=0,
         end=18,
@@ -29,12 +29,12 @@ def _make_gene(*, strand: str) -> GeneRecord:
     )
 
 
-def _make_split_gene(*, strand: str = '+') -> GeneRecord:
+def _make_split_feature(*, strand: str = '+') -> FeatureRecord:
     """Build a split CDS with a non-coding envelope gap between segments."""
-    return GeneRecord(
+    return FeatureRecord(
         id=2,
         reference_id=1,
-        name='split_gene',
+        name='split_feature',
         protein='P',
         start=0,
         end=18,
@@ -42,16 +42,16 @@ def _make_split_gene(*, strand: str = '+') -> GeneRecord:
         codon_start=0,
         nt_sequence='ATGAAAGGGTCC',
         segments=(
-            GeneSegment(segment_index=0, start=0, end=6),
-            GeneSegment(segment_index=1, start=12, end=18),
+            FeatureSegment(segment_index=0, start=0, end=6),
+            FeatureSegment(segment_index=1, start=12, end=18),
         ),
     )
 
 
-def _make_match(gene: GeneRecord, *, match_strand: str, query: str, cigar: str) -> GeneMatch:
-    """Build a controlled GeneMatch for remap tests."""
-    return GeneMatch(
-        gene=gene,
+def _make_match(feature: FeatureRecord, *, match_strand: str, query: str, cigar: str) -> FeatureMatch:
+    """Build a controlled FeatureMatch for remap tests."""
+    return FeatureMatch(
+        feature=feature,
         identity=1.0,
         cds_coverage=1.0,
         query_coverage=1.0,
@@ -119,7 +119,7 @@ class TestTransformAllele:
 
 
 @pytest.mark.parametrize(
-    ('gene_strand', 'match_strand', 'query_seq', 'query_token', 'expected_token', 'expected_aa'),
+    ('feature_strand', 'match_strand', 'query_seq', 'query_token', 'expected_token', 'expected_aa'),
     [
         ('+', '+', 'ATGCAAGTCGGAAACTAA', 'A4G', 'A4G', 'Q1R'),
         ('+', '+', 'ATGCAAGTCGGAAACTAA', 'A5ATT', 'A5ATT', 'Q1fsX'),
@@ -140,7 +140,7 @@ class TestTransformAllele:
     ],
 )
 def test_examples_e1_to_e4(
-    gene_strand: str,
+    feature_strand: str,
     match_strand: str,
     query_seq: str,
     query_token: str,
@@ -148,8 +148,8 @@ def test_examples_e1_to_e4(
     expected_aa: str,
 ) -> None:
     """Validate the canonical strand/orientation examples E1-E4."""
-    gene = _make_gene(strand=gene_strand)
-    match = _make_match(gene, match_strand=match_strand, query=query_seq, cigar='18M')
+    feature = _make_feature(strand=feature_strand)
+    match = _make_match(feature, match_strand=match_strand, query=query_seq, cigar='18M')
     var = _variant_from_token(query_token)
 
     remapped, warnings = remap_variants([var], [match], query_seq)
@@ -157,20 +157,20 @@ def test_examples_e1_to_e4(
     assert not warnings
     assert len(remapped) == 1
     assert _token_from_variant(remapped[0]) == expected_token, (
-        f'gene={gene_strand} match={match_strand} query={query_seq} '
+        f'feature={feature_strand} match={match_strand} query={query_seq} '
         f'in={query_token} out={_token_from_variant(remapped[0])} expected={expected_token}'
     )
 
-    anns = annotate_variants(remapped, [gene])
+    anns = annotate_variants(remapped, [feature])
     assert len(anns) == 1
     _assert_aa_token(anns[0], expected_aa)
 
 
 def test_example_e5_query_deletion_rc_orientation() -> None:
     """E5: query has deletion vs reference and query aligns as reverse-complement."""
-    gene = _make_gene(strand='+')
+    feature = _make_feature(strand='+')
     query_seq = 'TTAGTTTCCTTGCAT'
-    match = _make_match(gene, match_strand='-', query=query_seq, cigar='6M3D9M')
+    match = _make_match(feature, match_strand='-', query=query_seq, cigar='6M3D9M')
     var = _variant_from_token('C8T')
 
     remapped, warnings = remap_variants([var], [match], query_seq)
@@ -179,16 +179,16 @@ def test_example_e5_query_deletion_rc_orientation() -> None:
     assert len(remapped) == 1
     assert _token_from_variant(remapped[0]) == 'G9A'
 
-    anns = annotate_variants(remapped, [gene])
+    anns = annotate_variants(remapped, [feature])
     assert len(anns) == 1
     _assert_aa_token(anns[0], 'G3R')
 
 
 def test_example_e6_query_insertion_projection_and_no_projection() -> None:
     """E6: one SNP projects through insertion, one SNP in insertion has no projection."""
-    gene = _make_gene(strand='+')
+    feature = _make_feature(strand='+')
     query_seq = 'ATGCAATTTGTCGGAAACTAA'
-    match = _make_match(gene, match_strand='+', query=query_seq, cigar='6M3I12M')
+    match = _make_match(feature, match_strand='+', query=query_seq, cigar='6M3I12M')
     projected = _variant_from_token('G9A')
     non_projected = _variant_from_token('T7C')
 
@@ -198,16 +198,16 @@ def test_example_e6_query_insertion_projection_and_no_projection() -> None:
     assert len(remapped) == 1
     assert _token_from_variant(remapped[0]) == 'G6A'
 
-    anns = annotate_variants(remapped, [gene])
+    anns = annotate_variants(remapped, [feature])
     assert len(anns) == 1
     _assert_aa_token(anns[0], 'V2I')
 
 
 def test_example_e7_mismatch_column_projection() -> None:
     """E7: SNP at mismatch column still projects and annotates correctly."""
-    gene = _make_gene(strand='+')
+    feature = _make_feature(strand='+')
     query_seq = 'ATGCAGGTCGGAAGCTAA'
-    match = _make_match(gene, match_strand='+', query=query_seq, cigar='18M')
+    match = _make_match(feature, match_strand='+', query=query_seq, cigar='18M')
     var = _variant_from_token('G5T')
 
     remapped, warnings = remap_variants([var], [match], query_seq)
@@ -216,7 +216,7 @@ def test_example_e7_mismatch_column_projection() -> None:
     assert len(remapped) == 1
     assert _token_from_variant(remapped[0]) == 'G5T'
 
-    anns = annotate_variants(remapped, [gene])
+    anns = annotate_variants(remapped, [feature])
     assert len(anns) == 1
     _assert_aa_token(anns[0], 'Q1H')
 
@@ -226,7 +226,7 @@ def test_overlapping_cds_matches_emit_one_remap_per_match() -> None:
     query_seq = 'ATGAAATTT'
     var = VariantCall(chrom='c', pos=4, ref='A', alt='G', allele_freq=0.9, depth=100)
 
-    gene_a = GeneRecord(
+    feature_a = FeatureRecord(
         id=10,
         reference_id=1,
         name='orf_a',
@@ -237,7 +237,7 @@ def test_overlapping_cds_matches_emit_one_remap_per_match() -> None:
         codon_start=0,
         nt_sequence='ATGAAATTT',
     )
-    gene_b = GeneRecord(
+    feature_b = FeatureRecord(
         id=11,
         reference_id=1,
         name='orf_b',
@@ -250,8 +250,8 @@ def test_overlapping_cds_matches_emit_one_remap_per_match() -> None:
     )
 
     matches = [
-        _make_match(gene_a, match_strand='+', query=query_seq, cigar='9M'),
-        _make_match(gene_b, match_strand='+', query=query_seq, cigar='9M'),
+        _make_match(feature_a, match_strand='+', query=query_seq, cigar='9M'),
+        _make_match(feature_b, match_strand='+', query=query_seq, cigar='9M'),
     ]
 
     remapped, warnings = remap_variants([var], matches, query_seq)
@@ -263,9 +263,9 @@ def test_overlapping_cds_matches_emit_one_remap_per_match() -> None:
 
 def test_anchor_ref_mismatch_produces_warning() -> None:
     """VCF REF anchor mismatch to query emits warning and excludes the variant."""
-    gene = _make_gene(strand='+')
+    feature = _make_feature(strand='+')
     query = 'ATGCAAGTCGGAAACTAA'
-    match = _make_match(gene, match_strand='+', query=query, cigar='18M')
+    match = _make_match(feature, match_strand='+', query=query, cigar='18M')
     var = VariantCall(chrom='c', pos=3, ref='T', alt='G', allele_freq=0.9, depth=100)
 
     remapped, warnings = remap_variants([var], [match], query)
@@ -274,11 +274,11 @@ def test_anchor_ref_mismatch_produces_warning() -> None:
     assert len(warnings) == 1
 
 
-def test_split_gene_remap_projects_second_segment_coordinates() -> None:
+def test_split_feature_remap_projects_second_segment_coordinates() -> None:
     """Split CDS remap must land in the second coding segment, not the envelope gap."""
-    gene = _make_split_gene(strand='+')
-    query = gene.nt_sequence
-    match = _make_match(gene, match_strand='+', query=query, cigar='12M')
+    feature = _make_split_feature(strand='+')
+    query = feature.nt_sequence
+    match = _make_match(feature, match_strand='+', query=query, cigar='12M')
     var = VariantCall(chrom='c', pos=6, ref='G', alt='A', allele_freq=0.9, depth=50)
 
     remapped, warnings = remap_variants([var], [match], query)
@@ -288,22 +288,22 @@ def test_split_gene_remap_projects_second_segment_coordinates() -> None:
     assert remapped[0].pos == 12
 
 
-def test_split_gene_envelope_gap_is_treated_as_non_coding() -> None:
-    """A position inside the split-gene envelope gap must not annotate against the CDS."""
-    gene = _make_split_gene(strand='+')
+def test_split_feature_envelope_gap_is_treated_as_non_coding() -> None:
+    """A position inside the split-feature envelope gap must not annotate against the CDS."""
+    feature = _make_split_feature(strand='+')
     gap_variant = VariantCall(chrom='c', pos=6, ref='A', alt='G', allele_freq=0.9, depth=50)
 
-    annotations = annotate_variants([gap_variant], [gene])
+    annotations = annotate_variants([gap_variant], [feature])
 
     assert len(annotations) == 1
-    assert annotations[0].gene_name == ''
+    assert annotations[0].feature_name == ''
 
 
-def test_split_gene_envelope_gap_remap_logs_debug_skip_reason(caplog: pytest.LogCaptureFixture) -> None:
-    """Split-gene envelope gaps should emit a debug skip reason during remap."""
-    gene = _make_split_gene(strand='+')
+def test_split_feature_envelope_gap_remap_logs_debug_skip_reason(caplog: pytest.LogCaptureFixture) -> None:
+    """Split-feature envelope gaps should emit a debug skip reason during remap."""
+    feature = _make_split_feature(strand='+')
     query = 'ATGAAATTTTTTGGGTCC'
-    match = _make_match(gene, match_strand='+', query=query, cigar='6M6I6M')
+    match = _make_match(feature, match_strand='+', query=query, cigar='6M6I6M')
     var = VariantCall(chrom='c', pos=6, ref='T', alt='G', allele_freq=0.9, depth=50)
 
     with caplog.at_level(logging.DEBUG, logger='respro.core.vcf_remap'):
@@ -317,16 +317,16 @@ def test_split_gene_envelope_gap_remap_logs_debug_skip_reason(caplog: pytest.Log
     )
 
 
-def test_minus_gene_reference_sequence_is_reverse_complement_of_coding_sequence() -> None:
-    """Guardrail: minus-gene genomic-forward reference sequence used in examples."""
+def test_minus_feature_reference_sequence_is_reverse_complement_of_coding_sequence() -> None:
+    """Guardrail: minus-feature genomic-forward reference sequence used in examples."""
     assert reverse_complement('ATGCAAGTCGGAAACTAA') == 'TTAGTTTCCGACTTGCAT'
 
 
 def test_anchor_changed_indel_is_split_forward_orientation() -> None:
     """Non-canonical indel with changed anchor is split into SNP + indel before remap."""
-    gene = _make_gene(strand='+')
+    feature = _make_feature(strand='+')
     query_seq = 'ATGCAAGTCGGAAACTAA'
-    match = _make_match(gene, match_strand='+', query=query_seq, cigar='18M')
+    match = _make_match(feature, match_strand='+', query=query_seq, cigar='18M')
     # Encodes A->G at anchor plus 3-nt deletion payload in one record.
     var = _variant_from_token('AAGT4G')
 
@@ -338,7 +338,7 @@ def test_anchor_changed_indel_is_split_forward_orientation() -> None:
     assert 'A4G' in tokens
     assert 'AAGT4A' in tokens
 
-    anns = annotate_variants(remapped, [gene])
+    anns = annotate_variants(remapped, [feature])
     consequences = {a.consequence for a in anns}
     assert 'missense' in consequences
     assert any(c in consequences for c in ('deletion', 'inframe_complex', 'frameshift'))
@@ -346,9 +346,9 @@ def test_anchor_changed_indel_is_split_forward_orientation() -> None:
 
 def test_anchor_changed_indel_is_split_reverse_orientation() -> None:
     """Reverse-orientation remap preserves both SNP and indel from changed-anchor record."""
-    gene = _make_gene(strand='+')
+    feature = _make_feature(strand='+')
     query_seq = 'TTAGTTTCCGACTTGCAT'
-    match = _make_match(gene, match_strand='-', query=query_seq, cigar='18M')
+    match = _make_match(feature, match_strand='-', query=query_seq, cigar='18M')
     var = _variant_from_token('CAAA11G')
 
     remapped, warnings = remap_variants([var], [match], query_seq)
@@ -360,7 +360,7 @@ def test_anchor_changed_indel_is_split_reverse_orientation() -> None:
     assert snp_count == 1
     assert indel_count == 1
 
-    anns = annotate_variants(remapped, [gene])
+    anns = annotate_variants(remapped, [feature])
     consequences = {a.consequence for a in anns}
     assert 'missense' in consequences
     assert any(c in consequences for c in ('deletion', 'inframe_complex', 'frameshift'))

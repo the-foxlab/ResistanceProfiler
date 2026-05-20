@@ -18,7 +18,7 @@ from typer.testing import CliRunner
 from respro.cli.main import app
 from respro.core.alignment import (
     load_cached_mappings,
-    match_query_to_genes,
+    match_query_to_features,
     sequence_checksum,
     store_mappings,
 )
@@ -36,7 +36,7 @@ from respro.core.vcf_remap import (
     _build_query_to_cds_map,
     remap_variants,
 )
-from respro.db.models import GeneMatch, GeneRecord, GeneSegment, VariantCall
+from respro.db.models import FeatureMatch, FeatureRecord, FeatureSegment, VariantCall
 from respro.db.schema import create_schema, open_project_db
 
 
@@ -62,7 +62,7 @@ def fasta_db(tmp_path: Path) -> Path:
         (1, TINY_REF_NAME, len(TINY_REF_SEQ)),
     )
     conn.execute(
-        'INSERT INTO gene (reference_id, name, protein, start, end, strand, '
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, '
         'nt_sequence) VALUES (?, ?, ?, ?, ?, ?, ?)',
         (1, 'gag', 'Gag', 0, 87, '+', TINY_REF_SEQ),
     )
@@ -73,7 +73,7 @@ def fasta_db(tmp_path: Path) -> Path:
     # Rule: 0-based codon 1 = K, mutation E → resistant
     conn.execute(
         'INSERT INTO resistance_rule '
-        '(gene_id, drug_id, position, reference, mutation, phenotype) '
+        '(feature_id, drug_id, position, reference, mutation, phenotype) '
         'VALUES (?, ?, ?, ?, ?, ?)',
         (1, 1, 1, 'K', 'E', 'resistant'),
     )
@@ -103,25 +103,25 @@ def fasta_db_multi_reference(tmp_path: Path) -> Path:
     ref_b_seq = 'CCCCGGGAAATTTCCCGGGAAATTTCCCGG'
 
     conn.execute(
-        'INSERT INTO gene (reference_id, name, protein, start, end, strand, nt_sequence) '
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
         'VALUES (?, ?, ?, ?, ?, ?, ?)',
         (1, 'gagA', 'GagA', 0, 30, '+', ref_a_seq),
     )
     conn.execute(
-        'INSERT INTO gene (reference_id, name, protein, start, end, strand, nt_sequence) '
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
         'VALUES (?, ?, ?, ?, ?, ?, ?)',
         (2, 'gagB', 'GagB', 0, 30, '+', ref_b_seq),
     )
     conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'testdrug'))
     conn.execute(
         'INSERT INTO resistance_rule '
-        '(gene_id, drug_id, position, reference, mutation, phenotype) '
+        '(feature_id, drug_id, position, reference, mutation, phenotype) '
         'VALUES (?, ?, ?, ?, ?, ?)',
         (1, 1, 1, 'K', 'E', 'resistant'),
     )
     conn.execute(
         'INSERT INTO resistance_rule '
-        '(gene_id, drug_id, position, reference, mutation, phenotype) '
+        '(feature_id, drug_id, position, reference, mutation, phenotype) '
         'VALUES (?, ?, ?, ?, ?, ?)',
         (2, 1, 1, 'P', 'A', 'resistant'),
     )
@@ -130,17 +130,17 @@ def fasta_db_multi_reference(tmp_path: Path) -> Path:
     return db_path
 
 @pytest.fixture()
-def gene_fwd() -> GeneRecord:
-    """Forward-strand gene spanning the tiny reference."""
-    return GeneRecord(
+def feature_fwd() -> FeatureRecord:
+    """Forward-strand feature spanning the tiny reference."""
+    return FeatureRecord(
         id=1, reference_id=1, name='gag', protein='Gag',
         start=0, end=87, strand='+', codon_start=0,
         nt_sequence=TINY_REF_SEQ,
     )
 
-def _split_gene(*, strand: str) -> GeneRecord:
+def _split_feature(*, strand: str) -> FeatureRecord:
     """Build a two-segment CDS with a non-coding envelope gap."""
-    return GeneRecord(
+    return FeatureRecord(
         id=99,
         reference_id=1,
         name=f'split_{strand}',
@@ -151,8 +151,8 @@ def _split_gene(*, strand: str) -> GeneRecord:
         codon_start=0,
         nt_sequence='ATGAAAGGGTCC',
         segments=(
-            GeneSegment(segment_index=0, start=0, end=6),
-            GeneSegment(segment_index=1, start=12, end=18),
+            FeatureSegment(segment_index=0, start=0, end=6),
+            FeatureSegment(segment_index=1, start=12, end=18),
         ),
     )
 
@@ -200,77 +200,77 @@ class TestBuildQueryToCdsMap:
 
 class TestCdsToGenomicPosition:
     def test_forward_strand(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1, reference_id=1, name='g', protein='',
             start=10, end=40, strand='+', codon_start=0,
         )
-        assert gene.cds_to_genomic_position(0) == 10
-        assert gene.cds_to_genomic_position(29) == 39
+        assert feature.cds_to_genomic_position(0) == 10
+        assert feature.cds_to_genomic_position(29) == 39
 
     def test_reverse_strand(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1, reference_id=1, name='g', protein='',
             start=10, end=40, strand='-', codon_start=0,
         )
-        assert gene.cds_to_genomic_position(0) == 39
-        assert gene.cds_to_genomic_position(29) == 10
+        assert feature.cds_to_genomic_position(0) == 39
+        assert feature.cds_to_genomic_position(29) == 10
 
     def test_roundtrip(self) -> None:
         """cds_to_genomic_position and genomic_to_cds_position should be inverses."""
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1, reference_id=1, name='g', protein='',
             start=5, end=35, strand='+', codon_start=0,
         )
         for cds in range(30):
-            genomic = gene.cds_to_genomic_position(cds)
-            assert gene.genomic_to_cds_position(genomic) == cds
+            genomic = feature.cds_to_genomic_position(cds)
+            assert feature.genomic_to_cds_position(genomic) == cds
 
     def test_roundtrip_reverse_strand(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1, reference_id=1, name='g', protein='',
             start=5, end=35, strand='-', codon_start=0,
         )
         for cds in range(30):
-            genomic = gene.cds_to_genomic_position(cds)
-            assert gene.genomic_to_cds_position(genomic) == cds
+            genomic = feature.cds_to_genomic_position(cds)
+            assert feature.genomic_to_cds_position(genomic) == cds
 
-    def test_split_gene_roundtrip_forward_strand(self) -> None:
-        gene = _split_gene(strand='+')
+    def test_split_feature_roundtrip_forward_strand(self) -> None:
+        feature = _split_feature(strand='+')
 
-        assert gene.contains(0)
-        assert gene.contains(12)
-        assert not gene.contains(6)
-        assert gene.genomic_to_cds_position(0) == 0
-        assert gene.genomic_to_cds_position(5) == 5
-        assert gene.genomic_to_cds_position(12) == 6
-        assert gene.genomic_to_cds_position(17) == 11
-        assert gene.genomic_to_cds_position(6) is None
-        assert gene.cds_to_genomic_position(0) == 0
-        assert gene.cds_to_genomic_position(5) == 5
-        assert gene.cds_to_genomic_position(6) == 12
-        assert gene.cds_to_genomic_position(11) == 17
+        assert feature.contains(0)
+        assert feature.contains(12)
+        assert not feature.contains(6)
+        assert feature.genomic_to_cds_position(0) == 0
+        assert feature.genomic_to_cds_position(5) == 5
+        assert feature.genomic_to_cds_position(12) == 6
+        assert feature.genomic_to_cds_position(17) == 11
+        assert feature.genomic_to_cds_position(6) is None
+        assert feature.cds_to_genomic_position(0) == 0
+        assert feature.cds_to_genomic_position(5) == 5
+        assert feature.cds_to_genomic_position(6) == 12
+        assert feature.cds_to_genomic_position(11) == 17
 
-    def test_split_gene_roundtrip_reverse_strand(self) -> None:
-        gene = _split_gene(strand='-')
+    def test_split_feature_roundtrip_reverse_strand(self) -> None:
+        feature = _split_feature(strand='-')
 
-        assert gene.contains(0)
-        assert gene.contains(17)
-        assert not gene.contains(6)
-        assert gene.genomic_to_cds_position(17) == 0
-        assert gene.genomic_to_cds_position(12) == 5
-        assert gene.genomic_to_cds_position(5) == 6
-        assert gene.genomic_to_cds_position(0) == 11
-        assert gene.genomic_to_cds_position(6) is None
-        assert gene.cds_to_genomic_position(0) == 17
-        assert gene.cds_to_genomic_position(5) == 12
-        assert gene.cds_to_genomic_position(6) == 5
-        assert gene.cds_to_genomic_position(11) == 0
+        assert feature.contains(0)
+        assert feature.contains(17)
+        assert not feature.contains(6)
+        assert feature.genomic_to_cds_position(17) == 0
+        assert feature.genomic_to_cds_position(12) == 5
+        assert feature.genomic_to_cds_position(5) == 6
+        assert feature.genomic_to_cds_position(0) == 11
+        assert feature.genomic_to_cds_position(6) is None
+        assert feature.cds_to_genomic_position(0) == 17
+        assert feature.cds_to_genomic_position(5) == 12
+        assert feature.cds_to_genomic_position(6) == 5
+        assert feature.cds_to_genomic_position(11) == 0
 
-class TestSplitGeneFastaProjection:
+class TestSplitFeatureFastaProjection:
     def test_synthetic_variant_projection_uses_segment_coordinates(self) -> None:
-        gene = _split_gene(strand='+')
+        feature = _split_feature(strand='+')
 
-        nt_variant = _make_variant_from_coding_nt(gene, 7, 'G', 'A')
+        nt_variant = _make_variant_from_coding_nt(feature, 7, 'G', 'A')
 
         assert nt_variant.pos == 13
 
@@ -279,10 +279,10 @@ class TestSplitGeneFastaProjection:
 # ──────────────────────────────────────────────────────────────────────
 
 class TestRemapVariants:
-    def test_exact_match_remaps_position(self, gene_fwd: GeneRecord) -> None:
+    def test_exact_match_remaps_position(self, feature_fwd: FeatureRecord) -> None:
         """Variant at flanked query pos 8 remaps to internal pos 3."""
         query = 'NNNNN' + TINY_REF_SEQ + 'NNNNN'
-        matches = match_query_to_genes(query, [gene_fwd])
+        matches = match_query_to_features(query, [feature_fwd])
         assert len(matches) == 1
 
         # Query 0-based pos 8 -> CDS pos 3 -> genomic 0-based pos 3
@@ -300,10 +300,10 @@ class TestRemapVariants:
         assert remapped[0].ref == 'A'
         assert remapped[0].alt == 'G'
 
-    def test_variant_outside_cds_excluded(self, gene_fwd: GeneRecord) -> None:
+    def test_variant_outside_cds_excluded(self, feature_fwd: FeatureRecord) -> None:
         """Variant in flanking region should be silently excluded."""
         query = 'NNNNN' + TINY_REF_SEQ + 'NNNNN'
-        matches = match_query_to_genes(query, [gene_fwd])
+        matches = match_query_to_features(query, [feature_fwd])
 
         variants = [
             VariantCall(
@@ -316,10 +316,10 @@ class TestRemapVariants:
         assert len(remapped) == 0
         assert len(warnings) == 0
 
-    def test_ref_base_mismatch_warns(self, gene_fwd: GeneRecord) -> None:
+    def test_ref_base_mismatch_warns(self, feature_fwd: FeatureRecord) -> None:
         """VCF REF disagreeing with FASTA should produce a warning."""
         query = TINY_REF_SEQ
-        matches = match_query_to_genes(query, [gene_fwd])
+        matches = match_query_to_features(query, [feature_fwd])
 
         # Position 0 in TINY_REF_SEQ is 'A', but VCF says REF='T'
         variants = [
@@ -335,11 +335,11 @@ class TestRemapVariants:
         assert 'VCF REF' in warnings[0]
 
     def test_multiple_variants_some_inside_some_outside(
-        self, gene_fwd: GeneRecord,
+        self, feature_fwd: FeatureRecord,
     ) -> None:
         """Mixed set: one variant inside CDS, one outside."""
         query = 'NNNNN' + TINY_REF_SEQ + 'NNNNN'
-        matches = match_query_to_genes(query, [gene_fwd])
+        matches = match_query_to_features(query, [feature_fwd])
 
         variants = [
             VariantCall(chrom='c', pos=2, ref='N', alt='A', allele_freq=0.5, depth=50),
@@ -350,10 +350,10 @@ class TestRemapVariants:
         assert len(remapped) == 1
         assert remapped[0].pos == 3
 
-    def test_preserves_allele_freq_and_depth(self, gene_fwd: GeneRecord) -> None:
+    def test_preserves_allele_freq_and_depth(self, feature_fwd: FeatureRecord) -> None:
         """AF and depth should be carried through from the original variant."""
         query = TINY_REF_SEQ
-        matches = match_query_to_genes(query, [gene_fwd])
+        matches = match_query_to_features(query, [feature_fwd])
 
         variants = [
             VariantCall(
@@ -367,10 +367,10 @@ class TestRemapVariants:
         assert remapped[0].allele_freq == pytest.approx(0.42)
         assert remapped[0].depth == 999
 
-    def test_snp_stores_query_ref_codon(self, gene_fwd: GeneRecord) -> None:
+    def test_snp_stores_query_ref_codon(self, feature_fwd: FeatureRecord) -> None:
         """SNP remapping stores the query codon for downstream SNP annotation."""
         query = TINY_REF_SEQ
-        matches = match_query_to_genes(query, [gene_fwd])
+        matches = match_query_to_features(query, [feature_fwd])
 
         variants = [
             VariantCall(chrom='c', pos=3, ref='A', alt='G', allele_freq=0.4, depth=20),
@@ -382,7 +382,7 @@ class TestRemapVariants:
 
     def test_snp_stores_query_ref_codon_for_reverse_match(self) -> None:
         """Reverse-strand matches must reconstruct query codon in CDS orientation."""
-        gene_rev = GeneRecord(
+        feature_rev = FeatureRecord(
             id=1,
             reference_id=1,
             name='rev',
@@ -395,8 +395,8 @@ class TestRemapVariants:
         )
         query = 'TTTCAT'  # reverse complement of ATGAAA
         matches = [
-            GeneMatch(
-                gene=gene_rev,
+            FeatureMatch(
+                feature=feature_rev,
                 identity=1.0,
                 cds_coverage=1.0,
                 query_coverage=1.0,
@@ -436,7 +436,7 @@ class TestResolveFastaReference:
         assert name == 'user_ref'
         assert seq == TINY_REF_SEQ
         assert len(matches) >= 1
-        assert matches[0].gene.name == 'gag'
+        assert matches[0].feature.name == 'gag'
 
         # Second call should hit cache
         name2, seq2, matches2 = resolve_fasta_query(
@@ -492,7 +492,7 @@ class TestResolveCachedQueryReference:
         assert name == 'stored_ref'
         assert seq == TINY_REF_SEQ
         assert len(matches) >= 1
-        assert matches[0].gene.name == 'gag'
+        assert matches[0].feature.name == 'gag'
         conn.close()
 
     def test_unknown_header_lists_available_cached_headers(self, fasta_db: Path, tmp_path: Path) -> None:
@@ -514,14 +514,14 @@ class TestResolveCachedQueryReference:
         )
         conn.commit()
 
-        with pytest.raises(ValueError, match='no cached gene mappings'):
+        with pytest.raises(ValueError, match='no cached feature mappings'):
             resolve_cached_query_reference(conn, 'orphan_ref')
         conn.close()
 
     def test_ambiguous_header_raises(self, fasta_db: Path) -> None:
         conn = open_project_db(fasta_db)
-        genes = [
-            GeneRecord(
+        features = [
+            FeatureRecord(
                 id=1,
                 reference_id=1,
                 name='gag',
@@ -535,8 +535,8 @@ class TestResolveCachedQueryReference:
         ]
         query_one = TINY_REF_SEQ
         query_two = 'NNNNN' + TINY_REF_SEQ + 'NNNNN'
-        matches_one = match_query_to_genes(query_one, genes)
-        matches_two = match_query_to_genes(query_two, genes)
+        matches_one = match_query_to_features(query_one, features)
+        matches_two = match_query_to_features(query_two, features)
         store_mappings(conn, 'dup_ref', query_one, sequence_checksum(query_one), matches_one)
         store_mappings(conn, 'dup_ref', query_two, sequence_checksum(query_two), matches_two)
 
@@ -557,30 +557,30 @@ class TestFastaCacheRegression:
             'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
             (1, 'ref1', 18),
         )
-        gene_nt = 'ATGCAAGTCGGAAACTAA'
+        feature_nt = 'ATGCAAGTCGGAAACTAA'
         conn.execute(
-            'INSERT INTO gene (reference_id, name, protein, start, end, strand, nt_sequence) '
+            'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
             'VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (1, 'minus_gene', 'Minus', 0, 18, '-', gene_nt),
+            (1, 'minus_feature', 'Minus', 0, 18, '-', feature_nt),
         )
-        conn.execute('UPDATE gene SET codon_start = ? WHERE id = ?', (1, 1))
+        conn.execute('UPDATE feature SET codon_start = ? WHERE id = ?', (1, 1))
         conn.commit()
 
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
-            name='minus_gene',
+            name='minus_feature',
             protein='Minus',
             start=0,
             end=18,
             strand='-',
             codon_start=1,
-            nt_sequence=gene_nt,
+            nt_sequence=feature_nt,
         )
-        coding_region = 'NNNNN' + gene_nt[6:]
+        coding_region = 'NNNNN' + feature_nt[6:]
         query_seq = str(Seq(coding_region).reverse_complement())
-        direct_match = GeneMatch(
-            gene=gene,
+        direct_match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=12 / 18,
             query_coverage=1.0,
@@ -608,8 +608,8 @@ class TestFastaCacheRegression:
         uncached_signature = sorted((v.pos, v.ref, v.alt) for v in uncached_variants)
         cached_signature = sorted((v.pos, v.ref, v.alt) for v in cached_variants)
         assert cached_signature == uncached_signature
-        assert [(g.gene_name, g.codon_start, g.codon_end) for g in cached_gaps] == [
-            (g.gene_name, g.codon_start, g.codon_end) for g in uncached_gaps
+        assert [(g.feature_name, g.codon_start, g.codon_end) for g in cached_gaps] == [
+            (g.feature_name, g.codon_start, g.codon_end) for g in uncached_gaps
         ]
         assert not any(len(v.alt) > len(v.ref) for v in cached_variants)
 
@@ -641,7 +641,7 @@ class TestProfileFastaCli:
     def test_fasta_profile_uses_metadata_of_matched_reference(
         self, fasta_db_multi_reference: Path, tmp_path: Path,
     ) -> None:
-        """Report metadata should come from the reference of the matched gene."""
+        """Report metadata should come from the reference of the matched feature."""
         fasta_path = tmp_path / 'user_ref_b.fasta'
         query = 'CCCCGGGAAATTTCCCGGGAAATTTCCCGG'
         fasta_path.write_text(f'>user_ref_b\n{query}\n')
@@ -769,9 +769,9 @@ class TestProfileFastaCli:
 _SIMPLE_CDS = 'ATGAAAGCTTAA'
 
 @pytest.fixture()
-def simple_gene() -> GeneRecord:
-    """Minimal 4-codon gene for FASTA consensus profiling tests."""
-    return GeneRecord(
+def simple_feature() -> FeatureRecord:
+    """Minimal 4-codon feature for FASTA consensus profiling tests."""
+    return FeatureRecord(
         id=1, reference_id=1, name='gag', protein='Gag',
         start=0, end=12, strand='+', codon_start=0,
         nt_sequence=_SIMPLE_CDS,
@@ -781,7 +781,7 @@ def simple_gene() -> GeneRecord:
 class TestFastaToVcf:
     def test_compacts_consecutive_deletion_run_into_single_variant(
         self,
-        simple_gene: GeneRecord,
+        simple_feature: FeatureRecord,
     ) -> None:
         """A contiguous 3-nt deletion run should emit one compacted deletion variant."""
         aligned_ref = 'ATGAAAGCTTAA'
@@ -790,7 +790,7 @@ class TestFastaToVcf:
         variants, gaps = _variants_from_alignment(
             aligned_ref,
             aligned_query,
-            simple_gene,
+            simple_feature,
             covered_cds_start=0,
             covered_cds_end=12,
         )
@@ -802,7 +802,7 @@ class TestFastaToVcf:
         assert deletion.ref == 'GAAA'
         assert deletion.alt == 'G'
 
-    def test_iupac_snp_emits_fractional_variants(self, simple_gene: GeneRecord) -> None:
+    def test_iupac_snp_emits_fractional_variants(self, simple_feature: FeatureRecord) -> None:
         """IUPAC bases should split into per-base alternatives with fractional AF."""
         aligned_ref = 'ATGAAAGCTTAA'
         aligned_query = 'ATGRAAGCTTAA'
@@ -810,7 +810,7 @@ class TestFastaToVcf:
         variants, gaps = _variants_from_alignment(
             aligned_ref,
             aligned_query,
-            simple_gene,
+            simple_feature,
             covered_cds_start=0,
             covered_cds_end=12,
         )
@@ -825,7 +825,7 @@ class TestFastaToVcf:
 
     def test_full_n_codon_is_coverage_gap_and_not_emitted_as_variants(
         self,
-        simple_gene: GeneRecord,
+        simple_feature: FeatureRecord,
     ) -> None:
         """A full NNN codon should be marked as uncovered and skipped for variant emission."""
         aligned_ref = 'ATGAAAGCTTAA'
@@ -834,20 +834,20 @@ class TestFastaToVcf:
         variants, gaps = _variants_from_alignment(
             aligned_ref,
             aligned_query,
-            simple_gene,
+            simple_feature,
             covered_cds_start=0,
             covered_cds_end=12,
         )
 
         assert variants == []
         assert len(gaps) == 1
-        assert gaps[0].gene_name == simple_gene.name
+        assert gaps[0].feature_name == simple_feature.name
         assert gaps[0].codon_start == 1
         assert gaps[0].codon_end == 1
 
     def test_partial_n_codon_remains_assessable_for_iupac_variants(
         self,
-        simple_gene: GeneRecord,
+        simple_feature: FeatureRecord,
     ) -> None:
         """Partial ambiguity (e.g. AAN) should stay assessable and emit IUPAC SNP variants."""
         aligned_ref = 'ATGAAAGCTTAA'
@@ -856,7 +856,7 @@ class TestFastaToVcf:
         variants, gaps = _variants_from_alignment(
             aligned_ref,
             aligned_query,
-            simple_gene,
+            simple_feature,
             covered_cds_start=0,
             covered_cds_end=12,
         )
@@ -870,7 +870,7 @@ class TestFastaToVcf:
 
     def test_minus_strand_insertion_keeps_anchor_first_in_genomic_orientation(self) -> None:
         """Minus-strand insertion should emit VCF-style REF/ALT with anchor at ALT start."""
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='rev',
@@ -888,7 +888,7 @@ class TestFastaToVcf:
         variants, gaps = _variants_from_alignment(
             aligned_ref,
             aligned_query,
-            gene,
+            feature,
             covered_cds_start=0,
             covered_cds_end=6,
         )
@@ -902,7 +902,7 @@ class TestFastaToVcf:
 
     def test_insertion_uses_reference_anchor_even_if_query_anchor_is_snp(
         self,
-        simple_gene: GeneRecord,
+        simple_feature: FeatureRecord,
     ) -> None:
         """Insertion REF/ALT must remain reference-anchored even with anchor SNP in query."""
         aligned_ref = 'ATGA-AAGCTTAA'
@@ -911,7 +911,7 @@ class TestFastaToVcf:
         variants, gaps = _variants_from_alignment(
             aligned_ref,
             aligned_query,
-            simple_gene,
+            simple_feature,
             covered_cds_start=0,
             covered_cds_end=12,
         )
@@ -926,7 +926,7 @@ class TestFastaToVcf:
 
     def test_minus_strand_deletion_keeps_anchor_first_in_genomic_orientation(self) -> None:
         """Minus-strand deletion should emit VCF-style REF/ALT with anchor at REF start."""
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='rev',
@@ -944,7 +944,7 @@ class TestFastaToVcf:
         variants, gaps = _variants_from_alignment(
             aligned_ref,
             aligned_query,
-            gene,
+            feature,
             covered_cds_start=0,
             covered_cds_end=8,
         )
@@ -958,7 +958,7 @@ class TestFastaToVcf:
 
     def test_deletion_uses_reference_anchor_even_if_query_anchor_is_snp(
         self,
-        simple_gene: GeneRecord,
+        simple_feature: FeatureRecord,
     ) -> None:
         """Deletion REF/ALT must remain reference-anchored even with anchor SNP in query."""
         aligned_ref = 'ATGAAAGCTTAA'
@@ -967,7 +967,7 @@ class TestFastaToVcf:
         variants, gaps = _variants_from_alignment(
             aligned_ref,
             aligned_query,
-            simple_gene,
+            simple_feature,
             covered_cds_start=0,
             covered_cds_end=12,
         )
@@ -1082,7 +1082,7 @@ class TestReverseStrandMappyParity:
         coding_query: str,
     ) -> list[tuple[int, str, str, str]]:
         query = str(Seq(coding_query).reverse_complement())
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='rev',
@@ -1095,9 +1095,9 @@ class TestReverseStrandMappyParity:
             aa_sequence='',
         )
 
-        matches = match_query_to_genes(
+        matches = match_query_to_features(
             query,
-            [gene],
+            [feature],
             min_identity=0.7,
         )
         assert len(matches) == 1
@@ -1105,7 +1105,7 @@ class TestReverseStrandMappyParity:
 
         variants, gaps = fasta_to_vcf(query, [matches[0]])
         assert gaps == []
-        annotations = annotate_variants(variants, [gene], is_fasta_mode=True)
+        annotations = annotate_variants(variants, [feature], is_fasta_mode=True)
         return [
             (ann.codon_pos, ann.consequence, ann.ref_aa, ann.alt_aa)
             for ann in annotations
@@ -1146,7 +1146,7 @@ class TestReverseStrandMappyParity:
         Verify that FASTA-profiled minus-strand variants are assessed in internal
         reference coordinates (like VCF mode).
 
-        For a minus-strand gene, nt_sequence is stored in coding (5'→3') orientation.
+        For a minus-strand feature, nt_sequence is stored in coding (5'→3') orientation.
        When we profile a query on minus strand, aligned_ref and aligned_query are
         built relative to this internal coding sequence, independent of the
         actual genomic orientation.
@@ -1157,17 +1157,17 @@ class TestReverseStrandMappyParity:
         # Create mutation in internal frame: codon 1 CAA → AAG (Q → K)
         internal_variant = 'ATGAAGGTCGGAAACTAA'
 
-        # Create a genomic RC query (how it appears when matching to minus-strand gene)
+        # Create a genomic RC query (how it appears when matching to minus-strand feature)
         query_on_minus_strand = str(Seq(internal_variant).reverse_complement())
 
-        # After matching and reverse-complement handling in _profile_gene_to_variants,
+        # After matching and reverse-complement handling in _profile_feature_to_variants,
         # the region gets reverse-complemented back to coding orientation
         region_in_coding_orientation = str(Seq(query_on_minus_strand).reverse_complement())
         assert region_in_coding_orientation == internal_variant
 
-        # Create gene with internal ref
-        gene = GeneRecord(
-            id=1, reference_id=1, name='minus_gene', protein='Test',
+        # Create feature with internal ref
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='minus_feature', protein='Test',
             start=0, end=18, strand='-', codon_start=0,
             nt_sequence=internal_ref,
         )
@@ -1180,13 +1180,13 @@ class TestReverseStrandMappyParity:
         variants, gaps = _variants_from_alignment(
             aligned_ref,
             aligned_query,
-            gene,
+            feature,
             covered_cds_start=0,
             covered_cds_end=18,
         )
 
         # Annotate the variants
-        annotations = annotate_variants(variants, [gene], is_fasta_mode=True)
+        annotations = annotate_variants(variants, [feature], is_fasta_mode=True)
 
         # Must detect Q→K at codon 1 in the internal reference frame
         aa_changes = [(a.codon_pos, a.ref_aa, a.alt_aa) for a in annotations]

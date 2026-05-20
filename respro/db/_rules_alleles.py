@@ -256,12 +256,12 @@ def _resolve_anchorless_deletion(
     Resolve an anchor-less deletion token to canonical form.
 
     The anchor residue is the AA immediately preceding the deleted block.  It is
-    fetched from the gene sequence and used to build the canonical deletion token
+    fetched from the feature sequence and used to build the canonical deletion token
     ``ANCHOR + DELETED_BLOCK + ANCHOR_POS_1BASED + ANCHOR``.
 
     :param deleted_block: uppercase deleted AA block (e.g. ``'Q'`` or ``'DD'``)
-    :param position_0based: 0-based start index of the deletion in the gene sequence
-    :param aa_seq: amino-acid sequence of the gene
+    :param position_0based: 0-based start index of the deletion in the feature sequence
+    :param aa_seq: amino-acid sequence of the feature
     :return: ``(anchor_position_0based, anchor_aa, canonical_mutation)`` or ``None``
              when the anchor cannot be resolved (position 0, or block mismatch)
     """
@@ -275,7 +275,7 @@ def _resolve_anchorless_deletion(
 
     actual_block = aa_seq[position_0based:end_idx].upper()
     if actual_block != deleted_block.upper():
-        return None  # gene sequence does not match claimed deleted block
+        return None  # feature sequence does not match claimed deleted block
 
     anchor_aa = aa_seq[anchor_idx].upper()
     anchor_pos_1based = anchor_idx + 1

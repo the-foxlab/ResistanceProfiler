@@ -354,7 +354,7 @@ export function useDashboardLogic() {
   const [formulaFilterColumn, setFormulaFilterColumn] = useState('-1');
   const [mutationColumnKeys, setMutationColumnKeys] = useState([]);
   const [formulaColumnKeys, setFormulaColumnKeys] = useState([]);
-  const [mutationPlotMeta, setMutationPlotMeta] = useState({ references: [], genes: [] });
+  const [mutationPlotMeta, setMutationPlotMeta] = useState({ references: [], features: [] });
   const [mutationsLoaded, setMutationsLoaded] = useState(false);
   const [activeMode, setActiveMode] = useState('profile');
   const [activeProfileMode, setActiveProfileMode] = useState('vcf');
@@ -427,7 +427,7 @@ export function useDashboardLogic() {
         const formulaItems = payload.data.formula_items || [];
         const formulaColumns = payload.data.formula_columns
           || (formulaItems.length > 0 ? Object.keys(formulaItems[0]) : []);
-        const plotMeta = payload.data.plot_meta || { references: [], genes: [] };
+        const plotMeta = payload.data.plot_meta || { references: [], features: [] };
         setRules(items);
         setFormulaRules(formulaItems);
         setMutationColumnKeys(columns);

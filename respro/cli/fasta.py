@@ -119,10 +119,10 @@ def _profile_fasta_command(
         ref_id, ref_name, fasta_matches = _resolve_reference(
             project_conn, fasta_matches, query_name, logger,
         )
-        genes, rules, formula_rules, rule_gene_names = _load_reference_data(project_conn, ref_id)
+        features, rules, formula_rules, rule_feature_names = _load_reference_data(project_conn, ref_id)
 
         variants, coverage_gaps = fasta_to_vcf(query_seq, fasta_matches)
-        annotations = annotate_variants(variants, genes, is_fasta_mode=True)
+        annotations = annotate_variants(variants, features, is_fasta_mode=True)
 
         if coverage_gaps:
             total_non_covered = sum(gap.codon_end - gap.codon_start + 1 for gap in coverage_gaps)
@@ -143,14 +143,14 @@ def _profile_fasta_command(
         ctx = _ProfilingRunContext(
             annotations=annotations,
             formula_rules=formula_rules,
-            genes=genes,
-            rule_gene_names=rule_gene_names,
+            features=features,
+            rule_feature_names=rule_feature_names,
             rules=rules,
             total_variants=len(annotations),
             variants_in_cds=len(annotations),
             coverage_gaps=coverage_gaps or [],
             query_sequence=query_seq,
-            gene_matches=fasta_matches or [],
+            feature_matches=fasta_matches or [],
             af_bins=fasta_af_bins,
         )
         result, outputs = _finalize_and_export(

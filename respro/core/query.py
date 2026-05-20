@@ -11,12 +11,12 @@ from pathlib import Path
 
 from respro.core.alignment import (
     load_cached_mappings,
-    load_genes_with_rules,
-    match_query_to_genes,
+    load_features_with_rules,
+    match_query_to_features,
     sequence_checksum,
     store_mappings,
 )
-from respro.db.models import GeneMatch
+from respro.db.models import FeatureMatch
 from respro.io.reference import read_fasta
 
 logger = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ def resolve_fasta_query(
     min_identity: float = 0.9,
     use_cache: bool = True,
     threads: int = 1,
-) -> tuple[str, str, list[GeneMatch]]:
+) -> tuple[str, str, list[FeatureMatch]]:
     """
     Read a user FASTA and align to internal CDS annotations.
 
@@ -37,8 +37,8 @@ def resolve_fasta_query(
     :param fasta_path: path to single-record user FASTA
     :param min_identity: minimum nucleotide identity
     :param use_cache: if True, reuse/store mapping cache in project DB
-    :param threads: number of worker processes for parallel gene alignment
-    :return: (query_name, query_sequence, gene_matches)
+    :param threads: number of worker processes for parallel feature alignment
+    :return: (query_name, query_sequence, feature_matches)
     """
     seqs = read_fasta(fasta_path)
     if not seqs:
@@ -58,15 +58,15 @@ def resolve_fasta_query(
     if use_cache:
         cached = _load_cached_query_matches(conn, query_name, query_seq, chk)
         if cached is not None:
-            logger.info('Using cached gene mappings for %r', query_name)
+            logger.info('Using cached feature mappings for %r', query_name)
             return query_name, query_seq, cached
 
-    genes = load_genes_with_rules(conn)
-    if not genes:
-        raise ValueError('No genes with resistance rules in project database')
+    features = load_features_with_rules(conn)
+    if not features:
+        raise ValueError('No features with resistance rules in project database')
 
-    matches = match_query_to_genes(
-        query_seq, genes,
+    matches = match_query_to_features(
+        query_seq, features,
         min_identity=min_identity,
         threads=threads,
     )
@@ -84,13 +84,13 @@ def resolve_fasta_query(
 def resolve_cached_query_reference(
     conn: sqlite3.Connection,
     query_header: str,
-) -> tuple[str, str, list[GeneMatch]]:
+) -> tuple[str, str, list[FeatureMatch]]:
     """
     Reuse a previously stored query reference by its header.
 
     :param conn: project database connection
     :param query_header: exact stored query header
-    :return: (query_name, query_sequence, gene_matches)
+    :return: (query_name, query_sequence, feature_matches)
     """
     header = query_header.strip()
     if not header:
@@ -115,7 +115,7 @@ def resolve_cached_query_reference(
             'No cached query-reference mappings are available in this project database.'
         )
 
-    cached_rows: list[tuple[sqlite3.Row, list[GeneMatch]]] = []
+    cached_rows: list[tuple[sqlite3.Row, list[FeatureMatch]]] = []
     for row in rows:
         matches = load_cached_mappings(conn, row['checksum'])
         if matches:
@@ -123,7 +123,7 @@ def resolve_cached_query_reference(
 
     if not cached_rows:
         raise ValueError(
-            f'Stored query reference header {header!r} exists, but no cached gene mappings '
+            f'Stored query reference header {header!r} exists, but no cached feature mappings '
             'are available for it. Re-run profiling once with --ref-fasta to create them.'
         )
 
@@ -142,40 +142,40 @@ def resolve_cached_query_reference(
     return row['name'], row['sequence'], matches
 
 
-def pick_best_reference_id(matches: list[GeneMatch]) -> int:
+def pick_best_reference_id(matches: list[FeatureMatch]) -> int:
     """
-    Select the most likely internal reference from FASTA gene matches.
+    Select the most likely internal reference from FASTA feature matches.
 
-    The best single gene match defines the reference. Sorting keys are:
-    identity desc, cds_coverage desc, query_coverage desc, gene name asc (lexicographic).
+    The best single feature match defines the reference. Sorting keys are:
+    identity desc, cds_coverage desc, query_coverage desc, feature name asc (lexicographic).
 
-    :param matches: accepted gene matches
+    :param matches: accepted feature matches
     :return: internal reference id
     """
     if not matches:
-        raise ValueError('No FASTA gene matches available for reference selection')
+        raise ValueError('No FASTA feature matches available for reference selection')
 
     best = min(
         matches,
-        key=lambda m: (-m.identity, -m.cds_coverage, -m.query_coverage, m.gene.name),
+        key=lambda m: (-m.identity, -m.cds_coverage, -m.query_coverage, m.feature.name),
     )
-    return best.gene.reference_id
+    return best.feature.reference_id
 
 
 def select_matches_for_reference(
-    matches: list[GeneMatch],
+    matches: list[FeatureMatch],
     reference_id: int,
-) -> list[GeneMatch]:
+) -> list[FeatureMatch]:
     """
     Keep only matches belonging to one internal reference.
 
-    :param matches: gene matches from FASTA alignment
+    :param matches: feature matches from FASTA alignment
     :param reference_id: selected internal reference id
     :return: filtered matches for the selected reference
     """
-    selected = [match for match in matches if match.gene.reference_id == reference_id]
+    selected = [match for match in matches if match.feature.reference_id == reference_id]
     if not selected:
-        raise ValueError(f'No FASTA gene matches for reference_id={reference_id}')
+        raise ValueError(f'No FASTA feature matches for reference_id={reference_id}')
     return selected
 
 
@@ -184,7 +184,7 @@ def _load_cached_query_matches(
     query_name: str,
     query_sequence: str,
     checksum: str,
-) -> list[GeneMatch] | None:
+) -> list[FeatureMatch] | None:
     """
     Reuse cached mappings if the query is already known by checksum or header.
 
@@ -215,11 +215,11 @@ def _load_cached_query_matches(
 
 
 def _list_cached_query_headers(conn: sqlite3.Connection) -> list[str]:
-    """Return stored query headers that already have cached gene mappings."""
+    """Return stored query headers that already have cached feature mappings."""
     rows = conn.execute(
         'SELECT DISTINCT qr.name '
         'FROM query_reference qr '
-        'JOIN query_gene_mapping qgm ON qgm.query_ref_id = qr.id '
+        'JOIN query_feature_mapping qgm ON qgm.query_ref_id = qr.id '
         'ORDER BY qr.name'
     ).fetchall()
     return [row['name'] for row in rows if (row['name'] or '').strip()]

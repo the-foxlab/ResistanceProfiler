@@ -219,7 +219,7 @@ function _buildMutationsPerGenePie(rules) {
   const counts = new Map();
 
   rules.forEach((rule) => {
-    const geneName = _displayValue(rule.gene, 'Unknown gene');
+    const geneName = _displayValue(rule.feature, 'Unknown gene');
     counts.set(geneName, (counts.get(geneName) || 0) + 1);
   });
 
@@ -232,7 +232,7 @@ function _buildMutationsPerGenePie(rules) {
     key: 'mutations-per-gene',
     title: 'Mutations per Gene',
     total: counts.size,
-    centerLabel: 'genes',
+    centerLabel: 'features',
     slices: _limitPieSlices(ordered),
   };
 }
@@ -331,12 +331,12 @@ function _buildReferenceLookup(plotMeta) {
 
 function _buildGeneLengthLookup(plotMeta) {
   // Amino-acid lengths are used to build bins with consistent x-axis semantics.
-  const genes = Array.isArray(plotMeta?.genes) ? plotMeta.genes : [];
+  const features = Array.isArray(plotMeta?.features) ? plotMeta.features : [];
   const lookup = new Map();
-  genes.forEach((gene) => {
-    const referenceName = _displayValue(gene.reference_name, 'Unknown reference');
-    const geneName = _displayValue(gene.gene_name, 'Unknown gene');
-    const aaLength = Number(gene.aa_length);
+  features.forEach((feature) => {
+    const referenceName = _displayValue(feature.reference_name, 'Unknown reference');
+    const geneName = _displayValue(feature.feature_name, 'Unknown gene');
+    const aaLength = Number(feature.aa_length);
     if (!Number.isFinite(aaLength) || aaLength <= 0) {
       return;
     }
@@ -597,7 +597,7 @@ function _buildGenePositionSections(rules, plotMeta, phenotypeMode, binSize) {
     }
 
     const referenceName = _displayValue(rule.reference_name, 'Unknown reference');
-    const geneName = _displayValue(rule.gene, 'Unknown gene');
+    const geneName = _displayValue(rule.feature, 'Unknown gene');
     const groupKey = `${referenceName}::${geneName}`;
     if (!groupMap.has(groupKey)) {
       const referenceMeta = referenceLookup.get(referenceName);

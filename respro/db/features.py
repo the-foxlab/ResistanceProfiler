@@ -1,5 +1,5 @@
 """
-Gene and reference loading — insert or reuse GenBank-derived rows in the project database.
+Feature and reference loading — insert or reuse GenBank-derived rows in the project database.
 """
 
 from __future__ import annotations
@@ -9,7 +9,11 @@ import re
 import sqlite3
 
 from respro.config.cli_settings import CLI_CONFIG
-from respro.io.genbank import ParsedGenBankGene, ParsedGenBankReference, validate_strand
+from respro.io.genbank import (
+    ParsedGenBankFeature,
+    ParsedGenBankReference,
+    validate_strand,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +32,7 @@ def _load_genbank_records(
     records: list[ParsedGenBankReference],
 ) -> None:
     """
-    Load references and CDS/gene annotations from parsed GenBank records.
+    Load references and CDS/feature annotations from parsed GenBank records.
 
     :param conn: SQLite database connection
     :param project_id: ID of the project
@@ -36,8 +40,8 @@ def _load_genbank_records(
     """
     inserted_refs = 0
     reused_refs = 0
-    inserted_genes = 0
-    reused_genes = 0
+    inserted_features = 0
+    reused_features = 0
     ncbi_protein_url_cache: dict[str, str] = {}
 
     for record in records:
@@ -47,25 +51,25 @@ def _load_genbank_records(
         else:
             reused_refs += 1
 
-        for gene in record.genes:
-            gene_id, created_gene = _get_or_create_gene(
+        for feature in record.features:
+            feature_id, created_feature = _get_or_create_feature(
                 conn,
                 reference_id,
-                gene,
+                feature,
                 ncbi_protein_url_cache=ncbi_protein_url_cache,
             )
-            _upsert_gene_segments(conn, gene_id, gene.segments)
-            if created_gene:
-                inserted_genes += 1
+            _upsert_feature_segments(conn, feature_id, feature.segments)
+            if created_feature:
+                inserted_features += 1
             else:
-                reused_genes += 1
+                reused_features += 1
 
     logger.info(
-        'Loaded GenBank data: references +%d (reused %d), genes +%d (reused %d)',
+        'Loaded GenBank data: references +%d (reused %d), features +%d (reused %d)',
         inserted_refs,
         reused_refs,
-        inserted_genes,
-        reused_genes,
+        inserted_features,
+        reused_features,
     )
 
 
@@ -140,115 +144,140 @@ def _get_or_create_reference_id(
     return int(existing['id']), False
 
 
-def _get_or_create_gene(
+def _get_or_create_feature(
     conn: sqlite3.Connection,
     reference_id: int,
-    gene: ParsedGenBankGene,
+    feature: ParsedGenBankFeature,
     *,
     ncbi_protein_url_cache: dict[str, str],
 ) -> tuple[int, bool]:
-    """Insert a gene row or validate that an existing one is compatible."""
+    """Insert a feature row or validate that an existing one is compatible."""
     conn.row_factory = sqlite3.Row
     existing = conn.execute(
         'SELECT start, end, strand, codon_start, nt_sequence, aa_sequence, protein, '
-        'protein_id, ncbi_protein_url, locus_tag, note '
-        'FROM gene WHERE reference_id = ? AND name = ?',
-        (reference_id, gene.gene_name),
+        'protein_id, ncbi_protein_url, locus_tag, note, feature_type, parent_feature_name '
+        'FROM feature WHERE reference_id = ? AND name = ?',
+        (reference_id, feature.feature_name),
     ).fetchone()
 
-    strand = validate_strand(gene.strand)
-    ncbi_protein_url = _resolve_ncbi_protein_url(gene.protein_id, ncbi_protein_url_cache)
+    strand = validate_strand(feature.strand)
+    ncbi_protein_url = _resolve_ncbi_protein_url(feature.protein_id, ncbi_protein_url_cache)
     if existing is None:
         cur = conn.execute(
-            'INSERT INTO gene '
+            'INSERT INTO feature '
             '(reference_id, name, protein, protein_id, ncbi_protein_url, locus_tag, note, '
-            'start, end, strand, codon_start, nt_sequence, aa_sequence) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'start, end, strand, codon_start, nt_sequence, aa_sequence, feature_type, parent_feature_name) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 reference_id,
-                gene.gene_name,
-                gene.protein,
-                gene.protein_id,
+                feature.feature_name,
+                feature.protein,
+                feature.protein_id,
                 ncbi_protein_url,
-                gene.locus_tag,
-                gene.note,
-                gene.start,
-                gene.end,
+                feature.locus_tag,
+                feature.note,
+                feature.start,
+                feature.end,
                 strand,
-                gene.codon_start,
-                gene.nt_sequence,
-                gene.aa_sequence,
+                feature.codon_start,
+                feature.nt_sequence,
+                feature.aa_sequence,
+                feature.feature_type,
+                feature.parent_feature_name,
             ),
         )
         return int(cur.lastrowid), True
 
-    same_gene = (
-        int(existing['start']) == gene.start
-        and int(existing['end']) == gene.end
+    same_feature = (
+        int(existing['start']) == feature.start
+        and int(existing['end']) == feature.end
         and existing['strand'] == strand
-        and int(existing['codon_start']) == gene.codon_start
-        and (existing['nt_sequence'] or '') == gene.nt_sequence
-        and (existing['aa_sequence'] or '') == gene.aa_sequence
+        and int(existing['codon_start']) == feature.codon_start
+        and (existing['nt_sequence'] or '') == feature.nt_sequence
+        and (existing['aa_sequence'] or '') == feature.aa_sequence
+        and (existing['feature_type'] or 'CDS') == feature.feature_type
+        and (existing['parent_feature_name'] or '') == feature.parent_feature_name
     )
-    if not same_gene:
-        raise ValueError(
-            f'Gene {gene.gene_name!r} already exists for this reference with different '
-            'coordinates/sequence; refusing to append incompatible data'
+    if not same_feature:
+        can_fill_parent_feature_name = (
+            (existing['parent_feature_name'] or '').strip() == ''
+            and feature.parent_feature_name
+            and int(existing['start']) == feature.start
+            and int(existing['end']) == feature.end
+            and existing['strand'] == strand
+            and int(existing['codon_start']) == feature.codon_start
+            and (existing['nt_sequence'] or '') == feature.nt_sequence
+            and (existing['aa_sequence'] or '') == feature.aa_sequence
+            and (existing['feature_type'] or 'CDS') == feature.feature_type
         )
+        if can_fill_parent_feature_name:
+            conn.execute(
+                'UPDATE feature SET parent_feature_name = ? WHERE reference_id = ? AND name = ?',
+                (feature.parent_feature_name, reference_id, feature.feature_name),
+            )
+        else:
+            raise ValueError(
+                f'Feature {feature.feature_name!r} already exists for this reference with different '
+                'coordinates/sequence; refusing to append incompatible data'
+            )
 
     update_needed = False
-    if not (existing['protein'] or '').strip() and gene.protein:
+    if not (existing['protein'] or '').strip() and feature.protein:
         update_needed = True
-    if not (existing['protein_id'] or '').strip() and gene.protein_id:
+    if not (existing['protein_id'] or '').strip() and feature.protein_id:
         update_needed = True
     if not (existing['ncbi_protein_url'] or '').strip() and ncbi_protein_url:
         update_needed = True
-    if not (existing['locus_tag'] or '').strip() and gene.locus_tag:
+    if not (existing['locus_tag'] or '').strip() and feature.locus_tag:
         update_needed = True
-    if not (existing['note'] or '').strip() and gene.note:
+    if not (existing['note'] or '').strip() and feature.note:
+        update_needed = True
+    if not (existing['parent_feature_name'] or '').strip() and feature.parent_feature_name:
         update_needed = True
 
     if update_needed:
         conn.execute(
-            'UPDATE gene SET protein = ?, protein_id = ?, ncbi_protein_url = ?, locus_tag = ?, note = ? '
+            'UPDATE feature SET protein = ?, protein_id = ?, ncbi_protein_url = ?, locus_tag = ?, note = ?, '
+            'parent_feature_name = ? '
             'WHERE reference_id = ? AND name = ?',
             (
-                (existing['protein'] or '').strip() or gene.protein,
-                (existing['protein_id'] or '').strip() or gene.protein_id,
+                (existing['protein'] or '').strip() or feature.protein,
+                (existing['protein_id'] or '').strip() or feature.protein_id,
                 (existing['ncbi_protein_url'] or '').strip() or ncbi_protein_url,
-                (existing['locus_tag'] or '').strip() or gene.locus_tag,
-                (existing['note'] or '').strip() or gene.note,
+                (existing['locus_tag'] or '').strip() or feature.locus_tag,
+                (existing['note'] or '').strip() or feature.note,
+                (existing['parent_feature_name'] or '').strip() or feature.parent_feature_name,
                 reference_id,
-                gene.gene_name,
+                feature.feature_name,
             ),
         )
 
     row = conn.execute(
-        'SELECT id FROM gene WHERE reference_id = ? AND name = ?',
-        (reference_id, gene.gene_name),
+        'SELECT id FROM feature WHERE reference_id = ? AND name = ?',
+        (reference_id, feature.feature_name),
     ).fetchone()
     if row is None:
-        raise ValueError(f'Gene {gene.gene_name!r} could not be reloaded after lookup')
+        raise ValueError(f'Feature {feature.feature_name!r} could not be reloaded after lookup')
     return int(row['id']), False
 
 
-def _upsert_gene_segments(
+def _upsert_feature_segments(
     conn: sqlite3.Connection,
-    gene_id: int,
+    feature_id: int,
     segments: tuple[tuple[int, int], ...],
 ) -> None:
-    """Insert or validate persisted CDS segment rows for one gene."""
+    """Insert or validate persisted CDS segment rows for one feature."""
     expected = [(idx, start, end) for idx, (start, end) in enumerate(segments)]
     existing = conn.execute(
-        'SELECT segment_index, start, end FROM gene_segment WHERE gene_id = ? '
+        'SELECT segment_index, start, end FROM feature_segment WHERE feature_id = ? '
         'ORDER BY segment_index',
-        (gene_id,),
+        (feature_id,),
     ).fetchall()
 
     if not existing:
         conn.executemany(
-            'INSERT INTO gene_segment (gene_id, segment_index, start, end) VALUES (?, ?, ?, ?)',
-            [(gene_id, idx, start, end) for idx, start, end in expected],
+            'INSERT INTO feature_segment (feature_id, segment_index, start, end) VALUES (?, ?, ?, ?)',
+            [(feature_id, idx, start, end) for idx, start, end in expected],
         )
         return
 
@@ -258,7 +287,7 @@ def _upsert_gene_segments(
     ]
     if existing_triplets != expected:
         raise ValueError(
-            f'Gene id {gene_id} already exists with different CDS segment coordinates; '
+            f'Feature id {feature_id} already exists with different CDS segment coordinates; '
             'refusing to append incompatible data'
         )
 

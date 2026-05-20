@@ -17,8 +17,7 @@ This document is the source of truth for curated rules TSV files used by `respro
 
 | Column                   | Meaning                          | Constraints                                                         |
 | ------------------------ | -------------------------------- | ------------------------------------------------------------------- |
-| `member_id`            | Stable atomic member identifier  | Required for rows that belong to a combination group (`group_id`) |
-| `gene`                 | CDS/gene name                    | Must match a gene loaded from GenBank                               |
+| `feature`              | CDS or mat_peptide feature name  | Must match a feature loaded from GenBank                            |
 | `reference_identifier` | Reference accession or name      | Must match a reference in the project DB                            |
 | `position`             | Amino-acid position              | File-wide 0-based or 1-based, auto-detected                         |
 | `reference`            | Reference amino acid at position | Checked against reference AA sequence                               |
@@ -27,20 +26,23 @@ This document is the source of truth for curated rules TSV files used by `respro
 
 ### Optional columns
 
-| Column                         | Meaning                               |
-| ------------------------------ | ------------------------------------- |
-| `phenotype`                  | Rule-level phenotype interpretation   |
-| `clinical_phenotype`         | Clinical interpretation field         |
-| `ic50` / `ic_50`           | Absolute IC50 value                   |
-| `fold_ic50` / `fold_ic_50` | Fold IC50 value                       |
-| `publication`                | DOI, PMID, or source publication text |
-| `source`                     | Provenance label                      |
-| `comment`                    | Free-text curator note                |
-| `group_id`                   | Combination group key                 |
-| `score`                      | Numeric quality/evidence score        |
+| Column                         | Meaning                               | Constraints                                            |
+| ------------------------------ | ------------------------------------- | ------------------------------------------------------ |
+| `phenotype`                  | Rule-level phenotype interpretation   |                                                        |
+| `clinical_phenotype`         | Clinical interpretation field         |                                                        |
+| `ic50` / `ic_50`           | Absolute IC50 value                   |                                                        |
+| `fold_ic50` / `fold_ic_50` | Fold IC50 value                       |                                                        |
+| `publication`                | DOI, PMID, or source publication text |                                                        |
+| `source`                     | Provenance label                      |                                                        |
+| `comment`                    | Free-text curator note                |                                                        |
+| `group_id`                   | Combination group key                 |                                                        |
+| `member_id`                  | Stable atomic member identifier       | Required only if `group_id` is present                 |
+| `score`                      | Numeric quality/evidence score        |                                                        |
 
 Notes:
 
+- Single rules (without `group_id`) do not require `member_id`.
+- `member_id` is only used when a row belongs to a combination group (`group_id` is present).
 - `member_id` values must be unique when provided.
 - `member_id` values must not use reserved boolean keywords such as `AND`, `OR`, `NOT`, or `XOR`.
 - Rows with `group_id` must also provide `member_id` when `--formula-rules` is used.
@@ -74,7 +76,7 @@ Normalization means that different textual inputs describing the same biological
 
 High-level processing order:
 
-1. Read row context (`gene`, `reference_identifier`, `position`, `reference`).
+1. Read row context (`feature`, `reference_identifier`, `position`, `reference`).
 2. Detect mutation category (substitution, stop, frameshift, insertion, deletion).
 3. Normalize token spelling to canonical internal form.
 4. Validate against reference protein context.
@@ -234,7 +236,7 @@ Import deduplicates publication entries and links them to atomic rules and formu
 
 ### Minimal single-rule example
 
-| gene | reference_identifier | position | reference | mutation | antiviral | phenotype |
+| feature | reference_identifier | position | reference | mutation | antiviral | phenotype |
 | ---- | -------------------- | -------: | --------- | -------- | --------- | --------- |
 | UL23 | NC_001806            |      336 | A         | V        | Aciclovir | resistant |
 
@@ -242,7 +244,7 @@ Import deduplicates publication entries and links them to atomic rules and formu
 
 Frameshift rules are normalized to anchor the reference amino acid:
 
-| gene | reference_identifier | position | reference | mutation | antiviral | phenotype    |
+| feature | reference_identifier | position | reference | mutation | antiviral | phenotype    |
 | ---- | -------------------- | -------: | --------- | -------- | --------- | ------------ |
 | UL30 | NC_001806            |      715 | K         | fs       | Aciclovir | resistant    |
 | UL23 | NC_001806            |       50 | F         | FGG      | Aciclovir | intermediate |
@@ -297,7 +299,7 @@ The optional formula TSV defines higher-order resistance rules over atomic `memb
 
 Define the individual mutations:
 
-| gene | reference_identifier | position | reference | mutation | antiviral | phenotype | ic50 | fold_ic50 | group_id | member_id |
+| feature | reference_identifier | position | reference | mutation | antiviral | phenotype | ic50 | fold_ic50 | group_id | member_id |
 | ---- | -------------------- | -------: | --------- | -------- | --------- | --------- | ---- | --------- | -------- | --------- |
 | UL23 | NC_001806            |      336 | A         | V        | Aciclovir | resistant | 32.5 | 4.1       | group_1  | mut_A     |
 | UL30 | NC_001806            |      715 | K         | I        | Aciclovir | resistant | 28.0 | 3.5       | group_1  | mut_B     |
@@ -332,7 +334,7 @@ When optional metadata columns are provided in the atomic rules TSV:
 
 ## Common validation failures
 
-1. `gene` not found in imported GenBank annotations
+1. `feature` not found in imported GenBank annotations
 2. `reference_identifier` not present in project references
 3. inconsistent coordinate system inside one file
 4. `reference` amino acid mismatch at the given position

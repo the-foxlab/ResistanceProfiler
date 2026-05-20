@@ -84,7 +84,7 @@ def _manifest_with_formula_rules_path(formula_rules_path: str) -> dict:
     return manifest
 
 _RULES_TSV_CONTENT = (
-    'gene\tposition\tref_aa\tmut_aa\tphenotype\treference_identifier\n'
+    'feature\tposition\tref_aa\tmut_aa\tphenotype\treference_identifier\n'
     'UL23\t168\tA\tT\tresistant\tX04770\n'
     'UL30\t700\tL\tM\tresistant\tX04771\n'
     'UL23\t200\tR\tW\tresistant\tX04770\n'  # duplicate accession — should deduplicate
@@ -171,13 +171,13 @@ class TestParseReferenceIdentifiers:
 
     def test_returns_empty_when_column_missing(self, tmp_path: Path) -> None:
         tsv = tmp_path / 'rules.tsv'
-        tsv.write_text('gene\tposition\n')
+        tsv.write_text('feature\tposition\n')
         result = _parse_reference_identifiers(tsv)
         assert result == []
 
     def test_skips_empty_values(self, tmp_path: Path) -> None:
         tsv = tmp_path / 'rules.tsv'
-        tsv.write_text('gene\treference_identifier\nUL23\t\nUL30\tX04770\n')
+        tsv.write_text('feature\treference_identifier\nUL23\t\nUL30\tX04770\n')
         result = _parse_reference_identifiers(tsv)
         assert result == ['X04770']
 
@@ -221,7 +221,7 @@ class TestDownloadDatabaseFiles:
             _json_mock(json.loads(json.dumps(_MANIFEST))),         # manifest fetch
             _bytes_mock(rules_content),                           # rules.tsv download
             _bytes_mock(metadata_content),                        # metadata.json download
-            _bytes_mock(b'gene\tformula\n'),                      # formula-rules.tsv download
+            _bytes_mock(b'feature\tformula\n'),                      # formula-rules.tsv download
             _bytes_mock(_GENBANK_CONTENT),                        # X04770.gb
             _bytes_mock(_GENBANK_CONTENT),                        # X04771.gb
         ]

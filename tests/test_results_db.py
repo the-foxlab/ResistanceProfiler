@@ -40,20 +40,20 @@ from respro.db.results import (
     save_run,
 )
 from respro.db.schema import create_schema, init_results_db, open_project_db
-from respro.io.reference import load_genes_for_reference
+from respro.io.reference import load_features_for_reference
 from respro.report.non_html_exports import export_results
 
 
 def _init_split_project(
     tmp_path: Path,
     *,
-    gene_name: str,
+    feature_name: str,
     strand: str,
     segments: list[tuple[int, int]],
     reference_aa: str,
     mutation_aa: str,
 ) -> Path:
-    gb_path = tmp_path / f'{gene_name}.gb'
+    gb_path = tmp_path / f'{feature_name}.gb'
     record = SeqRecord(Seq('GCT' * 120), id='tiny_ref', name='tiny_ref', description='')
     record.annotations['molecule_type'] = 'DNA'
     record.annotations['accessions'] = ['tiny_ref']
@@ -67,7 +67,7 @@ def _init_split_project(
             ),
             type='CDS',
             qualifiers={
-                'gene': [gene_name],
+                'gene': [feature_name],
                 'product': ['DNA polymerase'],
                 'codon_start': ['1'],
             },
@@ -76,18 +76,18 @@ def _init_split_project(
     with open(gb_path, 'w') as handle:
         SeqIO.write([record], handle, 'genbank')
 
-    rules_tsv = tmp_path / f'{gene_name}.tsv'
+    rules_tsv = tmp_path / f'{feature_name}.tsv'
     rules_tsv.write_text(
         textwrap.dedent(
             f'''\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
-            {gene_name}\ttiny_ref\t2\t{reference_aa}\t{mutation_aa}\tDrugA\tresistant
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            {feature_name}\ttiny_ref\t2\t{reference_aa}\t{mutation_aa}\tDrugA\tresistant
             '''
         ),
         encoding='utf-8',
     )
 
-    db_path = tmp_path / f'{gene_name}.db'
+    db_path = tmp_path / f'{feature_name}.db'
     init_project(
         db_path=db_path,
         name='split-test',
@@ -148,7 +148,7 @@ class TestProjectSchemaBoundary:
             ')'
         )
         conn.execute(
-            'CREATE TABLE gene ('
+            'CREATE TABLE feature ('
             'id INTEGER PRIMARY KEY AUTOINCREMENT, '
             'reference_id INTEGER NOT NULL, '
             'name TEXT NOT NULL, '
@@ -167,7 +167,7 @@ class TestProjectSchemaBoundary:
         conn.execute(
             'CREATE TABLE resistance_rule ('
             'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'gene_id INTEGER NOT NULL, '
+            'feature_id INTEGER NOT NULL, '
             'drug_id INTEGER NOT NULL, '
             'position INTEGER NOT NULL, '
             'mutation TEXT NOT NULL'
@@ -183,7 +183,7 @@ class TestProjectSchemaBoundary:
             'CREATE TABLE resistance_rule_set_member ('
             'id INTEGER PRIMARY KEY AUTOINCREMENT, '
             'rule_set_id INTEGER NOT NULL, '
-            'gene_id INTEGER NOT NULL, '
+            'feature_id INTEGER NOT NULL, '
             'position INTEGER NOT NULL, '
             'mutation TEXT NOT NULL'
             ')'
@@ -199,17 +199,17 @@ class TestProjectSchemaBoundary:
             ')'
         )
         conn.execute(
-            'CREATE TABLE query_gene_mapping ('
+            'CREATE TABLE query_feature_mapping ('
             'id INTEGER PRIMARY KEY AUTOINCREMENT, '
             'query_ref_id INTEGER NOT NULL, '
-            'gene_id INTEGER NOT NULL, '
+            'feature_id INTEGER NOT NULL, '
             'identity REAL NOT NULL, '
             'cds_coverage REAL NOT NULL, '
             'query_start INTEGER NOT NULL, '
             'query_end INTEGER NOT NULL, '
             "strand TEXT NOT NULL DEFAULT '+', "
             'cigar TEXT NOT NULL, '
-            'UNIQUE(query_ref_id, gene_id)'
+            'UNIQUE(query_ref_id, feature_id)'
             ')'
         )
         conn.execute(
@@ -221,7 +221,7 @@ class TestProjectSchemaBoundary:
             (1, 'ref_legacy', 100),
         )
         conn.execute(
-            'INSERT INTO gene (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
             (1, 'gag', 0, 30, '+'),
         )
         conn.execute(
@@ -229,7 +229,7 @@ class TestProjectSchemaBoundary:
             (1, 'drugx'),
         )
         conn.execute(
-            'INSERT INTO resistance_rule (gene_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
+            'INSERT INTO resistance_rule (feature_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
             (1, 1, 1, 'E'),
         )
         conn.execute(
@@ -237,8 +237,8 @@ class TestProjectSchemaBoundary:
             ('legacy_query_ref', 'ATGAAACCC', 9, 'legacy_checksum'),
         )
         conn.execute(
-            'INSERT INTO query_gene_mapping ('
-            'query_ref_id, gene_id, identity, cds_coverage, query_start, query_end, strand, cigar'
+            'INSERT INTO query_feature_mapping ('
+            'query_ref_id, feature_id, identity, cds_coverage, query_start, query_end, strand, cigar'
             ') VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             (1, 1, 0.95, 0.75, 0, 9, '+', '9M'),
         )
@@ -256,7 +256,7 @@ class TestProjectSchemaBoundary:
         }
         mapping_columns = {
             row['name']
-            for row in migrated_conn.execute('PRAGMA table_info(query_gene_mapping)').fetchall()
+            for row in migrated_conn.execute('PRAGMA table_info(query_feature_mapping)').fetchall()
         }
         migrated_reference = migrated_conn.execute(
             'SELECT accession, organism, taxonomy FROM reference WHERE id = 1'
@@ -266,11 +266,11 @@ class TestProjectSchemaBoundary:
             'FROM resistance_rule WHERE id = 1'
         ).fetchone()
         mapping_count = migrated_conn.execute(
-            'SELECT COUNT(*) AS total FROM query_gene_mapping'
+            'SELECT COUNT(*) AS total FROM query_feature_mapping'
         ).fetchone()
         migrated_mapping_stats = migrated_conn.execute(
             'SELECT COUNT(*) AS total, COALESCE(MAX(cds_start), 0) AS max_cds_start '
-            'FROM query_gene_mapping'
+            'FROM query_feature_mapping'
         ).fetchone()
         reference_count = migrated_conn.execute(
             'SELECT COUNT(*) AS total FROM query_reference'
@@ -396,7 +396,7 @@ class TestResultsDbSchema:
             'SELECT sample_name, total_variants, resistance_hits, status FROM run WHERE id = 1'
         ).fetchone()
         migrated_variant = migrated_conn.execute(
-            'SELECT gene_name, af_bin, drug_hits FROM variant_result WHERE id = 1'
+            'SELECT feature_name, af_bin, drug_hits FROM variant_result WHERE id = 1'
         ).fetchone()
         migrated_conn.close()
 
@@ -410,7 +410,7 @@ class TestResultsDbSchema:
         assert migrated_run['resistance_hits'] == 0
         assert migrated_run['status'] == 'complete'
         assert migrated_variant is not None
-        assert migrated_variant['gene_name'] == ''
+        assert migrated_variant['feature_name'] == ''
         assert migrated_variant['af_bin'] == ''
         assert migrated_variant['drug_hits'] == '[]'
 
@@ -431,7 +431,7 @@ class TestResultsPersistence:
             (1, 'ref1', 100),
         )
         conn.execute(
-            'INSERT INTO gene (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
+            'INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
             (1, 'gag', 0, 90, '+'),
         )
         conn.execute(
@@ -439,7 +439,7 @@ class TestResultsPersistence:
             (1, 'drugx'),
         )
         conn.execute(
-            'INSERT INTO resistance_rule (gene_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
+            'INSERT INTO resistance_rule (feature_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
             (1, 1, 1, 'E'),
         )
         conn.commit()
@@ -454,13 +454,13 @@ class TestResultsPersistence:
     def _make_result(self, annotated: bool = True, with_combo_hit: bool = False) -> ProfilingResult:
         v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
         rule = ResistanceRule(
-            id=1, gene_name='gag', gene_id=1, drug_name='drugx', drug_id=1,
+            id=1, feature_name='gag', feature_id=1, drug_name='drugx', drug_id=1,
             reference_identifier='', position=1, reference='K', mutation='E',
             phenotype='resistant',
         )
         ann = AnnotatedVariant(
             variant=v,
-            gene_name='gag',
+            feature_name='gag',
             codon_pos=1,
             ref_codon='AAA',
             alt_codon='GAA',
@@ -483,8 +483,8 @@ class TestResultsPersistence:
                 ResistanceRuleSetMember(
                     id=1,
                     rule_set_id=1,
-                    gene_name='gag',
-                    gene_id=1,
+                    feature_name='gag',
+                    feature_id=1,
                     reference_identifier='ref1',
                     position=1,
                     reference='K',
@@ -493,8 +493,8 @@ class TestResultsPersistence:
                 ResistanceRuleSetMember(
                     id=2,
                     rule_set_id=1,
-                    gene_name='gag',
-                    gene_id=1,
+                    feature_name='gag',
+                    feature_id=1,
                     reference_identifier='ref1',
                     position=5,
                     reference='A',
@@ -535,7 +535,7 @@ class TestResultsPersistence:
         assert count == 1
 
         row = results_conn.execute('SELECT * FROM variant_result WHERE run_id = 1').fetchone()
-        assert row['gene_name'] == 'gag'
+        assert row['feature_name'] == 'gag'
         assert row['ref_aa'] == 'K'
         assert row['alt_aa'] == 'E'
         assert row['rule_match'] == 1
@@ -570,7 +570,7 @@ class TestResultsPersistence:
         annotations = reconstruct_annotations(variant_rows)
         assert len(annotations) == 1
         ann = annotations[0]
-        assert ann.gene_name == 'gag'
+        assert ann.feature_name == 'gag'
         assert ann.ref_aa == 'K'
         assert ann.is_resistance_hit
         assert ann.rule_matches[0].drug_name == 'drugx'
@@ -616,7 +616,7 @@ class TestResultsPersistence:
         assert hit.rule_set.drug_name == 'drugx'
         assert len(hit.rule_set.members) == 2
         assert len(hit.matched_variants) == 1
-        assert hit.matched_variants[0].gene_name == 'gag'
+        assert hit.matched_variants[0].feature_name == 'gag'
 
     def test_project_fingerprint_is_deterministic(self, minimal_project_conn) -> None:
         fp1 = project_fingerprint(minimal_project_conn)
@@ -631,9 +631,9 @@ class TestResultsPersistence:
             ('ProjectA', 1, str(uuid.uuid4())),
         )
         conn_a.execute('INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)', (1, 'ref_a', 50))
-        conn_a.execute('INSERT INTO gene (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)', (1, 'g', 0, 30, '+'))
+        conn_a.execute('INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)', (1, 'g', 0, 30, '+'))
         conn_a.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'd'))
-        conn_a.execute('INSERT INTO resistance_rule (gene_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)', (1, 1, 0, 'E'))
+        conn_a.execute('INSERT INTO resistance_rule (feature_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)', (1, 1, 0, 'E'))
         conn_a.commit()
 
         conn_b = create_schema(tmp_path / 'b.db')
@@ -642,19 +642,19 @@ class TestResultsPersistence:
             ('ProjectB', 1, str(uuid.uuid4())),
         )
         conn_b.execute('INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)', (1, 'ref_b', 50))
-        conn_b.execute('INSERT INTO gene (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)', (1, 'g', 0, 30, '+'))
+        conn_b.execute('INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)', (1, 'g', 0, 30, '+'))
         conn_b.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'd'))
-        conn_b.execute('INSERT INTO resistance_rule (gene_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)', (1, 1, 0, 'E'))
+        conn_b.execute('INSERT INTO resistance_rule (feature_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)', (1, 1, 0, 'E'))
         conn_b.commit()
 
         assert project_fingerprint(conn_a) != project_fingerprint(conn_b)
         conn_a.close()
         conn_b.close()
 
-    def test_split_gene_run_roundtrip_reconstructs_and_exports_report(self, tmp_path: Path) -> None:
+    def test_split_feature_run_roundtrip_reconstructs_and_exports_report(self, tmp_path: Path) -> None:
         project_db = _init_split_project(
             tmp_path,
-            gene_name='split_pol',
+            feature_name='split_pol',
             strand='+',
             segments=[(0, 18), (60, 78)],
             reference_aa='A',
@@ -682,7 +682,7 @@ class TestResultsPersistence:
                     allele_freq=0.95,
                     depth=250,
                 ),
-                gene_name='split_pol',
+                feature_name='split_pol',
                 codon_pos=1,
                 ref_codon='GCT',
                 alt_codon='GTT',
@@ -712,7 +712,7 @@ class TestResultsPersistence:
 
             run_dict, variant_rows = load_run(results_conn, run_id)
             annotations = reconstruct_annotations(variant_rows)
-            genes = load_genes_for_reference(project_conn, int(ref_row['id']))
+            features = load_features_for_reference(project_conn, int(ref_row['id']))
             outputs = export_results(
                 ProfilingResult(
                     project_name=run_dict['project_name'],
@@ -728,19 +728,19 @@ class TestResultsPersistence:
                     annotations=annotations,
                 ),
                 tmp_path / 'roundtrip_report',
-                genes=genes,
-                rule_gene_names={rule.gene_name for rule in rules},
+                features=features,
+                rule_feature_names={rule.feature_name for rule in rules},
                 project_conn=project_conn,
                 rules=rules,
             )
 
             assert len(annotations) == 1
-            assert annotations[0].gene_name == 'split_pol'
+            assert annotations[0].feature_name == 'split_pol'
             assert annotations[0].rule_matches[0].drug_name == 'druga'
-            assert len(genes) == 1
+            assert len(features) == 1
             assert [
                 (segment.segment_index, segment.start, segment.end)
-                for segment in genes[0].segments
+                for segment in features[0].segments
             ] == [(0, 0, 18), (1, 60, 78)]
             assert 'html' in outputs
             assert outputs['html'].exists()
@@ -762,9 +762,9 @@ class TestCoverageGapPersistence:
             ('Test', 1, str(uuid.uuid4())),
         )
         conn.execute('INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)', (1, 'ref1', 100))
-        conn.execute('INSERT INTO gene (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)', (1, 'gag', 0, 90, '+'))
+        conn.execute('INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)', (1, 'gag', 0, 90, '+'))
         conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'd'))
-        conn.execute('INSERT INTO resistance_rule (gene_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)', (1, 1, 1, 'E'))
+        conn.execute('INSERT INTO resistance_rule (feature_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)', (1, 1, 1, 'E'))
         conn.commit()
         return conn
 
@@ -776,16 +776,16 @@ class TestCoverageGapPersistence:
 
     def _make_result_with_gaps(self) -> ProfilingResult:
         v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=1.0, depth=0)
-        ann = AnnotatedVariant(variant=v, gene_name='gag', codon_pos=1, consequence='missense', is_fasta_mode=True)
+        ann = AnnotatedVariant(variant=v, feature_name='gag', codon_pos=1, consequence='missense', is_fasta_mode=True)
         return ProfilingResult(
             project_name='Test',
             reference_name='ref1',
             vcf_name='sample.fasta',
             annotations=[ann],
             coverage_gaps=[
-                CoverageGap(gene_name='gag', codon_start=3, codon_end=3),
-                CoverageGap(gene_name='gag', codon_start=5, codon_end=5),
-                CoverageGap(gene_name='pol', codon_start=0, codon_end=0),
+                CoverageGap(feature_name='gag', codon_start=3, codon_end=3),
+                CoverageGap(feature_name='gag', codon_start=5, codon_end=5),
+                CoverageGap(feature_name='pol', codon_start=0, codon_end=0),
             ],
         )
 
@@ -794,13 +794,13 @@ class TestCoverageGapPersistence:
         run_id = save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
 
         rows = results_conn.execute(
-            'SELECT gene_name, codon_start, codon_end FROM coverage_gap WHERE run_id = ? ORDER BY gene_name, codon_start',
+            'SELECT feature_name, codon_start, codon_end FROM coverage_gap WHERE run_id = ? ORDER BY feature_name, codon_start',
             (run_id,),
         ).fetchall()
         assert len(rows) == 3
-        assert (rows[0]['gene_name'], rows[0]['codon_start'], rows[0]['codon_end']) == ('gag', 3, 3)
-        assert (rows[1]['gene_name'], rows[1]['codon_start'], rows[1]['codon_end']) == ('gag', 5, 5)
-        assert (rows[2]['gene_name'], rows[2]['codon_start'], rows[2]['codon_end']) == ('pol', 0, 0)
+        assert (rows[0]['feature_name'], rows[0]['codon_start'], rows[0]['codon_end']) == ('gag', 3, 3)
+        assert (rows[1]['feature_name'], rows[1]['codon_start'], rows[1]['codon_end']) == ('gag', 5, 5)
+        assert (rows[2]['feature_name'], rows[2]['codon_start'], rows[2]['codon_end']) == ('pol', 0, 0)
 
     def test_load_coverage_gaps_restores_gaps(self, results_conn, minimal_project_conn, tmp_path) -> None:
         result = self._make_result_with_gaps()
@@ -808,8 +808,8 @@ class TestCoverageGapPersistence:
 
         gaps = load_coverage_gaps(results_conn, run_id)
         assert len(gaps) == 3
-        assert CoverageGap(gene_name='gag', codon_start=3, codon_end=3) in gaps
-        assert CoverageGap(gene_name='pol', codon_start=0, codon_end=0) in gaps
+        assert CoverageGap(feature_name='gag', codon_start=3, codon_end=3) in gaps
+        assert CoverageGap(feature_name='pol', codon_start=0, codon_end=0) in gaps
 
     def test_load_coverage_gaps_empty_for_run_without_gaps(self, results_conn, minimal_project_conn, tmp_path) -> None:
         v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
@@ -817,7 +817,7 @@ class TestCoverageGapPersistence:
             project_name='Test',
             reference_name='ref1',
             vcf_name='sample.vcf',
-            annotations=[AnnotatedVariant(variant=v, gene_name='gag', codon_pos=1)],
+            annotations=[AnnotatedVariant(variant=v, feature_name='gag', codon_pos=1)],
         )
         run_id = save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
 
@@ -895,7 +895,7 @@ class TestDeleteRun:
             (run_id, 'ref', 10, 'A', 'G'),
         )
         conn.execute(
-            'INSERT INTO coverage_gap (run_id, gene_name, codon_start, codon_end) VALUES (?, ?, ?, ?)',
+            'INSERT INTO coverage_gap (run_id, feature_name, codon_start, codon_end) VALUES (?, ?, ?, ?)',
             (run_id, 'gag', 1, 3),
         )
         conn.execute(

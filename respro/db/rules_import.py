@@ -17,15 +17,15 @@ from respro.db._rules_alleles import (
     _normalize_rule_alleles_for_storage,
     _resolve_anchorless_deletion,
 )
+from respro.db._rules_features import (
+    _detect_coordinate_base,
+    _get_feature_aa_sequence,
+    _resolve_rule_feature_id,
+    _validate_reference_amino_acids,
+)
 from respro.db._rules_formula import (
     _FORMULA_OPERATORS,
     _parse_formula_expression,
-)
-from respro.db._rules_genes import (
-    _detect_coordinate_base,
-    _get_gene_aa_sequence,
-    _resolve_rule_gene_id,
-    _validate_reference_amino_acids,
 )
 from respro.db._rules_normalize import (
     _append_contradictory_comment,
@@ -36,9 +36,10 @@ from respro.db._rules_normalize import (
     _normalize_score_from_row,
 )
 from respro.db._rules_persist import (
-    _build_gene_lookup,
+    _build_feature_lookup,
     _external_rule_id_exists,
     _formula_rule_exists,
+    _load_known_reference_identifiers,
     _load_rule_ids_by_external_id,
     _rule_exists,
 )
@@ -80,12 +81,15 @@ def load_resistance_rules(
     skipped_duplicates = 0
 
     conn.row_factory = sqlite3.Row
-    genes_by_name = _build_gene_lookup(conn)
+    features_by_name = _build_feature_lookup(conn)
+    known_reference_identifiers = _load_known_reference_identifiers(conn)
 
     errors: list[str] = []
+    skipped_missing_ref_ids: set[str] = set()
+    skipped_missing_ref_count = 0
     skipped_ref: list[str] = []
-    skipped_gene: list[str] = []
-    skipped_gene_pairs: list[tuple[str, str]] = []
+    skipped_feature: list[str] = []
+    skipped_feature_pairs: list[tuple[str, str]] = []
     skipped_invalid_aa: list[str] = []
     skipped_duplicates_detail: list[str] = []
     skipped_identical_member_id_rows: list[str] = []
@@ -160,39 +164,52 @@ def load_resistance_rules(
         raise ValueError(f'Rules validation failed:\n{formatted}')
 
     # Detect coordinate base once globally and use it consistently for all rows.
-    coord_base = _detect_coordinate_base(all_rows, genes_by_name)
+    coord_base = _detect_coordinate_base(
+        all_rows,
+        features_by_name,
+        allowed_reference_identifiers=known_reference_identifiers,
+    )
     logger.info('Detected %d-based amino acid positions in rules TSV', coord_base)
-    mismatch_keys = _validate_reference_amino_acids(all_rows, genes_by_name, coord_base)
+    mismatch_keys = _validate_reference_amino_acids(
+        all_rows,
+        features_by_name,
+        coord_base,
+        allowed_reference_identifiers=known_reference_identifiers,
+    )
 
     for row_number, row in enumerate(all_rows, start=2):
-        gene_name = _get_value(row, 'gene')
+        feature_name = _get_value(row, 'feature')
         reference_identifier = _get_value(row, 'reference_identifier')
-        if not gene_name or gene_name not in genes_by_name:
-            gene_label = gene_name or '<empty>'
+        if reference_identifier and reference_identifier not in known_reference_identifiers:
+            skipped_missing_ref_ids.add(reference_identifier)
+            skipped_missing_ref_count += 1
+            continue
+        if not feature_name or feature_name not in features_by_name:
+            feature_label = feature_name or '<empty>'
             reference_label = reference_identifier or '<empty>'
-            skipped_gene.append(
-                f'row {row_number}: gene {gene_label!r}, reference_identifier {reference_label!r}'
+            skipped_feature.append(
+                f'row {row_number}: feature {feature_label!r}, reference_identifier {reference_label!r}'
             )
-            skipped_gene_pairs.append((gene_label, reference_label))
+            skipped_feature_pairs.append((feature_label, reference_label))
             continue
 
-        gene_id = _resolve_rule_gene_id(genes_by_name[gene_name], reference_identifier)
-        if gene_id is None:
-            # Missing reference context can make same gene name ambiguous across records.
+        feature_id = _resolve_rule_feature_id(features_by_name[feature_name], reference_identifier)
+        if feature_id is None:
+            # Missing reference context can make same feature name ambiguous across records.
             candidate_refs = sorted(
                 {
                     candidate['reference_accession'] or candidate['reference_name']
-                    for candidate in genes_by_name[gene_name]
+                    for candidate in features_by_name[feature_name]
                 }
             )
             if reference_identifier:
                 skipped_ref.append(
-                    f'gene {gene_name!r}: reference_identifier {reference_identifier!r} '
+                    f'feature {feature_name!r}: reference_identifier {reference_identifier!r} '
                     f'not found (available: {candidate_refs})'
                 )
             else:
                 errors.append(
-                    f'Rules gene {gene_name!r} is ambiguous across references {candidate_refs}; '
+                    f'Rules feature {feature_name!r} is ambiguous across references {candidate_refs}; '
                     'add reference_identifier to the rules row'
                 )
             continue
@@ -209,28 +226,28 @@ def load_resistance_rules(
             if require_external_ids and external_id:
                 drug_name = _INTERNAL_FORMULA_COMPONENT_DRUG_NAME
             else:
-                errors.append(f'Rule for gene {gene_name!r} has no antiviral value')
+                errors.append(f'Rule for feature {feature_name!r} has no antiviral value')
                 continue
 
         position_raw = _get_value(row, 'position')
         mutation_raw = _get_value(row, 'mutation')
         if not position_raw or not mutation_raw:
-            errors.append(f'Rule for gene {gene_name!r} is missing position or mutation')
+            errors.append(f'Rule for feature {feature_name!r} is missing position or mutation')
             continue
 
         try:
             position_0based = int(position_raw) - coord_base
         except ValueError:
             errors.append(
-                f'Rule for gene {gene_name!r} has invalid position {position_raw!r}'
+                f'Rule for feature {feature_name!r} has invalid position {position_raw!r}'
             )
             continue
 
         reference_aa = _get_value(row, 'reference')
-        if (gene_name, position_raw, reference_identifier, reference_aa) in mismatch_keys:
+        if (feature_name, position_raw, reference_identifier, reference_aa) in mismatch_keys:
             if external_id:
                 skipped_external_ids[external_id] = (
-                    f'reference AA mismatch at {reference_identifier} {gene_name} pos {position_raw}'
+                    f'reference AA mismatch at {reference_identifier} {feature_name} pos {position_raw}'
                 )
             continue
 
@@ -238,19 +255,19 @@ def load_resistance_rules(
         m_del = _RE_ANCHORLESS_DEL.match(mutation_raw)
         if m_del:
             deleted_block = m_del.group(1).upper()
-            aa_seq = _get_gene_aa_sequence(genes_by_name[gene_name], reference_identifier)
+            aa_seq = _get_feature_aa_sequence(features_by_name[feature_name], reference_identifier)
             if not aa_seq:
                 errors.append(
-                    f'Rule for gene {gene_name!r} pos {position_raw!r}: '
-                    f'gene has no aa_sequence, cannot resolve deletion anchor for {mutation_raw!r}'
+                    f'Rule for feature {feature_name!r} pos {position_raw!r}: '
+                    f'feature has no aa_sequence, cannot resolve deletion anchor for {mutation_raw!r}'
                 )
                 continue
             resolved = _resolve_anchorless_deletion(deleted_block, position_0based, aa_seq)
             if resolved is None:
                 errors.append(
-                    f'Rule for gene {gene_name!r} pos {position_raw!r}: '
+                    f'Rule for feature {feature_name!r} pos {position_raw!r}: '
                     f'cannot resolve anchor for deletion {mutation_raw!r} — '
-                    'check that the deleted block matches the gene sequence and '
+                    'check that the deleted block matches the feature sequence and '
                     'that the deletion does not start at position 1'
                 )
                 continue
@@ -259,28 +276,28 @@ def load_resistance_rules(
         ic50_value = _normalize_ic50_from_row(
             row,
             errors=errors,
-            context=f'Rule for gene {gene_name!r} pos {position_raw!r}',
+            context=f'Rule for feature {feature_name!r} pos {position_raw!r}',
         )
         fold_ic50_value = _normalize_fold_ic50_from_row(
             row,
             errors=errors,
-            context=f'Rule for gene {gene_name!r} pos {position_raw!r}',
+            context=f'Rule for feature {feature_name!r} pos {position_raw!r}',
         )
         score_value = _normalize_score_from_row(
             row,
             errors=errors,
-            context=f'Rule for gene {gene_name!r} pos {position_raw!r}',
+            context=f'Rule for feature {feature_name!r} pos {position_raw!r}',
         )
         phenotype_value, clinical_phenotype_value = _normalize_phenotypes_from_row(
             row,
             errors=errors,
-            context=f'Rule for gene {gene_name!r} pos {position_raw!r}',
+            context=f'Rule for feature {feature_name!r} pos {position_raw!r}',
         )
         normalized = _normalize_rule_alleles_for_storage(
             reference_aa=reference_aa,
             mutation_raw=mutation_raw,
             position_0based=position_0based,
-            context=f'Rule for gene {gene_name!r} pos {position_raw!r}',
+            context=f'Rule for feature {feature_name!r} pos {position_raw!r}',
             errors=errors,
         )
         if normalized is None:
@@ -289,14 +306,14 @@ def load_resistance_rules(
 
         if _is_noop_mutation(reference_aa, mutation):
             errors.append(
-                f'Rule for gene {gene_name!r} pos {position_raw!r}: '
+                f'Rule for feature {feature_name!r} pos {position_raw!r}: '
                 f'mutation {mutation_raw!r} does not change reference {reference_aa!r}'
             )
             continue
 
         if not _is_supported_mutation_token(mutation):
             skipped_invalid_aa.append(
-                f'gene {gene_name!r} pos {position_raw!r}: unsupported amino-acid token '
+                f'feature {feature_name!r} pos {position_raw!r}: unsupported amino-acid token '
                 f'{mutation_raw!r} (normalized {mutation!r})'
             )
             continue
@@ -310,7 +327,7 @@ def load_resistance_rules(
         )
 
         if external_id:
-            signature = (gene_id, reference_identifier, position_0based, reference_aa, mutation)
+            signature = (feature_id, reference_identifier, position_0based, reference_aa, mutation)
             seen = seen_external_id_signatures.get(external_id)
             if seen is not None:
                 first_row, first_signature = seen
@@ -333,7 +350,7 @@ def load_resistance_rules(
         # mutation-level deduplication; the unique index on external_id prevents true duplicates.
         if not group_ids and _rule_exists(
             conn,
-            gene_id=gene_id,
+            feature_id=feature_id,
             drug_id=drug_id,
             reference_identifier=reference_identifier,
             position=position_0based,
@@ -342,7 +359,7 @@ def load_resistance_rules(
         ):
             skipped_duplicates += 1
             skipped_duplicates_detail.append(
-                f'{reference_identifier} gene {gene_name!r} pos {position_raw} '
+                f'{reference_identifier} feature {feature_name!r} pos {position_raw} '
                 f'{reference_aa!r}>{mutation!r} ({drug_name})'
             )
             if external_id:
@@ -352,11 +369,11 @@ def load_resistance_rules(
         conn.execute(
             'INSERT INTO resistance_rule '
             '('
-            'gene_id, drug_id, external_id, reference_identifier, position, reference, mutation, '
+            'feature_id, drug_id, external_id, reference_identifier, position, reference, mutation, '
             'phenotype, clinical_phenotype, ic50, fold_ic50, score, source, comment'
             ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
-                gene_id,
+                feature_id,
                 drug_id,
                 external_id,
                 reference_identifier,
@@ -385,15 +402,22 @@ def load_resistance_rules(
             )
         count += 1
 
-    if skipped_gene:
-        unique_rows = sorted(set(skipped_gene))
-        unique_pairs = sorted(set(skipped_gene_pairs))
+    if skipped_missing_ref_ids:
         logger.warning(
-            '%d rule(s) skipped — gene(s) not found in GenBank annotations: %s\n%s',
-            len(skipped_gene),
+            '%d rule(s) skipped — reference(s) not provided (no GenBank supplied): %s',
+            skipped_missing_ref_count,
+            ', '.join(repr(r) for r in sorted(skipped_missing_ref_ids)),
+        )
+
+    if skipped_feature:
+        unique_rows = sorted(set(skipped_feature))
+        unique_pairs = sorted(set(skipped_feature_pairs))
+        logger.warning(
+            '%d rule(s) skipped — feature(s) not found in GenBank annotations: %s\n%s',
+            len(skipped_feature),
             ', '.join(
-                f'{gene!r} @ reference_identifier {reference!r}'
-                for gene, reference in unique_pairs
+                f'{feature!r} @ reference_identifier {reference!r}'
+                for feature, reference in unique_pairs
             ),
             '\n'.join(f'  - {detail}' for detail in unique_rows),
         )

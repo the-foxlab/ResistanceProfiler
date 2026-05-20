@@ -18,15 +18,15 @@ from respro.db._rules_formula import _RE_FORMULA_TOKEN as _RE_LOGIC_TOKEN
 from respro.db.models import (
     AnnotatedVariant,
     CoverageGap,
-    GeneRecord,
+    FeatureRecord,
     ProfilingResult,
     ResistanceRule,
 )
 from respro.db.results import project_fingerprint
 from respro.report.alignment_visualization import (
-    GeneAlignment,
+    FeatureAlignment,
     build_alignment_html,
-    build_gene_alignments,
+    build_feature_alignments,
 )
 from respro.report.palette import (
     AF_BIN_COLOURS,
@@ -223,7 +223,7 @@ def _alignment_title(ann: AnnotatedVariant) -> str:
 
 def _build_db_hit_rows(
     result: ProfilingResult,
-    gene_alignments: dict[str, GeneAlignment],
+    feature_alignments: dict[str, FeatureAlignment],
 ) -> list[dict]:
     """
     Build one row per drug per annotated variant that matched a resistance rule.
@@ -239,12 +239,12 @@ def _build_db_hit_rows(
         aa_change = _format_aa_change(ann)
         nt_change = _format_nt_change(ann)
         alignment_html = None
-        if ann.gene_name in gene_alignments:
-            alignment_html = build_alignment_html(ann, gene_alignments[ann.gene_name])
+        if ann.feature_name in feature_alignments:
+            alignment_html = build_alignment_html(ann, feature_alignments[ann.feature_name])
 
         for rule in ann.non_formula_component_rule_matches:
             rows.append({
-                'gene': ann.gene_name,
+                'feature': ann.feature_name,
                 'aa_change': aa_change,
                 'consequence': ann.consequence,
                 'af_bin': ann.af_bin,
@@ -296,7 +296,7 @@ def _sort_db_hit_rows(rows: list[dict]) -> list[dict]:
             (row.get('drug') or '').lower(),
             phenotype_rank,
             -ic50_sort_value,
-            (row.get('gene') or '').lower(),
+            (row.get('feature') or '').lower(),
             Markup(str(row.get('aa_change', ''))).striptags().lower(),
         )
 
@@ -314,7 +314,7 @@ def _build_combo_hit_rows(result: ProfilingResult) -> list[dict]:
     for combo in result.formula_hits:
         rs = combo.rule_set
         member_by_id = {
-            member.external_id: f'{member.gene_name}:{member.reference}{member.position + 1}{member.mutation}'
+            member.external_id: f'{member.feature_name}:{member.reference}{member.position + 1}{member.mutation}'
             for member in rs.members
             if member.external_id
         }
@@ -327,7 +327,7 @@ def _build_combo_hit_rows(result: ProfilingResult) -> list[dict]:
             )
         else:
             member_labels = ', '.join(
-                f'{m.gene_name}:{m.reference}{m.position + 1}{m.mutation}'
+                f'{m.feature_name}:{m.reference}{m.position + 1}{m.mutation}'
                 for m in rs.members
             )
         rows.append({
@@ -368,10 +368,10 @@ def _render_formula_logic(
         else:
             label = members_by_id.get(token, token)
             member_class = 'formula-member-detected' if token in matched_member_ids else 'formula-member-missing'
-            gene_name, mutation_label = _split_formula_member_label(label)
+            feature_name, mutation_label = _split_formula_member_label(label)
             rendered.append(
                 f"<span class='formula-member {member_class}'>"
-                f"<span class='formula-member-gene'>{escape(gene_name)}</span>"
+                f"<span class='formula-member-feature'>{escape(feature_name)}</span>"
                 f"<span class='formula-member-mutation'>{escape(mutation_label)}</span>"
                 f"</span>"
             )
@@ -382,11 +382,11 @@ def _render_formula_logic(
 
 
 def _split_formula_member_label(label: str) -> tuple[str, str]:
-    """Split one formula member display label into gene and mutation chunks."""
+    """Split one formula member display label into feature and mutation chunks."""
     if ':' not in label:
         return label, ''
-    gene_name, mutation_label = label.split(':', 1)
-    return gene_name, mutation_label
+    feature_name, mutation_label = label.split(':', 1)
+    return feature_name, mutation_label
 
 
 def _build_sample_classification(result: ProfilingResult) -> dict | None:
@@ -450,7 +450,7 @@ def _attach_drug_badges(rows: list[dict], drug_colours: dict[str, str]) -> None:
 
 def _build_cds_rows(
     result: ProfilingResult,
-    gene_alignments: dict[str, GeneAlignment],
+    feature_alignments: dict[str, FeatureAlignment],
 ) -> list[dict]:
     """
     Build rows for the all-CDS-variants table.
@@ -462,8 +462,8 @@ def _build_cds_rows(
     for ann in result.cds_annotations:
         nt_change = _format_nt_change(ann)
         alignment_html = None
-        if ann.gene_name in gene_alignments:
-            alignment_html = build_alignment_html(ann, gene_alignments[ann.gene_name])
+        if ann.feature_name in feature_alignments:
+            alignment_html = build_alignment_html(ann, feature_alignments[ann.feature_name])
         if ann.consequence == 'inframe_complex':
             aa_change = Markup('?')
             display_consequence = 'complex'
@@ -472,7 +472,7 @@ def _build_cds_rows(
             display_consequence = ann.consequence
 
         rows.append({
-            'gene': ann.gene_name,
+            'feature': ann.feature_name,
             'nt_change': nt_change,
             'aa_change': aa_change,
             'consequence': display_consequence,
@@ -489,13 +489,13 @@ def _build_cds_rows(
 def _build_potential_effects_rows(
     result: ProfilingResult,
     rules: list[ResistanceRule],
-    gene_alignments: dict[str, GeneAlignment] | None = None,
+    feature_alignments: dict[str, FeatureAlignment] | None = None,
 ) -> list[dict]:
     """
     Find detected mutations at known resistance positions with a different AA change.
 
     For missense variants that are not direct DB hits, check if any rule exists
-    at the same gene + position and score similarity via BLOSUM62.
+    at the same feature + position and score similarity via BLOSUM62.
     For indels, report if any indel-type rule exists at that position.
     Frameshifts and stop gains are excluded (reported elsewhere).
 
@@ -506,13 +506,13 @@ def _build_potential_effects_rows(
     if not rules:
         return []
 
-    if gene_alignments is None:
-        gene_alignments = {}
+    if feature_alignments is None:
+        feature_alignments = {}
 
-    # Index rules by (gene_name, position) for position-based lookup
+    # Index rules by (feature_name, position) for position-based lookup
     rules_by_pos: dict[tuple[str, int], list[ResistanceRule]] = {}
     for rule in rules:
-        rules_by_pos.setdefault((rule.gene_name, rule.position), []).append(rule)
+        rules_by_pos.setdefault((rule.feature_name, rule.position), []).append(rule)
 
     excluded_consequences = {'frameshift', 'stop_gained', 'synonymous', 'inframe_complex'}
     rows: list[dict] = []
@@ -524,10 +524,10 @@ def _build_potential_effects_rows(
             continue
         if ann.consequence in excluded_consequences:
             continue
-        if not ann.gene_name or not ann.alt_aa:
+        if not ann.feature_name or not ann.alt_aa:
             continue
 
-        pos_key = (ann.gene_name, ann.codon_pos)
+        pos_key = (ann.feature_name, ann.codon_pos)
         if pos_key not in rules_by_pos:
             continue
 
@@ -540,8 +540,8 @@ def _build_potential_effects_rows(
             if ann_is_indel and not rule_is_indel:
                 continue
 
-            # Deduplicate by (gene, position, observed_aa, drug)
-            dedup_key = (ann.gene_name, ann.codon_pos, ann.alt_aa, rule.drug_name)
+            # Deduplicate by (feature, position, observed_aa, drug)
+            dedup_key = (ann.feature_name, ann.codon_pos, ann.alt_aa, rule.drug_name)
             if dedup_key in seen:
                 continue
             seen.add(dedup_key)
@@ -556,12 +556,12 @@ def _build_potential_effects_rows(
                 similarity = classify_similarity(ann.alt_aa, rule.mutation)
 
             potential_alignment = (
-                build_alignment_html(ann, gene_alignments[ann.gene_name])
-                if ann.gene_name in gene_alignments else None
+                build_alignment_html(ann, feature_alignments[ann.feature_name])
+                if ann.feature_name in feature_alignments else None
             )
 
             rows.append({
-                'gene': ann.gene_name,
+                'feature': ann.feature_name,
                 'codon_pos': ann.codon_pos,
                 'observed_change': observed_change,
                 'rule_change': rule_change,
@@ -596,17 +596,17 @@ def _count_unassessed_rule_positions(
     :param coverage_gaps: non-covered codon stretches emitted by the profiler
     :return: (total unique rule positions, unassessed unique rule positions)
     """
-    rule_positions = {(rule.gene_name, rule.position) for rule in rules}
+    rule_positions = {(rule.feature_name, rule.position) for rule in rules}
     if not rule_positions:
         return 0, 0
 
-    gene_gaps: dict[str, list[CoverageGap]] = {}
+    feature_gaps: dict[str, list[CoverageGap]] = {}
     for gap in coverage_gaps:
-        gene_gaps.setdefault(gap.gene_name, []).append(gap)
+        feature_gaps.setdefault(gap.feature_name, []).append(gap)
 
     unassessed_total = sum(
-        1 for gene, pos in rule_positions if any(
-            gap.codon_start <= pos <= gap.codon_end for gap in gene_gaps.get(gene, [])
+        1 for feature, pos in rule_positions if any(
+            gap.codon_start <= pos <= gap.codon_end for gap in feature_gaps.get(feature, [])
         )
     )
     return len(rule_positions), unassessed_total
@@ -721,38 +721,38 @@ def _load_drug_cards(
     return cards
 
 
-def _load_gene_cards(
+def _load_feature_cards(
     project_conn: sqlite3.Connection | None,
     reference_name: str,
-    detected_gene_names: set[str] | None = None,
+    detected_feature_names: set[str] | None = None,
 ) -> list[dict]:
     """
-    Load gene metadata for detected genes in the active reference.
+    Load feature metadata for detected features in the active reference.
 
     :param project_conn: open project database connection (or None)
     :param reference_name: active reference name from profiling result
-    :param detected_gene_names: genes observed in this profiling run
-    :return: list of gene info dicts
+    :param detected_feature_names: features observed in this profiling run
+    :return: list of feature info dicts
     """
-    if project_conn is None or not detected_gene_names:
+    if project_conn is None or not detected_feature_names:
         return []
 
     try:
         rows = project_conn.execute(
             'SELECT g.name, g.protein, g.protein_id, g.ncbi_protein_url, g.locus_tag, g.note, g.aa_sequence '
-            'FROM gene g '
+            'FROM feature g '
             'JOIN reference r ON r.id = g.reference_id '
             'WHERE r.name = ? '
             'ORDER BY g.start',
             (reference_name,),
         ).fetchall()
     except sqlite3.Error as exc:
-        logger.debug('Failed to load gene cards from project DB for %r: %s', reference_name, exc)
+        logger.debug('Failed to load feature cards from project DB for %r: %s', reference_name, exc)
         return []
 
     cards: list[dict] = []
     for row in rows:
-        if row['name'] not in detected_gene_names:
+        if row['name'] not in detected_feature_names:
             continue
         cards.append({
             'name': row['name'],
@@ -811,9 +811,9 @@ def _build_summary_text(
     potential_rows: list[dict],
     summary: dict,
     organism: str = '',
-    affected_genes: list[str] | None = None,
-    high_impact_genes: list[str] | None = None,
-    coverage_gap_genes: list[str] | None = None,
+    affected_features: list[str] | None = None,
+    high_impact_features: list[str] | None = None,
+    coverage_gap_features: list[str] | None = None,
 ) -> Markup:
     """
     Build a concise, grammatically natural English narrative for the report header.
@@ -827,9 +827,9 @@ def _build_summary_text(
     :param potential_rows: similarity-based potential effect rows
     :param summary: report summary metrics
     :param organism: organism name from the profiling result
-    :param affected_genes: gene names with resistance hits
-    :param high_impact_genes: gene names that carry at least one high-impact variant
-    :param coverage_gap_genes: gene names with coverage gaps
+    :param affected_features: feature names with resistance hits
+    :param high_impact_features: feature names that carry at least one high-impact variant
+    :param coverage_gap_features: feature names with coverage gaps
     :return: HTML Markup narrative string
     """
     evidence_rows = [*db_hit_rows, *combo_hit_rows]
@@ -881,7 +881,7 @@ def _build_summary_text(
         hit_noun = 'database hit' if n_hits == 1 else 'database hits'
         drug_noun = 'drug' if n_drugs == 1 else 'drugs'
 
-        # Build opening sentence: "Resistance-associated mutations in gene UL23 of Human alphaherpesvirus 1 were detected ..."
+        # Build opening sentence: "Resistance-associated mutations in feature UL23 of Human alphaherpesvirus 1 were detected ..."
         if total_resistant or total_intermediate:
             subject = 'Resistance-associated mutations'
         elif total_sensitive:
@@ -890,9 +890,9 @@ def _build_summary_text(
             subject = 'Mutations with no resistance phenotype classification'
 
         location_parts: list[str] = []
-        if affected_genes:
-            gene_list = _join_english_list([f'<em>{escape(g.upper())}</em>' for g in sorted(affected_genes)])
-            location_parts.append(f'in {gene_list}')
+        if affected_features:
+            feature_list = _join_english_list([f'<em>{escape(g.upper())}</em>' for g in sorted(affected_features)])
+            location_parts.append(f'in {feature_list}')
         if organism:
             location_parts.append(f'of {escape(organism)}')
         location_clause = (' ' + ' '.join(location_parts)) if location_parts else ''
@@ -972,22 +972,22 @@ def _build_summary_text(
             if (cnt := by_consequence.get(c, 0))
         ]
         type_list = _join_english_list(type_parts) if type_parts else 'high-impact'
-        gene_clause = ''
-        if high_impact_genes:
-            hi_gene_list = _join_english_list([f'<em>{escape(g.upper())}</em>' for g in sorted(high_impact_genes)])
-            gene_clause = f' in {hi_gene_list}'
+        feature_clause = ''
+        if high_impact_features:
+            hi_feature_list = _join_english_list([f'<em>{escape(g.upper())}</em>' for g in sorted(high_impact_features)])
+            feature_clause = f' in {hi_feature_list}'
         sentences.append(
             f"Moreover, {'one' if n == 1 else n} high-impact variant{'s were' if n != 1 else ' was'} "
-            f"identified{gene_clause} ({type_list}) that may disrupt protein structure or function "
+            f"identified{feature_clause} ({type_list}) that may disrupt protein structure or function "
             f"and should be interpreted with caution."
         )
 
-    if coverage_gap_genes:
-        gene_list = _join_english_list([f'<em>{escape(g.upper())}</em>' for g in sorted(coverage_gap_genes)])
-        n_genes = len(coverage_gap_genes)
-        part = 'part' if n_genes == 1 else 'parts'
+    if coverage_gap_features:
+        feature_list = _join_english_list([f'<em>{escape(g.upper())}</em>' for g in sorted(coverage_gap_features)])
+        n_features = len(coverage_gap_features)
+        part = 'part' if n_features == 1 else 'parts'
         sentences.append(
-            f"Due to coverage gaps, {part} of {gene_list} could not be fully assessed for resistance mutations."
+            f"Due to coverage gaps, {part} of {feature_list} could not be fully assessed for resistance mutations."
         )
 
     return Markup(' '.join(sentences))
@@ -1017,9 +1017,9 @@ def build_report_context(
             project_uuid = ''
     summary['project_uuid'] = project_uuid
 
-    gene_alignments = build_gene_alignments(result.query_sequence, result.gene_matches)
+    feature_alignments = build_feature_alignments(result.query_sequence, result.feature_matches)
 
-    db_hit_rows = _build_db_hit_rows(result, gene_alignments)
+    db_hit_rows = _build_db_hit_rows(result, feature_alignments)
     summary['db_hit_rules'] = len(db_hit_rows)
     combo_hit_rows = _build_combo_hit_rows(result)
     summary['combination_rule_hits'] = len(combo_hit_rows)
@@ -1030,7 +1030,7 @@ def build_report_context(
     summary['single_hit_drugs'] = len({(row.get('drug') or '').lower() for row in db_hit_rows})
 
     summary['combo_hit_positions'] = len({
-        (variant.gene_name, variant.codon_pos)
+        (variant.feature_name, variant.codon_pos)
         for hit in result.formula_hits
         for variant in hit.matched_variants
     })
@@ -1038,8 +1038,8 @@ def build_report_context(
     summary['combo_total_hits'] = summary['combo_hit_rules']
     summary['combo_hit_drugs'] = len({(row.get('drug') or '').lower() for row in combo_hit_rows})
     sample_classification = _build_sample_classification(result)
-    cds_rows = _build_cds_rows(result, gene_alignments)
-    potential_rows = _build_potential_effects_rows(result, rules or [], gene_alignments)
+    cds_rows = _build_cds_rows(result, feature_alignments)
+    potential_rows = _build_potential_effects_rows(result, rules or [], feature_alignments)
     coverage_assessment_available = bool(rules) or bool(result.coverage_gaps) or any(
         ann.is_fasta_mode for ann in result.annotations
     )
@@ -1050,8 +1050,8 @@ def build_report_context(
     else:
         total_rule_positions = 0
         unassessed_rule_positions = 0
-    summary['similarity_hits'] = len({(r['gene'], r['codon_pos']) for r in potential_rows})
-    summary['similarity_rules'] = len({(r['gene'], r['observed_change']) for r in potential_rows})
+    summary['similarity_hits'] = len({(r['feature'], r['codon_pos']) for r in potential_rows})
+    summary['similarity_rules'] = len({(r['feature'], r['observed_change']) for r in potential_rows})
 
     summary['resistant_hits'] = sum(1 for r in db_hit_rows if _effective_phenotype(r) == 'resistant')
     summary['intermediate_hits'] = sum(1 for r in db_hit_rows if _effective_phenotype(r) == 'intermediate')
@@ -1121,34 +1121,34 @@ def build_report_context(
     _attach_drug_badges(potential_rows, drug_colours)
 
     drug_cards = _load_drug_cards(project_conn, detected_drug_names)
-    detected_gene_names = {
-        ann.gene_name
+    detected_feature_names = {
+        ann.feature_name
         for ann in result.cds_annotations
-        if ann.gene_name
+        if ann.feature_name
     }
-    gene_cards = _load_gene_cards(project_conn, result.reference_name, detected_gene_names)
+    feature_cards = _load_feature_cards(project_conn, result.reference_name, detected_feature_names)
 
-    # Genes that carry at least one direct resistance hit.
-    hit_gene_names = {
-        ann.gene_name
+    # features that carry at least one direct resistance hit.
+    hit_feature_names = {
+        ann.feature_name
         for ann in result.cds_annotations
-        if ann.is_resistance_hit and ann.gene_name
+        if ann.is_resistance_hit and ann.feature_name
     }
-    high_impact_gene_names = {
-        ann.gene_name
+    high_impact_feature_names = {
+        ann.feature_name
         for ann in result.cds_annotations
-        if ann.consequence in _high_impact and ann.gene_name
+        if ann.consequence in _high_impact and ann.feature_name
     }
-    coverage_gap_gene_names = {
-        gap.gene_name
+    coverage_gap_feature_names = {
+        gap.feature_name
         for gap in result.coverage_gaps
     }
     summary_text = _build_summary_text(
         db_hit_rows, combo_hit_rows, potential_rows, summary,
         organism=summary.get('organism') or '',
-        affected_genes=sorted(hit_gene_names),
-        high_impact_genes=sorted(high_impact_gene_names),
-        coverage_gap_genes=sorted(coverage_gap_gene_names),
+        affected_features=sorted(hit_feature_names),
+        high_impact_features=sorted(high_impact_feature_names),
+        coverage_gap_features=sorted(coverage_gap_feature_names),
     )
 
     return {
@@ -1160,7 +1160,7 @@ def build_report_context(
         'cds_rows': cds_rows,
         'potential_rows': potential_rows,
         'drug_cards': drug_cards,
-        'gene_cards': gene_cards,
+        'feature_cards': feature_cards,
         'db_cols': db_cols,
         'combo_cols': combo_cols,
         'pot_cols': pot_cols,
@@ -1212,7 +1212,7 @@ def render_html(
 def write_html(
     result: ProfilingResult,
     output_path: Path,
-    genes: list[GeneRecord] | None = None,
+    features: list[FeatureRecord] | None = None,
     plot_svg_data: bytes | None = None,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
@@ -1222,7 +1222,7 @@ def write_html(
 
     :param result: ProfilingResult object
     :param output_path: path to write HTML file to
-    :param genes: optional list of genes for context
+    :param features: optional list of features for context
     :param plot_svg_data: optional SVG bytes of the embedded plot
     :param project_conn: optional project DB connection for drug overview
     :param rules: optional list of resistance rules for potential effects analysis

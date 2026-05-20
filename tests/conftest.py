@@ -16,7 +16,7 @@ from Bio.Seq import Seq
 from Bio.SeqFeature import FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
 
-from respro.db.models import GeneRecord
+from respro.db.models import FeatureRecord
 from respro.db.schema import create_schema
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -38,7 +38,7 @@ def tmp_dir(tmp_path: Path) -> Path:
 
 # ─── Minimal reference data ──────────────────────────────────────────
 
-# A tiny 90-nt "genome" with one 30-codon gene at positions 1–90
+# A tiny 90-nt "genome" with one 30-codon feature at positions 1–90
 TINY_REF_SEQ = 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCCAAAGCTTTTGGCCCCAAATTTGGGCCCAAAGCTTTTGGCCCCAAATTTGGGCCCAAATAA'
 # len = 87 nt  (29 codons → 28 AA + stop)
 # Codons: ATG AAA GCT TTT GGC CCC AAA TTT GGG CCC AAA GCT TTT GGC CCC AAA TTT GGG CCC AAA GCT TTT GGC CCC AAA TTT GGG CCC AAA TAA
@@ -52,9 +52,9 @@ def tiny_ref_seq() -> str:
 
 
 @pytest.fixture()
-def tiny_gene() -> GeneRecord:
-    """A gene spanning the entire tiny reference."""
-    return GeneRecord(
+def tiny_feature() -> FeatureRecord:
+    """A feature spanning the entire tiny reference."""
+    return FeatureRecord(
         id=1,
         reference_id=1,
         name='gag',
@@ -71,7 +71,7 @@ def tiny_gene() -> GeneRecord:
 
 @pytest.fixture()
 def project_db(tmp_path: Path) -> Path:
-    """Create a minimal project database with one reference, one gene, and rules."""
+    """Create a minimal project database with one reference, one feature, and rules."""
     db_path = tmp_path / 'test_project.db'
     conn = create_schema(db_path)
     conn.row_factory = sqlite3.Row
@@ -86,9 +86,9 @@ def project_db(tmp_path: Path) -> Path:
         'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
         (1, TINY_REF_NAME, len(TINY_REF_SEQ)),
     )
-    # Gene
+    # feature
     conn.execute(
-        'INSERT INTO gene (reference_id, name, protein, start, end, strand, nt_sequence) '
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
         'VALUES (?, ?, ?, ?, ?, ?, ?)',
         (1, 'gag', 'Gag', 0, 87, '+', TINY_REF_SEQ),
     )
@@ -99,7 +99,7 @@ def project_db(tmp_path: Path) -> Path:
     )
     # Rule: position 1 (0-based = 2nd AA = K), mutation=E -> resistance
     conn.execute(
-        'INSERT INTO resistance_rule (gene_id, drug_id, position, reference, mutation, phenotype) '
+        'INSERT INTO resistance_rule (feature_id, drug_id, position, reference, mutation, phenotype) '
         'VALUES (?, ?, ?, ?, ?, ?)',
         (1, 1, 1, 'K', 'E', 'resistant'),
     )
@@ -157,26 +157,26 @@ def write_genbank(
             record.annotations['taxonomy'] = record_data['taxonomy']
         record.features = []
 
-        for gene in record_data.get('genes', []):
-            product_value = gene.get('product', gene.get('protein', gene.get('gene', '')))
+        for feature in record_data.get('features', []):
+            product_value = feature.get('product', feature.get('protein', feature.get('feature', '')))
             qualifiers = {
-                'codon_start': [str(gene.get('codon_start', 1))],
+                'codon_start': [str(feature.get('codon_start', 1))],
             }
-            if gene.get('gene'):
-                qualifiers['gene'] = [gene['gene']]
+            if feature.get('feature'):
+                qualifiers['gene'] = [feature['feature']]
             if product_value:
                 qualifiers['product'] = [product_value]
-            if gene.get('protein_id'):
-                qualifiers['protein_id'] = [gene['protein_id']]
-            if gene.get('locus_tag'):
-                qualifiers['locus_tag'] = [gene['locus_tag']]
-            if 'translation' in gene:
-                qualifiers['translation'] = [gene['translation']]
+            if feature.get('protein_id'):
+                qualifiers['protein_id'] = [feature['protein_id']]
+            if feature.get('locus_tag'):
+                qualifiers['locus_tag'] = [feature['locus_tag']]
+            if 'translation' in feature:
+                qualifiers['translation'] = [feature['translation']]
             feature = SeqFeature(
                 FeatureLocation(
-                    gene['start'] - 1,
-                    gene['end'],
-                    strand=1 if gene.get('strand', '+') == '+' else -1,
+                    feature['start'] - 1,
+                    feature['end'],
+                    strand=1 if feature.get('strand', '+') == '+' else -1,
                 ),
                 type='CDS',
                 qualifiers=qualifiers,

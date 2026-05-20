@@ -16,7 +16,7 @@ from rich.console import Console
 
 from respro.core.rules import import_rules_with_summary, validate_rules_tsv
 from respro.db.drugs import _consolidate_drug_names_to_lowercase, _get_drugs_from_pubchem
-from respro.db.genes import _load_genbank_records
+from respro.db.features import _load_genbank_records
 from respro.db.project_metadata import load_metadata_json, store_project_metadata
 from respro.db.schema import PROJECT_SCHEMA_VERSION, create_schema, open_project_db
 from respro.io.genbank import ParsedGenBankReference, parse_genbank_sources
@@ -111,7 +111,7 @@ def add_to_project(
 
     :param db_path: existing project database path
     :param rules_tsv: tab-separated rules file to add
-    :param genbank_paths: optional GenBank files with additional references/genes
+    :param genbank_paths: optional GenBank files with additional references/features
     :param additional_info: if True, query PubChem for new drugs and resolve publication metadata
     :param validate_only: if True, run full rules validation/import path and roll back all DB changes
     :return: path to the updated database
@@ -182,12 +182,12 @@ def _get_existing_project_id(conn: sqlite3.Connection) -> int:
 
 
 def _ensure_project_has_reference_annotations(conn: sqlite3.Connection) -> None:
-    """Fail early when an existing DB lacks the stored references/genes needed for rule loading."""
+    """Fail early when an existing DB lacks the stored references/features needed for rule loading."""
     reference_count = conn.execute('SELECT COUNT(*) FROM reference').fetchone()[0]
-    gene_count = conn.execute('SELECT COUNT(*) FROM gene').fetchone()[0]
-    if reference_count == 0 or gene_count == 0:
+    feature_count = conn.execute('SELECT COUNT(*) FROM feature').fetchone()[0]
+    if reference_count == 0 or feature_count == 0:
         raise ValueError(
-            'Existing database has no stored references/genes. '
+            'Existing database has no stored references/features. '
             'Provide --genbank or rebuild the project with respro init.'
         )
 
@@ -263,12 +263,12 @@ def _init_add_command(
         Path, typer.Option('--rules', '-r', exists=True, help='Resistance rules TSV to add.')
     ],
     formula_rules: Annotated[
-        Path | None, typer.Option('--formula-rules', exists=True, help='Optional formula rules TSV.')
+        Path | None, typer.Option('--formula-rules',  exists=True, help='Optional formula rules TSV.')
     ] = None,
     genbank_paths: Annotated[
         list[Path] | None, typer.Option(
             '--genbank', '-g', exists=True,
-            help='Optional GenBank file(s) with additional references/genes.',
+            help='Optional GenBank file(s) with additional references/features.',
         )
     ] = None,
     additional_info: Annotated[

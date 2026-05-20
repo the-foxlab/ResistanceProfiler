@@ -116,13 +116,13 @@ section {
   display: block;
 }
 
-.gene-group {
+.feature-group {
   border-top: none;
   padding-top: 3mm;
   margin-top: 3mm;
 }
 
-.gene-heading {
+.feature-heading {
   font-size: 8pt;
   margin-bottom: 1.6mm;
 }

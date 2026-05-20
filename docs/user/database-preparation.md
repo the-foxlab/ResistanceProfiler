@@ -5,9 +5,9 @@ ResistanceProfiler uses a project SQLite database (`project.db`) created from:
 - at least one GenBank reference file
 - one resistance [rules TSV](docs/user/rules-tsv-format.md)
 
-If you are preparing your first database, make sure the rules file uses gene names that exist in the GenBank CDS annotations.
+If you are preparing your first database, make sure the rules file uses feature names that exist in the GenBank CDS annotations.
 
-This database is the central asset of a ResPro workflow. It does not just store reference files. It defines the internal references, gene annotations, and curated rule set that later FASTA and VCF samples are compared against.
+This database is the central asset of a ResPro workflow. It does not just store reference files. It defines the internal references, feature annotations, and curated rule set that later FASTA and VCF samples are compared against.
 
 > [!IMPORTANT]
 > Build `project.db` carefully and version it in your workflow. Most downstream interpretation quality depends on this curated project database.

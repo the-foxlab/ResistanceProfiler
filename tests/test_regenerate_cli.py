@@ -38,7 +38,7 @@ from respro.db.results import (
     save_run,
 )
 from respro.db.schema import init_results_db, open_project_db, open_results_db
-from respro.io.reference import load_genes_for_reference
+from respro.io.reference import load_features_for_reference
 from respro.report.non_html_exports import export_results
 
 
@@ -50,13 +50,13 @@ def _strip_ansi(text: str) -> str:
 def _init_split_project(
     tmp_path: Path,
     *,
-    gene_name: str,
+    feature_name: str,
     strand: str,
     segments: list[tuple[int, int]],
     reference_aa: str,
     mutation_aa: str,
 ) -> Path:
-    gb_path = tmp_path / f'{gene_name}.gb'
+    gb_path = tmp_path / f'{feature_name}.gb'
     record = SeqRecord(Seq('GCT' * 120), id='tiny_ref', name='tiny_ref', description='')
     record.annotations['molecule_type'] = 'DNA'
     record.annotations['accessions'] = ['tiny_ref']
@@ -70,7 +70,7 @@ def _init_split_project(
             ),
             type='CDS',
             qualifiers={
-                'gene': [gene_name],
+                'gene': [feature_name],
                 'product': ['DNA polymerase'],
                 'codon_start': ['1'],
             },
@@ -79,18 +79,18 @@ def _init_split_project(
     with open(gb_path, 'w') as handle:
         SeqIO.write([record], handle, 'genbank')
 
-    rules_tsv = tmp_path / f'{gene_name}.tsv'
+    rules_tsv = tmp_path / f'{feature_name}.tsv'
     rules_tsv.write_text(
         textwrap.dedent(
             f'''\
-            gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
-            {gene_name}\ttiny_ref\t2\t{reference_aa}\t{mutation_aa}\tDrugA\tresistant
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            {feature_name}\ttiny_ref\t2\t{reference_aa}\t{mutation_aa}\tDrugA\tresistant
             '''
         ),
         encoding='utf-8',
     )
 
-    db_path = tmp_path / f'{gene_name}.db'
+    db_path = tmp_path / f'{feature_name}.db'
     init_project(
         db_path=db_path,
         name='split-test',
@@ -459,7 +459,7 @@ class TestRegenerate:
         variant = VariantCall(chrom='tiny_ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=100)
         ann = AnnotatedVariant(
             variant=variant,
-            gene_name='gag',
+            feature_name='gag',
             codon_pos=1,
             ref_codon='AAA',
             alt_codon='GAA',
@@ -479,8 +479,8 @@ class TestRegenerate:
             ResistanceRuleSetMember(
                 id=1,
                 rule_set_id=1,
-                gene_name='gag',
-                gene_id=1,
+                feature_name='gag',
+                feature_id=1,
                 reference_identifier='tiny_ref',
                 position=1,
                 reference='K',
@@ -489,8 +489,8 @@ class TestRegenerate:
             ResistanceRuleSetMember(
                 id=2,
                 rule_set_id=1,
-                gene_name='gag',
-                gene_id=1,
+                feature_name='gag',
+                feature_id=1,
                 reference_identifier='tiny_ref',
                 position=5,
                 reference='A',
@@ -528,10 +528,10 @@ class TestRegenerate:
         assert 'combo_regen_test' in html
         assert 'TestDrug' in html
 
-    def test_regenerate_handles_negative_strand_split_gene_roundtrip(self, tmp_path: Path) -> None:
+    def test_regenerate_handles_negative_strand_split_feature_roundtrip(self, tmp_path: Path) -> None:
         project_db = _init_split_project(
             tmp_path,
-            gene_name='split_neg',
+            feature_name='split_neg',
             strand='-',
             segments=[(30, 48), (90, 108)],
             reference_aa='S',
@@ -549,9 +549,9 @@ class TestRegenerate:
             assert ref_row is not None
 
             rules = load_rules(project_conn, int(ref_row['id']))
-            genes = load_genes_for_reference(project_conn, int(ref_row['id']))
-            assert len(genes) == 1
-            assert len(genes[0].segments) == 2
+            features = load_features_for_reference(project_conn, int(ref_row['id']))
+            assert len(features) == 1
+            assert len(features[0].segments) == 2
 
             ann = AnnotatedVariant(
                 variant=VariantCall(
@@ -562,7 +562,7 @@ class TestRegenerate:
                     allele_freq=0.98,
                     depth=400,
                 ),
-                gene_name='split_neg',
+                feature_name='split_neg',
                 codon_pos=1,
                 ref_codon='AGC',
                 alt_codon='GCC',
@@ -663,12 +663,12 @@ class TestRegenerate:
 
         out_dir = tmp_path / 'regenerated_with_classification'
         rules = load_rules(project_conn, int(ref_row['id']))
-        genes = load_genes_for_reference(project_conn, int(ref_row['id']))
+        features = load_features_for_reference(project_conn, int(ref_row['id']))
         outputs = export_results(
             profiling_result,
             out_dir,
-            genes=genes,
-            rule_gene_names={rule.gene_name for rule in rules},
+            features=features,
+            rule_feature_names={rule.feature_name for rule in rules},
             project_conn=project_conn,
             rules=rules,
         )
@@ -844,7 +844,7 @@ class TestExploreRules:
         # project_db is built from conftest fixtures; should have at least one rule.
         # Verify table output contains expected columns and at least one rule
         assert 'Reference' in result.output
-        assert 'Gene' in result.output
+        assert 'Feature' in result.output
         assert 'Drug' in result.output
         assert 'TestDrug' in result.output
 
@@ -901,13 +901,13 @@ class TestExploreRules:
                     'id': 'tiny_ref',
                     'accession': 'tiny_ref',
                     'sequence': TINY_REF_SEQ,
-                    'genes': [{'gene': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+                    'features': [{'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
                 }
             ],
         )
         rules_tsv = tmp_path / 'rules.tsv'
         rules_tsv.write_text(
-            'gene\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id\n'
+            'feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id\n'
             'gag\ttiny_ref\t2\tK\tE\tDrugA\tunknown\tgroup_1\tmut_k2e\n'
             'gag\ttiny_ref\t6\tP\tV\tDrugA\tunknown\tgroup_1\tmut_p6v\n',
             encoding='utf-8',

@@ -10,18 +10,18 @@ from Bio.Seq import Seq
 from respro.db.models import (
     AnnotatedVariant,
     CoverageGap,
-    GeneMatch,
-    GeneRecord,
-    GeneSegment,
+    FeatureMatch,
+    FeatureRecord,
+    FeatureSegment,
     ProfilingResult,
     Publication,
     ResistanceRule,
     VariantCall,
 )
-from respro.report.alignment_visualization import build_alignment_html, build_gene_alignments
+from respro.report.alignment_visualization import build_alignment_html, build_feature_alignments
 from respro.report.html import (
     _build_potential_effects_rows,
-    _load_gene_cards,
+    _load_feature_cards,
     build_report_context,
     render_html,
 )
@@ -44,7 +44,7 @@ def _make_result() -> ProfilingResult:
     """
     var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500)
     rule = ResistanceRule(
-        id=1, gene_name='gag', gene_id=1,
+        id=1, feature_name='gag', feature_id=1,
         drug_name='DrugA', drug_id=1,
         reference_identifier='tiny_ref',
         position=2, reference='K', mutation='E',
@@ -54,13 +54,13 @@ def _make_result() -> ProfilingResult:
     )
     ann = AnnotatedVariant(
         variant=var,
-        gene_name='gag', codon_pos=2,
+        feature_name='gag', codon_pos=2,
         ref_codon='AAA', alt_codon='GAA',
         ref_aa='K', alt_aa='E',
         consequence='missense', af_bin='high',
         rule_matches=[rule],
     )
-    gene = GeneRecord(
+    feature = FeatureRecord(
         id=1,
         reference_id=1,
         name='gag',
@@ -78,9 +78,9 @@ def _make_result() -> ProfilingResult:
         total_variants=1, variants_in_cds=1, resistance_hits=1,
         annotations=[ann],
         query_sequence='ATGAAAGCTTAA',
-        gene_matches=[
-            GeneMatch(
-                gene=gene,
+        feature_matches=[
+            FeatureMatch(
+                feature=feature,
                 identity=1.0,
                 cds_coverage=1.0,
                 query_coverage=1.0,
@@ -132,17 +132,17 @@ class TestBuildReportContext:
         # Two rules on the same variant → 1 position, 2 rules
         var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=300)
         rule_a = ResistanceRule(
-            id=1, gene_name='gag', gene_id=1,
+            id=1, feature_name='gag', feature_id=1,
             drug_name='DrugA', drug_id=1, reference_identifier='ref',
             position=2, reference='K', mutation='E', phenotype='resistant',
         )
         rule_b = ResistanceRule(
-            id=2, gene_name='gag', gene_id=1,
+            id=2, feature_name='gag', feature_id=1,
             drug_name='DrugB', drug_id=2, reference_identifier='ref',
             position=2, reference='K', mutation='E', phenotype='sensitive',
         )
         ann = AnnotatedVariant(
-            variant=var, gene_name='gag', codon_pos=2,
+            variant=var, feature_name='gag', codon_pos=2,
             ref_codon='AAA', alt_codon='GAA',
             ref_aa='K', alt_aa='E',
             consequence='missense', af_bin='high',
@@ -182,13 +182,13 @@ class TestBuildReportContext:
         # → should count as resistant only, NOT as both resistant and intermediate.
         var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=300)
         rule = ResistanceRule(
-            id=1, gene_name='gag', gene_id=1,
+            id=1, feature_name='gag', feature_id=1,
             drug_name='DrugA', drug_id=1, reference_identifier='ref',
             position=2, reference='K', mutation='E',
             phenotype='resistant', clinical_phenotype='intermediate',
         )
         ann = AnnotatedVariant(
-            variant=var, gene_name='gag', codon_pos=2,
+            variant=var, feature_name='gag', codon_pos=2,
             ref_aa='K', alt_aa='E', consequence='missense', af_bin='high',
             rule_matches=[rule],
         )
@@ -205,13 +205,13 @@ class TestBuildReportContext:
         # → should count as resistant via fallback.
         var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=300)
         rule = ResistanceRule(
-            id=1, gene_name='gag', gene_id=1,
+            id=1, feature_name='gag', feature_id=1,
             drug_name='DrugA', drug_id=1, reference_identifier='ref',
             position=2, reference='K', mutation='E',
             phenotype='unknown', clinical_phenotype='resistant',
         )
         ann = AnnotatedVariant(
-            variant=var, gene_name='gag', codon_pos=2,
+            variant=var, feature_name='gag', codon_pos=2,
             ref_aa='K', alt_aa='E', consequence='missense', af_bin='high',
             rule_matches=[rule],
         )
@@ -224,20 +224,20 @@ class TestBuildReportContext:
         assert ctx['summary']['intermediate_hits'] == 0
 
     def test_similarity_hits_counts_unique_positions(self) -> None:
-        # Two rules at the same (gene, codon_pos) for different drugs
+        # Two rules at the same (feature, codon_pos) for different drugs
         # → similarity_hits = 1 unique position, similarity_rules = 2
         var = VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.5, depth=100)
         ann = AnnotatedVariant(
-            variant=var, gene_name='gag', codon_pos=5,
+            variant=var, feature_name='gag', codon_pos=5,
             ref_aa='L', alt_aa='V', consequence='missense', af_bin='high',
         )
         rule_a = ResistanceRule(
-            id=10, gene_name='gag', gene_id=1,
+            id=10, feature_name='gag', feature_id=1,
             drug_name='DrugA', drug_id=1, reference_identifier='ref',
             position=5, reference='L', mutation='I', phenotype='resistant',
         )
         rule_b = ResistanceRule(
-            id=11, gene_name='gag', gene_id=1,
+            id=11, feature_name='gag', feature_id=1,
             drug_name='DrugB', drug_id=2, reference_identifier='ref',
             position=5, reference='L', mutation='I', phenotype='intermediate',
         )
@@ -254,11 +254,11 @@ class TestBuildReportContext:
         # → counted as resistant only.
         var = VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.5, depth=100)
         ann = AnnotatedVariant(
-            variant=var, gene_name='gag', codon_pos=5,
+            variant=var, feature_name='gag', codon_pos=5,
             ref_aa='L', alt_aa='V', consequence='missense', af_bin='high',
         )
         rule = ResistanceRule(
-            id=10, gene_name='gag', gene_id=1,
+            id=10, feature_name='gag', feature_id=1,
             drug_name='DrugA', drug_id=1, reference_identifier='ref',
             position=5, reference='L', mutation='I',
             phenotype='resistant', clinical_phenotype='intermediate',
@@ -277,11 +277,11 @@ class TestBuildReportContext:
         # to the 'Mutations in database' section.
         var = VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.5, depth=100)
         ann = AnnotatedVariant(
-            variant=var, gene_name='gag', codon_pos=5,
+            variant=var, feature_name='gag', codon_pos=5,
             ref_aa='L', alt_aa='V', consequence='missense', af_bin='high',
         )
         rule = ResistanceRule(
-            id=10, gene_name='gag', gene_id=1,
+            id=10, feature_name='gag', feature_id=1,
             drug_name='DrugA', drug_id=1, reference_identifier='ref',
             position=5, reference='L', mutation='I',
             phenotype='unknown', clinical_phenotype='resistant',
@@ -302,11 +302,11 @@ class TestBuildReportContext:
         # must be omitted everywhere — same 'if available' behaviour as 'Mutations in database'.
         var = VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.5, depth=100)
         ann = AnnotatedVariant(
-            variant=var, gene_name='gag', codon_pos=5,
+            variant=var, feature_name='gag', codon_pos=5,
             ref_aa='L', alt_aa='V', consequence='missense', af_bin='high',
         )
         rule = ResistanceRule(
-            id=10, gene_name='gag', gene_id=1,
+            id=10, feature_name='gag', feature_id=1,
             drug_name='DrugA', drug_id=1, reference_identifier='ref',
             position=5, reference='L', mutation='I',
             phenotype='resistant',  # clinical_phenotype defaults to 'unknown'
@@ -345,26 +345,26 @@ class TestPdfExports:
         # ALSO show the Clinical phenotype column even if those similarity rules have 'unknown'.
         var_hit = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=300)
         rule_hit = ResistanceRule(
-            id=1, gene_name='gag', gene_id=1,
+            id=1, feature_name='gag', feature_id=1,
             drug_name='DrugA', drug_id=1, reference_identifier='ref',
             position=2, reference='K', mutation='E',
             phenotype='resistant', clinical_phenotype='resistant',
         )
         ann_hit = AnnotatedVariant(
-            variant=var_hit, gene_name='gag', codon_pos=2,
+            variant=var_hit, feature_name='gag', codon_pos=2,
             ref_aa='K', alt_aa='E', consequence='missense', af_bin='high',
             rule_matches=[rule_hit],
         )
         # Similarity hit at a different position — rule has clinical_phenotype='unknown'
         var_sim = VariantCall(chrom='ref', pos=15, ref='C', alt='T', allele_freq=0.5, depth=100)
         rule_sim = ResistanceRule(
-            id=2, gene_name='gag', gene_id=1,
+            id=2, feature_name='gag', feature_id=1,
             drug_name='DrugA', drug_id=1, reference_identifier='ref',
             position=5, reference='L', mutation='I',
             phenotype='resistant',  # clinical_phenotype='unknown' (default)
         )
         ann_sim = AnnotatedVariant(
-            variant=var_sim, gene_name='gag', codon_pos=5,
+            variant=var_sim, feature_name='gag', codon_pos=5,
             ref_aa='L', alt_aa='V', consequence='missense', af_bin='high',
         )
         r = ProfilingResult(
@@ -383,7 +383,7 @@ class TestPdfExports:
         var = VariantCall(chrom='ref', pos=10, ref='A', alt='AGGG', allele_freq=0.8, depth=120)
         ann = AnnotatedVariant(
             variant=var,
-            gene_name='gag',
+            feature_name='gag',
             codon_pos=2,
             ref_aa='K',
             alt_aa='KG',
@@ -404,8 +404,8 @@ class TestPdfExports:
 
         snp_rule = ResistanceRule(
             id=1,
-            gene_name='gag',
-            gene_id=1,
+            feature_name='gag',
+            feature_id=1,
             drug_name='DrugA',
             drug_id=1,
             reference_identifier='tiny_ref',
@@ -422,7 +422,7 @@ class TestPdfExports:
         var = VariantCall(chrom='ref', pos=10, ref='A', alt='AGGG', allele_freq=0.8, depth=120)
         ann = AnnotatedVariant(
             variant=var,
-            gene_name='gag',
+            feature_name='gag',
             codon_pos=2,
             ref_aa='K',
             alt_aa='KG',
@@ -443,8 +443,8 @@ class TestPdfExports:
 
         indel_rule = ResistanceRule(
             id=1,
-            gene_name='gag',
-            gene_id=1,
+            feature_name='gag',
+            feature_id=1,
             drug_name='DrugA',
             drug_id=1,
             reference_identifier='tiny_ref',
@@ -459,21 +459,21 @@ class TestPdfExports:
         assert rows[0]['drug'] == 'DrugA'
         assert rows[0]['similarity'] == 'moderate'
 
-    def test_render_html_gene_overview(self):
+    def test_render_html_feature_overview(self):
 
         r = _make_result()
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row
         conn.execute('CREATE TABLE reference (id INTEGER, name TEXT)')
         conn.execute(
-            'CREATE TABLE gene ('
+            'CREATE TABLE feature ('
             'name TEXT, protein TEXT, protein_id TEXT, ncbi_protein_url TEXT, '
             'locus_tag TEXT, note TEXT, aa_sequence TEXT, start INTEGER, reference_id INTEGER'
             ')'
         )
         conn.execute('INSERT INTO reference (id, name) VALUES (?, ?)', (1, 'ref'))
         conn.execute(
-            'INSERT INTO gene (name, protein, protein_id, ncbi_protein_url, locus_tag, note, aa_sequence, start, reference_id) '
+            'INSERT INTO feature (name, protein, protein_id, ncbi_protein_url, locus_tag, note, aa_sequence, start, reference_id) '
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 'gag',
@@ -489,7 +489,7 @@ class TestPdfExports:
         )
         conn.commit()
 
-        cards = _load_gene_cards(conn, r.reference_name, {'gag'})
+        cards = _load_feature_cards(conn, r.reference_name, {'gag'})
         assert len(cards) == 1
         assert cards[0]['protein_id'] == 'YP_009137097.1'
         assert cards[0]['ncbi_protein_url'] == 'https://www.ncbi.nlm.nih.gov/protein/YP_009137097.1/'
@@ -497,12 +497,12 @@ class TestPdfExports:
 
     def test_build_report_context_tracks_unassessed_rule_positions(self):
         r = _make_result()
-        r.coverage_gaps = [CoverageGap(gene_name='gag', codon_start=2, codon_end=2)]
+        r.coverage_gaps = [CoverageGap(feature_name='gag', codon_start=2, codon_end=2)]
         rules = [
             ResistanceRule(
                 id=2,
-                gene_name='gag',
-                gene_id=1,
+                feature_name='gag',
+                feature_id=1,
                 drug_name='DrugA',
                 drug_id=1,
                 reference_identifier='tiny_ref',
@@ -513,8 +513,8 @@ class TestPdfExports:
             ),
             ResistanceRule(
                 id=3,
-                gene_name='gag',
-                gene_id=1,
+                feature_name='gag',
+                feature_id=1,
                 drug_name='DrugB',
                 drug_id=2,
                 reference_identifier='tiny_ref',
@@ -531,12 +531,12 @@ class TestPdfExports:
 
     def test_render_html_shows_unassessed_rule_tile_without_detail_table(self):
         r = _make_result()
-        r.coverage_gaps = [CoverageGap(gene_name='gag', codon_start=2, codon_end=2)]
+        r.coverage_gaps = [CoverageGap(feature_name='gag', codon_start=2, codon_end=2)]
         rules = [
             ResistanceRule(
                 id=2,
-                gene_name='gag',
-                gene_id=1,
+                feature_name='gag',
+                feature_id=1,
                 drug_name='DrugA',
                 drug_id=1,
                 reference_identifier='tiny_ref',
@@ -547,8 +547,8 @@ class TestPdfExports:
             ),
             ResistanceRule(
                 id=3,
-                gene_name='gag',
-                gene_id=1,
+                feature_name='gag',
+                feature_id=1,
                 drug_name='DrugB',
                 drug_id=2,
                 reference_identifier='tiny_ref',
@@ -568,7 +568,7 @@ class TestPdfExports:
         variant = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=200)
         ann = AnnotatedVariant(
             variant=variant,
-            gene_name='gag',
+            feature_name='gag',
             codon_pos=2,
             ref_aa='K',
             alt_aa='E',
@@ -589,8 +589,8 @@ class TestPdfExports:
         rules = [
             ResistanceRule(
                 id=11,
-                gene_name='gag',
-                gene_id=1,
+                feature_name='gag',
+                feature_id=1,
                 drug_name='DrugA',
                 drug_id=1,
                 reference_identifier='tiny_ref',
@@ -608,8 +608,8 @@ class TestPdfExports:
     def test_build_report_context_sorts_db_hits_by_drug_then_resistance_then_ic50(self):
         resistant_rule = ResistanceRule(
             id=21,
-            gene_name='gag',
-            gene_id=1,
+            feature_name='gag',
+            feature_id=1,
             drug_name='DrugA',
             drug_id=1,
             reference_identifier='tiny_ref',
@@ -621,8 +621,8 @@ class TestPdfExports:
         )
         intermediate_rule = ResistanceRule(
             id=22,
-            gene_name='gag',
-            gene_id=1,
+            feature_name='gag',
+            feature_id=1,
             drug_name='DrugA',
             drug_id=1,
             reference_identifier='tiny_ref',
@@ -634,8 +634,8 @@ class TestPdfExports:
         )
         high_ic50_unknown_rule = ResistanceRule(
             id=23,
-            gene_name='gag',
-            gene_id=1,
+            feature_name='gag',
+            feature_id=1,
             drug_name='DrugB',
             drug_id=2,
             reference_identifier='tiny_ref',
@@ -648,8 +648,8 @@ class TestPdfExports:
         )
         low_ic50_unknown_rule = ResistanceRule(
             id=24,
-            gene_name='gag',
-            gene_id=1,
+            feature_name='gag',
+            feature_id=1,
             drug_name='DrugB',
             drug_id=2,
             reference_identifier='tiny_ref',
@@ -671,7 +671,7 @@ class TestPdfExports:
             annotations=[
                 AnnotatedVariant(
                     variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
-                    gene_name='gag',
+                    feature_name='gag',
                     codon_pos=2,
                     ref_aa='K',
                     alt_aa='E',
@@ -681,7 +681,7 @@ class TestPdfExports:
                 ),
                 AnnotatedVariant(
                     variant=VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.9, depth=180),
-                    gene_name='gag',
+                    feature_name='gag',
                     codon_pos=3,
                     ref_aa='A',
                     alt_aa='V',
@@ -691,7 +691,7 @@ class TestPdfExports:
                 ),
                 AnnotatedVariant(
                     variant=VariantCall(chrom='ref', pos=9, ref='C', alt='T', allele_freq=0.85, depth=170),
-                    gene_name='gag',
+                    feature_name='gag',
                     codon_pos=4,
                     ref_aa='L',
                     alt_aa='I',
@@ -701,7 +701,7 @@ class TestPdfExports:
                 ),
                 AnnotatedVariant(
                     variant=VariantCall(chrom='ref', pos=12, ref='C', alt='A', allele_freq=0.8, depth=160),
-                    gene_name='gag',
+                    feature_name='gag',
                     codon_pos=5,
                     ref_aa='P',
                     alt_aa='S',
@@ -739,13 +739,13 @@ class TestPdfExports:
         conn.row_factory = sqlite3.Row
         conn.execute('CREATE TABLE reference (id INTEGER, name TEXT)')
         conn.execute(
-            'CREATE TABLE gene ('
+            'CREATE TABLE feature ('
             'name TEXT, start INTEGER, end INTEGER, strand TEXT, codon_start INTEGER, nt_sequence TEXT, reference_id INTEGER'
             ')'
         )
         conn.execute('INSERT INTO reference (id, name) VALUES (?, ?)', (1, 'ref'))
         conn.execute(
-            'INSERT INTO gene (name, start, end, strand, codon_start, nt_sequence, reference_id) '
+            'INSERT INTO feature (name, start, end, strand, codon_start, nt_sequence, reference_id) '
             'VALUES (?, ?, ?, ?, ?, ?, ?)',
             ('gag', 0, 12, '+', 0, 'ATGAAAGCTTAA', 1),
         )
@@ -764,8 +764,8 @@ class TestPdfExports:
     def test_build_report_context_includes_summary_text(self) -> None:
         hit_rule = ResistanceRule(
             id=1,
-            gene_name='gag',
-            gene_id=1,
+            feature_name='gag',
+            feature_id=1,
             drug_name='DrugA',
             drug_id=1,
             reference_identifier='tiny_ref',
@@ -778,7 +778,7 @@ class TestPdfExports:
         )
         hit_ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
-            gene_name='gag',
+            feature_name='gag',
             codon_pos=2,
             ref_aa='K',
             alt_aa='E',
@@ -789,7 +789,7 @@ class TestPdfExports:
 
         sim_ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.5, depth=100),
-            gene_name='gag',
+            feature_name='gag',
             codon_pos=5,
             ref_aa='L',
             alt_aa='V',
@@ -798,7 +798,7 @@ class TestPdfExports:
         )
         high_impact_ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=10, ref='A', alt='AG', allele_freq=0.8, depth=120),
-            gene_name='gag',
+            feature_name='gag',
             codon_pos=6,
             ref_aa='P',
             alt_aa='PfsX',
@@ -807,8 +807,8 @@ class TestPdfExports:
         )
         sim_rule = ResistanceRule(
             id=2,
-            gene_name='gag',
-            gene_id=1,
+            feature_name='gag',
+            feature_id=1,
             drug_name='DrugB',
             drug_id=2,
             reference_identifier='tiny_ref',
@@ -843,7 +843,7 @@ class TestPdfExports:
     def test_build_report_context_mentions_coverage_gaps(self) -> None:
         hit_ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=10, ref='A', alt='T', allele_freq=0.8, depth=100),
-            gene_name='pol',
+            feature_name='pol',
             codon_pos=1,
             ref_aa='K',
             alt_aa='E',
@@ -860,8 +860,8 @@ class TestPdfExports:
             organism='Test organism',
             annotations=[hit_ann],
             coverage_gaps=[
-                CoverageGap(gene_name='gag', codon_start=5, codon_end=10),
-                CoverageGap(gene_name='rt', codon_start=20, codon_end=25),
+                CoverageGap(feature_name='gag', codon_start=5, codon_end=10),
+                CoverageGap(feature_name='rt', codon_start=20, codon_end=25),
             ],
         )
 
@@ -893,7 +893,7 @@ class TestPdfExports:
         var = VariantCall(chrom='ref', pos=3, ref='C', alt='CG', allele_freq=0.9, depth=300)
         ann = AnnotatedVariant(
             variant=var,
-            gene_name='gag',
+            feature_name='gag',
             codon_pos=2,
             ref_codon='AAA',
             alt_codon='AAAGGG',
@@ -919,7 +919,7 @@ class TestPdfExports:
     def test_render_html_highlights_frameshift_indel_segments_in_table(self) -> None:
         ins = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=3, ref='A', alt='AG', allele_freq=0.9, depth=300),
-            gene_name='gag',
+            feature_name='gag',
             codon_pos=2,
             ref_aa='K',
             alt_aa='KfsX',
@@ -928,7 +928,7 @@ class TestPdfExports:
         )
         dele = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=6, ref='AC', alt='A', allele_freq=0.8, depth=250),
-            gene_name='gag',
+            feature_name='gag',
             codon_pos=3,
             ref_aa='P',
             alt_aa='PfsX',
@@ -952,7 +952,7 @@ class TestPdfExports:
     def test_render_html_fasta_frameshift_uses_indel_nt_not_fsx_token(self) -> None:
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=47663, ref='GG', alt='G', allele_freq=0.8, depth=250),
-            gene_name='UL23',
+            feature_name='UL23',
             codon_pos=47,
             ref_aa='P',
             alt_aa='PfsX',
@@ -982,13 +982,13 @@ class TestPdfExports:
         conn.row_factory = sqlite3.Row
         conn.execute('CREATE TABLE reference (id INTEGER, name TEXT)')
         conn.execute(
-            'CREATE TABLE gene ('
+            'CREATE TABLE feature ('
             'name TEXT, start INTEGER, end INTEGER, strand TEXT, codon_start INTEGER, nt_sequence TEXT, reference_id INTEGER'
             ')'
         )
         conn.execute('INSERT INTO reference (id, name) VALUES (?, ?)', (1, 'ref'))
         conn.execute(
-            'INSERT INTO gene (name, start, end, strand, codon_start, nt_sequence, reference_id) '
+            'INSERT INTO feature (name, start, end, strand, codon_start, nt_sequence, reference_id) '
             'VALUES (?, ?, ?, ?, ?, ?, ?)',
             ('gag', 0, 12, '+', 0, 'ATGAAAGCTTAA', 1),
         )
@@ -1001,9 +1001,9 @@ class TestPdfExports:
         from respro.report.plots import render_lollipop_plot_bytes
 
         r = _make_result()
-        r.coverage_gaps = [CoverageGap(gene_name='gag', codon_start=2, codon_end=2)]
-        genes = [
-            GeneRecord(
+        r.coverage_gaps = [CoverageGap(feature_name='gag', codon_start=2, codon_end=2)]
+        features = [
+            FeatureRecord(
                 id=1,
                 reference_id=1,
                 name='gag',
@@ -1016,7 +1016,7 @@ class TestPdfExports:
             ),
         ]
 
-        svg = render_lollipop_plot_bytes(r, genes, fmt='svg')
+        svg = render_lollipop_plot_bytes(r, features, fmt='svg')
         assert svg is not None
         assert b'non covered' in svg
         assert b'#6b7280' in svg
@@ -1027,8 +1027,8 @@ class TestPdfExports:
 
         r = _make_result()
         r.coverage_gaps = []
-        genes = [
-            GeneRecord(
+        features = [
+            FeatureRecord(
                 id=1,
                 reference_id=1,
                 name='gag',
@@ -1041,16 +1041,16 @@ class TestPdfExports:
             ),
         ]
 
-        svg = render_lollipop_plot_bytes(r, genes, fmt='svg')
+        svg = render_lollipop_plot_bytes(r, features, fmt='svg')
         assert svg is not None
         assert b'non covered' not in svg
 
-    def test_lollipop_svg_omits_intron_legend_without_split_gene(self):
+    def test_lollipop_svg_omits_intron_legend_without_split_feature(self):
         from respro.report.plots import render_lollipop_plot_bytes
 
         r = _make_result()
-        genes = [
-            GeneRecord(
+        features = [
+            FeatureRecord(
                 id=1,
                 reference_id=1,
                 name='gag',
@@ -1063,16 +1063,16 @@ class TestPdfExports:
             ),
         ]
 
-        svg = render_lollipop_plot_bytes(r, genes, fmt='svg')
+        svg = render_lollipop_plot_bytes(r, features, fmt='svg')
         assert svg is not None
         assert b'Intron (non-coding)' not in svg
 
 
-class TestSplitGenePlotRendering:
+class TestSplitFeaturePlotRendering:
     def test_genome_overview_draws_one_block_per_segment_in_genomic_order(self) -> None:
         from respro.report.plots import _draw_genome_overview
 
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='UL30',
@@ -1083,14 +1083,14 @@ class TestSplitGenePlotRendering:
             codon_start=0,
             nt_sequence='A' * 12,
             segments=(
-                GeneSegment(segment_index=0, start=30, end=36),
-                GeneSegment(segment_index=1, start=10, end=16),
+                FeatureSegment(segment_index=0, start=30, end=36),
+                FeatureSegment(segment_index=1, start=10, end=16),
             ),
         )
 
         fig, ax = plt.subplots()
         try:
-            _draw_genome_overview(ax, [gene], {gene.name}, reference_length_nt=50)
+            _draw_genome_overview(ax, [feature], {feature.name}, reference_length_nt=50)
 
             rects = ax.patches
             assert len(rects) == 2
@@ -1100,10 +1100,10 @@ class TestSplitGenePlotRendering:
         finally:
             plt.close(fig)
 
-    def test_gene_track_draws_one_block_per_segment_in_genomic_order(self) -> None:
-        from respro.report.plots import _draw_gene_track
+    def test_feature_track_draws_one_block_per_segment_in_genomic_order(self) -> None:
+        from respro.report.plots import _draw_feature_track
 
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='UL30',
@@ -1114,18 +1114,18 @@ class TestSplitGenePlotRendering:
             codon_start=0,
             nt_sequence='A' * 12,
             segments=(
-                GeneSegment(segment_index=0, start=30, end=36),
-                GeneSegment(segment_index=1, start=10, end=16),
+                FeatureSegment(segment_index=0, start=30, end=36),
+                FeatureSegment(segment_index=1, start=10, end=16),
             ),
         )
 
         fig, ax = plt.subplots()
         try:
-            _draw_gene_track(ax, gene)
+            _draw_feature_track(ax, feature)
 
             rects = ax.patches
             assert len(rects) == 2
-            # Full gene box (start=10 → x=11, width=26) then intron gap (16–30 → x=17, width=14)
+            # Full feature box (start=10 → x=11, width=26) then intron gap (16–30 → x=17, width=14)
             assert [rect.get_x() for rect in rects] == [11, 17]
             assert [rect.get_width() for rect in rects] == [26, 14]
             assert [text.get_text() for text in ax.texts] == ['← UL30 ←']
@@ -1135,7 +1135,7 @@ class TestSplitGenePlotRendering:
 
 class TestAlignmentVisualization:
     def test_fasta_alignment_renders_match_bars_from_aligned_query(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='FASTA',
@@ -1146,8 +1146,8 @@ class TestAlignmentVisualization:
             codon_start=0,
             nt_sequence='AAACCCGGG',
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1157,10 +1157,10 @@ class TestAlignmentVisualization:
             cigar='9M',
             cds_start=0,
         )
-        alignment = build_gene_alignments('AAATCCGGG', [match])['FASTA']
+        alignment = build_feature_alignments('AAATCCGGG', [match])['FASTA']
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=3, ref='CCC', alt='TCC'),
-            gene_name='FASTA',
+            feature_name='FASTA',
             codon_pos=1,
             ref_codon='CCC',
             alt_codon='TCC',
@@ -1175,7 +1175,7 @@ class TestAlignmentVisualization:
         assert html.count("<span class='aln-cell aln-match-cell'>|</span>") == 8
 
     def test_fasta_snp_highlights_the_existing_aligned_base(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='FASTASNP',
@@ -1186,8 +1186,8 @@ class TestAlignmentVisualization:
             codon_start=0,
             nt_sequence='AAACCCGGG',
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1197,10 +1197,10 @@ class TestAlignmentVisualization:
             cigar='9M',
             cds_start=0,
         )
-        alignment = build_gene_alignments('AAATCCGGG', [match])['FASTASNP']
+        alignment = build_feature_alignments('AAATCCGGG', [match])['FASTASNP']
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=3, ref='CCC', alt='TCC'),
-            gene_name='FASTASNP',
+            feature_name='FASTASNP',
             codon_pos=1,
             ref_codon='CCC',
             alt_codon='TCC',
@@ -1215,7 +1215,7 @@ class TestAlignmentVisualization:
         assert "<span class='aln-cell aln-affected'>T</span>" in html
 
     def test_fasta_synonymous_snp_still_highlights_anchor_base(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='FASTASYN',
@@ -1226,8 +1226,8 @@ class TestAlignmentVisualization:
             codon_start=0,
             nt_sequence='AAACCCGGG',
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1237,10 +1237,10 @@ class TestAlignmentVisualization:
             cigar='9M',
             cds_start=0,
         )
-        alignment = build_gene_alignments('AAATCCGGG', [match])['FASTASYN']
+        alignment = build_feature_alignments('AAATCCGGG', [match])['FASTASYN']
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=3, ref='C', alt='T'),
-            gene_name='FASTASYN',
+            feature_name='FASTASYN',
             codon_pos=1,
             ref_codon='GGC',
             alt_codon='GGC',
@@ -1256,7 +1256,7 @@ class TestAlignmentVisualization:
         assert "<span class='aln-cell aln-affected'>T</span>" in html
 
     def test_vcf_alignment_renders_match_bars_from_overlay_query(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='VCF',
@@ -1267,8 +1267,8 @@ class TestAlignmentVisualization:
             codon_start=0,
             nt_sequence='AAACCCGGG',
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1278,10 +1278,10 @@ class TestAlignmentVisualization:
             cigar='9M',
             cds_start=0,
         )
-        alignment = build_gene_alignments('AAACCCGGG', [match])['VCF']
+        alignment = build_feature_alignments('AAACCCGGG', [match])['VCF']
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=103, ref='C', alt='T'),
-            gene_name='VCF',
+            feature_name='VCF',
             codon_pos=1,
             consequence='missense',
             af_bin='high',
@@ -1292,7 +1292,7 @@ class TestAlignmentVisualization:
         assert html.count("<span class='aln-cell aln-match-cell'>|</span>") == 8
 
     def test_highlight_uses_real_cigar_alignment_window(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='UL23',
@@ -1303,8 +1303,8 @@ class TestAlignmentVisualization:
             codon_start=0,
             nt_sequence='ATGACCCCCAAGGCC',
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1314,11 +1314,11 @@ class TestAlignmentVisualization:
             cigar='8M1D6M',
             cds_start=0,
         )
-        alignments = build_gene_alignments('ATGACCCC AAGGCC'.replace(' ', ''), [match])
+        alignments = build_feature_alignments('ATGACCCC AAGGCC'.replace(' ', ''), [match])
 
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=7, ref='CC', alt='C'),
-            gene_name='UL23',
+            feature_name='UL23',
             codon_pos=2,
             consequence='deletion',
             ref_codon='CCC',
@@ -1332,7 +1332,7 @@ class TestAlignmentVisualization:
         assert "<span class='aln-cell aln-affected'>-</span>" in html
 
     def test_fasta_frameshift_deletion_highlights_gap_column_in_alignment(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='UL23',
@@ -1343,8 +1343,8 @@ class TestAlignmentVisualization:
             codon_start=0,
             nt_sequence='TAGCGTGGGCATTTTCTG',
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1354,10 +1354,10 @@ class TestAlignmentVisualization:
             cigar='6M1D12M',
             cds_start=0,
         )
-        alignment = build_gene_alignments('TAGCGTGGCATTTTCTG', [match])['UL23']
+        alignment = build_feature_alignments('TAGCGTGGCATTTTCTG', [match])['UL23']
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=5, ref='TG', alt='T'),
-            gene_name='UL23',
+            feature_name='UL23',
             codon_pos=1,
             consequence='frameshift',
             ref_aa='P',
@@ -1370,7 +1370,7 @@ class TestAlignmentVisualization:
         assert "<span class='aln-cell aln-affected'>-</span>" in html
 
     def test_fasta_insertion_uses_existing_alignment_without_duplication(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='UL23INS',
@@ -1381,8 +1381,8 @@ class TestAlignmentVisualization:
             codon_start=0,
             nt_sequence='ATGCCCAAAGGG',
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1392,10 +1392,10 @@ class TestAlignmentVisualization:
             cigar='4M1I8M',
             cds_start=0,
         )
-        alignment = build_gene_alignments('ATGCGCCCAAAGGG', [match])['UL23INS']
+        alignment = build_feature_alignments('ATGCGCCCAAAGGG', [match])['UL23INS']
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=3, ref='C', alt='CG'),
-            gene_name='UL23INS',
+            feature_name='UL23INS',
             codon_pos=1,
             consequence='insertion',
             ref_aa='P',
@@ -1408,7 +1408,7 @@ class TestAlignmentVisualization:
         assert html.count("<span class='aln-cell aln-affected'>G</span>") == 1
 
     def test_fasta_reverse_frameshift_deletion_highlights_gap_column_in_alignment(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='REVDEL',
@@ -1421,8 +1421,8 @@ class TestAlignmentVisualization:
         )
         coding_query = 'ATGGGTTT'
         query = str(Seq(coding_query).reverse_complement())
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1432,10 +1432,10 @@ class TestAlignmentVisualization:
             cigar='3M1D5M',
             cds_start=0,
         )
-        alignment = build_gene_alignments(query, [match])['REVDEL']
+        alignment = build_feature_alignments(query, [match])['REVDEL']
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=4, ref='CC', alt='C'),
-            gene_name='REVDEL',
+            feature_name='REVDEL',
             codon_pos=1,
             consequence='frameshift',
             ref_aa='G',
@@ -1447,8 +1447,8 @@ class TestAlignmentVisualization:
         assert html.count('aln-cell aln-affected') == 1
         assert "<span class='aln-cell aln-affected'>-</span>" in html
 
-    def test_reverse_gene_codon_spacing_follows_cds_direction(self) -> None:
-        gene = GeneRecord(
+    def test_reverse_feature_codon_spacing_follows_cds_direction(self) -> None:
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='REV',
@@ -1459,8 +1459,8 @@ class TestAlignmentVisualization:
             codon_start=0,
             nt_sequence='AAACCCGGG',
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1470,11 +1470,11 @@ class TestAlignmentVisualization:
             cigar='9M',
             cds_start=0,
         )
-        alignments = build_gene_alignments('AAACCCGGG', [match])
+        alignments = build_feature_alignments('AAACCCGGG', [match])
 
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=4, ref='C', alt='T'),
-            gene_name='REV',
+            feature_name='REV',
             codon_pos=1,
             consequence='missense',
             ref_codon='CCC',
@@ -1494,7 +1494,7 @@ class TestCoverageGapPlotBounds:
     def test_reverse_strand_gap_bounds_include_full_terminal_codons(self) -> None:
         from respro.report.plots import _coverage_gap_nt_bounds
 
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='REV',
@@ -1505,13 +1505,13 @@ class TestCoverageGapPlotBounds:
             codon_start=0,
             nt_sequence='A' * 30,
         )
-        gap = CoverageGap(gene_name='REV', codon_start=0, codon_end=2)
+        gap = CoverageGap(feature_name='REV', codon_start=0, codon_end=2)
 
-        start, end = _coverage_gap_nt_bounds(gene, gap)
+        start, end = _coverage_gap_nt_bounds(feature, gap)
         assert (start, end) == (121, 130)
 
     def test_vcf_snp_overlay_switches_base_and_highlights_anchor(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='G',
@@ -1522,8 +1522,8 @@ class TestCoverageGapPlotBounds:
             codon_start=0,
             nt_sequence='AAACCCGGG',
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1533,10 +1533,10 @@ class TestCoverageGapPlotBounds:
             cigar='9M',
             cds_start=0,
         )
-        alignment = build_gene_alignments('AAACCCGGG', [match])['G']
+        alignment = build_feature_alignments('AAACCCGGG', [match])['G']
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=103, ref='C', alt='T'),
-            gene_name='G',
+            feature_name='G',
             codon_pos=1,
             consequence='missense',
             is_fasta_mode=False,
@@ -1547,7 +1547,7 @@ class TestCoverageGapPlotBounds:
         assert "<span class='aln-cell aln-affected'>T</span>" in html
 
     def test_vcf_deletion_overlay_places_gap_after_anchor(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='D',
@@ -1558,8 +1558,8 @@ class TestCoverageGapPlotBounds:
             codon_start=0,
             nt_sequence='ATGCCCAAAGGG',
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1569,10 +1569,10 @@ class TestCoverageGapPlotBounds:
             cigar='12M',
             cds_start=0,
         )
-        alignment = build_gene_alignments('ATGCCCAAAGGG', [match])['D']
+        alignment = build_feature_alignments('ATGCCCAAAGGG', [match])['D']
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=3, ref='CC', alt='C'),
-            gene_name='D',
+            feature_name='D',
             codon_pos=1,
             consequence='deletion',
             is_fasta_mode=False,
@@ -1582,7 +1582,7 @@ class TestCoverageGapPlotBounds:
         assert "<span class='aln-cell aln-affected'>-</span>" in html
 
     def test_vcf_deletion_does_not_highlight_anchor_cell(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='DANCHOR',
@@ -1593,8 +1593,8 @@ class TestCoverageGapPlotBounds:
             codon_start=0,
             nt_sequence='ATGCCCAAAGGG',
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1604,10 +1604,10 @@ class TestCoverageGapPlotBounds:
             cigar='12M',
             cds_start=0,
         )
-        alignment = build_gene_alignments('ATGCCCAAAGGG', [match])['DANCHOR']
+        alignment = build_feature_alignments('ATGCCCAAAGGG', [match])['DANCHOR']
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=3, ref='CC', alt='C'),
-            gene_name='DANCHOR',
+            feature_name='DANCHOR',
             codon_pos=1,
             consequence='deletion',
             is_fasta_mode=False,
@@ -1618,7 +1618,7 @@ class TestCoverageGapPlotBounds:
         assert html.count('aln-cell aln-affected') == 1
 
     def test_vcf_insertion_does_not_highlight_anchor_cell(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='IANCHOR',
@@ -1629,8 +1629,8 @@ class TestCoverageGapPlotBounds:
             codon_start=0,
             nt_sequence='ATGCCCAAAGGG',
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1640,10 +1640,10 @@ class TestCoverageGapPlotBounds:
             cigar='12M',
             cds_start=0,
         )
-        alignment = build_gene_alignments('ATGCCCAAAGGG', [match])['IANCHOR']
+        alignment = build_feature_alignments('ATGCCCAAAGGG', [match])['IANCHOR']
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=3, ref='C', alt='CG'),
-            gene_name='IANCHOR',
+            feature_name='IANCHOR',
             codon_pos=1,
             consequence='insertion',
             is_fasta_mode=False,
@@ -1654,7 +1654,7 @@ class TestCoverageGapPlotBounds:
         assert html.count('aln-cell aln-affected') == 1
 
     def test_vcf_long_deletion_expands_alignment_context(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='DLONG',
@@ -1665,8 +1665,8 @@ class TestCoverageGapPlotBounds:
             codon_start=0,
             nt_sequence='A' * 30,
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1676,10 +1676,10 @@ class TestCoverageGapPlotBounds:
             cigar='30M',
             cds_start=0,
         )
-        alignment = build_gene_alignments('A' * 30, [match])['DLONG']
+        alignment = build_feature_alignments('A' * 30, [match])['DLONG']
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=3, ref='AAAAAAAAAA', alt='A'),
-            gene_name='DLONG',
+            feature_name='DLONG',
             codon_pos=1,
             consequence='deletion',
             is_fasta_mode=False,
@@ -1689,7 +1689,7 @@ class TestCoverageGapPlotBounds:
         assert html.count("<span class='aln-cell aln-affected'>-</span>") == 9
 
     def test_vcf_long_deletion_expands_alignment_context_reverse_strand(self) -> None:
-        gene = GeneRecord(
+        feature = FeatureRecord(
             id=1,
             reference_id=1,
             name='DLONGREV',
@@ -1700,8 +1700,8 @@ class TestCoverageGapPlotBounds:
             codon_start=0,
             nt_sequence='A' * 30,
         )
-        match = GeneMatch(
-            gene=gene,
+        match = FeatureMatch(
+            feature=feature,
             identity=1.0,
             cds_coverage=1.0,
             query_coverage=1.0,
@@ -1711,10 +1711,10 @@ class TestCoverageGapPlotBounds:
             cigar='30M',
             cds_start=0,
         )
-        alignment = build_gene_alignments('A' * 30, [match])['DLONGREV']
+        alignment = build_feature_alignments('A' * 30, [match])['DLONGREV']
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=120, ref='AAAAAAAAAA', alt='A'),
-            gene_name='DLONGREV',
+            feature_name='DLONGREV',
             codon_pos=3,
             consequence='deletion',
             is_fasta_mode=False,

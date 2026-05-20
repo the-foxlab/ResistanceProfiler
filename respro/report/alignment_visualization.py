@@ -8,17 +8,17 @@ from markupsafe import Markup, escape
 
 from respro.core.annotation import reverse_complement
 from respro.core.fasta_to_vcf import _gapped_strings_from_cigar
-from respro.db.models import AnnotatedVariant, GeneMatch
+from respro.db.models import AnnotatedVariant, FeatureMatch
 
 
 @dataclass(frozen=True)
-class GeneAlignment:
-    """Real gapped gene-level alignment in coding orientation."""
+class FeatureAlignment:
+    """Real gapped feature-level alignment in coding orientation."""
 
-    gene_name: str
-    gene_start: int
-    gene_end: int
-    gene_length: int
+    feature_name: str
+    feature_start: int
+    feature_end: int
+    feature_length: int
     strand: str
     codon_start: int
     aligned_ref: str
@@ -69,20 +69,20 @@ def _build_coding_to_aln_index(
     return mapping
 
 
-def build_gene_alignments(
+def build_feature_alignments(
     query_sequence: str,
-    gene_matches: list[GeneMatch],
-) -> dict[str, GeneAlignment]:
-    """Build real coding-orientation gapped alignments for all matched genes."""
+    feature_matches: list[FeatureMatch],
+) -> dict[str, FeatureAlignment]:
+    """Build real coding-orientation gapped alignments for all matched features."""
     query_upper = (query_sequence or '').upper()
     if not query_upper:
         return {}
 
-    alignments: dict[str, GeneAlignment] = {}
+    alignments: dict[str, FeatureAlignment] = {}
     best_identity: dict[str, float] = {}
-    for match in gene_matches:
-        gene = match.gene
-        if not gene.nt_sequence:
+    for match in feature_matches:
+        feature = match.feature
+        if not feature.nt_sequence:
             continue
 
         region = query_upper[match.query_start:match.query_end]
@@ -90,12 +90,12 @@ def build_gene_alignments(
             region = reverse_complement(region)
 
         aligned_ref_coding, aligned_query_coding = _gapped_strings_from_cigar(
-            gene.nt_sequence.upper(), region, match.cigar, match.cds_start,
+            feature.nt_sequence.upper(), region, match.cigar, match.cds_start,
         )
 
         coding_ref_pos, coding_anchor_pos, _ = _build_alignment_index(aligned_ref_coding)
 
-        if gene.strand == '-':
+        if feature.strand == '-':
             aligned_ref = _reverse_complement_gapped(aligned_ref_coding)
             aligned_query = _reverse_complement_gapped(aligned_query_coding)
             aln_coding_pos = list(reversed(coding_ref_pos))
@@ -106,27 +106,27 @@ def build_gene_alignments(
             aln_coding_pos = coding_ref_pos
             aln_coding_anchor_pos = coding_anchor_pos
 
-        gene_len = len(gene.nt_sequence)
+        feature_len = len(feature.nt_sequence)
 
-        if gene.strand == '-':
+        if feature.strand == '-':
             aln_native_pos = [
-                (gene_len - 1 - p) if p is not None else None
+                (feature_len - 1 - p) if p is not None else None
                 for p in aln_coding_pos
             ]
-            aln_native_anchor_pos = [gene_len - 1 - p for p in aln_coding_anchor_pos]
+            aln_native_anchor_pos = [feature_len - 1 - p for p in aln_coding_anchor_pos]
         else:
             aln_native_pos = list(aln_coding_pos)
             aln_native_anchor_pos = list(aln_coding_anchor_pos)
 
-        coding_to_aln_idx = _build_coding_to_aln_index(aln_coding_pos, gene_len)
+        coding_to_aln_idx = _build_coding_to_aln_index(aln_coding_pos, feature_len)
 
-        entry = GeneAlignment(
-            gene_name=gene.name,
-            gene_start=gene.start,
-            gene_end=gene.end,
-            gene_length=gene_len,
-            strand=gene.strand,
-            codon_start=gene.codon_start,
+        entry = FeatureAlignment(
+            feature_name=feature.name,
+            feature_start=feature.start,
+            feature_end=feature.end,
+            feature_length=feature_len,
+            strand=feature.strand,
+            codon_start=feature.codon_start,
             aligned_ref=aligned_ref,
             aligned_query=aligned_query,
             aln_coding_pos=aln_coding_pos,
@@ -135,9 +135,9 @@ def build_gene_alignments(
             aln_native_anchor_pos=aln_native_anchor_pos,
             coding_to_aln_idx=coding_to_aln_idx,
         )
-        if gene.name not in best_identity or match.identity > best_identity[gene.name]:
-            alignments[gene.name] = entry
-            best_identity[gene.name] = match.identity
+        if feature.name not in best_identity or match.identity > best_identity[feature.name]:
+            alignments[feature.name] = entry
+            best_identity[feature.name] = match.identity
 
     return alignments
 
@@ -157,7 +157,7 @@ def _render_spaced_line(
             if strand == '+':
                 is_codon_boundary = (coding_pos - codon_start) % 3 == 0
             else:
-                # Display is left-to-right native reference for reverse genes, but codons
+                # Display is left-to-right native reference for reverse features, but codons
                 # are defined in coding direction (right-to-left here).
                 is_codon_boundary = (coding_pos - codon_start) % 3 == 2
             if is_codon_boundary:
@@ -192,23 +192,23 @@ def _build_match_line(
     return rendered.replace("<span class='aln-cell'>|</span>", "<span class='aln-cell aln-match-cell'>|</span>")
 
 
-def _variant_coding_pos(ann: AnnotatedVariant, alignment: GeneAlignment) -> int:
+def _variant_coding_pos(ann: AnnotatedVariant, alignment: FeatureAlignment) -> int:
     """Return coding-sequence nucleotide position for the variant anchor."""
     if alignment.strand == '+':
-        nt_offset = ann.variant.pos - alignment.gene_start
+        nt_offset = ann.variant.pos - alignment.feature_start
     else:
-        nt_offset = (alignment.gene_end - 1) - ann.variant.pos
+        nt_offset = (alignment.feature_end - 1) - ann.variant.pos
     return nt_offset - alignment.codon_start
 
 
-def _variant_native_pos(ann: AnnotatedVariant, alignment: GeneAlignment) -> int:
-    """Return native 5'-3' reference-gene nucleotide offset for variant anchor."""
-    return ann.variant.pos - alignment.gene_start
+def _variant_native_pos(ann: AnnotatedVariant, alignment: FeatureAlignment) -> int:
+    """Return native 5'-3' reference-feature nucleotide offset for variant anchor."""
+    return ann.variant.pos - alignment.feature_start
 
 
 def _apply_vcf_overlay(
     ann: AnnotatedVariant,
-    alignment: GeneAlignment,
+    alignment: FeatureAlignment,
     ref_window: str,
     query_window: str,
     coding_positions: list[int | None],
@@ -280,7 +280,7 @@ def _apply_vcf_overlay(
 
 def _window_displays_variant(
     ann: AnnotatedVariant,
-    alignment: GeneAlignment,
+    alignment: FeatureAlignment,
     ref_window: str,
     query_window: str,
     native_positions: list[int | None],
@@ -329,7 +329,7 @@ def _window_displays_variant(
 
 def _build_affected_mask(
     ann: AnnotatedVariant,
-    alignment: GeneAlignment,
+    alignment: FeatureAlignment,
     native_positions: list[int | None],
     native_anchor_positions: list[int],
     codon_nt_start: int,
@@ -363,7 +363,7 @@ def _build_affected_mask(
 
 def _affected_nt_positions(
     ann: AnnotatedVariant,
-    alignment: GeneAlignment,
+    alignment: FeatureAlignment,
     codon_nt_start: int,
 ) -> set[int]:
     """Return native-direction positions that should be highlighted as directly affected."""
@@ -392,7 +392,7 @@ def _affected_nt_positions(
                 continue
             coding_pos = codon_nt_start + idx
             if alignment.strand == '-':
-                affected.add(alignment.gene_length - 1 - coding_pos)
+                affected.add(alignment.feature_length - 1 - coding_pos)
             else:
                 affected.add(coding_pos)
         return affected
@@ -402,21 +402,21 @@ def _affected_nt_positions(
 
 def build_alignment_html(
     ann: AnnotatedVariant,
-    alignment: GeneAlignment,
+    alignment: FeatureAlignment,
     context_codons: int = 2,
 ) -> Markup | None:
     """
     Build a short coding-direction alignment block around one mutation.
 
     :param ann: annotated variant row source
-    :param alignment: real gapped alignment for the annotated gene
+    :param alignment: real gapped alignment for the annotated feature
     :param context_codons: number of codons on each side of the mutation codon
     :return: Markup-safe HTML block or None when unavailable
     """
     if ann.codon_pos < 0:
         return None
 
-    total_coding_codons = (alignment.gene_length - alignment.codon_start) // 3
+    total_coding_codons = (alignment.feature_length - alignment.codon_start) // 3
     if total_coding_codons <= 0:
         return None
 
@@ -432,7 +432,7 @@ def build_alignment_html(
 
     codon_nt_start = alignment.codon_start + center_codon * 3
     codon_nt_end = codon_nt_start + 3
-    if codon_nt_end > alignment.gene_length:
+    if codon_nt_end > alignment.feature_length:
         return None
 
     left_context_codons = context_codons
@@ -456,7 +456,7 @@ def build_alignment_html(
     visible_indices = [
         alignment.coding_to_aln_idx[coding_pos]
         for coding_pos in range(window_nt_start, window_nt_end)
-        if 0 <= coding_pos < alignment.gene_length and alignment.coding_to_aln_idx[coding_pos] >= 0
+        if 0 <= coding_pos < alignment.feature_length and alignment.coding_to_aln_idx[coding_pos] >= 0
     ]
     if not visible_indices:
         return None

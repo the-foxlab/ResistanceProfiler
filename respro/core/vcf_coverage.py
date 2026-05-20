@@ -10,7 +10,7 @@ from pathlib import Path
 import pysam
 
 from respro.core.vcf_remap import _build_query_to_cds_map
-from respro.db.models import CoverageGap, GeneMatch
+from respro.db.models import CoverageGap, FeatureMatch
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ def compute_coverage_gaps_from_bam(
     bam_path: Path,
     query_name: str,
     query_sequence: str,
-    matches: list[GeneMatch],
+    matches: list[FeatureMatch],
     min_depth: int,
 ) -> list[CoverageGap]:
     """
@@ -32,7 +32,7 @@ def compute_coverage_gaps_from_bam(
     :param bam_path: aligned BAM against the query reference used for VCF calling
     :param query_name: query reference name/header used during sequence matching
     :param query_sequence: full query sequence
-    :param matches: selected gene matches for the resolved internal reference
+    :param matches: selected feature matches for the resolved internal reference
     :param min_depth: per-base minimum depth threshold
     :return: merged non-covered codon stretches
     """
@@ -63,7 +63,7 @@ def _ensure_bam_index(bam_path: Path) -> None:
 
 def compute_coverage_gaps_from_depth(
     query_depths: list[int],
-    matches: list[GeneMatch],
+    matches: list[FeatureMatch],
     min_depth: int,
     query_len: int,
 ) -> list[CoverageGap]:
@@ -71,14 +71,14 @@ def compute_coverage_gaps_from_depth(
     Compute non-covered codon stretches from precomputed query depth values.
 
     :param query_depths: depth per query position (0-based)
-    :param matches: selected gene matches for the resolved internal reference
+    :param matches: selected feature matches for the resolved internal reference
     :param min_depth: per-base minimum depth threshold
     :param query_len: total query sequence length
     :return: merged non-covered codon stretches
     """
     gaps: list[CoverageGap] = []
     for match in matches:
-        gene = match.gene
+        feature = match.feature
         q2c = _build_query_to_cds_map(
             match.cigar,
             match.query_start,
@@ -89,16 +89,16 @@ def compute_coverage_gaps_from_depth(
         )
         cds_to_query = {cds_pos: query_pos for query_pos, cds_pos in q2c.items()}
 
-        codon_count = max(0, (len(gene.nt_sequence) - gene.codon_start) // 3)
+        codon_count = max(0, (len(feature.nt_sequence) - feature.codon_start) // 3)
         non_covered: list[int] = []
         for codon_idx in range(codon_count):
-            codon_nt_start = gene.codon_start + codon_idx * 3
+            codon_nt_start = feature.codon_start + codon_idx * 3
             if _codon_is_non_covered(codon_nt_start, cds_to_query, query_depths, min_depth):
                 non_covered.append(codon_idx)
 
-        gaps.extend(_merge_codon_gaps(gene.name, non_covered))
+        gaps.extend(_merge_codon_gaps(feature.name, non_covered))
 
-    gaps.sort(key=lambda gap: (gap.gene_name, gap.codon_start))
+    gaps.sort(key=lambda gap: (gap.feature_name, gap.codon_start))
     total_non_covered = sum(gap.codon_end - gap.codon_start + 1 for gap in gaps)
     logger.info(
         'VCF/BAM coverage: %d non-covered stretch(es), %d codon position(s) total',
@@ -156,7 +156,7 @@ def _codon_is_non_covered(
     return False
 
 
-def _merge_codon_gaps(gene_name: str, codon_indices: list[int]) -> list[CoverageGap]:
+def _merge_codon_gaps(feature_name: str, codon_indices: list[int]) -> list[CoverageGap]:
     """Merge non-covered codon indices into contiguous stretches."""
     if not codon_indices:
         return []
@@ -169,8 +169,8 @@ def _merge_codon_gaps(gene_name: str, codon_indices: list[int]) -> list[Coverage
         if pos == end + 1:
             end = pos
             continue
-        gaps.append(CoverageGap(gene_name=gene_name, codon_start=start, codon_end=end))
+        gaps.append(CoverageGap(feature_name=feature_name, codon_start=start, codon_end=end))
         start = pos
         end = pos
-    gaps.append(CoverageGap(gene_name=gene_name, codon_start=start, codon_end=end))
+    gaps.append(CoverageGap(feature_name=feature_name, codon_start=start, codon_end=end))
     return gaps
