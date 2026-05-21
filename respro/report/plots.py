@@ -426,22 +426,20 @@ def _draw_genome_overview(
     tracks = _assign_feature_tracks(sorted_features)
     genome_start, genome_end = _resolve_overview_bounds(sorted_features, reference_length_nt)
     max_track = max(tracks.values(), default=0)
-    track_height = 0.44
-    track_step = track_height * 0.2
     # Baseline beneath the tracks
-    ax.hlines(0.0, genome_start, genome_end, color=FEATURE_BASELINE_COLOUR, linewidth=1.0, zorder=1)
+    ax.hlines(0.5, genome_start, genome_end, color=FEATURE_BASELINE_COLOUR, linewidth=1.0, zorder=1)
 
     for feature in sorted_features:
         track = tracks[feature.name]
-        y = -(track * track_step)
+        y = -track
         is_highlighted = feature.name in highlighted_feature_names
         colour = FEATURE_HIGHLIGHTED_COLOUR if is_highlighted else FEATURE_DEFAULT_COLOUR
         edge = FEATURE_HIGHLIGHTED_EDGE if is_highlighted else FEATURE_DEFAULT_EDGE
         for segment_start, segment_end in _feature_plot_segments(feature):
             ax.add_patch(mpatches.Rectangle(
-                (segment_start + 1, y - (track_height / 2.0)),
+                (segment_start + 1, y),
                 max(1, segment_end - segment_start),
-                track_height,
+                0.9,
                 facecolor=colour,
                 edgecolor=edge,
                 linewidth=0.7,
@@ -449,7 +447,7 @@ def _draw_genome_overview(
             ))
 
         if is_highlighted:
-            label_y = y + (track_height / 2.0) + 0.11
+            label_y = 1
             label_x = feature.start + 1 + ((feature.end - feature.start) / 2)
             ax.text(
                 label_x,
@@ -457,15 +455,16 @@ def _draw_genome_overview(
                 feature.name,
                 ha='center',
                 va='bottom',
-                fontsize=8,
+                fontsize=6,
                 fontweight='bold',
                 color=FEATURE_HIGHLIGHTED_EDGE,
+                zorder=200 + y,
             )
 
     ax.set_title('Genome overview', fontsize=8, loc='left', fontweight='bold')
     ax.set_xlim(genome_start, genome_end)
-    lower = -(max_track * track_step) - (track_height / 2.0) - 0.2
-    ax.set_ylim(lower, 0.9)
+    lower = -(max_track + 0.2)
+    ax.set_ylim(lower, 1.2)
     ax.set_yticks([])
     ax.set_xlabel('Genomic position')
     ax.spines['top'].set_visible(False)
