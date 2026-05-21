@@ -1075,6 +1075,63 @@ class TestPhenotypeNormalization:
         assert phenotype == 'resistant'
         assert clinical == 'sensitive'
 
+    def test_missing_phenotype_columns_do_not_default_to_unknown(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral
+            gag\ttiny_ref\t2\tK\tE\tDrugA
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        phenotype, clinical = conn.execute(
+            'SELECT phenotype, clinical_phenotype FROM resistance_rule'
+        ).fetchone()
+        conn.close()
+        assert phenotype == ''
+        assert clinical == ''
+
+    def test_missing_phenotype_defaults_to_unknown_when_ruleset_has_phenotypes(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant
+            gag\ttiny_ref\t3\tA\tV\tDrugB\t
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        rows = conn.execute(
+            'SELECT phenotype, clinical_phenotype FROM resistance_rule ORDER BY id'
+        ).fetchall()
+        conn.close()
+        assert rows[0] == ('resistant', '')
+        assert rows[1] == ('unknown', '')
+
+    def test_missing_clinical_phenotype_defaults_to_unknown_when_ruleset_has_clinical_values(
+        self,
+        tmp_path,
+        tiny_genbank,
+    ) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tclinical_phenotype
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant
+            gag\ttiny_ref\t3\tA\tV\tDrugB\t
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        rows = conn.execute(
+            'SELECT phenotype, clinical_phenotype FROM resistance_rule ORDER BY id'
+        ).fetchall()
+        conn.close()
+        assert rows[0] == ('', 'resistant')
+        assert rows[1] == ('', 'unknown')
+
     def test_rejects_ambiguous_deletion_tokens(self, tmp_path, tiny_genbank) -> None:
         # F67del at position 2 with reference K: deleted block 'F' does not match
         # the feature sequence at position 2 (which is 'K') — resolution must fail.

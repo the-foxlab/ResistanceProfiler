@@ -213,7 +213,12 @@ def _effective_phenotype(row: dict) -> str:
     :return: one of 'resistant', 'intermediate', 'sensitive', or 'unknown'
     """
     p = row.get('phenotype', '')
-    return p if p and p != 'unknown' else row.get('clinical_phenotype', 'unknown')
+    if p and p != 'unknown':
+        return p
+    clinical = row.get('clinical_phenotype', '')
+    if clinical and clinical != 'unknown':
+        return clinical
+    return 'unknown'
 
 
 def _alignment_title(ann: AnnotatedVariant) -> str:
@@ -626,7 +631,7 @@ def _col_visibility(rows: list[dict], columns: list[str]) -> dict[str, bool]:
     result: dict[str, bool] = {}
     for col in columns:
         if col == 'clinical_phenotype':
-            result[col] = any(r.get(col, 'unknown') != 'unknown' for r in rows)
+            result[col] = any(bool(r.get(col)) and r.get(col) != 'unknown' for r in rows)
         elif col == 'publication':
             result[col] = any(r.get('pub_citations') for r in rows)
         else:
@@ -851,7 +856,7 @@ def _build_summary_text(
             entry[phenotype] += 1
         else:
             entry['unknown'] += 1
-        if row.get('clinical_phenotype', 'unknown') != 'unknown':
+        if row.get('clinical_phenotype') and row.get('clinical_phenotype') != 'unknown':
             entry['clinical'] += 1
 
         fold_value = (row.get('fold_ic50') or '').strip()

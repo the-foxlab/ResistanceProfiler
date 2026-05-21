@@ -34,6 +34,7 @@ from respro.db._rules_normalize import (
     _normalize_ic50_from_row,
     _normalize_phenotypes_from_row,
     _normalize_score_from_row,
+    _phenotype_missing_defaults,
 )
 from respro.db._rules_persist import (
     _build_feature_lookup,
@@ -121,6 +122,7 @@ def load_resistance_rules(
     external_ids: list[str] = []
     declared_external_ids: set[str] = set()
     grouped_ids: set[str] = set()
+    phenotype_default, clinical_phenotype_default = _phenotype_missing_defaults(all_rows)
     for row_number, row in enumerate(all_rows, start=2):
         if not _get_value(row, 'reference_identifier'):
             required_field_errors.append(
@@ -292,6 +294,8 @@ def load_resistance_rules(
             row,
             errors=errors,
             context=f'Rule for feature {feature_name!r} pos {position_raw!r}',
+            missing_phenotype_default=phenotype_default,
+            missing_clinical_default=clinical_phenotype_default,
         )
         normalized = _normalize_rule_alleles_for_storage(
             reference_aa=reference_aa,
@@ -492,6 +496,7 @@ def load_formula_rules(
     normalized_by_drug: dict[tuple[str, str], str] = {}
     prepared_rows: list[tuple[dict[str, str], str, list[str]]] = []
     skipped_formula_validation: list[str] = []  # Track rows skipped due to duplicates/conflicts
+    phenotype_default, clinical_phenotype_default = _phenotype_missing_defaults(rows)
     for row_number, row in enumerate(rows, start=2):
         formula_id = _get_value(row, 'group_id', 'formula_id')
         drug_name = _get_value(row, 'antiviral')
@@ -608,6 +613,8 @@ def load_formula_rules(
             row,
             errors=errors,
             context=f'Formula rule {formula_id!r}',
+            missing_phenotype_default=phenotype_default,
+            missing_clinical_default=clinical_phenotype_default,
         )
         ic50_value = _normalize_ic50_from_row(
             row,
