@@ -445,7 +445,7 @@ def _draw_genome_overview(
             ax.text(
                 label_x,
                 label_y,
-                feature.name,
+                feature.display_name,
                 ha='center',
                 va='bottom',
                 fontsize=6,
@@ -486,27 +486,6 @@ def _resolve_overview_bounds(
         'Reference length missing in result object; falling back to CDS-derived overview bounds.'
     )
     return 1, max(feature.end for feature in features)
-
-
-def _resolve_feature_label(feature_name: str, rule_feature_names: set[str] | None) -> str:
-    """
-    Resolve the display label for a feature using rule-matched names when possible.
-
-    Tries exact match first, then case-insensitive fallback.
-
-    :param feature_name: feature name from the database
-    :param rule_feature_names: optional set of rule-backed names
-    :return: best available label string
-    """
-    if not rule_feature_names:
-        return feature_name
-    if feature_name in rule_feature_names:
-        return feature_name
-    lower = feature_name.lower()
-    for name in rule_feature_names:
-        if name.lower() == lower:
-            return name
-    return feature_name
 
 
 def _draw_feature_track(
@@ -557,7 +536,7 @@ def _draw_feature_track(
     ax.text(
         feature_x,
         0.5,
-        f'← {feature.name} ←' if feature.strand == '-' else f'→ {feature.name} →',
+        f'← {feature.display_name} ←' if feature.strand == '-' else f'→ {feature.display_name} →',
         ha='center',
         va='center',
         fontsize=6,
@@ -579,7 +558,7 @@ def _draw_feature_track(
                 colors='black', linewidth=1, linestyle=':', zorder=5,
             )
         for mp in sorted_mps:
-            label = _resolve_feature_label(mp.name, rule_feature_names)
+            label = mp.display_name
             label_x = mp.start + 1 + max(1, mp.end - mp.start) / 2
             ax.text(
                 label_x, 0.76, label,
@@ -694,7 +673,7 @@ def _draw_feature_panel(
     ax.set_ylim(-0.19, 1.05)
     ax.set_ylabel('variant frequency')
     ax.set_title(
-        f'{feature.name} variants',
+        f'{feature.display_name} variants',
         fontsize=8,
         loc='left',
         pad=25,

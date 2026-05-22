@@ -129,6 +129,13 @@ class FeatureRecord:
             return None
         return (nt_offset - self.codon_start) % 3
 
+    @property
+    def display_name(self) -> str:
+        """Return the preferred display name for reports: protein for mat_peptides (if present), else name."""
+        if self.feature_type == 'mat_peptide' and self.protein:
+            return self.protein
+        return self.name
+
 
 @dataclass(frozen=True)
 class FeatureSegment:

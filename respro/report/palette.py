@@ -23,12 +23,12 @@ MUTATION_COLOURS = {
 NON_COVERED_COLOUR = '#6b7280'
 
 # Genome overview feature track colours
-CDS_HIGHLIGHTED_COLOUR = "#494899"
-MATPEPTIDE_HIGHLIGHTED_COLOUR = "#4169A7"
+CDS_HIGHLIGHTED_COLOUR = "#627BAA"
+MATPEPTIDE_HIGHLIGHTED_COLOUR = "#398588"
 FEATURE_INTRON_COLOUR = "#b2b2b2"  # muted blue-grey for intron / non-coding intervals within split genes
 FEATURE_DEFAULT_COLOUR = '#d9dde3'
 FEATURE_HIGHLIGHTED_EDGE = 'black'
-FEATURE_DEFAULT_EDGE = "#3d54bb"
+FEATURE_DEFAULT_EDGE = "#a2a2a2"
 FEATURE_BASELINE_COLOUR = 'dimgrey'
 
 # Phenotype badge colours — key is the raw phenotype value

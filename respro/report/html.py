@@ -229,11 +229,13 @@ def _alignment_title(ann: AnnotatedVariant) -> str:
 def _build_db_hit_rows(
     result: ProfilingResult,
     feature_alignments: dict[str, FeatureAlignment],
+    display_names: dict[str, str] | None = None,
 ) -> list[dict]:
     """
     Build one row per drug per annotated variant that matched a resistance rule.
 
     :param result: profiling result
+    :param display_names: optional mapping of feature_name to display name
     :return: list of dicts for the database hits table
     """
     rows: list[dict] = []
@@ -249,7 +251,7 @@ def _build_db_hit_rows(
 
         for rule in ann.non_formula_component_rule_matches:
             rows.append({
-                'feature': ann.feature_name,
+                'feature': (display_names or {}).get(ann.feature_name, ann.feature_name),
                 'aa_change': aa_change,
                 'consequence': ann.consequence,
                 'af_bin': ann.af_bin,
@@ -456,11 +458,13 @@ def _attach_drug_badges(rows: list[dict], drug_colours: dict[str, str]) -> None:
 def _build_cds_rows(
     result: ProfilingResult,
     feature_alignments: dict[str, FeatureAlignment],
+    display_names: dict[str, str] | None = None,
 ) -> list[dict]:
     """
     Build rows for the all-CDS-variants table.
 
     :param result: profiling result
+    :param display_names: optional mapping of feature_name to display name
     :return: list of dicts for the variant table
     """
     rows: list[dict] = []
@@ -477,7 +481,7 @@ def _build_cds_rows(
             display_consequence = ann.consequence
 
         rows.append({
-            'feature': ann.feature_name,
+            'feature': (display_names or {}).get(ann.feature_name, ann.feature_name),
             'nt_change': nt_change,
             'aa_change': aa_change,
             'consequence': display_consequence,
@@ -495,6 +499,7 @@ def _build_potential_effects_rows(
     result: ProfilingResult,
     rules: list[ResistanceRule],
     feature_alignments: dict[str, FeatureAlignment] | None = None,
+    display_names: dict[str, str] | None = None,
 ) -> list[dict]:
     """
     Find detected mutations at known resistance positions with a different AA change.
@@ -506,6 +511,8 @@ def _build_potential_effects_rows(
 
     :param result: profiling result with annotated variants
     :param rules: all loaded resistance rules
+    :param feature_alignments: optional feature alignment map
+    :param display_names: optional mapping of feature_name to display name
     :return: list of dicts for the potential effects table
     """
     if not rules:
@@ -565,8 +572,9 @@ def _build_potential_effects_rows(
                 if ann.feature_name in feature_alignments else None
             )
 
+            feature_name = (display_names or {}).get(ann.feature_name, ann.feature_name)
             rows.append({
-                'feature': ann.feature_name,
+                'feature': feature_name,
                 'codon_pos': ann.codon_pos,
                 'observed_change': observed_change,
                 'rule_change': rule_change,
@@ -1002,6 +1010,7 @@ def build_report_context(
     result: ProfilingResult,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
+    features: list[FeatureRecord] | None = None,
 ) -> dict:
     """
     Build the shared report context used by HTML and PDF exports.
@@ -1009,6 +1018,7 @@ def build_report_context(
     :param result: ProfilingResult object
     :param project_conn: optional project DB connection for overview sections
     :param rules: optional list of resistance rules for potential effects analysis
+    :param features: optional list of features for display name resolution
     :return: dict with summary and section rows
     """
     summary = result.summary_dict()
@@ -1023,8 +1033,9 @@ def build_report_context(
     summary['project_uuid'] = project_uuid
 
     feature_alignments = build_feature_alignments(result.query_sequence, result.feature_matches)
+    display_names: dict[str, str] = {f.name: f.display_name for f in (features or [])}
 
-    db_hit_rows = _build_db_hit_rows(result, feature_alignments)
+    db_hit_rows = _build_db_hit_rows(result, feature_alignments, display_names=display_names)
     summary['db_hit_rules'] = len(db_hit_rows)
     combo_hit_rows = _build_combo_hit_rows(result)
     summary['combination_rule_hits'] = len(combo_hit_rows)
@@ -1043,8 +1054,8 @@ def build_report_context(
     summary['combo_total_hits'] = summary['combo_hit_rules']
     summary['combo_hit_drugs'] = len({(row.get('drug') or '').lower() for row in combo_hit_rows})
     sample_classification = _build_sample_classification(result)
-    cds_rows = _build_cds_rows(result, feature_alignments)
-    potential_rows = _build_potential_effects_rows(result, rules or [], feature_alignments)
+    cds_rows = _build_cds_rows(result, feature_alignments, display_names=display_names)
+    potential_rows = _build_potential_effects_rows(result, rules or [], feature_alignments, display_names=display_names)
     coverage_assessment_available = bool(rules) or bool(result.coverage_gaps) or any(
         ann.is_fasta_mode for ann in result.annotations
     )
@@ -1151,9 +1162,9 @@ def build_report_context(
     summary_text = _build_summary_text(
         db_hit_rows, combo_hit_rows, potential_rows, summary,
         organism=summary.get('organism') or '',
-        affected_features=sorted(hit_feature_names),
-        high_impact_features=sorted(high_impact_feature_names),
-        coverage_gap_features=sorted(coverage_gap_feature_names),
+        affected_features=sorted(display_names.get(n, n) for n in hit_feature_names),
+        high_impact_features=sorted(display_names.get(n, n) for n in high_impact_feature_names),
+        coverage_gap_features=sorted(display_names.get(n, n) for n in coverage_gap_feature_names),
     )
 
     return {
@@ -1170,6 +1181,7 @@ def build_report_context(
         'combo_cols': combo_cols,
         'pot_cols': pot_cols,
         'bibliography': bibliography,
+        'display_names': display_names,
     }
 
 
@@ -1178,6 +1190,7 @@ def render_html(
     plot_svg_data: bytes | None = None,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
+    features: list[FeatureRecord] | None = None,
 ) -> str:
     """
     Render the profiling result to an HTML string.
@@ -1186,6 +1199,7 @@ def render_html(
     :param plot_svg_data: optional SVG bytes of the embedded plot
     :param project_conn: optional project DB connection for drug overview
     :param rules: optional list of resistance rules for potential effects analysis
+    :param features: optional list of features for display name resolution
     :return: HTML string
     """
 
@@ -1194,7 +1208,7 @@ def render_html(
     css_text = _load_css_text()
     js_text = _load_js_text()
 
-    context = build_report_context(result, project_conn=project_conn, rules=rules)
+    context = build_report_context(result, project_conn=project_conn, rules=rules, features=features)
 
     plot_data = ''
     if plot_svg_data:
@@ -1235,7 +1249,7 @@ def write_html(
     """
     html = render_html(
         result, plot_svg_data=plot_svg_data,
-        project_conn=project_conn, rules=rules,
+        project_conn=project_conn, rules=rules, features=features,
     )
     output_path = Path(output_path)
     output_path.write_text(html, encoding='utf-8')

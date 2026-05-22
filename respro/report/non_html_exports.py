@@ -112,7 +112,7 @@ def export_results(
         outputs['json'] = json_path
 
     if 'tabular' in requested_formats:
-        context = build_report_context(result, project_conn=project_conn, rules=rules)
+        context = build_report_context(result, project_conn=project_conn, rules=rules, features=features)
         tabular_path = output_dir / f'{stem}.mutations.tsv'
         write_tabular(tabular_path, context['db_hit_rows'], context['db_cols'])
         outputs['tabular'] = tabular_path
@@ -126,6 +126,7 @@ def export_results(
             rules=rules,
             context=context,
             plot_png_data=plot_png_data,
+            features=features,
         )
         outputs['pdf'] = pdf_path
 
@@ -288,6 +289,7 @@ def write_pdf(
     rules: list[ResistanceRule] | None = None,
     context: dict | None = None,
     plot_png_data: bytes | None = None,
+    features: list[FeatureRecord] | None = None,
 ) -> Path:
     """
     Render and write a dedicated PDF report to a file.
@@ -297,12 +299,13 @@ def write_pdf(
     :param project_conn: optional project DB connection for report context
     :param rules: optional list of resistance rules for potential effects analysis
     :param context: optional prebuilt report context
+    :param features: optional list of features for display name resolution
     :return: path to written PDF file
     """
     if HTML is None:
         raise ValueError('PDF export requested but WeasyPrint is not installed.')
 
-    report_context = context or build_report_context(result, project_conn=project_conn, rules=rules)
+    report_context = context or build_report_context(result, project_conn=project_conn, rules=rules, features=features)
     env = Environment(loader=BaseLoader(), autoescape=True)
     template = env.from_string(_load_pdf_template_text())
     plot_data = base64.b64encode(plot_png_data).decode('ascii') if plot_png_data else None
@@ -329,6 +332,7 @@ def write_pdf(
 def _build_pdf_mutation_entries(result: ProfilingResult, report_context: dict) -> list[dict]:
     """Build grouped mutation cards for non-synonymous annotations."""
     bibliography_lookup = _build_pdf_bibliography_lookup(report_context.get('bibliography', []))
+    display_names = report_context.get('display_names', {})
     potential_rows_by_key: dict[tuple[str, int, str], list[dict]] = {}
     for potential_row in report_context.get('potential_rows', []):
         key = (
@@ -343,7 +347,7 @@ def _build_pdf_mutation_entries(result: ProfilingResult, report_context: dict) -
         if ann.consequence == 'synonymous':
             continue
         variant = ann.variant
-        feature_name = ann.feature_name or 'Intergenic'
+        feature_name = display_names.get(ann.feature_name, ann.feature_name) or 'Intergenic'
         aa_change = ''
         if ann.ref_aa and ann.alt_aa:
             aa_change = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'

@@ -1900,11 +1900,11 @@ class TestMatPeptidePlotLogic:
             assert len(fig.axes) == 6
             titles = [ax.get_title(loc='left') or ax.get_title() for ax in fig.axes]
             assert titles.count('Genome overview') == 1
-            assert titles.count('Gene overview') == 3
+            assert titles.count('CDS overview') + titles.count('Mature Peptide overview') == 3
             assert 'p2 variants' in titles
             assert 'p7 variants' in titles
 
-            parent_tracks = [ax for ax in fig.axes if ax.get_title(loc='left') == 'Gene overview' and ax.get_ylim()[1] > 1.2]
+            parent_tracks = [ax for ax in fig.axes if ax.get_title(loc='left') == 'CDS overview' and ax.get_ylim()[1] > 1.2]
             assert len(parent_tracks) == 1
             parent_texts = [t.get_text() for t in parent_tracks[0].texts]
             assert 'p2' in parent_texts
@@ -1933,11 +1933,11 @@ class TestMatPeptidePlotLogic:
             assert len(fig.axes) == 7
             titles = [ax.get_title(loc='left') or ax.get_title() for ax in fig.axes]
             assert titles.count('Genome overview') == 1
-            assert titles.count('Gene overview') == 4
+            assert titles.count('CDS overview') + titles.count('Mature Peptide overview') == 4
             assert 'p2 variants' in titles
             assert 'gp120 variants' in titles
 
-            parent_tracks = [ax for ax in fig.axes if ax.get_title(loc='left') == 'Gene overview' and ax.get_ylim()[1] > 1.2]
+            parent_tracks = [ax for ax in fig.axes if ax.get_title(loc='left') == 'CDS overview' and ax.get_ylim()[1] > 1.2]
             assert len(parent_tracks) == 2
             parent_track_texts = [[t.get_text() for t in ax.texts] for ax in parent_tracks]
             assert any('p2' in texts for texts in parent_track_texts)
@@ -2025,7 +2025,7 @@ class TestMatPeptidePlotLogic:
             assert len(fig.axes) == 4
             titles = [ax.get_title(loc='left') or ax.get_title() for ax in fig.axes]
             assert titles.count('Genome overview') == 1
-            assert titles.count('Gene overview') == 2
+            assert titles.count('CDS overview') + titles.count('Mature Peptide overview') == 2
             assert titles.count('p2 variants') == 1
         finally:
             if fig:
@@ -2049,10 +2049,95 @@ class TestMatPeptidePlotLogic:
             parent_track = next(
                 ax
                 for ax in fig.axes
-                if ax.get_title(loc='left') == 'Gene overview' and ax.get_ylim()[1] > 1.2
+                if ax.get_title(loc='left') == 'CDS overview' and ax.get_ylim()[1] > 1.2
             )
             parent_track_labels = [t.get_text() for t in parent_track.texts]
             assert 'p2' in parent_track_labels
         finally:
             if fig:
                 plt.close(fig)
+
+
+class TestMatPeptideDisplayName:
+    """Tests for mat_peptide display name resolution in reports."""
+
+    def _make_mat_peptide_feature(
+        self,
+        name: str = 'pol_mat_peptide_1',
+        protein: str = 'Protease',
+    ) -> FeatureRecord:
+        return FeatureRecord(
+            id=1, reference_id=1, name=name, protein=protein,
+            start=0, end=300, strand='+', codon_start=0,
+            feature_type='mat_peptide',
+            nt_sequence='A' * 300,
+        )
+
+    def _make_cds_feature(
+        self,
+        name: str = 'gag',
+        protein: str = 'Group-specific antigen',
+    ) -> FeatureRecord:
+        return FeatureRecord(
+            id=2, reference_id=1, name=name, protein=protein,
+            start=0, end=300, strand='+', codon_start=0,
+            feature_type='CDS',
+            nt_sequence='A' * 300,
+        )
+
+    def _make_result_for_feature(self, feature_name: str) -> ProfilingResult:
+        var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=500)
+        rule = ResistanceRule(
+            id=1, feature_name=feature_name, feature_id=1,
+            drug_name='DrugA', drug_id=1, reference_identifier='ref',
+            position=1, reference='K', mutation='E', phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=var, feature_name=feature_name, codon_pos=1,
+            ref_codon='AAA', alt_codon='GAA', ref_aa='K', alt_aa='E',
+            consequence='missense', af_bin='high', rule_matches=[rule],
+        )
+        return ProfilingResult(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            total_variants=1, variants_in_cds=1, resistance_hits=1,
+            annotations=[ann],
+        )
+
+    # -- FeatureRecord.display_name unit tests --
+
+    def test_display_name_mat_peptide_with_protein(self) -> None:
+        feature = self._make_mat_peptide_feature(name='pol_mat_peptide_1', protein='Protease')
+        assert feature.display_name == 'Protease'
+
+    def test_display_name_mat_peptide_without_protein(self) -> None:
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='pol_mat_peptide_1', protein='',
+            start=0, end=300, strand='+', codon_start=0,
+            feature_type='mat_peptide',
+        )
+        assert feature.display_name == 'pol_mat_peptide_1'
+
+    def test_display_name_cds_with_protein_returns_name(self) -> None:
+        feature = self._make_cds_feature(name='gag', protein='Group-specific antigen')
+        assert feature.display_name == 'gag'
+
+    # -- build_report_context integration tests --
+
+    def test_db_hit_rows_use_protein_for_mat_peptide(self) -> None:
+        feature = self._make_mat_peptide_feature(name='pol_mat_peptide_1', protein='Protease')
+        result = self._make_result_for_feature('pol_mat_peptide_1')
+        ctx = build_report_context(result, features=[feature])
+        assert ctx['db_hit_rows'][0]['feature'] == 'Protease'
+
+    def test_cds_rows_use_protein_for_mat_peptide(self) -> None:
+        feature = self._make_mat_peptide_feature(name='pol_mat_peptide_1', protein='Protease')
+        result = self._make_result_for_feature('pol_mat_peptide_1')
+        ctx = build_report_context(result, features=[feature])
+        assert ctx['cds_rows'][0]['feature'] == 'Protease'
+
+    def test_db_hit_rows_use_name_for_cds(self) -> None:
+        feature = self._make_cds_feature(name='gag', protein='Group-specific antigen')
+        result = self._make_result_for_feature('gag')
+        ctx = build_report_context(result, features=[feature])
+        assert ctx['db_hit_rows'][0]['feature'] == 'gag'
+
