@@ -1772,7 +1772,7 @@ class TestAssignFeatureTracks:
 
 
 class TestMatPeptidePlotLogic:
-    """Tests for grouped mat_peptide panel logic and related rendering helpers."""
+    """Tests for mat_peptide plot row layout and rendering helpers."""
 
     def _make_parent_cds(self) -> FeatureRecord:
         return FeatureRecord(
@@ -1816,6 +1816,57 @@ class TestMatPeptidePlotLogic:
             annotations=[ann],
         )
 
+    def _make_mat_peptide_result_for_features(self, feature_names: list[str]) -> ProfilingResult:
+        annotations: list[AnnotatedVariant] = []
+        for idx, feature_name in enumerate(feature_names, start=1):
+            var = VariantCall(
+                chrom='ref',
+                pos=100 + idx,
+                ref='A',
+                alt='G',
+                allele_freq=0.9,
+                depth=500,
+            )
+            rule = ResistanceRule(
+                id=idx,
+                feature_name=feature_name,
+                feature_id=20 + idx,
+                drug_name='DrugA',
+                drug_id=1,
+                reference_identifier='ref',
+                position=5,
+                reference='K',
+                mutation='E',
+                phenotype='resistant',
+            )
+            annotations.append(
+                AnnotatedVariant(
+                    variant=var,
+                    feature_name=feature_name,
+                    codon_pos=5,
+                    ref_codon='AAA',
+                    alt_codon='GAA',
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                )
+            )
+
+        return ProfilingResult(
+            project_name='Test',
+            organism='test',
+            reference_name='ref',
+            reference_length_nt=5000,
+            sample_name='S1',
+            vcf_name='test.vcf',
+            total_variants=len(annotations),
+            variants_in_cds=len(annotations),
+            resistance_hits=len(annotations),
+            annotations=annotations,
+        )
+
     def test_genome_overview_highlights_parent_cds_for_mat_peptide_selection(self) -> None:
         """When a mat_peptide has variants, genome overview highlights its parent CDS."""
         from respro.report.plots import _build_lollipop_figure
@@ -1834,41 +1885,66 @@ class TestMatPeptidePlotLogic:
             if fig:
                 plt.close(fig)
 
-    def test_mat_peptides_with_same_parent_grouped_into_one_panel(self) -> None:
-        """Two mat_peptides with the same parent produce exactly one lollipop panel group."""
-        from respro.report.plots import _build_panel_groups
+    def test_same_parent_mat_peptides_render_parent_track_and_per_peptide_rows(self) -> None:
+        """Same-parent mat_peptides share one parent CDS track and keep per-peptide rows."""
+        from respro.report.plots import _build_lollipop_figure
 
         parent = self._make_parent_cds()
         mp1 = self._make_mat_peptide('p2', 0, 500, feat_id=20)
         mp2 = self._make_mat_peptide('p7', 500, 1000, feat_id=21)
-        feature_by_name = {'pol': parent, 'p2': mp1, 'p7': mp2}
+        result = self._make_mat_peptide_result_for_features(['p2', 'p7'])
 
-        groups = _build_panel_groups([mp1, mp2], feature_by_name)
+        fig = _build_lollipop_figure(result, [parent, mp1, mp2])
+        try:
+            assert fig is not None
+            assert len(fig.axes) == 6
+            titles = [ax.get_title(loc='left') or ax.get_title() for ax in fig.axes]
+            assert titles.count('Genome overview') == 1
+            assert titles.count('Gene overview') == 3
+            assert 'p2 variants' in titles
+            assert 'p7 variants' in titles
 
-        assert len(groups) == 1
-        assert groups[0].is_mat_peptide_group
-        assert {f.name for f in groups[0].features} == {'p2', 'p7'}
-        assert groups[0].parent_feature is parent
+            parent_tracks = [ax for ax in fig.axes if ax.get_title(loc='left') == 'Gene overview' and ax.get_ylim()[1] > 1.2]
+            assert len(parent_tracks) == 1
+            parent_texts = [t.get_text() for t in parent_tracks[0].texts]
+            assert 'p2' in parent_texts
+            assert 'p7' in parent_texts
+        finally:
+            if fig:
+                plt.close(fig)
 
-    def test_mat_peptides_with_different_parents_form_separate_groups(self) -> None:
-        """mat_peptides with different parents each get their own group."""
-        from respro.report.plots import _build_panel_groups
+    def test_different_parent_mat_peptides_render_two_parent_tracks(self) -> None:
+        """Different-parent mat_peptides render one parent track per parent in a single figure."""
+        from respro.report.plots import _build_lollipop_figure
 
         parent_a = self._make_parent_cds()
         parent_b = FeatureRecord(
             id=11, reference_id=1, name='env', protein='Env',
             start=3000, end=6000, strand='+', codon_start=0,
+            nt_sequence='A' * 3000,
         )
         mp1 = self._make_mat_peptide('p2', 0, 500, parent_name='pol', feat_id=20)
         mp2 = self._make_mat_peptide('gp120', 3000, 4500, parent_name='env', feat_id=21)
-        feature_by_name = {'pol': parent_a, 'env': parent_b, 'p2': mp1, 'gp120': mp2}
+        result = self._make_mat_peptide_result_for_features(['p2', 'gp120'])
 
-        groups = _build_panel_groups([mp1, mp2], feature_by_name)
+        fig = _build_lollipop_figure(result, [parent_a, parent_b, mp1, mp2])
+        try:
+            assert fig is not None
+            assert len(fig.axes) == 7
+            titles = [ax.get_title(loc='left') or ax.get_title() for ax in fig.axes]
+            assert titles.count('Genome overview') == 1
+            assert titles.count('Gene overview') == 4
+            assert 'p2 variants' in titles
+            assert 'gp120 variants' in titles
 
-        assert len(groups) == 2
-        assert all(g.is_mat_peptide_group for g in groups)
-        parent_names = {g.parent_feature.name for g in groups if g.parent_feature}
-        assert parent_names == {'pol', 'env'}
+            parent_tracks = [ax for ax in fig.axes if ax.get_title(loc='left') == 'Gene overview' and ax.get_ylim()[1] > 1.2]
+            assert len(parent_tracks) == 2
+            parent_track_texts = [[t.get_text() for t in ax.texts] for ax in parent_tracks]
+            assert any('p2' in texts for texts in parent_track_texts)
+            assert any('gp120' in texts for texts in parent_track_texts)
+        finally:
+            if fig:
+                plt.close(fig)
 
     def test_cds_track_draws_dotted_separators_for_mat_peptide_overlays(self) -> None:
         """_draw_feature_track with mat_peptide_overlays adds vlines at mat_peptide boundaries."""
@@ -1935,8 +2011,8 @@ class TestMatPeptidePlotLogic:
         finally:
             plt.close(fig)
 
-    def test_mat_peptide_overview_row_present_in_grouped_figure(self) -> None:
-        """A grouped mat_peptide panel produces four axes: lollipop+overview+track+genome."""
+    def test_mat_peptide_rows_include_feature_track_lollipop_and_genome(self) -> None:
+        """Single mat_peptide layout yields lollipop row, two track rows, and genome row."""
         from respro.report.plots import _build_lollipop_figure
 
         parent = self._make_parent_cds()
@@ -1947,12 +2023,16 @@ class TestMatPeptidePlotLogic:
         try:
             assert fig is not None
             assert len(fig.axes) == 4
+            titles = [ax.get_title(loc='left') or ax.get_title() for ax in fig.axes]
+            assert titles.count('Genome overview') == 1
+            assert titles.count('Gene overview') == 2
+            assert titles.count('p2 variants') == 1
         finally:
             if fig:
                 plt.close(fig)
 
-    def test_mat_peptide_lollipop_title_indicates_mature_peptides(self) -> None:
-        """Grouped mat_peptide panel lollipop title includes 'Mature peptides of'."""
+    def test_mat_peptide_lollipop_title_uses_feature_variants_and_parent_labels_peptide(self) -> None:
+        """Lollipop title follows '<feature> variants' while parent CDS track keeps peptide labels."""
         from respro.report.plots import _build_lollipop_figure
 
         parent = self._make_parent_cds()
@@ -1964,7 +2044,15 @@ class TestMatPeptidePlotLogic:
             assert fig is not None
             lollipop_ax = fig.axes[0]
             title_text = lollipop_ax.get_title(loc='left') or lollipop_ax.get_title()
-            assert 'Mature peptides of' in title_text
+            assert title_text == 'p2 variants'
+
+            parent_track = next(
+                ax
+                for ax in fig.axes
+                if ax.get_title(loc='left') == 'Gene overview' and ax.get_ylim()[1] > 1.2
+            )
+            parent_track_labels = [t.get_text() for t in parent_track.texts]
+            assert 'p2' in parent_track_labels
         finally:
             if fig:
                 plt.close(fig)

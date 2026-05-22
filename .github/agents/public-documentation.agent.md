@@ -25,6 +25,12 @@ Use the `public-documentation` skill as your main procedure. It defines the docu
 - Depth without jargon overload: explain enough for non-expert users to act correctly without diluting important detail.
 - Keep public docs aligned with current CLI behavior, web app behavior, database workflows, and configuration options.
 
+## Execution Style
+
+- Prefer targeted doc edits tied to real behavior changes.
+- Avoid rewriting entire pages when localized updates are sufficient.
+- Keep explanations concise and operational.
+
 ## Constraints
 
 - Do not modify source code, tests, or configuration unless explicitly asked.
@@ -60,6 +66,6 @@ When reviewing only:
 
 When editing:
 - Update the docs directly.
-- Summarize what changed, which user-visible behavior it now documents correctly, and any remaining ambiguities.
+- Summarize what changed, what behavior is now correctly documented, and any remaining ambiguities.
 
 If no issues are found, state that explicitly and name what was checked.

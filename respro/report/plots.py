@@ -5,7 +5,6 @@ Publication-ready plots for genome overview and feature-level mutation tracks.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
@@ -16,12 +15,13 @@ import numpy as np
 
 from respro.db.models import AnnotatedVariant, CoverageGap, FeatureRecord, ProfilingResult
 from respro.report.palette import (
+    CDS_HIGHLIGHTED_COLOUR,
     FEATURE_BASELINE_COLOUR,
     FEATURE_DEFAULT_COLOUR,
     FEATURE_DEFAULT_EDGE,
-    FEATURE_HIGHLIGHTED_COLOUR,
     FEATURE_HIGHLIGHTED_EDGE,
     FEATURE_INTRON_COLOUR,
+    MATPEPTIDE_HIGHLIGHTED_COLOUR,
     MUTATION_COLOURS,
     NON_COVERED_COLOUR,
     mutation_legend_patches,
@@ -121,7 +121,28 @@ def _build_lollipop_figure(
     feature_annotations = _group_annotations_by_feature(cds, plot_features)
     feature_by_name = {feature.name: feature for feature in features}
 
-    panel_groups = _build_panel_groups(plot_features, feature_by_name)
+    mat_peptides_by_parent: dict[str, list[FeatureRecord]] = {}
+    for feature in plot_features:
+        if feature.feature_type == 'mat_peptide' and feature.parent_feature_name:
+            mat_peptides_by_parent.setdefault(feature.parent_feature_name, []).append(feature)
+
+    main_features_by_name: dict[str, FeatureRecord] = {
+        feature.name: feature
+        for feature in plot_features
+        if feature.feature_type != 'mat_peptide'
+    }
+    for parent_name in mat_peptides_by_parent:
+        parent_feature = feature_by_name.get(parent_name)
+        if parent_feature is not None:
+            main_features_by_name[parent_name] = parent_feature
+
+    main_features = sorted(
+        main_features_by_name.values(),
+        key=lambda feature: (feature.start, feature.end, feature.name),
+    )
+    if not main_features:
+        logger.warning('No main features available for plotting')
+        return None
 
     # Map mat_peptide variant feature names to parent CDS for genome overview highlighting.
     cds_highlighted: set[str] = set()
@@ -132,17 +153,26 @@ def _build_lollipop_figure(
         else:
             cds_highlighted.add(feature_name)
 
-    # Layout: per group — lollipop + optional peptide overview + CDS track; then genome overview.
-    height_ratios: list[float] = []
-    for group in panel_groups:
-        height_ratios.append(2.0)
-        if group.is_mat_peptide_group:
-            height_ratios.append(0.3)
-        height_ratios.append(0.5)
-    height_ratios.append(0.5)
+    rows: list[dict] = [{'kind': 'genome'}]
+    for feature in main_features:
+        mat_peptides = sorted(
+            mat_peptides_by_parent.get(feature.name, []),
+            key=lambda mat_peptide: (mat_peptide.start, mat_peptide.end, mat_peptide.name),
+        )
+        rows.append({'kind': 'track', 'feature': feature, 'mat_peptides': mat_peptides, 'parent_feature': None})
+        if mat_peptides:
+            for mat_peptide in mat_peptides:
+                rows.append({'kind': 'track', 'feature': mat_peptide, 'parent_feature': feature})
+                rows.append({'kind': 'lollipop', 'feature': mat_peptide})
+        else:
+            rows.append({'kind': 'lollipop', 'feature': feature})
 
-    n_mat_groups = sum(1 for g in panel_groups if g.is_mat_peptide_group)
-    fig_height = 2 + 3.4 * len(panel_groups) + 0.4 * n_mat_groups
+    subplot_rows = list(reversed(rows))
+    height_ratios = [
+        2.0 if row['kind'] == 'lollipop' else 0.5
+        for row in subplot_rows
+    ]
+    fig_height = 2 + 1.7*(len(height_ratios)-1)
     fig, axes = plt.subplots(
         len(height_ratios),
         1,
@@ -150,7 +180,13 @@ def _build_lollipop_figure(
         height_ratios=height_ratios,
     )
     axes_list = list(axes if isinstance(axes, (list, tuple)) else axes.flat)
-    overview_ax = axes_list[-1]
+
+    row_axes = list(zip(subplot_rows, axes_list))
+    overview_ax = next(
+        ax
+        for row, ax in row_axes
+        if row['kind'] == 'genome'
+    )
 
     _draw_genome_overview(
         overview_ax,
@@ -160,10 +196,14 @@ def _build_lollipop_figure(
     )
 
     effects_for_legend = {ann.consequence for ann in cds}
+    lollipop_feature_names = {
+        row['feature'].name
+        for row in rows
+        if row['kind'] == 'lollipop'
+    }
     has_coverage_overlay = any(
-        coverage_gaps_by_feature.get(f.name)
-        for group in panel_groups
-        for f in group.features
+        coverage_gaps_by_feature.get(feature_name)
+        for feature_name in lollipop_feature_names
     )
     has_introns = any(_feature_intron_gaps(f) for f in plot_features)
     handles = [
@@ -176,120 +216,73 @@ def _build_lollipop_figure(
         handles.append(mpatches.Patch(facecolor=FEATURE_INTRON_COLOUR, label='Intron (non-coding)'))
     handles.extend(mutation_legend_patches(effects_for_legend))
 
-    ax_idx = 0
+    lollipop_rows_by_feature_name: dict[str, list[tuple[dict[str, object], object]]] = {}
+    for row, ax in row_axes:
+        if row['kind'] != 'lollipop':
+            continue
+        feature = row['feature']
+        lollipop_rows_by_feature_name.setdefault(feature.name, []).append((row, ax))
+
+    shared_track_ax_by_row_id: dict[int, object] = {}
+    for row, ax in row_axes:
+        if row['kind'] != 'track':
+            continue
+        feature = row['feature']
+        row_id = id(row)
+        lollipop_candidates = lollipop_rows_by_feature_name.get(feature.name, [])
+        if lollipop_candidates:
+            shared_track_ax_by_row_id[row_id] = lollipop_candidates[0][1]
+
     first_lollipop_ax = None
-    for group in panel_groups:
-        lollipop_ax = axes_list[ax_idx]
-        ax_idx += 1
+    for row, ax in row_axes:
+        row_kind = row['kind']
+        if row_kind == 'genome':
+            continue
+
+        feature = row['feature']
+        if row_kind == 'track':
+            mat_peptides = row.get('mat_peptides')
+            panel_name = 'Mature Peptide' if feature.feature_type == 'mat_peptide' else 'CDS'
+            if mat_peptides:
+                _draw_feature_track(
+                    ax,
+                    feature,
+                    mat_peptide_overlays=mat_peptides,
+                    rule_feature_names=rule_feature_names,
+                    panel_name=panel_name,
+                )
+            else:
+                _draw_feature_track(
+                    ax,
+                    feature,
+                    parent_feature=row.get('parent_feature'),
+                    rule_feature_names=rule_feature_names,
+                    panel_name=panel_name,
+                )
+
+            shared_lollipop_ax = shared_track_ax_by_row_id.get(id(row))
+            if shared_lollipop_ax is not None:
+                ax.set_xlim(shared_lollipop_ax.get_xlim())
+            continue
+
         if first_lollipop_ax is None:
-            first_lollipop_ax = lollipop_ax
-
-        if group.is_mat_peptide_group:
-            peptide_overview_ax = axes_list[ax_idx]
-            ax_idx += 1
-        else:
-            peptide_overview_ax = None
-
-        track_ax = axes_list[ax_idx]
-        ax_idx += 1
-
-        if group.is_mat_peptide_group:
-            display_feature = group.parent_feature or group.features[0]
-            all_annotations = sorted(
-                [ann for f in group.features for ann in feature_annotations.get(f.name, [])],
-                key=lambda a: (a.variant.pos, a.variant.allele_freq, a.alt_aa, a.consequence),
-            )
-            _draw_feature_panel(
-                lollipop_ax, display_feature, all_annotations,
-                coverage_gaps=[],
-                shared_track_ax=track_ax,
-            )
-            lollipop_ax.set_title(
-                f'Mature peptides of {display_feature.name}',
-                fontsize=9, loc='left', pad=25, fontweight='bold',
-            )
-            assert peptide_overview_ax is not None
-            _draw_mat_peptide_overview(
-                peptide_overview_ax, list(group.features), display_feature, rule_feature_names,
-            )
-            _draw_feature_track(
-                track_ax, display_feature,
-                mat_peptide_overlays=list(group.features),
-                rule_feature_names=rule_feature_names,
-            )
-        else:
-            feature = group.features[0]
-            annotations = feature_annotations.get(feature.name, [])
-            _draw_feature_panel(
-                lollipop_ax, feature, annotations,
-                coverage_gaps=coverage_gaps_by_feature.get(feature.name, []),
-                shared_track_ax=track_ax,
-            )
-            parent_feature = (
-                feature_by_name.get(feature.parent_feature_name)
-                if feature.parent_feature_name else None
-            )
-            _draw_feature_track(track_ax, feature, parent_feature=parent_feature)
+            first_lollipop_ax = ax
+        _draw_feature_panel(
+            ax,
+            feature,
+            feature_annotations.get(feature.name, []),
+            coverage_gaps=coverage_gaps_by_feature.get(feature.name, []),
+            shared_track_ax=None,
+        )
 
     if first_lollipop_ax is not None:
         first_lollipop_ax.legend(
-            handles=handles, loc='upper right', fontsize=7,
+            handles=handles, loc='upper right', fontsize=6,
             ncol=len(handles), frameon=False,
             bbox_to_anchor=(1, 1.25), borderaxespad=0.0,
         )
     plt.tight_layout()
     return fig
-
-
-@dataclass(frozen=True)
-class _PanelGroup:
-    """Internal grouping of features for one lollipop panel."""
-
-    is_mat_peptide_group: bool
-    features: tuple[FeatureRecord, ...]
-    parent_feature: FeatureRecord | None
-    sort_key: int
-
-
-def _build_panel_groups(
-    plot_features: list[FeatureRecord],
-    feature_by_name: dict[str, FeatureRecord],
-) -> list[_PanelGroup]:
-    """
-    Group selected features into lollipop panel groups.
-
-    CDS features each form their own group.  mat_peptide features sharing
-    the same parent CDS are combined into one group per parent.
-
-    :param plot_features: selected features ordered by position
-    :param feature_by_name: all features indexed by name
-    :return: list of panel groups in genomic order
-    """
-    groups: list[_PanelGroup] = []
-    mat_groups: dict[str, list[FeatureRecord]] = {}
-
-    for feature in plot_features:
-        if feature.feature_type == 'mat_peptide' and feature.parent_feature_name:
-            mat_groups.setdefault(feature.parent_feature_name, []).append(feature)
-        else:
-            groups.append(_PanelGroup(
-                is_mat_peptide_group=False,
-                features=(feature,),
-                parent_feature=None,
-                sort_key=feature.start,
-            ))
-
-    for parent_name, mat_peptides in mat_groups.items():
-        parent = feature_by_name.get(parent_name)
-        sort_key = parent.start if parent else min(mp.start for mp in mat_peptides)
-        groups.append(_PanelGroup(
-            is_mat_peptide_group=True,
-            features=tuple(sorted(mat_peptides, key=lambda f: f.start)),
-            parent_feature=parent,
-            sort_key=sort_key,
-        ))
-
-    return sorted(groups, key=lambda g: (g.sort_key, g.features[0].name))
 
 
 def _select_plot_features(
@@ -433,7 +426,7 @@ def _draw_genome_overview(
         track = tracks[feature.name]
         y = -track
         is_highlighted = feature.name in highlighted_feature_names
-        colour = FEATURE_HIGHLIGHTED_COLOUR if is_highlighted else FEATURE_DEFAULT_COLOUR
+        colour = CDS_HIGHLIGHTED_COLOUR if is_highlighted else FEATURE_DEFAULT_COLOUR
         edge = FEATURE_HIGHLIGHTED_EDGE if is_highlighted else FEATURE_DEFAULT_EDGE
         for segment_start, segment_end in _feature_plot_segments(feature):
             ax.add_patch(mpatches.Rectangle(
@@ -522,6 +515,7 @@ def _draw_feature_track(
     parent_feature: FeatureRecord | None = None,
     mat_peptide_overlays: list[FeatureRecord] | None = None,
     rule_feature_names: set[str] | None = None,
+    panel_name: str = 'CDS',
 ) -> None:
     """
     Draw a simple feature track visualization above the lollipop plot.
@@ -541,7 +535,7 @@ def _draw_feature_track(
         (feature.start + 1, 0.3),
         max(1, feature.end - feature.start),
         0.4,
-        facecolor=FEATURE_HIGHLIGHTED_COLOUR,
+        facecolor=CDS_HIGHLIGHTED_COLOUR if feature.feature_type == 'CDS' else MATPEPTIDE_HIGHLIGHTED_COLOUR,
         edgecolor=FEATURE_HIGHLIGHTED_EDGE,
         alpha=1,
         linewidth=1.0,
@@ -566,12 +560,12 @@ def _draw_feature_track(
         f'← {feature.name} ←' if feature.strand == '-' else f'→ {feature.name} →',
         ha='center',
         va='center',
-        fontsize=8,
+        fontsize=6,
         fontweight='bold',
-        color='white',
+        color='white'
     )
 
-    ax.set_title('Gene overview', fontsize=8, loc='left', fontweight='bold')
+    ax.set_title(f'{panel_name} overview', fontsize=8, loc='left', fontweight='bold')
     ax.set_xlim(max(1, feature.start + 1 - pad), feature.end + pad)
 
     if mat_peptide_overlays:
@@ -581,8 +575,8 @@ def _draw_feature_track(
         boundaries.add(sorted_mps[-1].end + 1)
         for x_boundary in sorted(boundaries):
             ax.vlines(
-                x=x_boundary, ymin=0.3, ymax=0.7,
-                colors='white', linewidth=0.9, linestyle=':', zorder=5,
+                x=x_boundary, ymin=0.3, ymax=1,
+                colors='black', linewidth=1, linestyle=':', zorder=5,
             )
         for mp in sorted_mps:
             label = _resolve_feature_label(mp.name, rule_feature_names)
@@ -590,7 +584,7 @@ def _draw_feature_track(
             ax.text(
                 label_x, 0.76, label,
                 ha='center', va='bottom',
-                fontsize=6, color=FEATURE_HIGHLIGHTED_EDGE, fontweight='bold',
+                fontsize=6, color=MATPEPTIDE_HIGHLIGHTED_COLOUR, fontweight='bold',
                 clip_on=True,
             )
         ax.set_ylim(0, 1.4)
@@ -598,25 +592,14 @@ def _draw_feature_track(
         strip_start, strip_end = _resolve_precursor_strip_bounds(ax, parent_feature)
         strip_width = max(1, strip_end - strip_start)
         ax.add_patch(mpatches.Rectangle(
-            (strip_start, 0.84),
+            (strip_start, 0.3),
             strip_width,
-            0.09,
-            facecolor=FEATURE_DEFAULT_COLOUR,
-            edgecolor=FEATURE_DEFAULT_EDGE,
-            alpha=0.55,
+            0.4,
+            facecolor=CDS_HIGHLIGHTED_COLOUR,
+            edgecolor=FEATURE_HIGHLIGHTED_EDGE,
             linewidth=0.6,
-            zorder=4,
+            zorder=-4,
         ))
-        label_x = strip_start + (strip_width / 2.0)
-        ax.text(
-            label_x,
-            0.945,
-            f'precursor: {feature.parent_feature_name}',
-            ha='center',
-            va='bottom',
-            fontsize=7,
-            color=FEATURE_DEFAULT_EDGE,
-        )
         ax.set_ylim(0, 1)
     else:
         ax.set_ylim(0, 1)
@@ -645,56 +628,6 @@ def _resolve_precursor_strip_bounds(
     if visible_right <= visible_left:
         return x_left, x_right
     return visible_left, visible_right
-
-
-def _draw_mat_peptide_overview(
-    ax,
-    mat_peptides: list[FeatureRecord],
-    parent_feature: FeatureRecord,
-    rule_feature_names: set[str] | None,
-) -> None:
-    """
-    Draw a compact mature peptide position overview row within a parent CDS context.
-
-    :param ax: matplotlib axis
-    :param mat_peptides: mat_peptide features to render
-    :param parent_feature: parent CDS for x-axis reference
-    :param rule_feature_names: optional rule-backed names for labels
-    """
-    pad = max(10, int((parent_feature.end - parent_feature.start) * 0.03))
-    ax.hlines(
-        0.5, parent_feature.start + 1 - pad, parent_feature.end + pad,
-        color=FEATURE_BASELINE_COLOUR, linewidth=0.8, zorder=1,
-    )
-
-    for mp in sorted(mat_peptides, key=lambda f: f.start):
-        x = mp.start + 1
-        width = max(1, mp.end - mp.start)
-        ax.add_patch(mpatches.Rectangle(
-            (x, 0.2), width, 0.6,
-            facecolor=FEATURE_HIGHLIGHTED_COLOUR,
-            edgecolor=FEATURE_HIGHLIGHTED_EDGE,
-            alpha=0.8,
-            linewidth=0.8,
-            zorder=2,
-        ))
-        label = _resolve_feature_label(mp.name, rule_feature_names)
-        ax.text(
-            x + width / 2, 0.5, label,
-            ha='center', va='center',
-            fontsize=6, fontweight='bold', color='white',
-            clip_on=True,
-        )
-
-    ax.set_title('Mature peptides', fontsize=7, loc='left')
-    ax.set_xlim(max(1, parent_feature.start + 1 - pad), parent_feature.end + pad)
-    ax.set_ylim(0, 1)
-    ax.set_yticks([])
-    ax.spines['top'].set_visible(False)
-    ax.spines['left'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.set_xlabel('')
-    ax.set_ylabel('')
 
 
 def _draw_feature_panel(
@@ -748,7 +681,7 @@ def _draw_feature_panel(
                 (x_top, y_top),
                 textcoords='offset points',
                 xytext=(0, 7),
-                fontsize=7,
+                fontsize=6,
                 color=colour,
                 fontweight='bold',
                 rotation=90,
@@ -762,7 +695,7 @@ def _draw_feature_panel(
     ax.set_ylabel('variant frequency')
     ax.set_title(
         f'{feature.name} variants',
-        fontsize=9,
+        fontsize=8,
         loc='left',
         pad=25,
         fontweight='bold',

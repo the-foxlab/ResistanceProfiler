@@ -23,7 +23,8 @@ MUTATION_COLOURS = {
 NON_COVERED_COLOUR = '#6b7280'
 
 # Genome overview feature track colours
-FEATURE_HIGHLIGHTED_COLOUR = 'steelblue'
+CDS_HIGHLIGHTED_COLOUR = 'steelblue'
+MATPEPTIDE_HIGHLIGHTED_COLOUR = 'sienna'
 FEATURE_INTRON_COLOUR = "#b2b2b2"  # muted blue-grey for intron / non-coding intervals within split genes
 FEATURE_DEFAULT_COLOUR = '#d9dde3'
 FEATURE_HIGHLIGHTED_EDGE = 'black'

@@ -9,8 +9,8 @@ services:
       dockerfile: Dockerfile.web
     image: respro-web:latest
     ports:
-      #- '127.0.0.1:9000:8000'
-      - '0.0.0.0:8000:8000' # dev only
+      - '127.0.0.1:9000:8000'
+      #- '0.0.0.0:8000:8000' # dev only
     volumes:
       - ./data:/data:rw
     environment:
