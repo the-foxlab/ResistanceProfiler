@@ -204,7 +204,7 @@ def _init_command(
         Path, typer.Option('--rules', '-r', help='Resistance rules TSV.')
     ],
     formula_rules: Annotated[
-        Path | None, typer.Option('--formula-rules', help='Optional formula rules TSV.')
+        Path | None, typer.Option('--formula-rules', '-f', help='Optional formula rules TSV.')
     ] = None,
     genbank_paths: Annotated[
         list[Path] | None, typer.Option(
@@ -216,10 +216,10 @@ def _init_command(
         Path, typer.Option('--output', '-o', help='Output SQLite database path.')
     ] = Path('project.db'),
     metadata: Annotated[
-        Path | None, typer.Option('--metadata', exists=True, help='Optional metadata JSON file.')
+        Path | None, typer.Option('--metadata', '-m', exists=True, help='Optional metadata JSON file.')
     ] = None,
     overwrite: Annotated[
-        bool, typer.Option('--overwrite', help='Overwrite existing database.')
+        bool, typer.Option('--overwrite', '-w', help='Overwrite existing database.')
     ] = False,
     additional_info: Annotated[
         bool, typer.Option(
@@ -263,7 +263,7 @@ def _init_add_command(
         Path, typer.Option('--rules', '-r', exists=True, help='Resistance rules TSV to add.')
     ],
     formula_rules: Annotated[
-        Path | None, typer.Option('--formula-rules',  exists=True, help='Optional formula rules TSV.')
+        Path | None, typer.Option('--formula-rules', '-f', exists=True, help='Optional formula rules TSV.')
     ] = None,
     genbank_paths: Annotated[
         list[Path] | None, typer.Option(
@@ -278,7 +278,7 @@ def _init_add_command(
         )
     ] = True,
     validate: Annotated[
-        bool, typer.Option('--validate', help='Validate rules and exit without writing DB changes.')
+        bool, typer.Option('--validate', '-v', help='Validate rules and exit without writing DB changes.')
     ] = False,
 ) -> None:
     """
