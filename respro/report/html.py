@@ -294,6 +294,7 @@ def _build_feature_stats(
     features: list[FeatureRecord] | None = None,
 ) -> dict[str, dict]:
     """Build counts per detected feature from annotation and hit data."""
+    unassigned_feature_name = 'Unassigned'
     observed_counter: Counter[str] = Counter()
     direct_counter: Counter[str] = Counter()
     formula_counter: Counter[str] = Counter()
@@ -320,22 +321,20 @@ def _build_feature_stats(
             observed_counter[feature_name] += 1
 
     for ann in result.cds_annotations:
-        feature_name = (ann.feature_name or '').strip()
-        if not feature_name:
-            continue
-        if ann.is_resistance_hit:
-            direct_counter[feature_name] += 1
+        feature_name = (ann.feature_name or '').strip() or unassigned_feature_name
+        direct_counter[feature_name] += len(ann.non_formula_component_rule_matches)
 
     for formula_hit in result.formula_hits:
+        # count once per unique feature the formula involves, not once per member variant
+        hit_features: set[str] = set()
         for ann in formula_hit.matched_variants:
-            feature_name = (ann.feature_name or '').strip()
-            if not feature_name:
-                continue
+            hit_features.add((ann.feature_name or '').strip() or unassigned_feature_name)
+        for feature_name in hit_features:
             formula_counter[feature_name] += 1
 
     stats: dict[str, dict] = {}
-    # include only features with observed variants
-    feature_names = set(observed_counter)
+    # include observed features plus features that only carry hit counts.
+    feature_names = set(observed_counter) | set(direct_counter) | set(formula_counter)
     for feature_name in sorted(feature_names, key=lambda item: item.lower()):
         direct_hits = direct_counter.get(feature_name, 0)
         formula_hits = formula_counter.get(feature_name, 0)

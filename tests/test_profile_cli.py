@@ -22,6 +22,7 @@ from respro.db.models import (
     ResistanceRuleSet,
     VariantCall,
 )
+from respro.report.html import build_report_context
 from respro.db.schema import create_schema, init_results_db
 
 
@@ -52,7 +53,7 @@ class TestProfileCli:
         html_path = output_dir / f'{sample_vcf.stem}.report.html'
         assert html_path.exists()
         html = html_path.read_text()
-        assert 'ResistanceProfiler' in html
+        assert 'resistance profile' in html
         assert 'Test Project' in html
         assert 'tiny_ref' in html
 
@@ -286,8 +287,191 @@ class TestProfileCli:
         _print_completion_panel(console, 'profile', result, {'html': Path('/tmp/report.html')})
 
         output = console.file.getvalue()
-        assert '1 database hit' in output
-        assert '1 formula rule hit' in output
+        assert '1 unique rule hit' in output
+        assert '1 unique formula rule hit' in output
+        assert '1 total database hits' in output
+
+    def test_completion_panel_total_hits_matches_sequence_feature_totals_for_complex_multi_hits(
+        self,
+    ) -> None:
+        """Cumulative totals must stay aligned across CLI and report feature cards."""
+        var_a = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500)
+        var_b = VariantCall(chrom='ref', pos=6, ref='C', alt='T', allele_freq=0.90, depth=450)
+        var_c = VariantCall(chrom='ref', pos=9, ref='G', alt='A', allele_freq=0.85, depth=420)
+        var_d = VariantCall(chrom='ref', pos=12, ref='T', alt='C', allele_freq=0.80, depth=400)
+
+        rule_a1 = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=1,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+        rule_b1 = ResistanceRule(
+            id=2,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugB',
+            drug_id=2,
+            reference_identifier='ref',
+            position=1,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+        rule_a2 = ResistanceRule(
+            id=3,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='A',
+            mutation='V',
+            phenotype='resistant',
+        )
+        rule_c1 = ResistanceRule(
+            id=4,
+            feature_name='pol',
+            feature_id=2,
+            drug_name='DrugC',
+            drug_id=3,
+            reference_identifier='ref',
+            position=3,
+            reference='D',
+            mutation='N',
+            phenotype='resistant',
+        )
+        internal_formula_member = ResistanceRule(
+            id=5,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='__formula_component__',
+            drug_id=999,
+            reference_identifier='ref',
+            position=4,
+            reference='P',
+            mutation='S',
+            phenotype='unknown',
+            external_id='mut_formula',
+            is_internal_formula_component=True,
+        )
+
+        ann_a = AnnotatedVariant(
+            variant=var_a,
+            feature_name='gag',
+            codon_pos=1,
+            ref_codon='AAA',
+            alt_codon='GAA',
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            rule_matches=[rule_a1, rule_b1],
+        )
+        ann_b = AnnotatedVariant(
+            variant=var_b,
+            feature_name='gag',
+            codon_pos=2,
+            ref_codon='GCT',
+            alt_codon='GTT',
+            ref_aa='A',
+            alt_aa='V',
+            consequence='missense',
+            rule_matches=[rule_a2],
+        )
+        ann_c = AnnotatedVariant(
+            variant=var_c,
+            feature_name='pol',
+            codon_pos=3,
+            ref_codon='GAT',
+            alt_codon='AAT',
+            ref_aa='D',
+            alt_aa='N',
+            consequence='missense',
+            rule_matches=[rule_c1],
+        )
+        ann_d = AnnotatedVariant(
+            variant=var_d,
+            feature_name='pol',
+            codon_pos=4,
+            ref_codon='CCT',
+            alt_codon='TCT',
+            ref_aa='P',
+            alt_aa='S',
+            consequence='missense',
+            rule_matches=[internal_formula_member],
+        )
+
+        formula_rule_set_a = ResistanceRuleSet(
+            id=101,
+            drug_name='FormulaDrugX',
+            drug_id=11,
+            phenotype='resistant',
+            group_name='formula_x',
+        )
+        formula_rule_set_b = ResistanceRuleSet(
+            id=102,
+            drug_name='FormulaDrugY',
+            drug_id=12,
+            phenotype='resistant',
+            group_name='formula_y',
+        )
+        formula_rule_set_c = ResistanceRuleSet(
+            id=103,
+            drug_name='FormulaDrugZ',
+            drug_id=13,
+            phenotype='resistant',
+            group_name='formula_z',
+        )
+
+        formula_hits = [
+            FormulaRuleHit(rule_set=formula_rule_set_a, matched_variants=[ann_a, ann_b]),
+            FormulaRuleHit(rule_set=formula_rule_set_b, matched_variants=[ann_b, ann_c]),
+            FormulaRuleHit(rule_set=formula_rule_set_c, matched_variants=[ann_d]),
+        ]
+
+        result = ProfilingResult(
+            project_name='Test Project',
+            reference_name='ref',
+            sample_name='sample01',
+            vcf_name='sample.vcf',
+            reference_length_nt=100,
+            total_variants=4,
+            variants_in_cds=3,
+            resistance_hits=3,
+            annotations=[ann_a, ann_b, ann_c, ann_d],
+            formula_hits=formula_hits,
+        )
+
+        # direct rule matches: 2 (ann_a) + 1 (ann_b) + 1 (ann_c) + 0 (ann_d, formula-only) = 4
+        # formula fires: 3 (one per FormulaRuleHit)
+        # total database hits = 4 + 3 = 7
+        #
+        # per-feature formula attribution (1 per unique feature per formula hit):
+        #   formula_x members in {gag} → gag +1
+        #   formula_y members in {gag, pol} → gag +1, pol +1
+        #   formula_z members in {pol} → pol +1
+        # feature totals: gag = 3 direct + 2 formula = 5; pol = 1 direct + 2 formula = 3
+        # (feature sum = 8 > global total = 7 because formula_y spans two features)
+
+        console = Console(file=StringIO(), force_terminal=False, color_system=None, width=120)
+        _print_completion_panel(console, 'profile', result, {'html': Path('/tmp/report.html')})
+        cli_output = console.file.getvalue()
+
+        assert '4 unique rule hit' in cli_output
+        assert '3 unique formula rule hit' in cli_output
+        assert '7 total database hits' in cli_output
+
+        context = build_report_context(result)
+        cards_by_name = {card['name']: card for card in context['sequence_features']['cards']}
+        assert cards_by_name['gag']['database_hits'] == 5
+        assert cards_by_name['pol']['database_hits'] == 3
 
     def test_profile_drops_variants_with_non_matching_vcf_chrom(
         self,
