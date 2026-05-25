@@ -263,14 +263,13 @@ def _finalize_and_export(
         vcf_name=input_basename,
         total_variants=ctx.total_variants,
         variants_in_cds=ctx.variants_in_cds,
-        resistance_hits=0,
+        resistance_hits=sum(1 for a in annotations if a.is_resistance_hit),
         annotations=annotations,
         formula_hits=formula_hits,
         coverage_gaps=ctx.coverage_gaps,
         query_sequence=ctx.query_sequence,
         feature_matches=ctx.feature_matches,
     )
-    result.resistance_hits = result.database_hit_count
 
     raw_stem = Path(input_basename).stem.strip() or 'profile'
     safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', raw_stem) or 'profile'

@@ -119,8 +119,8 @@ body {
 }
 
 .header-icon-button img {
-  width: 1rem;
-  height: 1rem;
+  width: 2rem;
+  height: 2rem;
   display: block;
 }
 
@@ -165,7 +165,7 @@ body {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  padding-right: 0.8rem;
+  padding-right: 0.35rem;
 }
 
 .tab-button {
@@ -193,11 +193,11 @@ body {
 }
 
 .tab-icon-button {
-  width: 2rem;
-  height: 2rem;
-  border: 1px solid var(--line);
+  width: 2.45rem;
+  height: 2.45rem;
+  border: 1px solid var(--accent);
   border-radius: var(--radius-md);
-  background: var(--surface-strong);
+  background: var(--accent);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -205,13 +205,13 @@ body {
 }
 
 .tab-icon-button:hover {
-  border-color: var(--line-strong);
-  background: var(--paper-soft);
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
 }
 
 .tab-icon-button img {
-  width: 1rem;
-  height: 1rem;
+  width: 2rem;
+  height: 2rem;
   display: block;
 }
 
@@ -230,6 +230,182 @@ body {
   display: block;
 }
 
+.info-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.85rem;
+}
+
+.info-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-strong);
+  padding: 0.9rem;
+  box-shadow: var(--shadow);
+}
+
+.info-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.info-card-header-main {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.info-card-title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+  color: var(--ink);
+}
+
+.info-card-action-button {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.info-card-action-button:hover {
+  border-color: var(--line-strong);
+  background: var(--paper-soft);
+}
+
+.info-card-action-button--green {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.info-card-action-button--green:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.info-card-action-button--green img {
+  filter: brightness(0) invert(1);
+}
+
+.info-card-action-button img {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+}
+
+.info-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--paper-soft);
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.info-card-stats {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.info-card-stats div {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-soft);
+  padding: 0.4rem 0.5rem;
+}
+
+.info-card-stats div.is-nonzero {
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+}
+
+.info-card-stats div.is-nonzero dd {
+  color: var(--accent);
+}
+
+.info-card-stats dt {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+}
+
+.info-card-stats dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--font-size-md);
+  font-weight: 700;
+}
+
+.info-card-meta {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.65rem;
+  color: var(--muted);
+}
+
+.info-card-meta p {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+
+.info-card-meta p + p {
+  margin-top: 0.35rem;
+}
+
+.info-card-meta a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.info-card-meta a:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.drug-structure-modal-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+}
+
+.drug-structure-modal-img {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+}
+
+.tab-empty-state {
+  margin: 0;
+  padding: 0.9rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  background: var(--paper-soft);
+  color: var(--muted);
+}
+
 /* Plot Modal */
 .plot-modal {
   display: none;
@@ -238,7 +414,7 @@ body {
   z-index: 1000;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: 0rem;
 }
 
 .plot-modal.is-open {
@@ -256,8 +432,10 @@ body {
 .plot-modal-panel {
   position: relative;
   z-index: 1;
-  width: min(1120px, 80vw);
+  width: 80vw;
   max-height: 90vh;
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--surface-strong);
@@ -287,7 +465,7 @@ body {
 
 .plot-modal-content {
   padding: 1.5rem;
-  max-height: 90vh;
+  max-height: calc(90vh - 2.8rem);
   overflow: auto;
 }
 
@@ -301,6 +479,85 @@ body {
   margin: 0;
   color: var(--muted);
   font-size: var(--font-size-lg);
+}
+
+.sequence-modal-panel {
+  width: min(72rem, 92vw);
+}
+
+.sequence-modal-content {
+  display: grid;
+  gap: 1rem;
+}
+
+.sequence-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.sequence-modal-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sequence-modal-title {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--font-size-xl);
+}
+
+.sequence-modal-toggle {
+  display: flex;
+  gap: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 0.2rem;
+  background: var(--paper-soft);
+  width: fit-content;
+}
+
+.seq-toggle-btn {
+  padding: 0.25rem 0.75rem;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.seq-toggle-btn--active {
+  background: var(--surface-strong);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(12, 34, 49, 0.08);
+}
+
+.seq-toggle-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.sequence-modal-block {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-soft);
+  padding: 1rem;
+  color: var(--ink);
+  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: var(--font-size-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  height: 30vh;
+  overflow-y: auto;
 }
 
 /* Responsive */
@@ -329,6 +586,10 @@ body {
     padding: 1rem;
   }
 
+  .info-card-grid {
+    grid-template-columns: 1fr;
+  }
+
   .tab-button {
     padding: 0.7rem 1rem;
     font-size: var(--font-size-sm);
@@ -339,7 +600,11 @@ body {
   }
 
   .report-tabs-actions {
-    padding-right: 0.6rem;
+    padding-right: 0.35rem;
+  }
+
+  .plot-modal-panel {
+    width: 94vw;
   }
 
   .plot-modal-content {

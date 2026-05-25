@@ -38,7 +38,7 @@
           {% endfor %}
         </div>
         <div class="report-tabs-actions">
-          <button id="plot-modal-open" class="tab-icon-button" type="button" aria-label="Open resistance plot">
+          <button id="plot-modal-open" class="tab-icon-button" type="button" title="Open mutation plot" aria-label="Open mutation plot">
             <img src="{{ context.header.picture_in_picture_icon }}" alt="Picture in picture icon">
           </button>
         </div>
@@ -57,10 +57,117 @@
         <p>All mutations content (placeholder)</p>
       </div>
       <div id="tab-sequence-features" class="tab-content">
-        <p>Sequence features content (placeholder)</p>
+        {% if context.sequence_features.cards %}
+          <div class="info-card-grid">
+            {% for card in context.sequence_features.cards %}
+              <article class="info-card">
+                <header class="info-card-header">
+                  <div class="info-card-header-main">
+                    <h3 class="info-card-title">{{ card.name }}</h3>
+                  </div>
+                  {% if card.has_sequence %}
+                    <button
+                      class="info-card-action-button info-card-action-button--green feature-sequence-button"
+                      type="button"
+                      aria-label="View sequence for {{ card.name | e }}"
+                      data-feature-title="{{ card.name | e }}"
+                      data-nt-sequence="{{ card.nt_sequence | e }}"
+                      data-aa-sequence="{{ card.aa_sequence | e }}"
+                    >
+                      <img src="{{ context.sequence_features.sequence_icon }}" alt="">
+                    </button>
+                  {% endif %}
+                </header>
+                <dl class="info-card-stats">
+                  <div{% if card.observed_variants %} class="is-nonzero"{% endif %}>
+                    <dt>Observed variants</dt>
+                    <dd>{{ card.observed_variants }}</dd>
+                  </div>
+                  <div{% if card.database_hits %} class="is-nonzero"{% endif %}>
+                    <dt>Database hits</dt>
+                    <dd>{{ card.database_hits }}</dd>
+                  </div>
+                </dl>
+                {% if card.protein or card.note or card.protein_id or card.locus_tag %}
+                  <div class="info-card-meta">
+                    {% if card.protein %}<p><strong>Protein:</strong> {{ card.protein }}</p>{% endif %}
+                    {% if card.protein_id %}
+                      <p>
+                        <strong>Protein ID:</strong>
+                        {% if card.ncbi_protein_url %}
+                          <a href="{{ card.ncbi_protein_url }}" target="_blank" rel="noopener">{{ card.protein_id }}</a>
+                        {% else %}
+                          {{ card.protein_id }}
+                        {% endif %}
+                      </p>
+                    {% endif %}
+                    {% if card.locus_tag %}<p><strong>Locus:</strong> {{ card.locus_tag }}</p>{% endif %}
+                    {% if card.note %}<p>{{ card.note }}</p>{% endif %}
+                  </div>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="tab-empty-state">No detected sequence features were found for this sample.</p>
+        {% endif %}
       </div>
       <div id="tab-drugs" class="tab-content">
-        <p>Drugs content (placeholder)</p>
+        {% if context.drugs.cards %}
+          <div class="info-card-grid">
+            {% for card in context.drugs.cards %}
+              <article class="info-card">
+                <header class="info-card-header">
+                  <div class="info-card-header-main">
+                    <h3 class="info-card-title">{{ card.name }}</h3>
+                  </div>
+                  <div class="info-card-header-actions">
+                    {% if card.structure_url %}
+                      <button
+                        class="info-card-action-button info-card-action-button--green drug-structure-button"
+                        type="button"
+                        aria-label="View structure for {{ card.name | e }}"
+                        data-drug-title="{{ card.name | e }}"
+                        data-structure-url="{{ card.structure_url | e }}"
+                      >
+                        <img src="{{ context.drugs.structure_icon }}" alt="">
+                      </button>
+                    {% endif %}
+                    {% if card.pubchem_url %}
+                      <a
+                        class="info-card-action-button"
+                        href="{{ card.pubchem_url }}"
+                        target="_blank"
+                        rel="noopener"
+                        title="Open PubChem entry for {{ card.name | e }} in a new tab"
+                        aria-label="Open PubChem entry for {{ card.name | e }}"
+                      >
+                        <img src="{{ context.drugs.pubchem_icon }}" alt="">
+                      </a>
+                    {% endif %}
+                  </div>
+                </header>
+                <dl class="info-card-stats">
+                  <div{% if card.single_rule_hits %} class="is-nonzero"{% endif %}>
+                    <dt>Single-rule hits</dt>
+                    <dd>{{ card.single_rule_hits }}</dd>
+                  </div>
+                  <div{% if card.formula_hits %} class="is-nonzero"{% endif %}>
+                    <dt>Formula hits</dt>
+                    <dd>{{ card.formula_hits }}</dd>
+                  </div>
+                </dl>
+                {% if card.description %}
+                  <div class="info-card-meta">
+                    <p>{{ card.description }}</p>
+                  </div>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="tab-empty-state">No detected drugs were found for this sample.</p>
+        {% endif %}
       </div>
     </main>
 
@@ -74,6 +181,36 @@
           {% else %}
             <p class="plot-modal-empty">No plot available for this report.</p>
           {% endif %}
+        </div>
+      </section>
+    </div>
+
+    <div id="drug-structure-modal" class="plot-modal" aria-hidden="true">
+      <div id="drug-structure-modal-backdrop" class="plot-modal-backdrop"></div>
+      <section class="plot-modal-panel sequence-modal-panel" role="dialog" aria-modal="true" aria-labelledby="drug-structure-modal-title">
+        <div class="plot-modal-content sequence-modal-content">
+          <div class="sequence-modal-header">
+            <h2 id="drug-structure-modal-title" class="sequence-modal-title">Structure</h2>
+          </div>
+          <div class="drug-structure-modal-body">
+            <img id="drug-structure-modal-img" class="drug-structure-modal-img" src="" alt="">
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="feature-sequence-modal" class="plot-modal" aria-hidden="true">
+      <div id="feature-sequence-modal-backdrop" class="plot-modal-backdrop"></div>
+      <section class="plot-modal-panel sequence-modal-panel" role="dialog" aria-modal="true" aria-labelledby="feature-sequence-modal-title">
+        <div class="plot-modal-content sequence-modal-content">
+          <div class="sequence-modal-header">
+            <h2 id="feature-sequence-modal-title" class="sequence-modal-title">Feature sequence</h2>
+            <div class="sequence-modal-toggle">
+              <button id="seq-toggle-nt" class="seq-toggle-btn seq-toggle-btn--active" type="button">DNA</button>
+              <button id="seq-toggle-aa" class="seq-toggle-btn" type="button">Protein</button>
+            </div>
+          </div>
+          <pre id="feature-sequence-modal-sequence" class="sequence-modal-block"></pre>
         </div>
       </section>
     </div>

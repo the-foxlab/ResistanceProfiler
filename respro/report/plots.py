@@ -279,7 +279,7 @@ def _build_lollipop_figure(
 
     if first_lollipop_ax is not None:
         first_lollipop_ax.legend(
-            handles=handles, loc='upper right', fontsize=6,
+            handles=handles, loc='upper right', fontsize=7,
             ncol=len(handles), frameon=False,
             bbox_to_anchor=(1, 1.25), borderaxespad=0.0,
         )
@@ -450,7 +450,7 @@ def _draw_genome_overview(
                 feature.display_name,
                 ha='center',
                 va='bottom',
-                fontsize=6,
+                fontsize=7,
                 fontweight='bold',
                 color=FEATURE_HIGHLIGHTED_EDGE,
                 zorder=200 + y,
@@ -541,7 +541,7 @@ def _draw_feature_track(
         f'← {feature.display_name} ←' if feature.strand == '-' else f'→ {feature.display_name} →',
         ha='center',
         va='center',
-        fontsize=6,
+        fontsize=7,
         fontweight='bold',
         color='white'
     )
@@ -556,8 +556,8 @@ def _draw_feature_track(
         boundaries.add(sorted_mps[-1].end + 1)
         for x_boundary in sorted(boundaries):
             ax.vlines(
-                x=x_boundary, ymin=0.3, ymax=1,
-                colors='black', linewidth=1, linestyle=':', zorder=5,
+                x=x_boundary, ymin=0.3, ymax=0.7,
+                colors=FEATURE_DEFAULT_COLOUR, linewidth=1.5, zorder=5,
             )
         for mp in sorted_mps:
             label = mp.display_name
@@ -565,7 +565,7 @@ def _draw_feature_track(
             ax.text(
                 label_x, 0.76, label,
                 ha='center', va='bottom',
-                fontsize=6, color=MATPEPTIDE_HIGHLIGHTED_COLOUR, fontweight='bold',
+                fontsize=7, color=MATPEPTIDE_HIGHLIGHTED_COLOUR, fontweight='bold',
                 clip_on=True,
             )
         ax.set_ylim(0, 1.4)
@@ -665,7 +665,7 @@ def _draw_feature_panel(
                 (x_top, y_top),
                 textcoords='offset points',
                 xytext=(0, 7),
-                fontsize=6,
+                fontsize=7,
                 color=colour,
                 fontweight='bold',
                 rotation=90,
