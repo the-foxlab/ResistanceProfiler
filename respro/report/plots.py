@@ -206,6 +206,7 @@ def _build_lollipop_figure(
         for feature_name in lollipop_feature_names
     )
     has_introns = any(_feature_intron_gaps(f) for f in plot_features)
+    database_hit_annotation_ids = {id(ann) for ann in result.database_hit_annotations}
     handles = [
         plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='white',
                    markeredgecolor='black', markersize=8, label='Database hit'),
@@ -272,6 +273,7 @@ def _build_lollipop_figure(
             feature,
             feature_annotations.get(feature.name, []),
             coverage_gaps=coverage_gaps_by_feature.get(feature.name, []),
+            database_hit_annotation_ids=database_hit_annotation_ids,
             shared_track_ax=None,
         )
 
@@ -614,6 +616,7 @@ def _draw_feature_panel(
     feature: FeatureRecord,
     annotations: list[AnnotatedVariant],
     coverage_gaps: list[CoverageGap] | None = None,
+    database_hit_annotation_ids: set[int] | None = None,
     shared_track_ax=None,
 ) -> None:
     """
@@ -630,6 +633,8 @@ def _draw_feature_panel(
         'no_database_hit': 'o',
     }
 
+    database_hit_annotation_ids = database_hit_annotation_ids or set()
+
     _draw_non_covered_regions(ax, feature, coverage_gaps or [])
 
     jittered = _apply_top_jitter(annotations, feature_length=feature.end - feature.start)
@@ -643,16 +648,16 @@ def _draw_feature_panel(
             y_top,
             color=colour,
             marker=(
-                marker_shapes['database_hit'] if ann.is_resistance_hit
+                marker_shapes['database_hit'] if id(ann) in database_hit_annotation_ids
                 else marker_shapes['no_database_hit']
             ),
-            s=50 if ann.is_resistance_hit else 40,
+            s=50 if id(ann) in database_hit_annotation_ids else 40,
             zorder=4,
-            edgecolors='black' if ann.is_resistance_hit else  'white',
+            edgecolors='black' if id(ann) in database_hit_annotation_ids else 'white',
             linewidths=0.5,
         )
 
-        if ann.is_resistance_hit:
+        if id(ann) in database_hit_annotation_ids:
             label = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             # Alternate text alignment left/right to reduce label overlap
             ax.annotate(

@@ -380,6 +380,41 @@ class ProfilingResult:
         """
         return [a for a in self.annotations if a.feature_name]
 
+    @property
+    def database_hit_annotations(self) -> list[AnnotatedVariant]:
+        """
+        Return annotations that should be counted as database hits.
+
+        This includes direct resistance hits and formula-only member annotations referenced by
+        fired formula rules, without double-counting shared annotations.
+        """
+        hit_annotations: list[AnnotatedVariant] = []
+        seen_annotation_ids: set[int] = set()
+
+        for ann in self.annotations:
+            if not ann.is_resistance_hit:
+                continue
+            ann_id = id(ann)
+            if ann_id in seen_annotation_ids:
+                continue
+            seen_annotation_ids.add(ann_id)
+            hit_annotations.append(ann)
+
+        for formula_hit in self.formula_hits:
+            for ann in formula_hit.matched_variants:
+                ann_id = id(ann)
+                if ann_id in seen_annotation_ids:
+                    continue
+                seen_annotation_ids.add(ann_id)
+                hit_annotations.append(ann)
+
+        return hit_annotations
+
+    @property
+    def database_hit_count(self) -> int:
+        """Return the total number of database-hit annotations."""
+        return len(self.database_hit_annotations)
+
     def summary_dict(self) -> dict:
         """
         Return a JSON-serializable summary (no per-variant detail).

@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>ResistanceProfiler - {{ summary.vcf }}</title>
+<style>{{ css }}</style>
+<style>
+  {% for effect, colour in mutation_colours.items() %}
+  .badge-{{ effect.replace('inframe_complex', 'complex') }} { background: {{ colour }}; color: {{ badge_text_colour(colour) }}; }
+  {% endfor %}
+  {% for key, colour in phenotype_colours.items() %}
+  .badge-{{ 'intermediate-p' if key == 'intermediate' else key }} { background: {{ colour }}; color: {{ badge_text_colour(colour) }}; }
+  {% endfor %}
+  {% for key, colour in af_bin_colours.items() %}
+  .badge-{{ key }} { background: {{ colour }}; color: {{ badge_text_colour(colour) }}; }
+  {% endfor %}
+  {% for key, colour in similarity_colours.items() %}
+  .badge-sim-{{ key }} { background: {{ colour }}; color: {{ badge_text_colour(colour) }}; }
+  {% endfor %}
+  {% for key, colour in phenotype_colours.items() %}
+  .stat-pill.{{ key }} { background: {{ colour }}; color: {{ badge_text_colour(colour) }}; }
+  {% endfor %}
+</style>
+</head>
+<body>
+<section class='meta-grid'>
+  <article class='meta-item'><span class='meta-label'>Database</span><span class='meta-value'>{{ summary.project_name }}</span></article>
+  <article class='meta-item'><span class='meta-label'>Database UUID</span><span class='meta-value'>{{ summary.project_uuid or '-' }}</span></article>
+  <article class='meta-item'><span class='meta-label'>Organism</span><span class='meta-value'>{{ summary.organism or '-' }}</span></article>
+  <article class='meta-item'><span class='meta-label'>Reference</span><span class='meta-value'>{{ summary.reference }}</span></article>
+  <article class='meta-item'><span class='meta-label'>Sample</span><span class='meta-value'>{{ summary.sample or '-' }}</span></article>
+  <article class='meta-item'><span class='meta-label'>File name</span><span class='meta-value'>{{ summary.vcf }}</span></article>
+  <article class='meta-item'><span class='meta-label'>Timestamp</span><span class='meta-value'>{{ summary.timestamp }}</span></article>
+</section>
+
+<div class='stats'>
+  <a class='stat-card' href='#section-cds'>
+    <div class='number'>{{ summary.variants_in_cds }}</div>
+    <div class='label'>In CDS</div>
+  </a>
+  {% if summary.missense_count %}
+  <a class='stat-card' href='#section-cds'>
+    <div class='number'>{{ summary.missense_count }}</div>
+    <div class='label'>Missense variants</div>
+  </a>
+  {% endif %}
+   {% if summary.high_impact_count %}
+  <a class='stat-card warn' href='#section-cds'>
+    <div class='number'>&#9888; {{ summary.high_impact_count }}</div>
+    <div class='label'>High-impact variants</div>
+    <div class='stat-note'>frameshift &middot; stop &middot; indel</div>
+  </a>
+  {% endif %}
+  <a class='stat-card hit' href='#section-db-hits'>
+    <div class='number'>{{ summary.single_total_hits }}</div>
+    <div class='label'>Single Rule Hits</div>
+    {% if summary.single_hit_rules %}
+    <div class='stat-note'>{{ summary.single_hit_rules }} rule{{ 's' if summary.single_hit_rules != 1 }} &middot; {{ summary.single_hit_positions }} position{{ 's' if summary.single_hit_positions != 1 }} &middot; {{ summary.single_hit_drugs }} drug{{ 's' if summary.single_hit_drugs != 1 }}</div>
+    <div class='stat-sub'>
+      <span class='stat-pill resistant{{ ' zero' if not summary.resistant_hits }}'>Resistant: {{ summary.resistant_hits }}</span>
+      <span class='stat-pill intermediate{{ ' zero' if not summary.intermediate_hits }}'>Intermediate: {{ summary.intermediate_hits }}</span>
+      <span class='stat-pill sensitive{{ ' zero' if not summary.sensitive_hits }}'>Sensitive: {{ summary.sensitive_hits }}</span>
+    </div>
+    {% endif %}
+  </a>
+  <a class='stat-card hit' href='#section-combo-hits'>
+    <div class='number'>{{ summary.combo_total_hits }}</div>
+    <div class='label'>Combination Rule Hits</div>
+    {% if summary.combo_hit_rules %}
+    <div class='stat-note'>{{ summary.combo_total_hits }} total hit{{ 's' if summary.combo_total_hits != 1 }} &middot; {{ summary.combo_hit_positions }} position{{ 's' if summary.combo_hit_positions != 1 }} &middot; {{ summary.combo_hit_drugs }} drug{{ 's' if summary.combo_hit_drugs != 1 }}</div>
+    <div class='stat-sub'>
+      <span class='stat-pill resistant{{ ' zero' if not summary.combo_resistant_hits }}'>Resistant: {{ summary.combo_resistant_hits }}</span>
+      <span class='stat-pill intermediate{{ ' zero' if not summary.combo_intermediate_hits }}'>Intermediate: {{ summary.combo_intermediate_hits }}</span>
+      <span class='stat-pill sensitive{{ ' zero' if not summary.combo_sensitive_hits }}'>Sensitive: {{ summary.combo_sensitive_hits }}</span>
+    </div>
+    {% endif %}
+  </a>
+  <a class='stat-card' href='#section-similarity'>
+    <div class='number'>{{ summary.similarity_hits }}</div>
+    <div class='label'>Similarity hits</div>
+    {% if summary.similarity_hits %}
+    <div class='stat-note'>{{ summary.similarity_hits }} position{{ 's' if summary.similarity_hits != 1 }} &middot; {{ summary.similarity_rules }} rule{{ 's' if summary.similarity_rules != 1 }}</div>
+    <div class='stat-sub'>
+      <span class='stat-pill resistant{{ ' zero' if not summary.similarity_resistant }}'>Resistant: {{ summary.similarity_resistant }}</span>
+      <span class='stat-pill intermediate{{ ' zero' if not summary.similarity_intermediate }}'>Intermediate: {{ summary.similarity_intermediate }}</span>
+      <span class='stat-pill sensitive{{ ' zero' if not summary.similarity_sensitive }}'>Sensitive: {{ summary.similarity_sensitive }}</span>
+    </div>
+    {% endif %}
+  </a>
+  {% if summary.rule_positions_total %}
+  <div class='stat-card{{ ' warn' if summary.unassessed_rule_positions else '' }}'>
+    <div class='number'>{{ summary.unassessed_rule_positions }}</div>
+    <div class='label'>Unassessed rule positions</div>
+    <div class='stat-note'>of {{ summary.rule_positions_total }} total positions (missing coverage)</div>
+  </div>
+  {% endif %}
+</div>
+
+{% if summary_text_en %}
+<div class='section open' id='section-summary-text'>
+<h2 class='section-toggle'>Interpretation summary <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
+  <div class='summary-text-box' data-summary-lang='en' data-auto-translate='true'>
+    <div class='summary-lang-controls'>
+      <button type='button' class='summary-lang-btn active' data-lang='en'>English</button>
+      <button type='button' class='summary-lang-btn' data-lang='de'>Deutsch (Google Translate)</button>
+      <button type='button' class='summary-lang-btn' data-lang='fr'>Français (Google Translate)</button>
+      <button type='button' class='summary-lang-btn' data-lang='es'>Español (Google Translate)</button>
+    </div>
+    <p class='summary-text' data-lang='en'>{{ summary_text_en | safe }}</p>
+    <p class='summary-text' data-lang='de' hidden>Translation loading...</p>
+    <p class='summary-text' data-lang='fr' hidden>Translation loading...</p>
+    <p class='summary-text' data-lang='es' hidden>Translation loading...</p>
+  </div>
+</div>
+</div>
+{% endif %}
+
+{% if sample_classification %}
+<div class='section open'>
+<h2 class='section-toggle'>Manual classification <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
+  <div class='manual-classification-grid'>
+    <div><span class='manual-label'>Drug</span><span class='manual-value'>{{ sample_classification.drug or '—' }}</span></div>
+    <div><span class='manual-label'>Phenotype</span><span class='manual-value'>{% if sample_classification.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
+      {% elif sample_classification.phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
+      {% elif sample_classification.phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% else %}<span class='badge badge-unknown'>{{ sample_classification.phenotype }}</span>{% endif %}</span></div>
+    {% if sample_classification.clinical_phenotype and sample_classification.clinical_phenotype != 'unknown' %}
+    <div><span class='manual-label'>Clinical phenotype</span><span class='manual-value'>{% if sample_classification.clinical_phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
+      {% elif sample_classification.clinical_phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
+      {% elif sample_classification.clinical_phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% else %}<span class='badge badge-unknown'>{{ sample_classification.clinical_phenotype }}</span>{% endif %}</span></div>
+    {% endif %}
+    {% if sample_classification.ic50 %}
+    <div><span class='manual-label'>IC50</span><span class='manual-value'>{{ sample_classification.ic50 }}</span></div>
+    {% endif %}
+    {% if sample_classification.fold_ic50 %}
+    <div><span class='manual-label'>Fold-IC50</span><span class='manual-value'>{{ sample_classification.fold_ic50 }}</span></div>
+    {% endif %}
+    {% if sample_classification.source %}
+    <div><span class='manual-label'>Source</span><span class='manual-value'>{{ sample_classification.source }}</span></div>
+    {% endif %}
+    <div><span class='manual-label'>Timestamp</span><span class='manual-value'>{{ sample_classification.created_at or '—' }}</span></div>
+  </div>
+  {% if sample_classification.note %}
+  <div class='manual-note'><strong>User comment:</strong> {{ sample_classification.note }}</div>
+  {% endif %}
+</div>
+</div>
+{% endif %}
+
+{% if plot_data %}
+<div class='section open'>
+<h2 class='section-toggle'>Mutation overview <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
+<div class='plot-container'>
+  <img src='data:image/svg+xml;base64,{{ plot_data }}' alt='Lollipop plot'>
+</div>
+</div>
+</div>
+{% endif %}
+
+{% if db_hit_rows %}
+<div class='section open' id='section-db-hits'>
+<h2 class='section-toggle'>Mutations in database <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
+<div class='table-wrapper'>
+<table class='sortable expandable-table'>
+<thead><tr>
+  <th>Feature</th><th>AA change</th><th>Drug</th>
+  {% if db_cols.ic50 %}<th>IC50</th>{% endif %}
+  {% if db_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
+  <th>Phenotype</th>
+  {% if db_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
+  <th>Underlying nt change</th><th>Consequence</th><th>Frequency classification</th>
+  {% if db_cols.source %}<th>Source</th>{% endif %}
+  {% if db_cols.comment %}<th>Comment</th>{% endif %}
+  {% if db_cols.publication %}<th>Publications</th>{% endif %}
+</tr></thead>
+<tbody>
+{% for r in db_hit_rows %}
+<tr class='hit-row data-row{% if r.has_alignment %} expandable-row{% endif %}' data-row-id='db-{{ loop.index }}'>
+  <td>{{ r.feature }}</td>
+  <td>{{ r.aa_change }}</td>
+  <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
+  {% if db_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
+  {% if db_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
+  <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
+      {% elif r.phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
+      {% elif r.phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% elif r.phenotype == 'contradictory' %}<span class='badge badge-contradictory'>contradictory</span>
+      {% else %}<span class='badge badge-unknown'>{{ r.phenotype }}</span>{% endif %}</td>
+  {% if db_cols.clinical_phenotype %}
+  <td>{% if r.clinical_phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
+      {% elif r.clinical_phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
+      {% elif r.clinical_phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% elif r.clinical_phenotype == 'contradictory' %}<span class='badge badge-contradictory'>contradictory</span>
+      {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
+  {% endif %}
+  <td>{{ r.nt_change }}</td>
+  <td><span class='badge badge-{{ r.consequence }}'>{{ r.consequence }}</span></td>
+  <td data-sort-value='{{ r.af_bin }}'><span class='badge badge-{{ r.af_bin }}'>{{ r.af_bin }}</span></td>
+  {% if db_cols.source %}<td>{{ r.source or '—' }}</td>{% endif %}
+  {% if db_cols.comment %}<td>{{ r.comment or '—' }}</td>{% endif %}
+  {% if db_cols.publication %}<td>{% for n in r.pub_citations %}<a href='#ref-{{ n }}'>[{{ n }}]</a> {% endfor %}</td>{% endif %}
+</tr>
+{% if r.has_alignment %}
+<tr class='detail-row' data-for='db-{{ loop.index }}'>
+  <td colspan='99'>
+    <div class='row-detail-title'>{{ r.alignment_title }}</div>
+    {{ r.alignment_html }}
+  </td>
+</tr>
+{% endif %}
+{% endfor %}
+</tbody>
+</table>
+</div>
+<p class='table-note'>Phenotypes are interpreted as resistant = reduced susceptibility, sensitive = expected susceptibility, intermediate = partial or uncertain effect, and contradictory = conflicting evidence.</p>
+</div>
+</div>
+{% endif %}
+
+{% if combo_hit_rows %}
+<div class='section open' id='section-combo-hits'>
+<h2 class='section-toggle'>Combination rule hits <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
+<p class='table-note'>Logic rows show mutations that are part of a combination rule. Green markers indicate detected members that are sufficient for the rule to apply; gray markers indicate not-detected members. Operators and parentheses are color-coded for readability. Boolean operators: <strong>and</strong> = all linked conditions must be true, <strong>or</strong> = at least one linked condition must be true, <strong>not</strong> = the next condition must be false, <strong>xor</strong> = exactly one of two linked conditions must be true.</p>
+<div class='table-wrapper'>
+<table class='sortable expandable-table'>
+<thead><tr>
+  <th>Group</th><th>Logic / member mutations</th><th>Drug</th>
+  {% if combo_cols.ic50 %}<th>IC50</th>{% endif %}
+  {% if combo_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
+  {% if combo_cols.score %}<th>Score</th>{% endif %}
+  <th>Phenotype</th>
+  {% if combo_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
+  {% if combo_cols.comment %}<th>Comment</th>{% endif %}
+  {% if combo_cols.publication %}<th>Ref</th>{% endif %}
+</tr></thead>
+<tbody>
+{% for r in combo_hit_rows %}
+<tr class='hit-row data-row'>
+  <td>{{ r.group_name }}</td>
+  <td>{{ r.members | safe }}</td>
+  <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
+  {% if combo_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
+  {% if combo_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
+  {% if combo_cols.score %}<td>{{ r.score or '—' }}</td>{% endif %}
+  <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
+      {% elif r.phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
+      {% elif r.phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% elif r.phenotype == 'contradictory' %}<span class='badge badge-contradictory'>contradictory</span>
+      {% else %}<span class='badge badge-unknown'>{{ r.phenotype }}</span>{% endif %}</td>
+  {% if combo_cols.clinical_phenotype %}
+  <td>{% if r.clinical_phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
+      {% elif r.clinical_phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
+      {% elif r.clinical_phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% elif r.clinical_phenotype == 'contradictory' %}<span class='badge badge-contradictory'>contradictory</span>
+      {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
+  {% endif %}
+  {% if combo_cols.comment %}<td>{{ r.comment or '—' }}</td>{% endif %}
+  {% if combo_cols.publication %}<td>{% for n in r.pub_citations %}<a href='#ref-{{ n }}'>[{{ n }}]</a> {% endfor %}</td>{% endif %}
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+</div>
+{% endif %}
+
+{% if potential_rows %}
+<div class='section open' id='section-similarity'>
+<h2 class='section-toggle'>Similarity to database entries <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
+<p class='table-note'>Detected mutations at positions with known resistance rules but different amino acid changes. Similarity is scored with BLOSUM62.</p>
+<div class='table-wrapper'>
+<table class='sortable'>
+<thead><tr>
+  <th>Feature</th><th>Observed AA change</th><th>Known rule</th><th>Similarity</th><th>Drug</th>
+  {% if pot_cols.ic50 %}<th>IC50</th>{% endif %}
+  {% if pot_cols.fold_ic50 %}<th>Fold-IC50</th>{% endif %}
+  {% if pot_cols.score %}<th>Score</th>{% endif %}
+  <th>Phenotype</th>
+  {% if pot_cols.clinical_phenotype %}<th>Clinical phenotype</th>{% endif %}
+  {% if pot_cols.source %}<th>Source</th>{% endif %}
+  {% if pot_cols.comment %}<th>Comment</th>{% endif %}
+  <th>Frequency</th>{% if pot_cols.publication %}<th>Ref</th>{% endif %}
+</tr></thead>
+<tbody>
+{% for r in potential_rows %}
+<tr class='data-row{% if r.has_alignment %} expandable-row{% endif %}' data-row-id='pot-{{ loop.index }}'>
+  <td>{{ r.feature }}</td>
+  <td>{{ r.observed_change }}</td>
+  <td>{{ r.rule_change }}</td>
+  <td><span class='badge badge-sim-{{ r.similarity }}'>{{ r.similarity }}</span></td>
+  <td><span class='badge drug-badge' style='background: {{ r.drug_badge_bg }}; color: {{ r.drug_badge_fg }};'>{{ r.drug }}</span></td>
+  {% if pot_cols.ic50 %}<td>{{ r.ic50 or '—' }}</td>{% endif %}
+  {% if pot_cols.fold_ic50 %}<td>{{ r.fold_ic50 or '—' }}</td>{% endif %}
+  {% if pot_cols.score %}<td>{{ r.score or '—' }}</td>{% endif %}
+  <td>{% if r.phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
+      {% elif r.phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
+      {% elif r.phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% elif r.phenotype == 'contradictory' %}<span class='badge badge-contradictory'>contradictory</span>
+      {% else %}<span class='badge badge-unknown'>{{ r.phenotype }}</span>{% endif %}</td>
+  {% if pot_cols.clinical_phenotype %}
+  <td>{% if r.clinical_phenotype == 'resistant' %}<span class='badge badge-resistant'>resistant</span>
+      {% elif r.clinical_phenotype == 'intermediate' %}<span class='badge badge-intermediate-p'>intermediate</span>
+      {% elif r.clinical_phenotype == 'sensitive' %}<span class='badge badge-sensitive'>sensitive</span>
+      {% elif r.clinical_phenotype == 'contradictory' %}<span class='badge badge-contradictory'>contradictory</span>
+      {% else %}<span class='badge badge-unknown'>{{ r.clinical_phenotype }}</span>{% endif %}</td>
+  {% endif %}
+  {% if pot_cols.source %}<td>{{ r.source or '—' }}</td>{% endif %}
+  {% if pot_cols.comment %}<td>{{ r.comment or '—' }}</td>{% endif %}
+  <td data-sort-value='{{ '%.6f'|format(r.allele_freq) }}'>{{ '%.3f'|format(r.allele_freq) }}</td>
+  {% if pot_cols.publication %}<td>{% for n in r.pub_citations %}<a href='#ref-{{ n }}'>[{{ n }}]</a> {% endfor %}</td>{% endif %}
+</tr>
+{% if r.has_alignment %}
+<tr class='detail-row' data-for='pot-{{ loop.index }}'>
+  <td colspan='99'>
+    <div class='row-detail-title'>{{ r.alignment_title }}</div>
+    {{ r.alignment_html }}
+  </td>
+</tr>
+{% endif %}
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+</div>
+{% endif %}
+
+<div class='section' id='section-cds'>
+<h2 class='section-toggle'>All CDS variants <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
+<div class='table-wrapper'>
+<table class='sortable expandable-table'>
+<thead><tr>
+  <th>Feature</th><th>Nt change</th><th>AA change</th><th>Consequence</th><th>Frequency</th><th>Frequency classification</th><th>In database</th>
+</tr></thead>
+<tbody>
+{% for r in cds_rows %}
+<tr class='{{ 'hit-row ' if r.database_hit else '' }}data-row{% if r.has_alignment %} expandable-row{% endif %}' data-row-id='cds-{{ loop.index }}'>
+  <td>{{ r.feature }}</td>
+  <td>{{ r.nt_change }}</td>
+  <td>{% if r.aa_change %}{{ r.aa_change }}{% endif %}</td>
+  <td><span class='badge badge-{{ r.consequence }}'>{{ r.consequence }}</span></td>
+  <td data-sort-value='{{ '%.6f'|format(r.allele_freq) }}'>{{ '%.3f'|format(r.allele_freq) }}</td>
+  <td data-sort-value='{{ r.af_bin }}'><span class='badge badge-{{ r.af_bin }}'>{{ r.af_bin }}</span></td>
+  <td data-sort-value='{{ 1 if r.database_hit else 0 }}'><span class='db-indicator {{ 'db-yes' if r.database_hit else 'db-no' }}' title='{{ 'Yes' if r.database_hit else 'No' }}' aria-label='{{ 'Yes' if r.database_hit else 'No' }}'></span></td>
+</tr>
+{% if r.has_alignment %}
+<tr class='detail-row' data-for='cds-{{ loop.index }}'>
+  <td colspan='99'>
+    <div class='row-detail-title'>{{ r.alignment_title }}</div>
+    {{ r.alignment_html }}
+  </td>
+</tr>
+{% endif %}
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+</div>
+
+{% if feature_cards %}
+<div class='section'>
+<h2 class='section-toggle'>Feature overview <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
+<div class='feature-cards'>
+{% for g in feature_cards %}
+<div class='feature-card'>
+  <div class='feature-meta-block'>
+    <div class='feature-name'>{{ g.name }}</div>
+    <div><strong>Product:</strong> {{ g.protein or '-' }}</div>
+    <div><strong>Protein ID:</strong> {{ g.protein_id or '-' }}</div>
+    <div><strong>Locus tag:</strong> {{ g.locus_tag or '-' }}</div>
+    {% if g.note %}<div class='feature-note'><strong>Note:</strong> {{ g.note }}</div>{% endif %}
+    {% if g.ncbi_protein_url %}<a href='{{ g.ncbi_protein_url }}' target='_blank'>NCBI protein ↗</a>{% endif %}
+  </div>
+  <div class='feature-seq-block'>
+    <pre class='feature-seq'>{% if g.protein_id %}>{{ g.protein_id }}{% else %}>{{ g.name }}{% endif %}
+{{ g.aa_sequence or '-' }}</pre>
+  </div>
+</div>
+{% endfor %}
+</div>
+</div>
+</div>
+{% endif %}
+
+{% if drug_cards %}
+<div class='section'>
+<h2 class='section-toggle'>Drug overview <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
+<div class='drug-cards'>
+{% for d in drug_cards %}
+<div class='drug-card'>
+  {% if d.structure_url %}<img src='{{ d.structure_url }}' alt='{{ d.name }} structure'>{% endif %}
+  <div class='drug-info'>
+    <div class='drug-name'><span class='badge drug-badge'{% if d.badge_color %} style='background: {{ d.badge_color }}; color: {{ badge_text_colour(d.badge_color) }};'{% endif %}>{{ d.name }}</span></div>
+    {% if d.description %}<div class='drug-desc'>{{ d.description }}</div>{% endif %}
+    {% if d.pubchem_url %}<a href='{{ d.pubchem_url }}' target='_blank'>PubChem ↗</a>{% endif %}
+  </div>
+</div>
+{% endfor %}
+</div>
+</div>
+</div>
+{% endif %}
+
+{% if bibliography %}
+<div class='section'>
+<h2 class='section-toggle'>References <span class='toggle-arrow'>&#9654;</span></h2>
+<div class='section-body'>
+<ol class='bibliography'>
+{% for pub in bibliography %}
+<li id='ref-{{ pub.citation_num }}'>
+  {% if pub.title %}<em>{{ pub.title }}</em>{% else %}<span>{{ pub.raw_input or pub.doi }}</span>{% endif %}
+  {% if pub.doi %} — <a href='https://doi.org/{{ pub.doi }}' target='_blank' rel='noopener'>DOI ↗</a>{% endif %}
+  {% if pub.pubmed_id %} <a href='https://pubmed.ncbi.nlm.nih.gov/{{ pub.pubmed_id }}/' target='_blank' rel='noopener'>PubMed ↗</a>{% endif %}
+</li>
+{% endfor %}
+</ol>
+</div>
+</div>
+{% endif %}
+
+<footer>Generated by <strong>ResistanceProfiler v{{ version }}</strong> on {{ summary.timestamp }}.</footer>
+
+<script>{{ js | safe }}</script>
+</body>
+</html>
+

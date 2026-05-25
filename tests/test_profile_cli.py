@@ -4,13 +4,24 @@ Tests for the CLI profile-vcf command — end-to-end integration.
 
 import json
 import sqlite3
+from io import StringIO
 from pathlib import Path
 
 import pysam
-from conftest import TINY_REF_SEQ, write_genbank
+from rich.console import Console
 from typer.testing import CliRunner
 
 from respro.cli.main import app
+from respro.cli.profile_helpers import _print_completion_panel
+from respro.db.models import (
+    AnnotatedVariant,
+    FeatureRecord,
+    FormulaRuleHit,
+    ProfilingResult,
+    ResistanceRule,
+    ResistanceRuleSet,
+    VariantCall,
+)
 from respro.db.schema import create_schema, init_results_db
 
 
@@ -212,6 +223,71 @@ class TestProfileCli:
         ])
         assert result.exit_code == 0, result.output
         assert '1 database hit' in result.output
+
+    def test_profile_completion_panel_counts_formula_only_member_hits_as_database_hits(self) -> None:
+        feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='gag',
+            protein='Gag',
+            start=0,
+            end=12,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATGAAAGCTTAA',
+        )
+        variant = VariantCall(chrom='tiny_ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500)
+        internal_rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='__formula_component__',
+            drug_id=1,
+            reference_identifier='tiny_ref',
+            position=1,
+            reference='K',
+            mutation='E',
+            phenotype='unknown',
+            external_id='mut_a',
+            is_internal_formula_component=True,
+        )
+        ann = AnnotatedVariant(
+            variant=variant,
+            feature_name='gag',
+            codon_pos=1,
+            ref_codon='AAA',
+            alt_codon='GAA',
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            rule_matches=[internal_rule],
+        )
+        rule_set = ResistanceRuleSet(
+            id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            phenotype='resistant',
+            group_name='formula_1',
+        )
+        result = ProfilingResult(
+            project_name='Test Project',
+            reference_name='tiny_ref',
+            sample_name='sample01',
+            vcf_name='sample.vcf',
+            reference_length_nt=12,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=0,
+            annotations=[ann],
+            formula_hits=[FormulaRuleHit(rule_set=rule_set, matched_variants=[ann])],
+        )
+
+        console = Console(file=StringIO(), force_terminal=False, color_system=None, width=120)
+        _print_completion_panel(console, 'profile', result, {'html': Path('/tmp/report.html')})
+
+        output = console.file.getvalue()
+        assert '1 database hit' in output
+        assert '1 formula rule hit' in output
 
     def test_profile_drops_variants_with_non_matching_vcf_chrom(
         self,
