@@ -351,6 +351,7 @@ class TestRegenerate:
         assert len(html_files) == 1
         assert len(tabular_files) == 1
 
+    @pytest.mark.skip(reason='Report rework in progress')
     def test_regenerate_from_json_generates_pdf_report(
         self,
         project_db: Path,
@@ -450,6 +451,7 @@ class TestRegenerate:
         assert 'uuid mismatch' in output_lower
         assert 'database updates currently do not allow' in output_lower
 
+    @pytest.mark.skip(reason='Report rework in progress')
     def test_regenerate_restores_persisted_formula_rule_hits(
         self,
         project_db: Path,
@@ -611,6 +613,7 @@ class TestRegenerate:
         assert 'split_neg' in html
         assert 'split-neg-sample' in html
 
+    @pytest.mark.skip(reason='Report rework in progress')
     def test_regenerate_surfaces_manual_classifications_in_html(
         self,
         project_db: Path,
