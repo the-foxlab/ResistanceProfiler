@@ -23,6 +23,14 @@ doi_prefixes = ['https://doi.org/', 'http://doi.org/']
 [matching]
 combination_member_af_threshold = 0.75
 
+[similarity]
+# BLOSUM62 score thresholds for amino-acid similarity classification.
+# score >= high      → 'high'
+# score >= moderate  → 'moderate'
+# score < moderate   → 'low'
+high     = 1
+moderate = 0
+
 [af_bins]
 # Allele-frequency classification bins for VCF-mode profiling.
 # Each value is [lower_inclusive, upper_inclusive].

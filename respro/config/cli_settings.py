@@ -49,6 +49,14 @@ class CliMatchingConfig:
 
 
 @dataclass(frozen=True)
+class CliSimilarityConfig:
+    """BLOSUM62 score thresholds for amino-acid similarity classification."""
+
+    high: int
+    moderate: int
+
+
+@dataclass(frozen=True)
 class CliAfBinsConfig:
     """Allele-frequency classification bin boundaries (lower_inclusive, upper_inclusive)."""
 
@@ -73,6 +81,7 @@ class CliConfig:
     urls: CliUrlConfig
     parsing: CliParsingConfig
     matching: CliMatchingConfig
+    similarity: CliSimilarityConfig
     af_bins: CliAfBinsConfig
     af_bins_fasta: CliAfBinsConfig
 
@@ -85,6 +94,7 @@ def _load_cli_config() -> CliConfig:
     urls = payload['urls']
     parsing = payload['parsing']
     matching = payload['matching']
+    similarity = payload['similarity']
 
     def _bins(section: dict) -> CliAfBinsConfig:
         return CliAfBinsConfig(
@@ -118,6 +128,10 @@ def _load_cli_config() -> CliConfig:
         ),
         matching=CliMatchingConfig(
             combination_member_af_threshold=float(matching['combination_member_af_threshold']),
+        ),
+        similarity=CliSimilarityConfig(
+            high=int(similarity['high']),
+            moderate=int(similarity['moderate']),
         ),
         af_bins=_bins(payload['af_bins']),
         af_bins_fasta=_bins(payload['af_bins_fasta']),

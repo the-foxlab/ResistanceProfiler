@@ -700,9 +700,9 @@ def classify_similarity(observed_aa: str, rule_aa: str) -> str:
         # Non-standard tokens (e.g. 'fsX', '*') are not in the matrix
         logger.debug('BLOSUM62 matrix does not contain %s/%s — defaulting to low', observed_aa, rule_aa)
         return 'low'
-    if score >= 1:
+    if score >= CLI_CONFIG.similarity.high:
         return 'high'
-    if score >= 0:
+    if score >= CLI_CONFIG.similarity.moderate:
         return 'moderate'
     return 'low'
 

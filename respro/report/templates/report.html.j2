@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{{ context.title }}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ context.favicon }}"/>
   <style>
     {{ css }}
   </style>
@@ -113,8 +114,8 @@
                     <span class="db-hit-freq-info">
                       <img class="db-hit-info-icon" src="{{ context.database_hits.info_icon }}" alt="info" width="13" height="13">
                       <div class="db-hit-info-panel">
-                        <p><strong>Single rules</strong> — allele frequency bin derived from the matched variant: high (&ge;75&nbsp;%), intermediate (25–75&nbsp;%), low (1–25&nbsp;%).</p>
-                        <p><strong>Combinatorial rules</strong> — always classified as <em>high</em>, because all member mutations must individually exceed 75&nbsp;% allele frequency for the rule to fire.</p>
+                        <p><strong>Single rules</strong> — allele frequency bin derived from the matched variant: high (&ge;{{ context.thresholds.af_high_pct }}&nbsp;%), intermediate ({{ context.thresholds.af_intermediate_pct }}–{{ context.thresholds.af_high_pct }}&nbsp;%), low ({{ context.thresholds.af_low_min_pct }}–{{ context.thresholds.af_intermediate_pct }}&nbsp;%).</p>
+                        <p><strong>Combinatorial rules</strong> — always classified as <em>high</em>, because all member mutations must individually exceed {{ context.thresholds.combination_member_af_pct }}&nbsp;% allele frequency for the rule to fire.</p>
                       </div>
                     </span>
                   </th>
@@ -252,9 +253,9 @@
                       <img class="db-hit-info-icon" src="{{ context.similarity_entries.info_icon }}" alt="info" width="13" height="13">
                       <div class="db-hit-info-panel">
                         <p>How biochemically similar the observed amino acid change is to the known resistance mutation at the same position, scored by BLOSUM62.</p>
-                        <p><strong>High</strong> &mdash; BLOSUM62 &ge; 1 (biochemically similar substitution).</p>
-                        <p><strong>Moderate</strong> &mdash; BLOSUM62 = 0 (neutral substitution).</p>
-                        <p><strong>Low</strong> &mdash; BLOSUM62 &lt; 0 (dissimilar substitution).</p>
+                        <p><strong>High</strong> &mdash; BLOSUM62 &ge; {{ context.thresholds.similarity_high }} (biochemically similar substitution).</p>
+                        <p><strong>Moderate</strong> &mdash; {{ context.thresholds.similarity_moderate }} &le; BLOSUM62 &lt; {{ context.thresholds.similarity_high }} (neutral substitution).</p>
+                        <p><strong>Low</strong> &mdash; BLOSUM62 &lt; {{ context.thresholds.similarity_moderate }} (dissimilar substitution).</p>
                         <p>Indels at indel-rule positions are always scored as <em>moderate</em>.</p>
                       </div>
                     </span>
@@ -276,7 +277,7 @@
                     <span class="db-hit-freq-info">
                       <img class="db-hit-info-icon" src="{{ context.similarity_entries.info_icon }}" alt="info" width="13" height="13">
                       <div class="db-hit-info-panel">
-                        <p>Allele frequency bin of the observed variant: high (&ge;75&nbsp;%), intermediate (25&ndash;75&nbsp;%), low (1&ndash;25&nbsp;%).</p>
+                        <p>Allele frequency bin of the observed variant: high (&ge;{{ context.thresholds.af_high_pct }}&nbsp;%), intermediate ({{ context.thresholds.af_intermediate_pct }}&ndash;{{ context.thresholds.af_high_pct }}&nbsp;%), low ({{ context.thresholds.af_low_min_pct }}&ndash;{{ context.thresholds.af_intermediate_pct }}&nbsp;%).</p>
                       </div>
                     </span>
                   </th>

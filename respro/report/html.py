@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 from jinja2 import BaseLoader, Environment
 
+from respro.config.cli_settings import CLI_CONFIG
 from respro.core.annotation import classify_similarity
 from respro.db.models import (
     FeatureRecord,
@@ -140,6 +141,7 @@ def build_report_context(
 
     return {
         'title': f'Report: {title_source} resistance profile',
+        'favicon': _load_svg_data_url('favicon.svg'),
         'header': {
             'title': f'Report: {title_source} resistance profile',
             'badge_label': 'Database hits found' if has_database_hit else 'No database hits found',
@@ -156,6 +158,14 @@ def build_report_context(
             'Sequence Feature Information',
             'Drug Information',
         ],
+        'thresholds': {
+            'similarity_high': CLI_CONFIG.similarity.high,
+            'similarity_moderate': CLI_CONFIG.similarity.moderate,
+            'af_high_pct': int(CLI_CONFIG.af_bins.high[0] * 100),
+            'af_intermediate_pct': int(CLI_CONFIG.af_bins.intermediate[0] * 100),
+            'af_low_min_pct': int(CLI_CONFIG.af_bins.low[0] * 100),
+            'combination_member_af_pct': int(CLI_CONFIG.matching.combination_member_af_threshold * 100),
+        },
         'database_hits': database_hits,
         'similarity_entries': similarity_entries,
         'all_mutations': {
