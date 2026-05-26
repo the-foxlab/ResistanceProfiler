@@ -148,7 +148,8 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   });
 
-  const mutationTable = document.querySelector('.mutation-table');
+  const mutationTab = document.getElementById('tab-all-mutations');
+  const mutationTable = mutationTab && mutationTab.querySelector('.mutation-table');
   if (!mutationTable) {
     return;
   }
@@ -156,10 +157,10 @@ document.addEventListener('DOMContentLoaded', function () {
   const mutationTbody = mutationTable.querySelector('tbody');
   const mutationSortButton = mutationTable.querySelector('.mutation-sort-button');
   const mutationSearchInput = document.getElementById('mutation-search-input');
-  const mutationToolbar = document.querySelector('.mutation-toolbar');
-  const mutationFilterMenus = Array.from(document.querySelectorAll('.mutation-filter-menu'));
-  const mutationResetButton = document.querySelector('.mutation-reset-button');
-  const mutationDownloadButton = document.querySelector('.mutation-download-button');
+  const mutationToolbar = mutationTab.querySelector('.mutation-toolbar');
+  const mutationFilterMenus = Array.from(mutationTab.querySelectorAll('.mutation-filter-menu'));
+  const mutationResetButton = mutationTab.querySelector('.mutation-reset-button');
+  const mutationDownloadButton = mutationTab.querySelector('.mutation-download-button');
 
   if (mutationTbody) {
     mutationTbody.querySelectorAll('.mutation-row--expandable').forEach(function (row) {
@@ -244,6 +245,22 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         optionsContainer.textContent = '';
+
+        if (values.length > 0) {
+          const toggleAll = document.createElement('button');
+          toggleAll.type = 'button';
+          toggleAll.className = 'mutation-filter-toggle-all';
+          toggleAll.textContent = 'Uncheck all';
+          toggleAll.addEventListener('click', function () {
+            const checkboxes = Array.from(optionsContainer.querySelectorAll('.mutation-filter-option'));
+            const allChecked = checkboxes.every(function (cb) { return cb.checked; });
+            checkboxes.forEach(function (cb) { cb.checked = !allChecked; });
+            toggleAll.textContent = allChecked ? 'Check all' : 'Uncheck all';
+            applyMutationFilter();
+          });
+          optionsContainer.appendChild(toggleAll);
+        }
+
         values.forEach(function (value) {
           const label = document.createElement('label');
           const input = document.createElement('input');
@@ -252,6 +269,12 @@ document.addEventListener('DOMContentLoaded', function () {
           input.value = value;
           input.checked = true;
           input.dataset.field = config.field;
+          input.addEventListener('change', function () {
+            const checkboxes = Array.from(optionsContainer.querySelectorAll('.mutation-filter-option'));
+            const allChecked = checkboxes.every(function (cb) { return cb.checked; });
+            const toggleBtn = optionsContainer.querySelector('.mutation-filter-toggle-all');
+            if (toggleBtn) { toggleBtn.textContent = allChecked ? 'Uncheck all' : 'Check all'; }
+          });
 
           label.appendChild(input);
           label.appendChild(document.createTextNode(value));
@@ -418,6 +441,9 @@ document.addEventListener('DOMContentLoaded', function () {
         document.querySelectorAll('.mutation-filter-option').forEach(function (field) {
           field.checked = true;
         });
+        mutationTab.querySelectorAll('.mutation-filter-toggle-all').forEach(function (btn) {
+          btn.textContent = 'Uncheck all';
+        });
         applyMutationFilter();
       });
     }
@@ -426,7 +452,12 @@ document.addEventListener('DOMContentLoaded', function () {
       mutationDownloadButton.addEventListener('click', function () {
         closeAllMutationFilterMenus();
 
-        const headers = ['Feature', 'Nt change', 'AA change', 'Consequence', 'Allele freq', 'In database'];
+        const hasDbCol = !!mutationTab.querySelector('thead th:last-child') &&
+          mutationTab.querySelector('thead th:last-child').textContent.trim() === 'In database';
+        const headers = ['Feature', 'Nt change', 'AA change', 'Consequence', 'Variant frequency'];
+        if (hasDbCol) {
+          headers.push('In database');
+        }
         const lines = [headers.join('\t')];
 
         collectMutationRowPairs().forEach(function (pair) {
@@ -440,19 +471,21 @@ document.addEventListener('DOMContentLoaded', function () {
           const aaChange = (row.children[2]?.textContent || '').trim();
           const consequence = (row.children[3]?.textContent || '').trim();
           const alleleFreq = (row.children[4]?.textContent || '').trim();
-          const inDatabase = ((row.getAttribute('data-database-values') || 'None')
-            .split('|')
-            .map(function (value) {
-              return value.trim();
-            })
-            .filter(Boolean)
-            .join('; '));
 
-          const fields = [feature, ntChange, aaChange, consequence, alleleFreq, inDatabase]
-            .map(function (value) {
-              return value.replace(/\t/g, ' ').replace(/\n/g, ' ');
-            });
-          lines.push(fields.join('\t'));
+          const fields = [feature, ntChange, aaChange, consequence, alleleFreq];
+          if (hasDbCol) {
+            const inDatabase = ((row.getAttribute('data-database-values') || 'None')
+              .split('|')
+              .map(function (value) {
+                return value.trim();
+              })
+              .filter(Boolean)
+              .join('; '));
+            fields.push(inDatabase);
+          }
+          lines.push(fields.map(function (value) {
+            return value.replace(/\t/g, ' ').replace(/\n/g, ' ');
+          }).join('\t'));
         });
 
         const blob = new Blob([`${lines.join('\n')}\n`], { type: 'text/tab-separated-values;charset=utf-8' });
@@ -468,5 +501,337 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     applyMutationFilter();
+  }
+
+  // ── Database Hits table: search, filter, download ───────────────────────
+  const dbHitTable = document.querySelector('.db-hit-table');
+  if (dbHitTable) {
+    const dbHitTbody = dbHitTable.querySelector('tbody');
+    const dbHitSearchInput = document.getElementById('db-hit-search-input');
+    const dbHitToolbar = dbHitSearchInput && dbHitSearchInput.closest('[role="region"]');
+    const dbHitFilterMenus = Array.from(document.querySelectorAll('.mutation-filter-menu[data-filter-group^="db-hit-"]'));
+    const dbHitResetButton = document.querySelector('.db-hit-reset-button');
+    const dbHitDownloadButton = document.querySelector('.db-hit-download-button');
+
+    const collectDbHitRows = function () {
+      return Array.from(dbHitTbody.querySelectorAll('.db-hit-row'));
+    };
+
+    const dbHitFieldConfigs = [
+      { field: 'db-hit-drug-class', attr: 'data-drug-class-value' },
+      { field: 'db-hit-drug', attr: 'data-drug-value' },
+      { field: 'db-hit-freq', attr: 'data-freq-value' },
+    ];
+
+    // Build or rebuild the options for one filter from a set of raw values.
+    // checkedValues: Set of values to keep checked; null means check all.
+    const buildDbHitOptions = function (config, rawValues, checkedValues) {
+      const menu = document.querySelector(
+        `.mutation-filter-menu[data-filter-group="${config.field}"]`,
+      );
+      const optionsContainer = menu && menu.querySelector('.mutation-filter-options');
+      if (!optionsContainer) { return; }
+
+      const values = Array.from(new Set(rawValues.filter(Boolean)))
+        .sort(function (a, b) { return a.localeCompare(b); });
+
+      optionsContainer.textContent = '';
+
+      if (values.length > 0) {
+        const toggleAll = document.createElement('button');
+        toggleAll.type = 'button';
+        toggleAll.className = 'mutation-filter-toggle-all';
+        toggleAll.textContent = 'Uncheck all';
+        toggleAll.addEventListener('click', function () {
+          const checkboxes = Array.from(optionsContainer.querySelectorAll('.mutation-filter-option:not([disabled])'));
+          const allChecked = checkboxes.every(function (cb) { return cb.checked; });
+          checkboxes.forEach(function (cb) { cb.checked = !allChecked; });
+          toggleAll.textContent = allChecked ? 'Check all' : 'Uncheck all';
+          refreshDbHitCascade(config.field);
+        });
+        optionsContainer.appendChild(toggleAll);
+      }
+
+      values.forEach(function (value) {
+        const label = document.createElement('label');
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.className = 'mutation-filter-option';
+        input.value = value;
+        input.checked = checkedValues === null || checkedValues.has(value);
+        input.dataset.field = config.field;
+        input.addEventListener('change', function () {
+          const checkboxes = Array.from(optionsContainer.querySelectorAll('.mutation-filter-option:not([disabled])'));
+          const allChecked = checkboxes.every(function (cb) { return cb.checked; });
+          const toggleBtn = optionsContainer.querySelector('.mutation-filter-toggle-all');
+          if (toggleBtn) { toggleBtn.textContent = allChecked ? 'Uncheck all' : 'Check all'; }
+          refreshDbHitCascade(config.field);
+        });
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(value));
+        optionsContainer.appendChild(label);
+      });
+
+      if (values.length === 0) {
+        const empty = document.createElement('span');
+        empty.className = 'mutation-filter-empty';
+        empty.textContent = 'No values';
+        optionsContainer.appendChild(empty);
+      }
+    };
+
+    // Build all filter menus from the full row set (initial state, all checked).
+    const buildDbHitFilterMenus = function () {
+      dbHitFieldConfigs.forEach(function (config) {
+        const rawValues = collectDbHitRows().map(function (row) {
+          return (row.getAttribute(config.attr) || '').trim();
+        });
+        buildDbHitOptions(config, rawValues, null);
+      });
+    };
+
+    // When one filter changes, update the available options in all OTHER filters
+    // in place — without rebuilding menus from scratch. Options that are no longer
+    // reachable given the other active filters are disabled+unchecked (greyed out);
+    // options that become reachable again are re-enabled and auto-checked.
+    //
+    // Critically, candidate rows for filter X are determined by applying every
+    // OTHER field's selections — never filter X's own restriction — so options in
+    // X can always come back when the user relaxes another filter.
+    const refreshDbHitCascade = function (changedField) {
+      // Snapshot checked+enabled selections for all fields before touching the DOM.
+      const selections = {};
+      dbHitFieldConfigs.forEach(function (config) {
+        selections[config.field] = new Set(
+          Array.from(
+            document.querySelectorAll(
+              `.mutation-filter-menu[data-filter-group="${config.field}"] .mutation-filter-option:checked:not([disabled])`,
+            ),
+          ).map(function (cb) { return cb.value; }),
+        );
+      });
+
+      // Enable/disable options in each OTHER filter.
+      dbHitFieldConfigs.forEach(function (config) {
+        if (config.field === changedField) { return; }
+        const menu = document.querySelector(
+          `.mutation-filter-menu[data-filter-group="${config.field}"]`,
+        );
+        const optionsContainer = menu && menu.querySelector('.mutation-filter-options');
+        if (!optionsContainer) { return; }
+
+        // Candidate rows: rows that pass all fields except this one.
+        const candidateRows = collectDbHitRows().filter(function (row) {
+          return dbHitFieldConfigs.every(function (c) {
+            if (c.field === config.field) { return true; }
+            const sel = selections[c.field];
+            if (!sel || sel.size === 0) { return true; }
+            return sel.has((row.getAttribute(c.attr) || '').trim());
+          });
+        });
+
+        const available = new Set(
+          candidateRows
+            .map(function (row) { return (row.getAttribute(config.attr) || '').trim(); })
+            .filter(Boolean),
+        );
+
+        Array.from(optionsContainer.querySelectorAll('label')).forEach(function (label) {
+          const input = label.querySelector('.mutation-filter-option');
+          if (!input) { return; }
+          const reachable = available.has(input.value);
+          if (reachable && input.disabled) {
+            input.disabled = false;
+            input.checked = true;
+            label.classList.remove('mutation-filter-option-disabled');
+          } else if (!reachable && !input.disabled) {
+            input.disabled = true;
+            input.checked = false;
+            label.classList.add('mutation-filter-option-disabled');
+          }
+        });
+
+        const enabledBoxes = Array.from(optionsContainer.querySelectorAll('.mutation-filter-option:not([disabled])'));
+        const allChecked = enabledBoxes.length > 0 && enabledBoxes.every(function (cb) { return cb.checked; });
+        const toggleBtn = optionsContainer.querySelector('.mutation-filter-toggle-all');
+        if (toggleBtn) { toggleBtn.textContent = allChecked ? 'Uncheck all' : 'Check all'; }
+      });
+
+      applyDbHitFilter();
+    };
+
+    buildDbHitFilterMenus();
+
+    // Toggle comment expansion row when clicking an expandable db-hit row.
+    dbHitTbody.querySelectorAll('.db-hit-row--expandable').forEach(function (row) {
+      const toggleComment = function (event) {
+        if (event && event.target && event.target.closest('a, button')) { return; }
+        const rowId = row.getAttribute('data-comment-row');
+        if (!rowId) { return; }
+        const commentRow = document.getElementById(rowId);
+        if (!commentRow) { return; }
+        const isOpen = !commentRow.hidden;
+        commentRow.hidden = isOpen;
+        row.setAttribute('aria-expanded', String(!isOpen));
+      };
+      row.addEventListener('click', toggleComment);
+      row.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter' && event.key !== ' ') { return; }
+        event.preventDefault();
+        toggleComment(event);
+      });
+    });
+
+    const closeAllDbHitFilterMenus = function (exceptMenu) {
+      dbHitFilterMenus.forEach(function (menu) {
+        if (!exceptMenu || menu !== exceptMenu) {
+          menu.open = false;
+        }
+      });
+    };
+
+    dbHitFilterMenus.forEach(function (menu) {
+      const summary = menu.querySelector('summary');
+      if (!summary) { return; }
+      summary.addEventListener('click', function (event) {
+        event.preventDefault();
+        const willOpen = !menu.open;
+        closeAllDbHitFilterMenus(menu);
+        menu.open = willOpen;
+      });
+    });
+
+    document.addEventListener('click', function (event) {
+      if (!dbHitToolbar || dbHitToolbar.contains(event.target)) { return; }
+      closeAllDbHitFilterMenus();
+    });
+
+    if (dbHitToolbar) {
+      dbHitToolbar.addEventListener('click', function (event) {
+        if (!event.target.closest('.mutation-filter-menu')) {
+          closeAllDbHitFilterMenus();
+        }
+      });
+    }
+
+    const applyDbHitFilter = function () {
+      const query = (dbHitSearchInput ? dbHitSearchInput.value : '').trim().toLowerCase();
+
+      const selectedDrugClasses = Array.from(
+        document.querySelectorAll('.mutation-filter-menu[data-filter-group="db-hit-drug-class"] .mutation-filter-option:checked:not([disabled])'),
+      ).map(function (input) { return input.value; });
+
+      const selectedDrugs = Array.from(
+        document.querySelectorAll('.mutation-filter-menu[data-filter-group="db-hit-drug"] .mutation-filter-option:checked:not([disabled])'),
+      ).map(function (input) { return input.value; });
+
+      const selectedFreqs = Array.from(
+        document.querySelectorAll('.mutation-filter-menu[data-filter-group="db-hit-freq"] .mutation-filter-option:checked:not([disabled])'),
+      ).map(function (input) { return input.value; });
+
+      collectDbHitRows().forEach(function (row) {
+        const searchText = (row.textContent || '').toLowerCase();
+        const drugClass = (row.getAttribute('data-drug-class-value') || '').trim();
+        const drug = (row.getAttribute('data-drug-value') || '').trim();
+        const freq = (row.getAttribute('data-freq-value') || '').trim();
+
+        const queryMatch = query.length === 0 || searchText.includes(query);
+        const drugClassMatch = selectedDrugClasses.length === 0 || selectedDrugClasses.includes(drugClass);
+        const drugMatch = selectedDrugs.length === 0 || selectedDrugs.includes(drug);
+        const freqMatch = selectedFreqs.length === 0 || selectedFreqs.includes(freq);
+
+        row.hidden = !(queryMatch && drugClassMatch && drugMatch && freqMatch);
+        // Collapse the comment row when the parent is filtered out.
+        if (row.hidden) {
+          const commentRowId = row.getAttribute('data-comment-row');
+          if (commentRowId) {
+            const commentRow = document.getElementById(commentRowId);
+            if (commentRow) {
+              commentRow.hidden = true;
+              row.setAttribute('aria-expanded', 'false');
+            }
+          }
+        }
+      });
+    };
+
+    applyDbHitFilter();
+
+    if (dbHitSearchInput) {
+      dbHitSearchInput.addEventListener('input', function () {
+        closeAllDbHitFilterMenus();
+        applyDbHitFilter();
+      });
+    }
+
+    if (dbHitResetButton) {
+      dbHitResetButton.addEventListener('click', function () {
+        closeAllDbHitFilterMenus();
+        if (dbHitSearchInput) { dbHitSearchInput.value = ''; }
+        buildDbHitFilterMenus();
+        applyDbHitFilter();
+      });
+    }
+
+    if (dbHitDownloadButton) {
+      dbHitDownloadButton.addEventListener('click', function () {
+        closeAllDbHitFilterMenus();
+
+        const hasPubs = dbHitTable.querySelector('thead th:last-child') &&
+          (dbHitTable.querySelector('thead th:last-child').textContent || '').trim() === 'References';
+        const hasDrugClass = !!dbHitTable.querySelector('thead th.db-hit-drug-class-th');
+
+        const headers = [];
+        if (hasDrugClass) { headers.push('Drug class'); }
+        headers.push('Drug', 'Mutations', 'Drug sensitivity data', 'Frequency classification', 'Source');
+        if (hasPubs) { headers.push('References'); }
+        const lines = [headers.join('\t')];
+
+        collectDbHitRows().forEach(function (row) {
+          if (row.hidden) { return; }
+
+          const drugClassCell = hasDrugClass ? row.querySelector('.db-hit-drug-class-cell') : null;
+          const drugClass = drugClassCell ? drugClassCell.textContent.trim() : '';
+          const drugCell = row.querySelector('.db-hit-drug-cell');
+          const drug = drugCell ? drugCell.textContent.trim() : '';
+
+          const mutGroups = Array.from(row.querySelectorAll('.db-hit-mut-group')).map(function (g) {
+            return g.textContent.replace(/\s+/g, ' ').trim();
+          }).join('; ');
+
+          const metrics = Array.from(row.querySelectorAll('.db-hit-metric')).map(function (m) {
+            return m.textContent.replace(/\s+/g, ' ').trim();
+          }).join('; ');
+
+          const freq = (row.getAttribute('data-freq-value') || '').trim();
+
+          const sourceCell = row.querySelector('.db-hit-source-cell');
+          const source = sourceCell ? sourceCell.textContent.trim() : '';
+
+          const fields = [];
+          if (hasDrugClass) { fields.push(drugClass); }
+          fields.push(drug, mutGroups, metrics, freq, source);
+
+          if (hasPubs) {
+            const pubUrls = (row.getAttribute('data-pub-urls') || '').trim();
+            fields.push(pubUrls);
+          }
+
+          lines.push(fields.map(function (v) {
+            return v.replace(/\t/g, ' ').replace(/\n/g, ' ');
+          }).join('\t'));
+        });
+
+        const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/tab-separated-values;charset=utf-8' });
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = 'database_hits.tsv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(blobUrl);
+      });
+    }
   }
 });

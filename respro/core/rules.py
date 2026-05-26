@@ -534,6 +534,7 @@ def _rule_from_row(row: sqlite3.Row) -> ResistanceRule:
         clinical_phenotype=row['clinical_phenotype'] or '',
         ic50=row['ic50'] or '',
         fold_ic50=row['fold_ic50'] or '',
+        score=row['score'] or '',
         source=row['source'] or '',
         comment=row['comment'] or '',
         pubchem_url=row['pubchem_url'] or '',

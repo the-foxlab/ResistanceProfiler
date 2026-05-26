@@ -11,6 +11,7 @@ import re
 from Bio.Align.substitution_matrices import load as _load_matrix
 from Bio.Seq import Seq
 
+from respro.config.cli_settings import CLI_CONFIG
 from respro.db.models import AnnotatedVariant, FeatureRecord, VariantCall
 
 logger = logging.getLogger(__name__)
@@ -721,11 +722,7 @@ def assign_af_bins(
     :return: the same annotations list with af_bin populated
     """
     if bins is None:
-        bins = {
-            'high': (0.75, 1.0),
-            'intermediate': (0.25, 0.7499),
-            'low': (0.01, 0.2499),
-        }
+        bins = CLI_CONFIG.af_bins.as_dict()
 
     # Sort bins by lower bound descending so higher bins are checked first
     sorted_bins = sorted(bins.items(), key=lambda x: -x[1][0])

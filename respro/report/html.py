@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
+import re
 import sqlite3
+import statistics
 from collections import Counter
 from pathlib import Path
 from urllib.parse import quote
 
 from jinja2 import BaseLoader, Environment
 
-from respro.db.models import FeatureRecord, ProfilingResult, ResistanceRule
+from respro.db.models import (
+    FeatureRecord,
+    ProfilingResult,
+    Publication,
+    ResistanceRule,
+)
 from respro.report.alignment_visualization import (
     FeatureAlignment,
     build_alignment_html,
@@ -98,6 +106,9 @@ def build_report_context(
         )
 
     all_mutations_rows = _build_all_mutations_rows(result, feature_alignments, display_names)
+    metric_thresholds = _load_numeric_metric_thresholds(project_conn)
+    drug_class_map = _load_drug_class_map(project_conn)
+    database_hits = _build_database_hits_rows(result, display_names, metric_thresholds, drug_class_map)
 
     db_drug_cards = _load_drug_cards(project_conn, detected_drug_names)
     db_drug_cards_by_name = {
@@ -135,10 +146,12 @@ def build_report_context(
             'meta_primary': ' · '.join([part for part in primary_parts if part]),
             'meta_secondary': ' · '.join([part for part in secondary_parts if part]),
         },
-        'tabs': ['Summary', 'Database hits', 'All Mutations', 'Sequence Feature Information', 'Drug Information'],
+        'tabs': ['Summary', 'Database Hits', 'All Mutations', 'Sequence Feature Information', 'Drug Information'],
+        'database_hits': database_hits,
         'all_mutations': {
             'rows': all_mutations_rows,
             'count': len(all_mutations_rows),
+            'has_database_hits': any(r['is_database_hit'] for r in all_mutations_rows),
             'search_icon': _load_svg_data_url('search.svg'),
             'reset_icon': _load_svg_data_url('reset_filter.svg'),
         },
@@ -291,6 +304,311 @@ def _build_all_mutations_rows(
             'has_alignment': alignment_html is not None,
         })
     return rows
+
+
+# Matches an optional qualifier (>, <, ≥, ≤, ~) followed by a leading number.
+_RE_LEADING_NUM = re.compile(r'^[><=~≥≤≈\s]*(\d+(?:\.\d+)?)')
+
+
+def _parse_numeric_value(value_str: str) -> float | None:
+    """Extract a leading float from a potentially qualified metric string (e.g. '>0.5 µM' → 0.5)."""
+    m = _RE_LEADING_NUM.match(value_str.strip())
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def _assign_numeric_tier(value: float, mean: float, std: float) -> str:
+    """
+    Map a numeric metric value to a severity tier CSS class using mean ± std thresholds.
+
+    :param value: parsed float value
+    :param mean: mean of all values for this field in the database
+    :param std: standard deviation of all values for this field
+    :return: CSS class string
+    """
+    if value <= mean:
+        return 'metric--tier1'
+    if value <= mean + std:
+        return 'metric--tier2'
+    if value <= mean + 2 * std:
+        return 'metric--tier3'
+    return 'metric--tier4'
+
+
+def _load_numeric_metric_thresholds(
+    project_conn: sqlite3.Connection | None,
+) -> dict[str, tuple[float, float] | None]:
+    """
+    Compute mean and standard deviation for each numeric metric field across all database rules.
+
+    Queries both single rules and formula rules to capture the full population.
+    Returns None for a field when fewer than two parseable values are available.
+
+    :param project_conn: open project DB connection
+    :return: dict mapping 'ic50', 'fold_ic50', 'score' to (mean, std) or None
+    """
+    if project_conn is None:
+        return {}
+    try:
+        rows = project_conn.execute(
+            'SELECT ic50, fold_ic50, score FROM resistance_rule '
+            'UNION ALL '
+            'SELECT ic50, fold_ic50, score FROM resistance_formula_rule'
+        ).fetchall()
+    except sqlite3.Error as exc:
+        logger.debug('Failed to load numeric metric stats from DB: %s', exc)
+        return {}
+
+    buckets: dict[str, list[float]] = {'ic50': [], 'fold_ic50': [], 'score': []}
+    for row in rows:
+        for field in ('ic50', 'fold_ic50', 'score'):
+            raw = row[field] if isinstance(row, dict) else row[field]
+            parsed = _parse_numeric_value(raw or '')
+            if parsed is not None:
+                buckets[field].append(parsed)
+
+    result: dict[str, tuple[float, float] | None] = {}
+    for field, values in buckets.items():
+        if len(values) < 2:
+            result[field] = None
+        else:
+            mean = statistics.mean(values)
+            std = statistics.stdev(values)
+            result[field] = (mean, std) if std > 0 else None
+    return result
+
+
+def _load_drug_class_map(
+    project_conn: sqlite3.Connection | None,
+) -> dict[str, str]:
+    """
+    Build a lowercase-drug-name → class-name map from the drug_groups algorithm config.
+
+    :param project_conn: open project DB connection
+    :return: dict mapping normalized drug name to drug class/group name; empty if not configured
+    """
+    if project_conn is None:
+        return {}
+    try:
+        row = project_conn.execute(
+            "SELECT config_json FROM interpretation_algorithm "
+            "WHERE algorithm_name = 'drug_groups' LIMIT 1"
+        ).fetchone()
+    except sqlite3.Error as exc:
+        logger.debug('Failed to load drug_groups algorithm from DB: %s', exc)
+        return {}
+    if row is None:
+        return {}
+    config = json.loads(row['config_json'])
+    drug_map: dict[str, str] = {}
+    for group_name, members in config.get('groups', {}).items():
+        for drug in members:
+            drug_map[drug.strip().lower()] = group_name
+    return drug_map
+
+
+def _build_database_hits_rows(
+    result: ProfilingResult,
+    display_names: dict[str, str] | None = None,
+    metric_thresholds: dict[str, tuple[float, float] | None] | None = None,
+    drug_class_map: dict[str, str] | None = None,
+) -> dict:
+    """
+    Build one row per database hit for the Database Hits table.
+
+    Single rules and formula rules each produce one row. Formula-rule frequency is
+    always 'high' since they only fire when allele_freq > 0.75 for every member.
+    Publications are deduplicated globally and referenced by citation number.
+
+    :param result: profiling result
+    :param display_names: optional feature display-name overrides
+    :param metric_thresholds: optional mean/std per numeric field for tier-badge coloring
+    :param drug_class_map: optional mapping of normalized drug name to drug class/group name
+    :return: dict with 'rows', 'count', 'has_publications', 'has_drug_class', and 'bibliography'
+    """
+    rows: list[dict] = []
+    for ann in result.cds_annotations:
+        for rule in ann.non_formula_component_rule_matches:
+            feature = (display_names or {}).get(ann.feature_name, ann.feature_name)
+            aa_change = (
+                f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+                if ann.ref_aa and ann.alt_aa
+                else ann.feature_name
+            )
+            rows.append({
+                'drug': rule.drug_name,
+                'drug_class': (drug_class_map or {}).get(rule.drug_name.strip().lower(), ''),
+                'mutation_groups': [{'feature': feature, 'muts': [aa_change]}],
+                'metrics': _build_rule_metrics(
+                    rule.phenotype, rule.clinical_phenotype,
+                    rule.ic50, rule.fold_ic50, rule.score,
+                    thresholds=metric_thresholds,
+                ),
+                'af_bin': ann.af_bin,
+                'source': rule.source,
+                'comment': rule.comment,
+                '_raw_pubs': list(rule.publications),
+            })
+
+    for formula_hit in result.formula_hits:
+        rs = formula_hit.rule_set
+        feature_to_muts: dict[str, list[str]] = {}
+        for ann in formula_hit.matched_variants:
+            feature = (display_names or {}).get(ann.feature_name, ann.feature_name)
+            aa_change = (
+                f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+                if ann.ref_aa and ann.alt_aa
+                else ann.feature_name
+            )
+            feature_to_muts.setdefault(feature, []).append(aa_change)
+        mutation_groups = [{'feature': f, 'muts': muts} for f, muts in feature_to_muts.items()]
+        rows.append({
+            'drug': rs.drug_name,
+            'drug_class': (drug_class_map or {}).get(rs.drug_name.strip().lower(), ''),
+            'mutation_groups': mutation_groups,
+            'metrics': _build_rule_metrics(
+                rs.phenotype, rs.clinical_phenotype,
+                rs.ic50, rs.fold_ic50, rs.score,
+                thresholds=metric_thresholds,
+            ),
+            'af_bin': 'high',  # formula rules only fire at allele_freq > 0.75
+            'source': rs.source,
+            'comment': rs.comment,
+            '_raw_pubs': list(rs.publications),
+        })
+
+    rows.sort(key=lambda r: (
+        r['drug'].lower(),
+        [(g['feature'], g['muts']) for g in r['mutation_groups']],
+    ))
+
+    bibliography, pub_to_num = _build_bibliography(rows)
+    for row in rows:
+        citations: list[dict] = []
+        seen_nums: set[int] = set()
+        for pub in row.pop('_raw_pubs'):
+            num = pub_to_num.get(_publication_key(pub))
+            if num is None or num in seen_nums:
+                continue
+            seen_nums.add(num)
+            url = ''
+            if pub.doi:
+                url = f'https://doi.org/{pub.doi}'
+            elif pub.pubmed_id:
+                url = f'https://pubmed.ncbi.nlm.nih.gov/{pub.pubmed_id}/'
+            citations.append({'num': num, 'url': url})
+        row['pub_citations'] = citations
+
+    has_publications = any(row['pub_citations'] for row in rows)
+    has_comments = any(row.get('comment') for row in rows)
+    return {
+        'rows': rows,
+        'count': len(rows),
+        'has_publications': has_publications,
+        'has_drug_class': bool(drug_class_map),
+        'has_comments': has_comments,
+        'bibliography': bibliography,
+        'info_icon': _load_svg_data_url('info.svg'),
+        'search_icon': _load_svg_data_url('search.svg'),
+        'reset_icon': _load_svg_data_url('reset_filter.svg'),
+    }
+
+
+def _build_bibliography(
+    rows: list[dict],
+) -> tuple[list[dict], dict[tuple, int]]:
+    """
+    Collect unique publications across all rows and assign sequential citation numbers.
+
+    :param rows: row dicts containing '_raw_pubs' lists (not yet popped)
+    :return: (ordered bibliography list, mapping of publication key → citation number)
+    """
+    seen: dict[tuple, int] = {}
+    ordered: list[dict] = []
+    num = 1
+    for row in rows:
+        for pub in row.get('_raw_pubs', []):
+            key = _publication_key(pub)
+            if key not in seen:
+                seen[key] = num
+                url = ''
+                if pub.doi:
+                    url = f'https://doi.org/{pub.doi}'
+                elif pub.pubmed_id:
+                    url = f'https://pubmed.ncbi.nlm.nih.gov/{pub.pubmed_id}/'
+                ordered.append({
+                    'num': num,
+                    'url': url,
+                    'label': pub.title or pub.doi or pub.pubmed_id or pub.raw_input,
+                    'has_url': bool(url),
+                })
+                num += 1
+    return ordered, seen
+
+
+def _publication_key(pub: Publication) -> tuple:
+    """Return a stable deduplication key for a publication."""
+    pub_id = int(getattr(pub, 'id', 0) or 0)
+    if pub_id > 0:
+        return ('id', str(pub_id), '', '', '')
+    doi = (pub.doi or '').strip().lower()
+    pubmed_id = (pub.pubmed_id or '').strip()
+    raw_input = (pub.raw_input or '').strip().lower()
+    title = (pub.title or '').strip().lower()
+    return ('meta', doi, pubmed_id, raw_input, title)
+
+
+_PHENOTYPE_BADGE_CLASS = {
+    'resistant': 'phenotype--resistant',
+    'intermediate': 'phenotype--intermediate',
+    'sensitive': 'phenotype--sensitive',
+    'contradictory': 'phenotype--contradictory',
+}
+
+
+def _build_rule_metrics(
+    phenotype: str,
+    clinical_phenotype: str,
+    ic50: str,
+    fold_ic50: str,
+    score: str,
+    thresholds: dict[str, tuple[float, float] | None] | None = None,
+) -> list[dict]:
+    """Build metric chips for non-empty, non-unknown resistance data fields."""
+    metrics: list[dict] = []
+    if phenotype and phenotype.lower() != 'unknown':
+        metrics.append({
+            'label': 'Phenotype',
+            'value': phenotype,
+            'badge_class': _PHENOTYPE_BADGE_CLASS.get(phenotype.lower(), ''),
+        })
+    if clinical_phenotype and clinical_phenotype.lower() != 'unknown':
+        metrics.append({
+            'label': 'Clinical phenotype',
+            'value': clinical_phenotype,
+            'badge_class': _PHENOTYPE_BADGE_CLASS.get(clinical_phenotype.lower(), ''),
+        })
+
+    def _numeric_badge_class(field: str, value_str: str) -> str:
+        if thresholds:
+            stats = thresholds.get(field)
+            if stats is not None:
+                parsed = _parse_numeric_value(value_str)
+                if parsed is not None:
+                    return _assign_numeric_tier(parsed, *stats)
+        return ''
+
+    if ic50:
+        metrics.append({'label': 'IC50', 'value': ic50, 'badge_class': _numeric_badge_class('ic50', ic50)})
+    if fold_ic50:
+        metrics.append({'label': 'Fold IC50', 'value': fold_ic50, 'badge_class': _numeric_badge_class('fold_ic50', fold_ic50)})
+    if score:
+        metrics.append({'label': 'Score', 'value': score, 'badge_class': _numeric_badge_class('score', score)})
+    return metrics
 
 
 def _build_feature_display_names(features: list[FeatureRecord] | None) -> dict[str, str]:

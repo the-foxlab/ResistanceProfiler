@@ -55,7 +55,154 @@
         <p>Summary content (placeholder)</p>
       </div>
       <div id="tab-database-hits" class="tab-content">
-        <p>Database hits content (placeholder)</p>
+        {% if context.database_hits.rows %}
+          <div class="mutation-toolbar" role="region" aria-label="Database hits filters">
+            <label class="mutation-search" for="db-hit-search-input">
+              <img src="{{ context.database_hits.search_icon }}" alt="" aria-hidden="true">
+              <input
+                id="db-hit-search-input"
+                class="mutation-search-input"
+                type="search"
+                placeholder="search hits"
+                aria-label="Search database hits"
+              >
+            </label>
+            {% if context.database_hits.has_drug_class %}
+            <details class="mutation-filter-menu" data-filter-group="db-hit-drug-class">
+              <summary>Class</summary>
+              <div class="mutation-filter-options" data-filter-options="db-hit-drug-class"></div>
+            </details>
+            {% endif %}
+            <details class="mutation-filter-menu" data-filter-group="db-hit-drug">
+              <summary>Drug</summary>
+              <div class="mutation-filter-options" data-filter-options="db-hit-drug"></div>
+            </details>
+            <details class="mutation-filter-menu" data-filter-group="db-hit-freq">
+              <summary>Frequency</summary>
+              <div class="mutation-filter-options" data-filter-options="db-hit-freq"></div>
+            </details>
+            <button type="button" class="mutation-reset-button db-hit-reset-button" aria-label="Reset database hit filters" title="Reset filters">
+              <img src="{{ context.database_hits.reset_icon }}" alt="" aria-hidden="true">
+            </button>
+            <button type="button" class="mutation-download-button db-hit-download-button" aria-label="Download database hits table" title="Download table">
+              Download Table
+            </button>
+          </div>
+          <div class="db-hit-table-wrapper">
+            <table class="db-hit-table">
+              <thead>
+                <tr>
+                  {% if context.database_hits.has_drug_class %}<th class="db-hit-drug-class-th">Drug class</th>{% endif %}
+                  <th>Drug</th>
+                  <th>Mutations</th>
+                  <th>
+                    Drug sensitivity data
+                    <span class="db-hit-freq-info">
+                      <img class="db-hit-info-icon" src="{{ context.database_hits.info_icon }}" alt="info" width="13" height="13">
+                      <div class="db-hit-info-panel">
+                        <p>Quantitative or categorical resistance data from the source database.</p>
+                        <p><strong>Phenotype / Clinical phenotype</strong> — qualitative classification (e.g. resistant, intermediate, sensitive).</p>
+                        <p><strong>IC50 / Fold IC50</strong> — inhibitory concentration or fold-change relative to wild type.</p>
+                        <p><strong>Score</strong> — database-specific numeric score (e.g. Stanford HIVDB genotypic resistance score).</p>
+                        <p>Badge colour reflects where the value falls relative to the distribution of all values for that field in the database (blue&nbsp;→ amber&nbsp;→ orange&nbsp;→ red = increasing severity).</p>
+                      </div>
+                    </span>
+                  </th>
+                  <th>
+                    Frequency classification
+                    <span class="db-hit-freq-info">
+                      <img class="db-hit-info-icon" src="{{ context.database_hits.info_icon }}" alt="info" width="13" height="13">
+                      <div class="db-hit-info-panel">
+                        <p><strong>Single rules</strong> — allele frequency bin derived from the matched variant: high (&ge;75&nbsp;%), intermediate (25–75&nbsp;%), low (1–25&nbsp;%).</p>
+                        <p><strong>Combinatorial rules</strong> — always classified as <em>high</em>, because all member mutations must individually exceed 75&nbsp;% allele frequency for the rule to fire.</p>
+                      </div>
+                    </span>
+                  </th>
+                  <th>Source</th>
+                  {% if context.database_hits.has_publications %}<th>References</th>{% endif %}
+                </tr>
+              </thead>
+              <tbody>
+                {% set col_count = 5 + (1 if context.database_hits.has_drug_class else 0) + (1 if context.database_hits.has_publications else 0) %}
+                {% for row in context.database_hits.rows %}
+                  <tr
+                    class="db-hit-row{% if row.comment %} db-hit-row--expandable{% endif %}"
+                    data-drug-class-value="{{ row.drug_class | e }}"
+                    data-drug-value="{{ row.drug | e }}"
+                    data-freq-value="{{ row.af_bin | e }}"
+                    data-pub-urls="{{ row.pub_citations | selectattr('url') | map(attribute='url') | join(' ') | e }}"
+                    {% if row.comment %}
+                      data-comment-row="db-hit-comment-{{ loop.index }}"
+                      aria-expanded="false"
+                      tabindex="0"
+                    {% endif %}
+                  >
+                    {% if context.database_hits.has_drug_class %}<td class="db-hit-drug-class-cell">{{ row.drug_class or '—' }}</td>{% endif %}
+                    <td class="db-hit-drug-cell">{{ row.drug }}</td>
+                    <td class="db-hit-muts-cell">
+                      {% for group in row.mutation_groups %}
+                        <div class="db-hit-mut-group">
+                          <span class="db-hit-mut-feature">{{ group.feature }}:</span>
+                          {{ group.muts | join(' + ') }}
+                        </div>
+                      {% endfor %}
+                    </td>
+                    <td>
+                      <div class="db-hit-cell-inner">
+                        {% for metric in row.metrics %}
+                          {% if metric.badge_class %}
+                            <span class="db-hit-metric db-hit-metric--badge {{ metric.badge_class }}">{{ metric.label }}: <strong>{{ metric.value }}</strong></span>
+                          {% else %}
+                            <span class="db-hit-metric">{{ metric.label }}: {{ metric.value }}</span>
+                          {% endif %}
+                        {% endfor %}
+                      </div>
+                    </td>
+                    <td>
+                      <span class="db-hit-af-chip db-hit-af--{{ row.af_bin }}">{{ row.af_bin }}</span>
+                    </td>
+                    <td class="db-hit-source-cell">{{ row.source or '—' }}</td>
+                    {% if context.database_hits.has_publications %}
+                      <td class="db-hit-pubs-cell">
+                        {% for cit in row.pub_citations %}
+                          {% if cit.url %}
+                            <a class="db-hit-pub-link" href="{{ cit.url }}" target="_blank" rel="noopener noreferrer">[{{ cit.num }}]</a>
+                          {% else %}
+                            <span class="db-hit-pub-link">[{{ cit.num }}]</span>
+                          {% endif %}
+                        {% endfor %}
+                      </td>
+                    {% endif %}
+                  </tr>
+                  {% if row.comment %}
+                    <tr id="db-hit-comment-{{ loop.index }}" class="db-hit-comment-row" hidden>
+                      <td colspan="{{ col_count }}">
+                        <div class="db-hit-comment-body">{{ row.comment }}</div>
+                      </td>
+                    </tr>
+                  {% endif %}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if context.database_hits.bibliography %}
+            <div class="db-hit-bibliography">
+              <p class="db-hit-bib-title">References</p>
+              {% for entry in context.database_hits.bibliography %}
+                <p class="db-hit-bib-entry">
+                  <span class="db-hit-bib-num">[{{ entry.num }}]</span>
+                  {% if entry.has_url %}
+                    <a class="db-hit-bib-link" href="{{ entry.url }}" target="_blank" rel="noopener noreferrer">{{ entry.label }}</a>
+                  {% else %}
+                    <span>{{ entry.label }}</span>
+                  {% endif %}
+                </p>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% else %}
+          <p class="tab-empty-state">No database hits found for this sample.</p>
+        {% endif %}
       </div>
       <div id="tab-all-mutations" class="tab-content">
         {% if context.all_mutations.rows %}
@@ -107,8 +254,8 @@
                   </th>
                   <th>AA change</th>
                   <th>Consequence</th>
-                  <th>Allele freq</th>
-                  <th>In database</th>
+                  <th>Variant Frequency</th>
+                  {% if context.all_mutations.has_database_hits %}<th>In database</th>{% endif %}
                 </tr>
               </thead>
               <tbody>
@@ -132,6 +279,7 @@
                       <span class="mutation-consequence mutation-consequence--{{ r.consequence }}">{{ r.consequence }}</span>
                     </td>
                     <td class="mutation-freq">{{ '%.3f' | format(r.allele_freq) }}</td>
+                    {% if context.all_mutations.has_database_hits %}
                     <td>
                       <span class="mutation-db-status">
                         {% if r.is_single_hit %}
@@ -145,10 +293,11 @@
                         {% endif %}
                       </span>
                     </td>
+                    {% endif %}
                   </tr>
                   {% if r.has_alignment %}
                     <tr id="mutation-align-{{ loop.index }}" class="mutation-alignment-row" hidden>
-                      <td colspan="6">
+                      <td colspan="{{ 5 + (1 if context.all_mutations.has_database_hits else 0) }}">
                         <div class="mutation-alignment-body">
                           {{ r.alignment_html | safe }}
                         </div>

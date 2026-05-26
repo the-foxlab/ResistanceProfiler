@@ -22,3 +22,18 @@ doi_prefixes = ['https://doi.org/', 'http://doi.org/']
 
 [matching]
 combination_member_af_threshold = 0.75
+
+[af_bins]
+# Allele-frequency classification bins for VCF-mode profiling.
+# Each value is [lower_inclusive, upper_inclusive].
+high         = [0.75, 1.0]
+intermediate = [0.25, 0.7499]
+low          = [0.01, 0.2499]
+
+[af_bins_fasta]
+# Allele-frequency classification bins for FASTA-mode profiling.
+# FASTA frequencies are discrete (1.0, 0.5, 0.33, 0.25) due to IUPAC base expansion,
+# so bin boundaries are adjusted to reflect these values cleanly.
+high         = [0.75, 1.0]
+intermediate = [0.35, 0.74]
+low          = [0.01, 0.34]

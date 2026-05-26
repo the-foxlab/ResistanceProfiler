@@ -336,9 +336,12 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Smaller Issues
 
-- 🟡 only show relevant combinations and not all (remove badges etc)?
-- 🟡 overlapping orfs minialignments
-- 🟡 init short arguments
-- 🟡 show scores in combinations and singles
-- 🟡 show all mutations in the lolliplot even if they are only part of combinations
-- 🟡 "Phenotypes are interpreted as resistant = reduced susceptibility, sensitive = expected susceptibility, intermediate = partial or uncertain effect, and contradictory = conflicting evidence." --> only when relevant
+- 🟡fix tests
+- 🟡remove tabular (integrate into html plot)
+- 🟡pdf workable for hiv?
+- 🟡make it again work with the webapp
+- 🟡adapt webapp a bit (better sidebar, less tile in tile)
+- 🟡check that regenerate works still
+- 🟡remove drug badges
+- 🟡identify dead code
+- 🟡optimize for mobile
