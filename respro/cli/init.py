@@ -15,6 +15,7 @@ import typer
 from rich.console import Console
 
 from respro.core.rules import import_rules_with_summary, validate_rules_tsv
+from respro.db.algorithms import store_interpretation_algorithms
 from respro.db.drugs import _consolidate_drug_names_to_lowercase, _get_drugs_from_pubchem
 from respro.db.features import _load_genbank_records
 from respro.db.project_metadata import load_metadata_json, store_project_metadata
@@ -62,7 +63,7 @@ def init_project(
     require_file(rules_tsv, 'Rules TSV')
     if formula_rules_tsv is not None:
         require_file(formula_rules_tsv, 'Formula rules TSV')
-    metadata_payload = load_metadata_json(metadata_json) if metadata_json else {}
+    metadata_payload, algorithms = load_metadata_json(metadata_json) if metadata_json else ({}, [])
 
     genbank_records = parse_genbank_sources(genbank_paths)
 
@@ -84,6 +85,8 @@ def init_project(
             additional_info=additional_info,
         )
         store_project_metadata(conn, project_id, metadata_payload)
+        if algorithms:
+            store_interpretation_algorithms(conn, project_id, algorithms)
         if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
         conn.commit()

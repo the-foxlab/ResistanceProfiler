@@ -57,6 +57,65 @@ Example metadata file:
 }
 ```
 
+## Interpretation algorithms
+
+`metadata.json` optionally supports a top-level `interpretation_algorithms` array. Each entry configures one algorithm by name. All three algorithm types are non-mutually-exclusive and can coexist in the same list.
+
+### `ic50_thresholds`
+
+Defines per-drug IC50 or fold-IC50 breakpoints.
+
+- `use` — required; must be `"ic50"` or `"fold_ic50"`
+- `thresholds` — required non-empty object; each key is a drug name; each value must have `"intermediate"` and `"resistant"` keys with positive numbers; `"resistant"` must be strictly greater than `"intermediate"`
+
+### `drug_groups`
+
+Assigns drugs to named groups (e.g. drug classes).
+
+- `groups` — required non-empty object; each key is a group name; each value is a non-empty list of drug name strings; a drug name may not appear in more than one group
+
+### `drug_interpretation`
+
+Specifies how phenotype or score counts translate into an interpretation.
+
+- `method` — required; must be `"by_phenotype"` or `"by_score"`
+- `thresholds` — required object; must include `"resistant"` key; `"intermediate"` is optional; all values must be positive integers
+
+### Example
+
+```json
+{
+  "description": "HIV-1 integrase inhibitor resistance database",
+  "interpretation_algorithms": [
+    {
+      "name": "ic50_thresholds",
+      "use": "fold_ic50",
+      "thresholds": {
+        "ACV": {"intermediate": 3.0, "resistant": 10.0},
+        "PCV": {"intermediate": 3.0, "resistant": 10.0}
+      }
+    },
+    {
+      "name": "drug_groups",
+      "groups": {
+        "Nucleoside Analogues": ["ACV", "PCV"],
+        "Pyrophosphate Analogues": ["FOS"]
+      }
+    },
+    {
+      "name": "drug_interpretation",
+      "method": "by_phenotype",
+      "thresholds": {
+        "resistant": 1,
+        "intermediate": 1
+      }
+    }
+  ]
+}
+```
+
+Algorithms are validated at `respro init` time and stored in the `interpretation_algorithm` table of the project database. Existing databases without this table are migrated automatically on next open.
+
 ## Inspect project metadata
 
 ```bash

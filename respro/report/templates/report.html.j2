@@ -86,7 +86,7 @@
               <img src="{{ context.all_mutations.reset_icon }}" alt="" aria-hidden="true">
             </button>
             <button type="button" class="mutation-download-button" aria-label="Download filtered mutation table" title="Download filtered mutation table">
-              Download TSV
+              Download Table
             </button>
           </div>
           <div class="mutation-table-wrapper">
@@ -163,7 +163,7 @@
           <p class="tab-empty-state">No CDS variants were found for this sample.</p>
         {% endif %}
       </div>
-      <div id="tab-sequence-features" class="tab-content">
+      <div id="tab-sequence-feature-information" class="tab-content">
         {% if context.sequence_features.cards %}
           <div class="info-card-grid">
             {% for card in context.sequence_features.cards %}
@@ -206,7 +206,7 @@
                     <dd>{{ card.observed_variants }}</dd>
                   </div>
                   <div{% if card.database_hits %} class="is-nonzero"{% endif %}>
-                    <dt>Database hits</dt>
+                    <dt>Database Hits</dt>
                     <dd>{{ card.database_hits }}</dd>
                   </div>
                 </dl>
@@ -227,7 +227,7 @@
           <p class="tab-empty-state">No detected sequence features were found for this sample.</p>
         {% endif %}
       </div>
-      <div id="tab-drugs" class="tab-content">
+      <div id="tab-drug-information" class="tab-content">
         {% if context.drugs.cards %}
           <div class="info-card-grid">
             {% for card in context.drugs.cards %}

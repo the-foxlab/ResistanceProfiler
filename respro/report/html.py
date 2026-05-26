@@ -135,7 +135,7 @@ def build_report_context(
             'meta_primary': ' · '.join([part for part in primary_parts if part]),
             'meta_secondary': ' · '.join([part for part in secondary_parts if part]),
         },
-        'tabs': ['Summary', 'Database hits', 'All Mutations', 'Sequence Features', 'Drugs'],
+        'tabs': ['Summary', 'Database hits', 'All Mutations', 'Sequence Feature Information', 'Drug Information'],
         'all_mutations': {
             'rows': all_mutations_rows,
             'count': len(all_mutations_rows),

@@ -6,6 +6,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+from respro.db.algorithms import validate_interpretation_algorithms
 from respro.io.publications import fetch_pubmed_metadata
 from respro.utils.files import require_file
 
@@ -34,15 +35,17 @@ _CANONICAL_KEY_ALIASES = {
     'license': 'license',
     'tsv_checksum': 'tsv_checksum',
     'tsv checksum': 'tsv_checksum',
+    'interpretation_algorithms': 'interpretation_algorithms',
 }
 
 
-def load_metadata_json(metadata_path: Path) -> dict[str, str]:
+def load_metadata_json(metadata_path: Path) -> tuple[dict[str, str], list[dict]]:
     """
     Load and validate a metadata JSON file for project creation.
 
     :param metadata_path: path to metadata JSON
-    :return: normalized metadata dict mapped to project column values
+    :return: tuple of (normalized metadata dict mapped to project column values,
+             validated list of interpretation algorithm configs)
     """
     require_file(metadata_path, 'Metadata JSON file')
 
@@ -53,6 +56,11 @@ def load_metadata_json(metadata_path: Path) -> dict[str, str]:
 
     if not isinstance(payload, dict):
         raise ValueError('Invalid metadata JSON: top-level value must be an object.')
+
+    raw_algorithms = payload.pop('interpretation_algorithms', None)
+    algorithms: list[dict] = []
+    if raw_algorithms is not None:
+        algorithms = validate_interpretation_algorithms(raw_algorithms)
 
     normalized: dict[str, str] = {}
     invalid_keys: list[str] = []
@@ -82,7 +90,7 @@ def load_metadata_json(metadata_path: Path) -> dict[str, str]:
         if metadata and metadata.get('doi'):
             normalized['publication_doi'] = str(metadata['doi']).strip()
 
-    return _to_project_column_payload(normalized)
+    return _to_project_column_payload(normalized), algorithms
 
 
 def store_project_metadata(

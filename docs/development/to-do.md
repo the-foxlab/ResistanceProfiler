@@ -175,6 +175,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Surface sample classifications in report and JSON — dedicated "Manual classifications" section in HTML report and `sample_classifications` key in exported JSON, clearly separated from rule-based hits
 - [X] Optional database metadata in `respro init` — `--metadata` accepts validated JSON with fixed keys (`maintainers`, `contact`, `publication_pmid`, `website`, `description`, `maintainer_update`, `license`, `tsv_checksum`); PMID values are DOI-enriched best-effort at creation time and stored on the project row
 - [X] `respro manage database <db_path> --info` — added project metadata inspection mode that prints non-empty project identity and curated metadata fields
+- [X] Interpretation algorithm metadata in `metadata.json` — `interpretation_algorithms` top-level array in metadata JSON accepts three coexisting algorithm types (`ic50_thresholds`, `drug_groups`, `drug_interpretation`); each is validated on import and stored in a new `interpretation_algorithm` table in `project.db`; `load_interpretation_algorithms` exposes the config to downstream consumers (report, scoring); full test coverage in `tests/test_algorithms.py`; documented in `docs/user/database-preparation.md`
 
 ### Web deployment and security (done)
 

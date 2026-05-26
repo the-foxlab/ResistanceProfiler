@@ -194,6 +194,15 @@ CREATE TABLE IF NOT EXISTS query_feature_mapping (
     cigar           TEXT    NOT NULL,
     UNIQUE(query_ref_id, feature_id)
 );
+
+-- Interpretation algorithms (non-mutually-exclusive; stored as JSON config blobs)
+CREATE TABLE IF NOT EXISTS interpretation_algorithm (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id     INTEGER NOT NULL REFERENCES project(id),
+    algorithm_name TEXT    NOT NULL,
+    config_json    TEXT    NOT NULL DEFAULT '{}',
+    UNIQUE(project_id, algorithm_name)
+);
 """
 
 
@@ -710,6 +719,13 @@ CREATE TABLE IF NOT EXISTS resistance_formula_rule_publication (
     UNIQUE(formula_rule_id, publication_id)
 );
 CREATE INDEX IF NOT EXISTS idx_resistance_formula_rule_pub ON resistance_formula_rule_publication(formula_rule_id);
+CREATE TABLE IF NOT EXISTS interpretation_algorithm (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id     INTEGER NOT NULL REFERENCES project(id),
+    algorithm_name TEXT    NOT NULL,
+    config_json    TEXT    NOT NULL DEFAULT '{}',
+    UNIQUE(project_id, algorithm_name)
+);
 """)
     conn.commit()
 
