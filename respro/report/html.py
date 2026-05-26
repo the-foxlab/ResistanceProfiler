@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from jinja2 import BaseLoader, Environment
 
-from respro.db.models import AnnotatedVariant, FeatureRecord, ProfilingResult, ResistanceRule
+from respro.db.models import FeatureRecord, ProfilingResult, ResistanceRule
 from respro.report.alignment_visualization import (
     FeatureAlignment,
     build_alignment_html,
@@ -134,7 +134,6 @@ def build_report_context(
             'badge_class': 'is-hit' if has_database_hit else 'is-no-hit',
             'meta_primary': ' · '.join([part for part in primary_parts if part]),
             'meta_secondary': ' · '.join([part for part in secondary_parts if part]),
-            'picture_in_picture_icon': _load_svg_data_url('graph.svg'),
         },
         'tabs': ['Summary', 'Database hits', 'All Mutations', 'Sequence Features', 'Drugs'],
         'all_mutations': {
@@ -146,6 +145,7 @@ def build_report_context(
             'cards': feature_cards,
             'count': len(feature_cards),
             'sequence_icon': _load_svg_data_url('dna.svg'),
+            'link_icon': _load_svg_data_url('link.svg'),
         },
         'drugs': {
             'cards': drug_cards,

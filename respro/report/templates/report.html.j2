@@ -21,6 +21,15 @@
               {{ context.header.badge_label }}
             </span>
           </div>
+          <button
+            id="plot-modal-open"
+            class="header-plot-button"
+            type="button"
+            title="Open variant overview"
+            aria-label="Open variant overview"
+          >
+            Open Plot
+          </button>
         </div>
         <div class="header-meta">
           <p>{{ context.header.meta_primary }}</p>
@@ -36,11 +45,6 @@
               {{ tab }}
             </button>
           {% endfor %}
-        </div>
-        <div class="report-tabs-actions">
-          <button id="plot-modal-open" class="tab-icon-button" type="button" title="Open mutation plot" aria-label="Open mutation plot">
-            <img src="{{ context.header.picture_in_picture_icon }}" alt="Picture in picture icon">
-          </button>
         </div>
       </nav>
     </header>
@@ -131,18 +135,33 @@
                   <div class="info-card-header-main">
                     <h3 class="info-card-title">{{ card.name }}</h3>
                   </div>
-                  {% if card.has_sequence %}
-                    <button
-                      class="info-card-action-button info-card-action-button--green feature-sequence-button"
-                      type="button"
-                      aria-label="View sequence for {{ card.name | e }}"
-                      data-feature-title="{{ card.name | e }}"
-                      data-nt-sequence="{{ card.nt_sequence | e }}"
-                      data-aa-sequence="{{ card.aa_sequence | e }}"
-                    >
-                      <img src="{{ context.sequence_features.sequence_icon }}" alt="">
-                    </button>
-                  {% endif %}
+                  <div class="info-card-header-actions">
+                    {% if card.has_sequence %}
+                      <button
+                        class="info-card-action-button info-card-action-button--green feature-sequence-button"
+                        type="button"
+                        title="View sequence of {{ card.name | e }}"
+                        aria-label="View sequence of {{ card.name | e }}"
+                        data-feature-title="{{ card.name | e }}"
+                        data-nt-sequence="{{ card.nt_sequence | e }}"
+                        data-aa-sequence="{{ card.aa_sequence | e }}"
+                      >
+                        <img src="{{ context.sequence_features.sequence_icon }}" alt="">
+                      </button>
+                    {% endif %}
+                    {% if card.ncbi_protein_url %}
+                      <a
+                        class="info-card-action-button"
+                        href="{{ card.ncbi_protein_url }}"
+                        target="_blank"
+                        rel="noopener"
+                        title="Open NCBI entry for {{ card.name | e }}"
+                        aria-label="Open NCBI entry for {{ card.name | e }}"
+                      >
+                        <img src="{{ context.sequence_features.link_icon }}" alt="">
+                      </a>
+                    {% endif %}
+                  </div>
                 </header>
                 <dl class="info-card-stats">
                   <div{% if card.observed_variants %} class="is-nonzero"{% endif %}>
@@ -158,14 +177,7 @@
                   <div class="info-card-meta">
                     {% if card.protein %}<p><strong>Protein:</strong> {{ card.protein }}</p>{% endif %}
                     {% if card.protein_id %}
-                      <p>
-                        <strong>Protein ID:</strong>
-                        {% if card.ncbi_protein_url %}
-                          <a href="{{ card.ncbi_protein_url }}" target="_blank" rel="noopener">{{ card.protein_id }}</a>
-                        {% else %}
-                          {{ card.protein_id }}
-                        {% endif %}
-                      </p>
+                      <p><strong>Protein ID:</strong> {{ card.protein_id }}</p>
                     {% endif %}
                     {% if card.locus_tag %}<p><strong>Locus:</strong> {{ card.locus_tag }}</p>{% endif %}
                     {% if card.note %}<p>{{ card.note }}</p>{% endif %}
@@ -192,7 +204,8 @@
                       <button
                         class="info-card-action-button info-card-action-button--green drug-structure-button"
                         type="button"
-                        aria-label="View structure for {{ card.name | e }}"
+                        title="View structure of {{ card.name | e }}"
+                        aria-label="View structure of {{ card.name | e }}"
                         data-drug-title="{{ card.name | e }}"
                         data-structure-url="{{ card.structure_url | e }}"
                       >
@@ -219,7 +232,7 @@
                     <dd>{{ card.single_rule_hits }}</dd>
                   </div>
                   <div{% if card.formula_hits %} class="is-nonzero"{% endif %}>
-                    <dt>Formula hits</dt>
+                    <dt>Formula-rule hits</dt>
                     <dd>{{ card.formula_hits }}</dd>
                   </div>
                 </dl>
@@ -253,7 +266,7 @@
 
     <div id="drug-structure-modal" class="plot-modal" aria-hidden="true">
       <div id="drug-structure-modal-backdrop" class="plot-modal-backdrop"></div>
-      <section class="plot-modal-panel sequence-modal-panel" role="dialog" aria-modal="true" aria-labelledby="drug-structure-modal-title">
+      <section class="plot-modal-panel sequence-modal-panel drug-structure-modal-panel" role="dialog" aria-modal="true" aria-labelledby="drug-structure-modal-title">
         <div class="plot-modal-content sequence-modal-content">
           <div class="sequence-modal-header">
             <h2 id="drug-structure-modal-title" class="sequence-modal-title">Structure</h2>
