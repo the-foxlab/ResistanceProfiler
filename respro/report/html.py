@@ -139,6 +139,8 @@ def build_report_context(
         'all_mutations': {
             'rows': all_mutations_rows,
             'count': len(all_mutations_rows),
+            'search_icon': _load_svg_data_url('search.svg'),
+            'reset_icon': _load_svg_data_url('reset_filter.svg'),
         },
         'sequence_features': {
             'cards': feature_cards,

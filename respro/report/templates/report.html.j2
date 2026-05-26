@@ -59,6 +59,33 @@
       </div>
       <div id="tab-all-mutations" class="tab-content">
         {% if context.all_mutations.rows %}
+          <div class="mutation-toolbar" role="region" aria-label="Mutation table filters">
+            <label class="mutation-search" for="mutation-search-input">
+              <img src="{{ context.all_mutations.search_icon }}" alt="" aria-hidden="true">
+              <input
+                id="mutation-search-input"
+                class="mutation-search-input"
+                type="search"
+                placeholder="search mutations"
+                aria-label="Search mutations"
+              >
+            </label>
+            <details class="mutation-filter-menu" data-filter-group="feature">
+              <summary>Feature</summary>
+              <div class="mutation-filter-options" data-filter-options="feature"></div>
+            </details>
+            <details class="mutation-filter-menu" data-filter-group="consequence">
+              <summary>Consequence</summary>
+              <div class="mutation-filter-options" data-filter-options="consequence"></div>
+            </details>
+            <details class="mutation-filter-menu" data-filter-group="database">
+              <summary>In Database</summary>
+              <div class="mutation-filter-options" data-filter-options="database"></div>
+            </details>
+            <button type="button" class="mutation-reset-button" aria-label="Reset mutation filters" title="Reset mutation filters">
+              <img src="{{ context.all_mutations.reset_icon }}" alt="" aria-hidden="true">
+            </button>
+          </div>
           <div class="mutation-table-wrapper">
             <table class="mutation-table">
               <thead>
@@ -86,6 +113,9 @@
                   <tr
                     class="mutation-row{% if r.is_database_hit %} mutation-row--hit{% endif %}{% if r.has_alignment %} mutation-row--expandable{% endif %}"
                     data-nt-pos="{{ r.nt_pos }}"
+                    data-feature-value="{{ r.feature | e }}"
+                    data-consequence-value="{{ r.consequence | e }}"
+                    data-database-values="{% if r.is_single_hit %}Single-Rule{% endif %}{% if r.is_single_hit and r.is_formula_hit %}|{% endif %}{% if r.is_formula_hit %}Formula-Rule{% endif %}{% if not r.is_single_hit and not r.is_formula_hit %}None{% endif %}"
                     {% if r.has_alignment %}
                       data-alignment-row="mutation-align-{{ loop.index }}"
                       aria-expanded="false"
@@ -108,7 +138,7 @@
                           <span class="db-hit-pill db-hit-pill--formula" title="Part of a combination rule hit">Formula-Rule</span>
                         {% endif %}
                         {% if not r.is_single_hit and not r.is_formula_hit %}
-                          <span class="db-hit-pill db-hit-pill--none">—</span>
+                          <span class="db-hit-pill db-hit-pill--none">None</span>
                         {% endif %}
                       </span>
                     </td>

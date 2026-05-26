@@ -155,6 +155,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   const mutationTbody = mutationTable.querySelector('tbody');
   const mutationSortButton = mutationTable.querySelector('.mutation-sort-button');
+  const mutationSearchInput = document.getElementById('mutation-search-input');
+  const mutationToolbar = document.querySelector('.mutation-toolbar');
+  const mutationFilterMenus = Array.from(document.querySelectorAll('.mutation-filter-menu'));
+  const mutationResetButton = document.querySelector('.mutation-reset-button');
 
   if (mutationTbody) {
     mutationTbody.querySelectorAll('.mutation-row--expandable').forEach(function (row) {
@@ -196,6 +200,110 @@ document.addEventListener('DOMContentLoaded', function () {
       });
     };
 
+    const getFieldValue = function (row, fieldName) {
+      return (row.getAttribute(`data-${fieldName}-value`) || '').trim();
+    };
+
+    const getFieldValues = function (row, fieldName) {
+      if (fieldName === 'database') {
+        const raw = (row.getAttribute('data-database-values') || '').trim();
+        if (!raw) {
+          return [];
+        }
+        return raw.split('|').map(function (value) {
+          return value.trim();
+        }).filter(Boolean);
+      }
+      const value = getFieldValue(row, fieldName);
+      return value ? [value] : [];
+    };
+
+    const buildMutationFilterMenus = function () {
+      const fieldConfigs = [
+        { field: 'feature', label: 'Feature' },
+        { field: 'consequence', label: 'Consequence' },
+        { field: 'database', label: 'In Database' },
+      ];
+
+      fieldConfigs.forEach(function (config) {
+        const menu = document.querySelector(`.mutation-filter-menu[data-filter-group="${config.field}"]`);
+        const optionsContainer = menu?.querySelector('.mutation-filter-options');
+        if (!optionsContainer) {
+          return;
+        }
+
+        const values = Array.from(
+          new Set(
+            collectMutationRowPairs().flatMap(function (pair) {
+              return getFieldValues(pair.row, config.field);
+            }).filter(Boolean),
+          ),
+        ).sort(function (left, right) {
+          return left.localeCompare(right);
+        });
+
+        optionsContainer.textContent = '';
+        values.forEach(function (value) {
+          const label = document.createElement('label');
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.className = 'mutation-filter-option';
+          input.value = value;
+          input.checked = true;
+          input.dataset.field = config.field;
+
+          label.appendChild(input);
+          label.appendChild(document.createTextNode(value));
+          optionsContainer.appendChild(label);
+        });
+
+        if (values.length === 0) {
+          const empty = document.createElement('span');
+          empty.className = 'mutation-filter-empty';
+          empty.textContent = 'No values';
+          optionsContainer.appendChild(empty);
+        }
+      });
+    };
+
+    buildMutationFilterMenus();
+
+    const closeAllMutationFilterMenus = function (exceptMenu) {
+      mutationFilterMenus.forEach(function (menu) {
+        if (!exceptMenu || menu !== exceptMenu) {
+          menu.open = false;
+        }
+      });
+    };
+
+    mutationFilterMenus.forEach(function (menu) {
+      const summary = menu.querySelector('summary');
+      if (!summary) {
+        return;
+      }
+      summary.addEventListener('click', function (event) {
+        event.preventDefault();
+        const willOpen = !menu.open;
+        closeAllMutationFilterMenus(menu);
+        menu.open = willOpen;
+      });
+    });
+
+    document.addEventListener('click', function (event) {
+      if (!mutationToolbar || mutationToolbar.contains(event.target)) {
+        return;
+      }
+      closeAllMutationFilterMenus();
+    });
+
+    if (mutationToolbar) {
+      mutationToolbar.addEventListener('click', function (event) {
+        if (!event.target.closest('.mutation-filter-menu')) {
+          closeAllMutationFilterMenus();
+        }
+      });
+    }
+
     const applyMutationSort = function (direction) {
       const pairs = collectMutationRowPairs();
       const factor = direction === 'desc' ? -1 : 1;
@@ -216,12 +324,68 @@ document.addEventListener('DOMContentLoaded', function () {
           mutationTbody.appendChild(pair.alignmentRow);
         }
       });
+
+      applyMutationFilter();
+    };
+
+    const applyMutationFilter = function () {
+      const query = (mutationSearchInput?.value || '').trim().toLowerCase();
+
+      const selectedValuesByField = new Map();
+      mutationFilterMenus.forEach(function (menu) {
+        const fieldName = menu.getAttribute('data-filter-group') || '';
+        const checkedValues = Array.from(menu.querySelectorAll('.mutation-filter-option:checked')).map(function (input) {
+          return input.value;
+        });
+        selectedValuesByField.set(fieldName, checkedValues);
+      });
+
+      collectMutationRowPairs().forEach(function (pair) {
+        const row = pair.row;
+        const alignmentRow = pair.alignmentRow;
+
+        const searchableText = row.textContent?.toLowerCase() || '';
+        const queryMatch = query.length === 0 || searchableText.includes(query);
+
+        const fieldMatches = [
+          {
+            selected: selectedValuesByField.get('feature') || [],
+            values: getFieldValues(row, 'feature'),
+          },
+          {
+            selected: selectedValuesByField.get('consequence') || [],
+            values: getFieldValues(row, 'consequence'),
+          },
+          {
+            selected: selectedValuesByField.get('database') || [],
+            values: getFieldValues(row, 'database'),
+          },
+        ];
+
+        const selectedMatch = fieldMatches.every(function (field) {
+          return field.values.some(function (value) {
+            return field.selected.includes(value);
+          });
+        });
+
+        const isMatch = queryMatch && selectedMatch;
+
+        row.hidden = !isMatch;
+        if (alignmentRow) {
+          if (!isMatch) {
+            alignmentRow.hidden = true;
+            row.setAttribute('aria-expanded', 'false');
+          }
+          alignmentRow.style.display = isMatch ? '' : 'none';
+        }
+      });
     };
 
     applyMutationSort('asc');
 
     if (mutationSortButton) {
       mutationSortButton.addEventListener('click', function () {
+        closeAllMutationFilterMenus();
         const currentDirection = this.getAttribute('data-sort-direction') || 'asc';
         const nextDirection = currentDirection === 'asc' ? 'desc' : 'asc';
         this.setAttribute('data-sort-direction', nextDirection);
@@ -232,5 +396,31 @@ document.addEventListener('DOMContentLoaded', function () {
         applyMutationSort(nextDirection);
       });
     }
+
+    if (mutationSearchInput) {
+      mutationSearchInput.addEventListener('input', function () {
+        closeAllMutationFilterMenus();
+        applyMutationFilter();
+      });
+    }
+
+    document.querySelectorAll('.mutation-filter-option').forEach(function (field) {
+      field.addEventListener('change', applyMutationFilter);
+    });
+
+    if (mutationResetButton) {
+      mutationResetButton.addEventListener('click', function () {
+        closeAllMutationFilterMenus();
+        if (mutationSearchInput) {
+          mutationSearchInput.value = '';
+        }
+        document.querySelectorAll('.mutation-filter-option').forEach(function (field) {
+          field.checked = true;
+        });
+        applyMutationFilter();
+      });
+    }
+
+    applyMutationFilter();
   }
 });
