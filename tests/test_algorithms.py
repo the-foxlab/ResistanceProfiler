@@ -126,6 +126,15 @@ class TestValidateInterpretationAlgorithms:
         with pytest.raises(ValueError, match="Duplicate algorithm name 'drug_groups'"):
             validate_interpretation_algorithms(algorithms)
 
+    def test_rejects_two_drug_interpretation_entries(self) -> None:
+        """by_phenotype and by_score are mutually exclusive — two drug_interpretation entries must fail."""
+        algorithms = [
+            {'name': 'drug_interpretation', 'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'name': 'drug_interpretation', 'method': 'by_score', 'thresholds': {'resistant': 5}},
+        ]
+        with pytest.raises(ValueError, match="Duplicate algorithm name 'drug_interpretation'"):
+            validate_interpretation_algorithms(algorithms)
+
     def test_rejects_non_list_input(self) -> None:
         with pytest.raises(ValueError, match='must be a list'):
             validate_interpretation_algorithms({'name': 'drug_groups'})

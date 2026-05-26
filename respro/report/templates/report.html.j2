@@ -53,7 +53,188 @@
     <!-- Tab Content -->
     <main class="report-main">
       <div id="tab-summary" class="tab-content active">
-        <p>Summary content (placeholder)</p>
+
+        <!-- Row 1: two-column grid — Sequence Assessment + Coverage (if available) -->
+        <div class="summary-grid">
+
+          <!-- Tile 1: Sequence Assessment -->
+          <div class="summary-tile">
+            <div class="summary-tile-header">
+              <img src="{{ context.summary.dna_icon }}" class="summary-tile-icon" alt="" aria-hidden="true">
+              <h2 class="summary-tile-title">Sequence Assessment</h2>
+            </div>
+            <ul class="summary-stat-list">
+              <li>
+                <span class="summary-stat-label">Total mutations</span>
+                <span class="summary-stat-value">{{ context.summary.sequence_assessment.total_mutations }}</span>
+              </li>
+              <li>
+                <span class="summary-stat-label">Non-synonymous</span>
+                <span class="summary-stat-value">{{ context.summary.sequence_assessment.non_synonymous_count }}</span>
+              </li>
+              <li>
+                <span class="summary-stat-label">Features affected</span>
+                <span class="summary-stat-value">{{ context.summary.sequence_assessment.features_count }}</span>
+              </li>
+            </ul>
+            {% if context.summary.sequence_assessment.features_with_mutations %}
+              <div class="summary-feature-tags">
+                {% for f in context.summary.sequence_assessment.features_with_mutations %}
+                  <span class="summary-feature-tag">{{ f }}</span>
+                {% endfor %}
+              </div>
+            {% endif %}
+            {% if context.summary.sequence_assessment.high_impact_count %}
+              <div class="summary-high-impact">
+                <strong>
+                  {{ context.summary.sequence_assessment.high_impact_count }}
+                  high-impact {{ 'variant' if context.summary.sequence_assessment.high_impact_count == 1 else 'variants' }}
+                </strong>
+                detected ({{ context.summary.sequence_assessment.high_impact_types }})
+                {% if context.summary.sequence_assessment.high_impact_features %}
+                  in
+                  {% for f in context.summary.sequence_assessment.high_impact_features %}
+                    <em>{{ f }}</em>{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                {% endif %}.
+              </div>
+            {% endif %}
+          </div>
+
+          <!-- Tile 2: Coverage Overview (only when rule positions are known) -->
+          {% if context.summary.coverage.available %}
+            <div class="summary-tile">
+              <div class="summary-tile-header">
+                <h2 class="summary-tile-title">Coverage Overview</h2>
+              </div>
+              <div class="summary-coverage-summary">
+                <div class="coverage-bar-track">
+                  <div class="coverage-bar-fill" style="width: {{ context.summary.coverage.assessed_pct }}%"></div>
+                </div>
+                <span class="coverage-bar-label">
+                  {{ context.summary.coverage.assessed_rule_positions }}/{{ context.summary.coverage.total_rule_positions }}
+                  rule positions assessed ({{ context.summary.coverage.assessed_pct }}%)
+                </span>
+              </div>
+              {% if context.summary.coverage.per_feature | length > 1 %}
+                <div class="coverage-per-feature">
+                  {% for pc in context.summary.coverage.per_feature %}
+                    <div class="coverage-feature-row">
+                      <span class="coverage-feature-name">{{ pc.feature }}</span>
+                      <div class="coverage-bar-track coverage-bar-track--mini">
+                        <div class="coverage-bar-fill" style="width: {{ pc.assessed_pct }}%"></div>
+                      </div>
+                      <span class="coverage-feature-count">{{ pc.assessed }}/{{ pc.total }}</span>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </div>
+          {% endif %}
+
+        </div><!-- end .summary-grid -->
+
+        <!-- Tile 3: Mutation Profile by Feature -->
+        {% if context.summary.mutation_profile %}
+          <div class="summary-tile summary-tile--full">
+            <div class="summary-tile-header">
+              <h2 class="summary-tile-title">Mutation Profile by Feature</h2>
+            </div>
+            <div class="mutation-profile-list">
+              {% for entry in context.summary.mutation_profile %}
+                <div class="mutation-profile-row">
+                  <span class="mutation-profile-feature">{{ entry.feature }}</span>
+                  <span class="mutation-profile-mutations">{{ entry.mutations }}</span>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+
+        <!-- Tile 4: Interpretation Narrative -->
+        <div class="summary-tile summary-tile--full">
+          <div class="summary-tile-header">
+            <h2 class="summary-tile-title">Interpretation Summary</h2>
+          </div>
+          <div class="summary-text-box" data-summary-lang="en">
+            <div class="summary-lang-controls">
+              <button class="summary-lang-btn active" data-lang="en" type="button">EN</button>
+              <button class="summary-lang-btn" data-lang="de" type="button">DE</button>
+              <button class="summary-lang-btn" data-lang="fr" type="button">FR</button>
+              <button class="summary-lang-btn" data-lang="es" type="button">ES</button>
+            </div>
+            <p class="summary-text" data-lang="en">{{ context.summary.narrative | safe }}</p>
+            <p class="summary-text" data-lang="de" hidden></p>
+            <p class="summary-text" data-lang="fr" hidden></p>
+            <p class="summary-text" data-lang="es" hidden></p>
+          </div>
+        </div>
+
+        <!-- Tile 5: Drug Interpretation Table -->
+        {% if context.summary.drug_table.rows %}
+          <div class="summary-tile summary-tile--full">
+            <div class="summary-tile-header">
+              <h2 class="summary-tile-title">Drug Interpretation</h2>
+            </div>
+
+            {%- macro drug_table_rows(drugs) %}
+              {% for drug in drugs %}
+                <tr>
+                  <td>{{ drug.name }}</td>
+                  <td class="drug-table-count">{{ drug.hit_count }}</td>
+                  {% if context.summary.drug_table.has_phenotypes %}
+                    <td>
+                      {% if drug.dominant_phenotype %}
+                        <span class="db-hit-phenotype {{ drug.phenotype_badge_class }}">{{ drug.dominant_phenotype }}</span>
+                      {% else %}—{% endif %}
+                    </td>
+                  {% endif %}
+                  {% if context.summary.drug_table.has_scores %}
+                    <td>{{ drug.scores | join(', ') or '—' }}</td>
+                  {% endif %}
+                  {% if context.summary.drug_table.has_assessment %}
+                    <td>
+                      {% if drug.assessment %}
+                        <span class="db-hit-phenotype {{ drug.assessment_badge_class }}">{{ drug.assessment }}</span>
+                      {% else %}—{% endif %}
+                    </td>
+                  {% endif %}
+                </tr>
+              {% endfor %}
+            {%- endmacro %}
+
+            {%- macro drug_table_head() %}
+              <thead>
+                <tr>
+                  <th>Drug</th>
+                  <th>Hits</th>
+                  {% if context.summary.drug_table.has_phenotypes %}<th>Phenotype</th>{% endif %}
+                  {% if context.summary.drug_table.has_scores %}<th>Score</th>{% endif %}
+                  {% if context.summary.drug_table.has_assessment %}<th>Assessment</th>{% endif %}
+                </tr>
+              </thead>
+            {%- endmacro %}
+
+            {% if context.summary.drug_table.has_groups %}
+              {% for class_name, drugs in context.summary.drug_table.groups.items() %}
+                <div class="drug-group-section">
+                  <div class="drug-group-title">{{ class_name }}</div>
+                  <table class="drug-interp-table">
+                    {{ drug_table_head() }}
+                    <tbody>{{ drug_table_rows(drugs) }}</tbody>
+                  </table>
+                </div>
+              {% endfor %}
+            {% else %}
+              <table class="drug-interp-table">
+                {{ drug_table_head() }}
+                <tbody>{{ drug_table_rows(context.summary.drug_table.rows) }}</tbody>
+              </table>
+            {% endif %}
+
+          </div>
+        {% endif %}
+
       </div>
       <div id="tab-database-hits" class="tab-content">
         {% if context.database_hits.rows %}

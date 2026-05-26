@@ -59,7 +59,7 @@ Example metadata file:
 
 ## Interpretation algorithms
 
-`metadata.json` optionally supports a top-level `interpretation_algorithms` array. Each entry configures one algorithm by name. All three algorithm types are non-mutually-exclusive and can coexist in the same list.
+`metadata.json` optionally supports a top-level `interpretation_algorithms` array. Each entry configures one algorithm by name. Each algorithm type may appear **at most once** in the list, and all three types can coexist.
 
 ### `ic50_thresholds`
 
@@ -76,9 +76,9 @@ Assigns drugs to named groups (e.g. drug classes).
 
 ### `drug_interpretation`
 
-Specifies how phenotype or score counts translate into an interpretation.
+Specifies how phenotype or score counts translate into an interpretation. `by_phenotype` and `by_score` are mutually exclusive — only one `drug_interpretation` entry is permitted per project, and its `method` field selects which strategy is used. Providing two `drug_interpretation` entries is an error and will cause `respro init` to fail.
 
-- `method` — required; must be `"by_phenotype"` or `"by_score"`
+- `method` — required; must be `"by_phenotype"` or `"by_score"`; the two methods are mutually exclusive
 - `thresholds` — required object; must include `"resistant"` key; `"intermediate"` is optional; all values must be positive integers
 
 ### Example

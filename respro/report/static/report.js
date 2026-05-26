@@ -879,4 +879,75 @@ document.addEventListener('DOMContentLoaded', function () {
       },
     });
   }
+
+  // ── Summary tab: narrative translation ──────────────────────────────
+  document.querySelectorAll('.summary-text-box').forEach(function (box) {
+    const buttons = Array.from(box.querySelectorAll('.summary-lang-btn'));
+    const paragraphs = Array.from(box.querySelectorAll('.summary-text[data-lang]'));
+    if (!buttons.length || !paragraphs.length) {
+      return;
+    }
+
+    const translationCache = {};
+    const enParagraph = paragraphs.find(function (p) { return p.dataset.lang === 'en'; });
+
+    const loadTranslation = async function (lang) {
+      const targetParagraph = paragraphs.find(function (p) { return p.dataset.lang === lang; });
+      if (!enParagraph || !targetParagraph) {
+        return;
+      }
+      if (translationCache[lang]) {
+        targetParagraph.textContent = translationCache[lang];
+        return;
+      }
+      const source = (enParagraph.textContent || '').trim();
+      if (!source) {
+        targetParagraph.textContent = 'No source text available for translation.';
+        return;
+      }
+      targetParagraph.textContent = 'Translation loading\u2026';
+      const endpoint = 'https://translate.googleapis.com/translate_a/single';
+      const params = new URLSearchParams({ client: 'gtx', sl: 'en', tl: lang, dt: 't', q: source });
+      try {
+        const response = await fetch(endpoint + '?' + params.toString());
+        if (!response.ok) {
+          throw new Error('Translation request failed with status ' + response.status);
+        }
+        const payload = await response.json();
+        const segments = Array.isArray(payload) && Array.isArray(payload[0]) ? payload[0] : [];
+        const translated = segments
+          .map(function (seg) { return Array.isArray(seg) ? seg[0] : ''; })
+          .join('')
+          .trim();
+        if (!translated) {
+          throw new Error('Translation response was empty');
+        }
+        translationCache[lang] = translated;
+        targetParagraph.textContent = translated;
+      } catch (_err) {
+        targetParagraph.textContent = 'Automatic translation unavailable. Please retry later.';
+      }
+    };
+
+    const setLanguage = async function (lang) {
+      if (lang !== 'en') {
+        await loadTranslation(lang);
+      }
+      buttons.forEach(function (btn) {
+        btn.classList.toggle('active', btn.dataset.lang === lang);
+      });
+      paragraphs.forEach(function (p) {
+        p.hidden = p.dataset.lang !== lang;
+      });
+      box.dataset.summaryLang = lang;
+    };
+
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        void setLanguage(btn.dataset.lang || 'en');
+      });
+    });
+
+    void setLanguage(box.dataset.summaryLang || 'en');
+  });
 });

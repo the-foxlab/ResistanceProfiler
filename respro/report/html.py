@@ -13,10 +13,13 @@ from pathlib import Path
 from urllib.parse import quote
 
 from jinja2 import BaseLoader, Environment
+from markupsafe import Markup, escape
 
 from respro.config.cli_settings import CLI_CONFIG
+from respro.db.algorithms import load_interpretation_algorithms
 from respro.core.annotation import classify_similarity
 from respro.db.models import (
+    CoverageGap,
     FeatureRecord,
     ProfilingResult,
     Publication,
@@ -113,6 +116,15 @@ def build_report_context(
         result, rules or [], display_names, metric_thresholds, drug_class_map
     )
 
+    summary_context = _build_summary_context(
+        result,
+        display_names=display_names,
+        rules=rules,
+        database_hits=database_hits,
+        similarity_entries=similarity_entries,
+        project_conn=project_conn,
+    )
+
     db_drug_cards = _load_drug_cards(project_conn, detected_drug_names)
     db_drug_cards_by_name = {
         (card.get('name') or '').strip().lower(): card
@@ -168,6 +180,7 @@ def build_report_context(
         },
         'database_hits': database_hits,
         'similarity_entries': similarity_entries,
+        'summary': summary_context,
         'all_mutations': {
             'rows': all_mutations_rows,
             'count': len(all_mutations_rows),
@@ -328,6 +341,18 @@ def _build_all_mutations_rows(
 
 # Matches an optional qualifier (>, <, ≥, ≤, ~) followed by a leading number.
 _RE_LEADING_NUM = re.compile(r'^[><=~≥≤≈\s]*(-?\d+(?:\.\d+)?)')
+
+_HIGH_IMPACT_CONSEQUENCES: frozenset[str] = frozenset({
+    'frameshift', 'stop_gained', 'stop_lost', 'start_lost', 'insertion', 'deletion',
+})
+_CONSEQUENCE_LABELS: dict[str, str] = {
+    'frameshift': 'frameshift',
+    'stop_gained': 'premature stop',
+    'stop_lost': 'stop loss',
+    'start_lost': 'start loss',
+    'insertion': 'in-frame insertion',
+    'deletion': 'in-frame deletion',
+}
 
 
 def _parse_numeric_value(value_str: str) -> float | None:
@@ -967,6 +992,542 @@ def _build_potential_effects_rows(
         'info_icon': _load_svg_data_url('info.svg'),
         'search_icon': _load_svg_data_url('search.svg'),
         'reset_icon': _load_svg_data_url('reset_filter.svg'),
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Summary tab helpers
+# ──────────────────────────────────────────────────────────────────────
+
+def _join_english_list(items: list[str]) -> str:
+    """Join a list of strings with commas and a final Oxford 'and'."""
+    if len(items) == 1:
+        return items[0]
+    if len(items) == 2:
+        return f'{items[0]} and {items[1]}'
+    return ', '.join(items[:-1]) + f', and {items[-1]}'
+
+
+def _phenotype_sentence(stats: dict) -> str:
+    """
+    Build a concise phenotype-distribution sentence for one drug.
+
+    Returns an empty string when all evidence is of unknown phenotype.
+    """
+    parts: list[str] = []
+    if stats['resistant']:
+        n = stats['resistant']
+        parts.append(f"{n} {'mutation' if n == 1 else 'mutations'} associated with resistance")
+    if stats['intermediate']:
+        n = stats['intermediate']
+        parts.append(f"{n} with an intermediate phenotype")
+    if stats['sensitive']:
+        n = stats['sensitive']
+        parts.append(f"{n} associated with drug sensitivity")
+    if not parts:
+        return ''
+    return _join_english_list(parts)
+
+
+def _range_sentence(ranges: dict[str, int]) -> str:
+    """Format IC50/fold-IC50 range data as a short parenthetical phrase."""
+    if not ranges:
+        return ''
+    ordered = sorted(ranges.items(), key=lambda item: (-item[1], item[0].lower()))
+    labels = [label for label, _ in ordered[:3]]
+    return f"quantitative values: {_join_english_list(labels)}"
+
+
+def _build_summary_context(
+    result: ProfilingResult,
+    display_names: dict[str, str],
+    rules: list[ResistanceRule] | None,
+    database_hits: dict,
+    similarity_entries: dict,
+    project_conn: sqlite3.Connection | None,
+) -> dict:
+    """
+    Build the complete context dict for the Summary tab.
+
+    :param result: profiling result
+    :param display_names: feature display-name overrides
+    :param rules: resistance rules for coverage assessment
+    :param database_hits: context dict from _build_database_hits_rows
+    :param similarity_entries: context dict from _build_potential_effects_rows
+    :param project_conn: optional project DB connection for algorithm lookup
+    :return: summary context dict
+    """
+    sequence_assessment = _build_sequence_assessment(result, display_names)
+    coverage = _build_coverage_context(result, rules, display_names)
+    mutation_profile = _build_mutation_profile(result, display_names)
+    narrative = _build_summary_narrative(
+        result, display_names, database_hits, similarity_entries, sequence_assessment,
+    )
+    drug_table = _build_drug_interpretation_table(database_hits, project_conn)
+    return {
+        'sequence_assessment': sequence_assessment,
+        'coverage': coverage,
+        'mutation_profile': mutation_profile,
+        'narrative': str(narrative),
+        'drug_table': drug_table,
+        'dna_icon': _load_svg_data_url('dna.svg'),
+    }
+
+
+def _build_sequence_assessment(
+    result: ProfilingResult,
+    display_names: dict[str, str],
+) -> dict:
+    """
+    Summarise variant types and high-impact consequences across all CDS annotations.
+
+    :param result: profiling result
+    :param display_names: feature display-name overrides
+    :return: dict with mutation counts, feature lists, and high-impact breakdown
+    """
+    feature_seen: set[str] = set()
+    high_impact_features: set[str] = set()
+    high_impact_by_consequence: Counter[str] = Counter()
+    non_synonymous_count = 0
+
+    for ann in result.cds_annotations:
+        feature = display_names.get(ann.feature_name, ann.feature_name)
+        feature_seen.add(feature)
+        if ann.consequence not in ('synonymous_variant', 'synonymous'):
+            non_synonymous_count += 1
+        if ann.consequence in _HIGH_IMPACT_CONSEQUENCES:
+            high_impact_features.add(feature)
+            high_impact_by_consequence[ann.consequence] += 1
+
+    high_impact_count = sum(high_impact_by_consequence.values())
+    high_impact_type_parts = [
+        f"{cnt} {_CONSEQUENCE_LABELS[c]}{'s' if cnt != 1 else ''}"
+        for c in _CONSEQUENCE_LABELS
+        if (cnt := high_impact_by_consequence.get(c, 0))
+    ]
+    return {
+        'total_mutations': len(result.cds_annotations),
+        'non_synonymous_count': non_synonymous_count,
+        'features_with_mutations': sorted(feature_seen),
+        'features_count': len(feature_seen),
+        'high_impact_count': high_impact_count,
+        'high_impact_types': _join_english_list(high_impact_type_parts) if high_impact_type_parts else '',
+        'high_impact_features': sorted(high_impact_features),
+    }
+
+
+def _build_coverage_context(
+    result: ProfilingResult,
+    rules: list[ResistanceRule] | None,
+    display_names: dict[str, str],
+) -> dict:
+    """
+    Compute assessable vs. unassessable rule positions based on coverage gaps.
+
+    :param result: profiling result
+    :param rules: resistance rules to cross-reference against coverage gaps
+    :param display_names: feature display-name overrides
+    :return: coverage context dict; 'available' is False when no rule positions exist
+    """
+    rule_positions = {(rule.feature_name, rule.position) for rule in (rules or [])}
+    if not rule_positions:
+        return {'available': False}
+
+    feature_gaps: dict[str, list[CoverageGap]] = {}
+    for gap in result.coverage_gaps:
+        feature_gaps.setdefault(gap.feature_name, []).append(gap)
+
+    total_rule_positions = len(rule_positions)
+    unassessed_total = sum(
+        1 for feature, pos in rule_positions
+        if any(gap.codon_start <= pos <= gap.codon_end for gap in feature_gaps.get(feature, []))
+    )
+    assessed_rule_positions = total_rule_positions - unassessed_total
+    assessed_pct = round(100 * assessed_rule_positions / total_rule_positions)
+
+    features_with_rules = {feature for feature, _ in rule_positions}
+    per_feature: list[dict] = []
+    for feature_name in sorted(features_with_rules):
+        feature_positions = {pos for f, pos in rule_positions if f == feature_name}
+        feat_total = len(feature_positions)
+        feat_unassessed = sum(
+            1 for pos in feature_positions
+            if any(gap.codon_start <= pos <= gap.codon_end for gap in feature_gaps.get(feature_name, []))
+        )
+        feat_assessed = feat_total - feat_unassessed
+        per_feature.append({
+            'feature': display_names.get(feature_name, feature_name),
+            'total': feat_total,
+            'assessed': feat_assessed,
+            'unassessed': feat_unassessed,
+            'assessed_pct': round(100 * feat_assessed / feat_total) if feat_total else 100,
+        })
+
+    return {
+        'available': True,
+        'total_rule_positions': total_rule_positions,
+        'unassessed_rule_positions': unassessed_total,
+        'assessed_rule_positions': assessed_rule_positions,
+        'assessed_pct': assessed_pct,
+        'per_feature': per_feature,
+    }
+
+
+def _build_mutation_profile(
+    result: ProfilingResult,
+    display_names: dict[str, str],
+) -> list[dict]:
+    """
+    Group amino acid changes by feature for the mutation profile tile.
+
+    :param result: profiling result
+    :param display_names: feature display-name overrides
+    :return: list of {feature, mutations} dicts ordered by feature name
+    """
+    feature_aa_changes: dict[str, list[str]] = {}
+    for ann in result.cds_annotations:
+        feature = display_names.get(ann.feature_name, ann.feature_name)
+        aa_change = (
+            f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+            if ann.ref_aa and ann.alt_aa
+            else ann.consequence
+        )
+        feature_aa_changes.setdefault(feature, []).append(aa_change)
+
+    return [
+        {'feature': feature, 'mutations': ' + '.join(changes)}
+        for feature, changes in sorted(feature_aa_changes.items())
+    ]
+
+
+def _build_summary_narrative(
+    result: ProfilingResult,
+    display_names: dict[str, str],
+    database_hits: dict,
+    similarity_entries: dict,
+    sequence_assessment: dict,
+) -> Markup:
+    """
+    Build a natural-language English narrative for the interpretation summary tile.
+
+    Describes resistance evidence per drug, phenotype distribution, quantitative data,
+    similarity hints, high-impact variants, and coverage gaps.
+
+    :param result: profiling result
+    :param display_names: feature display-name overrides
+    :param database_hits: context dict from _build_database_hits_rows
+    :param similarity_entries: context dict from _build_potential_effects_rows
+    :param sequence_assessment: context dict from _build_sequence_assessment
+    :return: HTML Markup narrative string
+    """
+    hit_rows = database_hits.get('rows', [])
+    similarity_rows = similarity_entries.get('rows', [])
+
+    by_drug: dict[str, dict] = {}
+    for row in hit_rows:
+        drug = (row.get('drug') or 'Unknown').strip()
+        metrics = row.get('metrics', [])
+        entry = by_drug.setdefault(drug, {
+            'total': 0, 'resistant': 0, 'intermediate': 0, 'sensitive': 0,
+            'unknown': 0, 'clinical': 0, 'ranges': {},
+        })
+        entry['total'] += 1
+
+        phenotype = ''
+        clinical_phenotype = ''
+        for m in metrics:
+            if m.get('label') == 'Phenotype':
+                phenotype = (m.get('value') or '').strip().lower()
+            elif m.get('label') == 'Clinical phenotype':
+                clinical_phenotype = (m.get('value') or '').strip().lower()
+
+        eff_pheno = phenotype if phenotype and phenotype != 'unknown' else clinical_phenotype
+        if eff_pheno in ('resistant', 'intermediate', 'sensitive'):
+            entry[eff_pheno] += 1
+        else:
+            entry['unknown'] += 1
+
+        if clinical_phenotype and clinical_phenotype != 'unknown':
+            entry['clinical'] += 1
+
+        fold_val = ''
+        ic50_val = ''
+        for m in metrics:
+            if m.get('label') == 'Fold IC50':
+                fold_val = (m.get('value') or '').strip()
+            elif m.get('label') == 'IC50':
+                ic50_val = (m.get('value') or '').strip()
+        if fold_val:
+            label = f'fold-IC50 {fold_val}'
+            entry['ranges'][label] = entry['ranges'].get(label, 0) + 1
+        elif ic50_val:
+            label = f'IC50 {ic50_val}'
+            entry['ranges'][label] = entry['ranges'].get(label, 0) + 1
+
+    affected_features: set[str] = set()
+    for row in hit_rows:
+        for mg in row.get('mutation_groups', []):
+            feat = (mg.get('feature') or '').strip()
+            if feat:
+                affected_features.add(feat)
+
+    coverage_gap_features = sorted({
+        display_names.get(gap.feature_name, gap.feature_name)
+        for gap in result.coverage_gaps
+    })
+
+    sentences: list[str] = []
+
+    if by_drug:
+        drug_names = sorted(by_drug)
+        n_drugs = len(drug_names)
+        n_hits = len(hit_rows)
+
+        total_resistant = sum(s['resistant'] for s in by_drug.values())
+        total_intermediate = sum(s['intermediate'] for s in by_drug.values())
+        total_sensitive = sum(s['sensitive'] for s in by_drug.values())
+
+        drug_list = _join_english_list(drug_names)
+        hit_noun = 'database hit' if n_hits == 1 else 'database hits'
+        drug_noun = 'drug' if n_drugs == 1 else 'drugs'
+
+        if total_resistant or total_intermediate:
+            subject = 'Resistance-associated mutations'
+        elif total_sensitive:
+            subject = 'Sensitivity-associated mutations'
+        else:
+            subject = 'Mutations with no resistance phenotype classification'
+
+        location_parts: list[str] = []
+        if affected_features:
+            feature_list = _join_english_list(
+                [f'<em>{escape(g.upper())}</em>' for g in sorted(affected_features)]
+            )
+            location_parts.append(f'in {feature_list}')
+        if result.organism:
+            location_parts.append(f'of {escape(result.organism)}')
+        location_clause = (' ' + ' '.join(location_parts)) if location_parts else ''
+
+        sentences.append(
+            f"{subject}{location_clause} were detected "
+            f"for {n_drugs} {drug_noun} ({drug_list}), with {n_hits} {hit_noun} in total."
+        )
+
+        for drug_name in drug_names:
+            stats = by_drug[drug_name]
+            n = stats['total']
+            pheno = _phenotype_sentence(stats)
+            range_note = _range_sentence(stats['ranges'])
+
+            sentence = f"For {drug_name}, {n} database {'hit was' if n == 1 else 'hits were'} identified"
+            if pheno:
+                sentence += f", including {pheno}"
+            sentence += '.'
+            sentences.append(sentence)
+
+            if stats['clinical'] or range_note:
+                c = stats['clinical']
+                if c and range_note:
+                    followup = (
+                        f"For {drug_name}, clinical phenotype data are available for "
+                        f"{c} of {'this hit' if n == 1 else 'these hits'} ({range_note})."
+                    )
+                elif c:
+                    followup = (
+                        f"For {drug_name}, clinical phenotype data are available for "
+                        f"{c} of {'this hit' if n == 1 else 'these hits'}."
+                    )
+                else:
+                    followup = f"Reported quantitative data for {drug_name}: {range_note}."
+                sentences.append(followup)
+    else:
+        sentences.append(
+            'No resistance mutations matching database entries were identified in this sample.'
+        )
+
+    high_sim = sum(1 for row in similarity_rows if row.get('similarity') == 'high')
+    moderate_sim = sum(1 for row in similarity_rows if row.get('similarity') == 'moderate')
+    similar_total = high_sim + moderate_sim
+    if similar_total:
+        sim_parts: list[str] = []
+        if high_sim:
+            sim_parts.append(f"{high_sim} with high amino acid similarity")
+        if moderate_sim:
+            sim_parts.append(f"{moderate_sim} with moderate amino acid similarity")
+        sentences.append(
+            f"In addition, {similar_total} substitution{'s' if similar_total != 1 else ''} "
+            f"at known resistance positions {'were' if similar_total != 1 else 'was'} detected "
+            f"that do not exactly match a database entry but show biochemical similarity "
+            f"to a known resistance mutation ({_join_english_list(sim_parts)}). "
+            f"Further evaluation of {'these variants' if similar_total != 1 else 'this variant'} "
+            f"is recommended."
+        )
+
+    high_impact_count = sequence_assessment.get('high_impact_count', 0)
+    if high_impact_count:
+        n = high_impact_count
+        by_consequence: Counter[str] = Counter(
+            ann.consequence for ann in result.cds_annotations
+            if ann.consequence in _HIGH_IMPACT_CONSEQUENCES
+        )
+        type_parts = [
+            f"{cnt} {_CONSEQUENCE_LABELS[c]}{'s' if cnt != 1 else ''}"
+            for c in _CONSEQUENCE_LABELS
+            if (cnt := by_consequence.get(c, 0))
+        ]
+        type_list = _join_english_list(type_parts) if type_parts else 'high-impact'
+        hi_features = sequence_assessment.get('high_impact_features', [])
+        feature_clause = ''
+        if hi_features:
+            hi_feature_list = _join_english_list(
+                [f'<em>{escape(g.upper())}</em>' for g in hi_features]
+            )
+            feature_clause = f' in {hi_feature_list}'
+        sentences.append(
+            f"Moreover, {'one' if n == 1 else n} high-impact variant{'s were' if n != 1 else ' was'} "
+            f"identified{feature_clause} ({type_list}) that may disrupt protein structure or function "
+            f"and should be interpreted with caution."
+        )
+
+    if coverage_gap_features:
+        feature_list = _join_english_list(
+            [f'<em>{escape(g.upper())}</em>' for g in coverage_gap_features]
+        )
+        n_features = len(coverage_gap_features)
+        part = 'part' if n_features == 1 else 'parts'
+        sentences.append(
+            f"Due to coverage gaps, {part} of {feature_list} could not be fully assessed "
+            f"for resistance mutations."
+        )
+
+    return Markup(' '.join(sentences))
+
+
+def _build_drug_interpretation_table(
+    database_hits: dict,
+    project_conn: sqlite3.Connection | None,
+) -> dict:
+    """
+    Build per-drug summary rows for the drug interpretation table.
+
+    Aggregates hit counts and phenotypes per drug, optionally computes an assessment
+    using the stored drug_interpretation algorithm.
+
+    :param database_hits: context dict from _build_database_hits_rows
+    :param project_conn: optional project DB connection for algorithm lookup
+    :return: dict with rows, groups, and capability flags
+    """
+    hit_rows = database_hits.get('rows', [])
+    if not hit_rows:
+        return {
+            'rows': [], 'groups': {}, 'has_groups': False,
+            'has_phenotypes': False, 'has_scores': False, 'has_assessment': False,
+        }
+
+    by_drug: dict[str, dict] = {}
+    for row in hit_rows:
+        drug = (row.get('drug') or 'Unknown').strip()
+        drug_class = row.get('drug_class', '')
+        metrics = row.get('metrics', [])
+
+        if drug not in by_drug:
+            by_drug[drug] = {
+                'name': drug,
+                'drug_class': drug_class,
+                'hit_count': 0,
+                'phenotypes': [],
+                'scores': [],
+                'assessment': '',
+                'dominant_phenotype': '',
+                'phenotype_badge_class': '',
+                'assessment_badge_class': '',
+            }
+
+        by_drug[drug]['hit_count'] += 1
+
+        for m in metrics:
+            if m.get('label') in ('Phenotype', 'Clinical phenotype'):
+                val = (m.get('value') or '').strip().lower()
+                if val and val != 'unknown':
+                    by_drug[drug]['phenotypes'].append(val)
+                break
+
+        for m in metrics:
+            if m.get('label') == 'Score':
+                val = (m.get('value') or '').strip()
+                if val:
+                    by_drug[drug]['scores'].append(val)
+                break
+
+    has_phenotypes = any(d['phenotypes'] for d in by_drug.values())
+    has_scores = any(d['scores'] for d in by_drug.values())
+    has_groups = any(d['drug_class'] for d in by_drug.values())
+
+    drug_interp_config: dict | None = None
+    if project_conn is not None:
+        try:
+            interp_row = project_conn.execute(
+                "SELECT config_json FROM interpretation_algorithm "
+                "WHERE algorithm_name = 'drug_interpretation' LIMIT 1"
+            ).fetchone()
+            if interp_row:
+                drug_interp_config = json.loads(interp_row['config_json'])
+        except sqlite3.Error as exc:
+            logger.debug('Failed to load drug_interpretation algorithm: %s', exc)
+
+    has_assessment = drug_interp_config is not None
+
+    if has_assessment:
+        method = drug_interp_config.get('method', '')
+        thresholds = drug_interp_config.get('thresholds', {})
+        resistant_threshold = thresholds.get('resistant', 1)
+        intermediate_threshold = thresholds.get('intermediate')
+
+        for drug_data in by_drug.values():
+            if method == 'by_phenotype':
+                resistant_count = drug_data['phenotypes'].count('resistant')
+                intermediate_count = drug_data['phenotypes'].count('intermediate')
+                if resistant_count >= resistant_threshold:
+                    drug_data['assessment'] = 'resistant'
+                elif intermediate_threshold is not None and intermediate_count >= intermediate_threshold:
+                    drug_data['assessment'] = 'intermediate'
+                else:
+                    drug_data['assessment'] = 'sensitive'
+            elif method == 'by_score':
+                total_score = sum(
+                    v for s in drug_data['scores'] if (v := _parse_numeric_value(s)) is not None
+                )
+                if total_score >= resistant_threshold:
+                    drug_data['assessment'] = 'resistant'
+                elif intermediate_threshold is not None and total_score >= intermediate_threshold:
+                    drug_data['assessment'] = 'intermediate'
+                else:
+                    drug_data['assessment'] = 'sensitive'
+
+    for drug_data in by_drug.values():
+        pheno_counts: Counter[str] = Counter(drug_data['phenotypes'])
+        if pheno_counts:
+            dominant = pheno_counts.most_common(1)[0][0]
+            drug_data['dominant_phenotype'] = dominant
+            drug_data['phenotype_badge_class'] = _PHENOTYPE_BADGE_CLASS.get(dominant, '')
+        drug_data['assessment_badge_class'] = _PHENOTYPE_BADGE_CLASS.get(
+            drug_data['assessment'].lower(), ''
+        )
+
+    drug_rows = sorted(by_drug.values(), key=lambda d: d['name'].lower())
+
+    groups: dict[str, list[dict]] = {}
+    for drug_data in drug_rows:
+        group_key = drug_data.get('drug_class') or 'Other'
+        groups.setdefault(group_key, []).append(drug_data)
+
+    return {
+        'rows': drug_rows,
+        'groups': groups,
+        'has_groups': has_groups,
+        'has_phenotypes': has_phenotypes,
+        'has_scores': has_scores,
+        'has_assessment': has_assessment,
     }
 
 
