@@ -153,7 +153,7 @@ def _suppress_ruleless_overlap_annotations(
     """
     Filter out annotations for features that have no rules when multiple features overlap a variant.
 
-    Groups annotations by the underlying variant object identity (same VariantCall).
+    Groups annotations by the underlying variant locus and alleles.
     For groups with more than one annotation (overlapping features):
     - If at least one feature_name is in rule_feature_names, keep only those annotations.
     - If no feature_name is in rule_feature_names, keep all (variants in ruleless features alone).
@@ -164,14 +164,14 @@ def _suppress_ruleless_overlap_annotations(
     :param rule_feature_names: set of feature names that have at least one rule
     :return: filtered list of annotated variants
     """
-    # Group by variant object identity (each annotation for the same underlying variant
-    # shares the exact same VariantCall object).
-    variant_groups: dict[int, list[AnnotatedVariant]] = {}
+    # Group by variant coordinates/alleles because annotation expansion can emit
+    # per-feature VariantCall copies for the same biological event.
+    variant_groups: dict[tuple[str, int, str, str], list[AnnotatedVariant]] = {}
     for ann in annotations:
-        variant_id = id(ann.variant)
-        if variant_id not in variant_groups:
-            variant_groups[variant_id] = []
-        variant_groups[variant_id].append(ann)
+        variant_key = (ann.variant.chrom, ann.variant.pos, ann.variant.ref, ann.variant.alt)
+        if variant_key not in variant_groups:
+            variant_groups[variant_key] = []
+        variant_groups[variant_key].append(ann)
 
     filtered: list[AnnotatedVariant] = []
     for group in variant_groups.values():

@@ -11,7 +11,12 @@ from urllib.parse import quote
 
 from jinja2 import BaseLoader, Environment
 
-from respro.db.models import FeatureRecord, ProfilingResult, ResistanceRule
+from respro.db.models import AnnotatedVariant, FeatureRecord, ProfilingResult, ResistanceRule
+from respro.report.alignment_visualization import (
+    FeatureAlignment,
+    build_alignment_html,
+    build_feature_alignments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +91,14 @@ def build_report_context(
     drug_stats = _build_drug_stats(result)
     feature_stats = _build_feature_stats(result, features)
 
+    feature_alignments: dict[str, FeatureAlignment] = {}
+    if result.query_sequence and result.feature_matches:
+        feature_alignments = build_feature_alignments(
+            result.query_sequence, result.feature_matches
+        )
+
+    all_mutations_rows = _build_all_mutations_rows(result, feature_alignments, display_names)
+
     db_drug_cards = _load_drug_cards(project_conn, detected_drug_names)
     db_drug_cards_by_name = {
         (card.get('name') or '').strip().lower(): card
@@ -124,6 +137,11 @@ def build_report_context(
             'picture_in_picture_icon': _load_svg_data_url('graph.svg'),
         },
         'tabs': ['Summary', 'Database hits', 'All Mutations', 'Sequence Features', 'Drugs'],
+        'all_mutations': {
+            'rows': all_mutations_rows,
+            'count': len(all_mutations_rows),
+            'pairwise_icon': _load_svg_data_url('pairwise.svg'),
+        },
         'sequence_features': {
             'cards': feature_cards,
             'count': len(feature_cards),
@@ -133,7 +151,7 @@ def build_report_context(
             'cards': drug_cards,
             'count': len(drug_cards),
             'structure_icon': _load_svg_data_url('structure.svg'),
-            'pubchem_icon': _load_svg_data_url('icon-database.svg'),
+            'pubchem_icon': _load_svg_data_url('link.svg'),
         },
     }
 
@@ -214,6 +232,63 @@ def write_html(
     )
     output_path.write_text(html_content, encoding='utf-8')
     return output_path
+
+
+def _build_all_mutations_rows(
+    result: ProfilingResult,
+    feature_alignments: dict[str, FeatureAlignment],
+    display_names: dict[str, str] | None = None,
+) -> list[dict]:
+    """
+    Build one row per CDS annotation for the All Mutations tab.
+
+    Each row carries the variant details, DB-hit status (single-rule and/or formula),
+    and an optional inline alignment block. Using annotation-level rows (rather than
+    variant-level) ensures overlapping features each produce their own row with the
+    correct per-feature alignment.
+
+    :param result: profiling result
+    :param feature_alignments: gapped alignments keyed by feature name
+    :param display_names: optional feature display-name overrides
+    :return: list of row dicts for the template
+    """
+    formula_hit_ann_ids: set[int] = set()
+    for formula_hit in result.formula_hits:
+        for ann in formula_hit.matched_variants:
+            formula_hit_ann_ids.add(id(ann))
+
+    rows: list[dict] = []
+    for ann in result.cds_annotations:
+        alignment_html = None
+        if ann.feature_name in feature_alignments:
+            alignment_html = build_alignment_html(ann, feature_alignments[ann.feature_name])
+
+        is_single_hit = ann.is_resistance_hit
+        is_formula_hit = id(ann) in formula_hit_ann_ids
+        display_consequence = 'complex' if ann.consequence == 'inframe_complex' else ann.consequence
+
+        pos_1based = ann.variant.pos + 1
+        nt_change = f'{ann.variant.ref}{pos_1based}{ann.variant.alt}'
+        aa_change = (
+            f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+            if ann.ref_aa and ann.alt_aa
+            else ''
+        )
+
+        rows.append({
+            'feature': (display_names or {}).get(ann.feature_name, ann.feature_name),
+            'nt_change': nt_change,
+            'aa_change': aa_change,
+            'consequence': display_consequence,
+            'allele_freq': ann.variant.allele_freq,
+            'af_bin': ann.af_bin,
+            'is_single_hit': is_single_hit,
+            'is_formula_hit': is_formula_hit,
+            'is_database_hit': is_single_hit or is_formula_hit,
+            'alignment_html': str(alignment_html) if alignment_html is not None else '',
+            'has_alignment': alignment_html is not None,
+        })
+    return rows
 
 
 def _build_feature_display_names(features: list[FeatureRecord] | None) -> dict[str, str]:

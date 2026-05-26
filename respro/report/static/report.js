@@ -147,4 +147,19 @@ document.addEventListener('DOMContentLoaded', function () {
       closeModal(sequenceModal);
     }
   });
+
+  document.querySelectorAll('.mutation-alignment-toggle').forEach(function (button) {
+    button.addEventListener('click', function (event) {
+      event.stopPropagation();
+      const rowId = this.getAttribute('data-alignment-row');
+      const alignmentRow = document.getElementById(rowId);
+      if (!alignmentRow) {
+        return;
+      }
+      const isOpen = !alignmentRow.hidden;
+      alignmentRow.hidden = isOpen;
+      this.setAttribute('aria-expanded', String(!isOpen));
+      this.classList.toggle('is-active', !isOpen);
+    });
+  });
 });

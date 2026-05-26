@@ -980,3 +980,25 @@ class TestSuppressRulelessOverlapAnnotations:
         # Should survive unchanged
         assert len(filtered) == 1
         assert filtered[0].feature_name == ''
+
+    def test_overlapping_with_copied_variant_objects_keeps_only_ruled(self) -> None:
+        """
+        Overlapping annotations may carry copied VariantCall instances for one locus.
+        Result: suppression must still keep only ruled features.
+        """
+        ruled_variant = VariantCall(
+            chrom='ref', pos=2299, ref='A', alt='G', allele_freq=0.9, depth=100,
+        )
+        ruleless_variant = VariantCall(
+            chrom='ref', pos=2299, ref='A', alt='G', allele_freq=0.9, depth=100,
+        )
+
+        annotations = [
+            AnnotatedVariant(variant=ruled_variant, feature_name='gag-pol_5'),
+            AnnotatedVariant(variant=ruleless_variant, feature_name='gag-pol_6'),
+        ]
+
+        filtered = _suppress_ruleless_overlap_annotations(annotations, {'gag-pol_5'})
+
+        assert len(filtered) == 1
+        assert filtered[0].feature_name == 'gag-pol_5'

@@ -611,3 +611,215 @@ body {
     padding: 1rem;
   }
 }
+
+/* ─── All Mutations table ─────────────────────────────────────────────────── */
+
+.mutation-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+}
+
+.mutation-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.mutation-table thead tr {
+  border-bottom: 2px solid var(--line);
+  background: var(--paper-soft);
+}
+
+.mutation-table th {
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  font-weight: 700;
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.mutation-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  vertical-align: middle;
+}
+
+.mutation-table tbody tr:last-child > td {
+  border-bottom: none;
+}
+
+.mutation-table tbody tr:hover > td {
+  background: var(--paper-soft);
+}
+
+.mutation-row--hit > td {
+  background: #f0f9f8;
+}
+
+.mutation-row--hit:hover > td {
+  background: #e5f4f2;
+}
+
+.mutation-table-action-col {
+  width: 2.5rem;
+  text-align: center;
+}
+
+.mutation-nt,
+.mutation-aa {
+  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.mutation-freq {
+  font-feature-settings: 'tnum';
+  white-space: nowrap;
+}
+
+/* Consequence badge */
+.mutation-consequence {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  background: var(--paper-soft);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.mutation-consequence--missense     { background: #fde8d0; color: #9a3800; }
+.mutation-consequence--synonymous   { background: #e8f7ef; color: #177040; }
+.mutation-consequence--frameshift   { background: #fee2e2; color: #b91c1c; }
+.mutation-consequence--stop_gained  { background: #fee2e2; color: #b91c1c; }
+.mutation-consequence--insertion    { background: #ede9fe; color: #5b21b6; }
+.mutation-consequence--deletion     { background: #fef9c3; color: #854d0e; }
+.mutation-consequence--complex      { background: #f0f9ff; color: #0369a1; }
+
+/* Database hit pills */
+.mutation-db-status {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.db-hit-pill {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.db-hit-pill--single  { background: #e8f7ef; color: #177040; border: 1px solid #b6e8cc; }
+.db-hit-pill--formula { background: #dbeafe; color: #1d4ed8; border: 1px solid #bfdbfe; }
+.db-hit-pill--none    { background: transparent; color: var(--muted); border: none; }
+
+/* Alignment toggle button */
+.mutation-alignment-toggle {
+  width: 2rem;
+  height: 2rem;
+}
+
+.mutation-alignment-toggle img {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.mutation-alignment-toggle.is-active {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* Inline alignment row */
+.mutation-alignment-row > td {
+  background: var(--paper-soft) !important;
+  border-bottom: 1px dashed var(--line);
+  padding: 0.65rem 0.75rem;
+}
+
+.mutation-alignment-body {
+  display: inline-block;
+}
+
+/* ─── Alignment block (shared with old report styles) ─────────────────────── */
+
+.aln-block {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  background: var(--surface-strong);
+}
+
+.aln-meta {
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
+.aln-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0.08rem 0;
+}
+
+.aln-line-match {
+  color: var(--line-strong);
+}
+
+.aln-label {
+  width: 2.2rem;
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.aln-seq {
+  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0, 'calt' 0;
+  font-size: var(--font-size-sm);
+  line-height: 1.25;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.aln-cell {
+  display: inline-block;
+  width: 0.72em;
+  min-height: 1.15em;
+  box-sizing: border-box;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.aln-match-cell {
+  color: var(--muted);
+}
+
+.aln-sep {
+  display: inline-block;
+  width: 0.5em;
+}
+
+.aln-mutation {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-radius: 2px;
+  font-weight: 700;
+}
+
+.aln-affected {
+  background: #fecaca;
+  box-shadow: inset 0 -2px 0 #991b1b;
+}
