@@ -69,7 +69,7 @@
             </label>
             {% if context.database_hits.has_drug_class %}
             <details class="mutation-filter-menu" data-filter-group="db-hit-drug-class">
-              <summary>Class</summary>
+              <summary>Drug class</summary>
               <div class="mutation-filter-options" data-filter-options="db-hit-drug-class"></div>
             </details>
             {% endif %}
@@ -202,6 +202,153 @@
           {% endif %}
         {% else %}
           <p class="tab-empty-state">No database hits found for this sample.</p>
+        {% endif %}
+      </div>
+      <div id="tab-similarity-to-database-entries" class="tab-content">
+        {% if context.similarity_entries.rows %}
+          <div class="mutation-toolbar" role="region" aria-label="Similarity table filters">
+            <label class="mutation-search" for="sim-search-input">
+              <img src="{{ context.similarity_entries.search_icon }}" alt="" aria-hidden="true">
+              <input
+                id="sim-search-input"
+                class="mutation-search-input"
+                type="search"
+                placeholder="search entries"
+                aria-label="Search similarity entries"
+              >
+            </label>
+            {% if context.similarity_entries.has_drug_class %}
+            <details class="mutation-filter-menu" data-filter-group="sim-drug-class">
+              <summary>Drug class</summary>
+              <div class="mutation-filter-options" data-filter-options="sim-drug-class"></div>
+            </details>
+            {% endif %}
+            <details class="mutation-filter-menu" data-filter-group="sim-drug">
+              <summary>Drug</summary>
+              <div class="mutation-filter-options" data-filter-options="sim-drug"></div>
+            </details>
+            <details class="mutation-filter-menu" data-filter-group="sim-freq">
+              <summary>Frequency</summary>
+              <div class="mutation-filter-options" data-filter-options="sim-freq"></div>
+            </details>
+            <button type="button" class="mutation-reset-button sim-reset-button" aria-label="Reset similarity filters" title="Reset filters">
+              <img src="{{ context.similarity_entries.reset_icon }}" alt="" aria-hidden="true">
+            </button>
+            <button type="button" class="mutation-download-button sim-download-button" aria-label="Download similarity table" title="Download table">
+              Download Table
+            </button>
+          </div>
+          <div class="db-hit-table-wrapper">
+            <table class="db-hit-table sim-table" id="section-similarity">
+              <thead>
+                <tr>
+                  {% if context.similarity_entries.has_drug_class %}<th class="sim-drug-class-th">Drug class</th>{% endif %}
+                  <th>Drug</th>
+                  <th>Mutation</th>
+                  <th>Known Rule</th>
+                  <th>
+                    Similarity to entry
+                    <span class="db-hit-freq-info">
+                      <img class="db-hit-info-icon" src="{{ context.similarity_entries.info_icon }}" alt="info" width="13" height="13">
+                      <div class="db-hit-info-panel">
+                        <p>How biochemically similar the observed amino acid change is to the known resistance mutation at the same position, scored by BLOSUM62.</p>
+                        <p><strong>High</strong> &mdash; BLOSUM62 &ge; 1 (biochemically similar substitution).</p>
+                        <p><strong>Moderate</strong> &mdash; BLOSUM62 = 0 (neutral substitution).</p>
+                        <p><strong>Low</strong> &mdash; BLOSUM62 &lt; 0 (dissimilar substitution).</p>
+                        <p>Indels at indel-rule positions are always scored as <em>moderate</em>.</p>
+                      </div>
+                    </span>
+                  </th>
+                  <th>
+                    Drug sensitivity data
+                    <span class="db-hit-freq-info">
+                      <img class="db-hit-info-icon" src="{{ context.similarity_entries.info_icon }}" alt="info" width="13" height="13">
+                      <div class="db-hit-info-panel">
+                        <p>Quantitative or categorical resistance data for the <strong>known rule</strong> at this position.</p>
+                        <p><strong>Phenotype / Clinical phenotype</strong> &mdash; qualitative classification (e.g. resistant, intermediate, sensitive).</p>
+                        <p><strong>IC50 / Fold IC50</strong> &mdash; inhibitory concentration or fold-change relative to wild type.</p>
+                        <p><strong>Score</strong> &mdash; database-specific numeric score.</p>
+                      </div>
+                    </span>
+                  </th>
+                  <th>
+                    Frequency classification
+                    <span class="db-hit-freq-info">
+                      <img class="db-hit-info-icon" src="{{ context.similarity_entries.info_icon }}" alt="info" width="13" height="13">
+                      <div class="db-hit-info-panel">
+                        <p>Allele frequency bin of the observed variant: high (&ge;75&nbsp;%), intermediate (25&ndash;75&nbsp;%), low (1&ndash;25&nbsp;%).</p>
+                      </div>
+                    </span>
+                  </th>
+                  <th>Source</th>
+                  {% if context.similarity_entries.has_publications %}<th>References</th>{% endif %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in context.similarity_entries.rows %}
+                  <tr
+                    class="sim-row"
+                    data-sim-drug-class-value="{{ row.drug_class | e }}"
+                    data-sim-drug-value="{{ row.drug | e }}"
+                    data-sim-freq-value="{{ row.af_bin | e }}"
+                    data-pub-urls="{{ row.pub_citations | selectattr('url') | map(attribute='url') | join(' ') | e }}"
+                  >
+                    {% if context.similarity_entries.has_drug_class %}<td class="sim-drug-class-cell">{{ row.drug_class or '—' }}</td>{% endif %}
+                    <td class="sim-drug-cell">{{ row.drug }}</td>
+                    <td class="sim-mutation-cell">{{ row.mutation }}</td>
+                    <td class="sim-rule-cell">{{ row.rule_change }}</td>
+                    <td>
+                      <span class="sim-badge sim-badge--{{ row.similarity }}">{{ row.similarity }}</span>
+                    </td>
+                    <td>
+                      <div class="db-hit-cell-inner">
+                        {% for metric in row.metrics %}
+                          {% if metric.badge_class %}
+                            <span class="db-hit-metric db-hit-metric--badge {{ metric.badge_class }}">{{ metric.label }}: <strong>{{ metric.value }}</strong></span>
+                          {% else %}
+                            <span class="db-hit-metric">{{ metric.label }}: {{ metric.value }}</span>
+                          {% endif %}
+                        {% endfor %}
+                        {% if not row.metrics %}<span class="db-hit-metric">—</span>{% endif %}
+                      </div>
+                    </td>
+                    <td>
+                      <span class="db-hit-af-chip db-hit-af--{{ row.af_bin }}">{{ row.af_bin }}</span>
+                    </td>
+                    <td class="sim-source-cell">{{ row.source or '—' }}</td>
+                    {% if context.similarity_entries.has_publications %}
+                      <td class="sim-pubs-cell">
+                        {% for cit in row.pub_citations %}
+                          {% if cit.url %}
+                            <a class="db-hit-pub-link" href="{{ cit.url }}" target="_blank" rel="noopener noreferrer">[{{ cit.num }}]</a>
+                          {% else %}
+                            <span class="db-hit-pub-link">[{{ cit.num }}]</span>
+                          {% endif %}
+                        {% endfor %}
+                      </td>
+                    {% endif %}
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if context.similarity_entries.bibliography %}
+            <div class="db-hit-bibliography">
+              <p class="db-hit-bib-title">References</p>
+              {% for entry in context.similarity_entries.bibliography %}
+                <p class="db-hit-bib-entry">
+                  <span class="db-hit-bib-num">[{{ entry.num }}]</span>
+                  {% if entry.has_url %}
+                    <a class="db-hit-bib-link" href="{{ entry.url }}" target="_blank" rel="noopener noreferrer">{{ entry.label }}</a>
+                  {% else %}
+                    <span>{{ entry.label }}</span>
+                  {% endif %}
+                </p>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% else %}
+          <p class="tab-empty-state">No similarity matches found for this sample.</p>
         {% endif %}
       </div>
       <div id="tab-all-mutations" class="tab-content">

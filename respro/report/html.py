@@ -14,6 +14,7 @@ from urllib.parse import quote
 
 from jinja2 import BaseLoader, Environment
 
+from respro.core.annotation import classify_similarity
 from respro.db.models import (
     FeatureRecord,
     ProfilingResult,
@@ -69,8 +70,6 @@ def build_report_context(
     :param features: optional feature records for display names
     :return: dictionary of context variables for Jinja2 template
     """
-    _ = rules
-
     summary = result.summary_dict()
     has_database_hit = result.database_hit_count > 0
 
@@ -109,6 +108,9 @@ def build_report_context(
     metric_thresholds = _load_numeric_metric_thresholds(project_conn)
     drug_class_map = _load_drug_class_map(project_conn)
     database_hits = _build_database_hits_rows(result, display_names, metric_thresholds, drug_class_map)
+    similarity_entries = _build_potential_effects_rows(
+        result, rules or [], display_names, metric_thresholds, drug_class_map
+    )
 
     db_drug_cards = _load_drug_cards(project_conn, detected_drug_names)
     db_drug_cards_by_name = {
@@ -146,8 +148,16 @@ def build_report_context(
             'meta_primary': ' · '.join([part for part in primary_parts if part]),
             'meta_secondary': ' · '.join([part for part in secondary_parts if part]),
         },
-        'tabs': ['Summary', 'Database Hits', 'All Mutations', 'Sequence Feature Information', 'Drug Information'],
+        'tabs': [
+            'Summary',
+            'Database Hits',
+            *(['Similarity to Database Entries'] if similarity_entries['count'] else []),
+            'All Mutations',
+            'Sequence Feature Information',
+            'Drug Information',
+        ],
         'database_hits': database_hits,
+        'similarity_entries': similarity_entries,
         'all_mutations': {
             'rows': all_mutations_rows,
             'count': len(all_mutations_rows),
@@ -307,7 +317,7 @@ def _build_all_mutations_rows(
 
 
 # Matches an optional qualifier (>, <, ≥, ≤, ~) followed by a leading number.
-_RE_LEADING_NUM = re.compile(r'^[><=~≥≤≈\s]*(\d+(?:\.\d+)?)')
+_RE_LEADING_NUM = re.compile(r'^[><=~≥≤≈\s]*(-?\d+(?:\.\d+)?)')
 
 
 def _parse_numeric_value(value_str: str) -> float | None:
@@ -813,17 +823,141 @@ def _build_feature_cards(
     return cards
 
 
-def _build_potential_effects_rows(result: ProfilingResult) -> list:
+def _build_potential_effects_rows(
+    result: ProfilingResult,
+    rules: list[ResistanceRule] | None = None,
+    display_names: dict[str, str] | None = None,
+    metric_thresholds: dict[str, tuple[float, float] | None] | None = None,
+    drug_class_map: dict[str, str] | None = None,
+) -> dict:
     """
-    Build rows for potential effects table.
+    Build the Similarity to Database Entries context.
 
-    Phase 2 stub - not yet implemented.
+    For single-rule variants that are NOT direct database hits, find resistance rules at
+    the same feature + codon position and score amino acid similarity via BLOSUM62.
+    Indels at indel-rule positions are reported with 'moderate' similarity.
+    Frameshifts, stop gains, synonymous changes, and complex indels are excluded.
 
     :param result: profiling result
-    :return: list of effect rows
+    :param rules: loaded resistance rules for position-based lookup
+    :param display_names: optional feature display-name overrides
+    :param metric_thresholds: optional mean/std per numeric field for metric tier colouring
+    :param drug_class_map: optional mapping of normalised drug name to drug class
+    :return: dict with 'rows', 'count', 'has_drug_class', 'has_publications', 'bibliography', icons
     """
-    # TODO: Phase 2 - implement potential effects rows
-    return []
+    def _empty() -> dict:
+        return {
+            'rows': [],
+            'count': 0,
+            'has_drug_class': False,
+            'has_publications': False,
+            'bibliography': [],
+            'info_icon': _load_svg_data_url('info.svg'),
+            'search_icon': _load_svg_data_url('search.svg'),
+            'reset_icon': _load_svg_data_url('reset_filter.svg'),
+        }
+
+    if not rules:
+        return _empty()
+
+    rules_by_pos: dict[tuple[str, int], list[ResistanceRule]] = {}
+    for rule in rules:
+        rules_by_pos.setdefault((rule.feature_name, rule.position), []).append(rule)
+
+    excluded_consequences = {'frameshift', 'stop_gained', 'synonymous', 'inframe_complex'}
+    rows: list[dict] = []
+    seen: set[tuple[str, int, str, str]] = set()
+
+    for ann in result.cds_annotations:
+        if ann.is_resistance_hit:
+            continue
+        if ann.consequence in excluded_consequences:
+            continue
+        if not ann.feature_name or not ann.alt_aa:
+            continue
+
+        pos_key = (ann.feature_name, ann.codon_pos)
+        if pos_key not in rules_by_pos:
+            continue
+
+        ann_is_indel = ann.consequence in ('insertion', 'deletion') or len(ann.alt_aa) != 1
+
+        for rule in rules_by_pos[pos_key]:
+            if rule.drug_name == '__formula_component__':
+                continue
+            rule_is_indel = rule.mutation.lower() == 'fsx' or any(ch.isdigit() for ch in rule.mutation)
+            if ann_is_indel and not rule_is_indel:
+                continue
+
+            dedup_key = (ann.feature_name, ann.codon_pos, ann.alt_aa, rule.drug_name)
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+
+            observed_change = (
+                f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+                if ann.ref_aa and ann.alt_aa
+                else ann.alt_aa or ''
+            )
+            rule_change = (
+                f'{rule.reference}{rule.position + 1}{rule.mutation}'
+                if rule.reference and rule.mutation
+                else rule.mutation or ''
+            )
+            similarity = (
+                'moderate' if ann_is_indel
+                else classify_similarity(ann.alt_aa, rule.mutation)
+            )
+
+            feature_name = (display_names or {}).get(ann.feature_name, ann.feature_name)
+            rows.append({
+                'feature': feature_name,
+                'drug': rule.drug_name,
+                'drug_class': (drug_class_map or {}).get(rule.drug_name.strip().lower(), ''),
+                'mutation': observed_change,
+                'rule_change': rule_change,
+                'similarity': similarity,
+                'metrics': _build_rule_metrics(
+                    rule.phenotype, rule.clinical_phenotype,
+                    rule.ic50, rule.fold_ic50, rule.score,
+                    thresholds=metric_thresholds,
+                ),
+                'af_bin': ann.af_bin,
+                'source': rule.source or '',
+                '_raw_pubs': list(rule.publications),
+            })
+
+    rows.sort(key=lambda r: (r['drug'].lower(), r['mutation']))
+
+    bibliography, pub_to_num = _build_bibliography(rows)
+    for row in rows:
+        citations: list[dict] = []
+        seen_nums: set[int] = set()
+        for pub in row.pop('_raw_pubs'):
+            num = pub_to_num.get(_publication_key(pub))
+            if num is None or num in seen_nums:
+                continue
+            seen_nums.add(num)
+            url = ''
+            if pub.doi:
+                url = f'https://doi.org/{pub.doi}'
+            elif pub.pubmed_id:
+                url = f'https://pubmed.ncbi.nlm.nih.gov/{pub.pubmed_id}/'
+            citations.append({'num': num, 'url': url})
+        row['pub_citations'] = citations
+
+    has_publications = any(row['pub_citations'] for row in rows)
+    has_drug_class = bool(drug_class_map) and any(r.get('drug_class') for r in rows)
+    return {
+        'rows': rows,
+        'count': len(rows),
+        'has_drug_class': has_drug_class,
+        'has_publications': has_publications,
+        'bibliography': bibliography,
+        'info_icon': _load_svg_data_url('info.svg'),
+        'search_icon': _load_svg_data_url('search.svg'),
+        'reset_icon': _load_svg_data_url('reset_filter.svg'),
+    }
 
 
 def _load_drug_cards(

@@ -148,6 +148,20 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   });
 
+  // ── Info panel tooltips (position: fixed to escape table scroll container) ─
+  document.querySelectorAll('.db-hit-freq-info').forEach(function (trigger) {
+    const panel = trigger.querySelector('.db-hit-info-panel');
+    if (!panel) { return; }
+    trigger.addEventListener('mouseenter', function () {
+      const rect = trigger.getBoundingClientRect();
+      const panelWidth = 352; // 22rem at 16px base
+      const leftRaw = rect.left - 64; // align left of panel ~4rem left of trigger
+      const left = Math.max(8, Math.min(leftRaw, window.innerWidth - panelWidth - 8));
+      panel.style.left = left + 'px';
+      panel.style.top = (rect.bottom + 6) + 'px';
+    });
+  });
+
   const mutationTab = document.getElementById('tab-all-mutations');
   const mutationTable = mutationTab && mutationTab.querySelector('.mutation-table');
   if (!mutationTable) {
@@ -488,54 +502,63 @@ document.addEventListener('DOMContentLoaded', function () {
           }).join('\t'));
         });
 
-        const blob = new Blob([`${lines.join('\n')}\n`], { type: 'text/tab-separated-values;charset=utf-8' });
-        const blobUrl = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = 'variant_profile.tsv';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(blobUrl);
+        downloadTsv(lines, 'variant_profile.tsv');
       });
     }
 
     applyMutationFilter();
   }
 
-  // ── Database Hits table: search, filter, download ───────────────────────
-  const dbHitTable = document.querySelector('.db-hit-table');
-  if (dbHitTable) {
-    const dbHitTbody = dbHitTable.querySelector('tbody');
-    const dbHitSearchInput = document.getElementById('db-hit-search-input');
-    const dbHitToolbar = dbHitSearchInput && dbHitSearchInput.closest('[role="region"]');
-    const dbHitFilterMenus = Array.from(document.querySelectorAll('.mutation-filter-menu[data-filter-group^="db-hit-"]'));
-    const dbHitResetButton = document.querySelector('.db-hit-reset-button');
-    const dbHitDownloadButton = document.querySelector('.db-hit-download-button');
+  // ── Utility: TSV file download ────────────────────────────────────────────
+  function downloadTsv(lines, filename) {
+    const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/tab-separated-values;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
-    const collectDbHitRows = function () {
-      return Array.from(dbHitTbody.querySelectorAll('.db-hit-row'));
+  // ── Generic faceted-cascade table filter ─────────────────────────────────
+  // Shared by Database Hits and Similarity to Database Entries.
+  //
+  // opts:
+  //   table          – <table> element
+  //   rowSelector    – CSS selector for data rows inside tbody
+  //   fieldConfigs   – [{ field, attr }]: filter-group name → row data-attribute
+  //   searchInput    – search <input> (optional)
+  //   filterMenus    – array of <details> filter menus
+  //   toolbar        – toolbar container for outside-click scope
+  //   resetButton, downloadButton – buttons (optional)
+  //   onRowHidden    – function(row) called when a row is filtered out (optional)
+  //   onDownload     – function(collectRows, table) called on download (optional)
+  function createFacetedTable(opts) {
+    if (!opts.table) { return; }
+    const tbody = opts.table.querySelector('tbody');
+    if (!tbody) { return; }
+
+    const { fieldConfigs, filterMenus, toolbar, searchInput, resetButton, downloadButton } = opts;
+
+    const collectRows = function () {
+      return Array.from(tbody.querySelectorAll(opts.rowSelector));
     };
 
-    const dbHitFieldConfigs = [
-      { field: 'db-hit-drug-class', attr: 'data-drug-class-value' },
-      { field: 'db-hit-drug', attr: 'data-drug-value' },
-      { field: 'db-hit-freq', attr: 'data-freq-value' },
-    ];
-
-    // Build or rebuild the options for one filter from a set of raw values.
-    // checkedValues: Set of values to keep checked; null means check all.
-    const buildDbHitOptions = function (config, rawValues, checkedValues) {
+    // Build or rebuild the checkbox list for one filter.
+    // checkedValues: Set of values to keep checked; null = check all.
+    const buildOptions = function (config, rawValues, checkedValues) {
       const menu = document.querySelector(
         `.mutation-filter-menu[data-filter-group="${config.field}"]`,
       );
-      const optionsContainer = menu && menu.querySelector('.mutation-filter-options');
-      if (!optionsContainer) { return; }
+      const container = menu && menu.querySelector('.mutation-filter-options');
+      if (!container) { return; }
 
       const values = Array.from(new Set(rawValues.filter(Boolean)))
         .sort(function (a, b) { return a.localeCompare(b); });
 
-      optionsContainer.textContent = '';
+      container.textContent = '';
 
       if (values.length > 0) {
         const toggleAll = document.createElement('button');
@@ -543,13 +566,13 @@ document.addEventListener('DOMContentLoaded', function () {
         toggleAll.className = 'mutation-filter-toggle-all';
         toggleAll.textContent = 'Uncheck all';
         toggleAll.addEventListener('click', function () {
-          const checkboxes = Array.from(optionsContainer.querySelectorAll('.mutation-filter-option:not([disabled])'));
-          const allChecked = checkboxes.every(function (cb) { return cb.checked; });
-          checkboxes.forEach(function (cb) { cb.checked = !allChecked; });
+          const boxes = Array.from(container.querySelectorAll('.mutation-filter-option:not([disabled])'));
+          const allChecked = boxes.every(function (cb) { return cb.checked; });
+          boxes.forEach(function (cb) { cb.checked = !allChecked; });
           toggleAll.textContent = allChecked ? 'Check all' : 'Uncheck all';
-          refreshDbHitCascade(config.field);
+          refreshCascade(config.field);
         });
-        optionsContainer.appendChild(toggleAll);
+        container.appendChild(toggleAll);
       }
 
       values.forEach(function (value) {
@@ -561,47 +584,39 @@ document.addEventListener('DOMContentLoaded', function () {
         input.checked = checkedValues === null || checkedValues.has(value);
         input.dataset.field = config.field;
         input.addEventListener('change', function () {
-          const checkboxes = Array.from(optionsContainer.querySelectorAll('.mutation-filter-option:not([disabled])'));
-          const allChecked = checkboxes.every(function (cb) { return cb.checked; });
-          const toggleBtn = optionsContainer.querySelector('.mutation-filter-toggle-all');
-          if (toggleBtn) { toggleBtn.textContent = allChecked ? 'Uncheck all' : 'Check all'; }
-          refreshDbHitCascade(config.field);
+          const boxes = Array.from(container.querySelectorAll('.mutation-filter-option:not([disabled])'));
+          const allChecked = boxes.every(function (cb) { return cb.checked; });
+          const btn = container.querySelector('.mutation-filter-toggle-all');
+          if (btn) { btn.textContent = allChecked ? 'Uncheck all' : 'Check all'; }
+          refreshCascade(config.field);
         });
         label.appendChild(input);
         label.appendChild(document.createTextNode(value));
-        optionsContainer.appendChild(label);
+        container.appendChild(label);
       });
 
       if (values.length === 0) {
         const empty = document.createElement('span');
         empty.className = 'mutation-filter-empty';
         empty.textContent = 'No values';
-        optionsContainer.appendChild(empty);
+        container.appendChild(empty);
       }
     };
 
-    // Build all filter menus from the full row set (initial state, all checked).
-    const buildDbHitFilterMenus = function () {
-      dbHitFieldConfigs.forEach(function (config) {
-        const rawValues = collectDbHitRows().map(function (row) {
+    const buildFilterMenus = function () {
+      fieldConfigs.forEach(function (config) {
+        const rawValues = collectRows().map(function (row) {
           return (row.getAttribute(config.attr) || '').trim();
         });
-        buildDbHitOptions(config, rawValues, null);
+        buildOptions(config, rawValues, null);
       });
     };
 
-    // When one filter changes, update the available options in all OTHER filters
-    // in place — without rebuilding menus from scratch. Options that are no longer
-    // reachable given the other active filters are disabled+unchecked (greyed out);
-    // options that become reachable again are re-enabled and auto-checked.
-    //
-    // Critically, candidate rows for filter X are determined by applying every
-    // OTHER field's selections — never filter X's own restriction — so options in
-    // X can always come back when the user relaxes another filter.
-    const refreshDbHitCascade = function (changedField) {
-      // Snapshot checked+enabled selections for all fields before touching the DOM.
+    // When one filter changes, enable/disable options in the other filters to
+    // reflect what is still reachable — without rebuilding menus from scratch.
+    const refreshCascade = function (changedField) {
       const selections = {};
-      dbHitFieldConfigs.forEach(function (config) {
+      fieldConfigs.forEach(function (config) {
         selections[config.field] = new Set(
           Array.from(
             document.querySelectorAll(
@@ -611,18 +626,14 @@ document.addEventListener('DOMContentLoaded', function () {
         );
       });
 
-      // Enable/disable options in each OTHER filter.
-      dbHitFieldConfigs.forEach(function (config) {
+      fieldConfigs.forEach(function (config) {
         if (config.field === changedField) { return; }
-        const menu = document.querySelector(
-          `.mutation-filter-menu[data-filter-group="${config.field}"]`,
-        );
-        const optionsContainer = menu && menu.querySelector('.mutation-filter-options');
-        if (!optionsContainer) { return; }
+        const menu = document.querySelector(`.mutation-filter-menu[data-filter-group="${config.field}"]`);
+        const container = menu && menu.querySelector('.mutation-filter-options');
+        if (!container) { return; }
 
-        // Candidate rows: rows that pass all fields except this one.
-        const candidateRows = collectDbHitRows().filter(function (row) {
-          return dbHitFieldConfigs.every(function (c) {
+        const candidateRows = collectRows().filter(function (row) {
+          return fieldConfigs.every(function (c) {
             if (c.field === config.field) { return true; }
             const sel = selections[c.field];
             if (!sel || sel.size === 0) { return true; }
@@ -636,7 +647,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .filter(Boolean),
         );
 
-        Array.from(optionsContainer.querySelectorAll('label')).forEach(function (label) {
+        Array.from(container.querySelectorAll('label')).forEach(function (label) {
           const input = label.querySelector('.mutation-filter-option');
           if (!input) { return; }
           const reachable = available.has(input.value);
@@ -651,16 +662,97 @@ document.addEventListener('DOMContentLoaded', function () {
           }
         });
 
-        const enabledBoxes = Array.from(optionsContainer.querySelectorAll('.mutation-filter-option:not([disabled])'));
+        const enabledBoxes = Array.from(container.querySelectorAll('.mutation-filter-option:not([disabled])'));
         const allChecked = enabledBoxes.length > 0 && enabledBoxes.every(function (cb) { return cb.checked; });
-        const toggleBtn = optionsContainer.querySelector('.mutation-filter-toggle-all');
-        if (toggleBtn) { toggleBtn.textContent = allChecked ? 'Uncheck all' : 'Check all'; }
+        const btn = container.querySelector('.mutation-filter-toggle-all');
+        if (btn) { btn.textContent = allChecked ? 'Uncheck all' : 'Check all'; }
       });
 
-      applyDbHitFilter();
+      applyFilter();
     };
 
-    buildDbHitFilterMenus();
+    const closeAllMenus = function (exceptMenu) {
+      filterMenus.forEach(function (menu) {
+        if (!exceptMenu || menu !== exceptMenu) { menu.open = false; }
+      });
+    };
+
+    const applyFilter = function () {
+      const query = (searchInput ? searchInput.value : '').trim().toLowerCase();
+      const selections = {};
+      fieldConfigs.forEach(function (config) {
+        selections[config.field] = Array.from(
+          document.querySelectorAll(
+            `.mutation-filter-menu[data-filter-group="${config.field}"] .mutation-filter-option:checked:not([disabled])`,
+          ),
+        ).map(function (input) { return input.value; });
+      });
+
+      collectRows().forEach(function (row) {
+        const queryMatch = query.length === 0 || (row.textContent || '').toLowerCase().includes(query);
+        const fieldMatch = fieldConfigs.every(function (config) {
+          const selected = selections[config.field] || [];
+          return selected.length === 0 || selected.includes((row.getAttribute(config.attr) || '').trim());
+        });
+        row.hidden = !(queryMatch && fieldMatch);
+        if (row.hidden && opts.onRowHidden) { opts.onRowHidden(row); }
+      });
+    };
+
+    buildFilterMenus();
+
+    filterMenus.forEach(function (menu) {
+      const summary = menu.querySelector('summary');
+      if (!summary) { return; }
+      summary.addEventListener('click', function (event) {
+        event.preventDefault();
+        const willOpen = !menu.open;
+        closeAllMenus(menu);
+        menu.open = willOpen;
+      });
+    });
+
+    document.addEventListener('click', function (event) {
+      if (!toolbar || toolbar.contains(event.target)) { return; }
+      closeAllMenus();
+    });
+
+    if (toolbar) {
+      toolbar.addEventListener('click', function (event) {
+        if (!event.target.closest('.mutation-filter-menu')) { closeAllMenus(); }
+      });
+    }
+
+    if (searchInput) {
+      searchInput.addEventListener('input', function () {
+        closeAllMenus();
+        applyFilter();
+      });
+    }
+
+    if (resetButton) {
+      resetButton.addEventListener('click', function () {
+        closeAllMenus();
+        if (searchInput) { searchInput.value = ''; }
+        buildFilterMenus();
+        applyFilter();
+      });
+    }
+
+    if (downloadButton && opts.onDownload) {
+      downloadButton.addEventListener('click', function () {
+        closeAllMenus();
+        opts.onDownload(collectRows, opts.table);
+      });
+    }
+
+    applyFilter();
+  }
+
+  // ── Database Hits table ───────────────────────────────────────────────────
+  const dbHitTable = document.querySelector('.db-hit-table:not(.sim-table)');
+  if (dbHitTable) {
+    const dbHitTbody = dbHitTable.querySelector('tbody');
 
     // Toggle comment expansion row when clicking an expandable db-hit row.
     dbHitTbody.querySelectorAll('.db-hit-row--expandable').forEach(function (row) {
@@ -682,156 +774,109 @@ document.addEventListener('DOMContentLoaded', function () {
       });
     });
 
-    const closeAllDbHitFilterMenus = function (exceptMenu) {
-      dbHitFilterMenus.forEach(function (menu) {
-        if (!exceptMenu || menu !== exceptMenu) {
-          menu.open = false;
+    const dbHitSearchInput = document.getElementById('db-hit-search-input');
+    createFacetedTable({
+      table:          dbHitTable,
+      rowSelector:    '.db-hit-row',
+      fieldConfigs: [
+        { field: 'db-hit-drug-class', attr: 'data-drug-class-value' },
+        { field: 'db-hit-drug',       attr: 'data-drug-value' },
+        { field: 'db-hit-freq',       attr: 'data-freq-value' },
+      ],
+      searchInput:    dbHitSearchInput,
+      filterMenus:    Array.from(document.querySelectorAll('.mutation-filter-menu[data-filter-group^="db-hit-"]')),
+      toolbar:        dbHitSearchInput && dbHitSearchInput.closest('[role="region"]'),
+      resetButton:    document.querySelector('.db-hit-reset-button'),
+      downloadButton: document.querySelector('.db-hit-download-button'),
+      onRowHidden: function (row) {
+        const id = row.getAttribute('data-comment-row');
+        if (!id) { return; }
+        const commentRow = document.getElementById(id);
+        if (commentRow) {
+          commentRow.hidden = true;
+          row.setAttribute('aria-expanded', 'false');
         }
-      });
-    };
-
-    dbHitFilterMenus.forEach(function (menu) {
-      const summary = menu.querySelector('summary');
-      if (!summary) { return; }
-      summary.addEventListener('click', function (event) {
-        event.preventDefault();
-        const willOpen = !menu.open;
-        closeAllDbHitFilterMenus(menu);
-        menu.open = willOpen;
-      });
-    });
-
-    document.addEventListener('click', function (event) {
-      if (!dbHitToolbar || dbHitToolbar.contains(event.target)) { return; }
-      closeAllDbHitFilterMenus();
-    });
-
-    if (dbHitToolbar) {
-      dbHitToolbar.addEventListener('click', function (event) {
-        if (!event.target.closest('.mutation-filter-menu')) {
-          closeAllDbHitFilterMenus();
-        }
-      });
-    }
-
-    const applyDbHitFilter = function () {
-      const query = (dbHitSearchInput ? dbHitSearchInput.value : '').trim().toLowerCase();
-
-      const selectedDrugClasses = Array.from(
-        document.querySelectorAll('.mutation-filter-menu[data-filter-group="db-hit-drug-class"] .mutation-filter-option:checked:not([disabled])'),
-      ).map(function (input) { return input.value; });
-
-      const selectedDrugs = Array.from(
-        document.querySelectorAll('.mutation-filter-menu[data-filter-group="db-hit-drug"] .mutation-filter-option:checked:not([disabled])'),
-      ).map(function (input) { return input.value; });
-
-      const selectedFreqs = Array.from(
-        document.querySelectorAll('.mutation-filter-menu[data-filter-group="db-hit-freq"] .mutation-filter-option:checked:not([disabled])'),
-      ).map(function (input) { return input.value; });
-
-      collectDbHitRows().forEach(function (row) {
-        const searchText = (row.textContent || '').toLowerCase();
-        const drugClass = (row.getAttribute('data-drug-class-value') || '').trim();
-        const drug = (row.getAttribute('data-drug-value') || '').trim();
-        const freq = (row.getAttribute('data-freq-value') || '').trim();
-
-        const queryMatch = query.length === 0 || searchText.includes(query);
-        const drugClassMatch = selectedDrugClasses.length === 0 || selectedDrugClasses.includes(drugClass);
-        const drugMatch = selectedDrugs.length === 0 || selectedDrugs.includes(drug);
-        const freqMatch = selectedFreqs.length === 0 || selectedFreqs.includes(freq);
-
-        row.hidden = !(queryMatch && drugClassMatch && drugMatch && freqMatch);
-        // Collapse the comment row when the parent is filtered out.
-        if (row.hidden) {
-          const commentRowId = row.getAttribute('data-comment-row');
-          if (commentRowId) {
-            const commentRow = document.getElementById(commentRowId);
-            if (commentRow) {
-              commentRow.hidden = true;
-              row.setAttribute('aria-expanded', 'false');
-            }
-          }
-        }
-      });
-    };
-
-    applyDbHitFilter();
-
-    if (dbHitSearchInput) {
-      dbHitSearchInput.addEventListener('input', function () {
-        closeAllDbHitFilterMenus();
-        applyDbHitFilter();
-      });
-    }
-
-    if (dbHitResetButton) {
-      dbHitResetButton.addEventListener('click', function () {
-        closeAllDbHitFilterMenus();
-        if (dbHitSearchInput) { dbHitSearchInput.value = ''; }
-        buildDbHitFilterMenus();
-        applyDbHitFilter();
-      });
-    }
-
-    if (dbHitDownloadButton) {
-      dbHitDownloadButton.addEventListener('click', function () {
-        closeAllDbHitFilterMenus();
-
-        const hasPubs = dbHitTable.querySelector('thead th:last-child') &&
-          (dbHitTable.querySelector('thead th:last-child').textContent || '').trim() === 'References';
-        const hasDrugClass = !!dbHitTable.querySelector('thead th.db-hit-drug-class-th');
-
+      },
+      onDownload: function (collectRows, table) {
+        const hasPubs = (table.querySelector('thead th:last-child')?.textContent || '').trim() === 'References';
+        const hasDrugClass = !!table.querySelector('thead th.db-hit-drug-class-th');
         const headers = [];
         if (hasDrugClass) { headers.push('Drug class'); }
         headers.push('Drug', 'Mutations', 'Drug sensitivity data', 'Frequency classification', 'Source');
         if (hasPubs) { headers.push('References'); }
         const lines = [headers.join('\t')];
 
-        collectDbHitRows().forEach(function (row) {
+        collectRows().forEach(function (row) {
           if (row.hidden) { return; }
-
-          const drugClassCell = hasDrugClass ? row.querySelector('.db-hit-drug-class-cell') : null;
-          const drugClass = drugClassCell ? drugClassCell.textContent.trim() : '';
-          const drugCell = row.querySelector('.db-hit-drug-cell');
-          const drug = drugCell ? drugCell.textContent.trim() : '';
-
+          const drugClass = hasDrugClass ? (row.querySelector('.db-hit-drug-class-cell')?.textContent || '').trim() : '';
+          const drug = (row.querySelector('.db-hit-drug-cell')?.textContent || '').trim();
           const mutGroups = Array.from(row.querySelectorAll('.db-hit-mut-group')).map(function (g) {
             return g.textContent.replace(/\s+/g, ' ').trim();
           }).join('; ');
-
           const metrics = Array.from(row.querySelectorAll('.db-hit-metric')).map(function (m) {
             return m.textContent.replace(/\s+/g, ' ').trim();
           }).join('; ');
-
           const freq = (row.getAttribute('data-freq-value') || '').trim();
-
-          const sourceCell = row.querySelector('.db-hit-source-cell');
-          const source = sourceCell ? sourceCell.textContent.trim() : '';
-
+          const source = (row.querySelector('.db-hit-source-cell')?.textContent || '').trim();
           const fields = [];
           if (hasDrugClass) { fields.push(drugClass); }
           fields.push(drug, mutGroups, metrics, freq, source);
-
-          if (hasPubs) {
-            const pubUrls = (row.getAttribute('data-pub-urls') || '').trim();
-            fields.push(pubUrls);
-          }
-
-          lines.push(fields.map(function (v) {
-            return v.replace(/\t/g, ' ').replace(/\n/g, ' ');
-          }).join('\t'));
+          if (hasPubs) { fields.push((row.getAttribute('data-pub-urls') || '').trim()); }
+          lines.push(fields.map(function (v) { return v.replace(/\t/g, ' ').replace(/\n/g, ' '); }).join('\t'));
         });
 
-        const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/tab-separated-values;charset=utf-8' });
-        const blobUrl = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = blobUrl;
-        link.download = 'database_hits.tsv';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(blobUrl);
-      });
-    }
+        downloadTsv(lines, 'database_hits.tsv');
+      },
+    });
+  }
+
+  // ── Similarity to Database Entries table ─────────────────────────────────
+  const simTable = document.querySelector('.sim-table');
+  if (simTable) {
+    const simSearchInput = document.getElementById('sim-search-input');
+    createFacetedTable({
+      table:          simTable,
+      rowSelector:    '.sim-row',
+      fieldConfigs: [
+        { field: 'sim-drug-class', attr: 'data-sim-drug-class-value' },
+        { field: 'sim-drug',       attr: 'data-sim-drug-value' },
+        { field: 'sim-freq',       attr: 'data-sim-freq-value' },
+      ],
+      searchInput:    simSearchInput,
+      filterMenus:    Array.from(document.querySelectorAll('.mutation-filter-menu[data-filter-group^="sim-"]')),
+      toolbar:        simSearchInput && simSearchInput.closest('[role="region"]'),
+      resetButton:    document.querySelector('.sim-reset-button'),
+      downloadButton: document.querySelector('.sim-download-button'),
+      onDownload: function (collectRows, table) {
+        const hasPubs = (table.querySelector('thead th:last-child')?.textContent || '').trim() === 'References';
+        const hasDrugClass = !!table.querySelector('thead th.sim-drug-class-th');
+        const headers = [];
+        if (hasDrugClass) { headers.push('Drug class'); }
+        headers.push('Drug', 'Mutation', 'Known Rule', 'Similarity to entry', 'Drug sensitivity data', 'Frequency classification', 'Source');
+        if (hasPubs) { headers.push('References'); }
+        const lines = [headers.join('\t')];
+
+        collectRows().forEach(function (row) {
+          if (row.hidden) { return; }
+          const drugClass = hasDrugClass ? (row.querySelector('.sim-drug-class-cell')?.textContent || '').trim() : '';
+          const drug = (row.querySelector('.sim-drug-cell')?.textContent || '').trim();
+          const mutation = (row.querySelector('.sim-mutation-cell')?.textContent || '').trim();
+          const knownRule = (row.querySelector('.sim-rule-cell')?.textContent || '').trim();
+          const similarity = (row.querySelector('.sim-badge')?.textContent || '').trim();
+          const metrics = Array.from(row.querySelectorAll('.db-hit-metric')).map(function (m) {
+            return m.textContent.replace(/\s+/g, ' ').trim();
+          }).join('; ');
+          const freq = (row.getAttribute('data-sim-freq-value') || '').trim();
+          const source = (row.querySelector('.sim-source-cell')?.textContent || '').trim();
+          const fields = [];
+          if (hasDrugClass) { fields.push(drugClass); }
+          fields.push(drug, mutation, knownRule, similarity, metrics, freq, source);
+          if (hasPubs) { fields.push((row.getAttribute('data-pub-urls') || '').trim()); }
+          lines.push(fields.map(function (v) { return v.replace(/\t/g, ' ').replace(/\n/g, ' '); }).join('\t'));
+        });
+
+        downloadTsv(lines, 'similarity_entries.tsv');
+      },
+    });
   }
 });

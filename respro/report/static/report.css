@@ -99,6 +99,8 @@ body {
 
 .header-badge {
   display: inline-block;
+  flex-shrink: 0;
+  white-space: nowrap;
   padding: 0.25rem 0.65rem;
   border-radius: 999px;
   background: #e8f7ef;
@@ -638,11 +640,19 @@ body {
   }
 
   .report-tabs {
-    gap: 0.5rem;
+    gap: 0;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .report-tabs-list {
+    flex-wrap: wrap;
+    overflow-x: visible;
   }
 
   .report-tabs-actions {
     padding-right: 0.35rem;
+    margin-left: auto;
   }
 
   .plot-modal-panel {
@@ -1247,10 +1257,10 @@ a.db-hit-pub-link:hover {
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
-  position: absolute;
-  top: 1.5rem;
-  left: -4rem;
-  z-index: 10;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 1000;
   width: 22rem;
   white-space: normal;
   border: 1px solid var(--line);
@@ -1317,4 +1327,46 @@ a.db-hit-pub-link:hover {
 .db-hit-bib-link:hover {
   color: var(--ink);
   text-decoration: underline;
+}
+
+/* ─── Similarity to Database Entries table ────────────────────────────────── */
+
+/* Similarity badge — three severity tiers reusing the report palette */
+.sim-badge {
+  display: inline-block;
+  padding: 0.2em 0.55em;
+  border-radius: 999px;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sim-badge--high {
+  background: #fde8e8;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+.sim-badge--moderate {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.sim-badge--low {
+  background: var(--surface-strong);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+.sim-drug-class-cell {
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.sim-rule-cell {
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
 }
