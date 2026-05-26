@@ -159,6 +159,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const mutationToolbar = document.querySelector('.mutation-toolbar');
   const mutationFilterMenus = Array.from(document.querySelectorAll('.mutation-filter-menu'));
   const mutationResetButton = document.querySelector('.mutation-reset-button');
+  const mutationDownloadButton = document.querySelector('.mutation-download-button');
 
   if (mutationTbody) {
     mutationTbody.querySelectorAll('.mutation-row--expandable').forEach(function (row) {
@@ -418,6 +419,51 @@ document.addEventListener('DOMContentLoaded', function () {
           field.checked = true;
         });
         applyMutationFilter();
+      });
+    }
+
+    if (mutationDownloadButton) {
+      mutationDownloadButton.addEventListener('click', function () {
+        closeAllMutationFilterMenus();
+
+        const headers = ['Feature', 'Nt change', 'AA change', 'Consequence', 'Allele freq', 'In database'];
+        const lines = [headers.join('\t')];
+
+        collectMutationRowPairs().forEach(function (pair) {
+          const row = pair.row;
+          if (row.hidden) {
+            return;
+          }
+
+          const feature = (row.children[0]?.textContent || '').trim();
+          const ntChange = (row.children[1]?.textContent || '').trim();
+          const aaChange = (row.children[2]?.textContent || '').trim();
+          const consequence = (row.children[3]?.textContent || '').trim();
+          const alleleFreq = (row.children[4]?.textContent || '').trim();
+          const inDatabase = ((row.getAttribute('data-database-values') || 'None')
+            .split('|')
+            .map(function (value) {
+              return value.trim();
+            })
+            .filter(Boolean)
+            .join('; '));
+
+          const fields = [feature, ntChange, aaChange, consequence, alleleFreq, inDatabase]
+            .map(function (value) {
+              return value.replace(/\t/g, ' ').replace(/\n/g, ' ');
+            });
+          lines.push(fields.join('\t'));
+        });
+
+        const blob = new Blob([`${lines.join('\n')}\n`], { type: 'text/tab-separated-values;charset=utf-8' });
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = blobUrl;
+        link.download = 'mutations.filtered.tsv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(blobUrl);
       });
     }
 
