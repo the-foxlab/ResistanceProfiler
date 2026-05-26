@@ -15,7 +15,11 @@ import typer
 from rich.console import Console
 
 from respro.core.rules import import_rules_with_summary, validate_rules_tsv
-from respro.db.algorithms import store_interpretation_algorithms
+from respro.db.algorithms import (
+    apply_ic50_threshold_classification,
+    load_interpretation_algorithms,
+    store_interpretation_algorithms,
+)
 from respro.db.drugs import _consolidate_drug_names_to_lowercase, _get_drugs_from_pubchem
 from respro.db.features import _load_genbank_records
 from respro.db.project_metadata import load_metadata_json, store_project_metadata
@@ -87,6 +91,9 @@ def init_project(
         store_project_metadata(conn, project_id, metadata_payload)
         if algorithms:
             store_interpretation_algorithms(conn, project_id, algorithms)
+        ic50_config = next((a for a in algorithms if a['name'] == 'ic50_thresholds'), None)
+        if ic50_config:
+            apply_ic50_threshold_classification(conn, project_id, ic50_config)
         if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
         conn.commit()
@@ -150,6 +157,10 @@ def add_to_project(
             formula_rules_tsv=formula_rules_tsv,
             additional_info=additional_info,
         )
+        stored_algorithms = load_interpretation_algorithms(conn, project_id)
+        ic50_config = next((a for a in stored_algorithms if a['name'] == 'ic50_thresholds'), None)
+        if ic50_config:
+            apply_ic50_threshold_classification(conn, project_id, ic50_config)
         if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
         conn.execute(

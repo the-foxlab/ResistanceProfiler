@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import sqlite3
 
+from respro.db._rules_normalize import _parse_ic50_value
+
 _KNOWN_ALGORITHM_NAMES = {'ic50_thresholds', 'drug_groups', 'drug_interpretation'}
 
 
@@ -96,6 +98,61 @@ def load_interpretation_algorithms(
         (project_id,),
     ).fetchall()
     return [json.loads(row['config_json']) for row in rows]
+
+
+def apply_ic50_threshold_classification(
+    conn: sqlite3.Connection,
+    project_id: int,
+    config: dict,
+) -> int:
+    """
+    Classify rule phenotypes based on IC50 or fold-IC50 thresholds.
+
+    For each resistance rule whose drug has a configured threshold and whose IC50 or
+    fold-IC50 value is non-empty, updates the phenotype to ``resistant``,
+    ``intermediate``, or ``sensitive`` according to the configured breakpoints.
+
+    :param conn: project DB connection
+    :param project_id: project id
+    :param config: validated ic50_thresholds algorithm config dict
+    :return: number of rules updated
+    """
+    use_column = config['use']
+    thresholds = config['thresholds']
+    q = (
+        f'SELECT r.id, d.name AS drug_name, r.{use_column} AS value '
+        'FROM resistance_rule r '
+        'JOIN drug d ON d.id = r.drug_id '
+        'JOIN feature f ON f.id = r.feature_id '
+        'JOIN reference ref ON ref.id = f.reference_id '
+        f"WHERE ref.project_id = ? AND r.{use_column} IS NOT NULL AND r.{use_column} != ''"
+    )
+    rows = conn.execute(q, (project_id,)).fetchall()
+
+    updated = 0
+    for row in rows:
+        drug_name = row['drug_name']
+        if drug_name not in thresholds:
+            continue
+        parsed = _parse_ic50_value(row['value'])
+        if parsed is None:
+            continue
+        new_phenotype = _classify_ic50(parsed, thresholds[drug_name])
+        conn.execute(
+            'UPDATE resistance_rule SET phenotype = ? WHERE id = ?',
+            (new_phenotype, int(row['id'])),
+        )
+        updated += 1
+    return updated
+
+
+def _classify_ic50(value: float, drug_thresholds: dict) -> str:
+    """Return the canonical phenotype for a numeric IC50 value against breakpoints."""
+    if value >= drug_thresholds['resistant']:
+        return 'resistant'
+    if value >= drug_thresholds['intermediate']:
+        return 'intermediate'
+    return 'sensitive'
 
 
 def _validate_ic50_thresholds(config: dict) -> None:

@@ -7,8 +7,8 @@ import sqlite3
 from io import StringIO
 from pathlib import Path
 
-import pytest
 import pysam
+import pytest
 from rich.console import Console
 from typer.testing import CliRunner
 
@@ -23,8 +23,8 @@ from respro.db.models import (
     ResistanceRuleSet,
     VariantCall,
 )
-from respro.report.html import build_report_context
 from respro.db.schema import create_schema, init_results_db
+from respro.report.html import build_report_context
 
 
 class TestProfileCli:

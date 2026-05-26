@@ -11,13 +11,13 @@ from pathlib import Path
 import pytest
 
 from respro.db.algorithms import (
+    apply_ic50_threshold_classification,
     load_interpretation_algorithms,
     store_interpretation_algorithms,
     validate_interpretation_algorithms,
 )
 from respro.db.project_metadata import load_metadata_json
 from respro.db.schema import create_schema
-
 
 # ──────────────────────────────────────────────────────────────────────
 # Fixtures
@@ -347,3 +347,180 @@ class TestMetadataJsonWithAlgorithms:
 
         with pytest.raises(ValueError, match='Unknown algorithm name'):
             load_metadata_json(json_path)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# IC50 threshold classification application tests
+# ──────────────────────────────────────────────────────────────────────
+
+class TestApplyIc50ThresholdClassification:
+
+    _THRESHOLDS = {
+        'DrugA': {'intermediate': 3.0, 'resistant': 10.0},
+    }
+
+    @pytest.fixture()
+    def db_with_rules(self, tmp_path: Path) -> tuple[sqlite3.Connection, int]:
+        """Minimal project DB: one gene, DrugA rules with ic50 values, DrugB without threshold."""
+        db_path = tmp_path / 'apply_test.db'
+        conn = create_schema(db_path)
+        project_id = conn.execute(
+            "INSERT INTO project (name, schema_version, uuid) VALUES ('p', 1, 'uuid')"
+        ).lastrowid
+        ref_id = conn.execute(
+            "INSERT INTO reference (project_id, name, length) VALUES (?, 'ref1', 1000)",
+            (project_id,),
+        ).lastrowid
+        feat_id = conn.execute(
+            "INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, 'gene1', 0, 300, '+')",
+            (ref_id,),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO feature_segment (feature_id, segment_index, start, end) VALUES (?, 0, 0, 300)",
+            (feat_id,),
+        )
+        drug_a_id = conn.execute(
+            "INSERT INTO drug (project_id, name) VALUES (?, 'DrugA')", (project_id,)
+        ).lastrowid
+        drug_b_id = conn.execute(
+            "INSERT INTO drug (project_id, name) VALUES (?, 'DrugB')", (project_id,)
+        ).lastrowid
+        # DrugA: above resistant threshold
+        conn.execute(
+            "INSERT INTO resistance_rule (feature_id, drug_id, position, mutation, ic50) VALUES (?, ?, 1, 'E', '15.0')",
+            (feat_id, drug_a_id),
+        )
+        # DrugA: between thresholds → intermediate
+        conn.execute(
+            "INSERT INTO resistance_rule (feature_id, drug_id, position, mutation, ic50) VALUES (?, ?, 2, 'K', '5.0')",
+            (feat_id, drug_a_id),
+        )
+        # DrugA: below intermediate threshold → sensitive
+        conn.execute(
+            "INSERT INTO resistance_rule (feature_id, drug_id, position, mutation, ic50) VALUES (?, ?, 3, 'R', '0.5')",
+            (feat_id, drug_a_id),
+        )
+        # DrugA: empty ic50 → should not update
+        conn.execute(
+            "INSERT INTO resistance_rule (feature_id, drug_id, position, mutation, ic50) VALUES (?, ?, 5, 'Y', '')",
+            (feat_id, drug_a_id),
+        )
+        # DrugB: no threshold configured → should not update
+        conn.execute(
+            "INSERT INTO resistance_rule (feature_id, drug_id, position, mutation, ic50) VALUES (?, ?, 4, 'V', '12.0')",
+            (feat_id, drug_b_id),
+        )
+        conn.commit()
+        return conn, project_id
+
+    def test_classifies_resistant_above_resistant_threshold(
+        self, db_with_rules: tuple[sqlite3.Connection, int]
+    ) -> None:
+        conn, project_id = db_with_rules
+        config = {'name': 'ic50_thresholds', 'use': 'ic50', 'thresholds': self._THRESHOLDS}
+        apply_ic50_threshold_classification(conn, project_id, config)
+        conn.commit()
+        row = conn.execute(
+            "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
+            "WHERE d.name = 'DrugA' AND r.ic50 = '15.0'"
+        ).fetchone()
+        assert row['phenotype'] == 'resistant'
+
+    def test_classifies_intermediate_between_thresholds(
+        self, db_with_rules: tuple[sqlite3.Connection, int]
+    ) -> None:
+        conn, project_id = db_with_rules
+        config = {'name': 'ic50_thresholds', 'use': 'ic50', 'thresholds': self._THRESHOLDS}
+        apply_ic50_threshold_classification(conn, project_id, config)
+        conn.commit()
+        row = conn.execute(
+            "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
+            "WHERE d.name = 'DrugA' AND r.ic50 = '5.0'"
+        ).fetchone()
+        assert row['phenotype'] == 'intermediate'
+
+    def test_classifies_sensitive_below_intermediate_threshold(
+        self, db_with_rules: tuple[sqlite3.Connection, int]
+    ) -> None:
+        conn, project_id = db_with_rules
+        config = {'name': 'ic50_thresholds', 'use': 'ic50', 'thresholds': self._THRESHOLDS}
+        apply_ic50_threshold_classification(conn, project_id, config)
+        conn.commit()
+        row = conn.execute(
+            "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
+            "WHERE d.name = 'DrugA' AND r.ic50 = '0.5'"
+        ).fetchone()
+        assert row['phenotype'] == 'sensitive'
+
+    def test_skips_drug_without_threshold(
+        self, db_with_rules: tuple[sqlite3.Connection, int]
+    ) -> None:
+        conn, project_id = db_with_rules
+        config = {'name': 'ic50_thresholds', 'use': 'ic50', 'thresholds': self._THRESHOLDS}
+        apply_ic50_threshold_classification(conn, project_id, config)
+        conn.commit()
+        row = conn.execute(
+            "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
+            "WHERE d.name = 'DrugB'"
+        ).fetchone()
+        assert row['phenotype'] == 'unknown'
+
+    def test_skips_empty_ic50_value(
+        self, db_with_rules: tuple[sqlite3.Connection, int]
+    ) -> None:
+        conn, project_id = db_with_rules
+        config = {'name': 'ic50_thresholds', 'use': 'ic50', 'thresholds': self._THRESHOLDS}
+        apply_ic50_threshold_classification(conn, project_id, config)
+        conn.commit()
+        row = conn.execute(
+            "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
+            "WHERE d.name = 'DrugA' AND r.ic50 = ''"
+        ).fetchone()
+        assert row['phenotype'] == 'unknown'
+
+    def test_returns_count_of_updated_rules(
+        self, db_with_rules: tuple[sqlite3.Connection, int]
+    ) -> None:
+        conn, project_id = db_with_rules
+        config = {'name': 'ic50_thresholds', 'use': 'ic50', 'thresholds': self._THRESHOLDS}
+        updated = apply_ic50_threshold_classification(conn, project_id, config)
+        # DrugA: 3 rules with ic50 values (15.0, 5.0, 0.5) → updated
+        # DrugA: 1 rule with empty ic50 → skipped
+        # DrugB: 1 rule → drug not in thresholds → skipped
+        assert updated == 3
+
+    def test_uses_fold_ic50_column(self, tmp_path: Path) -> None:
+        db_path = tmp_path / 'fold.db'
+        conn = create_schema(db_path)
+        project_id = conn.execute(
+            "INSERT INTO project (name, schema_version, uuid) VALUES ('p', 1, 'uuid')"
+        ).lastrowid
+        ref_id = conn.execute(
+            "INSERT INTO reference (project_id, name, length) VALUES (?, 'ref1', 1000)",
+            (project_id,),
+        ).lastrowid
+        feat_id = conn.execute(
+            "INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, 'gene1', 0, 300, '+')",
+            (ref_id,),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO feature_segment (feature_id, segment_index, start, end) VALUES (?, 0, 0, 300)",
+            (feat_id,),
+        )
+        drug_id = conn.execute(
+            "INSERT INTO drug (project_id, name) VALUES (?, 'DrugA')", (project_id,)
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO resistance_rule (feature_id, drug_id, position, mutation, fold_ic50) VALUES (?, ?, 1, 'E', '20.0')",
+            (feat_id, drug_id),
+        )
+        conn.commit()
+        config = {
+            'name': 'ic50_thresholds',
+            'use': 'fold_ic50',
+            'thresholds': {'DrugA': {'intermediate': 3.0, 'resistant': 10.0}},
+        }
+        updated = apply_ic50_threshold_classification(conn, project_id, config)
+        assert updated == 1
+        row = conn.execute('SELECT phenotype FROM resistance_rule').fetchone()
+        assert row['phenotype'] == 'resistant'

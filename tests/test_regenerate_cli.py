@@ -10,11 +10,11 @@ import sqlite3
 import textwrap
 from pathlib import Path
 
+import pytest
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
-import pytest
 from conftest import TINY_REF_SEQ, write_genbank
 from typer.testing import CliRunner
 
