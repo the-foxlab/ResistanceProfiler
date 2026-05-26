@@ -64,17 +64,34 @@
               <thead>
                 <tr>
                   <th>Feature</th>
-                  <th>Nt change</th>
+                  <th>
+                    <button
+                      class="mutation-sort-button"
+                      type="button"
+                      data-sort-direction="asc"
+                      title="Sort by nucleotide position"
+                      aria-label="Sort by nucleotide position"
+                    >
+                      Nt change <span class="mutation-sort-indicator" aria-hidden="true">↑</span>
+                    </button>
+                  </th>
                   <th>AA change</th>
                   <th>Consequence</th>
                   <th>Allele freq</th>
                   <th>In database</th>
-                  <th class="mutation-table-action-col"></th>
                 </tr>
               </thead>
               <tbody>
                 {% for r in context.all_mutations.rows %}
-                  <tr class="mutation-row{% if r.is_database_hit %} mutation-row--hit{% endif %}">
+                  <tr
+                    class="mutation-row{% if r.is_database_hit %} mutation-row--hit{% endif %}{% if r.has_alignment %} mutation-row--expandable{% endif %}"
+                    data-nt-pos="{{ r.nt_pos }}"
+                    {% if r.has_alignment %}
+                      data-alignment-row="mutation-align-{{ loop.index }}"
+                      aria-expanded="false"
+                      tabindex="0"
+                    {% endif %}
+                  >
                     <td>{{ r.feature }}</td>
                     <td class="mutation-nt">{{ r.nt_change }}</td>
                     <td class="mutation-aa">{{ r.aa_change or '—' }}</td>
@@ -85,33 +102,20 @@
                     <td>
                       <span class="mutation-db-status">
                         {% if r.is_single_hit %}
-                          <span class="db-hit-pill db-hit-pill--single" title="Direct database hit">Single</span>
+                          <span class="db-hit-pill db-hit-pill--single" title="Direct database hit">Single-Rule</span>
                         {% endif %}
                         {% if r.is_formula_hit %}
-                          <span class="db-hit-pill db-hit-pill--formula" title="Part of a combination rule hit">Formula</span>
+                          <span class="db-hit-pill db-hit-pill--formula" title="Part of a combination rule hit">Formula-Rule</span>
                         {% endif %}
                         {% if not r.is_single_hit and not r.is_formula_hit %}
                           <span class="db-hit-pill db-hit-pill--none">—</span>
                         {% endif %}
                       </span>
                     </td>
-                    <td class="mutation-table-action-col">
-                      {% if r.has_alignment %}
-                        <button
-                          class="mutation-alignment-toggle info-card-action-button info-card-action-button--green"
-                          type="button"
-                          aria-label="Toggle pairwise alignment for {{ r.feature | e }} {{ r.aa_change | e }}"
-                          aria-expanded="false"
-                          data-alignment-row="mutation-align-{{ loop.index }}"
-                        >
-                          <img src="{{ context.all_mutations.pairwise_icon }}" alt="">
-                        </button>
-                      {% endif %}
-                    </td>
                   </tr>
                   {% if r.has_alignment %}
                     <tr id="mutation-align-{{ loop.index }}" class="mutation-alignment-row" hidden>
-                      <td colspan="7">
+                      <td colspan="6">
                         <div class="mutation-alignment-body">
                           {{ r.alignment_html | safe }}
                         </div>

@@ -148,18 +148,89 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   });
 
-  document.querySelectorAll('.mutation-alignment-toggle').forEach(function (button) {
-    button.addEventListener('click', function (event) {
-      event.stopPropagation();
-      const rowId = this.getAttribute('data-alignment-row');
-      const alignmentRow = document.getElementById(rowId);
-      if (!alignmentRow) {
-        return;
-      }
-      const isOpen = !alignmentRow.hidden;
-      alignmentRow.hidden = isOpen;
-      this.setAttribute('aria-expanded', String(!isOpen));
-      this.classList.toggle('is-active', !isOpen);
+  const mutationTable = document.querySelector('.mutation-table');
+  if (!mutationTable) {
+    return;
+  }
+
+  const mutationTbody = mutationTable.querySelector('tbody');
+  const mutationSortButton = mutationTable.querySelector('.mutation-sort-button');
+
+  if (mutationTbody) {
+    mutationTbody.querySelectorAll('.mutation-row--expandable').forEach(function (row) {
+      const toggleRowAlignment = function (event) {
+        if (event && event.target && event.target.closest('a, button')) {
+          return;
+        }
+        const rowId = row.getAttribute('data-alignment-row');
+        if (!rowId) {
+          return;
+        }
+        const alignmentRow = document.getElementById(rowId);
+        if (!alignmentRow) {
+          return;
+        }
+        const isOpen = !alignmentRow.hidden;
+        alignmentRow.hidden = isOpen;
+        row.setAttribute('aria-expanded', String(!isOpen));
+      };
+
+      row.addEventListener('click', toggleRowAlignment);
+      row.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+          return;
+        }
+        event.preventDefault();
+        toggleRowAlignment(event);
+      });
     });
-  });
+
+    const collectMutationRowPairs = function () {
+      const rows = Array.from(mutationTbody.querySelectorAll('.mutation-row'));
+      return rows.map(function (row) {
+        const nextRow = row.nextElementSibling;
+        const alignmentRow = nextRow && nextRow.classList.contains('mutation-alignment-row')
+          ? nextRow
+          : null;
+        return { row: row, alignmentRow: alignmentRow };
+      });
+    };
+
+    const applyMutationSort = function (direction) {
+      const pairs = collectMutationRowPairs();
+      const factor = direction === 'desc' ? -1 : 1;
+      pairs.sort(function (leftPair, rightPair) {
+        const leftPos = Number(leftPair.row.getAttribute('data-nt-pos') || 0);
+        const rightPos = Number(rightPair.row.getAttribute('data-nt-pos') || 0);
+        if (leftPos !== rightPos) {
+          return (leftPos - rightPos) * factor;
+        }
+        const leftNt = (leftPair.row.querySelector('.mutation-nt')?.textContent || '').trim();
+        const rightNt = (rightPair.row.querySelector('.mutation-nt')?.textContent || '').trim();
+        return leftNt.localeCompare(rightNt) * factor;
+      });
+
+      pairs.forEach(function (pair) {
+        mutationTbody.appendChild(pair.row);
+        if (pair.alignmentRow) {
+          mutationTbody.appendChild(pair.alignmentRow);
+        }
+      });
+    };
+
+    applyMutationSort('asc');
+
+    if (mutationSortButton) {
+      mutationSortButton.addEventListener('click', function () {
+        const currentDirection = this.getAttribute('data-sort-direction') || 'asc';
+        const nextDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+        this.setAttribute('data-sort-direction', nextDirection);
+        const indicator = this.querySelector('.mutation-sort-indicator');
+        if (indicator) {
+          indicator.textContent = nextDirection === 'asc' ? '↑' : '↓';
+        }
+        applyMutationSort(nextDirection);
+      });
+    }
+  }
 });

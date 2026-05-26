@@ -139,7 +139,6 @@ def build_report_context(
         'all_mutations': {
             'rows': all_mutations_rows,
             'count': len(all_mutations_rows),
-            'pairwise_icon': _load_svg_data_url('pairwise.svg'),
         },
         'sequence_features': {
             'cards': feature_cards,
@@ -278,6 +277,7 @@ def _build_all_mutations_rows(
         rows.append({
             'feature': (display_names or {}).get(ann.feature_name, ann.feature_name),
             'nt_change': nt_change,
+            'nt_pos': pos_1based,
             'aa_change': aa_change,
             'consequence': display_consequence,
             'allele_freq': ann.variant.allele_freq,
