@@ -19,6 +19,23 @@
   --font-size-xxl: 1.2rem;
   --radius-md: 8px;
   --shadow: 0 10px 28px rgba(12, 34, 49, 0.08);
+
+  /* Semantic severity colours — shared by badges, pills, chips, metric tiers */
+  --resistant-bg: #fee2e2;
+  --resistant-text: #991b1b;
+  --resistant-border: #fca5a5;
+  --intermediate-bg: #fef3c7;
+  --intermediate-text: #92400e;
+  --intermediate-border: #fcd34d;
+  --sensitive-bg: #dcfce7;
+  --sensitive-text: #166534;
+  --sensitive-border: #86efac;
+  --info-bg: #dbeafe;
+  --info-text: #1d4ed8;
+  --info-border: #bfdbfe;
+  --neutral-bg: #f1f5f9;
+  --neutral-text: #334155;
+  --neutral-border: #cbd5e1;
 }
 
 * {
@@ -103,20 +120,20 @@ body {
   white-space: nowrap;
   padding: 0.25rem 0.65rem;
   border-radius: 999px;
-  background: #dcfce7;
-  color: #166534;
+  background: var(--sensitive-bg);
+  color: var(--sensitive-text);
   font-size: var(--font-size-sm);
   font-weight: 600;
 }
 
 .header-badge.is-hit {
-  background: #dcfce7;
-  color: #166534;
+  background: var(--sensitive-bg);
+  color: var(--sensitive-text);
 }
 
 .header-badge.is-no-hit {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--intermediate-bg);
+  color: var(--intermediate-text);
 }
 
 .header-icon-button {
@@ -814,25 +831,29 @@ body {
   background: var(--paper-soft);
 }
 
-.mutation-table-wrapper {
+.mutation-table-wrapper,
+.db-hit-table-wrapper {
   overflow-x: auto;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--surface-strong);
 }
 
-.mutation-table {
+.mutation-table,
+.db-hit-table {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--font-size-sm);
 }
 
-.mutation-table thead tr {
+.mutation-table thead tr,
+.db-hit-table thead tr {
   border-bottom: 2px solid var(--line);
   background: var(--paper-soft);
 }
 
-.mutation-table th {
+.mutation-table th,
+.db-hit-table th {
   padding: 0.55rem 0.75rem;
   text-align: left;
   font-weight: 700;
@@ -876,18 +897,21 @@ body {
   line-height: 1;
 }
 
-.mutation-table td {
+.mutation-table td,
+.db-hit-table td {
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--line);
   color: var(--ink);
   vertical-align: middle;
 }
 
-.mutation-table tbody tr:last-child > td {
+.mutation-table tbody tr:last-child > td,
+.db-hit-table tbody tr:last-child > td {
   border-bottom: none;
 }
 
-.mutation-table tbody tr:hover > td {
+.mutation-table tbody tr:hover > td,
+.db-hit-table tbody tr:hover > td {
   background: var(--paper-soft);
 }
 
@@ -968,8 +992,8 @@ body {
   white-space: nowrap;
 }
 
-.db-hit-pill--single  { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
-.db-hit-pill--formula { background: #dbeafe; color: #1d4ed8; border: 1px solid #bfdbfe; }
+.db-hit-pill--single  { background: var(--sensitive-bg);  color: var(--sensitive-text);  border: 1px solid var(--sensitive-border);  }
+.db-hit-pill--formula { background: var(--info-bg);        color: var(--info-text);        border: 1px solid var(--info-border);        }
 .db-hit-pill--none    { background: transparent; color: var(--muted); border: none; }
 
 /* Inline alignment row */
@@ -1047,62 +1071,19 @@ body {
 }
 
 .aln-mutation {
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--resistant-bg);
+  color: var(--resistant-text);
   border-radius: 2px;
   font-weight: 700;
 }
 
 .aln-affected {
   background: #fecaca;
-  box-shadow: inset 0 -2px 0 #991b1b;
+  box-shadow: inset 0 -2px 0 var(--resistant-text);
 }
 
 /* ─── Database Hits table ─────────────────────────────────────────────────── */
-
-.db-hit-table-wrapper {
-  overflow-x: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface-strong);
-}
-
-.db-hit-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--font-size-sm);
-}
-
-.db-hit-table thead tr {
-  border-bottom: 2px solid var(--line);
-  background: var(--paper-soft);
-}
-
-.db-hit-table th {
-  padding: 0.55rem 0.75rem;
-  text-align: left;
-  font-weight: 700;
-  color: var(--muted);
-  font-size: var(--font-size-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-}
-
-.db-hit-table td {
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--line);
-  color: var(--ink);
-  vertical-align: middle;
-}
-
-.db-hit-table tbody tr:last-child > td {
-  border-bottom: none;
-}
-
-.db-hit-table tbody tr:hover > td {
-  background: var(--paper-soft);
-}
+/* Wrapper and base table styles are shared with .mutation-table above */
 
 .db-hit-row--expandable {
   cursor: pointer;
@@ -1131,7 +1112,6 @@ body {
 
 .db-hit-drug-class-cell {
   white-space: nowrap;
-  font-size: var(--font-size-xs);
 }
 
 .db-hit-drug-cell {
@@ -1181,16 +1161,16 @@ body {
 }
 
 /* Phenotype badge classes — light bg, dark text */
-.phenotype--resistant    { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
-.phenotype--intermediate { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
-.phenotype--sensitive    { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
-.phenotype--contradictory{ background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; }
+.phenotype--resistant    { background: var(--resistant-bg);    color: var(--resistant-text);    border: 1px solid var(--resistant-border);    }
+.phenotype--intermediate { background: var(--intermediate-bg); color: var(--intermediate-text); border: 1px solid var(--intermediate-border); }
+.phenotype--sensitive    { background: var(--sensitive-bg);    color: var(--sensitive-text);    border: 1px solid var(--sensitive-border);    }
+.phenotype--contradictory{ background: var(--neutral-bg);      color: var(--neutral-text);      border: 1px solid var(--neutral-border);      }
 
 /* Numeric metric tier badges — coloured by mean±std position */
 /* tier1: at/below mean     */ .metric--tier1 { background: #f0f9ff; color: #0369a1; border-color: #bae6fd; }
-/* tier2: mean to mean+1σ   */ .metric--tier2 { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+/* tier2: mean to mean+1σ   */ .metric--tier2 { background: var(--intermediate-bg); color: var(--intermediate-text); border-color: var(--intermediate-border); }
 /* tier3: mean+1σ to +2σ   */ .metric--tier3 { background: #ffedd5; color: #c2410c; border-color: #fed7aa; }
-/* tier4: above mean+2σ     */ .metric--tier4 { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+/* tier4: above mean+2σ     */ .metric--tier4 { background: var(--resistant-bg);    color: var(--resistant-text);    border-color: var(--resistant-border);    }
 
 /* Frequency chips — three AF bins */
 .db-hit-af-chip {
@@ -1202,13 +1182,12 @@ body {
   white-space: nowrap;
 }
 
-.db-hit-af--high         { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
-.db-hit-af--intermediate { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+.db-hit-af--high         { background: var(--resistant-bg);    color: var(--resistant-text);    border: 1px solid var(--resistant-border);    }
+.db-hit-af--intermediate { background: var(--intermediate-bg); color: var(--intermediate-text); border: 1px solid var(--intermediate-border); }
 .db-hit-af--low          { background: var(--paper); color: var(--muted); border: 1px solid var(--line); }
 
 .db-hit-source-cell {
   color: var(--muted);
-  font-size: var(--font-size-xs);
   white-space: nowrap;
 }
 
@@ -1349,15 +1328,15 @@ a.db-hit-pub-link:hover {
 }
 
 .sim-badge--high {
-  background: #fee2e2;
-  color: #991b1b;
-  border: 1px solid #fca5a5;
+  background: var(--resistant-bg);
+  color: var(--resistant-text);
+  border: 1px solid var(--resistant-border);
 }
 
 .sim-badge--moderate {
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fcd34d;
+  background: var(--intermediate-bg);
+  color: var(--intermediate-text);
+  border: 1px solid var(--intermediate-border);
 }
 
 .sim-badge--low {
@@ -1480,8 +1459,8 @@ a.db-hit-pub-link:hover {
 }
 
 .summary-stat-box--high-impact {
-  background: #fef3c7;
-  border-color: #fcd34d;
+  background: var(--intermediate-bg);
+  border-color: var(--intermediate-border);
 }
 
 .summary-stat-box__value {
@@ -1492,25 +1471,7 @@ a.db-hit-pub-link:hover {
 }
 
 .summary-stat-box--high-impact .summary-stat-box__value {
-  color: #92400e;
-}
-
-button.summary-stat-box--link {
-  appearance: none;
-  border: none;
-  background: none;
-  font: inherit;
-  cursor: pointer;
-  text-align: inherit;
-  width: 100%;
-  padding: inherit;
-}
-
-button.summary-stat-box--link:hover,
-button.summary-stat-box--link:focus-visible {
-  background-color: rgba(0, 0, 0, 0.05);
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
+  color: var(--intermediate-text);
 }
 
 .summary-stat-box__label {
@@ -1550,28 +1511,15 @@ button.summary-stat-box--link:focus-visible {
 }
 
 .feature-mutation-badge {
-  background: #f1f5f9;
-  color: #334155;
-  border: 1px solid #cbd5e1;
+  background: var(--neutral-bg);
+  color: var(--neutral-text);
+  border: 1px solid var(--neutral-border);
   border-radius: 4px;
   padding: 0.15rem 0.5rem;
   font-size: var(--font-size-sm);
   font-weight: 600;
   white-space: nowrap;
   align-self: center;
-}
-
-button.feature-mutation-badge--link {
-  appearance: none;
-  font: inherit;
-  cursor: pointer;
-}
-
-button.feature-mutation-badge--link:hover,
-button.feature-mutation-badge--link:focus-visible {
-  opacity: 0.75;
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
 }
 
 .feature-mutations {
@@ -1595,7 +1543,7 @@ button.feature-mutation-badge--link:focus-visible {
 
 .mut-text--high-impact {
   font-weight: 700;
-  color: #991b1b;
+  color: var(--resistant-text);
 }
 
 .mut-sep {
@@ -1604,7 +1552,7 @@ button.feature-mutation-badge--link:focus-visible {
 
 /* Colour swatch used inside the info panel legend */
 .mut-legend-high-impact {
-  color: #991b1b;
+  color: var(--resistant-text);
 }
 
 /* Database hits summary (right column of tile body) */
@@ -1653,7 +1601,7 @@ button.feature-mutation-badge--link:focus-visible {
 
 .feature-coverage-bar__fill {
   height: 100%;
-  background: #166534;
+  background: var(--sensitive-text);
   border-radius: 2px;
 }
 
@@ -1682,7 +1630,7 @@ button.feature-mutation-badge--link:focus-visible {
 }
 
 .summary-lang-btn:hover {
-  background: #f1f5f9;
+  background: var(--neutral-bg);
   color: var(--ink);
 }
 
@@ -1712,10 +1660,13 @@ button.feature-mutation-badge--link:focus-visible {
 
 .drug-interp-table th {
   text-align: left;
-  padding: 0.5rem 0.75rem;
+  padding: 0.55rem 0.75rem;
   border-bottom: 2px solid var(--line);
-  font-weight: 600;
+  font-weight: 700;
   color: var(--muted);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   white-space: nowrap;
 }
 
@@ -1746,5 +1697,4 @@ button.feature-mutation-badge--link:focus-visible {
 
 .drug-table-count {
   text-align: center;
-  font-weight: 600;
 }

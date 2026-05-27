@@ -81,7 +81,7 @@ def regenerate(
         list[str] | None,
         typer.Option(
             '--export',
-            help='Optional extra export format in addition to HTML. Can be provided multiple times.',
+            help='Optional extra export format in addition to HTML (pdf, json, tabular). Pdfs are summaries only. Can be provided multiple times.',
         ),
     ] = None,
 ) -> None:

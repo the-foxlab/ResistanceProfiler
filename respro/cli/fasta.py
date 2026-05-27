@@ -72,8 +72,8 @@ def _profile_fasta_command(
     export: Annotated[
         list[str] | None,
         typer.Option(
-            '--export',
-            help='Optional extra export format in addition to HTML (pdf, json, tabular). Can be provided multiple times.',
+            '--export', '-e',
+            help='Optional extra export format in addition to HTML (pdf, json, tabular). Pdfs are summaries only. Can be provided multiple times.',
         ),
     ] = None,
     input_display_name: Annotated[
