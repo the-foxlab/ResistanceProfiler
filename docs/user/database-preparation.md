@@ -76,7 +76,7 @@ Assigns drugs to named groups (e.g. drug classes).
 
 ### `drug_interpretation`
 
-Specifies how phenotype or score counts translate into an interpretation. `by_phenotype` and `by_score` are mutually exclusive — only one `drug_interpretation` entry is permitted per project, and its `method` field selects which strategy is used. Providing two `drug_interpretation` entries is an error and will cause `respro init` to fail.
+Specifies how phenotype or score counts translate into an interpretation. `by_phenotype` and `by_score` are mutually exclusive — only one `drug_interpretation` entry is permitted per project, and its `method` field selects which strategy is used. Providing two `drug_interpretation` entries is an error and will cause `respro init` to fail. How these algorithm work is simple. For `by_phenotype` all phenotype assosiations per drug are counted and if they reach a threshold this results in the final interpretation. Likewise for the `by_score` algorithm the sum of scores is calculated and per drug its again checked they reach a threshold defined below.
 
 - `method` — required; must be `"by_phenotype"` or `"by_score"`; the two methods are mutually exclusive
 - `thresholds` — required object; must include `"resistant"` key; `"intermediate"` is optional; all values must be positive integers

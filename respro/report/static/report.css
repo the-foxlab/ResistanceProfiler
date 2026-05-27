@@ -1173,6 +1173,13 @@ body {
   border: 1px solid transparent;
 }
 
+.db-hit-phenotype {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
 /* Phenotype badge classes — light bg, dark text */
 .phenotype--resistant    { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
 .phenotype--intermediate { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
@@ -1662,19 +1669,8 @@ a.db-hit-pub-link:hover {
 }
 
 /* Drug interpretation table */
-.drug-group-section {
-  margin-bottom: 1rem;
-}
-
-.drug-group-title {
-  font-weight: 600;
-  font-size: var(--font-size-sm);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--muted);
-  margin-bottom: 0.5rem;
-  padding-bottom: 0.25rem;
-  border-bottom: 2px solid var(--line);
+.drug-interp-table-wrapper {
+  overflow-x: auto;
 }
 
 .drug-interp-table {
@@ -1692,6 +1688,10 @@ a.db-hit-pub-link:hover {
   white-space: nowrap;
 }
 
+.drug-interp-table th.drug-table-count {
+  text-align: center;
+}
+
 .drug-interp-table td {
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--line);
@@ -1700,6 +1700,17 @@ a.db-hit-pub-link:hover {
 
 .drug-interp-table tr:last-child td {
   border-bottom: none;
+}
+
+.drug-group-header-row td {
+  font-weight: 600;
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  background: var(--paper-soft);
+  padding: 0.35rem 0.75rem;
+  border-bottom: 1px solid var(--line);
 }
 
 .drug-table-count {

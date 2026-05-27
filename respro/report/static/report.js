@@ -880,6 +880,47 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
+  // ── Summary tab: Drug interpretation download ───────────────────────────
+  const summaryDrugTable = document.querySelector('.drug-interp-table');
+  const summaryDrugDownloadButton = document.querySelector('.summary-drug-download-button');
+  if (summaryDrugTable && summaryDrugDownloadButton) {
+    summaryDrugDownloadButton.addEventListener('click', function () {
+      const lines = [];
+      const headers = Array.from(summaryDrugTable.querySelectorAll('thead th')).map(function (th) {
+        const headerClone = th.cloneNode(true);
+        headerClone.querySelectorAll('.db-hit-freq-info').forEach(function (tooltip) {
+          tooltip.remove();
+        });
+        return (headerClone.textContent || '').replace(/\s+/g, ' ').trim();
+      });
+      const hasGroupHeaders = !!summaryDrugTable.querySelector('.drug-group-header-row');
+      if (hasGroupHeaders) {
+        headers.unshift('Drug class');
+      }
+      lines.push(headers.join('\t'));
+
+      let currentGroup = '';
+      Array.from(summaryDrugTable.querySelectorAll('tbody tr')).forEach(function (row) {
+        if (row.classList.contains('drug-group-header-row')) {
+          currentGroup = (row.textContent || '').replace(/\s+/g, ' ').trim();
+          return;
+        }
+        const values = Array.from(row.querySelectorAll('td')).map(function (cell) {
+          return (cell.textContent || '').replace(/\s+/g, ' ').trim();
+        });
+        if (!values.length) {
+          return;
+        }
+        const fields = hasGroupHeaders ? [currentGroup].concat(values) : values;
+        lines.push(fields.map(function (value) {
+          return value.replace(/\t/g, ' ').replace(/\n/g, ' ');
+        }).join('\t'));
+      });
+
+      downloadTsv(lines, 'drug_interpretation.tsv');
+    });
+  }
+
   // ── Summary tab: narrative translation ──────────────────────────────
   document.querySelectorAll('.summary-text-box').forEach(function (box) {
     const buttons = Array.from(box.querySelectorAll('.summary-lang-btn'));
