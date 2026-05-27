@@ -15,6 +15,7 @@ from urllib.parse import quote
 from jinja2 import BaseLoader, Environment
 from markupsafe import Markup, escape
 
+from respro import __version__
 from respro.config.cli_settings import CLI_CONFIG
 from respro.db.algorithms import load_interpretation_algorithms
 from respro.core.annotation import classify_similarity
@@ -154,6 +155,7 @@ def build_report_context(
         'favicon': _load_svg_data_url('favicon.svg'),
         'header': {
             'title': f'Report: {title_source} resistance profile',
+            'version': __version__,
             'badge_label': 'Database hits found' if has_database_hit else 'No database hits found',
             'badge_icon': 'tick' if has_database_hit else 'x',
             'badge_class': 'is-hit' if has_database_hit else 'is-no-hit',

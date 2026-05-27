@@ -22,15 +22,18 @@
               {{ context.header.badge_label }}
             </span>
           </div>
-          <button
-            id="plot-modal-open"
-            class="header-plot-button"
-            type="button"
-            title="Open variant overview"
-            aria-label="Open variant overview"
-          >
-            Open Plot
-          </button>
+          <div class="header-actions">
+            <span class="header-version">respro v{{ context.header.version }}</span>
+            <button
+              id="plot-modal-open"
+              class="header-plot-button"
+              type="button"
+              title="Open variant overview"
+              aria-label="Open variant overview"
+            >
+              Open Plot
+            </button>
+          </div>
         </div>
         <div class="header-meta">
           <p>{{ context.header.meta_primary }}</p>
@@ -838,6 +841,16 @@
         </div>
       </section>
     </div>
+
+    <button
+      id="scroll-top-button"
+      class="scroll-top-button"
+      type="button"
+      title="Scroll to top"
+      aria-label="Scroll to top"
+    >
+      ↑
+    </button>
   </div>
 
   <script>

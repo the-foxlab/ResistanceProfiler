@@ -19,6 +19,8 @@ document.addEventListener('DOMContentLoaded', function () {
   const sequenceBackdrop = document.getElementById('feature-sequence-modal-backdrop');
   const sequenceTitle = document.getElementById('feature-sequence-modal-title');
   const sequenceBlock = document.getElementById('feature-sequence-modal-sequence');
+  const reportMain = document.querySelector('.report-main');
+  const scrollTopButton = document.getElementById('scroll-top-button');
 
   tabButtons.forEach(button => {
     button.addEventListener('click', function () {
@@ -147,6 +149,39 @@ document.addEventListener('DOMContentLoaded', function () {
       closeModal(sequenceModal);
     }
   });
+
+  if (scrollTopButton) {
+    const threshold = 240;
+
+    const getScrollTop = function () {
+      const mainScrollTop = reportMain ? reportMain.scrollTop : 0;
+      const windowScrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+      return Math.max(mainScrollTop, windowScrollTop);
+    };
+
+    const updateScrollTopButton = function () {
+      const shouldShow = getScrollTop() > threshold;
+      scrollTopButton.classList.toggle('is-visible', shouldShow);
+    };
+
+    const scrollHandler = function () {
+      updateScrollTopButton();
+    };
+
+    if (reportMain) {
+      reportMain.addEventListener('scroll', scrollHandler, { passive: true });
+    }
+    window.addEventListener('scroll', scrollHandler, { passive: true });
+
+    scrollTopButton.addEventListener('click', function () {
+      if (reportMain) {
+        reportMain.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    updateScrollTopButton();
+  }
 
   // ── Info panel tooltips (position: fixed to escape table scroll container) ─
   document.querySelectorAll('.db-hit-freq-info').forEach(function (trigger) {
