@@ -47,25 +47,22 @@ def export_results(
     :param rules: optional resistance rules for potential effects analysis
     :param extra_export_formats: optional set of additional output formats ('json', 'tabular', 'pdf')
     :param project_db_path: optional path to project database used for this run
-    :param output_html_path: optional explicit HTML output file path; when set, HTML is written
-        exactly to this path and JSON/tabular files use its basename stem
+    :param output_html_path: explicit HTML output file path; HTML is written exactly to this
+        path and JSON/tabular files use its basename stem
     :return: dict mapping format names to output file paths
     """
     if output_html_path is None:
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        stem = _build_output_stem(result)
-        html_path = output_dir / f'{stem}.report.html'
+        raise ValueError('output_html_path is required for export_results().')
+
+    html_path = Path(output_html_path)
+    output_dir = html_path.parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if html_path.name.endswith('.report.html'):
+        stem = html_path.name[:-12]
+    elif html_path.suffix == '.html':
+        stem = html_path.stem
     else:
-        html_path = Path(output_html_path)
-        output_dir = html_path.parent
-        output_dir.mkdir(parents=True, exist_ok=True)
-        if html_path.name.endswith('.report.html'):
-            stem = html_path.name[:-12]
-        elif html_path.suffix == '.html':
-            stem = html_path.stem
-        else:
-            stem = html_path.name
+        stem = html_path.name
 
     requested_formats = set(extra_export_formats or set())
     unknown_formats = requested_formats - {'json', 'tabular', 'pdf'}
@@ -507,13 +504,6 @@ def _condense_pdf_narrative(narrative: str) -> str:
     text = re.sub(r'\s*List of drugs without[^.]*\.', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\s{2,}', ' ', text)
     return text.strip()
-
-
-def _build_output_stem(result: ProfilingResult) -> str:
-    """Return a safe basename derived from the profiled VCF/FASTA filename."""
-    raw_stem = Path(result.vcf_name).stem.strip() or 'profile'
-    safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', raw_stem)
-    return safe_stem or 'profile'
 
 
 def _strip_html(value: str) -> str:

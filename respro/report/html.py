@@ -794,7 +794,6 @@ def _build_drug_cards(drug_stats: dict[str, dict], db_drug_cards_by_name: dict[s
         metadata = db_drug_cards_by_name.get(key)
         if metadata:
             stats.update({
-                'badge_color': metadata.get('badge_color', ''),
                 'pubchem_url': metadata.get('pubchem_url', ''),
                 'description': metadata.get('description', ''),
                 'structure_url': metadata.get('structure_url', ''),
@@ -802,7 +801,6 @@ def _build_drug_cards(drug_stats: dict[str, dict], db_drug_cards_by_name: dict[s
             })
         else:
             stats.update({
-                'badge_color': '',
                 'pubchem_url': '',
                 'description': '',
                 'structure_url': '',
@@ -1571,7 +1569,7 @@ def _load_drug_cards(
 
     try:
         rows = project_conn.execute(
-            'SELECT name, badge_color, pubchem_cid, pubchem_url, description, structure_url '
+            'SELECT name, pubchem_url, description, structure_url '
             'FROM drug ORDER BY name'
         ).fetchall()
     except sqlite3.Error as exc:
@@ -1587,11 +1585,9 @@ def _load_drug_cards(
             continue
         cards.append({
             'name': name,
-            'badge_color': row['badge_color'] or '',
             'pubchem_url': row['pubchem_url'] or '',
             'description': row['description'] or '',
             'structure_url': row['structure_url'] or '',
-            'pubchem_cid': row['pubchem_cid'] or '',
         })
 
     cards.sort(key=lambda card: (card.get('name') or '').lower())
