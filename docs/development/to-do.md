@@ -345,3 +345,7 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡remove drug badges
 - 🟡identify dead code
 - 🟡optimize for mobile
+- 🟡missing gene in table webapp (likely due to naming it to feature)
+- 🟡 add herpes drg assessment of ic50 values
+- 🟡 herpes drg --> fold ic50 ?
+-

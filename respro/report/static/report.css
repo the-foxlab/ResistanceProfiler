@@ -1495,6 +1495,24 @@ a.db-hit-pub-link:hover {
   color: #92400e;
 }
 
+button.summary-stat-box--link {
+  appearance: none;
+  border: none;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  text-align: inherit;
+  width: 100%;
+  padding: inherit;
+}
+
+button.summary-stat-box--link:hover,
+button.summary-stat-box--link:focus-visible {
+  background-color: rgba(0, 0, 0, 0.05);
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
 .summary-stat-box__label {
   font-size: var(--font-size-xs);
   color: var(--muted);
@@ -1541,6 +1559,19 @@ a.db-hit-pub-link:hover {
   font-weight: 600;
   white-space: nowrap;
   align-self: center;
+}
+
+button.feature-mutation-badge--link {
+  appearance: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.feature-mutation-badge--link:hover,
+button.feature-mutation-badge--link:focus-visible {
+  opacity: 0.75;
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
 }
 
 .feature-mutations {

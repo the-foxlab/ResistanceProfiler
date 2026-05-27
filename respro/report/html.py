@@ -1273,7 +1273,7 @@ def _build_summary_narrative(
     ], key=lambda name: name.lower())
 
     profiled_features = sorted({
-        display_names.get(match.feature.name, match.feature.name).lower()
+        display_names.get(match.feature.name, match.feature.name)
         for match in result.feature_matches
     })
     if profiled_features:
@@ -1284,12 +1284,14 @@ def _build_summary_narrative(
     else:
         feature_clause = 'The input sequence'
 
+    is_plural = not profiled_features or len(profiled_features) != 1
+    verb = 'were' if is_plural else 'was'
     organism_name = escape(result.organism) if result.organism else 'Unknown organism'
     n_drugs = len(assessed_rows) if assessed_rows else len(drug_rows)
     if has_assessment and n_drugs:
         drug_word = 'drug' if n_drugs == 1 else 'drugs'
         lead = (
-            f'{feature_clause} of <strong>{organism_name}</strong> were evaluated against '
+            f'{feature_clause} of <strong>{organism_name}</strong> {verb} evaluated against '
             f'known resistance-associated mutations for {n_drugs} {drug_word}. '
             f'The assessment found evidence for antiviral resistance against '
             f"{len(resistant_drugs)} {'drug' if len(resistant_drugs) == 1 else 'drugs'}, "
@@ -1298,13 +1300,13 @@ def _build_summary_narrative(
         )
     elif drug_rows:
         lead = (
-            f'{feature_clause} of <strong>{organism_name}</strong> were evaluated against '
+            f'{feature_clause} of <strong>{organism_name}</strong> {verb} evaluated against '
             f'known resistance-associated mutations, but no final drug interpretation '
             'algorithm is configured.'
         )
     else:
         lead = (
-            f'{feature_clause} of <strong>{organism_name}</strong> were evaluated, '
+            f'{feature_clause} of <strong>{organism_name}</strong> {verb} evaluated, '
             'but no in-scope drugs were available for interpretation.'
         )
     paragraphs.append(lead)
