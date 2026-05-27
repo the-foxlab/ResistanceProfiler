@@ -295,10 +295,10 @@ def _finalize_and_export(
 
 def _print_completion_panel(console: Console, title: str, result: ProfilingResult, outputs: dict) -> None:
     """Render a summary panel after a profiling run."""
-    hit_line = f'{result.database_hit_count} unique rule hit(s)'
-    if hasattr(result, 'formula_hits') and result.formula_hits:
-        hit_line += f'  ·  {len(result.formula_hits)} unique formula rule hit(s)'
     direct_rule_hit_total = sum(len(ann.non_formula_component_rule_matches) for ann in result.annotations)
+    hit_line = f'{direct_rule_hit_total} rule hit(s)'
+    if result.formula_hits:
+        hit_line += f'  ·  {len(result.formula_hits)} formula rule hit(s)'
     total_database_hits = direct_rule_hit_total + len(result.formula_hits)
     total_hit_line = f'{total_database_hits} total database hits'
 

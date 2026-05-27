@@ -54,121 +54,118 @@
     <main class="report-main">
       <div id="tab-summary" class="tab-content active">
 
-        <!-- Row 1: two-column grid — Sequence Assessment + Coverage (if available) -->
-        <div class="summary-grid">
+        <!-- Outer row: Assessment tile + optional Interpretation Summary tile -->
+        <div class="summary-outer-row">
 
-          <!-- Tile 1: Sequence Assessment -->
-          <div class="summary-tile">
-            <div class="summary-tile-header">
-              <img src="{{ context.summary.dna_icon }}" class="summary-tile-icon" alt="" aria-hidden="true">
-              <h2 class="summary-tile-title">Sequence Assessment</h2>
-            </div>
-            <ul class="summary-stat-list">
-              <li>
-                <span class="summary-stat-label">Total mutations</span>
-                <span class="summary-stat-value">{{ context.summary.sequence_assessment.total_mutations }}</span>
-              </li>
-              <li>
-                <span class="summary-stat-label">Non-synonymous</span>
-                <span class="summary-stat-value">{{ context.summary.sequence_assessment.non_synonymous_count }}</span>
-              </li>
-              <li>
-                <span class="summary-stat-label">Features affected</span>
-                <span class="summary-stat-value">{{ context.summary.sequence_assessment.features_count }}</span>
-              </li>
-            </ul>
-            {% if context.summary.sequence_assessment.features_with_mutations %}
-              <div class="summary-feature-tags">
-                {% for f in context.summary.sequence_assessment.features_with_mutations %}
-                  <span class="summary-feature-tag">{{ f }}</span>
-                {% endfor %}
-              </div>
-            {% endif %}
-            {% if context.summary.sequence_assessment.high_impact_count %}
-              <div class="summary-high-impact">
-                <strong>
-                  {{ context.summary.sequence_assessment.high_impact_count }}
-                  high-impact {{ 'variant' if context.summary.sequence_assessment.high_impact_count == 1 else 'variants' }}
-                </strong>
-                detected ({{ context.summary.sequence_assessment.high_impact_types }})
-                {% if context.summary.sequence_assessment.high_impact_features %}
-                  in
-                  {% for f in context.summary.sequence_assessment.high_impact_features %}
-                    <em>{{ f }}</em>{% if not loop.last %}, {% endif %}
-                  {% endfor %}
-                {% endif %}.
-              </div>
-            {% endif %}
-          </div>
+          <!-- Assessment + Features tile -->
+          <div class="summary-tile summary-outer-col">
 
-          <!-- Tile 2: Coverage Overview (only when rule positions are known) -->
-          {% if context.summary.coverage.available %}
-            <div class="summary-tile">
-              <div class="summary-tile-header">
-                <h2 class="summary-tile-title">Coverage Overview</h2>
-              </div>
-              <div class="summary-coverage-summary">
-                <div class="coverage-bar-track">
-                  <div class="coverage-bar-fill" style="width: {{ context.summary.coverage.assessed_pct }}%"></div>
+            <!-- Top: two panels side by side -->
+            <div class="summary-top-row">
+
+              <!-- Left panel: Sequence Assessment -->
+              <div class="summary-top-panel">
+                <div class="summary-tile-header">
+                  <img src="{{ context.summary.dna_icon }}" class="summary-tile-icon" alt="" aria-hidden="true">
+                  <h2 class="summary-tile-title">Sequence Assessment</h2>
                 </div>
-                <span class="coverage-bar-label">
-                  {{ context.summary.coverage.assessed_rule_positions }}/{{ context.summary.coverage.total_rule_positions }}
-                  rule positions assessed ({{ context.summary.coverage.assessed_pct }}%)
-                </span>
-              </div>
-              {% if context.summary.coverage.per_feature | length > 1 %}
-                <div class="coverage-per-feature">
-                  {% for pc in context.summary.coverage.per_feature %}
-                    <div class="coverage-feature-row">
-                      <span class="coverage-feature-name">{{ pc.feature }}</span>
-                      <div class="coverage-bar-track coverage-bar-track--mini">
-                        <div class="coverage-bar-fill" style="width: {{ pc.assessed_pct }}%"></div>
+                <div class="summary-stats-row">
+                  <div class="summary-stat-box">
+                    <div class="summary-stat-box__value">{{ context.summary.sequence_assessment.total_mutations }}</div>
+                    <div class="summary-stat-box__label">Total mutations</div>
+                  </div>
+                  <div class="summary-stat-box">
+                    <div class="summary-stat-box__value">{{ context.summary.sequence_assessment.non_synonymous_count }}</div>
+                    <div class="summary-stat-box__label">Non-synonymous</div>
+                  </div>
+                  <div class="summary-stat-box{% if context.summary.sequence_assessment.high_impact_count %} summary-stat-box--high-impact{% endif %}">
+                    <div class="summary-stat-box__value">{{ context.summary.sequence_assessment.high_impact_count }}</div>
+                    <div class="summary-stat-box__label">High-impact variants</div>
+                  </div>
+                </div>
+              </div><!-- end left panel -->
+
+              <!-- Right panel: Database Hits -->
+              <div class="summary-top-panel summary-top-panel--right">
+                <div class="summary-tile-header">
+                  <img src="{{ context.summary.db_icon }}" class="summary-tile-icon" alt="" aria-hidden="true">
+                  <h2 class="summary-tile-title">Database Hits</h2>
+                </div>
+                <div class="summary-db-stats">
+                  <div class="summary-db-stat-row">
+                    <span class="summary-db-stat-label">Matching entries</span>
+                    <span class="summary-db-stat-value">{{ context.summary.db_hits_summary.total }}</span>
+                  </div>
+                  <div class="summary-db-stat-row">
+                    <span class="summary-db-stat-label">Single rule hits</span>
+                    <span class="summary-db-stat-value">{{ context.summary.db_hits_summary.single_rule_hits }}</span>
+                  </div>
+                  <div class="summary-db-stat-row">
+                    <span class="summary-db-stat-label">Formula rule hits</span>
+                    <span class="summary-db-stat-value">{{ context.summary.db_hits_summary.formula_rule_hits }}</span>
+                  </div>
+                </div>
+              </div><!-- end right panel -->
+
+            </div><!-- end .summary-top-row -->
+
+            <!-- Full-width: Affected sequence features -->
+            {% if context.summary.mutation_profile %}
+              <div class="summary-features-section">
+                <div class="summary-affected-features-header">
+                  <p class="summary-affected-features-label">Affected sequence features</p>
+                  <span class="db-hit-freq-info">
+                    <img class="db-hit-info-icon" src="{{ context.summary.info_icon }}" alt="info" width="13" height="13">
+                    <div class="db-hit-info-panel">
+                      <p><strong>Bold</strong> — mutation matches a database entry.</p>
+                      <p><strong class="mut-legend-high-impact">Bold red</strong> — high-impact structural variant (frameshift, stop gain/loss, start loss, insertion, or deletion).</p>
+                      {% if context.summary.has_coverage %}<p>Bar — gene coverage in the input sequence (green = covered, orange = not covered).</p>{% endif %}
+                    </div>
+                  </span>
+                </div>
+                <div class="feature-mutation-list{% if context.summary.has_coverage %} feature-mutation-list--with-coverage{% endif %}">
+                  {% for entry in context.summary.mutation_profile %}
+                    <div class="feature-mutation-row">
+                      <span class="feature-mutation-badge">{{ entry.feature }}</span>
+                      {% if context.summary.has_coverage %}
+                        <div class="feature-coverage-bar">
+                          <div class="feature-coverage-bar__fill" style="width: {{ entry.covered_pct }}%"></div>
+                        </div>
+                      {% endif %}
+                      <div class="feature-mutations">
+                        {% for m in entry.mutations %}<span class="mut-text{% if m.is_high_impact %} mut-text--high-impact{% elif m.is_db_hit %} mut-text--db-hit{% endif %}">{{ m.label }}</span>{% if not loop.last %}<span class="mut-sep">,</span> {% endif %}{% endfor %}
                       </div>
-                      <span class="coverage-feature-count">{{ pc.assessed }}/{{ pc.total }}</span>
                     </div>
                   {% endfor %}
                 </div>
-              {% endif %}
+              </div>
+            {% endif %}
+
+          </div><!-- end Assessment + Features tile -->
+
+          <!-- Interpretation Summary (only when an interpretation algorithm is configured) -->
+          {% if context.summary.has_narrative %}
+            <div class="summary-tile summary-outer-col">
+              <div class="summary-tile-header">
+                <img src="{{ context.summary.report_icon }}" class="summary-tile-icon" alt="" aria-hidden="true">
+                <h2 class="summary-tile-title">Interpretation Summary</h2>
+              </div>
+              <div class="summary-text-box" data-summary-lang="en">
+                <div class="summary-lang-controls">
+                  <button class="summary-lang-btn active" data-lang="en" type="button">EN</button>
+                  <button class="summary-lang-btn" data-lang="de" type="button">DE</button>
+                  <button class="summary-lang-btn" data-lang="fr" type="button">FR</button>
+                  <button class="summary-lang-btn" data-lang="es" type="button">ES</button>
+                </div>
+                <p class="summary-text" data-lang="en">{{ context.summary.narrative | safe }}</p>
+                <p class="summary-text" data-lang="de" hidden></p>
+                <p class="summary-text" data-lang="fr" hidden></p>
+                <p class="summary-text" data-lang="es" hidden></p>
+              </div>
             </div>
           {% endif %}
 
-        </div><!-- end .summary-grid -->
-
-        <!-- Tile 3: Mutation Profile by Feature -->
-        {% if context.summary.mutation_profile %}
-          <div class="summary-tile summary-tile--full">
-            <div class="summary-tile-header">
-              <h2 class="summary-tile-title">Mutation Profile by Feature</h2>
-            </div>
-            <div class="mutation-profile-list">
-              {% for entry in context.summary.mutation_profile %}
-                <div class="mutation-profile-row">
-                  <span class="mutation-profile-feature">{{ entry.feature }}</span>
-                  <span class="mutation-profile-mutations">{{ entry.mutations }}</span>
-                </div>
-              {% endfor %}
-            </div>
-          </div>
-        {% endif %}
-
-        <!-- Tile 4: Interpretation Narrative -->
-        <div class="summary-tile summary-tile--full">
-          <div class="summary-tile-header">
-            <h2 class="summary-tile-title">Interpretation Summary</h2>
-          </div>
-          <div class="summary-text-box" data-summary-lang="en">
-            <div class="summary-lang-controls">
-              <button class="summary-lang-btn active" data-lang="en" type="button">EN</button>
-              <button class="summary-lang-btn" data-lang="de" type="button">DE</button>
-              <button class="summary-lang-btn" data-lang="fr" type="button">FR</button>
-              <button class="summary-lang-btn" data-lang="es" type="button">ES</button>
-            </div>
-            <p class="summary-text" data-lang="en">{{ context.summary.narrative | safe }}</p>
-            <p class="summary-text" data-lang="de" hidden></p>
-            <p class="summary-text" data-lang="fr" hidden></p>
-            <p class="summary-text" data-lang="es" hidden></p>
-          </div>
-        </div>
+        </div><!-- end .summary-outer-row -->
 
         <!-- Tile 5: Drug Interpretation Table -->
         {% if context.summary.drug_table.rows %}

@@ -19,7 +19,6 @@ from respro.config.cli_settings import CLI_CONFIG
 from respro.db.algorithms import load_interpretation_algorithms
 from respro.core.annotation import classify_similarity
 from respro.db.models import (
-    CoverageGap,
     FeatureRecord,
     ProfilingResult,
     Publication,
@@ -119,7 +118,6 @@ def build_report_context(
     summary_context = _build_summary_context(
         result,
         display_names=display_names,
-        rules=rules,
         database_hits=database_hits,
         similarity_entries=similarity_entries,
         project_conn=project_conn,
@@ -1038,10 +1036,27 @@ def _range_sentence(ranges: dict[str, int]) -> str:
     return f"quantitative values: {_join_english_list(labels)}"
 
 
+def _has_interpretation_algorithm(project_conn: sqlite3.Connection | None) -> bool:
+    """
+    Return True when the project DB has at least one interpretation algorithm registered.
+
+    :param project_conn: optional project DB connection
+    :return: True if any algorithm is configured, False otherwise
+    """
+    if project_conn is None:
+        return False
+    try:
+        row = project_conn.execute(
+            'SELECT 1 FROM interpretation_algorithm LIMIT 1'
+        ).fetchone()
+        return row is not None
+    except Exception:
+        return False
+
+
 def _build_summary_context(
     result: ProfilingResult,
     display_names: dict[str, str],
-    rules: list[ResistanceRule] | None,
     database_hits: dict,
     similarity_entries: dict,
     project_conn: sqlite3.Connection | None,
@@ -1051,26 +1066,39 @@ def _build_summary_context(
 
     :param result: profiling result
     :param display_names: feature display-name overrides
-    :param rules: resistance rules for coverage assessment
     :param database_hits: context dict from _build_database_hits_rows
     :param similarity_entries: context dict from _build_potential_effects_rows
     :param project_conn: optional project DB connection for algorithm lookup
     :return: summary context dict
     """
     sequence_assessment = _build_sequence_assessment(result, display_names)
-    coverage = _build_coverage_context(result, rules, display_names)
-    mutation_profile = _build_mutation_profile(result, display_names)
+    gene_coverage = _compute_gene_coverage(result, display_names)
+    mutation_profile = _build_mutation_profile(result, display_names, gene_coverage)
+    has_narrative = _has_interpretation_algorithm(project_conn)
     narrative = _build_summary_narrative(
         result, display_names, database_hits, similarity_entries, sequence_assessment,
     )
     drug_table = _build_drug_interpretation_table(database_hits, project_conn)
+    single_rule_hit_count = sum(
+        len(ann.non_formula_component_rule_matches) for ann in result.cds_annotations
+    )
+    formula_rule_hit_count = len(result.formula_hits)
     return {
         'sequence_assessment': sequence_assessment,
-        'coverage': coverage,
         'mutation_profile': mutation_profile,
+        'has_coverage': gene_coverage is not None,
+        'has_narrative': has_narrative,
         'narrative': str(narrative),
         'drug_table': drug_table,
+        'db_hits_summary': {
+            'total': database_hits.get('count', 0),
+            'single_rule_hits': single_rule_hit_count,
+            'formula_rule_hits': formula_rule_hit_count,
+        },
         'dna_icon': _load_svg_data_url('dna.svg'),
+        'db_icon': _load_svg_data_url('icon-database.svg'),
+        'info_icon': _load_svg_data_url('info.svg'),
+        'report_icon': _load_svg_data_url('report.svg'),
     }
 
 
@@ -1116,87 +1144,89 @@ def _build_sequence_assessment(
     }
 
 
-def _build_coverage_context(
+def _compute_gene_coverage(
     result: ProfilingResult,
-    rules: list[ResistanceRule] | None,
     display_names: dict[str, str],
-) -> dict:
+) -> dict[str, int] | None:
     """
-    Compute assessable vs. unassessable rule positions based on coverage gaps.
+    Compute covered percentage per feature from feature matches and coverage gaps.
 
     :param result: profiling result
-    :param rules: resistance rules to cross-reference against coverage gaps
     :param display_names: feature display-name overrides
-    :return: coverage context dict; 'available' is False when no rule positions exist
+    :return: dict mapping display name to covered %, or None when no feature matches exist
     """
-    rule_positions = {(rule.feature_name, rule.position) for rule in (rules or [])}
-    if not rule_positions:
-        return {'available': False}
+    if not result.feature_matches:
+        return None
 
-    feature_gaps: dict[str, list[CoverageGap]] = {}
+    total_codons: dict[str, int] = {}
+    for match in result.feature_matches:
+        feature = match.feature
+        count = max(0, (len(feature.nt_sequence) - feature.codon_start) // 3)
+        total_codons[feature.name] = count
+
+    non_covered: dict[str, int] = {}
     for gap in result.coverage_gaps:
-        feature_gaps.setdefault(gap.feature_name, []).append(gap)
-
-    total_rule_positions = len(rule_positions)
-    unassessed_total = sum(
-        1 for feature, pos in rule_positions
-        if any(gap.codon_start <= pos <= gap.codon_end for gap in feature_gaps.get(feature, []))
-    )
-    assessed_rule_positions = total_rule_positions - unassessed_total
-    assessed_pct = round(100 * assessed_rule_positions / total_rule_positions)
-
-    features_with_rules = {feature for feature, _ in rule_positions}
-    per_feature: list[dict] = []
-    for feature_name in sorted(features_with_rules):
-        feature_positions = {pos for f, pos in rule_positions if f == feature_name}
-        feat_total = len(feature_positions)
-        feat_unassessed = sum(
-            1 for pos in feature_positions
-            if any(gap.codon_start <= pos <= gap.codon_end for gap in feature_gaps.get(feature_name, []))
+        non_covered[gap.feature_name] = (
+            non_covered.get(gap.feature_name, 0) + gap.codon_end - gap.codon_start + 1
         )
-        feat_assessed = feat_total - feat_unassessed
-        per_feature.append({
-            'feature': display_names.get(feature_name, feature_name),
-            'total': feat_total,
-            'assessed': feat_assessed,
-            'unassessed': feat_unassessed,
-            'assessed_pct': round(100 * feat_assessed / feat_total) if feat_total else 100,
-        })
 
-    return {
-        'available': True,
-        'total_rule_positions': total_rule_positions,
-        'unassessed_rule_positions': unassessed_total,
-        'assessed_rule_positions': assessed_rule_positions,
-        'assessed_pct': assessed_pct,
-        'per_feature': per_feature,
-    }
+    coverage: dict[str, int] = {}
+    for feature_name, total in total_codons.items():
+        display = display_names.get(feature_name, feature_name)
+        nc = min(non_covered.get(feature_name, 0), total)
+        coverage[display] = round(100 * (total - nc) / total) if total else 100
+    return coverage
 
 
 def _build_mutation_profile(
     result: ProfilingResult,
     display_names: dict[str, str],
+    gene_coverage: dict[str, int] | None,
 ) -> list[dict]:
     """
-    Group amino acid changes by feature for the mutation profile tile.
+    Group amino acid changes by feature with per-mutation styling flags.
 
     :param result: profiling result
     :param display_names: feature display-name overrides
-    :return: list of {feature, mutations} dicts ordered by feature name
+    :return: list of {feature, mutations: list[{label, is_db_hit, is_high_impact}]} ordered by feature
     """
-    feature_aa_changes: dict[str, list[str]] = {}
+    formula_hit_ann_ids: set[int] = set()
+    for formula_hit in result.formula_hits:
+        for ann in formula_hit.matched_variants:
+            formula_hit_ann_ids.add(id(ann))
+
+    # Key: (feature, codon_pos, label) → merged style flags. Multiple NT variants
+    # in the same codon can produce the same AA label; deduplicate and OR the flags.
+    seen: dict[tuple[str, int, str], dict] = {}
     for ann in result.cds_annotations:
         feature = display_names.get(ann.feature_name, ann.feature_name)
-        aa_change = (
+        label = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             if ann.ref_aa and ann.alt_aa
             else ann.consequence
         )
-        feature_aa_changes.setdefault(feature, []).append(aa_change)
+        key = (feature, ann.codon_pos, label)
+        if key in seen:
+            seen[key]['is_db_hit'] = seen[key]['is_db_hit'] or ann.is_resistance_hit or id(ann) in formula_hit_ann_ids
+            seen[key]['is_high_impact'] = seen[key]['is_high_impact'] or ann.consequence in _HIGH_IMPACT_CONSEQUENCES
+        else:
+            seen[key] = {
+                'label': label,
+                'is_db_hit': ann.is_resistance_hit or id(ann) in formula_hit_ann_ids,
+                'is_high_impact': ann.consequence in _HIGH_IMPACT_CONSEQUENCES,
+            }
+
+    feature_mutations: dict[str, list[tuple[int, dict]]] = {}
+    for (feature, codon_pos, _label), entry in seen.items():
+        feature_mutations.setdefault(feature, []).append((codon_pos, entry))
 
     return [
-        {'feature': feature, 'mutations': ' + '.join(changes)}
-        for feature, changes in sorted(feature_aa_changes.items())
+        {
+            'feature': feature,
+            'mutations': [m for _, m in sorted(entries, key=lambda x: x[0])],
+            'covered_pct': gene_coverage.get(feature) if gene_coverage is not None else None,
+        }
+        for feature, entries in sorted(feature_mutations.items())
     ]
 
 

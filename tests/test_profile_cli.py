@@ -293,8 +293,8 @@ class TestProfileCli:
         _print_completion_panel(console, 'profile', result, {'html': Path('/tmp/report.html')})
 
         output = console.file.getvalue()
-        assert '1 unique rule hit' in output
-        assert '1 unique formula rule hit' in output
+        assert '0 rule hit' in output
+        assert '1 formula rule hit' in output
         assert '1 total database hits' in output
 
     def test_completion_panel_total_hits_matches_sequence_feature_totals_for_complex_multi_hits(
@@ -470,8 +470,8 @@ class TestProfileCli:
         _print_completion_panel(console, 'profile', result, {'html': Path('/tmp/report.html')})
         cli_output = console.file.getvalue()
 
-        assert '4 unique rule hit' in cli_output
-        assert '3 unique formula rule hit' in cli_output
+        assert '4 rule hit' in cli_output
+        assert '3 formula rule hit' in cli_output
         assert '7 total database hits' in cli_output
 
         context = build_report_context(result)

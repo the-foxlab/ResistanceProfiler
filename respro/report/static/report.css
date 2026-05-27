@@ -1373,16 +1373,22 @@ a.db-hit-pub-link:hover {
 
 /* ─── Summary tab ──────────────────────────────────────────────────── */
 
-.summary-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+/* Outer flex row: Assessment tile + optional Interpretation Summary tile */
+.summary-outer-row {
+  display: flex;
+  align-items: stretch;
   gap: 1rem;
   margin-bottom: 1rem;
 }
 
-@media (max-width: 700px) {
-  .summary-grid {
-    grid-template-columns: 1fr;
+.summary-outer-col {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .summary-outer-row {
+    flex-direction: column;
   }
 }
 
@@ -1417,145 +1423,200 @@ a.db-hit-pub-link:hover {
   margin: 0;
 }
 
-/* Stat list */
-.summary-stat-list {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 0.75rem 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+/* Top row: Sequence Assessment | Database Hits side by side */
+.summary-top-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  margin-bottom: 0;
 }
 
-.summary-stat-list li {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: var(--font-size-sm);
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 0.25rem;
+.summary-top-panel--right {
+  border-left: 1px solid var(--line);
+  padding-left: 1.25rem;
 }
 
-.summary-stat-label {
+@media (max-width: 700px) {
+  .summary-top-row {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-top-panel--right {
+    border-left: none;
+    border-top: 1px solid var(--line);
+    padding-left: 0;
+    padding-top: 1rem;
+  }
+}
+
+/* Full-width features section below the top row */
+.summary-features-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+/* Stats row — three side-by-side boxes */
+.summary-stats-row {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.summary-stat-box {
+  flex: 1;
+  background: var(--paper-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 0.75rem;
+  text-align: center;
+}
+
+.summary-stat-box--high-impact {
+  background: #fef3c7;
+  border-color: #fcd34d;
+}
+
+.summary-stat-box__value {
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.2;
+}
+
+.summary-stat-box--high-impact .summary-stat-box__value {
+  color: #92400e;
+}
+
+.summary-stat-box__label {
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+  margin-top: 0.2rem;
+}
+
+/* Affected sequence features section */
+.summary-affected-features-header {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+
+.summary-affected-features-label {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: var(--muted);
 }
 
-.summary-stat-value {
-  font-weight: 600;
+/* Grid layout: column 1 = badge (auto-sized to widest), column 2 = mutations */
+.feature-mutation-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 0.75rem;
+  align-items: center;
 }
 
-/* Feature tags */
-.summary-feature-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  margin-bottom: 0.75rem;
+/* display: contents lets badge and mutations be direct grid children of the list */
+.feature-mutation-row {
+  display: contents;
 }
 
-.summary-feature-tag {
+.feature-mutation-badge {
   background: #f1f5f9;
   color: #334155;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
   padding: 0.15rem 0.5rem;
   font-size: var(--font-size-sm);
-  font-weight: 500;
+  font-weight: 600;
+  white-space: nowrap;
+  align-self: center;
 }
 
-/* High-impact warning box */
-.summary-high-impact {
-  background: #fef3c7;
-  color: #92400e;
-  border: 1px solid #fcd34d;
-  border-radius: 4px;
-  padding: 0.5rem 0.75rem;
+.feature-mutations {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0;
+  row-gap: 0.1rem;
   font-size: var(--font-size-sm);
-  line-height: 1.5;
+  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
 }
 
-/* Coverage bar */
-.summary-coverage-summary {
+/* Mutation text — plain, with modifiers for bold/red */
+.mut-text {
+  white-space: nowrap;
+}
+
+.mut-text--db-hit {
+  font-weight: 700;
+}
+
+.mut-text--high-impact {
+  font-weight: 700;
+  color: #991b1b;
+}
+
+.mut-sep {
+  margin-right: 0.25rem;
+}
+
+/* Colour swatch used inside the info panel legend */
+.mut-legend-high-impact {
+  color: #991b1b;
+}
+
+/* Database hits summary (right column of tile body) */
+.summary-db-stats {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin-bottom: 0.75rem;
+  gap: 0.35rem;
 }
 
-.coverage-bar-track {
-  width: 100%;
-  height: 10px;
-  background: #e2e8f0;
-  border-radius: 9999px;
+.summary-db-stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: var(--font-size-sm);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.3rem;
+}
+
+.summary-db-stat-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.summary-db-stat-label {
+  color: var(--muted);
+}
+
+.summary-db-stat-value {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* 3-column grid when inline coverage bars are shown */
+.feature-mutation-list--with-coverage {
+  grid-template-columns: max-content 5rem 1fr;
+}
+
+/* Mini inline gene coverage bar — height matches the feature badge */
+.feature-coverage-bar {
+  height: 1rem;
+  background: #e4a24c;
+  border-radius: 2px;
   overflow: hidden;
+  align-self: center;
 }
 
-.coverage-bar-fill {
+.feature-coverage-bar__fill {
   height: 100%;
   background: #166534;
-  border-radius: 9999px;
-  transition: width 0.3s ease;
-}
-
-.coverage-bar-label {
-  font-size: var(--font-size-sm);
-  color: var(--muted);
-}
-
-.coverage-per-feature {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.coverage-feature-row {
-  display: grid;
-  grid-template-columns: 6rem 1fr 3.5rem;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: var(--font-size-sm);
-}
-
-.coverage-bar-track--mini {
-  height: 6px;
-}
-
-.coverage-feature-name {
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.coverage-feature-count {
-  text-align: right;
-  color: var(--muted);
-}
-
-/* Mutation profile */
-.mutation-profile-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.mutation-profile-row {
-  display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-  font-size: var(--font-size-sm);
-  padding-bottom: 0.25rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.mutation-profile-feature {
-  font-weight: 600;
-  min-width: 6rem;
-  flex-shrink: 0;
-}
-
-.mutation-profile-mutations {
-  color: var(--ink);
-  word-break: break-word;
+  border-radius: 2px;
 }
 
 /* Interpretation narrative */
