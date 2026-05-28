@@ -12,7 +12,7 @@ export const PROFILE_MODES = [
 
 const MUTATION_COLUMN_LABELS = {
   reference_name: 'Reference',
-  gene: 'Gene',
+  feature: 'Sequence Feature',
   position: 'Pos',
   reference: 'Reference AA',
   mutation: 'Mutation',
@@ -28,7 +28,7 @@ const MUTATION_COLUMN_LABELS = {
 
 const MUTATION_COLUMN_ORDER = [
   'reference_name',
-  'gene',
+  'feature',
   'position',
   'reference',
   'mutation',

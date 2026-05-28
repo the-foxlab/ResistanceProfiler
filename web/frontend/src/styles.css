@@ -573,6 +573,10 @@ th {
   grid-template-columns: 1fr;
 }
 
+.database-reference-section-score .database-reference-plot-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .database-summary-pie-card {
   display: grid;
   justify-items: center;

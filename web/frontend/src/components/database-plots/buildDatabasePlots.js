@@ -364,6 +364,26 @@ function _parseNumericMeasurement(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function _scoreCategorySort(a, b) {
+  const aNumeric = Number(a);
+  const bNumeric = Number(b);
+  const aIsNumeric = Number.isFinite(aNumeric);
+  const bIsNumeric = Number.isFinite(bNumeric);
+
+  if (aIsNumeric && bIsNumeric) {
+    if (aNumeric !== bNumeric) {
+      return aNumeric - bNumeric;
+    }
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+  }
+
+  if (aIsNumeric !== bIsNumeric) {
+    return aIsNumeric ? -1 : 1;
+  }
+
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+}
+
 function _buildLogTicks(minValue, maxValue) {
   const safeMin = Math.max(minValue, 1e-6);
   const safeMax = Math.max(maxValue, safeMin);
@@ -420,10 +440,14 @@ function _buildLogTicks(minValue, maxValue) {
   };
 }
 
-function _buildIc50DistributionSections(rules, plotMeta) {
+function _buildIc50DistributionSections(rules, formulaRules, plotMeta) {
   // Build one strip-plot per organism with one y-lane per drug and log-scaled IC50 on x.
   const references = Array.isArray(plotMeta?.references) ? plotMeta.references : [];
   const organismByReference = new Map();
+  const allRules = [
+    ...(Array.isArray(rules) ? rules : []),
+    ...(Array.isArray(formulaRules) ? formulaRules : []),
+  ];
 
   references.forEach((reference) => {
     const referenceName = _displayValue(reference.reference_name, 'Unknown reference');
@@ -432,7 +456,7 @@ function _buildIc50DistributionSections(rules, plotMeta) {
   });
 
   const groups = new Map();
-  rules.forEach((rule) => {
+  allRules.forEach((rule) => {
     const referenceName = _displayValue(rule.reference_name, 'Unknown reference');
     const organism = organismByReference.get(referenceName) || 'Unknown organism';
     if (!groups.has(organism)) {
@@ -557,6 +581,8 @@ function _buildIc50DistributionSections(rules, plotMeta) {
         footer: group.skippedNonPositive > 0
           ? `${group.skippedNonPositive} non-positive value(s) were ignored for log-scale plotting`
           : 'Each point is one rule-level measurement',
+        xScale: 'log',
+        xTickMode: 'ic50-log',
         xAxisLabel: xAxisUnitLabel,
         yAxisLabel: 'Drug',
         xDomain,
@@ -579,6 +605,110 @@ function _buildIc50DistributionSections(rules, plotMeta) {
     {
       sectionKey: 'ic50-distribution',
       sectionHeading: 'IC50 distribution',
+      layout: 'single-column',
+      plots,
+    },
+  ];
+}
+
+function _buildScoreDistributionSections(rules, formulaRules, plotMeta) {
+  // Build one count-per-score bar chart per drug within each organism.
+  const references = Array.isArray(plotMeta?.references) ? plotMeta.references : [];
+  const organismByReference = new Map();
+  const allRules = [
+    ...(Array.isArray(rules) ? rules : []),
+    ...(Array.isArray(formulaRules) ? formulaRules : []),
+  ];
+
+  references.forEach((reference) => {
+    const referenceName = _displayValue(reference.reference_name, 'Unknown reference');
+    const organism = _displayValue(reference.reference_organism, 'Unknown organism');
+    organismByReference.set(referenceName, organism);
+  });
+
+  const groups = new Map();
+  allRules.forEach((rule) => {
+    if (!_isPopulated(rule.score)) {
+      return;
+    }
+    const scoreLabel = String(rule.score).trim();
+    if (!scoreLabel) {
+      return;
+    }
+
+    const referenceName = _displayValue(rule.reference_name, 'Unknown reference');
+    const organism = organismByReference.get(referenceName) || 'Unknown organism';
+    const drugName = _displayValue(rule.drug, 'Unspecified drug');
+    const groupKey = `${organism}::${drugName}`;
+
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        groupKey,
+        organism,
+        drugName,
+        byScore: new Map(),
+      });
+    }
+
+    const group = groups.get(groupKey);
+    group.byScore.set(scoreLabel, (group.byScore.get(scoreLabel) || 0) + 1);
+  });
+
+  const plots = Array.from(groups.values())
+    .map((group) => {
+      const scoreEntries = Array.from(group.byScore.entries())
+        .map(([scoreLabel, count]) => ({
+          scoreLabel,
+          count,
+        }))
+        .sort((a, b) => _scoreCategorySort(a.scoreLabel, b.scoreLabel));
+
+      if (scoreEntries.length === 0) {
+        return null;
+      }
+
+      const totalRules = scoreEntries.reduce((sum, entry) => sum + entry.count, 0);
+
+      return {
+        kind: 'score-counts',
+        key: `score::${group.groupKey}`,
+        title: group.drugName,
+        subtitle: `${group.organism} - ${totalRules} rule(s) grouped by score`,
+        organismSortKey: group.organism,
+        footer: 'Rule counts grouped by score value',
+        xAxisLabel: 'Score',
+        yAxisLabel: 'Rule count',
+        bars: scoreEntries.map((entry) => ({
+          scoreLabel: entry.scoreLabel,
+          count: entry.count,
+          color: '#6d8194',
+        })),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      const organismOrder = a.organismSortKey.localeCompare(b.organismSortKey, undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      });
+      if (organismOrder !== 0) {
+        return organismOrder;
+      }
+      return a.title.localeCompare(b.title, undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      });
+    });
+
+  if (plots.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      sectionKey: 'score-distribution',
+      sectionHeading: 'Score counts',
+      layout: 'score-grid',
       plots,
     },
   ];
@@ -763,12 +893,13 @@ export function buildDatabasePlots(
   const binSize = Number.isFinite(parsedBinSize) ? Math.min(100, Math.max(1, Math.floor(parsedBinSize))) : 10;
   const phenotypeMode = _resolvePhenotypeMode(rules, requestedPhenotypeMode);
   const summaryTile = _buildSummaryPies(rules, formulaRules, plotMeta);
-  const ic50Sections = _buildIc50DistributionSections(rules, plotMeta);
+  const ic50Sections = _buildIc50DistributionSections(rules, formulaRules, plotMeta);
+  const scoreSections = _buildScoreDistributionSections(rules, formulaRules, plotMeta);
   const detailSections = _buildGenePositionSections(rules, plotMeta, phenotypeMode.activeMode, binSize);
 
   return {
     summaryTile,
-    ic50Sections,
+    ic50Sections: [...ic50Sections, ...scoreSections],
     detailSections,
     phenotypeMode,
     binSize,

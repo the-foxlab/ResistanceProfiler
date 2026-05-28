@@ -19,6 +19,15 @@ def _is_empty_cell(value: object) -> bool:
     return False
 
 
+def _feature_display_name_sql(feature_alias: str) -> str:
+    """Return SQL expression for feature display names (mat_peptide -> protein when present)."""
+    return (
+        f"CASE WHEN {feature_alias}.feature_type = 'mat_peptide' "
+        f"AND {feature_alias}.protein IS NOT NULL AND {feature_alias}.protein != '' "
+        f"THEN {feature_alias}.protein ELSE {feature_alias}.name END"
+    )
+
+
 def list_rules_for_display(
     conn: sqlite3.Connection,
     ref_id: int | None = None,
@@ -45,10 +54,11 @@ def list_rules_for_display(
         ")"
         ")) AS publication"
     )
+    feature_display_expr = _feature_display_name_sql('g')
 
     if ref_id is not None:
         rows = conn.execute(
-            'SELECT r.name AS reference_name, g.name AS feature, '
+            f'SELECT r.name AS reference_name, {feature_display_expr} AS feature, '
             'rr.position, rr.reference, rr.mutation, '
             'd.name AS drug, rr.phenotype, rr.clinical_phenotype, '
             'rr.ic50, rr.fold_ic50, rr.score, ' + publication_doi_expr + ', rr.source, rr.comment '
@@ -57,12 +67,12 @@ def list_rules_for_display(
             'JOIN reference r ON r.id = g.reference_id '
             'JOIN drug d ON d.id = rr.drug_id '
             'WHERE g.reference_id = ? '
-            'ORDER BY r.name, g.name, rr.position, d.name',
+            'ORDER BY r.name, feature, rr.position, d.name',
             (ref_id,),
         ).fetchall()
     else:
         rows = conn.execute(
-            'SELECT r.name AS reference_name, g.name AS feature, '
+            f'SELECT r.name AS reference_name, {feature_display_expr} AS feature, '
             'rr.position, rr.reference, rr.mutation, '
             'd.name AS drug, rr.phenotype, rr.clinical_phenotype, '
             'rr.ic50, rr.fold_ic50, rr.score, ' + publication_doi_expr + ', rr.source, rr.comment '
@@ -70,7 +80,7 @@ def list_rules_for_display(
             'JOIN feature g ON g.id = rr.feature_id '
             'JOIN reference r ON r.id = g.reference_id '
             'JOIN drug d ON d.id = rr.drug_id '
-            'ORDER BY r.name, g.name, rr.position, d.name',
+            'ORDER BY r.name, feature, rr.position, d.name',
         ).fetchall()
 
     row_dicts = [
@@ -186,8 +196,9 @@ def _load_formula_member_labels_for_display(
     ref_id: int | None = None,
 ) -> dict[str, dict[str, str]]:
     """Return formula_id -> (member_id -> display label) mapping for expression rendering."""
+    feature_display_expr = _feature_display_name_sql('g')
     sql = (
-        'SELECT fr.formula_id, rr.external_id, g.name AS feature_name, '
+        f'SELECT fr.formula_id, rr.external_id, {feature_display_expr} AS feature_name, '
         'rr.position, rr.reference, rr.mutation '
         'FROM resistance_formula_rule fr '
         'JOIN resistance_formula_rule_member frm ON frm.formula_rule_id = fr.id '
@@ -265,8 +276,9 @@ def list_plot_metadata_for_display(
         'FROM reference r '
         'JOIN feature g ON g.reference_id = r.id '
     )
+    feature_display_expr = _feature_display_name_sql('g')
     feature_sql = (
-        'SELECT r.id AS reference_id, r.name AS reference_name, g.name AS feature_name, '
+        f'SELECT r.id AS reference_id, r.name AS reference_name, {feature_display_expr} AS feature_name, '
         'LENGTH(g.aa_sequence) AS aa_length '
         'FROM feature g '
         'JOIN reference r ON r.id = g.reference_id '
@@ -279,7 +291,7 @@ def list_plot_metadata_for_display(
         feature_sql += 'WHERE r.id = ? '
 
     reference_sql += 'ORDER BY r.name'
-    feature_sql += 'ORDER BY r.name, g.name'
+    feature_sql += 'ORDER BY r.name, feature_name'
 
     reference_rows = conn.execute(reference_sql, params).fetchall()
     feature_rows = conn.execute(feature_sql, params).fetchall()
