@@ -4,6 +4,7 @@ Read-only query helpers for resistance rules — reusable without any CLI depend
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from respro.db._rules_formula import _FORMULA_OPERATORS as _LOGIC_OPERATORS
@@ -28,6 +29,48 @@ def _feature_display_name_sql(feature_alias: str) -> str:
     )
 
 
+def _load_drug_alias_map(conn: sqlite3.Connection) -> dict[str, str]:
+    """Return normalized drug-name -> alias mappings from the drug table."""
+    rows = conn.execute(
+        "SELECT name, alias FROM drug "
+        "WHERE project_id = (SELECT id FROM project ORDER BY id LIMIT 1) "
+        "AND alias IS NOT NULL AND alias != '' ORDER BY LOWER(name), alias"
+    ).fetchall()
+    alias_map: dict[str, str] = {}
+    for row in rows:
+        name = (row['name'] or '').strip().lower()
+        alias = (row['alias'] or '').strip()
+        if name and alias:
+            alias_map[name] = alias
+    return alias_map
+
+
+def _load_drug_group_map(conn: sqlite3.Connection) -> dict[str, str]:
+    """Return normalized drug-name -> drug-group mappings from interpretation_algorithm."""
+    try:
+        row = conn.execute(
+            "SELECT config_json FROM interpretation_algorithm "
+            "WHERE project_id = (SELECT id FROM project ORDER BY id LIMIT 1) "
+            "AND algorithm_name = 'drug_groups' LIMIT 1"
+        ).fetchone()
+    except sqlite3.Error:
+        return {}
+
+    if row is None:
+        return {}
+
+    config = json.loads(row['config_json'])
+    groups = config.get('groups', {})
+    group_map: dict[str, str] = {}
+    for group_name in sorted(groups, key=lambda value: value.lower()):
+        members = groups.get(group_name, [])
+        for member in sorted(members, key=lambda value: value.lower()):
+            normalized_member = member.strip().lower()
+            if normalized_member:
+                group_map[normalized_member] = group_name
+    return group_map
+
+
 def list_rules_for_display(
     conn: sqlite3.Connection,
     ref_id: int | None = None,
@@ -43,6 +86,7 @@ def list_rules_for_display(
     :return: list of rule dicts with non-empty columns only; publication is populated from DOI
              values linked through ``rule_publication``/``publication`` when available
     """
+    drug_group_map = _load_drug_group_map(conn)
     publication_doi_expr = (
         "COALESCE(NULLIF(rr.publication, ''), ("
         "SELECT GROUP_CONCAT(doi, '; ') FROM ("
@@ -60,7 +104,7 @@ def list_rules_for_display(
         rows = conn.execute(
             f'SELECT r.name AS reference_name, {feature_display_expr} AS feature, '
             'rr.position, rr.reference, rr.mutation, '
-            'd.name AS drug, rr.phenotype, rr.clinical_phenotype, '
+            'd.name AS drug, \'\' AS drug_group, rr.phenotype, rr.clinical_phenotype, '
             'rr.ic50, rr.fold_ic50, rr.score, ' + publication_doi_expr + ', rr.source, rr.comment '
             'FROM resistance_rule rr '
             'JOIN feature g ON g.id = rr.feature_id '
@@ -74,7 +118,7 @@ def list_rules_for_display(
         rows = conn.execute(
             f'SELECT r.name AS reference_name, {feature_display_expr} AS feature, '
             'rr.position, rr.reference, rr.mutation, '
-            'd.name AS drug, rr.phenotype, rr.clinical_phenotype, '
+            'd.name AS drug, \'\' AS drug_group, rr.phenotype, rr.clinical_phenotype, '
             'rr.ic50, rr.fold_ic50, rr.score, ' + publication_doi_expr + ', rr.source, rr.comment '
             'FROM resistance_rule rr '
             'JOIN feature g ON g.id = rr.feature_id '
@@ -83,11 +127,14 @@ def list_rules_for_display(
             'ORDER BY r.name, feature, rr.position, d.name',
         ).fetchall()
 
-    row_dicts = [
-        dict(row)
-        for row in rows
-        if not is_internal_formula_component_drug_name(row['drug'] or '')
-    ]
+    row_dicts = []
+    for row in rows:
+        drug_name = row['drug'] or ''
+        if is_internal_formula_component_drug_name(drug_name):
+            continue
+        row_dict = dict(row)
+        row_dict['drug_group'] = drug_group_map.get(drug_name.strip().lower(), '')
+        row_dicts.append(row_dict)
     if not row_dicts:
         return []
 
@@ -118,6 +165,7 @@ def list_formula_rules_for_display(
     :param ref_id: optional reference id to filter by
     :return: list of formula rule dicts with non-empty columns only
     """
+    drug_group_map = _load_drug_group_map(conn)
     publication_doi_expr = (
         "COALESCE(("
         "SELECT GROUP_CONCAT(doi, '; ') FROM ("
@@ -139,7 +187,7 @@ def list_formula_rules_for_display(
         "JOIN reference r ON r.id = g.reference_id "
         'WHERE frm.formula_rule_id = fr.id '
         'ORDER BY r.name LIMIT 1), \'\') AS reference_name, '
-        'd.name AS drug, fr.formula_id, fr.label, fr.normalized_expression, '
+        'd.name AS drug, \'\' AS drug_group, fr.formula_id, fr.label, fr.normalized_expression, '
         'fr.phenotype, fr.clinical_phenotype, fr.ic50, fr.fold_ic50, fr.score, '
         + publication_doi_expr + ', '
         'fr.source, fr.comment, '
@@ -167,6 +215,10 @@ def list_formula_rules_for_display(
     row_dicts = [dict(row) for row in rows]
     if not row_dicts:
         return []
+
+    for row in row_dicts:
+        drug_name = str(row.get('drug', '') or '')
+        row['drug_group'] = drug_group_map.get(drug_name.strip().lower(), '')
 
     labels_by_formula_id = _load_formula_member_labels_for_display(conn, ref_id=ref_id)
     for row in row_dicts:
@@ -270,6 +322,8 @@ def list_plot_metadata_for_display(
     :param ref_id: optional reference id to filter by
     :return: dict with ``references`` and ``features`` arrays
     """
+    drug_aliases = _load_drug_alias_map(conn)
+    drug_groups = _load_drug_group_map(conn)
     reference_sql = (
         'SELECT DISTINCT r.id AS reference_id, r.name AS reference_name, '
         "r.accession AS reference_accession, r.organism AS reference_organism "
@@ -315,6 +369,8 @@ def list_plot_metadata_for_display(
     return {
         'references': references,
         'features': features,
+        'drug_aliases': drug_aliases,
+        'drug_groups': drug_groups,
     }
 
 

@@ -25,7 +25,7 @@ from respro.db.rules_import import (
     _resolve_anchorless_deletion,
     _validate_reference_amino_acids,
 )
-from respro.db.rules_queries import list_rules_for_display
+from respro.db.rules_queries import list_plot_metadata_for_display, list_rules_for_display
 from respro.db.schema import create_schema, open_project_db
 from respro.io.reference import load_features_for_reference
 
@@ -498,6 +498,31 @@ class TestComboRuleParsing:
         assert single_count == 2
         assert formula_count == 1
         assert member_count == 2
+
+    def test_rules_display_includes_alias_and_group_metadata(self, project_db: Path) -> None:
+        conn = sqlite3.connect(str(project_db))
+        conn.row_factory = sqlite3.Row
+        conn.execute("UPDATE drug SET name = ?, alias = ? WHERE id = 1", ('Acyclovir', 'ACV'))
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (project_id, algorithm_name, config_json) VALUES (?, ?, ?)',
+            (
+                1,
+                'drug_groups',
+                textwrap.dedent('''\
+                    {"name": "drug_groups", "groups": {"Nucleoside analogues": ["Acyclovir"]}}
+                ''').strip(),
+            ),
+        )
+        conn.commit()
+
+        rows = list_rules_for_display(conn)
+        plot_meta = list_plot_metadata_for_display(conn)
+        conn.close()
+
+        assert rows[0]['drug'] == 'Acyclovir'
+        assert rows[0]['drug_group'] == 'Nucleoside analogues'
+        assert plot_meta['drug_aliases']['acyclovir'] == 'ACV'
+        assert plot_meta['drug_groups']['acyclovir'] == 'Nucleoside analogues'
 
     def test_member_ids_must_be_unique(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'

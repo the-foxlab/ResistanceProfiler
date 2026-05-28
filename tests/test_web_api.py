@@ -435,6 +435,24 @@ class TestWebApi:
         assert database['metadata']['license'] == 'MIT'
 
     def test_mutations_endpoint_alias(self, client: TestClient, auth_headers: dict[str, str]) -> None:
+        project_db = sorted(client.app.state.startup_config.project_databases_dir.glob('*.db'))[0]
+        conn = sqlite3.connect(project_db)
+        conn.row_factory = sqlite3.Row
+        conn.execute("UPDATE drug SET name = ?, alias = ? WHERE id = 1", ('Acyclovir', 'ACV'))
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (project_id, algorithm_name, config_json) VALUES (?, ?, ?)',
+            (
+                1,
+                'drug_groups',
+                json.dumps({
+                    'name': 'drug_groups',
+                    'groups': {'Nucleoside analogues': ['Acyclovir']},
+                }),
+            ),
+        )
+        conn.commit()
+        conn.close()
+
         response = client.get('/api/mutations', headers=auth_headers)
         assert response.status_code == 200
         payload = response.json()['data']
@@ -442,6 +460,10 @@ class TestWebApi:
         assert 'formula_items' in payload
         assert 'formula_count' in payload
         assert 'formula_columns' in payload
+        assert payload['items'][0]['drug'] == 'Acyclovir'
+        assert payload['items'][0]['drug_group'] == 'Nucleoside analogues'
+        assert payload['plot_meta']['drug_aliases']['acyclovir'] == 'ACV'
+        assert payload['plot_meta']['drug_groups']['acyclovir'] == 'Nucleoside analogues'
         if payload['formula_count'] > 0:
             assert 'normalized_expression' in payload['formula_columns']
 

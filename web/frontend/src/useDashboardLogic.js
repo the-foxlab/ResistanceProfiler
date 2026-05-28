@@ -17,6 +17,7 @@ const MUTATION_COLUMN_LABELS = {
   reference: 'Reference AA',
   mutation: 'Mutation',
   drug: 'Drug',
+  drug_group: 'Drug Group',
   phenotype: 'Phenotype',
   clinical_phenotype: 'Clinical phenotype',
   ic50: 'IC50',
@@ -33,6 +34,7 @@ const MUTATION_COLUMN_ORDER = [
   'reference',
   'mutation',
   'drug',
+  'drug_group',
   'phenotype',
   'clinical_phenotype',
   'ic50',
@@ -45,6 +47,7 @@ const MUTATION_COLUMN_ORDER = [
 const FORMULA_COLUMN_LABELS = {
   reference_name: 'Reference',
   drug: 'Drug',
+  drug_group: 'Drug Group',
   formula_id: 'Formula ID',
   label: 'Label',
   normalized_expression: 'Expression',
@@ -61,6 +64,7 @@ const FORMULA_COLUMN_LABELS = {
 const FORMULA_COLUMN_ORDER = [
   'reference_name',
   'drug',
+  'drug_group',
   'formula_id',
   'label',
   'normalized_expression',
@@ -80,7 +84,8 @@ function _mutationColumnSortIndex(columnKey) {
   return idx === -1 ? MUTATION_COLUMN_ORDER.length + 100 : idx;
 }
 
-function _buildMutationColumns(columnKeys) {
+function _buildMutationColumns(columnKeys, plotMeta = {}) {
+  const drugAliasLookup = _buildDrugAliasLookup(plotMeta);
   return [...columnKeys]
     .sort((a, b) => _mutationColumnSortIndex(a) - _mutationColumnSortIndex(b))
     .map((columnKey) => {
@@ -93,6 +98,14 @@ function _buildMutationColumns(columnKeys) {
             return String(positionValue + 1);
           }
         }
+        if (columnKey === 'drug') {
+          const drugName = String(rule.drug || '').trim();
+          if (!drugName) {
+            return '';
+          }
+          const alias = _resolveDrugAlias(drugName, drugAliasLookup);
+          return alias ? `${drugName} (${alias})` : drugName;
+        }
         const value = rule[columnKey];
         if (value === null || value === undefined) {
           return '';
@@ -103,6 +116,7 @@ function _buildMutationColumns(columnKeys) {
         key: columnKey,
         label,
         accessor,
+        sortAccessor: columnKey === 'drug' ? (rule) => String(rule.drug || '') : accessor,
       };
     });
 }
@@ -112,12 +126,21 @@ function _formulaColumnSortIndex(columnKey) {
   return idx === -1 ? FORMULA_COLUMN_ORDER.length + 100 : idx;
 }
 
-function _buildFormulaColumns(columnKeys) {
+function _buildFormulaColumns(columnKeys, plotMeta = {}) {
+  const drugAliasLookup = _buildDrugAliasLookup(plotMeta);
   return [...columnKeys]
     .sort((a, b) => _formulaColumnSortIndex(a) - _formulaColumnSortIndex(b))
     .map((columnKey) => {
       const label = FORMULA_COLUMN_LABELS[columnKey] || columnKey;
       const accessor = (formulaRule) => {
+        if (columnKey === 'drug') {
+          const drugName = String(formulaRule.drug || '').trim();
+          if (!drugName) {
+            return '';
+          }
+          const alias = _resolveDrugAlias(drugName, drugAliasLookup);
+          return alias ? `${drugName} (${alias})` : drugName;
+        }
         const value = formulaRule[columnKey];
         if (value === null || value === undefined) {
           return '';
@@ -128,8 +151,26 @@ function _buildFormulaColumns(columnKeys) {
         key: columnKey,
         label,
         accessor,
+        sortAccessor: columnKey === 'drug' ? (formulaRule) => String(formulaRule.drug || '') : accessor,
       };
     });
+}
+
+function _buildDrugAliasLookup(plotMeta) {
+  const aliases = plotMeta?.drug_aliases || {};
+  const lookup = new Map();
+  Object.entries(aliases).forEach(([drugName, alias]) => {
+    const canonical = String(drugName || '').trim().toLowerCase();
+    const displayAlias = String(alias || '').trim();
+    if (canonical && displayAlias) {
+      lookup.set(canonical, displayAlias);
+    }
+  });
+  return lookup;
+}
+
+function _resolveDrugAlias(drugName, aliasLookup) {
+  return aliasLookup.get(String(drugName || '').trim().toLowerCase()) || '';
 }
 
 function buildHeaders(baseHeaders = {}) {
@@ -460,13 +501,15 @@ export function useDashboardLogic() {
   const mutationColumns = _buildMutationColumns(
     mutationColumnKeys.length > 0
       ? mutationColumnKeys
-      : (rules[0] ? Object.keys(rules[0]) : [])
+      : (rules[0] ? Object.keys(rules[0]) : []),
+    mutationPlotMeta
   );
 
   const formulaColumns = _buildFormulaColumns(
     formulaColumnKeys.length > 0
       ? formulaColumnKeys
-      : (formulaRules[0] ? Object.keys(formulaRules[0]) : [])
+      : (formulaRules[0] ? Object.keys(formulaRules[0]) : []),
+    mutationPlotMeta
   );
 
   const filterMutations = (rulesList) => {
@@ -496,7 +539,7 @@ export function useDashboardLogic() {
     }
 
     const selectedColumn = mutationColumns[mutationSortColumn];
-    const getColValue = selectedColumn ? selectedColumn.accessor : null;
+    const getColValue = selectedColumn ? (selectedColumn.sortAccessor || selectedColumn.accessor) : null;
     if (!getColValue) {
       return rulesToSort;
     }

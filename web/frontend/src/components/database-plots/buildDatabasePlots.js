@@ -156,6 +156,41 @@ function _extractDoiTokens(value) {
     .filter(Boolean);
 }
 
+function _buildDrugAliasLookup(plotMeta) {
+  const aliases = plotMeta?.drug_aliases || {};
+  const lookup = new Map();
+  Object.entries(aliases).forEach(([drugName, alias]) => {
+    const canonical = String(drugName || '').trim().toLowerCase();
+    const displayAlias = String(alias || '').trim();
+    if (canonical && displayAlias) {
+      lookup.set(canonical, displayAlias);
+    }
+  });
+  return lookup;
+}
+
+function _buildDrugGroupLookup(plotMeta) {
+  const groups = plotMeta?.drug_groups || {};
+  const lookup = new Map();
+  Object.entries(groups).forEach(([drugName, groupName]) => {
+    const canonical = String(drugName || '').trim().toLowerCase();
+    const displayGroup = String(groupName || '').trim();
+    if (canonical && displayGroup) {
+      lookup.set(canonical, displayGroup);
+    }
+  });
+  return lookup;
+}
+
+function _formatDrugNameWithAlias(name, aliasLookup) {
+  const drugName = _displayValue(name, 'Unspecified drug');
+  const alias = aliasLookup.get(drugName.trim().toLowerCase()) || '';
+  if (!alias) {
+    return drugName;
+  }
+  return `${drugName} (${alias})`;
+}
+
 function _buildRulesPerDrugPie(rules) {
   // Counts raw rule rows per drug (not unique mutations).
   const counts = new Map();
@@ -444,6 +479,7 @@ function _buildIc50DistributionSections(rules, formulaRules, plotMeta) {
   // Build one strip-plot per organism with one y-lane per drug and log-scaled IC50 on x.
   const references = Array.isArray(plotMeta?.references) ? plotMeta.references : [];
   const organismByReference = new Map();
+  const drugAliasLookup = _buildDrugAliasLookup(plotMeta);
   const allRules = [
     ...(Array.isArray(rules) ? rules : []),
     ...(Array.isArray(formulaRules) ? formulaRules : []),
@@ -469,6 +505,7 @@ function _buildIc50DistributionSections(rules, formulaRules, plotMeta) {
 
     const group = groups.get(organism);
     const drug = _displayValue(rule.drug, 'Unspecified drug');
+    const displayDrug = _formatDrugNameWithAlias(drug, drugAliasLookup);
     if (!group.byDrug.has(drug)) {
       group.byDrug.set(drug, {
         ic50Values: [],
@@ -504,6 +541,7 @@ function _buildIc50DistributionSections(rules, formulaRules, plotMeta) {
           const values = useIc50 ? bucket.ic50Values : bucket.foldValues;
           return {
             drug,
+            displayDrug: _formatDrugNameWithAlias(drug, drugAliasLookup),
             values,
             metricLabel: useIc50 ? 'IC50' : 'Fold IC50',
           };
@@ -523,7 +561,7 @@ function _buildIc50DistributionSections(rules, formulaRules, plotMeta) {
 
       drugEntries.forEach((entry, laneIdx) => {
         const lane = laneIdx + 1;
-        laneLabels[String(lane)] = entry.drug;
+        laneLabels[String(lane)] = entry.displayDrug;
         metricLabels.add(entry.metricLabel);
 
         entry.values.forEach((value, valueIdx) => {
@@ -533,7 +571,7 @@ function _buildIc50DistributionSections(rules, formulaRules, plotMeta) {
             x: Math.log10(value),
             y: lane + jitter,
             lane,
-            drug: entry.drug,
+            drug: entry.displayDrug,
             value,
             metricLabel: entry.metricLabel,
             color: PIE_COLORS[laneIdx % PIE_COLORS.length],
@@ -615,6 +653,9 @@ function _buildScoreDistributionSections(rules, formulaRules, plotMeta) {
   // Build one count-per-score bar chart per drug within each organism.
   const references = Array.isArray(plotMeta?.references) ? plotMeta.references : [];
   const organismByReference = new Map();
+  const drugAliasLookup = _buildDrugAliasLookup(plotMeta);
+  const drugGroupLookup = _buildDrugGroupLookup(plotMeta);
+  const hasDrugGroups = drugGroupLookup.size > 0;
   const allRules = [
     ...(Array.isArray(rules) ? rules : []),
     ...(Array.isArray(formulaRules) ? formulaRules : []),
@@ -639,79 +680,119 @@ function _buildScoreDistributionSections(rules, formulaRules, plotMeta) {
     const referenceName = _displayValue(rule.reference_name, 'Unknown reference');
     const organism = organismByReference.get(referenceName) || 'Unknown organism';
     const drugName = _displayValue(rule.drug, 'Unspecified drug');
-    const groupKey = `${organism}::${drugName}`;
 
-    if (!groups.has(groupKey)) {
-      groups.set(groupKey, {
-        groupKey,
+    const scoreGroupName = hasDrugGroups
+      ? (drugGroupLookup.get(drugName.trim().toLowerCase()) || 'Ungrouped')
+      : 'Score counts';
+    const sectionKey = hasDrugGroups ? scoreGroupName : 'score-distribution';
+    const plotKey = `${organism}::${drugName}`;
+
+    if (!groups.has(sectionKey)) {
+      groups.set(sectionKey, new Map());
+    }
+    const sectionPlots = groups.get(sectionKey);
+
+    if (!sectionPlots.has(plotKey)) {
+      sectionPlots.set(plotKey, {
+        groupName: scoreGroupName,
+        groupKey: plotKey,
         organism,
         drugName,
+        displayDrugName: _formatDrugNameWithAlias(drugName, drugAliasLookup),
         byScore: new Map(),
       });
     }
 
-    const group = groups.get(groupKey);
+    const group = sectionPlots.get(plotKey);
     group.byScore.set(scoreLabel, (group.byScore.get(scoreLabel) || 0) + 1);
   });
 
-  const plots = Array.from(groups.values())
-    .map((group) => {
-      const scoreEntries = Array.from(group.byScore.entries())
-        .map(([scoreLabel, count]) => ({
-          scoreLabel,
-          count,
-        }))
-        .sort((a, b) => _scoreCategorySort(a.scoreLabel, b.scoreLabel));
+  const sectionEntries = Array.from(groups.entries())
+    .map(([sectionKey, sectionPlots]) => {
+      const plots = Array.from(sectionPlots.values())
+        .map((group) => {
+          const scoreEntries = Array.from(group.byScore.entries())
+            .map(([scoreLabel, count]) => ({
+              scoreLabel,
+              count,
+            }))
+            .sort((a, b) => _scoreCategorySort(a.scoreLabel, b.scoreLabel));
 
-      if (scoreEntries.length === 0) {
-        return null;
-      }
+          if (scoreEntries.length === 0) {
+            return null;
+          }
 
-      const totalRules = scoreEntries.reduce((sum, entry) => sum + entry.count, 0);
+          const totalRules = scoreEntries.reduce((sum, entry) => sum + entry.count, 0);
 
-      return {
-        kind: 'score-counts',
-        key: `score::${group.groupKey}`,
-        title: group.drugName,
-        subtitle: `${group.organism} - ${totalRules} rule(s) grouped by score`,
-        organismSortKey: group.organism,
-        footer: 'Rule counts grouped by score value',
-        xAxisLabel: 'Score',
-        yAxisLabel: 'Rule count',
-        bars: scoreEntries.map((entry) => ({
-          scoreLabel: entry.scoreLabel,
-          count: entry.count,
-          color: '#6d8194',
-        })),
-      };
+          return {
+            kind: 'score-counts',
+            key: `score::${sectionKey}::${group.groupKey}`,
+            title: group.displayDrugName,
+            subtitle: `${group.organism} - ${totalRules} rule(s) grouped by score`,
+            organismSortKey: group.organism,
+            footer: 'Rule counts grouped by score value',
+            xAxisLabel: 'Score',
+            yAxisLabel: 'Rule count',
+            bars: scoreEntries.map((entry) => ({
+              scoreLabel: entry.scoreLabel,
+              count: entry.count,
+              color: '#6d8194',
+            })),
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => {
+          const organismOrder = a.organismSortKey.localeCompare(b.organismSortKey, undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          });
+          if (organismOrder !== 0) {
+            return organismOrder;
+          }
+          return a.title.localeCompare(b.title, undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          });
+        });
+
+      return { sectionKey, plots };
     })
-    .filter(Boolean)
+    .filter((section) => section.plots.length > 0);
+
+  if (sectionEntries.length === 0) {
+    return [];
+  }
+
+  if (!hasDrugGroups) {
+    return [
+      {
+        sectionKey: 'score-distribution',
+        sectionHeading: 'Score counts',
+        layout: 'score-grid',
+        plots: sectionEntries[0].plots,
+      },
+    ];
+  }
+
+  return sectionEntries
+    .map((section) => ({
+      sectionKey: `score-distribution::${section.sectionKey}`,
+      sectionHeading: section.sectionKey,
+      layout: 'score-grid',
+      plots: section.plots,
+    }))
     .sort((a, b) => {
-      const organismOrder = a.organismSortKey.localeCompare(b.organismSortKey, undefined, {
-        numeric: true,
-        sensitivity: 'base',
-      });
-      if (organismOrder !== 0) {
-        return organismOrder;
+      if (a.sectionHeading === 'Ungrouped') {
+        return 1;
       }
-      return a.title.localeCompare(b.title, undefined, {
+      if (b.sectionHeading === 'Ungrouped') {
+        return -1;
+      }
+      return a.sectionHeading.localeCompare(b.sectionHeading, undefined, {
         numeric: true,
         sensitivity: 'base',
       });
     });
-
-  if (plots.length === 0) {
-    return [];
-  }
-
-  return [
-    {
-      sectionKey: 'score-distribution',
-      sectionHeading: 'Score counts',
-      layout: 'score-grid',
-      plots,
-    },
-  ];
 }
 
 function _buildGenePositionSections(rules, plotMeta, phenotypeMode, binSize) {
