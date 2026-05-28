@@ -455,6 +455,42 @@ def _load_drug_class_map(
     return drug_map
 
 
+def _load_drug_alias_map(
+    project_conn: sqlite3.Connection | None,
+) -> dict[str, str]:
+    """
+    Build a lowercase-canonical-drug-name -> alias map from the drug table.
+
+    :param project_conn: open project DB connection
+    :return: dict mapping normalized canonical drug name to alias; empty if unavailable
+    """
+    if project_conn is None:
+        return {}
+    try:
+        rows = project_conn.execute(
+            'SELECT name, alias FROM drug',
+        ).fetchall()
+    except sqlite3.Error as exc:
+        logger.debug('Failed to load drug aliases from DB: %s', exc)
+        return {}
+
+    alias_map: dict[str, str] = {}
+    for row in rows:
+        canonical = (row['name'] or '').strip().lower()
+        short = (row['alias'] or '').strip()
+        if canonical and short:
+            alias_map[canonical] = short
+    return alias_map
+
+
+def _format_drug_name_with_alias(name: str, alias_map: dict[str, str]) -> str:
+    """Return a display-ready drug name with optional configured alias suffix."""
+    alias = alias_map.get(name.strip().lower(), '')
+    if not alias:
+        return name
+    return f'{name} ({alias})'
+
+
 def _build_database_hits_rows(
     result: ProfilingResult,
     display_names: dict[str, str] | None = None,
@@ -1297,6 +1333,7 @@ def _build_summary_narrative(
         display_names.get(match.feature.name, match.feature.name)
         for match in result.feature_matches
     })
+    was_were = 'were' if len(profiled_features) != 1 else 'was'
     if profiled_features:
         feature_list = _join_english_list([
             escape(feature) for feature in profiled_features
@@ -1310,7 +1347,7 @@ def _build_summary_narrative(
     if has_assessment and n_drugs:
         drug_word = 'drug' if n_drugs == 1 else 'drugs'
         lead = (
-            f'{feature_clause} of <strong>{organism_name}</strong> were evaluated against '
+            f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
             f'known resistance-associated mutations for {n_drugs} {drug_word}. '
             f'The assessment found evidence for antiviral resistance against '
             f"{len(resistant_drugs)} {'drug' if len(resistant_drugs) == 1 else 'drugs'}, "
@@ -1319,7 +1356,7 @@ def _build_summary_narrative(
         )
     elif drug_rows:
         lead = (
-            f'{feature_clause} of <strong>{organism_name}</strong> were evaluated against '
+            f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
             f'known resistance-associated mutations, but no final drug interpretation '
             'algorithm is configured.'
         )
@@ -1335,7 +1372,7 @@ def _build_summary_narrative(
         for gap in result.coverage_gaps
     )
     coverage_gap_features = sorted({
-        display_names.get(gap.feature_name, gap.feature_name).lower()
+        display_names.get(gap.feature_name, gap.feature_name)
         for gap in result.coverage_gaps
     })
     if uncovered_positions > 0 and coverage_gap_features:
@@ -1418,9 +1455,12 @@ def _build_drug_interpretation_table(
     """
     def _init_entry(name: str, drug_class: str) -> dict:
         return {
-            'name': name, 'drug_class': drug_class, 'hit_count': 0,
+            'name': _format_drug_name_with_alias(name, drug_alias_map),
+            'drug_class': drug_class,
+            'hit_count': 0,
             'resistant_count': 0, 'intermediate_count': 0, 'sensitive_count': 0,
             'score_total': 0.0, 'score_display': '0',
+            'ic50_values': [], 'fold_ic50_values': [],
             'assessment': '', 'assessment_badge_class': '',
         }
 
@@ -1433,6 +1473,14 @@ def _build_drug_interpretation_table(
             parts = [f'Resistant: total score \u2265 {resistant_t}.']
             if intermediate_t is not None:
                 parts.append(f'Intermediate: total score \u2265 {intermediate_t}.')
+        elif method == 'by_ic50':
+            parts = [f'Resistant: any IC50 value \u2265 {resistant_t}.']
+            if intermediate_t is not None:
+                parts.append(f'Intermediate: any IC50 value \u2265 {intermediate_t}.')
+        elif method == 'by_fold_ic50':
+            parts = [f'Resistant: any fold IC50 value \u2265 {resistant_t}.']
+            if intermediate_t is not None:
+                parts.append(f'Intermediate: any fold IC50 value \u2265 {intermediate_t}.')
         else:
             parts = []
         parts.append('Otherwise: Sensitive.')
@@ -1441,6 +1489,7 @@ def _build_drug_interpretation_table(
     hit_rows = database_hits.get('rows', [])
     profiled_features = {m.feature.name for m in result.feature_matches}
     drug_class_map = _load_drug_class_map(project_conn)
+    drug_alias_map = _load_drug_alias_map(project_conn)
 
     # Pre-populate from project DB: all drugs with rules for profiled features
     by_drug: dict[str, dict] = {}
@@ -1456,7 +1505,10 @@ def _build_drug_interpretation_table(
             ).fetchall():
                 name = (row[0] or '').strip()
                 if name and name != '__formula_component__':
-                    by_drug[name] = _init_entry(name, drug_class_map.get(name.lower(), ''))
+                    by_drug[name] = _init_entry(
+                        name,
+                        drug_class_map.get(name.lower(), ''),
+                    )
         except sqlite3.Error as exc:
             logger.debug('Failed to load in-scope drugs from DB: %s', exc)
 
@@ -1465,7 +1517,10 @@ def _build_drug_interpretation_table(
         drug = (row.get('drug') or 'Unknown').strip()
         if drug not in by_drug and drug != '__formula_component__':
             dc = row.get('drug_class') or drug_class_map.get(drug.lower(), '')
-            by_drug[drug] = _init_entry(drug, dc)
+            by_drug[drug] = _init_entry(
+                drug,
+                dc,
+            )
 
     if not by_drug:
         return {
@@ -1496,6 +1551,18 @@ def _build_drug_interpretation_table(
                 val = _parse_numeric_value((m.get('value') or '').strip())
                 if val is not None:
                     by_drug[drug]['score_total'] += val
+                break
+        for m in metrics:
+            if m.get('label') == 'IC50':
+                val = _parse_numeric_value((m.get('value') or '').strip())
+                if val is not None:
+                    by_drug[drug]['ic50_values'].append(val)
+                break
+        for m in metrics:
+            if m.get('label') == 'Fold IC50':
+                val = _parse_numeric_value((m.get('value') or '').strip())
+                if val is not None:
+                    by_drug[drug]['fold_ic50_values'].append(val)
                 break
 
     # Column presence is determined by actual hit data, not zero-hit entries
@@ -1546,6 +1613,28 @@ def _build_drug_interpretation_table(
                 if total >= resistant_threshold:
                     drug_data['assessment'] = 'resistant'
                 elif intermediate_threshold is not None and total >= intermediate_threshold:
+                    drug_data['assessment'] = 'intermediate'
+                else:
+                    drug_data['assessment'] = 'sensitive'
+            elif method == 'by_ic50':
+                ic50_values = drug_data['ic50_values']
+                if any(value >= resistant_threshold for value in ic50_values):
+                    drug_data['assessment'] = 'resistant'
+                elif (
+                    intermediate_threshold is not None
+                    and any(value >= intermediate_threshold for value in ic50_values)
+                ):
+                    drug_data['assessment'] = 'intermediate'
+                else:
+                    drug_data['assessment'] = 'sensitive'
+            elif method == 'by_fold_ic50':
+                fold_ic50_values = drug_data['fold_ic50_values']
+                if any(value >= resistant_threshold for value in fold_ic50_values):
+                    drug_data['assessment'] = 'resistant'
+                elif (
+                    intermediate_threshold is not None
+                    and any(value >= intermediate_threshold for value in fold_ic50_values)
+                ):
                     drug_data['assessment'] = 'intermediate'
                 else:
                     drug_data['assessment'] = 'sensitive'

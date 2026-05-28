@@ -7,7 +7,7 @@ import sqlite3
 
 from respro.db._rules_normalize import _parse_ic50_value
 
-_KNOWN_ALGORITHM_NAMES = {'ic50_thresholds', 'drug_groups', 'drug_interpretation'}
+_KNOWN_ALGORITHM_NAMES = {'ic50_thresholds', 'drug_groups', 'drug_interpretation', 'drug_alias'}
 
 
 def validate_interpretation_algorithms(algorithms: object) -> list[dict]:
@@ -52,6 +52,8 @@ def validate_interpretation_algorithms(algorithms: object) -> list[dict]:
             _validate_drug_groups(item)
         elif name == 'drug_interpretation':
             _validate_drug_interpretation(item)
+        elif name == 'drug_alias':
+            _validate_drug_alias(item)
 
     return algorithms
 
@@ -146,6 +148,33 @@ def apply_ic50_threshold_classification(
     return updated
 
 
+def apply_drug_alias_mappings(
+    conn: sqlite3.Connection,
+    project_id: int,
+    config: dict,
+) -> int:
+    """
+    Apply canonical drug-name alias mappings to ``drug.alias`` for one project.
+
+    For each canonical name in ``config['groups']``, updates matching
+    ``drug.name`` rows in the current project. Missing drugs are skipped.
+
+    :param conn: project DB connection
+    :param project_id: project id
+    :param config: validated drug_alias algorithm config dict
+    :return: number of drug rows updated
+    """
+    groups = config['groups']
+    updated = 0
+    for canonical_name, alias in groups.items():
+        cur = conn.execute(
+            'UPDATE drug SET alias = ? WHERE project_id = ? AND LOWER(name) = ?',
+            (alias.strip(), project_id, canonical_name.strip().lower()),
+        )
+        updated += int(cur.rowcount or 0)
+    return updated
+
+
 def _classify_ic50(value: float, drug_thresholds: dict) -> str:
     """Return the canonical phenotype for a numeric IC50 value against breakpoints."""
     if value >= drug_thresholds['resistant']:
@@ -217,9 +246,10 @@ def _validate_drug_groups(config: dict) -> None:
 
 def _validate_drug_interpretation(config: dict) -> None:
     method = config.get('method')
-    if method not in ('by_phenotype', 'by_score'):
+    if method not in ('by_phenotype', 'by_score', 'by_ic50', 'by_fold_ic50'):
         raise ValueError(
-            f'drug_interpretation: "method" must be "by_phenotype" or "by_score", '
+            'drug_interpretation: "method" must be "by_phenotype", "by_score", '
+            f'"by_ic50", or "by_fold_ic50", '
             f'got {method!r}.'
         )
 
@@ -230,9 +260,49 @@ def _validate_drug_interpretation(config: dict) -> None:
     if 'resistant' not in thresholds:
         raise ValueError('drug_interpretation: "thresholds" must include the "resistant" key.')
 
+    numeric_methods = {'by_ic50', 'by_fold_ic50'}
+    if method in numeric_methods:
+        for key, val in thresholds.items():
+            if not isinstance(val, (int, float)) or val <= 0:
+                raise ValueError(
+                    f'drug_interpretation: thresholds[{key!r}] must be a positive number, '
+                    f'got {val!r}.'
+                )
+        intermediate = thresholds.get('intermediate')
+        resistant = thresholds.get('resistant')
+        if intermediate is not None and resistant <= intermediate:
+            raise ValueError(
+                'drug_interpretation: "resistant" threshold must be strictly greater than '
+                '"intermediate" for numeric methods.'
+            )
+        return
+
     for key, val in thresholds.items():
         if not isinstance(val, int) or val <= 0:
             raise ValueError(
                 f'drug_interpretation: thresholds[{key!r}] must be a positive integer, '
                 f'got {val!r}.'
             )
+
+
+def _validate_drug_alias(config: dict) -> None:
+    groups = config.get('groups')
+    if not isinstance(groups, dict) or not groups:
+        raise ValueError('drug_alias: "groups" must be a non-empty dict.')
+
+    seen_aliases: set[str] = set()
+    for canonical_name, alias in groups.items():
+        if not isinstance(canonical_name, str) or not canonical_name.strip():
+            raise ValueError(
+                'drug_alias: each canonical drug name key must be a non-empty string.'
+            )
+        if not isinstance(alias, str) or not alias.strip():
+            raise ValueError(
+                f'drug_alias: alias for {canonical_name!r} must be a non-empty string.'
+            )
+        normalized_alias = alias.strip()
+        if normalized_alias in seen_aliases:
+            raise ValueError(
+                f'drug_alias: alias value {normalized_alias!r} is duplicated across canonical names.'
+            )
+        seen_aliases.add(normalized_alias)

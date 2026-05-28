@@ -209,6 +209,162 @@ class TestBuildReportContext:
         # Clinical phenotype should be shown in the HTML
         assert 'Clinical phenotype' in html
 
+    def test_drug_interpretation_by_ic50_prefers_resistant_when_any_hit_meets_threshold(self) -> None:
+        low_rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='unknown',
+            ic50='6.0',
+        )
+        high_rule = ResistanceRule(
+            id=2,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=3,
+            reference='A',
+            mutation='V',
+            phenotype='unknown',
+            ic50='12.0',
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=2,
+            variants_in_cds=2,
+            resistance_hits=2,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[low_rule],
+                ),
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.9, depth=180),
+                    feature_name='gag',
+                    codon_pos=3,
+                    ref_aa='A',
+                    alt_aa='V',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[high_rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_ic50',
+                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        assert ctx['summary']['drug_table']['rows'][0]['assessment'] == 'resistant'
+
+    def test_drug_interpretation_by_fold_ic50_marks_intermediate_when_no_resistant_hit(self) -> None:
+        rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='unknown',
+            fold_ic50='6.5',
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_fold_ic50',
+                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        assert ctx['summary']['drug_table']['rows'][0]['assessment'] == 'intermediate'
+
+    def test_drug_alias_is_rendered_from_drug_table_alias_column(self) -> None:
+        result = _make_result()
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE drug (name TEXT, alias TEXT)')
+        conn.execute("INSERT INTO drug (name, alias) VALUES ('DrugA', 'DRA')")
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        assert ctx['summary']['drug_table']['rows'][0]['name'] == 'DrugA (DRA)'
+        assert 'DrugA (DRA)' in ctx['summary']['narrative']
+
     def test_similarity_hits_counts_unique_positions(self) -> None:
         # Two rules at the same position for different drugs
         # → similarity_entries has 2 rows (one per drug/rule)

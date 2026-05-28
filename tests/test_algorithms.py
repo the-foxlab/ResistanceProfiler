@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from respro.db.algorithms import (
+    apply_drug_alias_mappings,
     apply_ic50_threshold_classification,
     load_interpretation_algorithms,
     store_interpretation_algorithms,
@@ -89,6 +90,41 @@ class TestValidateInterpretationAlgorithms:
                 'name': 'drug_interpretation',
                 'method': 'by_score',
                 'thresholds': {'resistant': 5},
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result == algorithms
+
+    def test_valid_drug_interpretation_by_ic50(self) -> None:
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_ic50',
+                'thresholds': {'resistant': 10.0, 'intermediate': 3.0},
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result == algorithms
+
+    def test_valid_drug_interpretation_by_fold_ic50(self) -> None:
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_fold_ic50',
+                'thresholds': {'resistant': 10.0, 'intermediate': 3.0},
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result == algorithms
+
+    def test_valid_drug_alias(self) -> None:
+        algorithms = [
+            {
+                'name': 'drug_alias',
+                'groups': {
+                    'Aciclovir': 'ACV',
+                    'Ganciclovir': 'GCV',
+                },
             }
         ]
         result = validate_interpretation_algorithms(algorithms)
@@ -234,6 +270,60 @@ class TestValidateInterpretationAlgorithms:
                     'name': 'drug_interpretation',
                     'method': 'by_score',
                     'thresholds': {'resistant': 0},
+                }
+            ])
+
+    def test_drug_interpretation_numeric_method_rejects_non_number(self) -> None:
+        with pytest.raises(ValueError, match='positive number'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_ic50',
+                    'thresholds': {'resistant': 'high'},
+                }
+            ])
+
+    def test_drug_interpretation_numeric_method_rejects_invalid_threshold_order(self) -> None:
+        with pytest.raises(ValueError, match='strictly greater than'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_fold_ic50',
+                    'thresholds': {'resistant': 3.0, 'intermediate': 3.0},
+                }
+            ])
+
+    def test_drug_alias_rejects_empty_groups(self) -> None:
+        with pytest.raises(ValueError, match='non-empty dict'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_alias',
+                    'groups': {},
+                }
+            ])
+
+    def test_drug_alias_rejects_empty_key_or_value(self) -> None:
+        with pytest.raises(ValueError, match='non-empty string'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_alias',
+                    'groups': {'': 'ACV'},
+                }
+            ])
+        with pytest.raises(ValueError, match='non-empty string'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_alias',
+                    'groups': {'Aciclovir': ''},
+                }
+            ])
+
+    def test_drug_alias_rejects_duplicate_alias_values(self) -> None:
+        with pytest.raises(ValueError, match='duplicated across canonical names'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_alias',
+                    'groups': {'Aciclovir': 'ACV', 'Acyclovir': 'ACV'},
                 }
             ])
 
@@ -533,3 +623,142 @@ class TestApplyIc50ThresholdClassification:
         assert updated == 1
         row = conn.execute('SELECT phenotype FROM resistance_rule').fetchone()
         assert row['phenotype'] == 'resistant'
+
+
+class TestApplyDrugAliasMappings:
+
+    def test_applies_aliases_to_matching_project_drugs(self, tmp_path: Path) -> None:
+        db_path = tmp_path / 'aliases.db'
+        conn = create_schema(db_path)
+        project_id = conn.execute(
+            "INSERT INTO project (name, schema_version, uuid) VALUES ('p', 1, 'uuid')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO drug (project_id, name) VALUES (?, 'Aciclovir')",
+            (project_id,),
+        )
+        conn.execute(
+            "INSERT INTO drug (project_id, name) VALUES (?, 'Ganciclovir')",
+            (project_id,),
+        )
+        conn.commit()
+
+        config = {
+            'name': 'drug_alias',
+            'groups': {
+                'Aciclovir': 'ACV',
+                'Ganciclovir': 'GCV',
+            },
+        }
+        updated = apply_drug_alias_mappings(conn, int(project_id), config)
+        conn.commit()
+
+        assert updated == 2
+        rows = conn.execute(
+            'SELECT name, alias FROM drug WHERE project_id = ? ORDER BY name',
+            (project_id,),
+        ).fetchall()
+        assert [dict(row) for row in rows] == [
+            {'name': 'Aciclovir', 'alias': 'ACV'},
+            {'name': 'Ganciclovir', 'alias': 'GCV'},
+        ]
+
+    def test_applies_alias_with_mixed_case_canonical_name_to_lowercase_drug(
+        self, tmp_path: Path
+    ) -> None:
+        db_path = tmp_path / 'aliases_case_insensitive.db'
+        conn = create_schema(db_path)
+        project_id = conn.execute(
+            "INSERT INTO project (name, schema_version, uuid) VALUES ('p', 1, 'uuid')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO drug (project_id, name) VALUES (?, 'aciclovir')",
+            (project_id,),
+        )
+        conn.commit()
+
+        config = {
+            'name': 'drug_alias',
+            'groups': {'Aciclovir': 'ACV'},
+        }
+        updated = apply_drug_alias_mappings(conn, int(project_id), config)
+        conn.commit()
+
+        assert updated == 1
+        row = conn.execute(
+            "SELECT alias FROM drug WHERE project_id = ? AND name = 'aciclovir'",
+            (project_id,),
+        ).fetchone()
+        assert row['alias'] == 'ACV'
+
+    def test_skips_missing_drugs_without_creating_rows(self, tmp_path: Path) -> None:
+        db_path = tmp_path / 'aliases_missing.db'
+        conn = create_schema(db_path)
+        project_id = conn.execute(
+            "INSERT INTO project (name, schema_version, uuid) VALUES ('p', 1, 'uuid')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO drug (project_id, name) VALUES (?, 'Aciclovir')",
+            (project_id,),
+        )
+        conn.commit()
+
+        config = {
+            'name': 'drug_alias',
+            'groups': {
+                'Aciclovir': 'ACV',
+                'Penciclovir': 'PCV',
+            },
+        }
+        updated = apply_drug_alias_mappings(conn, int(project_id), config)
+        conn.commit()
+
+        assert updated == 1
+        count = conn.execute(
+            'SELECT COUNT(*) AS c FROM drug WHERE project_id = ?',
+            (project_id,),
+        ).fetchone()['c']
+        assert count == 1
+        row = conn.execute(
+            "SELECT alias FROM drug WHERE project_id = ? AND name = 'Aciclovir'",
+            (project_id,),
+        ).fetchone()
+        assert row['alias'] == 'ACV'
+
+    def test_updates_only_the_target_project(self, tmp_path: Path) -> None:
+        db_path = tmp_path / 'aliases_scoped.db'
+        conn = create_schema(db_path)
+        project_a = conn.execute(
+            "INSERT INTO project (name, schema_version, uuid) VALUES ('A', 1, 'uuid-a')"
+        ).lastrowid
+        project_b = conn.execute(
+            "INSERT INTO project (name, schema_version, uuid) VALUES ('B', 1, 'uuid-b')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO drug (project_id, name) VALUES (?, 'Aciclovir')",
+            (project_a,),
+        )
+        conn.execute(
+            "INSERT INTO drug (project_id, name) VALUES (?, 'Aciclovir')",
+            (project_b,),
+        )
+        conn.commit()
+
+        config = {
+            'name': 'drug_alias',
+            'groups': {'Aciclovir': 'ACV'},
+        }
+        updated = apply_drug_alias_mappings(conn, int(project_a), config)
+        conn.commit()
+
+        assert updated == 1
+        row_a = conn.execute(
+            "SELECT alias FROM drug WHERE project_id = ? AND name = 'Aciclovir'",
+            (project_a,),
+        ).fetchone()
+        row_b = conn.execute(
+            "SELECT alias FROM drug WHERE project_id = ? AND name = 'Aciclovir'",
+            (project_b,),
+        ).fetchone()
+        assert row_a['alias'] == 'ACV'
+        assert row_b['alias'] == ''

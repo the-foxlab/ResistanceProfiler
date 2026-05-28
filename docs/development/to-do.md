@@ -175,7 +175,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Surface sample classifications in report and JSON — dedicated "Manual classifications" section in HTML report and `sample_classifications` key in exported JSON, clearly separated from rule-based hits
 - [X] Optional database metadata in `respro init` — `--metadata` accepts validated JSON with fixed keys (`maintainers`, `contact`, `publication_pmid`, `website`, `description`, `maintainer_update`, `license`, `tsv_checksum`); PMID values are DOI-enriched best-effort at creation time and stored on the project row
 - [X] `respro manage database <db_path> --info` — added project metadata inspection mode that prints non-empty project identity and curated metadata fields
-- [X] Interpretation algorithm metadata in `metadata.json` — `interpretation_algorithms` top-level array in metadata JSON accepts three coexisting algorithm types (`ic50_thresholds`, `drug_groups`, `drug_interpretation`); each is validated on import and stored in a new `interpretation_algorithm` table in `project.db`; `load_interpretation_algorithms` exposes the config to downstream consumers (report, scoring); full test coverage in `tests/test_algorithms.py`; documented in `docs/user/database-preparation.md`
+- [X] Interpretation algorithm metadata in `metadata.json` — `interpretation_algorithms` top-level array in metadata JSON accepts coexisting algorithm types (`ic50_thresholds`, `drug_groups`, `drug_interpretation`, `drug_alias`); each is validated on import and stored in the `interpretation_algorithm` table in `project.db`; `load_interpretation_algorithms` exposes the config to downstream consumers (report, scoring); full test coverage in `tests/test_algorithms.py`; documented in `docs/user/database-preparation.md`
 
 ### Web deployment and security (done)
 
@@ -338,15 +338,11 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 - 🟡adapt webapp a bit (better sidebar, less tile in tile)
 - one analysis option with different modi and one report option that shows previous reports (independent if batch or not) --> do not show below but always in new tab (previous than shows all in that session)
-- 🟡check that regenerate works still
 - 🟡missing gene in table webapp (likely due to naming it to feature)
 - 🟡 add herpes drg assessment of ic50 values
 - 🟡 herpes drg --> fold ic50 ?
 - 🟡 add scoring overview to potential plots
 - 🟡 rethink plots in app (make them more beautiful?)
 - 🟡 make formula rules use applied feature and not generic name in the table
-- 🟡 greyish looks crappy with new plot when the plot button is clicked
-- 🟡 download pdf does not work
 - fix lower case in feature report written
-- each sample should appear in previous (independent whether patch or not)
-- add assessment algorithm for ic50 and fold ic50
+- automatic database match for regenerate?

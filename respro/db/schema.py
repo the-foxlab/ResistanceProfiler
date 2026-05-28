@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS drug (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id  INTEGER NOT NULL REFERENCES project(id),
     name        TEXT    NOT NULL,
+    alias       TEXT    DEFAULT '',
     pubchem_cid TEXT    DEFAULT '',  -- PubChem compound ID (integer stored as text)
     pubchem_url TEXT    DEFAULT '',  -- canonical PubChem compound URL
     description TEXT    DEFAULT '',  -- short human-readable description from PubChem
@@ -403,6 +404,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'parent_feature_name': "TEXT NOT NULL DEFAULT ''",
     },
     'drug': {
+        'alias': "TEXT DEFAULT ''",
         'pubchem_cid': "TEXT DEFAULT ''",
         'pubchem_url': "TEXT DEFAULT ''",
         'description': "TEXT DEFAULT ''",
