@@ -10,7 +10,6 @@ import sqlite3
 import textwrap
 from pathlib import Path
 
-import pytest
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature

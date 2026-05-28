@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from respro.db.models import (
     AnnotatedVariant,
     FeatureRecord,

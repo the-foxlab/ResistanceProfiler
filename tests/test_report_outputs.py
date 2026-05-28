@@ -6,7 +6,6 @@ import json
 import sqlite3
 
 import matplotlib.pyplot as plt
-import pytest
 from Bio.Seq import Seq
 
 from respro.db.models import (
@@ -28,6 +27,7 @@ from respro.report.html import (
     render_html,
 )
 from respro.report.non_html_exports import export_results
+
 
 def _make_combined_result() -> ProfilingResult:
     """Create a ProfilingResult containing one combined codon event."""

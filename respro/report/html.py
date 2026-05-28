@@ -17,7 +17,6 @@ from markupsafe import Markup, escape
 
 from respro import __version__
 from respro.config.cli_settings import CLI_CONFIG
-from respro.db.algorithms import load_interpretation_algorithms
 from respro.core.annotation import classify_similarity
 from respro.db.models import (
     FeatureRecord,
@@ -550,7 +549,7 @@ def _build_database_hits_rows(
 
     has_publications = any(row['pub_citations'] for row in rows)
     has_comments = any(row.get('comment') for row in rows)
-    
+
     # Track which metric labels are actually used in any row
     metric_labels_present: set[str] = set()
     for row in rows:
@@ -992,7 +991,7 @@ def _build_potential_effects_rows(
 
     has_publications = any(row['pub_citations'] for row in rows)
     has_drug_class = bool(drug_class_map) and any(r.get('drug_class') for r in rows)
-    
+
     # Track which metric labels are actually used in any row
     metric_labels_present: set[str] = set()
     for row in rows:

@@ -8,16 +8,14 @@ from io import StringIO
 from pathlib import Path
 
 import pysam
-import pytest
+from conftest import TINY_REF_SEQ, write_genbank
 from rich.console import Console
 from typer.testing import CliRunner
 
-from conftest import TINY_REF_SEQ, write_genbank
 from respro.cli.main import app
 from respro.cli.profile_helpers import _print_completion_panel
 from respro.db.models import (
     AnnotatedVariant,
-    FeatureRecord,
     FormulaRuleHit,
     ProfilingResult,
     ResistanceRule,
@@ -173,17 +171,6 @@ class TestProfileCli:
         assert '1 total database hits' in result.output
 
     def test_profile_completion_panel_counts_formula_only_member_hits_as_database_hits(self) -> None:
-        feature = FeatureRecord(
-            id=1,
-            reference_id=1,
-            name='gag',
-            protein='Gag',
-            start=0,
-            end=12,
-            strand='+',
-            codon_start=0,
-            nt_sequence='ATGAAAGCTTAA',
-        )
         variant = VariantCall(chrom='tiny_ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500)
         internal_rule = ResistanceRule(
             id=1,
