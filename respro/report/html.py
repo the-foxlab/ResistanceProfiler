@@ -484,11 +484,11 @@ def _load_drug_alias_map(
 
 
 def _format_drug_name_with_alias(name: str, alias_map: dict[str, str]) -> str:
-    """Return a display-ready drug name with optional configured alias suffix."""
+    """Return the shorter of canonical drug name and alias (when alias exists)."""
     alias = alias_map.get(name.strip().lower(), '')
     if not alias:
         return name
-    return f'{name} ({alias})'
+    return alias if len(alias) < len(name) else name
 
 
 def _build_database_hits_rows(

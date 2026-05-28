@@ -362,8 +362,8 @@ class TestBuildReportContext:
         conn.commit()
 
         ctx = build_report_context(result, project_conn=conn)
-        assert ctx['summary']['drug_table']['rows'][0]['name'] == 'DrugA (DRA)'
-        assert 'DrugA (DRA)' in ctx['summary']['narrative']
+        assert ctx['summary']['drug_table']['rows'][0]['name'] == 'DRA'
+        assert 'DRA' in ctx['summary']['narrative']
 
     def test_similarity_hits_counts_unique_positions(self) -> None:
         # Two rules at the same position for different drugs
