@@ -344,5 +344,4 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 add scoring overview to potential plots
 - 🟡 rethink plots in app (make them more beautiful?)
 - 🟡 make formula rules use applied feature and not generic name in the table
-- fix lower case in feature report written
 - automatic database match for regenerate?

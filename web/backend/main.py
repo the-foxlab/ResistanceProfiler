@@ -42,6 +42,7 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from respro.db.results import load_run_from_json
 from web.backend.config import (
     WEB_BACKEND_CONFIG,
     WEB_ENV,
@@ -72,6 +73,7 @@ from web.backend.startup_config import (
     list_project_db_paths,
     load_startup_config,
     resolve_project_db_path,
+    resolve_regenerate_project_db_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -487,12 +489,21 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
-        project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
         json_path = Path(payload.json_path).expanduser().resolve()
         if not is_path_within_allowed_roots(json_path, config.allowed_roots):
             raise HTTPException(status_code=400, detail='JSON path is outside allowed upload/output directory.')
         if not json_path.is_file():
             raise HTTPException(status_code=404, detail='JSON file not found.')
+
+        try:
+            run_dict, _, _, _, _ = load_run_from_json(json_path)
+            project_db = resolve_regenerate_project_db_path(
+                config,
+                project_fingerprint=str(run_dict.get('project_fingerprint', '') or ''),
+                fallback_database_id=payload.database_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=_user_facing_error_message(str(exc))) from exc
 
         job = queue.enqueue(
             run_regenerate_json,

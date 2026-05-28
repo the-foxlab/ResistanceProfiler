@@ -855,7 +855,6 @@ export function useDashboardLogic() {
     try {
       const submitResponse = await apiPost('/api/regenerate/json', {
         json_path: jsonInputPath,
-        database_id: selectedDatabaseId,
       });
       setActiveJobId(submitResponse.job_id);
       setActiveJobStatus('queued');

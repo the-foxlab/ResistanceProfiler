@@ -10,6 +10,7 @@ import textwrap
 import zipfile
 from pathlib import Path
 from unittest.mock import Mock
+from uuid import uuid4
 
 import fakeredis
 import pytest
@@ -21,7 +22,21 @@ from tests.conftest import TINY_REF_NAME, TINY_REF_SEQ
 from web.backend.config import WEB_BACKEND_CONFIG
 from web.backend.main import _resolve_proxy_settings, create_app
 from web.backend.queue import get_batch_queue, get_queue
-from web.backend.startup_config import StartupConfig, _validate_startup_policy
+from web.backend.startup_config import (
+    StartupConfig,
+    _validate_startup_policy,
+    build_project_db_uuid_index,
+)
+
+
+def _write_project_uuid(project_db: Path, project_uuid: str) -> None:
+    """Assign a deterministic UUID in a copied project database for routing tests."""
+    conn = sqlite3.connect(project_db)
+    try:
+        conn.execute('UPDATE project SET uuid = ? WHERE id = 1', (project_uuid,))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @pytest.fixture()
@@ -53,6 +68,7 @@ def startup_config(project_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyP
         data_dir=data_dir.resolve(),
         allowed_roots=(project_databases_dir.resolve(), uploads_dir.resolve(), results_dir.resolve()),
         api_token='test-token',
+        project_db_uuid_index=build_project_db_uuid_index(project_databases_dir.resolve()),
     )
 
 
@@ -1084,7 +1100,132 @@ class TestWebApi:
         assert Path(result['report_json_path']).is_file()
         assert Path(result['report_pdf_path']).is_file()
 
-    def test_regenerate_from_json_uuid_mismatch_fails(
+    def test_regenerate_from_json_auto_selects_database_by_uuid(
+        self,
+        sync_queue: Queue,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        primary_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        alternate_db = startup_config.project_databases_dir / 'z-regenerate-alt.db'
+        shutil.copy2(primary_db, alternate_db)
+        alternate_uuid = str(uuid4())
+        _write_project_uuid(alternate_db, alternate_uuid)
+
+        reindexed_config = StartupConfig(
+            project_databases_dir=startup_config.project_databases_dir,
+            uploads_dir=startup_config.uploads_dir,
+            results_dir=startup_config.results_dir,
+            data_dir=startup_config.data_dir,
+            allowed_roots=startup_config.allowed_roots,
+            api_token=startup_config.api_token,
+            project_db_uuid_index=build_project_db_uuid_index(startup_config.project_databases_dir),
+        )
+        test_app = create_app(startup_config=reindexed_config)
+        test_app.dependency_overrides[get_queue] = lambda: sync_queue
+        test_app.dependency_overrides[get_batch_queue] = lambda: sync_queue
+        test_client = TestClient(test_app)
+
+        submit_profile = test_client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(web_sample_vcf),
+                'ref_fasta_path': str(web_sample_ref_fasta),
+                'database_id': alternate_db.name,
+                'sample': 'regen-web-vcf-auto-select',
+            },
+            headers=auth_headers,
+        )
+        assert submit_profile.status_code == 200
+        profile_job_id = submit_profile.json()['job_id']
+        profile_status = test_client.get(f'/api/jobs/{profile_job_id}', headers=auth_headers)
+        assert profile_status.status_code == 200
+        profile_payload = profile_status.json()
+        assert profile_payload['status'] == 'succeeded'
+
+        json_path = profile_payload['result']['report_json_path']
+        submit_regen = test_client.post(
+            '/api/regenerate/json',
+            json={'json_path': json_path},
+            headers=auth_headers,
+        )
+        assert submit_regen.status_code == 200
+
+        regen_status = test_client.get(f"/api/jobs/{submit_regen.json()['job_id']}", headers=auth_headers)
+        assert regen_status.status_code == 200
+        regen_payload = regen_status.json()
+        assert regen_payload['status'] == 'succeeded'
+        regenerated_payload = json.loads(
+            Path(regen_payload['result']['report_json_path']).read_text(encoding='utf-8')
+        )
+        assert regenerated_payload['run']['project_fingerprint'] == alternate_uuid
+
+    def test_regenerate_from_json_ignores_wrong_database_id_when_uuid_present(
+        self,
+        sync_queue: Queue,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        primary_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        alternate_db = startup_config.project_databases_dir / 'z-regenerate-alt-override.db'
+        shutil.copy2(primary_db, alternate_db)
+        alternate_uuid = str(uuid4())
+        _write_project_uuid(alternate_db, alternate_uuid)
+
+        reindexed_config = StartupConfig(
+            project_databases_dir=startup_config.project_databases_dir,
+            uploads_dir=startup_config.uploads_dir,
+            results_dir=startup_config.results_dir,
+            data_dir=startup_config.data_dir,
+            allowed_roots=startup_config.allowed_roots,
+            api_token=startup_config.api_token,
+            project_db_uuid_index=build_project_db_uuid_index(startup_config.project_databases_dir),
+        )
+        test_app = create_app(startup_config=reindexed_config)
+        test_app.dependency_overrides[get_queue] = lambda: sync_queue
+        test_app.dependency_overrides[get_batch_queue] = lambda: sync_queue
+        test_client = TestClient(test_app)
+
+        submit_profile = test_client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_path': str(web_sample_vcf),
+                'ref_fasta_path': str(web_sample_ref_fasta),
+                'database_id': alternate_db.name,
+                'sample': 'regen-web-vcf-prefer-json-uuid',
+            },
+            headers=auth_headers,
+        )
+        assert submit_profile.status_code == 200
+        profile_status = test_client.get(f"/api/jobs/{submit_profile.json()['job_id']}", headers=auth_headers)
+        assert profile_status.status_code == 200
+        profile_payload = profile_status.json()
+        assert profile_payload['status'] == 'succeeded'
+
+        submit_regen = test_client.post(
+            '/api/regenerate/json',
+            json={
+                'json_path': profile_payload['result']['report_json_path'],
+                'database_id': primary_db.name,
+            },
+            headers=auth_headers,
+        )
+        assert submit_regen.status_code == 200
+
+        regen_status = test_client.get(f"/api/jobs/{submit_regen.json()['job_id']}", headers=auth_headers)
+        assert regen_status.status_code == 200
+        regen_payload = regen_status.json()
+        assert regen_payload['status'] == 'succeeded'
+        regenerated_payload = json.loads(
+            Path(regen_payload['result']['report_json_path']).read_text(encoding='utf-8')
+        )
+        assert regenerated_payload['run']['project_fingerprint'] == alternate_uuid
+
+    def test_regenerate_from_json_returns_400_when_uuid_missing_from_startup_index(
         self,
         client: TestClient,
         startup_config: StartupConfig,
@@ -1097,7 +1238,7 @@ class TestWebApi:
             json={
                 'vcf_path': str(web_sample_vcf),
                 'ref_fasta_path': str(web_sample_ref_fasta),
-                'sample': 'regen-web-vcf-mismatch',
+                'sample': 'regen-web-vcf-missing-uuid',
             },
             headers=auth_headers,
         )
@@ -1111,7 +1252,7 @@ class TestWebApi:
         source_json = Path(profile_payload['result']['report_json_path'])
         tampered_json = startup_config.uploads_dir / 'tampered.results.json'
         tampered_payload = json.loads(source_json.read_text(encoding='utf-8'))
-        tampered_payload['run']['project_fingerprint'] = 'mismatching-uuid'
+        tampered_payload['run']['project_fingerprint'] = 'missing-uuid-in-startup-index'
         tampered_json.write_text(json.dumps(tampered_payload), encoding='utf-8')
 
         submit_regen = client.post(
@@ -1119,12 +1260,8 @@ class TestWebApi:
             json={'json_path': str(tampered_json)},
             headers=auth_headers,
         )
-        assert submit_regen.status_code == 200
-        regen_status = client.get(f"/api/jobs/{submit_regen.json()['job_id']}", headers=auth_headers)
-        assert regen_status.status_code == 200
-        payload = regen_status.json()
-        assert payload['status'] == 'failed'
-        assert 'UUID mismatch' in payload['error']
+        assert submit_regen.status_code == 400
+        assert 'No project database found for JSON project_fingerprint' in submit_regen.json()['detail']
 
     def test_regenerate_json_requires_auth(self, client: TestClient) -> None:
         response = client.post('/api/regenerate/json', json={'json_path': '/tmp/foo.results.json'})
