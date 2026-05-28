@@ -548,7 +548,6 @@ export function useDashboardLogic() {
     .map((result) => ({
       path: result.report_html_path,
       jsonPath: result.report_json_path || '',
-      tabularPath: result.report_tabular_path || '',
       pdfPath: result.report_pdf_path || '',
       label: `${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`,
       mode: result.mode,
@@ -598,7 +597,6 @@ export function useDashboardLogic() {
     [
       result.report_html_path,
       result.report_json_path,
-      result.report_tabular_path,
       result.report_pdf_path,
     ].forEach((path) => {
       if (path) {
@@ -1010,7 +1008,6 @@ export function useDashboardLogic() {
           reportHtmlPath: s.result ? s.result.report_html_path : null,
           reportPdfPath: s.result ? s.result.report_pdf_path : null,
           reportJsonPath: s.result ? s.result.report_json_path : null,
-          reportTabularPath: s.result ? s.result.report_tabular_path : null,
         }))
       );
     }
@@ -1091,7 +1088,6 @@ export function useDashboardLogic() {
         reportHtmlPath: null,
         reportPdfPath: null,
         reportJsonPath: null,
-        reportTabularPath: null,
       }));
       setBatchSamples(initialSamples);
       setBatchSubmitted(true);
@@ -1119,7 +1115,6 @@ export function useDashboardLogic() {
       sample.reportHtmlPath,
       sample.reportPdfPath,
       sample.reportJsonPath,
-      sample.reportTabularPath,
     ].filter(Boolean));
 
     if (artifactPaths.length === 0) {
@@ -1186,11 +1181,11 @@ export function useDashboardLogic() {
       lines.push(row.join('\t'));
     });
 
-    const blob = new Blob([`${lines.join('\n')}\n`], { type: 'text/tab-separated-values;charset=utf-8' });
+    const blob = new Blob([`${lines.join('\n')}\n`], { type: 'application/json;charset=utf-8' });
     const href = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = href;
-    anchor.download = 'mutations.tsv';
+    anchor.download = 'results.json';
     anchor.click();
     URL.revokeObjectURL(href);
   };

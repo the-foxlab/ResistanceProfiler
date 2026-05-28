@@ -662,7 +662,6 @@ describe('useDashboardLogic - Report Display Flow', () => {
               database_id: 'db1',
               report_html_path: '/data/results/sample1.report.html',
               report_json_path: '/data/results/sample1.report.json',
-              report_tabular_path: '/data/results/sample1.mutations.tsv',
               report_pdf_path: '/data/results/sample1.report.pdf',
               created_at: '2026-05-12T14:30:00',
               resistance_hits: 3,

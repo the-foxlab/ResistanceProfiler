@@ -728,6 +728,7 @@ class TestResultsPersistence:
                     annotations=annotations,
                 ),
                 tmp_path / 'roundtrip_report',
+                output_html_path=tmp_path / 'roundtrip_report.report.html',
                 features=features,
                 rule_feature_names={rule.feature_name for rule in rules},
                 project_conn=project_conn,

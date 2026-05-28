@@ -36,7 +36,7 @@ respro vcf \
     --ref-fasta example_data/vcf_reference.fasta \
     --output output/example_vcf \
     --export json \
-    --export tabular
+    --export pdf
 ```
 
 The HTML report is written into the selected output folder.

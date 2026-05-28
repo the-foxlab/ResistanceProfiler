@@ -594,7 +594,7 @@ class TestComboRuleParsing:
         assert row is not None
         assert row[0] == '10.1086/590668'
 
-    def test_drug_badge_color_is_persisted_and_stable(self, tmp_path, tiny_genbank) -> None:
+    def test_drug_names_are_canonicalized_case_insensitively(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             feature\treference_identifier\tposition\treference\tmutation\tantiviral
@@ -605,12 +605,11 @@ class TestComboRuleParsing:
         init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
-        rows = conn.execute('SELECT name, badge_color FROM drug ORDER BY id').fetchall()
+        rows = conn.execute('SELECT name FROM drug ORDER BY id').fetchall()
         conn.close()
 
         assert len(rows) == 1
         assert rows[0][0] == 'druga'
-        assert rows[0][1].startswith('#') and len(rows[0][1]) == 7
 
     def test_single_rule_publication_https_doi_is_stored(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'

@@ -45,10 +45,10 @@ def export_results(
     :param rule_feature_names: optional set of rule-backed feature names for focused plotting
     :param project_conn: optional project DB connection for drug overview in reports
     :param rules: optional resistance rules for potential effects analysis
-    :param extra_export_formats: optional set of additional output formats ('json', 'tabular', 'pdf')
+    :param extra_export_formats: optional set of additional output formats ('json', 'pdf')
     :param project_db_path: optional path to project database used for this run
     :param output_html_path: explicit HTML output file path; HTML is written exactly to this
-        path and JSON/tabular files use its basename stem
+        path and JSON files use its basename stem
     :return: dict mapping format names to output file paths
     """
     if output_html_path is None:
@@ -65,7 +65,7 @@ def export_results(
         stem = html_path.name
 
     requested_formats = set(extra_export_formats or set())
-    unknown_formats = requested_formats - {'json', 'tabular', 'pdf'}
+    unknown_formats = requested_formats - {'json', 'pdf'}
     if unknown_formats:
         raise ValueError(f'Unsupported export format(s): {", ".join(sorted(unknown_formats))}')
 
@@ -99,12 +99,6 @@ def export_results(
             project_db_path=project_db_path,
         )
         outputs['json'] = json_path
-
-    if 'tabular' in requested_formats:
-        context = build_report_context(result, project_conn=project_conn, rules=rules, features=features)
-        tabular_path = output_dir / f'{stem}.mutations.tsv'
-        write_tabular(tabular_path, context['db_hit_rows'], context['db_cols'])
-        outputs['tabular'] = tabular_path
 
     if 'pdf' in requested_formats:
         pdf_path = output_dir / f'{stem}.report.pdf'
@@ -213,61 +207,6 @@ def write_json(
     output_path = Path(output_path)
     output_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding='utf-8')
     logger.info('JSON report written to %s', output_path)
-    return output_path
-
-
-def write_tabular(output_path: Path, db_hit_rows: list[dict], db_cols: dict[str, bool]) -> Path:
-    """Write database-hit rows in a tab-separated table format."""
-    output_path = Path(output_path)
-    headers = ['Feature', 'AA change', 'Drug']
-    if db_cols.get('ic50', False):
-        headers.append('IC50')
-    if db_cols.get('fold_ic50', False):
-        headers.append('Fold-IC50')
-    headers.append('Phenotype')
-    if db_cols.get('clinical_phenotype', False):
-        headers.append('Clinical phenotype')
-    headers.extend(['Underlying nt change', 'Consequence', 'Frequency classification'])
-    if db_cols.get('source', False):
-        headers.append('Source')
-    if db_cols.get('comment', False):
-        headers.append('Comment')
-    if db_cols.get('publication', False):
-        headers.append('Publications')
-
-    with output_path.open('w', encoding='utf-8', newline='') as handle:
-        writer = csv.writer(handle, delimiter='\t', lineterminator='\n')
-        writer.writerow(headers)
-        for row in db_hit_rows:
-            publications = '; '.join(
-                filter(None, (_format_publication(pub) for pub in row.get('publications', [])))
-            )
-            output_row = [
-                row.get('feature', ''),
-                _strip_html(str(row.get('aa_change', ''))),
-                row.get('drug', ''),
-            ]
-            if db_cols.get('ic50', False):
-                output_row.append(row.get('ic50', ''))
-            if db_cols.get('fold_ic50', False):
-                output_row.append(row.get('fold_ic50', ''))
-            output_row.append(row.get('phenotype', ''))
-            if db_cols.get('clinical_phenotype', False):
-                output_row.append(row.get('clinical_phenotype', ''))
-
-            output_row.extend([
-                _strip_html(str(row.get('nt_change', ''))),
-                row.get('consequence', ''),
-                row.get('af_bin', ''),
-            ])
-            if db_cols.get('source', False):
-                output_row.append(row.get('source', ''))
-            if db_cols.get('comment', False):
-                output_row.append(row.get('comment', ''))
-            if db_cols.get('publication', False):
-                output_row.append(publications)
-            writer.writerow(output_row)
-    logger.info('Tabular report written to %s', output_path)
     return output_path
 
 
@@ -504,20 +443,3 @@ def _condense_pdf_narrative(narrative: str) -> str:
     text = re.sub(r'\s*List of drugs without[^.]*\.', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\s{2,}', ' ', text)
     return text.strip()
-
-
-def _strip_html(value: str) -> str:
-    """Collapse simple inline HTML markup used in report cells to plain text."""
-    return re.sub(r'<[^>]+>', '', value)
-
-
-def _format_publication(pub) -> str:
-    """Render one publication object into a compact TSV cell string."""
-    doi = (getattr(pub, 'doi', '') or '').strip()
-    pubmed_id = (getattr(pub, 'pubmed_id', '') or '').strip()
-    raw_input = (getattr(pub, 'raw_input', '') or '').strip()
-    if doi:
-        return f'DOI:{doi}'
-    if pubmed_id:
-        return f'PMID:{pubmed_id}'
-    return raw_input

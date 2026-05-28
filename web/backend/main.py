@@ -78,7 +78,7 @@ logger = logging.getLogger(__name__)
 _SAMPLE_QUOTA_LOCK = threading.Lock()
 _SAMPLE_QUOTA_COUNTER: dict[tuple[str, int], int] = {}
 _WEB_TIMESTAMP_TOKEN = re.compile(
-    r'\.(\d{20})(?=\.(?:report\.html|report\.pdf|results\.json|mutations\.tsv)$)'
+    r'\.(\d{20})(?=\.(?:report\.html|report\.pdf|results\.json)$)'
 )
 
 
@@ -123,7 +123,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         allowed_suffixes = (
             '.report.pdf',
             '.results.json',
-            '.mutations.tsv',
             '.report.html',
         )
         return any(str(artifact_path).endswith(suffix) for suffix in allowed_suffixes)
@@ -583,7 +582,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         if not _is_allowed_artifact_path(artifact_path):
             raise HTTPException(
                 status_code=400,
-                detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .mutations.tsv, .report.html.',
+                detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .report.html.',
             )
         if not artifact_path.is_file():
             raise HTTPException(status_code=404, detail='Artifact not found.')
@@ -656,7 +655,7 @@ def _build_artifact_bundle(
             if not is_allowed_artifact_path(artifact_path):
                 raise HTTPException(
                     status_code=400,
-                    detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .mutations.tsv, .report.html.',
+                    detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .report.html.',
                 )
             if not artifact_path.is_file():
                 raise HTTPException(status_code=404, detail='Artifact not found.')
@@ -736,8 +735,6 @@ def _derive_download_filename(artifact_path: Path) -> str:
         return file_name[:-11] + '.pdf'
     if file_name.endswith('.results.json'):
         return file_name[:-13] + '.json'
-    if file_name.endswith('.mutations.tsv'):
-        return file_name[:-14] + '.tsv'
     return file_name
 
 

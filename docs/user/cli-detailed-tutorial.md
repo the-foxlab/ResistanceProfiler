@@ -80,7 +80,7 @@ respro fasta \
   --output my_output \
   --results-db my_results.db \
   --export json \
-  --export tabular
+  --export pdf
 ```
 
 ## 5. Profile VCF input (`respro vcf`)
@@ -95,7 +95,7 @@ respro vcf \
   --min-af 0.01 \
   --min-depth 0 \
   --export json \
-  --export tabular
+  --export pdf
 ```
 
 ## 6. Inspect project metadata and curated rules (`respro manage database`)
@@ -172,7 +172,7 @@ respro regenerate \
   --results-db my_results.db \
   --run-id 1 \
   --output my_output \
-  --export tabular
+  --export pdf
 ```
 
 From a JSON export:

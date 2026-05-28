@@ -336,16 +336,17 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Smaller Issues
 
-- 🟡fix tests
-- 🟡remove tabular (integrate into html plot)
-- 🟡make it again work with the webapp
 - 🟡adapt webapp a bit (better sidebar, less tile in tile)
+- one analysis option with different modi and one report option that shows previous reports (independent if batch or not) --> do not show below but always in new tab (previous than shows all in that session)
 - 🟡check that regenerate works still
-- 🟡remove drug badges
-- 🟡identify dead code
 - 🟡missing gene in table webapp (likely due to naming it to feature)
 - 🟡 add herpes drg assessment of ic50 values
 - 🟡 herpes drg --> fold ic50 ?
 - 🟡 add scoring overview to potential plots
 - 🟡 rethink plots in app (make them more beautiful?)
-- 🟡 make formula rules use applied feature and not generic name.
+- 🟡 make formula rules use applied feature and not generic name in the table
+- 🟡 greyish looks crappy with new plot when the plot button is clicked
+- 🟡 download pdf does not work
+- fix lower case in feature report written
+- each sample should appear in previous (independent whether patch or not)
+- add assessment algorithm for ic50 and fold ic50

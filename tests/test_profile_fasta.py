@@ -670,7 +670,6 @@ class TestProfileFastaCli:
         assert 'refB' in html
         assert 'Organism B' in html
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_fasta_profile_detects_resistance_hit(
         self, fasta_db: Path, tmp_path: Path,
     ) -> None:
@@ -699,9 +698,8 @@ class TestProfileFastaCli:
         ])
 
         assert result.exit_code == 0, result.output
-        assert '1 database hit' in result.output
+        assert '1 total database hits' in result.output
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_fasta_profile_excludes_non_cds_variants(
         self, fasta_db: Path, tmp_path: Path,
     ) -> None:
@@ -730,7 +728,7 @@ class TestProfileFastaCli:
         ])
 
         assert result.exit_code == 0, result.output
-        assert '0 database hit' in result.output
+        assert '0 total database hits' in result.output
 
     def test_fasta_profile_html_output_contains_expected_fields(
         self, fasta_db: Path, tmp_path: Path,
@@ -985,7 +983,6 @@ class TestFastaToVcf:
 class TestFastaConsensusCli:
     """End-to-end CLI test for --fasta consensus input mode."""
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_fasta_consensus_detects_resistance_hit(
         self, fasta_db: Path, tmp_path: Path,
     ) -> None:
@@ -1004,9 +1001,8 @@ class TestFastaConsensusCli:
         ])
 
         assert result.exit_code == 0, result.output
-        assert '1 database hit' in result.output
+        assert '1 total database hits' in result.output
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_fasta_consensus_no_change_no_hits(
         self, fasta_db: Path, tmp_path: Path,
     ) -> None:
@@ -1023,7 +1019,7 @@ class TestFastaConsensusCli:
         ])
 
         assert result.exit_code == 0, result.output
-        assert '0 database hit' in result.output
+        assert '0 total database hits' in result.output
 
     def test_fasta_consensus_writes_optional_json_export(
         self, fasta_db: Path, tmp_path: Path,
@@ -1044,7 +1040,6 @@ class TestFastaConsensusCli:
         json_path = output_dir / f'{fasta_path.stem}.results.json'
         assert json_path.exists()
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_fasta_consensus_writes_repeated_export_formats(
         self, fasta_db: Path, tmp_path: Path,
     ) -> None:
@@ -1058,16 +1053,16 @@ class TestFastaConsensusCli:
             '--fasta', str(fasta_path),
             '--output', str(output_dir),
             '--export', 'json',
-            '--export', 'tabular',
+            '--export', 'pdf',
         ])
 
         assert result.exit_code == 0, result.output
         html_path = output_dir / f'{fasta_path.stem}.report.html'
         json_path = output_dir / f'{fasta_path.stem}.results.json'
-        tsv_path = output_dir / f'{fasta_path.stem}.mutations.tsv'
+        pdf_path = output_dir / f'{fasta_path.stem}.report.pdf'
         assert html_path.exists()
         assert json_path.exists()
-        assert tsv_path.exists()
+        assert pdf_path.exists()
 
 class TestReverseStrandMappyParity:
     """Regression tests for reverse-strand FASTA profiling with mappy CIGAR handling."""

@@ -316,9 +316,9 @@
                       <img class="db-hit-info-icon" src="{{ context.database_hits.info_icon }}" alt="info" width="13" height="13">
                       <div class="db-hit-info-panel">
                         <p>Quantitative or categorical resistance data from the source database.</p>
-                        <p><strong>Phenotype / Clinical phenotype</strong> — qualitative classification (e.g. resistant, intermediate, sensitive).</p>
-                        <p><strong>IC50 / Fold IC50</strong> — inhibitory concentration or fold-change relative to wild type.</p>
-                        <p><strong>Score</strong> — database-specific numeric score (e.g. Stanford HIVDB genotypic resistance score).</p>
+                        {% if context.database_hits.has_phenotype_metrics or context.database_hits.has_clinical_phenotype_metrics %}<p><strong>Phenotype / Clinical phenotype</strong> — qualitative classification (e.g. resistant, intermediate, sensitive).</p>{% endif %}
+                        {% if context.database_hits.has_ic50_metrics or context.database_hits.has_fold_ic50_metrics %}<p><strong>IC50 / Fold IC50</strong> — inhibitory concentration or fold-change relative to wild type.</p>{% endif %}
+                        {% if context.database_hits.has_score_metrics %}<p><strong>Score</strong> — database-specific numeric score (e.g. Stanford HIVDB genotypic resistance score).</p>{% endif %}
                         <p>Badge colour reflects where the value falls relative to the distribution of all values for that field in the database (blue&nbsp;→ amber&nbsp;→ orange&nbsp;→ red = increasing severity).</p>
                       </div>
                     </span>
@@ -480,9 +480,9 @@
                       <img class="db-hit-info-icon" src="{{ context.similarity_entries.info_icon }}" alt="info" width="13" height="13">
                       <div class="db-hit-info-panel">
                         <p>Quantitative or categorical resistance data for the <strong>known rule</strong> at this position.</p>
-                        <p><strong>Phenotype / Clinical phenotype</strong> &mdash; qualitative classification (e.g. resistant, intermediate, sensitive).</p>
-                        <p><strong>IC50 / Fold IC50</strong> &mdash; inhibitory concentration or fold-change relative to wild type.</p>
-                        <p><strong>Score</strong> &mdash; database-specific numeric score.</p>
+                        {% if context.similarity_entries.has_phenotype_metrics or context.similarity_entries.has_clinical_phenotype_metrics %}<p><strong>Phenotype / Clinical phenotype</strong> &mdash; qualitative classification (e.g. resistant, intermediate, sensitive).</p>{% endif %}
+                        {% if context.similarity_entries.has_ic50_metrics or context.similarity_entries.has_fold_ic50_metrics %}<p><strong>IC50 / Fold IC50</strong> &mdash; inhibitory concentration or fold-change relative to wild type.</p>{% endif %}
+                        {% if context.similarity_entries.has_score_metrics %}<p><strong>Score</strong> &mdash; database-specific numeric score.</p>{% endif %}
                       </div>
                     </span>
                   </th>

@@ -550,12 +550,23 @@ def _build_database_hits_rows(
 
     has_publications = any(row['pub_citations'] for row in rows)
     has_comments = any(row.get('comment') for row in rows)
+    
+    # Track which metric labels are actually used in any row
+    metric_labels_present: set[str] = set()
+    for row in rows:
+        for metric in row.get('metrics', []):
+            metric_labels_present.add(metric['label'])
     return {
         'rows': rows,
         'count': len(rows),
         'has_publications': has_publications,
         'has_drug_class': bool(drug_class_map),
         'has_comments': has_comments,
+        'has_phenotype_metrics': 'Phenotype' in metric_labels_present,
+        'has_clinical_phenotype_metrics': 'Clinical phenotype' in metric_labels_present,
+        'has_ic50_metrics': 'IC50' in metric_labels_present,
+        'has_fold_ic50_metrics': 'Fold IC50' in metric_labels_present,
+        'has_score_metrics': 'Score' in metric_labels_present,
         'bibliography': bibliography,
         'info_icon': _load_svg_data_url('info.svg'),
         'search_icon': _load_svg_data_url('search.svg'),
@@ -981,11 +992,22 @@ def _build_potential_effects_rows(
 
     has_publications = any(row['pub_citations'] for row in rows)
     has_drug_class = bool(drug_class_map) and any(r.get('drug_class') for r in rows)
+    
+    # Track which metric labels are actually used in any row
+    metric_labels_present: set[str] = set()
+    for row in rows:
+        for metric in row.get('metrics', []):
+            metric_labels_present.add(metric['label'])
     return {
         'rows': rows,
         'count': len(rows),
         'has_drug_class': has_drug_class,
         'has_publications': has_publications,
+        'has_phenotype_metrics': 'Phenotype' in metric_labels_present,
+        'has_clinical_phenotype_metrics': 'Clinical phenotype' in metric_labels_present,
+        'has_ic50_metrics': 'IC50' in metric_labels_present,
+        'has_fold_ic50_metrics': 'Fold IC50' in metric_labels_present,
+        'has_score_metrics': 'Score' in metric_labels_present,
         'bibliography': bibliography,
         'info_icon': _load_svg_data_url('info.svg'),
         'search_icon': _load_svg_data_url('search.svg'),

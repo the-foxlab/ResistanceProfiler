@@ -84,7 +84,7 @@ respro fasta \
     --output my_output \
     --results-db my_results.db \
     --export json \
-    --export tabular
+    --export pdf
 ```
 
 Or from vcf files:
@@ -97,7 +97,7 @@ respro vcf \
     --output my_output \
     --results-db my_results.db \
     --export json \
-    --export tabular
+    --export pdf
 ```
 
 For bundled, ready-to-run sample inputs, see [example_data/README](example_data/README).

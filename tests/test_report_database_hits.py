@@ -89,12 +89,11 @@ def test_render_lollipop_plot_labels_formula_only_member_hits() -> None:
     assert 'K2E' in svg_bytes.decode('utf-8')
 
 
-@pytest.mark.skip(reason='Report rework in progress')
 def test_report_css_expands_plot_modal_panel() -> None:
     css_text = _load_css_text()
 
     assert '.plot-modal-panel' in css_text
-    assert 'width: min(1120px, 80vw);' in css_text
+    assert 'width: 80vw;' in css_text
 
 
 # ─── _build_database_hits_rows ────────────────────────────────────────────────

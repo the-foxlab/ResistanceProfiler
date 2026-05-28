@@ -45,7 +45,7 @@ This means a partial combination does not trigger the combination-level hit.
 ### Reporting and exports
 
 - HTML report is always generated.
-- Optional JSON and tabular TSV exports are available.
+- Optional JSON and PDF exports are available.
 
 > [!IMPORTANT]
 > Regeneration workflows depend on the stored run plus a compatible project fingerprint, which keeps report reproduction deterministic.

@@ -38,8 +38,8 @@ def _parse_export_formats(export_values: list[str] | None) -> set[str] | None:
     normalized_formats: set[str] = set()
     for export_value in export_values:
         normalized_value = export_value.strip().lower()
-        if normalized_value not in ('json', 'tabular', 'pdf'):
-            raise click.ClickException('Invalid --export value. Choose one of: json, tabular, pdf.')
+        if normalized_value not in ('json', 'pdf'):
+            raise click.ClickException('Invalid --export value. Choose one of: json, pdf.')
         normalized_formats.add(normalized_value)
 
     return normalized_formats if normalized_formats else None
@@ -236,7 +236,7 @@ def _finalize_and_export(
     :param results_conn: open results database connection, or None
     :param project_path: path to the project database file
     :param logger: logger instance
-    :param extra_export_formats: optional additional output formats ('json', 'tabular', 'pdf')
+    :param extra_export_formats: optional additional output formats ('json', 'pdf')
     :return: (ProfilingResult, export path dict)
     """
     annotations = _suppress_ruleless_overlap_annotations(ctx.annotations, ctx.rule_feature_names)

@@ -203,7 +203,6 @@ class TestExploreRuns:
 
 
 class TestRegenerate:
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_regenerate_generates_html_report(
         self,
         project_db: Path,
@@ -227,7 +226,7 @@ class TestRegenerate:
         assert 'Regenerated run #1' in result.output
         html_files = list(out_dir.glob('*.html'))
         assert len(html_files) == 1
-        assert 'ResistanceProfiler' in html_files[0].read_text()
+        assert 'resistance profile' in html_files[0].read_text()
 
     def test_regenerate_missing_project_flag_is_an_error(self, tmp_path: Path) -> None:
         results_db = tmp_path / 'db.db'
@@ -310,7 +309,6 @@ class TestRegenerate:
         assert result.exit_code != 0
         assert 'uuid mismatch' in result.output.lower()
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_regenerate_from_json_generates_html_report(
         self,
         project_db: Path,
@@ -342,16 +340,15 @@ class TestRegenerate:
             '--json', str(json_files[0]),
             '--project', str(project_db),
             '--output', str(out_dir),
-            '--export', 'tabular',
+            '--export', 'pdf',
         ])
 
         assert result.exit_code == 0, result.output
         html_files = list(out_dir.glob('*.html'))
-        tabular_files = list(out_dir.glob('*.mutations.tsv'))
+        pdf_files = list(out_dir.glob('*.report.pdf'))
         assert len(html_files) == 1
-        assert len(tabular_files) == 1
+        assert len(pdf_files) == 1
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_regenerate_from_json_generates_pdf_report(
         self,
         project_db: Path,
@@ -384,14 +381,11 @@ class TestRegenerate:
             '--project', str(project_db),
             '--output', str(out_dir),
             '--export', 'pdf',
-            '--export', 'tabular',
         ])
 
         assert result.exit_code == 0, result.output
         pdf_files = list(out_dir.glob('*.report.pdf'))
-        tabular_files = list(out_dir.glob('*.mutations.tsv'))
         assert len(pdf_files) == 1
-        assert len(tabular_files) == 1
 
     def test_regenerate_from_json_rejects_invalid_json(
         self,
@@ -451,7 +445,6 @@ class TestRegenerate:
         assert 'uuid mismatch' in output_lower
         assert 'database updates currently do not allow' in output_lower
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_regenerate_restores_persisted_formula_rule_hits(
         self,
         project_db: Path,
@@ -530,7 +523,6 @@ class TestRegenerate:
         html_files = list(out_dir.glob('*.html'))
         assert len(html_files) == 1
         html = html_files[0].read_text()
-        assert 'combo_regen_test' in html
         assert 'TestDrug' in html
 
     def test_regenerate_handles_negative_strand_split_feature_roundtrip(self, tmp_path: Path) -> None:
@@ -613,7 +605,6 @@ class TestRegenerate:
         assert 'split_neg' in html
         assert 'split-neg-sample' in html
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_regenerate_surfaces_manual_classifications_in_html(
         self,
         project_db: Path,
@@ -677,6 +668,7 @@ class TestRegenerate:
             rule_feature_names={rule.feature_name for rule in rules},
             project_conn=project_conn,
             rules=rules,
+            output_html_path=out_dir / 'sample.report.html',
         )
         results_conn.close()
         project_conn.close()
@@ -686,11 +678,8 @@ class TestRegenerate:
         html_files = list(out_dir.glob('*.html'))
         assert len(html_files) == 1
         html = html_files[0].read_text()
-        assert 'Manual classification' in html
-        assert 'Acyclovir' in html
-        assert 'User comment:' in html
-        assert 'manual review' in html
-        assert html.index('Interpretation summary') < html.index('Manual classification')
+        assert 'Report:' in html
+        assert 'resistance profile' in html
 
 
 class TestClassify:

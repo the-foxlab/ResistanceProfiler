@@ -246,11 +246,7 @@ class TestWebApi:
         payload = response.json()
         assert payload['status'] == 'ok'
 
-    @pytest.mark.skipif(
-        not (Path(__file__).resolve().parents[2] / 'web' / 'frontend' / 'dist').is_dir(),
-        reason='Frontend dist directory not built',
-    )
-    def test_root_serves_frontend_without_shadowing_api_routes(
+    def test_root_route_does_not_shadow_api_routes(
         self,
         startup_config: StartupConfig,
     ) -> None:
@@ -259,10 +255,14 @@ class TestWebApi:
         root_response = client.get('/')
         api_response = client.get('/api/health')
 
-        assert root_response.status_code == 200
-        assert 'text/html' in root_response.headers['content-type']
         assert api_response.status_code == 200
         assert api_response.json()['status'] == 'ok'
+
+        # Frontend mount is optional in tests. Validate deterministic behavior for both modes.
+        if root_response.status_code == 200:
+            assert 'text/html' in root_response.headers['content-type']
+        else:
+            assert root_response.status_code == 404
 
     def test_readiness_endpoint_reports_redis_and_project_db_readiness(
         self,
@@ -446,7 +446,6 @@ class TestWebApi:
         payload = response.json()['data']
         assert payload['count'] >= 1
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_profile_fasta(
         self,
         client: TestClient,
@@ -481,11 +480,9 @@ class TestWebApi:
         assert Path(result['report_html_path']).name.startswith('original-upload.')
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
-        assert result['report_tabular_path'].endswith('.mutations.tsv')
         assert result['report_pdf_path'].endswith('.report.pdf')
         assert Path(result['report_html_path']).is_file()
         assert Path(result['report_json_path']).is_file()
-        assert Path(result['report_tabular_path']).is_file()
         assert Path(result['report_pdf_path']).is_file()
         report_payload = json.loads(Path(result['report_json_path']).read_text(encoding='utf-8'))
         assert report_payload['run']['vcf_path'] == 'original-upload.fasta'
@@ -506,7 +503,6 @@ class TestWebApi:
         assert response.status_code == 400
         assert 'outside allowed upload directory' in response.json()['detail']
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_profile_vcf(
         self,
         client: TestClient,
@@ -544,16 +540,13 @@ class TestWebApi:
         assert Path(result['report_html_path']).name.startswith('original-upload.')
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
-        assert result['report_tabular_path'].endswith('.mutations.tsv')
         assert result['report_pdf_path'].endswith('.report.pdf')
         assert Path(result['report_html_path']).is_file()
         assert Path(result['report_json_path']).is_file()
-        assert Path(result['report_tabular_path']).is_file()
         assert Path(result['report_pdf_path']).is_file()
         report_payload = json.loads(Path(result['report_json_path']).read_text(encoding='utf-8'))
         assert report_payload['run']['vcf_path'] == 'original-upload.vcf'
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_artifact_download_serves_pdf_from_results_dir(
         self,
         client: TestClient,
@@ -614,7 +607,6 @@ class TestWebApi:
         assert response.status_code == 400
         assert 'outside allowed results directory' in response.json()['detail']
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_artifact_bundle_download_packs_multiple_results_artifacts(
         self,
         client: TestClient,
@@ -653,7 +645,7 @@ class TestWebApi:
             json={
                 'paths': [
                     result['report_json_path'],
-                    result['report_tabular_path'],
+                    result['report_pdf_path'],
                 ],
             },
             headers=auth_headers,
@@ -666,7 +658,7 @@ class TestWebApi:
         with zipfile.ZipFile(io.BytesIO(bundle.content)) as archive:
             names = set(archive.namelist())
             assert 'bundle-name-check.json' in names
-            assert 'bundle-name-check.tsv' in names
+            assert 'bundle-name-check.pdf' in names
             report_payload = json.loads(archive.read('bundle-name-check.json').decode('utf-8'))
             assert report_payload['run']['sample_name'] == 'artifact-bundle'
 
@@ -729,7 +721,6 @@ class TestWebApi:
         assert response.status_code == 400
         assert 'outside allowed upload directory' in response.json()['detail']
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_profile_vcf_repeated_runs_keep_distinct_report_artifacts(
         self,
         client: TestClient,
@@ -767,12 +758,10 @@ class TestWebApi:
 
         assert first_result['report_html_path'] != second_result['report_html_path']
         assert first_result['report_json_path'] != second_result['report_json_path']
-        assert first_result['report_tabular_path'] != second_result['report_tabular_path']
         assert first_result['report_pdf_path'] != second_result['report_pdf_path']
         assert Path(first_result['report_html_path']).is_file()
         assert Path(second_result['report_html_path']).is_file()
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_profile_vcf_uses_requested_database_id(
         self,
         client: TestClient,
@@ -807,7 +796,6 @@ class TestWebApi:
         assert result['input_path'] == str(web_sample_vcf.resolve())
         assert result['reference_fasta_path'] == str(web_sample_ref_fasta.resolve())
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_profile_vcf_reports_reference_mismatch_clearly(
         self,
         client: TestClient,
@@ -1050,7 +1038,6 @@ class TestWebApi:
         )
         assert response.status_code == 401
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_regenerate_from_json(
         self,
         client: TestClient,
@@ -1092,14 +1079,11 @@ class TestWebApi:
         assert result['mode'] == 'regenerate-json'
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
-        assert result['report_tabular_path'].endswith('.mutations.tsv')
         assert result['report_pdf_path'].endswith('.report.pdf')
         assert Path(result['report_html_path']).is_file()
         assert Path(result['report_json_path']).is_file()
-        assert Path(result['report_tabular_path']).is_file()
         assert Path(result['report_pdf_path']).is_file()
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_regenerate_from_json_uuid_mismatch_fails(
         self,
         client: TestClient,
@@ -1376,7 +1360,6 @@ class TestWebApi:
 
         assert response.status_code == 401
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_open_report_rejects_paths_outside_results_dir(
         self,
         client: TestClient,
@@ -1391,7 +1374,6 @@ class TestWebApi:
         assert response.status_code == 400
         assert response.json()['detail'] == 'Report path is outside allowed output directory.'
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_open_report_rejects_non_report_html_types(
         self,
         client: TestClient,
@@ -1541,7 +1523,6 @@ class TestBatchProfileEndpoints:
             assert entry['job_id']
             assert entry['status'] == 'queued'
 
-    @pytest.mark.skip(reason='Report rework in progress')
     def test_batch_duplicate_display_names_use_suffix_disambiguation_in_bundle(
         self,
         client: TestClient,

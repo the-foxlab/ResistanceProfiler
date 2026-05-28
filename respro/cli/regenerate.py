@@ -81,7 +81,7 @@ def regenerate(
         list[str] | None,
         typer.Option(
             '--export',
-            help='Optional extra export format in addition to HTML (pdf, json, tabular). Pdfs are summaries only. Can be provided multiple times.',
+            help='Optional extra export format in addition to HTML (pdf, json). Pdfs are summaries only. Can be provided multiple times.',
         ),
     ] = None,
 ) -> None:
@@ -95,9 +95,9 @@ def regenerate(
         extra_export_formats: set[str] = set()
         for raw_export in export or []:
             export_value = raw_export.strip().lower()
-            if export_value not in ('json', 'tabular', 'pdf'):
+            if export_value not in ('json', 'pdf'):
                 raise click.ClickException(
-                    'Invalid --export value. Choose one of: json, tabular, pdf.'
+                    'Invalid --export value. Choose one of: json, pdf.'
                 )
             extra_export_formats.add(export_value)
 
