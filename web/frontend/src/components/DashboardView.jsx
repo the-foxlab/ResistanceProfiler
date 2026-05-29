@@ -1559,7 +1559,7 @@ export function DashboardView({
                       </p>
                     </div>
                     <div className="about-cli-side-card">
-                      <h4>Run ResPro Explorer locally</h4>
+                      <h4>Run ResPro WebApp locally</h4>
                       <div className="about-mini-command">
                         <code>{ABOUT_DOCKER_COMMAND}</code>
                         <button
