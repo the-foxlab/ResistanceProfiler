@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import logoSrc from '../assets/logo.svg';
 import aboutIconSrc from '../assets/icon-about.svg';
@@ -20,16 +20,23 @@ import { DatabaseDrugDistributionPlot } from './database-plots/DatabaseDrugDistr
 import { DatabaseSelectorBar } from './DatabaseSelectorBar';
 import { Spinner } from './Spinner';
 import regenerateIconSrc from '../assets/icon-regenerate.svg';
+import homeIconSrc from '../assets/home.svg';
+import reportIconSrc from '../assets/reports.svg';
+import infoIconSrc from '../assets/info.svg';
 import searchIconSrc from '../assets/search.svg';
 import resetFilterIconSrc from '../assets/reset_filter.svg';
 
 const MODES = [
-  { id: 'profile', label: 'Analyze', iconSrc: analyzeIconSrc },
-  { id: 'batch', label: 'Batch Analyze', iconSrc: batchIconSrc },
-  { id: 'regenerate', label: 'Regenerate', iconSrc: regenerateIconSrc },
+  { id: 'analyze', label: 'Analyze', iconSrc: homeIconSrc },
+  { id: 'results', label: 'Session results', iconSrc: reportIconSrc },
   { id: 'database', label: 'Database', iconSrc: databaseIconSrc },
   { id: 'mutations', label: 'Browse mutations', iconSrc: mutationsIconSrc },
   { id: 'about', label: 'About', iconSrc: aboutIconSrc },
+];
+
+const ANALYZE_SUBMODES = [
+  { id: 'single', label: 'One Sample', iconSrc: analyzeIconSrc },
+  { id: 'batch', label: 'Multiple Samples', iconSrc: batchIconSrc },
 ];
 
 function _isPopulated(value) {
@@ -119,6 +126,9 @@ export function DashboardView({
   setActiveMode,
   activeProfileMode,
   setActiveProfileMode,
+  analyzeSubMode,
+  setAnalyzeSubMode,
+  sessionResults,
   inlineReportPath,
   inlineReportLabel,
   mutationColumns,
@@ -174,6 +184,8 @@ export function DashboardView({
   const [requestedPhenotypeMode, setRequestedPhenotypeMode] = useState('auto');
   const [requestedBinSize, setRequestedBinSize] = useState(10);
   const [reportFrameHeight, setReportFrameHeight] = useState(900);
+  const analyzeSubmodeRowRef = useRef(null);
+  const [analyzeSubmodeRowWidth, setAnalyzeSubmodeRowWidth] = useState(0);
 
   const {
     summaryTile,
@@ -202,6 +214,7 @@ export function DashboardView({
     () => reportOptions.find((option) => option.path === selectedProfileReportPath) || null,
     [reportOptions, selectedProfileReportPath]
   );
+  const isAnalyzeScopeLocked = isProfileBusy || isRegenerateBusy || batchSubmitting;
 
   const databaseInfoEntries = useMemo(() => {
     if (!selectedDatabase) {
@@ -257,6 +270,35 @@ export function DashboardView({
     return () => clearInterval(timer);
   }, [batchRateLimitCooldown, setBatchRateLimitCooldown]);
 
+  useEffect(() => {
+    const row = analyzeSubmodeRowRef.current;
+    if (!row) {
+      return undefined;
+    }
+
+    const updateWidth = () => {
+      const nextWidth = Math.ceil(row.getBoundingClientRect().width);
+      setAnalyzeSubmodeRowWidth(nextWidth);
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => {
+        updateWidth();
+      });
+      observer.observe(row);
+      return () => {
+        observer.disconnect();
+      };
+    }
+
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [isProfileBusy, isRegenerateBusy, batchSubmitting]);
+
   return (
     <main className="dashboard-shell">
       {/* Left rail only switches visible mode; all data lives in shared hook state. */}
@@ -302,52 +344,82 @@ export function DashboardView({
         </div>
 
         <section className="panel-stack">
-          {/* PROFILE TAB: upload input files and render generated report */}
-          {activeMode === 'profile' ? (
+          {/* ANALYZE TAB: single sample, batch, and regenerate in one shared shell */}
+          {activeMode === 'analyze' ? (
             <>
               <article className="card profile-input-card tab-primary-tile">
-                <div className="workspace-output-header workspace-output-header-with-db section-header">
+                <div className="analyze-shell-header section-header">
                   <div>
-                    <h2>Profile resistances</h2>
-                    <p>Compare mutations to vcf or fasta files</p>
+                    <h2>{analyzeSubMode === 'batch' ? 'Analyze multiple samples' : 'Analyze'}</h2>
+                    <p>
+                      {analyzeSubMode === 'batch'
+                        ? 'Submit multiple sequence file at once (max 25 per batch and minute).'
+                        : 'Profile vcf files or consensus fasta sequence or regenerate a previous report'}
+                    </p>
+                  </div>
+                  <div className="analyze-submode-row" role="group" aria-label="Analysis workflow" ref={analyzeSubmodeRowRef}>
+                    {ANALYZE_SUBMODES.map((subMode) => (
+                      <button
+                        key={subMode.id}
+                        type="button"
+                        className={`analyze-submode-btn ${analyzeSubMode === subMode.id ? 'active' : ''}`}
+                        onClick={() => {
+                          if (subMode.id === 'single') {
+                            setActiveProfileMode('vcf');
+                            setAnalyzeSubMode('single');
+                            return;
+                          }
+
+                          if (subMode.id === 'batch') {
+                            setBatchMode('vcf');
+                            resetBatch();
+                            setAnalyzeSubMode('batch');
+                            return;
+                          }
+                        }}
+                        disabled={isAnalyzeScopeLocked}
+                      >
+                        <span className="sidebar-icon-mask analyze-submode-icon" style={{ '--icon-src': `url(${subMode.iconSrc})` }} aria-hidden="true" />
+                        {subMode.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
-                <div className="profile-input-subtile section-subtile">
-                  {activeProfileMode === 'vcf' ? (
-                    <>
-                      <div className="profile-mode-row">
-                        <div className="profile-settings-row" role="group" aria-label="Profiling mode">
-                          <div className="database-phenotype-switch">
-                            {PROFILE_MODES.map((mode) => (
-                              <button
-                                key={mode.id}
-                                type="button"
-                                className={activeProfileMode === mode.id ? 'active' : ''}
-                                onClick={() => setActiveProfileMode(mode.id)}
-                                disabled={isProfileBusy}
-                              >
-                                {mode.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="upload-progress" aria-label="Upload progress">
-                          <div className="upload-progress-head">
-                            <span>Upload progress</span>
-                            <span>{uploadProgress.percent}%</span>
-                          </div>
-                          <div className="upload-progress-track" aria-hidden="true">
-                            <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
-                          </div>
-                          <p className="upload-progress-file" title={uploadProgress.fileName || 'No upload yet'}>
-                            {uploadProgress.fileName || 'No upload yet'}
-                          </p>
+
+                {/* SINGLE SAMPLE submode */}
+                {analyzeSubMode === 'single' ? (
+                  <div className="profile-input-subtile section-subtile">
+                    <div className="profile-mode-row">
+                      <div className="profile-settings-row" role="group" aria-label="Profiling mode">
+                        <div className="database-phenotype-switch">
+                          {PROFILE_MODES.map((mode) => (
+                            <button
+                              key={mode.id}
+                              type="button"
+                              className={activeProfileMode === mode.id ? 'active' : ''}
+                              onClick={() => setActiveProfileMode(mode.id)}
+                              disabled={activeProfileMode === 'regenerate' ? isRegenerateBusy : isProfileBusy}
+                            >
+                              {mode.label}
+                            </button>
+                          ))}
                         </div>
                       </div>
+                      <div className="upload-progress" aria-label="Upload progress">
+                        <div className="upload-progress-head">
+                          <span>Upload progress</span>
+                          <span>{uploadProgress.percent}%</span>
+                        </div>
+                        <div className="upload-progress-track" aria-hidden="true">
+                          <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
+                        </div>
+                      </div>
+                    </div>
 
+                    {activeProfileMode === 'vcf' ? (
                       <div className="profile-upload-row profile-upload-row-vcf">
                         <label>
-                          VCF file
+                          <span className="input-label-row">VCF file <button type="button" className="input-info-btn" aria-label="VCF help" title="Upload one VCF (.vcf or .vcf.gz) with standard headers."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                           <input
                             type="file"
                             accept=".vcf,.vcf.gz"
@@ -360,7 +432,7 @@ export function DashboardView({
                           />
                         </label>
                         <label>
-                          Reference FASTA
+                          <span className="input-label-row">Reference FASTA <button type="button" className="input-info-btn" aria-label="Reference FASTA help" title="Reference FASTA must match the VCF coordinate system."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                           <input
                             type="file"
                             accept=".fasta,.fa,.fna"
@@ -373,7 +445,7 @@ export function DashboardView({
                           />
                         </label>
                         <label>
-                          <span className="label-text">BAM file <span className="field-optional">(optional)</span></span>
+                          <span className="label-text input-label-row">BAM file <span className="field-optional">(optional)</span> <button type="button" className="input-info-btn" aria-label="BAM help" title="Optional sorted BAM. A BAM index is generated automatically."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                           <input
                             type="file"
                             accept=".bam"
@@ -395,7 +467,7 @@ export function DashboardView({
                           />
                         </label>
                         <label>
-                          <span className="label-text">Frequency cutoff <span className="field-optional">(min AF)</span></span>
+                          <span className="label-text input-label-row">Frequency cutoff <button type="button" className="input-info-btn" aria-label="Frequency cutoff help" title="Minimum allele frequency from 0 to 1. Variants below this value are ignored."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                           <input
                             type="number"
                             min="0"
@@ -413,7 +485,7 @@ export function DashboardView({
                           />
                         </label>
                         <label>
-                          <span className="label-text">Coverage cutoff <span className="field-optional">(min depth)</span></span>
+                          <span className="label-text input-label-row">Coverage cutoff <button type="button" className="input-info-btn" aria-label="Coverage cutoff help" title="Minimum read depth required for calling a variant."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                           <input
                             type="number"
                             min="0"
@@ -430,42 +502,12 @@ export function DashboardView({
                           />
                         </label>
                       </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="profile-mode-row">
-                        <div className="profile-settings-row" role="group" aria-label="Profiling mode">
-                          <div className="database-phenotype-switch">
-                            {PROFILE_MODES.map((mode) => (
-                              <button
-                                key={mode.id}
-                                type="button"
-                                className={activeProfileMode === mode.id ? 'active' : ''}
-                                onClick={() => setActiveProfileMode(mode.id)}
-                                disabled={isProfileBusy}
-                              >
-                                {mode.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="upload-progress" aria-label="Upload progress">
-                          <div className="upload-progress-head">
-                            <span>Upload progress</span>
-                            <span>{uploadProgress.percent}%</span>
-                          </div>
-                          <div className="upload-progress-track" aria-hidden="true">
-                            <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
-                          </div>
-                          <p className="upload-progress-file" title={uploadProgress.fileName || 'No upload yet'}>
-                            {uploadProgress.fileName || 'No upload yet'}
-                          </p>
-                        </div>
-                      </div>
+                    ) : null}
 
+                    {activeProfileMode === 'fasta' ? (
                       <div className="profile-upload-row profile-upload-row-fasta">
                         <label>
-                          FASTA file
+                          <span className="input-label-row">FASTA file <button type="button" className="input-info-btn" aria-label="FASTA help" title="Upload one consensus FASTA sequence file."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                           <input
                             type="file"
                             accept=".fasta,.fa,.fna,.faa"
@@ -487,431 +529,367 @@ export function DashboardView({
                           />
                         </label>
                       </div>
-                    </>
-                  )}
+                    ) : null}
 
-                  <div className="profile-analyze-row">
-                    <p className="status analyze-status-inline">{status}</p>
-                    {canCancelJob ? (
+                    {activeProfileMode === 'regenerate' ? (
+                      <div className="profile-upload-row profile-upload-row-regenerate">
+                        <label>
+                          <span className="input-label-row">Results JSON <button type="button" className="input-info-btn" aria-label="Results JSON help" title="Upload a prior results JSON exported by ResistanceProfiler."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                          <input
+                            type="file"
+                            accept=".json"
+                            onChange={(event) => {
+                              if (event.target.files && event.target.files[0]) {
+                                uploadJsonFile(event.target.files[0]);
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+
+                    <div className="profile-analyze-row">
+                      {canCancelJob ? (
+                        <button
+                          type="button"
+                          className="button-link report-action-btn"
+                          onClick={() => cancelActiveJob()}
+                          disabled={isCancelingJob}
+                        >
+                          {isCancelingJob ? 'Canceling...' : 'Cancel job'}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="analyze-primary"
+                        onClick={() => {
+                          if (activeProfileMode === 'regenerate') {
+                            runRegenerateFromJson();
+                            return;
+                          }
+                          runSelectedProfile();
+                        }}
+                        disabled={activeProfileMode === 'regenerate' ? (isRegenerateBusy || !jsonInputPath) : isProfileBusy}
+                      >
+                        {(activeProfileMode === 'regenerate' ? isRegenerateBusy : isProfileBusy) ? (
+                          <>
+                            <Spinner /> {activeProfileMode === 'regenerate' ? 'Regenerate' : 'Analyze'}
+                          </>
+                        ) : (
+                          activeProfileMode === 'regenerate' ? 'Regenerate' : 'Analyze'
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="inline-actions report-actions analyze-report-actions">
+                      <select
+                        value={selectedProfileReportPath}
+                        onChange={(event) => setSelectedProfileReportPath(event.target.value)}
+                        disabled={reportOptions.length === 0}
+                      >
+                        {reportOptions.length === 0 ? (
+                          <option value="">No previous reports available</option>
+                        ) : null}
+                        {reportOptions.map((option) => (
+                          <option key={option.path} value={option.path}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                       <button
                         type="button"
                         className="button-link report-action-btn"
-                        onClick={() => cancelActiveJob()}
-                        disabled={isCancelingJob}
-                      >
-                        {isCancelingJob ? 'Canceling...' : 'Cancel job'}
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="analyze-primary"
-                      onClick={() => runSelectedProfile()}
-                      disabled={isProfileBusy}
-                    >
-                      {isProfileBusy ? (
-                        <>
-                          <Spinner /> Analyze
-                        </>
-                      ) : (
-                        'Analyze'
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </article>
-
-            </>
-          ) : null}
-
-          {/* BATCH TAB: submit multiple samples for profiling */}
-          {activeMode === 'batch' ? (
-            <article className="card profile-input-card tab-primary-tile">
-              <div className="workspace-output-header workspace-output-header-with-db section-header">
-                <div>
-                  <h2>Batch analysis</h2>
-                  <p>Submit multiple samples for profiling in one go</p>
-                </div>
-              </div>
-
-              {!batchSubmitted ? (
-                <div className="profile-input-subtile section-subtile">
-                  {/* Mode sub-selector */}
-                  <div className="profile-mode-row">
-                    <div className="profile-settings-row" role="group" aria-label="Batch mode">
-                      <div className="database-phenotype-switch">
-                        <button
-                          type="button"
-                          className={batchMode === 'vcf' ? 'active' : ''}
-                          onClick={() => setBatchMode('vcf')}
-                          disabled={batchSubmitting}
-                        >
-                          VCF batch
-                        </button>
-                        <button
-                          type="button"
-                          className={batchMode === 'fasta' ? 'active' : ''}
-                          onClick={() => setBatchMode('fasta')}
-                          disabled={batchSubmitting}
-                        >
-                          FASTA batch
-                        </button>
-                      </div>
-                    </div>
-                    <div className="upload-progress" aria-label="Batch upload progress">
-                      <div className="upload-progress-head">
-                        <span>Upload progress</span>
-                        <span>{uploadProgress.percent}%</span>
-                      </div>
-                      <div className="upload-progress-track" aria-hidden="true">
-                        <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
-                      </div>
-                      <p className="upload-progress-file" title={uploadProgress.fileName || 'No upload yet'}>
-                        {uploadProgress.fileName || 'No upload yet'}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* File upload area */}
-                  {batchMode === 'vcf' ? (
-                    <div className="profile-upload-row profile-upload-row-batch-vcf">
-                      <label>
-                        VCF files
-                        <input
-                          type="file"
-                          multiple
-                          accept=".vcf,.vcf.gz"
-                          disabled={batchSubmitting}
-                          onChange={(event) => {
-                            if (!event.target.files) {
-                              return;
-                            }
-                            addBatchVcfFiles(event.target.files);
-                            event.target.value = '';
-                          }}
-                        />
-                      </label>
-                      <label>
-                        <span className="label-text">Shared reference FASTA <span className="field-optional">(required)</span></span>
-                        <input
-                          type="file"
-                          accept=".fasta,.fa,.fna"
-                          disabled={batchSubmitting}
-                          onChange={(event) => {
-                            if (event.target.files && event.target.files[0]) {
-                              uploadBatchReferenceFasta(event.target.files[0]);
-                            }
-                          }}
-                        />
-                      </label>
-                      <label className="batch-settings-label">
-                        <span className="label-text">Frequency cutoff <span className="field-optional">(min AF)</span></span>
-                        <input
-                          type="number"
-                          min="0"
-                          max="1"
-                          step="0.001"
-                          value={batchVcfCutoffs.min_af}
-                          disabled={batchSubmitting}
-                          onChange={(event) => {
-                            const value = Number(event.target.value);
-                            if (!Number.isFinite(value)) {
-                              return;
-                            }
-                            setBatchVcfCutoffs((prev) => ({ ...prev, min_af: value }));
-                          }}
-                        />
-                      </label>
-                      <label className="batch-settings-label">
-                        <span className="label-text">Coverage cutoff <span className="field-optional">(min depth)</span></span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={batchVcfCutoffs.min_depth}
-                          disabled={batchSubmitting}
-                          onChange={(event) => {
-                            const value = Number(event.target.value);
-                            if (!Number.isFinite(value)) {
-                              return;
-                            }
-                            setBatchVcfCutoffs((prev) => ({ ...prev, min_depth: Math.trunc(value) }));
-                          }}
-                        />
-                      </label>
-                    </div>
-                  ) : (
-                    <div className="profile-upload-row">
-                      <label>
-                        FASTA files
-                        <input
-                          type="file"
-                          multiple
-                          accept=".fasta,.fa,.fna"
-                          disabled={batchSubmitting}
-                          onChange={(event) => {
-                            if (!event.target.files) {
-                              return;
-                            }
-                            addBatchFastaFiles(event.target.files);
-                            event.target.value = '';
-                          }}
-                        />
-                      </label>
-                    </div>
-                  )}
-
-                  {/* Uploaded file list */}
-                  {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length > 0 ? (
-                    <div className="profile-upload-row">
-                      <p className="field-optional">
-                        {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length} / {batchMaxSamples} files
-                        {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length >= batchMaxSamples ? (
-                          <span style={{ color: 'var(--color-error, #c2410c)', marginLeft: '0.4em' }}>Limit reached</span>
-                        ) : null}
-                      </p>
-                      <ul className="batch-uploaded-file-list">
-                        {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).map((file, index) => (
-                          <li key={file.path} className="batch-uploaded-file-row">
-                            <span className="batch-uploaded-file-name" title={file.name}>{file.name}</span>
-                            <span className="batch-uploaded-file-size field-optional">{Math.round(file.size / 1024)} KB</span>
-                            <button
-                              type="button"
-                              className="button-link batch-remove-file-btn"
-                              onClick={() => removeBatchFile(index)}
-                              disabled={batchSubmitting}
-                              aria-label={`Remove ${file.name}`}
-                            >
-                              ✕
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-
-                  {/* Shared reference FASTA selection status (VCF mode) */}
-                  {batchMode === 'vcf' && batchReferenceFasta ? (
-                    <p className="field-optional">Uploaded reference: {batchReferenceFasta.name}</p>
-                  ) : null}
-
-                  {/* Rate-limit notice and submit */}
-                  <div className="profile-analyze-row">
-                    <p className="status analyze-status-inline">
-                      {batchRateLimitCooldown > 0
-                        ? `Rate limit reached. Try again in ${batchRateLimitCooldown}s.`
-                        : `Batch submissions are limited by policy: at most ${sampleLimitPerMinute} samples per minute, max ${batchMaxSamples} samples per batch.`}
-                    </p>
-                    {batchError ? <p className="status" style={{ color: 'var(--color-error, #c2410c)' }}>{batchError}</p> : null}
-                    <button
-                      type="button"
-                      className="analyze-primary"
-                      onClick={() => submitBatch()}
-                      disabled={
-                        batchSubmitting
-                        || batchRateLimitCooldown > 0
-                        || (batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length === 0
-                        || (batchMode === 'vcf' && !batchReferenceFasta)
-                      }
-                    >
-                      {batchSubmitting ? (
-                        <>
-                          <Spinner /> Submitting...
-                        </>
-                      ) : (
-                        'Submit batch'
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                // Results table
-                <div className="profile-input-subtile section-subtile">
-                  {batchError ? (
-                    <p className="status" style={{ color: 'var(--color-error, #c2410c)' }}>{batchError}</p>
-                  ) : null}
-                  <div className="table-wrap mutation-table-wrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Sample</th>
-                          <th>Status</th>
-                          <th>Error</th>
-                          <th>HTML</th>
-                          <th>PDF</th>
-                          <th>JSON</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {batchSamples.map((sample) => (
-                          <tr key={sample.job_id}>
-                            <td>{sample.sample_name}</td>
-                            <td>
-                              <span className={`job-status-badge status-${sample.status}`}>
-                                {sample.status}
-                              </span>
-                            </td>
-                            <td>{sample.errorMessage || '—'}</td>
-                            <td>{sample.reportHtmlPath ? <a href={buildArtifactUrl(sample.reportHtmlPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
-                            <td>{sample.reportPdfPath ? <a href={buildArtifactUrl(sample.reportPdfPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
-                            <td>{sample.reportJsonPath ? <a href={buildArtifactUrl(sample.reportJsonPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  <div className="profile-analyze-row">
-                    <button
-                      type="button"
-                      className="analyze-primary"
-                      onClick={() => downloadAllBatchArtifacts()}
-                      disabled={isBatchDownloadBusy}
-                    >
-                      {isBatchDownloadBusy ? (
-                        <>
-                          <Spinner /> Preparing...
-                        </>
-                      ) : (
-                        'Download all'
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      className="analyze-primary"
-                      onClick={() => resetBatch()}
-                    >
-                      New batch
-                    </button>
-                  </div>
-                </div>
-              )}
-            </article>
-          ) : null}
-
-          {/* REGENERATE TAB: upload results JSON and regenerate report artifacts */}
-          {activeMode === 'regenerate' ? (
-            <>
-              <article className="card profile-input-card tab-primary-tile">
-                <div className="workspace-output-header workspace-output-header-with-db section-header">
-                  <div>
-                    <h2>Regenerate from JSON</h2>
-                    <p>Upload a results JSON and regenerate report artifacts with the active database.</p>
-                  </div>
-                </div>
-                <div className="profile-input-subtile section-subtile">
-                  <div className="profile-upload-row profile-upload-row-regenerate">
-                    <label>
-                      Upload JSON file of prior results
-                      <input
-                        type="file"
-                        accept=".json"
-                        onChange={(event) => {
-                          if (event.target.files && event.target.files[0]) {
-                            uploadJsonFile(event.target.files[0]);
+                        onClick={() => {
+                          if (selectedProfileReportPath) {
+                            window.open(buildReportUrl(selectedProfileReportPath), '_blank', 'noopener,noreferrer');
                           }
                         }}
-                      />
-                    </label>
-                  </div>
-
-                  <div className="regenerate-note-row">
-                    <p className="status regenerate-note">
-                      The backend automatically matches the database using the JSON UUID. Regeneration is blocked when no database with a matching UUID is available. Database updates currently do not allow regeneration of reports from older database versions.
-                    </p>
-                  </div>
-
-                  <div className="profile-analyze-row">
-                    <p className="status analyze-status-inline">{status}</p>
-                    {canCancelJob ? (
+                        disabled={!selectedProfileReportPath}
+                      >
+                        Open in new tab
+                      </button>
                       <button
                         type="button"
-                        className="button-link report-action-btn"
-                        onClick={() => cancelActiveJob()}
-                        disabled={isCancelingJob}
+                        className="button-link report-action-btn download-action-btn"
+                        onClick={() => {
+                          if (selectedReportOption?.pdfPath) {
+                            window.open(buildArtifactUrl(selectedReportOption.pdfPath), '_blank', 'noopener,noreferrer');
+                          }
+                        }}
+                        disabled={!selectedReportOption?.pdfPath}
                       >
-                        {isCancelingJob ? 'Canceling...' : 'Cancel job'}
+                        Download PDF
                       </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="analyze-primary"
-                      onClick={() => runRegenerateFromJson()}
-                      disabled={isRegenerateBusy || !jsonInputPath}
-                    >
-                      {isRegenerateBusy ? (
-                        <>
-                          <Spinner /> Regenerate
-                        </>
-                      ) : (
-                        'Regenerate'
-                      )}
-                    </button>
+                      <button
+                        type="button"
+                        className="button-link report-action-btn download-action-btn"
+                        onClick={() => {
+                          if (selectedReportOption?.jsonPath) {
+                            window.open(buildArtifactUrl(selectedReportOption.jsonPath), '_blank', 'noopener,noreferrer');
+                          }
+                        }}
+                        disabled={!selectedReportOption?.jsonPath}
+                      >
+                        Download JSON
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : null}
+
+                {/* BATCH submode */}
+                {analyzeSubMode === 'batch' ? (
+                  <div className="profile-input-subtile section-subtile">
+                  {!batchSubmitted ? (
+                    <>
+                      {/* Mode sub-selector */}
+                      <div className="profile-mode-row">
+                        <div className="profile-settings-row" role="group" aria-label="Batch mode">
+                          <div className="database-phenotype-switch">
+                            <button
+                              type="button"
+                              className={batchMode === 'vcf' ? 'active' : ''}
+                              onClick={() => setBatchMode('vcf')}
+                              disabled={batchSubmitting}
+                            >
+                              VCF batch
+                            </button>
+                            <button
+                              type="button"
+                              className={batchMode === 'fasta' ? 'active' : ''}
+                              onClick={() => setBatchMode('fasta')}
+                              disabled={batchSubmitting}
+                            >
+                              FASTA batch
+                            </button>
+                          </div>
+                        </div>
+                        <div className="upload-progress" aria-label="Batch upload progress">
+                          <div className="upload-progress-head">
+                            <span>Upload progress</span>
+                            <span>{uploadProgress.percent}%</span>
+                          </div>
+                          <div className="upload-progress-track" aria-hidden="true">
+                            <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* File upload area */}
+                      {batchMode === 'vcf' ? (
+                        <div className="profile-upload-row profile-upload-row-batch-vcf">
+                          <label>
+                            <span className="input-label-row">VCF files <button type="button" className="input-info-btn" aria-label="Batch VCF help" title="Upload one or more VCF files (.vcf or .vcf.gz)."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                            <input
+                              type="file"
+                              multiple
+                              accept=".vcf,.vcf.gz"
+                              disabled={batchSubmitting}
+                              onChange={(event) => {
+                                if (!event.target.files) {
+                                  return;
+                                }
+                                addBatchVcfFiles(event.target.files);
+                                event.target.value = '';
+                              }}
+                            />
+                          </label>
+                          <label>
+                            <span className="label-text input-label-row">Shared reference FASTA <span className="field-optional">(required)</span> <button type="button" className="input-info-btn" aria-label="Batch reference help" title="Shared reference FASTA for all uploaded VCF files."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                            <input
+                              type="file"
+                              accept=".fasta,.fa,.fna"
+                              disabled={batchSubmitting}
+                              onChange={(event) => {
+                                if (event.target.files && event.target.files[0]) {
+                                  uploadBatchReferenceFasta(event.target.files[0]);
+                                }
+                              }}
+                            />
+                          </label>
+                          <label className="batch-settings-label">
+                            <span className="label-text input-label-row">Frequency cutoff <button type="button" className="input-info-btn" aria-label="Batch frequency cutoff help" title="Minimum allele frequency from 0 to 1 for all batch VCF runs."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="1"
+                              step="0.001"
+                              value={batchVcfCutoffs.min_af}
+                              disabled={batchSubmitting}
+                              onChange={(event) => {
+                                const value = Number(event.target.value);
+                                if (!Number.isFinite(value)) {
+                                  return;
+                                }
+                                setBatchVcfCutoffs((prev) => ({ ...prev, min_af: value }));
+                              }}
+                            />
+                          </label>
+                          <label className="batch-settings-label">
+                            <span className="label-text input-label-row">Coverage cutoff <button type="button" className="input-info-btn" aria-label="Batch coverage cutoff help" title="Minimum read depth for all batch VCF runs."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={batchVcfCutoffs.min_depth}
+                              disabled={batchSubmitting}
+                              onChange={(event) => {
+                                const value = Number(event.target.value);
+                                if (!Number.isFinite(value)) {
+                                  return;
+                                }
+                                setBatchVcfCutoffs((prev) => ({ ...prev, min_depth: Math.trunc(value) }));
+                              }}
+                            />
+                          </label>
+                        </div>
+                      ) : (
+                        <div className="profile-upload-row">
+                          <label>
+                            <span className="input-label-row">FASTA files <button type="button" className="input-info-btn" aria-label="Batch FASTA help" title="Upload one or more consensus FASTA files."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                            <input
+                              type="file"
+                              multiple
+                              accept=".fasta,.fa,.fna"
+                              disabled={batchSubmitting}
+                              onChange={(event) => {
+                                if (!event.target.files) {
+                                  return;
+                                }
+                                addBatchFastaFiles(event.target.files);
+                                event.target.value = '';
+                              }}
+                            />
+                          </label>
+                        </div>
+                      )}
+
+                      {/* Uploaded file list */}
+                      {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length > 0 ? (
+                        <div className="profile-upload-row">
+                          <p className="field-optional">
+                            {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length} / {batchMaxSamples} files
+                            {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length >= batchMaxSamples ? (
+                              <span style={{ color: 'var(--color-error, #c2410c)', marginLeft: '0.4em' }}>Limit reached</span>
+                            ) : null}
+                          </p>
+                          <ul className="batch-uploaded-file-list">
+                            {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).map((file, index) => (
+                              <li key={file.path} className="batch-uploaded-file-row">
+                                <span className="batch-uploaded-file-name" title={file.name}>{file.name}</span>
+                                <span className="batch-uploaded-file-size field-optional">{Math.round(file.size / 1024)} KB</span>
+                                <button
+                                  type="button"
+                                  className="button-link batch-remove-file-btn"
+                                  onClick={() => removeBatchFile(index)}
+                                  disabled={batchSubmitting}
+                                  aria-label={`Remove ${file.name}`}
+                                >
+                                  ✕
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+
+                      {/* Shared reference FASTA selection status (VCF mode) */}
+                      {batchMode === 'vcf' && batchReferenceFasta ? (
+                        <p className="field-optional">Uploaded reference: {batchReferenceFasta.name}</p>
+                      ) : null}
+
+                      {/* Batch submit and status */}
+                      <div className="profile-analyze-row">
+                        <button
+                          type="button"
+                          className="analyze-primary"
+                          onClick={() => submitBatch()}
+                          disabled={
+                            batchSubmitting
+                            || batchRateLimitCooldown > 0
+                            || (batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length === 0
+                            || (batchMode === 'vcf' && !batchReferenceFasta)
+                          }
+                        >
+                          {batchSubmitting ? (
+                            <>
+                              <Spinner /> Submitting...
+                            </>
+                          ) : (
+                            'Submit batch'
+                          )}
+                        </button>
+                      </div>
+                      {batchRateLimitCooldown > 0 ? <p className="status">{`Rate limit reached. Try again in ${batchRateLimitCooldown}s.`}</p> : null}
+                      {batchError ? <p className="status" style={{ color: 'var(--color-error, #c2410c)' }}>{batchError}</p> : null}
+                    </>
+                  ) : (
+                    <>
+                      {batchError ? (
+                        <p className="status" style={{ color: 'var(--color-error, #c2410c)' }}>{batchError}</p>
+                      ) : null}
+                      <div className="table-wrap mutation-table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Sample</th>
+                              <th>Status</th>
+                              <th>Error</th>
+                              <th>HTML</th>
+                              <th>PDF</th>
+                              <th>JSON</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {batchSamples.map((sample) => (
+                              <tr key={sample.job_id}>
+                                <td>{sample.sample_name}</td>
+                                <td>
+                                  <span className={`job-status-badge status-${sample.status}`}>
+                                    {sample.status}
+                                  </span>
+                                </td>
+                                <td>{sample.errorMessage || '—'}</td>
+                                <td>{sample.reportHtmlPath ? <a href={buildArtifactUrl(sample.reportHtmlPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                                <td>{sample.reportPdfPath ? <a href={buildArtifactUrl(sample.reportPdfPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                                <td>{sample.reportJsonPath ? <a href={buildArtifactUrl(sample.reportJsonPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="profile-analyze-row">
+                        <button
+                          type="button"
+                          className="analyze-primary"
+                          onClick={() => downloadAllBatchArtifacts()}
+                          disabled={isBatchDownloadBusy}
+                        >
+                          {isBatchDownloadBusy ? (
+                            <>
+                              <Spinner /> Preparing...
+                            </>
+                          ) : (
+                            'Download all'
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          className="analyze-primary"
+                          onClick={() => resetBatch()}
+                        >
+                          New batch
+                        </button>
+                      </div>
+                    </>
+                  )}
+                  </div>
+                ) : null}
+
               </article>
-            </>
-          ) : null}
 
-          {(activeMode === 'profile' || activeMode === 'regenerate') ? (
-            <>
-              <article className="card workspace-output-tile full-width-tile">
-                <div className="workspace-output-header">
-                  <h2>Report</h2>
-                  <p>{inlineReportLabel || 'No report selected yet'}</p>
-                </div>
-                <div className="inline-actions report-actions">
-                  <select
-                    value={selectedProfileReportPath}
-                    onChange={(event) => setSelectedProfileReportPath(event.target.value)}
-                    disabled={reportOptions.length === 0}
-                  >
-                    {reportOptions.length === 0 ? (
-                      <option value="">No previous reports available</option>
-                    ) : null}
-                    {reportOptions.map((option) => (
-                      <option key={option.path} value={option.path}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    className="button-link report-action-btn"
-                    onClick={() => {
-                      if (selectedProfileReportPath) {
-                        window.open(buildReportUrl(selectedProfileReportPath), '_blank', 'noopener,noreferrer');
-                      }
-                    }}
-                    disabled={!selectedProfileReportPath}
-                  >
-                    Open in new tab
-                  </button>
-                  <button
-                    type="button"
-                    className="button-link report-action-btn download-action-btn"
-                    onClick={() => {
-                      if (selectedReportOption?.pdfPath) {
-                        window.open(buildArtifactUrl(selectedReportOption.pdfPath), '_blank', 'noopener,noreferrer');
-                      }
-                    }}
-                    disabled={!selectedReportOption?.pdfPath}
-                  >
-                    Download PDF
-                  </button>
-                  <button
-                    type="button"
-                    className="button-link report-action-btn download-action-btn"
-                    onClick={() => {
-                      if (selectedReportOption?.jsonPath) {
-                        window.open(buildArtifactUrl(selectedReportOption.jsonPath), '_blank', 'noopener,noreferrer');
-                      }
-                    }}
-                    disabled={!selectedReportOption?.jsonPath}
-                  >
-                    Download JSON
-                  </button>
-
-                </div>
-                {inlineReportPath ? (
+              {/* Report preview in its own tile below the analyze inputs/actions */}
+              {analyzeSubMode !== 'batch' && inlineReportPath ? (
+                <article className="card full-width-tile tab-primary-tile">
                   <iframe
                     title="ResistanceProfiler report"
                     src={buildReportUrl(inlineReportPath)}
@@ -934,11 +912,59 @@ export function DashboardView({
                       }
                     }}
                   />
-                ) : (
-                  <p className="status">Run profiling or regenerate from JSON and the report will open here.</p>
-                )}
-              </article>
+                </article>
+              ) : null}
             </>
+          ) : null}
+
+          {/* SESSION RESULTS TAB: all outputs generated in this session */}
+          {activeMode === 'results' ? (
+            <article className="card full-width-tile tab-primary-tile">
+              <div className="workspace-output-header section-header">
+                <div>
+                  <h2>Session results</h2>
+                  <p>All analysis outputs from this session. Results are cleared on page reload.</p>
+                </div>
+              </div>
+              {sessionResults.length === 0 ? (
+                <p className="status">No results yet. Run an analysis to see results here.</p>
+              ) : (
+                <div className="table-wrap mutation-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Mode</th>
+                        <th>Sample</th>
+                        <th>Reference</th>
+                        <th>Database</th>
+                        <th>Timestamp</th>
+                        <th>HTML</th>
+                        <th>PDF</th>
+                        <th>JSON</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...sessionResults].reverse().map((result, index) => (
+                        <tr key={result.run_id || index}>
+                          <td>
+                            <span className={`job-status-badge mode-badge-${String(result.mode || '').replace(/[^a-z]/g, '')}`}>
+                              {result.mode || '—'}
+                            </span>
+                          </td>
+                          <td>{result.sample_name || '—'}</td>
+                          <td>{result.reference_name || '—'}</td>
+                          <td>{result.database_id || '—'}</td>
+                          <td>{result.created_at ? new Date(result.created_at).toLocaleString() : '—'}</td>
+                          <td>{result.report_html_path ? <a href={buildReportUrl(result.report_html_path)} target="_blank" rel="noreferrer">View</a> : '—'}</td>
+                          <td>{result.report_pdf_path ? <a href={buildArtifactUrl(result.report_pdf_path)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                          <td>{result.report_json_path ? <a href={buildArtifactUrl(result.report_json_path)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </article>
           ) : null}
 
           {/* MUTATION TAB: interactive table with filter/sort and TSV export */}

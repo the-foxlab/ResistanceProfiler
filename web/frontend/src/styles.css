@@ -841,6 +841,61 @@ th {
   display: inline;
 }
 
+.input-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.input-info-icon {
+  width: 0.85rem;
+  height: 0.85rem;
+  opacity: 0.72;
+  vertical-align: middle;
+  cursor: help;
+}
+
+.input-info-btn {
+  position: relative;
+  display: inline-grid;
+  align-items: center;
+  justify-content: center;
+  width: 0.9rem;
+  height: 0.9rem;
+  min-width: 0.9rem;
+  min-height: 0.9rem;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: help;
+  color: inherit;
+  vertical-align: middle;
+  overflow: hidden;
+  flex: 0 0 0.9rem;
+}
+
+.input-info-btn:hover,
+.input-info-btn:focus-visible {
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
+  outline: none;
+  box-shadow: none;
+}
+
+.input-info-btn .input-info-icon {
+  width: 0.9rem;
+  height: 0.9rem;
+  opacity: 0.78;
+}
+
+.input-info-btn:hover .input-info-icon,
+.input-info-btn:focus-visible .input-info-icon {
+  opacity: 0.9;
+}
+
 .mutation-browser-tile {
   height: calc(100vh - 74px - 0.8rem - 1rem);
   grid-template-rows: auto auto 1fr auto;
@@ -930,6 +985,101 @@ th {
   margin-top: 0.75rem;
 }
 
+/* Analyze tab shell: header with submode switch */
+
+.analyze-shell-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.analyze-shell-header > div:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.analyze-shell-header h2,
+.analyze-shell-header p {
+  margin: 0;
+}
+
+.analyze-submode-row {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.analyze-regenerate-progress-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.1rem;
+}
+
+.analyze-regenerate-progress-row .upload-progress {
+  min-width: 0;
+  width: 100%;
+  flex: 0 0 auto;
+  margin-left: 0;
+}
+
+.analyze-submode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--ink);
+  padding: 0.3rem 0.75rem;
+  font-size: var(--font-size-button);
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.analyze-submode-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.analyze-submode-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.analyze-submode-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+/* Job status badges for batch results */
+
+.job-status-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: var(--font-size-xs, 0.72rem);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-succeeded { background: #d1fae5; color: #065f46; }
+.status-failed    { background: #fee2e2; color: #991b1b; }
+.status-queued    { background: #fef9c3; color: #854d0e; }
+.status-running   { background: #dbeafe; color: #1e40af; }
+
+@media (max-width: 620px) {
+  .analyze-shell-header { flex-direction: column; }
+  .analyze-submode-row { width: 100%; }
+}
+
 .analyze-status-inline {
   margin: 0;
   text-align: right;
@@ -966,8 +1116,8 @@ th {
 }
 
 .upload-progress {
-  min-width: 230px;
-  max-width: 320px;
+  min-width: 276px;
+  max-width: 384px;
   margin-left: auto;
   display: grid;
   gap: 0.2rem;
@@ -1006,12 +1156,13 @@ th {
 
 .profile-upload-row {
   display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 0.75rem;
   margin-top: 0.75rem;
 }
 
 .profile-upload-row-fasta {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .regenerate-note {
@@ -1023,11 +1174,11 @@ th {
 }
 
 .profile-upload-row-vcf {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .profile-upload-row-batch-vcf {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .profile-upload-row label {
@@ -1085,6 +1236,10 @@ th {
   align-items: center;
   gap: 0.5rem;
   margin-top: 0;
+}
+
+.analyze-report-actions {
+  margin-top: 0.75rem;
 }
 
 .report-actions select {
@@ -1333,6 +1488,7 @@ th {
 .mutation-download-button:hover {
   border-color: var(--line-strong);
   background: var(--paper-soft);
+  color: var(--ink)
 }
 
 .table-wrap {
@@ -1568,6 +1724,14 @@ th.sortable-col {
 
   .inline-actions {
     grid-template-columns: 1fr;
+  }
+
+  .analyze-regenerate-progress-row {
+    justify-content: flex-start;
+  }
+
+  .analyze-regenerate-progress-row .upload-progress {
+    width: 100%;
   }
 
   .input-grid-vcf,

@@ -8,6 +8,7 @@ const API_TOKEN = FRONTEND_CONFIG.apiToken;
 export const PROFILE_MODES = [
   { id: 'vcf', label: 'VCF mode' },
   { id: 'fasta', label: 'FASTA mode' },
+  { id: 'regenerate', label: 'Regenerate mode' },
 ];
 
 const MUTATION_COLUMN_LABELS = {
@@ -397,8 +398,9 @@ export function useDashboardLogic() {
   const [formulaColumnKeys, setFormulaColumnKeys] = useState([]);
   const [mutationPlotMeta, setMutationPlotMeta] = useState({ references: [], features: [] });
   const [mutationsLoaded, setMutationsLoaded] = useState(false);
-  const [activeMode, setActiveMode] = useState('profile');
+  const [activeMode, setActiveMode] = useState('analyze');
   const [activeProfileMode, setActiveProfileMode] = useState('vcf');
+  const [analyzeSubMode, setAnalyzeSubMode] = useState('single');
   const [inlineReportPath, setInlineReportPath] = useState('');
   const [inlineReportLabel, setInlineReportLabel] = useState('');
   const [uploadProgress, setUploadProgress] = useState({
@@ -475,12 +477,7 @@ export function useDashboardLogic() {
         setFormulaColumnKeys(formulaColumns);
         setMutationPlotMeta(plotMeta);
         setMutationsLoaded(true);
-        const databaseName = selectedDatabase ? selectedDatabase.display_name : selectedDatabaseId;
-        const singleCount = Number(payload.data.single_count ?? payload.data.count ?? items.length);
-        const combinationCount = Number(payload.data.formula_count ?? formulaItems.length);
-        setStatus(
-          `Database ${databaseName} loaded: ${singleCount} single rule(s), ${combinationCount} combination rule(s)`
-        );
+        // Keep status area quiet after background mutation loading to reduce UI noise.
       } catch (error) {
         setStatus(`Error loading mutations: ${error.message}`);
       }
@@ -919,7 +916,11 @@ export function useDashboardLogic() {
     }
   };
 
-  const isProfileBusy = activeProfileMode === 'fasta' ? isProcessingFasta : isProcessingVcf;
+  const isProfileBusy = activeProfileMode === 'fasta'
+    ? isProcessingFasta
+    : activeProfileMode === 'vcf'
+      ? isProcessingVcf
+      : false;
 
   // --- Batch functions ---
 
@@ -1286,6 +1287,9 @@ export function useDashboardLogic() {
     setActiveMode,
     activeProfileMode,
     setActiveProfileMode,
+    analyzeSubMode,
+    setAnalyzeSubMode,
+    sessionResults,
     inlineReportPath,
     inlineReportLabel,
     mutationColumns,
