@@ -336,9 +336,5 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Smaller Issues
 
-- 🟡adapt webapp a bit (better sidebar, less tile in tile):
-  - restyle about --> chatgpt restyle layout looks actually nice
-- one analysis option with different modi and one report option that shows previous reports (independent if batch or not) --> do not show below but always in new tab (previous than shows all in that session)
 - 🟡 add herpes drg assessment of ic50 values
 - 🟡 herpes drg --> fold ic50 ?
-- 🟡 add user information in web app and docu that explains the rational on how combinatorial rules fire and how changes are assessed in the same codon
