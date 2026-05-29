@@ -1381,7 +1381,7 @@ export function DashboardView({
                     <h3>No database curation</h3>
                     <p>
                       We do not maintain or curate resistance databases ourselves. We only provide up-to-date converted
-                      versions of openly available databases and are not responsible for their content or maintenance.
+                      <a href="https://github.com/jonas-fuchs/respro-db" target="_blank" rel="noreferrer"> versions</a> of openly available databases and are not responsible for their content or maintenance.
                     </p>
                   </div>
                 </article>
