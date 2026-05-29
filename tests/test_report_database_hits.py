@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from respro.db.models import (
     AnnotatedVariant,
     FeatureRecord,
@@ -12,7 +14,7 @@ from respro.db.models import (
     ResistanceRuleSet,
     VariantCall,
 )
-from respro.report.html import _build_database_hits_rows, _load_css_text
+from respro.report.html import _build_database_hits_rows
 from respro.report.plots import render_lollipop_plot_bytes
 
 
@@ -88,7 +90,9 @@ def test_render_lollipop_plot_labels_formula_only_member_hits() -> None:
 
 
 def test_report_css_expands_plot_modal_panel() -> None:
-    css_text = _load_css_text()
+    css_text = (Path(__file__).parent.parent / 'respro' / 'report' / 'static' / 'report.css').read_text(
+        encoding='utf-8'
+    )
 
     assert '.plot-modal-panel' in css_text
     assert 'width: 80vw;' in css_text

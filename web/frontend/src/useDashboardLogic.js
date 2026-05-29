@@ -1297,6 +1297,7 @@ export function useDashboardLogic() {
     reportOptions,
     isProfileBusy,
     canCancelJob,
+    activeJobStatus,
     isCancelingJob,
     cancelActiveJob,
     runSelectedProfile,
