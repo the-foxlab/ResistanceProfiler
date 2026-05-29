@@ -1,0 +1,10 @@
+Audit reference
+Date: 2026-05-29
+
+Current audit status (four-agent review)
+- Dead code finding addressed: the unused badge_text_colour helper in respro/report/palette.py has been removed.
+- PubChem test-only coupling addressed: private-helper-focused tests were removed from tests/test_pubchem.py in favor of public-behavior coverage.
+- Planned DB-layer follow-up: continue moving rules and report-related data shaping toward db-layer interfaces so core/report consume structured query results instead of mixed persistence logic.
+- Major architecture follow-up: continue compartmentalizing large modules and keep CLI/web entrypoints thin while preserving respro core independence.
+- Major security follow-up: keep strict auth, CORS, upload/artifact path confinement, rate limiting, and trusted-proxy boundaries as mandatory deployment controls.
+- Summary: no current critical audit blocker is open; remaining work is primarily structural follow-up.
