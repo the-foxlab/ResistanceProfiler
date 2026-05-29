@@ -10,7 +10,12 @@ import sqlite3
 
 from respro.db._rules_formula import _FORMULA_OPERATORS as _LOGIC_OPERATORS
 from respro.db._rules_formula import _RE_FORMULA_TOKEN as _RE_LOGIC_TOKEN
-from respro.db.models import FormulaRuleRuntime, Publication, ResistanceRule, is_internal_formula_component_drug_name
+from respro.db.models import (
+    FormulaRuleRuntime,
+    Publication,
+    ResistanceRule,
+    is_internal_formula_component_drug_name,
+)
 
 logger = logging.getLogger(__name__)
 

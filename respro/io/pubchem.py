@@ -76,7 +76,17 @@ def _fetch_cid(name: str, timeout: int) -> int | None:
     try:
         with urllib.request.urlopen(url, timeout=timeout) as resp:
             data = json.loads(resp.read())
-            cids = data.get('IdentifierList', {}).get('CID', [])
+            if not isinstance(data, dict):
+                logger.debug('PubChem CID lookup malformed payload for %r: root is %s', name, type(data).__name__)
+                return None
+            identifier_list = data.get('IdentifierList')
+            if not isinstance(identifier_list, dict):
+                logger.debug('PubChem CID lookup malformed payload for %r: missing IdentifierList object', name)
+                return None
+            cids = identifier_list.get('CID')
+            if not isinstance(cids, list):
+                logger.debug('PubChem CID lookup malformed payload for %r: CID is not a list', name)
+                return None
             return int(cids[0]) if cids else None
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
@@ -109,13 +119,42 @@ def _fetch_description(cid: int, timeout: int) -> str:
     try:
         with urllib.request.urlopen(description_url, timeout=timeout) as resp:
             data = json.loads(resp.read())
-            for entry in data.get('InformationList', {}).get('Information', []):
-                title = entry.get('Title', '').strip()
+            if not isinstance(data, dict):
+                logger.debug(
+                    'PubChem description lookup malformed payload for CID %s: root is %s',
+                    cid,
+                    type(data).__name__,
+                )
+                return ''
+            information_list = data.get('InformationList')
+            if not isinstance(information_list, dict):
+                logger.debug(
+                    'PubChem description lookup malformed payload for CID %s: missing InformationList object',
+                    cid,
+                )
+                return ''
+            information_entries = information_list.get('Information')
+            if not isinstance(information_entries, list):
+                logger.debug(
+                    'PubChem description lookup malformed payload for CID %s: Information is not a list',
+                    cid,
+                )
+                return ''
+            for entry in information_entries:
+                if not isinstance(entry, dict):
+                    logger.debug(
+                        'PubChem description lookup malformed payload for CID %s: entry is not an object',
+                        cid,
+                    )
+                    return ''
+                raw_title = entry.get('Title', '')
+                title = raw_title.strip() if isinstance(raw_title, str) else ''
                 if title and not first_title:
                     first_title = title
-                desc = entry.get('Description', '').strip()
-                if desc:
-                    return desc
+                raw_description = entry.get('Description', '')
+                description = raw_description.strip() if isinstance(raw_description, str) else ''
+                if description:
+                    return description
     except OSError as exc:
         logger.debug('PubChem description lookup failed for CID %s (network): %s', cid, exc)
     except Exception as exc:
@@ -128,8 +167,23 @@ def _fetch_description(cid: int, timeout: int) -> str:
     try:
         with urllib.request.urlopen(title_url, timeout=timeout) as resp:
             data = json.loads(resp.read())
-            for entry in data.get('PropertyTable', {}).get('Properties', []):
-                title = entry.get('Title', '').strip()
+            if not isinstance(data, dict):
+                logger.debug('PubChem title lookup malformed payload for CID %s: root is %s', cid, type(data).__name__)
+                return ''
+            property_table = data.get('PropertyTable')
+            if not isinstance(property_table, dict):
+                logger.debug('PubChem title lookup malformed payload for CID %s: missing PropertyTable object', cid)
+                return ''
+            properties = property_table.get('Properties')
+            if not isinstance(properties, list):
+                logger.debug('PubChem title lookup malformed payload for CID %s: Properties is not a list', cid)
+                return ''
+            for entry in properties:
+                if not isinstance(entry, dict):
+                    logger.debug('PubChem title lookup malformed payload for CID %s: entry is not an object', cid)
+                    return ''
+                raw_title = entry.get('Title', '')
+                title = raw_title.strip() if isinstance(raw_title, str) else ''
                 if title:
                     return title
     except OSError as exc:

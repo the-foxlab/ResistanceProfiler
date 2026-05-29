@@ -5,9 +5,9 @@ Atomic and formula resistance rule loading — row iteration, validation, and DB
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass, field
 import logging
 import sqlite3
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from respro.db._rules_alleles import (

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from Bio import SeqIO
 
+
 def read_fasta(fasta_path: Path) -> dict[str, str]:
     """
     Read a FASTA file and return a dict of sequences, normalized to DNA.

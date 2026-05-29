@@ -16,12 +16,14 @@ from Bio.Seq import Seq
 from Bio.SeqFeature import FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
 
+from respro.db.models import FeatureRecord
+from respro.db.schema import create_schema
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from respro.db.models import FeatureRecord
-from respro.db.schema import create_schema
+
 
 # ─── Paths ────────────────────────────────────────────────────────────
 

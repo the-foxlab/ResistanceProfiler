@@ -28,7 +28,6 @@ from respro.db.models import (
     ResistanceRuleSetMember,
     VariantCall,
 )
-from respro.db.rules_queries import load_rules
 from respro.db.results import (
     delete_run,
     list_runs,
@@ -40,6 +39,7 @@ from respro.db.results import (
     reconstruct_formula_rule_hits,
     save_run,
 )
+from respro.db.rules_queries import load_rules
 from respro.db.schema import create_schema, init_results_db, open_project_db
 from respro.report.non_html_exports import export_results
 

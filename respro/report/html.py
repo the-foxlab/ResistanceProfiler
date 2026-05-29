@@ -15,7 +15,6 @@ from jinja2 import BaseLoader, Environment
 from markupsafe import Markup, escape
 
 from respro import __version__
-from respro.config.cli_settings import CLI_CONFIG
 from respro.core.annotation import classify_similarity
 from respro.db.models import (
     FeatureRecord,
@@ -40,24 +39,6 @@ from respro.report.alignment_visualization import (
 logger = logging.getLogger(__name__)
 
 
-def _load_template_text() -> str:
-    """Load the Jinja2 template from filesystem."""
-    template_path = Path(__file__).parent / 'templates' / 'report.html.j2'
-    return template_path.read_text(encoding='utf-8')
-
-
-def _load_css_text() -> str:
-    """Load the report CSS stylesheet."""
-    css_path = Path(__file__).parent / 'static' / 'report.css'
-    return css_path.read_text(encoding='utf-8')
-
-
-def _load_js_text() -> str:
-    """Load the report JavaScript."""
-    js_path = Path(__file__).parent / 'static' / 'report.js'
-    return js_path.read_text(encoding='utf-8')
-
-
 def _load_svg_data_url(asset_name: str) -> str:
     """Load an SVG asset and return it as a data URL."""
     asset_path = Path(__file__).parent / 'static' / 'assets' / asset_name
@@ -70,6 +51,12 @@ def build_report_context(
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
     features: list[FeatureRecord] | None = None,
+    similarity_high: int = 1,
+    similarity_moderate: int = 0,
+    af_high_pct_source_threshold: float = 0.75,
+    af_intermediate_pct_source_threshold: float = 0.25,
+    af_low_min_pct_source_threshold: float = 0.01,
+    combination_member_af_pct_source_threshold: float = 0.75,
 ) -> dict:
     """
     Build all data structures needed to render the report.
@@ -113,8 +100,14 @@ def build_report_context(
         feature_alignments = build_feature_alignments(
             result.query_sequence, result.feature_matches
         )
+    formula_hit_annotation_ids = _collect_formula_hit_annotation_ids(result)
 
-    all_mutations_rows = _build_all_mutations_rows(result, feature_alignments, display_names)
+    all_mutations_rows = _build_all_mutations_rows(
+        result,
+        feature_alignments,
+        formula_hit_annotation_ids,
+        display_names,
+    )
     metric_thresholds = load_numeric_metric_thresholds(project_conn)
     drug_class_map = load_drug_class_map(project_conn)
     drug_alias_map = load_drug_alias_map(project_conn)
@@ -132,6 +125,8 @@ def build_report_context(
         metric_thresholds,
         drug_class_map,
         drug_alias_map,
+        similarity_high=similarity_high,
+        similarity_moderate=similarity_moderate,
     )
 
     summary_context = _build_summary_context(
@@ -141,6 +136,7 @@ def build_report_context(
         similarity_entries=similarity_entries,
         project_conn=project_conn,
         drug_alias_map=drug_alias_map,
+        formula_hit_annotation_ids=formula_hit_annotation_ids,
     )
 
     db_drug_cards = load_drug_cards(project_conn, detected_drug_names)
@@ -190,12 +186,12 @@ def build_report_context(
             'Drug Information',
         ],
         'thresholds': {
-            'similarity_high': CLI_CONFIG.similarity.high,
-            'similarity_moderate': CLI_CONFIG.similarity.moderate,
-            'af_high_pct': int(CLI_CONFIG.af_bins.high[0] * 100),
-            'af_intermediate_pct': int(CLI_CONFIG.af_bins.intermediate[0] * 100),
-            'af_low_min_pct': int(CLI_CONFIG.af_bins.low[0] * 100),
-            'combination_member_af_pct': int(CLI_CONFIG.matching.combination_member_af_threshold * 100),
+            'similarity_high': similarity_high,
+            'similarity_moderate': similarity_moderate,
+            'af_high_pct': int(af_high_pct_source_threshold * 100),
+            'af_intermediate_pct': int(af_intermediate_pct_source_threshold * 100),
+            'af_low_min_pct': int(af_low_min_pct_source_threshold * 100),
+            'combination_member_af_pct': int(combination_member_af_pct_source_threshold * 100),
         },
         'database_hits': database_hits,
         'similarity_entries': similarity_entries,
@@ -228,6 +224,12 @@ def render_html(
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
     features: list[FeatureRecord] | None = None,
+    similarity_high: int = 1,
+    similarity_moderate: int = 0,
+    af_high_pct_source_threshold: float = 0.75,
+    af_intermediate_pct_source_threshold: float = 0.25,
+    af_low_min_pct_source_threshold: float = 0.01,
+    combination_member_af_pct_source_threshold: float = 0.75,
 ) -> str:
     """
     Render the complete HTML report.
@@ -249,14 +251,22 @@ def render_html(
         project_conn=project_conn,
         rules=rules,
         features=features,
+        similarity_high=similarity_high,
+        similarity_moderate=similarity_moderate,
+        af_high_pct_source_threshold=af_high_pct_source_threshold,
+        af_intermediate_pct_source_threshold=af_intermediate_pct_source_threshold,
+        af_low_min_pct_source_threshold=af_low_min_pct_source_threshold,
+        combination_member_af_pct_source_threshold=combination_member_af_pct_source_threshold,
     )
     context['plot'] = {
         'has_plot': bool(plot_data_url),
         'data_url': plot_data_url,
     }
-    template_text = _load_template_text()
-    css_text = _load_css_text()
-    js_text = _load_js_text()
+    template_text = (Path(__file__).parent / 'templates' / 'report.html.j2').read_text(
+        encoding='utf-8'
+    )
+    css_text = (Path(__file__).parent / 'static' / 'report.css').read_text(encoding='utf-8')
+    js_text = (Path(__file__).parent / 'static' / 'report.js').read_text(encoding='utf-8')
 
     env = Environment(loader=BaseLoader())
     template = env.from_string(template_text)
@@ -275,6 +285,12 @@ def write_html(
     plot_svg_data: bytes | None = None,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
+    similarity_high: int = 1,
+    similarity_moderate: int = 0,
+    af_high_pct_source_threshold: float = 0.75,
+    af_intermediate_pct_source_threshold: float = 0.25,
+    af_low_min_pct_source_threshold: float = 0.01,
+    combination_member_af_pct_source_threshold: float = 0.75,
 ) -> Path:
     """
     Render and write the HTML report to a file.
@@ -295,6 +311,12 @@ def write_html(
         project_conn=project_conn,
         rules=rules,
         features=features,
+        similarity_high=similarity_high,
+        similarity_moderate=similarity_moderate,
+        af_high_pct_source_threshold=af_high_pct_source_threshold,
+        af_intermediate_pct_source_threshold=af_intermediate_pct_source_threshold,
+        af_low_min_pct_source_threshold=af_low_min_pct_source_threshold,
+        combination_member_af_pct_source_threshold=combination_member_af_pct_source_threshold,
     )
     output_path.write_text(html_content, encoding='utf-8')
     return output_path
@@ -303,6 +325,7 @@ def write_html(
 def _build_all_mutations_rows(
     result: ProfilingResult,
     feature_alignments: dict[str, FeatureAlignment],
+    formula_hit_annotation_ids: set[int],
     display_names: dict[str, str] | None = None,
 ) -> list[dict]:
     """
@@ -315,14 +338,10 @@ def _build_all_mutations_rows(
 
     :param result: profiling result
     :param feature_alignments: gapped alignments keyed by feature name
+    :param formula_hit_annotation_ids: annotation IDs participating in formula hits
     :param display_names: optional feature display-name overrides
     :return: list of row dicts for the template
     """
-    formula_hit_ann_ids: set[int] = set()
-    for formula_hit in result.formula_hits:
-        for ann in formula_hit.matched_variants:
-            formula_hit_ann_ids.add(id(ann))
-
     rows: list[dict] = []
     for ann in result.cds_annotations:
         alignment_html = None
@@ -330,7 +349,7 @@ def _build_all_mutations_rows(
             alignment_html = build_alignment_html(ann, feature_alignments[ann.feature_name])
 
         is_single_hit = ann.is_resistance_hit
-        is_formula_hit = id(ann) in formula_hit_ann_ids
+        is_formula_hit = id(ann) in formula_hit_annotation_ids
         display_consequence = 'complex' if ann.consequence == 'inframe_complex' else ann.consequence
 
         pos_1based = ann.variant.pos + 1
@@ -409,14 +428,6 @@ def _format_drug_name_with_alias(name: str, alias_map: dict[str, str]) -> str:
     if not alias:
         return name
     return f'{name} ({alias})'
-
-
-def _format_drug_name_for_summary(name: str, alias_map: dict[str, str]) -> str:
-    """Return the shorter of canonical drug name and alias for summary narrative lists."""
-    alias = alias_map.get(name.strip().lower(), '')
-    if not alias:
-        return name
-    return alias if len(alias) < len(name) else name
 
 
 def _build_database_hits_rows(
@@ -671,6 +682,17 @@ def _collect_detected_drug_names(result: ProfilingResult) -> set[str]:
     return detected_drug_names
 
 
+def _collect_formula_hit_annotation_ids(result: ProfilingResult) -> set[int]:
+    """Collect annotation object IDs that participate in any formula hit."""
+    formula_hit_annotation_ids: set[int] = set()
+    for formula_hit in result.formula_hits:
+        for ann in formula_hit.matched_variants:
+            # Formula hits reference annotation objects, not stable variant keys;
+            # object identity preserves exact membership when overlaps share coordinates.
+            formula_hit_annotation_ids.add(id(ann))
+    return formula_hit_annotation_ids
+
+
 def _build_drug_stats(result: ProfilingResult) -> dict[str, dict]:
     """Build per-drug counts from single-rule and formula hits."""
     direct_counter: Counter[str] = Counter()
@@ -846,6 +868,8 @@ def _build_potential_effects_rows(
     metric_thresholds: dict[str, tuple[float, float] | None] | None = None,
     drug_class_map: dict[str, str] | None = None,
     drug_alias_map: dict[str, str] | None = None,
+    similarity_high: int = 1,
+    similarity_moderate: int = 0,
 ) -> dict:
     """
     Build the Similarity to Database Entries context.
@@ -883,6 +907,8 @@ def _build_potential_effects_rows(
         rules_by_pos.setdefault((rule.feature_name, rule.position), []).append(rule)
 
     excluded_consequences = {'frameshift', 'stop_gained', 'synonymous', 'inframe_complex'}
+    # These classes are excluded because AA-level similarity is not interpretable:
+    # they are either disruptive, no-op, or not representable as one AA substitution.
     rows: list[dict] = []
     seen: set[tuple[str, int, str, str]] = set()
 
@@ -924,7 +950,12 @@ def _build_potential_effects_rows(
             )
             similarity = (
                 'moderate' if ann_is_indel
-                else classify_similarity(ann.alt_aa, rule.mutation)
+                else classify_similarity(
+                    ann.alt_aa,
+                    rule.mutation,
+                    high_threshold=similarity_high,
+                    moderate_threshold=similarity_moderate,
+                )
             )
 
             feature_name = (display_names or {}).get(ann.feature_name, ann.feature_name)
@@ -1039,6 +1070,7 @@ def _build_summary_context(
     similarity_entries: dict,
     project_conn: sqlite3.Connection | None,
     drug_alias_map: dict[str, str] | None = None,
+    formula_hit_annotation_ids: set[int] | None = None,
 ) -> dict:
     """
     Build the complete context dict for the Summary tab.
@@ -1048,11 +1080,18 @@ def _build_summary_context(
     :param database_hits: context dict from _build_database_hits_rows
     :param similarity_entries: context dict from _build_potential_effects_rows
     :param project_conn: optional project DB connection for algorithm lookup
+    :param formula_hit_annotation_ids: annotation IDs participating in formula hits
     :return: summary context dict
     """
+    formula_ids = formula_hit_annotation_ids or set()
     sequence_assessment = _build_sequence_assessment(result, display_names)
     gene_coverage = _compute_gene_coverage(result, display_names)
-    mutation_profile = _build_mutation_profile(result, display_names, gene_coverage)
+    mutation_profile = _build_mutation_profile(
+        result,
+        display_names,
+        gene_coverage,
+        formula_ids,
+    )
     has_narrative = has_interpretation_algorithm(project_conn)
     drug_table = _build_drug_interpretation_table(
         result,
@@ -1061,7 +1100,10 @@ def _build_summary_context(
         drug_alias_map=drug_alias_map,
     )
     narrative = _build_summary_narrative(
-        result, display_names, drug_table,
+        result,
+        display_names,
+        drug_table,
+        formula_ids,
     )
     single_rule_hit_count = sum(
         len(ann.non_formula_component_rule_matches) for ann in result.cds_annotations
@@ -1167,19 +1209,16 @@ def _build_mutation_profile(
     result: ProfilingResult,
     display_names: dict[str, str],
     gene_coverage: dict[str, int] | None,
+    formula_hit_annotation_ids: set[int],
 ) -> list[dict]:
     """
     Group amino acid changes by feature with per-mutation styling flags.
 
     :param result: profiling result
     :param display_names: feature display-name overrides
+    :param formula_hit_annotation_ids: annotation IDs participating in formula hits
     :return: list of {feature, mutations: list[{label, is_db_hit, is_high_impact}]} ordered by feature
     """
-    formula_hit_ann_ids: set[int] = set()
-    for formula_hit in result.formula_hits:
-        for ann in formula_hit.matched_variants:
-            formula_hit_ann_ids.add(id(ann))
-
     # Key: (feature, codon_pos, label) → merged style flags. Multiple NT variants
     # in the same codon can produce the same AA label; deduplicate and OR the flags.
     seen: dict[tuple[str, int, str], dict] = {}
@@ -1192,12 +1231,16 @@ def _build_mutation_profile(
         )
         key = (feature, ann.codon_pos, label)
         if key in seen:
-            seen[key]['is_db_hit'] = seen[key]['is_db_hit'] or ann.is_resistance_hit or id(ann) in formula_hit_ann_ids
+            seen[key]['is_db_hit'] = (
+                seen[key]['is_db_hit']
+                or ann.is_resistance_hit
+                or id(ann) in formula_hit_annotation_ids
+            )
             seen[key]['is_high_impact'] = seen[key]['is_high_impact'] or ann.consequence in _HIGH_IMPACT_CONSEQUENCES
         else:
             seen[key] = {
                 'label': label,
-                'is_db_hit': ann.is_resistance_hit or id(ann) in formula_hit_ann_ids,
+                'is_db_hit': ann.is_resistance_hit or id(ann) in formula_hit_annotation_ids,
                 'is_high_impact': ann.consequence in _HIGH_IMPACT_CONSEQUENCES,
             }
 
@@ -1219,6 +1262,7 @@ def _build_summary_narrative(
     result: ProfilingResult,
     display_names: dict[str, str],
     drug_table: dict,
+    formula_hit_annotation_ids: set[int],
 ) -> Markup:
     """
     Build a concise clinician-facing narrative for the interpretation summary tile.
@@ -1229,6 +1273,7 @@ def _build_summary_narrative(
     :param result: profiling result
     :param display_names: feature display-name overrides
     :param drug_table: context dict from _build_drug_interpretation_table
+    :param formula_hit_annotation_ids: annotation IDs participating in formula hits
     :return: HTML Markup narrative string
     """
     paragraphs: list[str] = []
@@ -1312,16 +1357,11 @@ def _build_summary_narrative(
             'due to incomplete sequence data.'
         )
 
-    formula_hit_ann_ids: set[int] = set()
-    for formula_hit in result.formula_hits:
-        for ann in formula_hit.matched_variants:
-            formula_hit_ann_ids.add(id(ann))
-
     high_impact_without_db = [
         ann for ann in result.cds_annotations
         if ann.consequence in _HIGH_IMPACT_CONSEQUENCES
         and not ann.is_resistance_hit
-        and id(ann) not in formula_hit_ann_ids
+        and id(ann) not in formula_hit_annotation_ids
     ]
     if high_impact_without_db:
         paragraphs.append(
@@ -1383,9 +1423,10 @@ def _build_drug_interpretation_table(
     :return: dict with rows, groups, and capability flags
     """
     def _init_entry(name: str, drug_class: str) -> dict:
+        alias = (drug_alias_map or {}).get(name.strip().lower(), '')
         return {
             'name': _format_drug_name_with_alias(name, drug_alias_map or {}),
-            'summary_name': _format_drug_name_for_summary(name, drug_alias_map or {}),
+            'summary_name': alias if alias and len(alias) < len(name) else name,
             'drug_class': drug_class,
             'hit_count': 0,
             'resistant_count': 0, 'intermediate_count': 0, 'sensitive_count': 0,

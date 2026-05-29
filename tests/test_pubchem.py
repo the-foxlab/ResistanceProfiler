@@ -4,13 +4,22 @@ Tests for the PubChem REST client and PubChem data loading in init_project.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from respro.db.drugs import _get_drugs_from_pubchem
-from respro.io.pubchem import PubChemRecord, lookup_drug
+from respro.io.pubchem import PubChemRecord, _fetch_cid, _fetch_description, lookup_drug
+
+
+def _mock_response(payload: object) -> MagicMock:
+    body = json.dumps(payload).encode()
+    mock = MagicMock()
+    mock.__enter__ = MagicMock(return_value=MagicMock(read=MagicMock(return_value=body)))
+    mock.__exit__ = MagicMock(return_value=False)
+    return mock
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -46,6 +55,29 @@ class TestLookupDrug:
         with patch('respro.io.pubchem._fetch_cid', return_value=None):
             result = lookup_drug('AnyDrug')
         assert result is None
+
+
+class TestPubchemJsonShapeValidation:
+    def test_fetch_cid_returns_none_when_identifier_list_is_not_object(self) -> None:
+        with patch('urllib.request.urlopen', return_value=_mock_response({'IdentifierList': []})):
+            assert _fetch_cid('Aciclovir', timeout=1) is None
+
+    def test_fetch_cid_returns_none_when_cid_field_is_not_list(self) -> None:
+        with patch('urllib.request.urlopen', return_value=_mock_response({'IdentifierList': {'CID': 'x'}})):
+            assert _fetch_cid('Aciclovir', timeout=1) is None
+
+    def test_fetch_description_returns_empty_when_information_list_is_not_object(self) -> None:
+        with patch('urllib.request.urlopen', return_value=_mock_response({'InformationList': []})):
+            assert _fetch_description(123, timeout=1) == ''
+
+    def test_fetch_description_returns_empty_when_property_table_is_not_object(self) -> None:
+        description_payload = {'InformationList': {'Information': []}}
+        title_payload = {'PropertyTable': []}
+        with patch(
+            'urllib.request.urlopen',
+            side_effect=[_mock_response(description_payload), _mock_response(title_payload)],
+        ):
+            assert _fetch_description(123, timeout=1) == ''
 
 
 # ──────────────────────────────────────────────────────────────────────
