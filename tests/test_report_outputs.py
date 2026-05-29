@@ -19,10 +19,10 @@ from respro.db.models import (
     ResistanceRule,
     VariantCall,
 )
+from respro.db.report_queries import load_feature_cards
 from respro.report.alignment_visualization import build_alignment_html, build_feature_alignments
 from respro.report.html import (
     _build_potential_effects_rows,
-    _load_feature_cards,
     build_report_context,
     render_html,
 )
@@ -618,7 +618,7 @@ class TestPdfExports:
         )
         conn.commit()
 
-        cards = _load_feature_cards(conn, r.reference_name, {'gag'})
+        cards = load_feature_cards(conn, r.reference_name, {'gag'})
         assert len(cards) == 1
         assert cards[0]['protein_id'] == 'YP_009137097.1'
         assert cards[0]['ncbi_protein_url'] == 'https://www.ncbi.nlm.nih.gov/protein/YP_009137097.1/'

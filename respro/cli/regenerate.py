@@ -13,8 +13,9 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from respro.core.rules import load_rules
+from respro.db.features import load_features_for_reference
 from respro.db.models import ProfilingResult
+from respro.db.rules_queries import load_rules
 from respro.db.results import (
     load_classifications,
     load_coverage_gaps,
@@ -27,7 +28,6 @@ from respro.db.results import (
 )
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.schema import open_project_db, open_results_db
-from respro.io.reference import load_features_for_reference
 from respro.report.non_html_exports import export_results
 from respro.utils.files import resolve_output_file
 from respro.utils.logging import err_console

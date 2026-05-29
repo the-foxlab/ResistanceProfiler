@@ -20,12 +20,13 @@ from rich.panel import Panel
 from respro.config.cli_settings import CLI_CONFIG
 from respro.core.annotation import assign_af_bins
 from respro.core.query import pick_best_reference_id, select_matches_for_reference
-from respro.core.rules import load_formula_rules, load_rules, match_formula_rules, match_rules
+from respro.core.rules import match_formula_rules, match_rules
 from respro.db.models import AnnotatedVariant, CoverageGap, FeatureMatch, ProfilingResult
+from respro.db.features import load_features_for_reference
+from respro.db.rules_queries import load_formula_rules, load_rules
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.results import save_run
 from respro.db.schema import init_results_db
-from respro.io.reference import load_features_for_reference
 from respro.report.non_html_exports import export_results
 from respro.utils.files import resolve_output_file
 

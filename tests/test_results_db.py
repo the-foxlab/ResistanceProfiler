@@ -17,7 +17,7 @@ from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
 
 from respro.cli.init import init_project
-from respro.core.rules import load_rules
+from respro.db.features import load_features_for_reference
 from respro.db.models import (
     AnnotatedVariant,
     CoverageGap,
@@ -28,6 +28,7 @@ from respro.db.models import (
     ResistanceRuleSetMember,
     VariantCall,
 )
+from respro.db.rules_queries import load_rules
 from respro.db.results import (
     delete_run,
     list_runs,
@@ -40,7 +41,6 @@ from respro.db.results import (
     save_run,
 )
 from respro.db.schema import create_schema, init_results_db, open_project_db
-from respro.io.reference import load_features_for_reference
 from respro.report.non_html_exports import export_results
 
 

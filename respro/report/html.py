@@ -7,7 +7,6 @@ import json
 import logging
 import re
 import sqlite3
-import statistics
 from collections import Counter
 from pathlib import Path
 from urllib.parse import quote
@@ -23,6 +22,14 @@ from respro.db.models import (
     ProfilingResult,
     Publication,
     ResistanceRule,
+)
+from respro.db.report_queries import (
+    has_interpretation_algorithm,
+    load_drug_alias_map,
+    load_drug_cards,
+    load_drug_class_map,
+    load_feature_cards,
+    load_numeric_metric_thresholds,
 )
 from respro.report.alignment_visualization import (
     FeatureAlignment,
@@ -108,9 +115,9 @@ def build_report_context(
         )
 
     all_mutations_rows = _build_all_mutations_rows(result, feature_alignments, display_names)
-    metric_thresholds = _load_numeric_metric_thresholds(project_conn)
-    drug_class_map = _load_drug_class_map(project_conn)
-    drug_alias_map = _load_drug_alias_map(project_conn)
+    metric_thresholds = load_numeric_metric_thresholds(project_conn)
+    drug_class_map = load_drug_class_map(project_conn)
+    drug_alias_map = load_drug_alias_map(project_conn)
     database_hits = _build_database_hits_rows(
         result,
         display_names,
@@ -136,7 +143,7 @@ def build_report_context(
         drug_alias_map=drug_alias_map,
     )
 
-    db_drug_cards = _load_drug_cards(project_conn, detected_drug_names)
+    db_drug_cards = load_drug_cards(project_conn, detected_drug_names)
     db_drug_cards_by_name = {
         (card.get('name') or '').strip().lower(): card
         for card in db_drug_cards
@@ -145,7 +152,7 @@ def build_report_context(
     drug_cards = _build_drug_cards(drug_stats, db_drug_cards_by_name, drug_alias_map)
 
     detected_feature_names = set(feature_stats)
-    db_feature_cards = _load_feature_cards(
+    db_feature_cards = load_feature_cards(
         project_conn,
         reference,
         detected_feature_names,
@@ -394,106 +401,6 @@ def _assign_numeric_tier(value: float, mean: float, std: float) -> str:
     if value <= mean + 2 * std:
         return 'metric--tier3'
     return 'metric--tier4'
-
-
-def _load_numeric_metric_thresholds(
-    project_conn: sqlite3.Connection | None,
-) -> dict[str, tuple[float, float] | None]:
-    """
-    Compute mean and standard deviation for each numeric metric field across all database rules.
-
-    Queries both single rules and formula rules to capture the full population.
-    Returns None for a field when fewer than two parseable values are available.
-
-    :param project_conn: open project DB connection
-    :return: dict mapping 'ic50', 'fold_ic50', 'score' to (mean, std) or None
-    """
-    if project_conn is None:
-        return {}
-    try:
-        rows = project_conn.execute(
-            'SELECT ic50, fold_ic50, score FROM resistance_rule '
-            'UNION ALL '
-            'SELECT ic50, fold_ic50, score FROM resistance_formula_rule'
-        ).fetchall()
-    except sqlite3.Error as exc:
-        logger.debug('Failed to load numeric metric stats from DB: %s', exc)
-        return {}
-
-    buckets: dict[str, list[float]] = {'ic50': [], 'fold_ic50': [], 'score': []}
-    for row in rows:
-        for field in ('ic50', 'fold_ic50', 'score'):
-            raw = row[field] if isinstance(row, dict) else row[field]
-            parsed = _parse_numeric_value(raw or '')
-            if parsed is not None:
-                buckets[field].append(parsed)
-
-    result: dict[str, tuple[float, float] | None] = {}
-    for field, values in buckets.items():
-        if len(values) < 2:
-            result[field] = None
-        else:
-            mean = statistics.mean(values)
-            std = statistics.stdev(values)
-            result[field] = (mean, std) if std > 0 else None
-    return result
-
-
-def _load_drug_class_map(
-    project_conn: sqlite3.Connection | None,
-) -> dict[str, str]:
-    """
-    Build a lowercase-drug-name → class-name map from the drug_groups algorithm config.
-
-    :param project_conn: open project DB connection
-    :return: dict mapping normalized drug name to drug class/group name; empty if not configured
-    """
-    if project_conn is None:
-        return {}
-    try:
-        row = project_conn.execute(
-            "SELECT config_json FROM interpretation_algorithm "
-            "WHERE algorithm_name = 'drug_groups' LIMIT 1"
-        ).fetchone()
-    except sqlite3.Error as exc:
-        logger.debug('Failed to load drug_groups algorithm from DB: %s', exc)
-        return {}
-    if row is None:
-        return {}
-    config = json.loads(row['config_json'])
-    drug_map: dict[str, str] = {}
-    for group_name, members in config.get('groups', {}).items():
-        for drug in members:
-            drug_map[drug.strip().lower()] = group_name
-    return drug_map
-
-
-def _load_drug_alias_map(
-    project_conn: sqlite3.Connection | None,
-) -> dict[str, str]:
-    """
-    Build a lowercase-canonical-drug-name -> alias map from the drug table.
-
-    :param project_conn: open project DB connection
-    :return: dict mapping normalized canonical drug name to alias; empty if unavailable
-    """
-    if project_conn is None:
-        return {}
-    try:
-        rows = project_conn.execute(
-            'SELECT name, alias FROM drug',
-        ).fetchall()
-    except sqlite3.Error as exc:
-        logger.debug('Failed to load drug aliases from DB: %s', exc)
-        return {}
-
-    alias_map: dict[str, str] = {}
-    for row in rows:
-        canonical = (row['name'] or '').strip().lower()
-        short = (row['alias'] or '').strip()
-        if canonical and short:
-            alias_map[canonical] = short
-    return alias_map
 
 
 def _format_drug_name_with_alias(name: str, alias_map: dict[str, str]) -> str:
@@ -1125,24 +1032,6 @@ def _range_sentence(ranges: dict[str, int]) -> str:
     return f"quantitative values: {_join_english_list(labels)}"
 
 
-def _has_interpretation_algorithm(project_conn: sqlite3.Connection | None) -> bool:
-    """
-    Return True when the project DB has at least one interpretation algorithm registered.
-
-    :param project_conn: optional project DB connection
-    :return: True if any algorithm is configured, False otherwise
-    """
-    if project_conn is None:
-        return False
-    try:
-        row = project_conn.execute(
-            'SELECT 1 FROM interpretation_algorithm LIMIT 1'
-        ).fetchone()
-        return row is not None
-    except Exception:
-        return False
-
-
 def _build_summary_context(
     result: ProfilingResult,
     display_names: dict[str, str],
@@ -1164,7 +1053,7 @@ def _build_summary_context(
     sequence_assessment = _build_sequence_assessment(result, display_names)
     gene_coverage = _compute_gene_coverage(result, display_names)
     mutation_profile = _build_mutation_profile(result, display_names, gene_coverage)
-    has_narrative = _has_interpretation_algorithm(project_conn)
+    has_narrative = has_interpretation_algorithm(project_conn)
     drug_table = _build_drug_interpretation_table(
         result,
         database_hits,
@@ -1529,7 +1418,7 @@ def _build_drug_interpretation_table(
 
     hit_rows = database_hits.get('rows', [])
     profiled_features = {m.feature.name for m in result.feature_matches}
-    drug_class_map = _load_drug_class_map(project_conn)
+    drug_class_map = load_drug_class_map(project_conn)
 
     # Pre-populate from project DB: all drugs with rules for profiled features
     by_drug: dict[str, dict] = {}
@@ -1709,84 +1598,3 @@ def _build_drug_interpretation_table(
     }
 
 
-def _load_drug_cards(
-    project_conn: sqlite3.Connection | None,
-    detected_drug_names: set[str] | None = None,
-) -> list[dict]:
-    """Load drug metadata for detected drugs in this run."""
-    if project_conn is None or not detected_drug_names:
-        return []
-
-    try:
-        rows = project_conn.execute(
-            'SELECT name, pubchem_url, description, structure_url '
-            'FROM drug ORDER BY name'
-        ).fetchall()
-    except sqlite3.Error as exc:
-        logger.debug('Failed to load drug cards from project DB: %s', exc)
-        return []
-
-    cards: list[dict] = []
-    for row in rows:
-        name = (row['name'] or '').strip()
-        if not name:
-            continue
-        if name.lower() not in detected_drug_names:
-            continue
-        cards.append({
-            'name': name,
-            'pubchem_url': row['pubchem_url'] or '',
-            'description': row['description'] or '',
-            'structure_url': row['structure_url'] or '',
-        })
-
-    cards.sort(key=lambda card: (card.get('name') or '').lower())
-    return cards
-
-
-def _load_feature_cards(
-    project_conn: sqlite3.Connection | None,
-    reference_name: str,
-    detected_feature_names: set[str] | None = None,
-) -> list[dict]:
-    """
-    Load feature metadata for detected features in the active reference.
-
-    :param project_conn: optional project DB connection
-    :param reference_name: active reference name from profiling result
-    :param detected_feature_names: features observed in this profiling run
-    :return: list of feature cards
-    """
-    if project_conn is None or not detected_feature_names:
-        return []
-
-    try:
-        rows = project_conn.execute(
-            'SELECT g.name, g.protein, g.protein_id, g.ncbi_protein_url, g.locus_tag, g.note, '
-            'g.nt_sequence, g.aa_sequence FROM feature g '
-            'JOIN reference r ON r.id = g.reference_id '
-            'WHERE r.name = ? ORDER BY g.start',
-            (reference_name,),
-        ).fetchall()
-    except sqlite3.Error as exc:
-        logger.debug('Failed to load feature cards from project DB for %r: %s', reference_name, exc)
-        return []
-
-    cards: list[dict] = []
-    for row in rows:
-        name = (row['name'] or '').strip()
-        if not name or name not in detected_feature_names:
-            continue
-        cards.append({
-            'name': name,
-            'protein': row['protein'] or '',
-            'protein_id': row['protein_id'] or '',
-            'ncbi_protein_url': row['ncbi_protein_url'] or '',
-            'locus_tag': row['locus_tag'] or '',
-            'note': row['note'] or '',
-            'nt_sequence': row['nt_sequence'] or '',
-            'aa_sequence': row['aa_sequence'] or '',
-        })
-
-    cards.sort(key=lambda card: (card.get('name') or '').lower())
-    return cards

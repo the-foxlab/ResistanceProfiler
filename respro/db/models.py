@@ -174,6 +174,29 @@ class ResistanceRule:
 
 
 @dataclass
+class FormulaRuleRuntime:
+    """Runtime representation of one formula rule and its referenced atomic members."""
+
+    id: int
+    formula_id: str
+    label: str
+    normalized_expression: str
+    drug_name: str
+    drug_id: int
+    phenotype: str
+    clinical_phenotype: str
+    ic50: str
+    fold_ic50: str
+    score: str
+    source: str
+    comment: str
+    pubchem_url: str = ''
+    description: str = ''
+    publications: list[Publication] = field(default_factory=list)
+    member_rules: dict[str, ResistanceRule] = field(default_factory=dict)
+
+
+@dataclass
 class ResistanceRuleSetMember:
     """One member mutation within a combined resistance rule set."""
 

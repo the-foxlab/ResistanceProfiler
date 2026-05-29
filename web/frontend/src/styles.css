@@ -273,7 +273,7 @@ th {
 
 .about-hero-visual {
   min-height: 0;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 2 / 1;
   max-height: 300px;
   display: flex;
   align-items: center;

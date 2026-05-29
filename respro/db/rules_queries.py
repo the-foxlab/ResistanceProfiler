@@ -5,11 +5,14 @@ Read-only query helpers for resistance rules — reusable without any CLI depend
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 
 from respro.db._rules_formula import _FORMULA_OPERATORS as _LOGIC_OPERATORS
 from respro.db._rules_formula import _RE_FORMULA_TOKEN as _RE_LOGIC_TOKEN
-from respro.db.models import is_internal_formula_component_drug_name
+from respro.db.models import FormulaRuleRuntime, Publication, ResistanceRule, is_internal_formula_component_drug_name
+
+logger = logging.getLogger(__name__)
 
 
 def _is_empty_cell(value: object) -> bool:
@@ -69,6 +72,184 @@ def _load_drug_group_map(conn: sqlite3.Connection) -> dict[str, str]:
             if normalized_member:
                 group_map[normalized_member] = group_name
     return group_map
+
+
+def load_rules(conn: sqlite3.Connection, reference_id: int) -> list[ResistanceRule]:
+    """
+    Load all resistance rules for features belonging to a reference.
+
+    :param conn: SQLite database connection
+    :param reference_id: ID of the reference
+    :return: list of ResistanceRule objects
+    """
+    rows = conn.execute(
+        """
+        SELECT
+            rr.id, g.name AS feature_name, rr.feature_id,
+            d.name AS drug_name, rr.drug_id,
+            d.pubchem_url, d.description,
+            rr.external_id,
+            rr.reference_identifier,
+            rr.position, rr.reference, rr.mutation,
+            rr.phenotype, rr.clinical_phenotype, rr.ic50, rr.fold_ic50, rr.score, rr.source, rr.comment
+        FROM resistance_rule rr
+        JOIN feature g ON g.id = rr.feature_id
+        JOIN drug d ON d.id = rr.drug_id
+        WHERE g.reference_id = ?
+        ORDER BY g.name, rr.position
+        """,
+        (reference_id,),
+    ).fetchall()
+
+    rules = [_rule_from_row(row) for row in rows]
+    if rules:
+        _attach_publications_to_rules(conn, rules)
+
+    logger.info('Loaded %d resistance rule(s)', len(rules))
+    return rules
+
+
+def load_formula_rules(conn: sqlite3.Connection, reference_id: int) -> list[FormulaRuleRuntime]:
+    """
+    Load formula rules for one reference and include only same-reference member rules.
+
+    Formulas that reference at least one atomic rule outside the active reference are
+    skipped with a warning.
+    """
+    formula_rows = conn.execute(
+        """
+        SELECT DISTINCT
+            fr.id,
+            fr.formula_id,
+            fr.label,
+            fr.normalized_expression,
+            fr.phenotype,
+            fr.clinical_phenotype,
+            fr.ic50,
+            fr.fold_ic50,
+            fr.score,
+            fr.source,
+            fr.comment,
+            d.id AS drug_id,
+            d.name AS drug_name,
+            d.pubchem_url,
+            d.description
+        FROM resistance_formula_rule fr
+        JOIN drug d ON d.id = fr.drug_id
+        JOIN resistance_formula_rule_member frm ON frm.formula_rule_id = fr.id
+        JOIN resistance_rule rr ON rr.id = frm.rule_id
+        JOIN feature g ON g.id = rr.feature_id
+        WHERE g.reference_id = ?
+        ORDER BY fr.id
+        """,
+        (reference_id,),
+    ).fetchall()
+
+    if not formula_rows:
+        return []
+
+    formulas: dict[int, FormulaRuleRuntime] = {}
+    for row in formula_rows:
+        formulas[int(row['id'])] = FormulaRuleRuntime(
+            id=int(row['id']),
+            formula_id=row['formula_id'] or '',
+            label=row['label'] or '',
+            normalized_expression=row['normalized_expression'] or '',
+            drug_name=row['drug_name'] or '',
+            drug_id=int(row['drug_id']),
+            phenotype=row['phenotype'] or '',
+            clinical_phenotype=row['clinical_phenotype'] or '',
+            ic50=row['ic50'] or '',
+            fold_ic50=row['fold_ic50'] or '',
+            score=row['score'] or '',
+            source=row['source'] or '',
+            comment=row['comment'] or '',
+            pubchem_url=row['pubchem_url'] or '',
+            description=row['description'] or '',
+        )
+
+    placeholders = ','.join('?' * len(formulas))
+    member_rows = conn.execute(
+        f"""
+        SELECT
+            frm.formula_rule_id,
+            rr.id,
+            rr.external_id,
+            rr.reference_identifier,
+            rr.position,
+            rr.reference,
+            rr.mutation,
+            rr.phenotype,
+            rr.clinical_phenotype,
+            rr.ic50,
+            rr.fold_ic50,
+            rr.score,
+            rr.source,
+            rr.comment,
+            rr.drug_id,
+            d.name AS drug_name,
+            d.pubchem_url,
+            d.description,
+            g.name AS feature_name,
+            g.id AS feature_id,
+            g.reference_id AS member_reference_id
+        FROM resistance_formula_rule_member frm
+        JOIN resistance_rule rr ON rr.id = frm.rule_id
+        JOIN drug d ON d.id = rr.drug_id
+        JOIN feature g ON g.id = rr.feature_id
+        WHERE frm.formula_rule_id IN ({placeholders})
+        ORDER BY frm.formula_rule_id, rr.external_id, rr.id
+        """,
+        list(formulas.keys()),
+    ).fetchall()
+
+    formulas_with_cross_reference_members: set[int] = set()
+    for row in member_rows:
+        formula_rule_id = int(row['formula_rule_id'])
+        if int(row['member_reference_id']) != reference_id:
+            formulas_with_cross_reference_members.add(formula_rule_id)
+            continue
+        external_id = row['external_id'] or ''
+        if external_id == '':
+            continue
+        formulas[formula_rule_id].member_rules[external_id] = ResistanceRule(
+            id=int(row['id']),
+            feature_name=row['feature_name'] or '',
+            feature_id=int(row['feature_id']),
+            drug_name=row['drug_name'] or '',
+            drug_id=int(row['drug_id']),
+            external_id=external_id,
+            reference_identifier=row['reference_identifier'] or '',
+            position=int(row['position']),
+            reference=row['reference'] or '',
+            mutation=row['mutation'] or '',
+            phenotype=row['phenotype'] or '',
+            clinical_phenotype=row['clinical_phenotype'] or '',
+            ic50=row['ic50'] or '',
+            fold_ic50=row['fold_ic50'] or '',
+            score=row['score'] or '',
+            source=row['source'] or '',
+            comment=row['comment'] or '',
+            pubchem_url=row['pubchem_url'] or '',
+            description=row['description'] or '',
+            is_internal_formula_component=is_internal_formula_component_drug_name(row['drug_name'] or ''),
+        )
+
+    if formulas_with_cross_reference_members:
+        skipped = sorted(formulas_with_cross_reference_members)
+        logger.warning(
+            '%d formula rule(s) skipped — cross-reference members are not allowed: %s',
+            len(skipped),
+            ', '.join(formulas[formula_id].formula_id for formula_id in skipped),
+        )
+        for formula_id in skipped:
+            formulas.pop(formula_id, None)
+
+    if formulas:
+        _attach_publications_to_formula_rules(conn, list(formulas.values()))
+
+    logger.info('Loaded %d formula rule(s)', len(formulas))
+    return list(formulas.values())
 
 
 def list_rules_for_display(
@@ -296,6 +477,106 @@ def _replace_formula_expression_for_display(
 
     rendered.append(expression[last_index:])
     return ''.join(rendered)
+
+
+def _publication_from_row(row: sqlite3.Row) -> Publication:
+    """Build one Publication object from a SQLite row."""
+    return Publication(
+        id=int(row['id']),
+        doi=row['doi'] or '',
+        title=row['title'] or '',
+        pubmed_id=row['pubmed_id'] or '',
+        raw_input=row['raw_input'] or '',
+    )
+
+
+def _fetch_publications_by_owner(
+    conn: sqlite3.Connection,
+    owner_ids: list[int],
+    *,
+    link_table: str,
+    owner_column: str,
+) -> dict[int, list[Publication]]:
+    """Fetch publications grouped by owner id (rule or formula rule)."""
+    if not owner_ids:
+        return {}
+
+    placeholders = ','.join('?' * len(owner_ids))
+    rows = conn.execute(
+        f'SELECT lp.{owner_column} AS owner_id, p.id, p.doi, p.title, p.pubmed_id, p.raw_input '
+        f'FROM {link_table} lp '
+        f'JOIN publication p ON p.id = lp.publication_id '
+        f'WHERE lp.{owner_column} IN ({placeholders})',
+        owner_ids,
+    ).fetchall()
+
+    grouped: dict[int, list[Publication]] = {}
+    for row in rows:
+        grouped.setdefault(int(row['owner_id']), []).append(_publication_from_row(row))
+    return grouped
+
+
+def _rule_from_row(row: sqlite3.Row) -> ResistanceRule:
+    """Build one ResistanceRule object from a SQLite row."""
+    return ResistanceRule(
+        id=row['id'],
+        feature_name=row['feature_name'],
+        feature_id=row['feature_id'],
+        drug_name=row['drug_name'],
+        drug_id=row['drug_id'],
+        external_id=row['external_id'] or '',
+        reference_identifier=row['reference_identifier'] or '',
+        position=row['position'],
+        reference=row['reference'] or '',
+        mutation=row['mutation'],
+        phenotype=row['phenotype'],
+        clinical_phenotype=row['clinical_phenotype'] or '',
+        ic50=row['ic50'] or '',
+        fold_ic50=row['fold_ic50'] or '',
+        score=row['score'] or '',
+        source=row['source'] or '',
+        comment=row['comment'] or '',
+        pubchem_url=row['pubchem_url'] or '',
+        description=row['description'] or '',
+        is_internal_formula_component=is_internal_formula_component_drug_name(row['drug_name'] or ''),
+    )
+
+
+def _attach_publications_to_rules(
+    conn: sqlite3.Connection,
+    rules: list[ResistanceRule],
+) -> None:
+    """
+    Batch-load publications for a list of rules and assign them in place.
+
+    :param conn: SQLite database connection
+    :param rules: list of ResistanceRule objects to enrich
+    """
+    rule_ids = [rule.id for rule in rules]
+    pubs_by_rule = _fetch_publications_by_owner(
+        conn,
+        rule_ids,
+        link_table='rule_publication',
+        owner_column='rule_id',
+    )
+    for rule in rules:
+        rule.publications = pubs_by_rule.get(rule.id, [])
+
+
+def _attach_publications_to_formula_rules(
+    conn: sqlite3.Connection,
+    formula_rules: list[FormulaRuleRuntime],
+) -> None:
+    """Batch-load publications for formula rules and assign them in place."""
+    formula_ids = [formula_rule.id for formula_rule in formula_rules]
+    pubs_by_formula = _fetch_publications_by_owner(
+        conn,
+        formula_ids,
+        link_table='resistance_formula_rule_publication',
+        owner_column='formula_rule_id',
+    )
+    for formula_rule in formula_rules:
+        formula_rule.publications = pubs_by_formula.get(formula_rule.id, [])
 
 
 def list_references_for_display(conn: sqlite3.Connection) -> list[dict]:

@@ -14,13 +14,11 @@ from respro.core.alignment import (
     _reverse_cigar_operations,
     _swap_cigar_indels,
     cigar_to_coordinate_map,
-    load_cached_mappings,
     load_features_with_rules,
     match_query_to_features,
     parse_cigar,
-    sequence_checksum,
-    store_mappings,
 )
+from respro.db.cache import load_cached_mappings, sequence_checksum, store_mappings
 from respro.db.models import FeatureMatch, FeatureRecord
 from respro.db.schema import create_schema
 

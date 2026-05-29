@@ -10,12 +10,10 @@ import sqlite3
 from pathlib import Path
 
 from respro.core.alignment import (
-    load_cached_mappings,
     load_features_with_rules,
     match_query_to_features,
-    sequence_checksum,
-    store_mappings,
 )
+from respro.db.cache import load_cached_mappings, sequence_checksum, store_mappings
 from respro.db.models import FeatureMatch
 from respro.io.reference import read_fasta
 

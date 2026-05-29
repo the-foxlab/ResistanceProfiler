@@ -5,6 +5,7 @@ Atomic and formula resistance rule loading — row iteration, validation, and DB
 from __future__ import annotations
 
 import csv
+from dataclasses import dataclass, field
 import logging
 import sqlite3
 from pathlib import Path
@@ -76,33 +77,149 @@ def load_resistance_rules(
              set of declared external_ids in rules TSV,
              dict of external_id -> skip reason for ids that were skipped)
     """
-    drug_cache: dict[str, int] = {}
-    pub_cache: dict[str, int] = {}
-    count = 0
-    skipped_duplicates = 0
-
     conn.row_factory = sqlite3.Row
     features_by_name = _build_feature_lookup(conn)
     known_reference_identifiers = _load_known_reference_identifiers(conn)
-
-    errors: list[str] = []
-    skipped_missing_ref_ids: set[str] = set()
-    skipped_missing_ref_count = 0
-    skipped_ref: list[str] = []
-    skipped_feature: list[str] = []
-    skipped_feature_pairs: list[tuple[str, str]] = []
-    skipped_invalid_aa: list[str] = []
-    skipped_duplicates_detail: list[str] = []
-    skipped_identical_member_id_rows: list[str] = []
-    # Maps external_id → skip reason, for formula rule skip messages.
-    skipped_external_ids: dict[str, str] = {}
-    seen_external_id_signatures: dict[str, tuple[int, tuple[int, str, int, str, str]]] = {}
 
     with open(rules_tsv, newline='') as fh:
         reader = csv.DictReader(fh, delimiter='\t')
         all_rows = _expand_anchor_changed_indel_rules(list(reader))
 
-    header_columns = {col.strip() for col in (reader.fieldnames or []) if col}
+    grouped_ids, declared_external_ids = _validate_rules_header_and_collect_ids(
+        conn,
+        all_rows,
+        reader.fieldnames,
+    )
+
+    state = _AtomicRuleLoadState()
+    prepared_rows = _prepare_atomic_rule_rows(
+        all_rows,
+        features_by_name,
+        known_reference_identifiers,
+        require_external_ids,
+        state,
+    )
+    count, skipped_duplicates, skipped_duplicates_detail = _insert_prepared_atomic_rules(
+        conn,
+        project_id,
+        prepared_rows,
+        additional_info,
+        publication_lookup_failures,
+        state.skipped_external_ids,
+    )
+
+    if state.skipped_missing_ref_ids:
+        logger.warning(
+            '%d rule(s) skipped — reference(s) not provided (no GenBank supplied): %s',
+            state.skipped_missing_ref_count,
+            ', '.join(repr(r) for r in sorted(state.skipped_missing_ref_ids)),
+        )
+
+    if state.skipped_feature:
+        unique_rows = sorted(set(state.skipped_feature))
+        unique_pairs = sorted(set(state.skipped_feature_pairs))
+        logger.warning(
+            '%d rule(s) skipped — feature(s) not found in GenBank annotations: %s\n%s',
+            len(state.skipped_feature),
+            ', '.join(
+                f'{feature!r} @ reference_identifier {reference!r}'
+                for feature, reference in unique_pairs
+            ),
+            '\n'.join(f'  - {detail}' for detail in unique_rows),
+        )
+
+    if state.skipped_ref:
+        unique_skipped = sorted(set(state.skipped_ref))
+        logger.warning(
+            '%d rule(s) skipped — reference_identifier not in this project:\n%s',
+            len(unique_skipped),
+            '\n'.join(f'  - {msg}' for msg in unique_skipped),
+        )
+
+    if state.skipped_invalid_aa:
+        unique_invalid = sorted(set(state.skipped_invalid_aa))
+        logger.warning(
+            '%d rule(s) skipped — unsupported amino-acid tokens:\n%s',
+            len(unique_invalid),
+            '\n'.join(f'  - {msg}' for msg in unique_invalid),
+        )
+
+    if skipped_duplicates_detail:
+        logger.warning(
+            '%d duplicate rule(s) skipped — existing rows were kept:\n%s',
+            len(skipped_duplicates_detail),
+            '\n'.join(f'  {rule}' for rule in sorted(skipped_duplicates_detail)),
+        )
+
+    if state.skipped_identical_member_id_rows:
+        logger.warning(
+            '%d row(s) skipped — duplicate member_id with identical atomic definition '
+            '(first occurrence kept):\n%s',
+            len(state.skipped_identical_member_id_rows),
+            '\n'.join(f'  - {msg}' for msg in sorted(state.skipped_identical_member_id_rows)),
+        )
+
+    if state.errors:
+        formatted = '\n'.join(f'- {message}' for message in sorted(set(state.errors)))
+        raise ValueError(f'Rules validation failed:\n{formatted}')
+
+    if grouped_ids and not require_external_ids:
+        logger.warning(
+            'Detected grouped atomic rules (%d group_id values), but no formula TSV was provided; '
+            'combinatorial rules are ignored while atomic rules are still imported',
+            len(grouped_ids),
+        )
+
+    logger.info('Loaded %d single resistance rule(s)', count)
+    return count, grouped_ids, declared_external_ids, state.skipped_external_ids
+
+
+@dataclass
+class _PreparedAtomicRule:
+    row_number: int
+    feature_name: str
+    feature_id: int
+    drug_name: str
+    group_ids: list[str]
+    external_id: str
+    reference_identifier: str
+    position_raw: str
+    position_0based: int
+    reference_aa: str
+    mutation: str
+    phenotype_value: str
+    clinical_phenotype_value: str
+    ic50_value: str
+    fold_ic50_value: str
+    score_value: str
+    source_value: str
+    comment_value: str
+    raw_publication: str
+
+
+@dataclass
+class _AtomicRuleLoadState:
+    errors: list[str] = field(default_factory=list)
+    skipped_missing_ref_ids: set[str] = field(default_factory=set)
+    skipped_missing_ref_count: int = 0
+    skipped_ref: list[str] = field(default_factory=list)
+    skipped_feature: list[str] = field(default_factory=list)
+    skipped_feature_pairs: list[tuple[str, str]] = field(default_factory=list)
+    skipped_invalid_aa: list[str] = field(default_factory=list)
+    skipped_identical_member_id_rows: list[str] = field(default_factory=list)
+    # Maps external_id → skip reason, for formula rule skip messages.
+    skipped_external_ids: dict[str, str] = field(default_factory=dict)
+
+
+def _validate_rules_header_and_collect_ids(
+    conn: sqlite3.Connection,
+    all_rows: list[dict[str, str]],
+    fieldnames: list[str] | None,
+) -> tuple[set[str], set[str]]:
+    """
+    Validate header-level constraints and collect grouped and external rule IDs.
+    """
+    header_columns = {col.strip() for col in (fieldnames or []) if col}
     present_ic50 = sorted(header_columns & {'ic50', 'ic_50'})
     present_fold = sorted(header_columns & {'fold_ic50', 'fold_ic_50'})
     if len(present_ic50) > 1:
@@ -122,7 +239,6 @@ def load_resistance_rules(
     external_ids: list[str] = []
     declared_external_ids: set[str] = set()
     grouped_ids: set[str] = set()
-    phenotype_default, clinical_phenotype_default = _phenotype_missing_defaults(all_rows)
     for row_number, row in enumerate(all_rows, start=2):
         if not _get_value(row, 'reference_identifier'):
             required_field_errors.append(
@@ -165,6 +281,23 @@ def load_resistance_rules(
         formatted = '\n'.join(f'- {message}' for message in required_field_errors)
         raise ValueError(f'Rules validation failed:\n{formatted}')
 
+    return grouped_ids, declared_external_ids
+
+
+def _prepare_atomic_rule_rows(
+    all_rows: list[dict[str, str]],
+    features_by_name: dict[str, list[sqlite3.Row]],
+    known_reference_identifiers: set[str],
+    require_external_ids: bool,
+    state: _AtomicRuleLoadState,
+) -> list[_PreparedAtomicRule]:
+    """
+    Normalize and validate per-row values into DB-ready atomic rule payloads.
+    """
+    prepared_rows: list[_PreparedAtomicRule] = []
+    phenotype_default, clinical_phenotype_default = _phenotype_missing_defaults(all_rows)
+    seen_external_id_signatures: dict[str, tuple[int, tuple[int, str, int, str, str]]] = {}
+
     # Detect coordinate base once globally and use it consistently for all rows.
     coord_base = _detect_coordinate_base(
         all_rows,
@@ -183,16 +316,16 @@ def load_resistance_rules(
         feature_name = _get_value(row, 'feature')
         reference_identifier = _get_value(row, 'reference_identifier')
         if reference_identifier and reference_identifier not in known_reference_identifiers:
-            skipped_missing_ref_ids.add(reference_identifier)
-            skipped_missing_ref_count += 1
+            state.skipped_missing_ref_ids.add(reference_identifier)
+            state.skipped_missing_ref_count += 1
             continue
         if not feature_name or feature_name not in features_by_name:
             feature_label = feature_name or '<empty>'
             reference_label = reference_identifier or '<empty>'
-            skipped_feature.append(
+            state.skipped_feature.append(
                 f'row {row_number}: feature {feature_label!r}, reference_identifier {reference_label!r}'
             )
-            skipped_feature_pairs.append((feature_label, reference_label))
+            state.skipped_feature_pairs.append((feature_label, reference_label))
             continue
 
         feature_id = _resolve_rule_feature_id(features_by_name[feature_name], reference_identifier)
@@ -205,12 +338,12 @@ def load_resistance_rules(
                 }
             )
             if reference_identifier:
-                skipped_ref.append(
+                state.skipped_ref.append(
                     f'feature {feature_name!r}: reference_identifier {reference_identifier!r} '
                     f'not found (available: {candidate_refs})'
                 )
             else:
-                errors.append(
+                state.errors.append(
                     f'Rules feature {feature_name!r} is ambiguous across references {candidate_refs}; '
                     'add reference_identifier to the rules row'
                 )
@@ -228,19 +361,19 @@ def load_resistance_rules(
             if require_external_ids and external_id:
                 drug_name = _INTERNAL_FORMULA_COMPONENT_DRUG_NAME
             else:
-                errors.append(f'Rule for feature {feature_name!r} has no antiviral value')
+                state.errors.append(f'Rule for feature {feature_name!r} has no antiviral value')
                 continue
 
         position_raw = _get_value(row, 'position')
         mutation_raw = _get_value(row, 'mutation')
         if not position_raw or not mutation_raw:
-            errors.append(f'Rule for feature {feature_name!r} is missing position or mutation')
+            state.errors.append(f'Rule for feature {feature_name!r} is missing position or mutation')
             continue
 
         try:
             position_0based = int(position_raw) - coord_base
         except ValueError:
-            errors.append(
+            state.errors.append(
                 f'Rule for feature {feature_name!r} has invalid position {position_raw!r}'
             )
             continue
@@ -248,7 +381,7 @@ def load_resistance_rules(
         reference_aa = _get_value(row, 'reference')
         if (feature_name, position_raw, reference_identifier, reference_aa) in mismatch_keys:
             if external_id:
-                skipped_external_ids[external_id] = (
+                state.skipped_external_ids[external_id] = (
                     f'reference AA mismatch at {reference_identifier} {feature_name} pos {position_raw}'
                 )
             continue
@@ -259,14 +392,14 @@ def load_resistance_rules(
             deleted_block = m_del.group(1).upper()
             aa_seq = _get_feature_aa_sequence(features_by_name[feature_name], reference_identifier)
             if not aa_seq:
-                errors.append(
+                state.errors.append(
                     f'Rule for feature {feature_name!r} pos {position_raw!r}: '
                     f'feature has no aa_sequence, cannot resolve deletion anchor for {mutation_raw!r}'
                 )
                 continue
             resolved = _resolve_anchorless_deletion(deleted_block, position_0based, aa_seq)
             if resolved is None:
-                errors.append(
+                state.errors.append(
                     f'Rule for feature {feature_name!r} pos {position_raw!r}: '
                     f'cannot resolve anchor for deletion {mutation_raw!r} — '
                     'check that the deleted block matches the feature sequence and '
@@ -275,25 +408,26 @@ def load_resistance_rules(
                 continue
             position_0based, reference_aa, mutation_raw = resolved
 
+        context = f'Rule for feature {feature_name!r} pos {position_raw!r}'
         ic50_value = _normalize_ic50_from_row(
             row,
-            errors=errors,
-            context=f'Rule for feature {feature_name!r} pos {position_raw!r}',
+            errors=state.errors,
+            context=context,
         )
         fold_ic50_value = _normalize_fold_ic50_from_row(
             row,
-            errors=errors,
-            context=f'Rule for feature {feature_name!r} pos {position_raw!r}',
+            errors=state.errors,
+            context=context,
         )
         score_value = _normalize_score_from_row(
             row,
-            errors=errors,
-            context=f'Rule for feature {feature_name!r} pos {position_raw!r}',
+            errors=state.errors,
+            context=context,
         )
         phenotype_value, clinical_phenotype_value = _normalize_phenotypes_from_row(
             row,
-            errors=errors,
-            context=f'Rule for feature {feature_name!r} pos {position_raw!r}',
+            errors=state.errors,
+            context=context,
             missing_phenotype_default=phenotype_default,
             missing_clinical_default=clinical_phenotype_default,
         )
@@ -301,34 +435,26 @@ def load_resistance_rules(
             reference_aa=reference_aa,
             mutation_raw=mutation_raw,
             position_0based=position_0based,
-            context=f'Rule for feature {feature_name!r} pos {position_raw!r}',
-            errors=errors,
+            context=context,
+            errors=state.errors,
         )
         if normalized is None:
             continue
         position_0based, reference_aa, mutation = normalized
 
         if _is_noop_mutation(reference_aa, mutation):
-            errors.append(
+            state.errors.append(
                 f'Rule for feature {feature_name!r} pos {position_raw!r}: '
                 f'mutation {mutation_raw!r} does not change reference {reference_aa!r}'
             )
             continue
 
         if not _is_supported_mutation_token(mutation):
-            skipped_invalid_aa.append(
+            state.skipped_invalid_aa.append(
                 f'feature {feature_name!r} pos {position_raw!r}: unsupported amino-acid token '
                 f'{mutation_raw!r} (normalized {mutation!r})'
             )
             continue
-
-        # Reuse/create drug IDs through a tiny cache to avoid repeated lookups.
-        drug_id = _get_or_create_drug_id(conn, project_id, drug_name, drug_cache)
-        comment_value = _append_contradictory_comment(
-            _get_value(row, 'comment'),
-            phenotype=phenotype_value,
-            clinical_phenotype=clinical_phenotype_value,
-        )
 
         if external_id:
             signature = (feature_id, reference_identifier, position_0based, reference_aa, mutation)
@@ -336,38 +462,90 @@ def load_resistance_rules(
             if seen is not None:
                 first_row, first_signature = seen
                 if signature == first_signature:
-                    skipped_identical_member_id_rows.append(
+                    state.skipped_identical_member_id_rows.append(
                         f'row {row_number}: member_id {external_id!r} duplicates identical atomic '
                         f'definition from row {first_row}'
                     )
-                    skipped_external_ids[external_id] = 'duplicate of an earlier identical row'
+                    state.skipped_external_ids[external_id] = 'duplicate of an earlier identical row'
                     continue
-                errors.append(
+                state.errors.append(
                     f'duplicate atomic rule ids: {external_id!r} '
                     f'(conflicting definitions in rows {first_row} and {row_number})'
                 )
                 continue
             seen_external_id_signatures[external_id] = (row_number, signature)
 
+        comment_value = _append_contradictory_comment(
+            _get_value(row, 'comment'),
+            phenotype=phenotype_value,
+            clinical_phenotype=clinical_phenotype_value,
+        )
+        prepared_rows.append(
+            _PreparedAtomicRule(
+                row_number=row_number,
+                feature_name=feature_name,
+                feature_id=feature_id,
+                drug_name=drug_name,
+                group_ids=group_ids,
+                external_id=external_id,
+                reference_identifier=reference_identifier,
+                position_raw=position_raw,
+                position_0based=position_0based,
+                reference_aa=reference_aa,
+                mutation=mutation,
+                phenotype_value=phenotype_value,
+                clinical_phenotype_value=clinical_phenotype_value,
+                ic50_value=ic50_value,
+                fold_ic50_value=fold_ic50_value,
+                score_value=score_value,
+                source_value=_get_value(row, 'source'),
+                comment_value=comment_value,
+                raw_publication=_get_value(row, 'publication'),
+            )
+        )
+
+    return prepared_rows
+
+
+def _insert_prepared_atomic_rules(
+    conn: sqlite3.Connection,
+    project_id: int,
+    prepared_rows: list[_PreparedAtomicRule],
+    additional_info: bool,
+    publication_lookup_failures: list[str] | None,
+    skipped_external_ids: dict[str, str],
+) -> tuple[int, int, list[str]]:
+    """
+    Persist prepared atomic rows into DB and attach publication links.
+    """
+    drug_cache: dict[str, int] = {}
+    pub_cache: dict[str, int] = {}
+    count = 0
+    skipped_duplicates = 0
+    skipped_duplicates_detail: list[str] = []
+
+    for prepared in prepared_rows:
         # Formula component rows (no antiviral, linked via external_id) may share the same
         # mutation across multiple formula groups. Each has a unique external_id, so skip
         # mutation-level deduplication; the unique index on external_id prevents true duplicates.
-        if not group_ids and _rule_exists(
+        drug_id = _get_or_create_drug_id(conn, project_id, prepared.drug_name, drug_cache)
+        if not prepared.group_ids and _rule_exists(
             conn,
-            feature_id=feature_id,
+            feature_id=prepared.feature_id,
             drug_id=drug_id,
-            reference_identifier=reference_identifier,
-            position=position_0based,
-            reference=reference_aa,
-            mutation=mutation,
+            reference_identifier=prepared.reference_identifier,
+            position=prepared.position_0based,
+            reference=prepared.reference_aa,
+            mutation=prepared.mutation,
         ):
             skipped_duplicates += 1
             skipped_duplicates_detail.append(
-                f'{reference_identifier} feature {feature_name!r} pos {position_raw} '
-                f'{reference_aa!r}>{mutation!r} ({drug_name})'
+                f'{prepared.reference_identifier} feature {prepared.feature_name!r} '
+                f'pos {prepared.position_raw} {prepared.reference_aa!r}>{prepared.mutation!r} '
+                f'({prepared.drug_name})'
             )
-            if external_id:
-                skipped_external_ids[external_id] = 'duplicate of an existing rule'
+            if prepared.external_id:
+                skipped_external_ids[prepared.external_id] = 'duplicate of an existing rule'
             continue
 
         conn.execute(
@@ -377,99 +555,35 @@ def load_resistance_rules(
             'phenotype, clinical_phenotype, ic50, fold_ic50, score, source, comment'
             ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
-                feature_id,
+                prepared.feature_id,
                 drug_id,
-                external_id,
-                reference_identifier,
-                position_0based,
-                reference_aa,
-                mutation,
-                phenotype_value,
-                clinical_phenotype_value,
-                ic50_value,
-                fold_ic50_value,
-                score_value,
-                _get_value(row, 'source'),
-                comment_value,
+                prepared.external_id,
+                prepared.reference_identifier,
+                prepared.position_0based,
+                prepared.reference_aa,
+                prepared.mutation,
+                prepared.phenotype_value,
+                prepared.clinical_phenotype_value,
+                prepared.ic50_value,
+                prepared.fold_ic50_value,
+                prepared.score_value,
+                prepared.source_value,
+                prepared.comment_value,
             ),
         )
         rule_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
-        raw_publication = _get_value(row, 'publication')
-        if raw_publication:
+        if prepared.raw_publication:
             _link_rule_publications(
                 conn,
                 rule_id,
-                raw_publication,
+                prepared.raw_publication,
                 additional_info,
                 pub_cache,
                 publication_lookup_failures,
             )
         count += 1
 
-    if skipped_missing_ref_ids:
-        logger.warning(
-            '%d rule(s) skipped — reference(s) not provided (no GenBank supplied): %s',
-            skipped_missing_ref_count,
-            ', '.join(repr(r) for r in sorted(skipped_missing_ref_ids)),
-        )
-
-    if skipped_feature:
-        unique_rows = sorted(set(skipped_feature))
-        unique_pairs = sorted(set(skipped_feature_pairs))
-        logger.warning(
-            '%d rule(s) skipped — feature(s) not found in GenBank annotations: %s\n%s',
-            len(skipped_feature),
-            ', '.join(
-                f'{feature!r} @ reference_identifier {reference!r}'
-                for feature, reference in unique_pairs
-            ),
-            '\n'.join(f'  - {detail}' for detail in unique_rows),
-        )
-
-    if skipped_ref:
-        unique_skipped = sorted(set(skipped_ref))
-        logger.warning(
-            '%d rule(s) skipped — reference_identifier not in this project:\n%s',
-            len(unique_skipped),
-            '\n'.join(f'  - {msg}' for msg in unique_skipped),
-        )
-
-    if skipped_invalid_aa:
-        unique_invalid = sorted(set(skipped_invalid_aa))
-        logger.warning(
-            '%d rule(s) skipped — unsupported amino-acid tokens:\n%s',
-            len(unique_invalid),
-            '\n'.join(f'  - {msg}' for msg in unique_invalid),
-        )
-
-    if skipped_duplicates_detail:
-        logger.warning(
-            '%d duplicate rule(s) skipped — existing rows were kept:\n%s',
-            len(skipped_duplicates_detail),
-            '\n'.join(f'  {rule}' for rule in sorted(skipped_duplicates_detail)),
-        )
-
-    if skipped_identical_member_id_rows:
-        logger.warning(
-            '%d row(s) skipped — duplicate member_id with identical atomic definition '
-            '(first occurrence kept):\n%s',
-            len(skipped_identical_member_id_rows),
-            '\n'.join(f'  - {msg}' for msg in sorted(skipped_identical_member_id_rows)),
-        )
-
-    if errors:
-        formatted = '\n'.join(f'- {message}' for message in sorted(set(errors)))
-        raise ValueError(f'Rules validation failed:\n{formatted}')
-
-    if grouped_ids and not require_external_ids:
-        logger.warning(
-            'Detected grouped atomic rules (%d group_id values), but no formula TSV was provided; '
-            'combinatorial rules are ignored while atomic rules are still imported',
-            len(grouped_ids),
-        )
-
-    logger.info('Loaded %d single resistance rule(s)', count)
-    return count, grouped_ids, declared_external_ids, skipped_external_ids
+    return count, skipped_duplicates, skipped_duplicates_detail
 
 
 def load_formula_rules(

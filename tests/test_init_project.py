@@ -18,8 +18,10 @@ from Bio.SeqRecord import SeqRecord
 from conftest import TINY_REF_SEQ, write_genbank
 
 from respro.cli.init import init_project
-from respro.core.alignment import load_cached_mappings, load_features_with_rules, sequence_checksum
+from respro.core.alignment import load_features_with_rules
+from respro.db.cache import load_cached_mappings, sequence_checksum
 from respro.db.features import _is_ncbi_protein_accession
+from respro.db.features import load_features_for_reference
 from respro.db.models import is_internal_formula_component_drug_name
 from respro.db.rules_import import (
     _detect_coordinate_base,
@@ -28,7 +30,6 @@ from respro.db.rules_import import (
 )
 from respro.db.rules_queries import list_plot_metadata_for_display, list_rules_for_display
 from respro.db.schema import create_schema, open_project_db
-from respro.io.reference import load_features_for_reference
 
 # Amino acid sequence used across tests:
 #   index:  0  1  2  3  4  5

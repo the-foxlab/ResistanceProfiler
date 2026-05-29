@@ -11,16 +11,16 @@ from typer.testing import CliRunner
 from respro.cli.init import init_project
 from respro.cli.main import app
 from respro.core.rules import (
-    FormulaRuleRuntime,
-    load_rules,
     match_formula_rules,
     match_rules,
 )
 from respro.db.models import (
     AnnotatedVariant,
+    FormulaRuleRuntime,
     ResistanceRule,
     VariantCall,
 )
+from respro.db.rules_queries import load_rules
 from respro.db.schema import open_project_db
 
 
