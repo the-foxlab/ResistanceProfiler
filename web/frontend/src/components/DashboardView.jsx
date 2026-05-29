@@ -278,8 +278,18 @@ export function DashboardView({
 
       <div className="dashboard-main">
         <div className="top-bar">
-          <div className="brand-logo-wrap" aria-label="ResistanceProfiler dashboard">
-            <img className="brand-logo" src={logoSrc} alt="ResistanceProfiler logo" />
+          <div className="top-bar-brand-block">
+            <div className="brand-logo-wrap" aria-label="ResistanceProfiler dashboard">
+              <img className="brand-logo" src={logoSrc} alt="ResistanceProfiler logo" />
+            </div>
+            <DatabaseSelectorBar
+              databases={databases}
+              selectedDatabase={selectedDatabase}
+              selectedDatabaseId={selectedDatabaseId}
+              onDatabaseChange={setSelectedDatabaseId}
+              selectId="topbar-db-select"
+              className="topbar-db-bar"
+            />
           </div>
           <div className="page-links" aria-label="Project links">
             <a href="https://github.com/jonas-fuchs/ResistanceProfiler" target="_blank" rel="noreferrer" title="ResistanceProfiler on GitHub" aria-label="ResistanceProfiler on GitHub">
@@ -301,14 +311,6 @@ export function DashboardView({
                     <h2>Profile resistances</h2>
                     <p>Compare mutations to vcf or fasta files</p>
                   </div>
-                  <DatabaseSelectorBar
-                    databases={databases}
-                    selectedDatabase={selectedDatabase}
-                    selectedDatabaseId={selectedDatabaseId}
-                    onDatabaseChange={setSelectedDatabaseId}
-                    selectId="header-db-select"
-                    className="profile-db-bar"
-                  />
                 </div>
                 <div className="profile-input-subtile section-subtile">
                   {activeProfileMode === 'vcf' ? (
@@ -529,14 +531,6 @@ export function DashboardView({
                   <h2>Batch analysis</h2>
                   <p>Submit multiple samples for profiling in one go</p>
                 </div>
-                <DatabaseSelectorBar
-                  databases={databases}
-                  selectedDatabase={selectedDatabase}
-                  selectedDatabaseId={selectedDatabaseId}
-                  onDatabaseChange={setSelectedDatabaseId}
-                  selectId="batch-db-select"
-                  className="profile-db-bar"
-                />
               </div>
 
               {!batchSubmitted ? (
@@ -802,14 +796,6 @@ export function DashboardView({
                     <h2>Regenerate from JSON</h2>
                     <p>Upload a results JSON and regenerate report artifacts with the active database.</p>
                   </div>
-                  <DatabaseSelectorBar
-                    databases={databases}
-                    selectedDatabase={selectedDatabase}
-                    selectedDatabaseId={selectedDatabaseId}
-                    onDatabaseChange={setSelectedDatabaseId}
-                    selectId="regenerate-db-select"
-                    className="profile-db-bar"
-                  />
                 </div>
                 <div className="profile-input-subtile section-subtile">
                   <div className="profile-upload-row profile-upload-row-regenerate">
@@ -962,29 +948,15 @@ export function DashboardView({
                 <div className="workspace-output-header workspace-output-header-with-db section-header">
                   <div>
                     <h2>Browse mutations</h2>
-                    <p>
-                      {displayedRules.length} visible mutation row(s), {formulaRules.length} formula row(s)
-                    </p>
-                  </div>
-                  <DatabaseSelectorBar
-                    databases={databases}
-                    selectedDatabase={selectedDatabase}
-                    selectedDatabaseId={selectedDatabaseId}
-                    onDatabaseChange={setSelectedDatabaseId}
-                    selectId="mutation-db-select"
-                    className="mutation-db-bar"
-                  />
-                </div>
-              </article>
-
-              <article className="card full-width-tile mutation-table-tile">
-                <div className="workspace-output-header section-header">
-                  <div>
-                    <h3>Single mutations</h3>
-                    <p>{displayedRules.length} visible row(s)</p>
                   </div>
                 </div>
-                <div className="table-controls-container">
+                <section className="mutation-merged-section">
+                  <div className="workspace-output-header section-header">
+                    <div>
+                      <h3>Single mutations</h3>
+                      <p>{displayedRules.length} visible row(s)</p>
+                    </div>
+                  </div>
                   <div className="mutation-toolbar">
                     <label className="mutation-search" htmlFor="mutation-rules-search">
                       <img src={searchIconSrc} alt="" aria-hidden="true" />
@@ -1017,56 +989,54 @@ export function DashboardView({
                       Download as TSV
                     </button>
                   </div>
-                </div>
-                <div className="table-wrap mutation-table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        {mutationColumns.map((column, index) => (
-                          <th
-                            key={column.key}
-                            className="sortable-col"
-                            onClick={() => {
-                              if (mutationSortColumn === index) {
-                                setMutationSortAsc(!mutationSortAsc);
-                              } else {
-                                setMutationSortColumn(index);
-                                setMutationSortAsc(true);
-                              }
-                            }}
-                          >
-                            {column.label}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {displayedRules.map((rule, index) => (
-                        <tr key={`${rule.id || 'rule'}-${index}`}>
-                          {mutationColumns.map((column) => (
-                            <td key={`${column.key}-${index}`}>{column.accessor(rule)}</td>
+                  <div className="table-wrap mutation-table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          {mutationColumns.map((column, index) => (
+                            <th
+                              key={column.key}
+                              className="sortable-col"
+                              onClick={() => {
+                                if (mutationSortColumn === index) {
+                                  setMutationSortAsc(!mutationSortAsc);
+                                } else {
+                                  setMutationSortColumn(index);
+                                  setMutationSortAsc(true);
+                                }
+                              }}
+                            >
+                              {column.label}
+                            </th>
                           ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {mutationsLoaded && rules.length === 0 ? (
-                  <p className="status">No single-mutation rules were found for the selected database/filter.</p>
-                ) : null}
-                {mutationsLoaded && rules.length > 0 && displayedRules.length === 0 ? (
-                  <p className="status">No mutations match the current filter.</p>
-                ) : null}
-              </article>
-
-              <article className="card full-width-tile mutation-table-tile formula-table-tile">
-                <div className="workspace-output-header section-header">
-                  <div>
-                    <h3>Combinatorial mutations</h3>
-                    <p>{displayedFormulaRules.length} visible row(s)</p>
+                      </thead>
+                      <tbody>
+                        {displayedRules.map((rule, index) => (
+                          <tr key={`${rule.id || 'rule'}-${index}`}>
+                            {mutationColumns.map((column) => (
+                              <td key={`${column.key}-${index}`}>{column.accessor(rule)}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                </div>
-                <div className="table-controls-container">
+                  {mutationsLoaded && rules.length === 0 ? (
+                    <p className="status">No single-mutation rules were found for the selected database/filter.</p>
+                  ) : null}
+                  {mutationsLoaded && rules.length > 0 && displayedRules.length === 0 ? (
+                    <p className="status">No mutations match the current filter.</p>
+                  ) : null}
+                </section>
+
+                <section className="mutation-merged-section">
+                  <div className="workspace-output-header section-header">
+                    <div>
+                      <h3>Combinatorial mutations</h3>
+                      <p>{displayedFormulaRules.length} visible row(s)</p>
+                    </div>
+                  </div>
                   <div className="mutation-toolbar">
                     <label className="mutation-search" htmlFor="formula-rules-search">
                       <img src={searchIconSrc} alt="" aria-hidden="true" />
@@ -1099,33 +1069,33 @@ export function DashboardView({
                       Download as TSV
                     </button>
                   </div>
-                </div>
-                <div className="table-wrap mutation-table-wrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        {formulaColumns.map((column) => (
-                          <th key={column.key}>{column.label}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {displayedFormulaRules.map((rule, index) => (
-                        <tr key={`${rule.formula_id || 'formula'}-${index}`}>
+                  <div className="table-wrap mutation-table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
                           {formulaColumns.map((column) => (
-                            <td key={`${column.key}-${index}`}>{column.accessor(rule)}</td>
+                            <th key={column.key}>{column.label}</th>
                           ))}
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {mutationsLoaded && formulaRules.length === 0 ? (
-                  <p className="status">No formula combinations were found for the selected database/filter.</p>
-                ) : null}
-                {mutationsLoaded && formulaRules.length > 0 && displayedFormulaRules.length === 0 ? (
-                  <p className="status">No formula combinations match the current filter.</p>
-                ) : null}
+                      </thead>
+                      <tbody>
+                        {displayedFormulaRules.map((rule, index) => (
+                          <tr key={`${rule.formula_id || 'formula'}-${index}`}>
+                            {formulaColumns.map((column) => (
+                              <td key={`${column.key}-${index}`}>{column.accessor(rule)}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {mutationsLoaded && formulaRules.length === 0 ? (
+                    <p className="status">No formula combinations were found for the selected database/filter.</p>
+                  ) : null}
+                  {mutationsLoaded && formulaRules.length > 0 && displayedFormulaRules.length === 0 ? (
+                    <p className="status">No formula combinations match the current filter.</p>
+                  ) : null}
+                </section>
               </article>
             </>
           ) : null}
@@ -1139,14 +1109,6 @@ export function DashboardView({
                     <h2>Database Dashboard</h2>
                     <p>Overview and visual summaries of the active resistance database.</p>
                   </div>
-                  <DatabaseSelectorBar
-                    databases={databases}
-                    selectedDatabase={selectedDatabase}
-                    selectedDatabaseId={selectedDatabaseId}
-                    onDatabaseChange={setSelectedDatabaseId}
-                    selectId="database-tab-select"
-                    className="mutation-db-bar"
-                  />
                 </div>
 
                 {selectedDatabase ? (

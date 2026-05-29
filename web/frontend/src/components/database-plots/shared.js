@@ -8,7 +8,7 @@ export const CLASSIFICATION_COLORS = {
 };
 
 // Default palette for pie slices; order matters for stable legend color mapping.
-export const PIE_COLORS = ['#0f766e', '#1d4ed8', '#c2410c', '#7c3aed', '#ca8a04', '#0f4c5c', '#64748b'];
+export const PIE_COLORS = ['#27978e', '#5c79ca', '#be6e4e', '#8d5ddf', '#d1a034', '#467a87', '#64748b'];
 
 // Human-readable legend labels for stacked bars and summary plots.
 export const CLASSIFICATION_LABELS = {

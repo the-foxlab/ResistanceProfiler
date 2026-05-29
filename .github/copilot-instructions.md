@@ -214,10 +214,22 @@ Use the lightweight workflow skills to keep agent behavior consistent:
 - `handoff` when work needs to pause or move to another agent or turn.
 - `improve-codebase-architecture` when maintainability pain is caused by shallow modules or cross-layer coupling and you need deepening candidates.
 
+## Agent routing
+
+Use the specialist agents consistently with the skill system:
+
+- `Implementation Generalist`: default executor for most coding changes.
+- `Software Engineer Orchestrator`: planning and delegation for multi-step or multi-agent work.
+- `Codebase Review Specialist`: quality review across correctness, complexity, dead code, and cleanup.
+- `Security Specialist`: security audits and hardening (uploads, auth, SQL, CORS, rate limits, trust boundaries).
+- `Web Full-Stack Specialist`: coordinated backend/frontend work under `web/`.
+- `Public Documentation Specialist`: public docs quality and drift correction.
+- `GitHub Actions Specialist`: workflow and CI/CD hardening.
+
 # Code review guidelines
 
 Full code review is handled by the **Codebase Review Specialist** agent and its skills
-(`code-review-and-quality`, `dead-code-and-test-only-audit`, `complexity-and-compartmentalization-audit`, `review-cleanup-playbook`).
+(`code-review-and-quality`, `dead-code-and-test-only-audit`, `complexity-and-compartmentalization-audit`, `improve-codebase-architecture`, `review-cleanup-playbook`).
 
 When reviewing code, always check for:
 
@@ -232,3 +244,4 @@ When reviewing code, always check for:
 ## Testing
 
 Full testing rules, TDD cycle, fixtures, focus areas, and anti-patterns are defined in the `testing` skill.
+For unclear failures and regressions, use the `diagnose` skill before implementing a fix.

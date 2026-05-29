@@ -657,7 +657,7 @@ function _buildIc50DistributionSections(rules, formulaRules, plotMeta) {
     {
       sectionKey: 'ic50-distribution',
       sectionHeading: 'IC50 distribution',
-      layout: 'single-column',
+      layout: 'grid',
       plots,
     },
   ];
@@ -674,6 +674,7 @@ function _buildScoreDistributionSections(rules, formulaRules, plotMeta) {
     ...(Array.isArray(rules) ? rules : []),
     ...(Array.isArray(formulaRules) ? formulaRules : []),
   ];
+  const allScoreLabels = new Set();
 
   references.forEach((reference) => {
     const referenceName = _displayValue(reference.reference_name, 'Unknown reference');
@@ -690,6 +691,7 @@ function _buildScoreDistributionSections(rules, formulaRules, plotMeta) {
     if (!scoreLabel) {
       return;
     }
+    allScoreLabels.add(scoreLabel);
 
     const referenceName = _displayValue(rule.reference_name, 'Unknown reference');
     const organism = organismByReference.get(referenceName) || 'Unknown organism';
@@ -721,16 +723,17 @@ function _buildScoreDistributionSections(rules, formulaRules, plotMeta) {
     group.byScore.set(scoreLabel, (group.byScore.get(scoreLabel) || 0) + 1);
   });
 
+  const orderedScoreLabels = Array.from(allScoreLabels.values())
+    .sort((a, b) => _scoreCategorySort(a, b));
+
   const sectionEntries = Array.from(groups.entries())
     .map(([sectionKey, sectionPlots]) => {
       const plots = Array.from(sectionPlots.values())
         .map((group) => {
-          const scoreEntries = Array.from(group.byScore.entries())
-            .map(([scoreLabel, count]) => ({
-              scoreLabel,
-              count,
-            }))
-            .sort((a, b) => _scoreCategorySort(a.scoreLabel, b.scoreLabel));
+          const scoreEntries = orderedScoreLabels.map((scoreLabel) => ({
+            scoreLabel,
+            count: group.byScore.get(scoreLabel) || 0,
+          }));
 
           if (scoreEntries.length === 0) {
             return null;
