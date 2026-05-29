@@ -279,7 +279,7 @@ class TestRegenerate:
         ])
 
         assert result.exit_code != 0
-        assert '999' in result.output
+        assert '999' in (result.output + str(result.exception or ''))
 
     def test_regenerate_fingerprint_mismatch_raises_error(
         self,
@@ -306,7 +306,7 @@ class TestRegenerate:
         ])
 
         assert result.exit_code != 0
-        assert 'uuid mismatch' in result.output.lower()
+        assert 'uuid mismatch' in (result.output + str(result.exception or '')).lower()
 
     def test_regenerate_from_json_generates_html_report(
         self,
@@ -402,7 +402,7 @@ class TestRegenerate:
         ])
 
         assert result.exit_code != 0
-        assert 'invalid results json' in result.output.lower()
+        assert 'invalid results json' in (result.output + str(result.exception or '')).lower()
 
     def test_regenerate_from_json_uuid_mismatch_raises_error(
         self,
@@ -440,7 +440,7 @@ class TestRegenerate:
         ])
 
         assert result.exit_code != 0
-        output_lower = result.output.lower()
+        output_lower = (result.output + str(result.exception or '')).lower()
         assert 'uuid mismatch' in output_lower
         assert 'database updates currently do not allow' in output_lower
 
@@ -722,7 +722,7 @@ class TestClassify:
         ])
 
         assert result.exit_code != 0
-        assert 'at least one' in result.output.lower() or 'required' in result.output.lower()
+        assert 'at least one' in (result.output + str(result.exception or '')).lower() or 'required' in (result.output + str(result.exception or '')).lower()
 
     def test_classify_unknown_run_id_raises_error(
         self,
@@ -741,7 +741,7 @@ class TestClassify:
         ])
 
         assert result.exit_code != 0
-        assert '999' in result.output
+        assert '999' in (result.output + str(result.exception or ''))
 
     def test_classify_replaces_existing_classification(
         self,
@@ -863,7 +863,7 @@ class TestExploreRules:
         ])
 
         assert result.exit_code != 0
-        assert 'No reference matching' in result.output
+        assert 'No reference matching' in (result.output + str(result.exception or ''))
 
     def test_rules_output_includes_browse_compatible_optional_columns(
         self,

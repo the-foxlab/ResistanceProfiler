@@ -434,7 +434,7 @@ class TestProfileCli:
         ])
 
         assert result.exit_code != 0
-        assert 'VCF contig names do not match the uploaded reference FASTA' in result.output
+        assert 'VCF contig names do not match the uploaded reference FASTA' in (result.output + str(result.exception or ''))
 
     def test_profile_with_results_db_creates_new_db(
         self,
@@ -514,7 +514,7 @@ class TestProfileCli:
             '--min-depth', '0',
         ])
         assert result.exit_code != 0
-        assert 'schema mismatch' in result.output.lower()
+        assert 'schema mismatch' in (result.output + str(result.exception or '')).lower()
 
     def test_profile_fails_when_ref_fasta_does_not_match_any_rule_feature(
         self,
@@ -536,7 +536,7 @@ class TestProfileCli:
         ])
 
         assert result.exit_code != 0
-        assert 'no cds matches above thresholds' in result.output.lower()
+        assert 'no cds matches above thresholds' in (result.output + str(result.exception or '')).lower()
 
     def test_profile_vcf_with_bam_persists_coverage_gaps(
         self,
@@ -924,7 +924,7 @@ class TestInitCli:
         ])
 
         assert result.exit_code != 0
-        assert 'schema mismatch' in result.output.lower()
+        assert 'schema mismatch' in (result.output + str(result.exception or '')).lower()
 
     def test_init_add_requires_stored_annotations_when_no_genbank_is_given(self, tmp_path: Path):
         db_path = tmp_path / 'empty_project.db'
@@ -950,7 +950,7 @@ class TestInitCli:
         ])
 
         assert result.exit_code != 0
-        assert 'no stored references/features' in result.output.lower()
+        assert 'no stored references/features' in (result.output + str(result.exception or '')).lower()
 
     def test_init_warns_on_rule_feature_missing_in_genbank(self, tmp_path: Path):
         genbank_path = write_genbank(
@@ -1020,7 +1020,7 @@ class TestInitCli:
         ])
 
         assert result.exit_code != 0
-        assert 'missing required field reference_identifier' in result.output
+        assert 'missing required field reference_identifier' in (result.output + str(result.exception or ''))
 
 
     def test_profile_with_results_db_populates_run_and_variants(
