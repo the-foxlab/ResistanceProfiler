@@ -378,7 +378,7 @@ export function useDashboardLogic() {
   const [selectedDatabaseId, setSelectedDatabaseId] = useState('');
   const [uploadedPaths, setUploadedPaths] = useState([]);
   const [reportPaths, setReportPaths] = useState([]);
-  const [status, setStatus] = useState('Ready (backend startup configuration active)');
+  const [statusError, setStatusError] = useState('');
   const [sessionResults, setSessionResults] = useState([]);
   const [selectedProfileReportPath, setSelectedProfileReportPath] = useState('');
   const [isProcessingFasta, setIsProcessingFasta] = useState(false);
@@ -416,6 +416,7 @@ export function useDashboardLogic() {
   const [batchSamples, setBatchSamples] = useState([]);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [isBatchDownloadBusy, setIsBatchDownloadBusy] = useState(false);
+  const [isSessionDownloadBusy, setIsSessionDownloadBusy] = useState(false);
   const [batchError, setBatchError] = useState(null);
   const [batchRateLimitCooldown, setBatchRateLimitCooldown] = useState(0);
   const [batchSubmitted, setBatchSubmitted] = useState(false);
@@ -432,7 +433,6 @@ export function useDashboardLogic() {
   useEffect(() => {
     const initData = async () => {
       try {
-        setStatus('Loading available databases...');
         const uiConfigPayload = await apiGet('/api/ui/config').catch(() => null);
         const uiConfig = uiConfigPayload?.data || {};
         if (Number.isFinite(uiConfig.batch_max_samples) && uiConfig.batch_max_samples > 0) {
@@ -448,9 +448,8 @@ export function useDashboardLogic() {
           setSelectedDatabaseId(items[0].id);
           return;
         }
-        setStatus('No databases available');
       } catch (error) {
-        setStatus(`Error loading data: ${error.message}`);
+        setStatusError(`Error loading data: ${error.message}`);
       }
     };
     initData();
@@ -462,7 +461,6 @@ export function useDashboardLogic() {
     }
     const loadMutationsForDb = async () => {
       // Mutation browser + database charts both read from this payload.
-      setStatus('Loading mutations from database...');
       try {
         const payload = await apiGet('/api/mutations', { database_id: selectedDatabaseId });
         const items = payload.data.items || [];
@@ -479,7 +477,7 @@ export function useDashboardLogic() {
         setMutationsLoaded(true);
         // Keep status area quiet after background mutation loading to reduce UI noise.
       } catch (error) {
-        setStatus(`Error loading mutations: ${error.message}`);
+        setStatusError(`Error loading mutations: ${error.message}`);
       }
     };
     loadMutationsForDb();
@@ -702,11 +700,6 @@ export function useDashboardLogic() {
       setActiveJobStatus(payload.status);
       if (payload.status === 'succeeded') return payload.result;
       if (payload.status === 'failed') throw new Error(formatUserError(payload.error || 'Job failed'));
-      if (payload.status === 'queued') {
-        setStatus(`Job queued (${jobId.slice(0, 8)}...)`);
-      } else {
-        setStatus(`Job running (${jobId.slice(0, 8)}...)`);
-      }
     }
   };
 
@@ -718,10 +711,9 @@ export function useDashboardLogic() {
     setIsCancelingJob(true);
     try {
       await apiDelete(`/api/jobs/${activeJobId}`);
-      setStatus(`Job cancellation requested (${activeJobId.slice(0, 8)}...)`);
       setActiveJobStatus('canceling');
     } catch (error) {
-      setStatus(formatUserError(error.message));
+      setStatusError(formatUserError(error.message));
     } finally {
       setIsCancelingJob(false);
     }
@@ -734,7 +726,7 @@ export function useDashboardLogic() {
     const fastaLabel = formatPathBasename(fastaPath);
 
     setIsProcessingFasta(true);
-    setStatus(`Submitting FASTA profiling job for ${databaseLabel} using ${fastaLabel}...`);
+    setStatusError('');
     try {
       const submitResponse = await apiPost('/api/profile/fasta', {
         ...fastaInput,
@@ -743,7 +735,6 @@ export function useDashboardLogic() {
       });
       setActiveJobId(submitResponse.job_id);
       setActiveJobStatus('queued');
-      setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
       const result = await pollJob(submitResponse.job_id);
       // Keep a local history of run results for the report selector.
       setSessionResults((prev) => [...prev, result]);
@@ -751,19 +742,8 @@ export function useDashboardLogic() {
       setSelectedProfileReportPath(result.report_html_path);
       setInlineReportPath(result.report_html_path);
       setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);
-      if ((result.resistance_hits || 0) === 0) {
-        setStatus(
-          `FASTA profiling finished for ${result.database_id || databaseLabel} using `
-          + `${formatPathBasename(result.input_path || fastaPath)}. No database matches were found for this sample.`
-        );
-      } else {
-        setStatus(
-          `FASTA profiling finished for ${result.database_id || databaseLabel} using `
-          + `${formatPathBasename(result.input_path || fastaPath)}. Database matches were found.`
-        );
-      }
     } catch (error) {
-      setStatus(formatUserError(error.message));
+      setStatusError(formatUserError(error.message));
     } finally {
       setIsProcessingFasta(false);
       setIsCancelingJob(false);
@@ -781,10 +761,7 @@ export function useDashboardLogic() {
     const referenceLabel = formatPathBasename(referenceFastaPath);
 
     setIsProcessingVcf(true);
-    setStatus(
-      `Submitting VCF profiling job for ${databaseLabel} using ${vcfLabel} `
-      + `and ${referenceLabel}...`
-    );
+    setStatusError('');
     try {
       if (!Number.isFinite(vcfInput.min_af) || vcfInput.min_af < 0 || vcfInput.min_af > 1) {
         throw new Error('Frequency cutoff (min AF) must be a number between 0 and 1.');
@@ -800,26 +777,14 @@ export function useDashboardLogic() {
       });
       setActiveJobId(submitResponse.job_id);
       setActiveJobStatus('queued');
-      setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
       const result = await pollJob(submitResponse.job_id);
       setSessionResults((prev) => [...prev, result]);
       addResultArtifactPaths(result);
       setSelectedProfileReportPath(result.report_html_path);
       setInlineReportPath(result.report_html_path);
       setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);
-      if ((result.resistance_hits || 0) === 0) {
-        setStatus(
-          `VCF profiling finished for ${result.database_id || databaseLabel} using `
-          + `${formatPathBasename(result.input_path || vcfPath)}. No database matches were found for this sample.`
-        );
-      } else {
-        setStatus(
-          `VCF profiling finished for ${result.database_id || databaseLabel} using `
-          + `${formatPathBasename(result.input_path || vcfPath)}. Database matches were found.`
-        );
-      }
     } catch (error) {
-      setStatus(formatUserError(error.message));
+      setStatusError(formatUserError(error.message));
     } finally {
       setIsProcessingVcf(false);
       setIsCancelingJob(false);
@@ -830,7 +795,6 @@ export function useDashboardLogic() {
 
   const uploadFile = async (file, fileType, onSuccess) => {
     // Shared upload path for FASTA/VCF/reference/BAM inputs.
-    setStatus(`Uploading ${fileType.toUpperCase()} file (${file.name})...`);
     setUploadProgress({
       percent: 0,
       fileName: `${fileType.toUpperCase()} - ${file.name}`,
@@ -848,9 +812,8 @@ export function useDashboardLogic() {
         ...prev,
         percent: 100,
       }));
-      setStatus(`${fileType.toUpperCase()} file uploaded successfully.`);
     } catch (error) {
-      setStatus(formatUserError(error.message));
+      setStatusError(formatUserError(error.message));
     }
   };
 
@@ -886,28 +849,26 @@ export function useDashboardLogic() {
 
   const runRegenerateFromJson = async () => {
     if (!jsonInputPath) {
-      setStatus('Upload a valid results JSON file first.');
+      setStatusError('Upload a valid results JSON file first.');
       return;
     }
 
     setIsProcessingRegenerate(true);
-    setStatus('Submitting regenerate-from-JSON job...');
+    setStatusError('');
     try {
       const submitResponse = await apiPost('/api/regenerate/json', {
         json_path: jsonInputPath,
       });
       setActiveJobId(submitResponse.job_id);
       setActiveJobStatus('queued');
-      setStatus(`Job queued (${submitResponse.job_id.slice(0, 8)}...)`);
       const result = await pollJob(submitResponse.job_id);
       setSessionResults((prev) => [...prev, result]);
       addResultArtifactPaths(result);
       setSelectedProfileReportPath(result.report_html_path);
       setInlineReportPath(result.report_html_path);
       setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);
-      setStatus('JSON regeneration finished successfully.');
     } catch (error) {
-      setStatus(formatUserError(error.message));
+      setStatusError(formatUserError(error.message));
     } finally {
       setIsProcessingRegenerate(false);
       setIsCancelingJob(false);
@@ -1193,6 +1154,42 @@ export function useDashboardLogic() {
     }
   };
 
+  const downloadAllSessionArtifacts = async () => {
+    const artifactPaths = sessionResults.flatMap((result) => [
+      result.report_html_path,
+      result.report_pdf_path,
+      result.report_json_path,
+    ].filter(Boolean));
+
+    if (artifactPaths.length === 0) return;
+
+    setIsSessionDownloadBusy(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/artifact-bundle`, {
+        method: 'POST',
+        headers: buildHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ paths: artifactPaths }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
+      }
+
+      const href = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a');
+      anchor.href = href;
+      anchor.download = 'respro-session-artifacts.zip';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(href);
+    } catch (error) {
+      setStatusError(formatUserError(error.message));
+    } finally {
+      setIsSessionDownloadBusy(false);
+    }
+  };
+
   const canCancelJob = Boolean(activeJobId) && ['queued', 'running'].includes(activeJobStatus);
 
   const runSelectedProfile = async () => {
@@ -1267,7 +1264,7 @@ export function useDashboardLogic() {
     selectedDatabase,
     selectedDatabaseId,
     setSelectedDatabaseId,
-    status,
+    statusError,
     selectedProfileReportPath,
     setSelectedProfileReportPath,
     mutationFilter,
@@ -1341,5 +1338,8 @@ export function useDashboardLogic() {
     submitBatch,
     downloadAllBatchArtifacts,
     resetBatch,
+    // Session
+    isSessionDownloadBusy,
+    downloadAllSessionArtifacts,
   };
 }

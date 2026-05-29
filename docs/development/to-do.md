@@ -337,13 +337,7 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 ### Smaller Issues
 
 - 🟡adapt webapp a bit (better sidebar, less tile in tile):
-  - adjust whitespace in for search
-  - score histogramm same x axis (all possible values overall)
-  - scroll weird for databases - should be behind header
-  - add auto button up here
   - restyle about --> chatgpt restyle layout looks actually nice
-  - add dark mode (should adapt automatically and also report... might be a bit overkill)
-  - 
 - one analysis option with different modi and one report option that shows previous reports (independent if batch or not) --> do not show below but always in new tab (previous than shows all in that session)
 - 🟡 add herpes drg assessment of ic50 values
 - 🟡 herpes drg --> fold ic50 ?

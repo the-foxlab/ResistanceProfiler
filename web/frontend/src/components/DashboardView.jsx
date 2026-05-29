@@ -27,10 +27,10 @@ import searchIconSrc from '../assets/search.svg';
 import resetFilterIconSrc from '../assets/reset_filter.svg';
 
 const MODES = [
-  { id: 'analyze', label: 'Analyze', iconSrc: homeIconSrc },
-  { id: 'results', label: 'Session results', iconSrc: reportIconSrc },
-  { id: 'database', label: 'Database', iconSrc: databaseIconSrc },
-  { id: 'mutations', label: 'Browse mutations', iconSrc: mutationsIconSrc },
+  { id: 'analyze', label: 'Analysis', iconSrc: homeIconSrc },
+  { id: 'results', label: 'Reports', iconSrc: reportIconSrc },
+  { id: 'database', label: 'Database Dashboard', iconSrc: databaseIconSrc },
+  { id: 'mutations', label: 'Browse Mutations', iconSrc: mutationsIconSrc },
   { id: 'about', label: 'About', iconSrc: aboutIconSrc },
 ];
 
@@ -106,7 +106,7 @@ export function DashboardView({
   selectedDatabase,
   selectedDatabaseId,
   setSelectedDatabaseId,
-  status,
+  statusError,
   selectedProfileReportPath,
   setSelectedProfileReportPath,
   mutationFilter,
@@ -164,6 +164,7 @@ export function DashboardView({
   batchSamples,
   batchSubmitting,
   isBatchDownloadBusy,
+  isSessionDownloadBusy,
   batchError,
   batchRateLimitCooldown,
   setBatchRateLimitCooldown,
@@ -178,6 +179,7 @@ export function DashboardView({
   uploadBatchReferenceFasta,
   submitBatch,
   downloadAllBatchArtifacts,
+  downloadAllSessionArtifacts,
   resetBatch,
 }) {
   // These controls only affect database charts, not mutation browsing or profiling.
@@ -313,6 +315,7 @@ export function DashboardView({
               aria-label={mode.label}
             >
               <span className="sidebar-icon-mask" style={{ '--icon-src': `url(${mode.iconSrc})` }} aria-hidden="true" />
+              <span className="sidebar-rail-text">{mode.label}</span>
             </button>
           ))}
         </nav>
@@ -485,7 +488,7 @@ export function DashboardView({
                           />
                         </label>
                         <label>
-                          <span className="label-text input-label-row">Coverage cutoff <button type="button" className="input-info-btn" aria-label="Coverage cutoff help" title="Minimum read depth required for calling a variant."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                          <span className="label-text input-label-row">Coverage cutoff <button type="button" className="input-info-btn" aria-label="Coverage cutoff help" title="Minimum read depth required for including a position."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                           <input
                             type="number"
                             min="0"
@@ -549,16 +552,6 @@ export function DashboardView({
                     ) : null}
 
                     <div className="profile-analyze-row">
-                      {canCancelJob ? (
-                        <button
-                          type="button"
-                          className="button-link report-action-btn"
-                          onClick={() => cancelActiveJob()}
-                          disabled={isCancelingJob}
-                        >
-                          {isCancelingJob ? 'Canceling...' : 'Cancel job'}
-                        </button>
-                      ) : null}
                       <button
                         type="button"
                         className="analyze-primary"
@@ -569,7 +562,13 @@ export function DashboardView({
                           }
                           runSelectedProfile();
                         }}
-                        disabled={activeProfileMode === 'regenerate' ? (isRegenerateBusy || !jsonInputPath) : isProfileBusy}
+                        disabled={
+                          activeProfileMode === 'regenerate' 
+                            ? (isRegenerateBusy || !jsonInputPath) 
+                            : activeProfileMode === 'vcf'
+                              ? (isProfileBusy || !vcfInput.vcf_path || !vcfInput.ref_fasta_path)
+                              : (isProfileBusy || !fastaInput.fasta_path)
+                        }
                       >
                         {(activeProfileMode === 'regenerate' ? isRegenerateBusy : isProfileBusy) ? (
                           <>
@@ -579,6 +578,19 @@ export function DashboardView({
                           activeProfileMode === 'regenerate' ? 'Regenerate' : 'Analyze'
                         )}
                       </button>
+                      {canCancelJob ? (
+                        <button
+                          type="button"
+                          className="button-link report-action-btn"
+                          onClick={() => cancelActiveJob()}
+                          disabled={isCancelingJob}
+                        >
+                          {isCancelingJob ? 'Canceling...' : 'Cancel job'}
+                        </button>
+                      ) : null}
+                      {statusError ? (
+                        <p className="status" style={{ color: 'var(--color-error, #c2410c)', marginLeft: '1rem' }}>{statusError}</p>
+                      ) : null}
                     </div>
 
                     <div className="inline-actions report-actions analyze-report-actions">
@@ -929,6 +941,7 @@ export function DashboardView({
               {sessionResults.length === 0 ? (
                 <p className="status">No results yet. Run an analysis to see results here.</p>
               ) : (
+                <>
                 <div className="table-wrap mutation-table-wrap">
                   <table>
                     <thead>
@@ -963,6 +976,21 @@ export function DashboardView({
                     </tbody>
                   </table>
                 </div>
+                <div className="profile-analyze-row">
+                  <button
+                    type="button"
+                    className="analyze-primary"
+                    onClick={() => downloadAllSessionArtifacts()}
+                    disabled={isSessionDownloadBusy}
+                  >
+                    {isSessionDownloadBusy ? (
+                      <><Spinner /> Preparing...</>
+                    ) : (
+                      'Download all'
+                    )}
+                  </button>
+                </div>
+                </>
               )}
             </article>
           ) : null}
