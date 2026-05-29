@@ -20,6 +20,8 @@ You are the default execution agent for this repository. Your job is to ship cor
 - Prefer smallest viable patch over broad refactor
 - Keep behavior stable unless behavior change is requested
 - Run focused tests first, then broaden only if needed
+- Use `testing` for any behavior change and `diagnose` when the failing path needs a narrow debug loop
+- Use `handoff` when the work is interrupted or needs to be continued in another turn
 - If blocked, report one concrete blocker and next best option
 
 ## Constraints
@@ -41,6 +43,8 @@ You are the default execution agent for this repository. Your job is to ship cor
 3. Implement in one coherent patch whenever practical.
 4. Run targeted verification commands.
 5. Report delta, validation, and any remaining risk.
+
+For bug fixes, pair this agent with the `testing` and `diagnose` skills so the failure is reproduced before the fix is written.
 
 ## Output Format
 

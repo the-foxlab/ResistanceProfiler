@@ -10,7 +10,7 @@ import aboutCommunityIconSrc from '../assets/icon-community.svg';
 import databaseIconSrc from '../assets/icon-database.svg';
 import githubIconSrc from '../assets/icon-github.svg';
 import websiteIconSrc from '../assets/website.svg';
-import mutationsIconSrc from '../assets/icon-mutations.svg';
+import mutationsIconSrc from '../assets/search.svg';
 import batchIconSrc from '../assets/batch.svg';
 import { FRONTEND_CONFIG } from '../config';
 import { buildDatabasePlots } from './database-plots/buildDatabasePlots';
@@ -20,6 +20,8 @@ import { DatabaseDrugDistributionPlot } from './database-plots/DatabaseDrugDistr
 import { DatabaseSelectorBar } from './DatabaseSelectorBar';
 import { Spinner } from './Spinner';
 import regenerateIconSrc from '../assets/icon-regenerate.svg';
+import searchIconSrc from '../assets/search.svg';
+import resetFilterIconSrc from '../assets/reset_filter.svg';
 
 const MODES = [
   { id: 'profile', label: 'Analyze', iconSrc: analyzeIconSrc },
@@ -982,36 +984,34 @@ export function DashboardView({
                     <p>{displayedRules.length} visible row(s)</p>
                   </div>
                 </div>
-                <div className="table-controls-container section-subtile">
-                  <div className="table-controls">
-                    <label>Filter:</label>
-                    <select
-                      value={mutationFilterColumn}
-                      onChange={(event) => setMutationFilterColumn(event.target.value)}
-                    >
-                      <option value="-1">All columns</option>
-                      {mutationColumns.map((column, index) => (
-                        <option key={column.key} value={String(index)}>{column.label}</option>
-                      ))}
-                    </select>
-                    <input
-                      type="text"
-                      placeholder="contains..."
-                      value={mutationFilter}
-                      onChange={(event) => setMutationFilter(event.target.value)}
-                    />
+                <div className="table-controls-container">
+                  <div className="mutation-toolbar">
+                    <label className="mutation-search" htmlFor="mutation-rules-search">
+                      <img src={searchIconSrc} alt="" aria-hidden="true" />
+                      <input
+                        id="mutation-rules-search"
+                        className="mutation-search-input"
+                        type="search"
+                        placeholder="search rules"
+                        value={mutationFilter}
+                        onChange={(event) => setMutationFilter(event.target.value)}
+                      />
+                    </label>
                     <button
                       type="button"
+                      className="mutation-reset-button"
+                      aria-label="Reset filter"
+                      title="Reset filter"
                       onClick={() => {
                         setMutationFilter('');
                         setMutationFilterColumn('-1');
                       }}
                     >
-                      Reset
+                      <img src={resetFilterIconSrc} alt="" aria-hidden="true" />
                     </button>
                     <button
                       type="button"
-                      className="download-tsv-btn"
+                      className="mutation-download-button"
                       onClick={downloadMutationsAsTsv}
                     >
                       Download as TSV
@@ -1066,36 +1066,34 @@ export function DashboardView({
                     <p>{displayedFormulaRules.length} visible row(s)</p>
                   </div>
                 </div>
-                <div className="table-controls-container section-subtile">
-                  <div className="table-controls">
-                    <label>Filter:</label>
-                    <select
-                      value={formulaFilterColumn}
-                      onChange={(event) => setFormulaFilterColumn(event.target.value)}
-                    >
-                      <option value="-1">All columns</option>
-                      {formulaColumns.map((column, index) => (
-                        <option key={column.key} value={String(index)}>{column.label}</option>
-                      ))}
-                    </select>
-                    <input
-                      type="text"
-                      placeholder="contains..."
-                      value={formulaFilter}
-                      onChange={(event) => setFormulaFilter(event.target.value)}
-                    />
+                <div className="table-controls-container">
+                  <div className="mutation-toolbar">
+                    <label className="mutation-search" htmlFor="formula-rules-search">
+                      <img src={searchIconSrc} alt="" aria-hidden="true" />
+                      <input
+                        id="formula-rules-search"
+                        className="mutation-search-input"
+                        type="search"
+                        placeholder="search rules"
+                        value={formulaFilter}
+                        onChange={(event) => setFormulaFilter(event.target.value)}
+                      />
+                    </label>
                     <button
                       type="button"
+                      className="mutation-reset-button"
+                      aria-label="Reset filter"
+                      title="Reset filter"
                       onClick={() => {
                         setFormulaFilter('');
                         setFormulaFilterColumn('-1');
                       }}
                     >
-                      Reset
+                      <img src={resetFilterIconSrc} alt="" aria-hidden="true" />
                     </button>
                     <button
                       type="button"
-                      className="download-tsv-btn"
+                      className="mutation-download-button"
                       onClick={downloadFormulaRulesAsTsv}
                     >
                       Download as TSV

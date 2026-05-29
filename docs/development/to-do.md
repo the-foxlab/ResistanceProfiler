@@ -336,12 +336,15 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Smaller Issues
 
-- 🟡adapt webapp a bit (better sidebar, less tile in tile)
+- 🟡adapt webapp a bit (better sidebar, less tile in tile):
+  - adjust whitespace in for search
+  - score histogramm same x axis (all possible values overall)
+  - scroll weird for databases - should be behind header
+  - add auto button up here
+  - restyle about --> chatgpt restyle layout looks actually nice
+  - add dark mode (should adapt automatically and also report... might be a bit overkill)
+  - 
 - one analysis option with different modi and one report option that shows previous reports (independent if batch or not) --> do not show below but always in new tab (previous than shows all in that session)
-- 🟡missing gene in table webapp (likely due to naming it to feature)
 - 🟡 add herpes drg assessment of ic50 values
 - 🟡 herpes drg --> fold ic50 ?
-- 🟡 add scoring overview to potential plots
-- 🟡 rethink plots in app (make them more beautiful?)
-- 🟡 make formula rules use applied feature and not generic name in the table
-- automatic database match for regenerate?
+- 🟡 add user information in web app and docu that explains the rational on how combinatorial rules fire and how changes are assessed in the same codon

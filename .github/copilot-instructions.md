@@ -203,6 +203,17 @@ a collection.
 Full todo management rules (structure, priority selection, marking done, adding items) are defined
 in the `todo-management` skill.
 
+## Workflow skills
+
+Use the lightweight workflow skills to keep agent behavior consistent:
+
+- `grill-me` when the request is underspecified and needs targeted clarification before code changes.
+- `testing` for any implementation or bug fix that should be proven with a red-green-refactor loop.
+- `diagnose` when a bug needs disciplined reproduction and narrowing before a fix.
+- `zoom-out` when a change may affect subsystem boundaries or architecture decisions.
+- `handoff` when work needs to pause or move to another agent or turn.
+- `improve-codebase-architecture` when maintainability pain is caused by shallow modules or cross-layer coupling and you need deepening candidates.
+
 # Code review guidelines
 
 Full code review is handled by the **Codebase Review Specialist** agent and its skills

@@ -191,20 +191,29 @@ function _formatDrugNameWithAlias(name, aliasLookup) {
   return `${drugName} (${alias})`;
 }
 
-function _buildRulesPerDrugPie(rules) {
+function _buildRulesPerDrugPie(rules, plotMeta) {
   // Counts raw rule rows per drug (not unique mutations).
+  const aliasLookup = _buildDrugAliasLookup(plotMeta);
   const counts = new Map();
 
   rules.forEach((rule) => {
     const drugName = _displayValue(rule.drug, 'Unspecified drug');
-    counts.set(drugName, (counts.get(drugName) || 0) + 1);
+    const key = drugName.trim().toLowerCase();
+    const entry = counts.get(key) || {
+      label: _formatDrugNameWithAlias(drugName, aliasLookup),
+      count: 0,
+    };
+    entry.count += 1;
+    counts.set(key, entry);
   });
 
   if (counts.size === 0) {
     return null;
   }
 
-  const ordered = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+  const ordered = Array.from(counts.values())
+    .map((entry) => [entry.label, entry.count])
+    .sort((a, b) => b[1] - a[1]);
   return {
     key: 'rules-per-drug',
     title: 'Mutations per Drug',
@@ -214,8 +223,9 @@ function _buildRulesPerDrugPie(rules) {
   };
 }
 
-function _buildDoiPerDrugPie(rules, formulaRules) {
+function _buildDoiPerDrugPie(rules, formulaRules, plotMeta) {
   // Counts unique publication identifiers per drug across single and formula rules.
+  const aliasLookup = _buildDrugAliasLookup(plotMeta);
   const counts = new Map();
 
   const allRows = [
@@ -225,13 +235,17 @@ function _buildDoiPerDrugPie(rules, formulaRules) {
 
   allRows.forEach((rule) => {
     const drugName = _displayValue(rule.drug, 'Unspecified drug');
-    const doiSet = counts.get(drugName) || new Set();
-    _extractDoiTokens(rule.publication).forEach((doi) => doiSet.add(doi));
-    counts.set(drugName, doiSet);
+    const key = drugName.trim().toLowerCase();
+    const entry = counts.get(key) || {
+      label: _formatDrugNameWithAlias(drugName, aliasLookup),
+      doiSet: new Set(),
+    };
+    _extractDoiTokens(rule.publication).forEach((doi) => entry.doiSet.add(doi));
+    counts.set(key, entry);
   });
 
-  const ordered = Array.from(counts.entries())
-    .map(([label, doiSet]) => [label, doiSet.size])
+  const ordered = Array.from(counts.values())
+    .map((entry) => [entry.label, entry.doiSet.size])
     .filter(([, count]) => count > 0)
     .sort((a, b) => b[1] - a[1]);
 
@@ -334,8 +348,8 @@ function _buildSummaryPies(rules, formulaRules, plotMeta) {
   // Compose all headline pies shown in the summary row.
   const pies = [
     _buildRuleTypePie(rules, formulaRules),
-    _buildRulesPerDrugPie(rules),
-    _buildDoiPerDrugPie(rules, formulaRules),
+    _buildRulesPerDrugPie(rules, plotMeta),
+    _buildDoiPerDrugPie(rules, formulaRules, plotMeta),
     _buildMutationsPerGenePie(rules),
     _buildEntriesPerOrganismPie(rules, plotMeta),
   ].filter(Boolean);

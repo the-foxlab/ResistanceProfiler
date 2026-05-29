@@ -110,9 +110,21 @@ def build_report_context(
     all_mutations_rows = _build_all_mutations_rows(result, feature_alignments, display_names)
     metric_thresholds = _load_numeric_metric_thresholds(project_conn)
     drug_class_map = _load_drug_class_map(project_conn)
-    database_hits = _build_database_hits_rows(result, display_names, metric_thresholds, drug_class_map)
+    drug_alias_map = _load_drug_alias_map(project_conn)
+    database_hits = _build_database_hits_rows(
+        result,
+        display_names,
+        metric_thresholds,
+        drug_class_map,
+        drug_alias_map,
+    )
     similarity_entries = _build_potential_effects_rows(
-        result, rules or [], display_names, metric_thresholds, drug_class_map
+        result,
+        rules or [],
+        display_names,
+        metric_thresholds,
+        drug_class_map,
+        drug_alias_map,
     )
 
     summary_context = _build_summary_context(
@@ -121,6 +133,7 @@ def build_report_context(
         database_hits=database_hits,
         similarity_entries=similarity_entries,
         project_conn=project_conn,
+        drug_alias_map=drug_alias_map,
     )
 
     db_drug_cards = _load_drug_cards(project_conn, detected_drug_names)
@@ -129,7 +142,7 @@ def build_report_context(
         for card in db_drug_cards
         if (card.get('name') or '').strip()
     }
-    drug_cards = _build_drug_cards(drug_stats, db_drug_cards_by_name)
+    drug_cards = _build_drug_cards(drug_stats, db_drug_cards_by_name, drug_alias_map)
 
     detected_feature_names = set(feature_stats)
     db_feature_cards = _load_feature_cards(
@@ -484,7 +497,15 @@ def _load_drug_alias_map(
 
 
 def _format_drug_name_with_alias(name: str, alias_map: dict[str, str]) -> str:
-    """Return the shorter of canonical drug name and alias (when alias exists)."""
+    """Return canonical drug name with alias suffix (when alias exists)."""
+    alias = alias_map.get(name.strip().lower(), '')
+    if not alias:
+        return name
+    return f'{name} ({alias})'
+
+
+def _format_drug_name_for_summary(name: str, alias_map: dict[str, str]) -> str:
+    """Return the shorter of canonical drug name and alias for summary narrative lists."""
     alias = alias_map.get(name.strip().lower(), '')
     if not alias:
         return name
@@ -496,6 +517,7 @@ def _build_database_hits_rows(
     display_names: dict[str, str] | None = None,
     metric_thresholds: dict[str, tuple[float, float] | None] | None = None,
     drug_class_map: dict[str, str] | None = None,
+    drug_alias_map: dict[str, str] | None = None,
 ) -> dict:
     """
     Build one row per database hit for the Database Hits table.
@@ -508,6 +530,7 @@ def _build_database_hits_rows(
     :param display_names: optional feature display-name overrides
     :param metric_thresholds: optional mean/std per numeric field for tier-badge coloring
     :param drug_class_map: optional mapping of normalized drug name to drug class/group name
+    :param drug_alias_map: optional mapping of normalized drug name to alias
     :return: dict with 'rows', 'count', 'has_publications', 'has_drug_class', and 'bibliography'
     """
     rows: list[dict] = []
@@ -520,7 +543,8 @@ def _build_database_hits_rows(
                 else ann.feature_name
             )
             rows.append({
-                'drug': rule.drug_name,
+                'drug_key': rule.drug_name,
+                'drug': _format_drug_name_with_alias(rule.drug_name, drug_alias_map or {}),
                 'drug_class': (drug_class_map or {}).get(rule.drug_name.strip().lower(), ''),
                 'mutation_groups': [{'feature': feature, 'muts': [aa_change]}],
                 'metrics': _build_rule_metrics(
@@ -547,7 +571,8 @@ def _build_database_hits_rows(
             feature_to_muts.setdefault(feature, []).append(aa_change)
         mutation_groups = [{'feature': f, 'muts': muts} for f, muts in feature_to_muts.items()]
         rows.append({
-            'drug': rs.drug_name,
+            'drug_key': rs.drug_name,
+            'drug': _format_drug_name_with_alias(rs.drug_name, drug_alias_map or {}),
             'drug_class': (drug_class_map or {}).get(rs.drug_name.strip().lower(), ''),
             'mutation_groups': mutation_groups,
             'metrics': _build_rule_metrics(
@@ -832,11 +857,16 @@ def _build_feature_stats(
     return stats
 
 
-def _build_drug_cards(drug_stats: dict[str, dict], db_drug_cards_by_name: dict[str, dict]) -> list[dict]:
+def _build_drug_cards(
+    drug_stats: dict[str, dict],
+    db_drug_cards_by_name: dict[str, dict],
+    drug_alias_map: dict[str, str] | None = None,
+) -> list[dict]:
     """Merge detected-drug stats with optional DB metadata into card payloads."""
     cards: list[dict] = []
     for key in sorted(drug_stats, key=lambda name: drug_stats[name]['name'].lower()):
         stats = dict(drug_stats[key])
+        stats['name'] = _format_drug_name_with_alias(stats['name'], drug_alias_map or {})
         metadata = db_drug_cards_by_name.get(key)
         if metadata:
             stats.update({
@@ -908,6 +938,7 @@ def _build_potential_effects_rows(
     display_names: dict[str, str] | None = None,
     metric_thresholds: dict[str, tuple[float, float] | None] | None = None,
     drug_class_map: dict[str, str] | None = None,
+    drug_alias_map: dict[str, str] | None = None,
 ) -> dict:
     """
     Build the Similarity to Database Entries context.
@@ -922,6 +953,7 @@ def _build_potential_effects_rows(
     :param display_names: optional feature display-name overrides
     :param metric_thresholds: optional mean/std per numeric field for metric tier colouring
     :param drug_class_map: optional mapping of normalised drug name to drug class
+    :param drug_alias_map: optional mapping of normalised drug name to alias
     :return: dict with 'rows', 'count', 'has_drug_class', 'has_publications', 'bibliography', icons
     """
     def _empty() -> dict:
@@ -991,7 +1023,7 @@ def _build_potential_effects_rows(
             feature_name = (display_names or {}).get(ann.feature_name, ann.feature_name)
             rows.append({
                 'feature': feature_name,
-                'drug': rule.drug_name,
+                'drug': _format_drug_name_with_alias(rule.drug_name, drug_alias_map or {}),
                 'drug_class': (drug_class_map or {}).get(rule.drug_name.strip().lower(), ''),
                 'mutation': observed_change,
                 'rule_change': rule_change,
@@ -1117,6 +1149,7 @@ def _build_summary_context(
     database_hits: dict,
     similarity_entries: dict,
     project_conn: sqlite3.Connection | None,
+    drug_alias_map: dict[str, str] | None = None,
 ) -> dict:
     """
     Build the complete context dict for the Summary tab.
@@ -1132,7 +1165,12 @@ def _build_summary_context(
     gene_coverage = _compute_gene_coverage(result, display_names)
     mutation_profile = _build_mutation_profile(result, display_names, gene_coverage)
     has_narrative = _has_interpretation_algorithm(project_conn)
-    drug_table = _build_drug_interpretation_table(result, database_hits, project_conn)
+    drug_table = _build_drug_interpretation_table(
+        result,
+        database_hits,
+        project_conn,
+        drug_alias_map=drug_alias_map,
+    )
     narrative = _build_summary_narrative(
         result, display_names, drug_table,
     )
@@ -1314,17 +1352,17 @@ def _build_summary_narrative(
     ]
 
     resistant_drugs = sorted([
-        row.get('name') or 'Unknown'
+        row.get('summary_name') or row.get('name') or 'Unknown'
         for row in assessed_rows
         if (row.get('assessment') or '').strip().lower() == 'resistant'
     ], key=lambda name: name.lower())
     intermediate_drugs = sorted([
-        row.get('name') or 'Unknown'
+        row.get('summary_name') or row.get('name') or 'Unknown'
         for row in assessed_rows
         if (row.get('assessment') or '').strip().lower() == 'intermediate'
     ], key=lambda name: name.lower())
     sensitive_drugs = sorted([
-        row.get('name') or 'Unknown'
+        row.get('summary_name') or row.get('name') or 'Unknown'
         for row in assessed_rows
         if (row.get('assessment') or '').strip().lower() == 'sensitive'
     ], key=lambda name: name.lower())
@@ -1439,6 +1477,7 @@ def _build_drug_interpretation_table(
     result: ProfilingResult,
     database_hits: dict,
     project_conn: sqlite3.Connection | None,
+    drug_alias_map: dict[str, str] | None = None,
 ) -> dict:
     """
     Build per-drug summary rows for the drug interpretation table.
@@ -1451,11 +1490,13 @@ def _build_drug_interpretation_table(
     :param result: profiling result, used to determine feature scope
     :param database_hits: context dict from _build_database_hits_rows
     :param project_conn: optional project DB connection for algorithm lookup
+    :param drug_alias_map: optional mapping of normalized drug name to alias
     :return: dict with rows, groups, and capability flags
     """
     def _init_entry(name: str, drug_class: str) -> dict:
         return {
-            'name': _format_drug_name_with_alias(name, drug_alias_map),
+            'name': _format_drug_name_with_alias(name, drug_alias_map or {}),
+            'summary_name': _format_drug_name_for_summary(name, drug_alias_map or {}),
             'drug_class': drug_class,
             'hit_count': 0,
             'resistant_count': 0, 'intermediate_count': 0, 'sensitive_count': 0,
@@ -1489,7 +1530,6 @@ def _build_drug_interpretation_table(
     hit_rows = database_hits.get('rows', [])
     profiled_features = {m.feature.name for m in result.feature_matches}
     drug_class_map = _load_drug_class_map(project_conn)
-    drug_alias_map = _load_drug_alias_map(project_conn)
 
     # Pre-populate from project DB: all drugs with rules for profiled features
     by_drug: dict[str, dict] = {}
@@ -1514,7 +1554,7 @@ def _build_drug_interpretation_table(
 
     # Also seed any hit drugs not already present (covers no-project-conn case)
     for row in hit_rows:
-        drug = (row.get('drug') or 'Unknown').strip()
+        drug = (row.get('drug_key') or row.get('drug') or 'Unknown').strip()
         if drug not in by_drug and drug != '__formula_component__':
             dc = row.get('drug_class') or drug_class_map.get(drug.lower(), '')
             by_drug[drug] = _init_entry(
@@ -1531,7 +1571,7 @@ def _build_drug_interpretation_table(
 
     # Accumulate counts and score sums from hit rows
     for row in hit_rows:
-        drug = (row.get('drug') or 'Unknown').strip()
+        drug = (row.get('drug_key') or row.get('drug') or 'Unknown').strip()
         by_drug[drug]['hit_count'] += 1
         metrics = row.get('metrics', [])
         pheno = ''
