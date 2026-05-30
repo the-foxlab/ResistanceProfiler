@@ -19,6 +19,7 @@ import githubIconSrc from '../assets/icon-github.svg';
 import websiteIconSrc from '../assets/website.svg';
 import mutationsIconSrc from '../assets/search.svg';
 import batchIconSrc from '../assets/batch.svg';
+import logicIconSrc from '../assets/logic.svg';
 import { FRONTEND_CONFIG } from '../config';
 import { buildDatabasePlots } from './database-plots/buildDatabasePlots';
 import { DatabasePieSummaryRow } from './database-plots/DatabasePieSummaryTile';
@@ -138,26 +139,112 @@ function _renderDatabaseMetaValue(entry) {
   return entry.value;
 }
 
+function _formatAlgorithmThresholds(thresholds) {
+  if (!thresholds || typeof thresholds !== 'object') {
+    return 'Not configured';
+  }
+
+  const keys = Object.keys(thresholds).sort((a, b) => a.localeCompare(b));
+  if (keys.length === 0) {
+    return 'Not configured';
+  }
+
+  const values = keys.map((key) => {
+    const value = thresholds[key];
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const nestedKeys = Object.keys(value).sort((a, b) => a.localeCompare(b));
+      const nestedText = nestedKeys
+        .map((nestedKey) => `${nestedKey}=${value[nestedKey]}`)
+        .join(', ');
+      return `${key}: ${nestedText}`;
+    }
+    return `${key}=${value}`;
+  });
+  return values.join('; ');
+}
+
+function _groupFrameshiftRules(rules) {
+  if (!Array.isArray(rules) || rules.length === 0) {
+    return [];
+  }
+
+  const grouped = new Map();
+  for (const rule of rules) {
+    const feature = String(rule.feature || '').trim();
+    const reference = String(rule.reference || '').trim();
+    const drug = String(rule.drug || '').trim();
+    const key = `${feature}|||${reference}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, { feature, reference, drugs: new Set() });
+    }
+    if (drug) {
+      grouped.get(key).drugs.add(drug);
+    }
+  }
+
+  return [...grouped.values()]
+    .map((row) => ({
+      feature: row.feature,
+      reference: row.reference,
+      drugs: [...row.drugs].sort((a, b) => a.localeCompare(b)),
+    }))
+    .sort((a, b) => {
+      const featureOrder = a.feature.localeCompare(b.feature);
+      if (featureOrder !== 0) {
+        return featureOrder;
+      }
+      return a.reference.localeCompare(b.reference);
+    });
+}
+
 function _renderDatabaseAlgorithms(algorithms) {
   if (!algorithms) return null;
   const frameshift = algorithms.frameshift_as_resistant;
   const drugInterp = algorithms.drug_interpretation;
+  const groupedFrameshiftRules = _groupFrameshiftRules(frameshift?.rules);
   if (!frameshift && !drugInterp) return null;
 
   return (
     <section className="database-meta-panel database-algorithms-panel" aria-label="Configured algorithms">
       <div className="database-meta-row database-meta-row-heading">
-        <span className="database-meta-label database-meta-section-heading">Algorithms</span>
+        <span className="database-meta-label database-meta-section-heading">
+          <span className="database-meta-section-heading-text">Supplied Interpretation Algorithms</span>
+          <button
+            type="button"
+            className="input-info-btn"
+            aria-label="Supplied interpretation algorithms info"
+            title="These settings are supplied by the active database. See the About section for algorithm details and interpretation behavior."
+          >
+            <img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" />
+          </button>
+        </span>
       </div>
       {drugInterp ? (
-        <div className="database-meta-row">
+        <div className="database-meta-row database-meta-row-table">
           <span className="database-meta-label">drug_interpretation</span>
           <span className="database-meta-value">
-            <span className="database-algorithm-badge">configured</span>
+            <table className="database-algorithm-table">
+              <thead>
+                <tr>
+                  <th>Field</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Method</td>
+                  <td>{String(drugInterp.method || '').trim() || 'Not configured'}</td>
+                </tr>
+                <tr>
+                  <td>Thresholds</td>
+                  <td>{_formatAlgorithmThresholds(drugInterp.thresholds)}</td>
+                </tr>
+              </tbody>
+            </table>
           </span>
         </div>
       ) : null}
-      {frameshift && frameshift.rules && frameshift.rules.length > 0 ? (
+      {groupedFrameshiftRules.length > 0 ? (
         <div className="database-meta-row database-meta-row-table">
           <span className="database-meta-label">frameshift_as_resistant</span>
           <span className="database-meta-value">
@@ -166,16 +253,15 @@ function _renderDatabaseAlgorithms(algorithms) {
                 <tr>
                   <th>Feature</th>
                   <th>Reference</th>
-                  <th>Drug</th>
+                  <th>Drugs</th>
                 </tr>
               </thead>
               <tbody>
-                {frameshift.rules.map((rule, i) => (
-                  // eslint-disable-next-line react/no-array-index-key
-                  <tr key={i}>
+                {groupedFrameshiftRules.map((rule) => (
+                  <tr key={`${rule.feature}-${rule.reference}`}>
                     <td>{rule.feature}</td>
                     <td>{rule.reference}</td>
-                    <td>{rule.drug}</td>
+                    <td>{rule.drugs.join(', ')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -887,7 +973,7 @@ export function DashboardView({
 
                       {/* Uploaded file list */}
                       {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length > 0 ? (
-                        <div className="profile-upload-row">
+                        <div className="profile-upload-row profile-upload-row-batch-files">
                           <p className="field-optional">
                             {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length} / {batchMaxSamples} files
                             {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length >= batchMaxSamples ? (
@@ -1570,10 +1656,10 @@ export function DashboardView({
                   </p>
                 </article>
 
-                <article className="about-section-card" tabIndex={0}>
+                <article className="about-section-card about-section-card-algorithms" tabIndex={0}>
                   <div className="about-section-title">
-                    <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${okListIconSrc})` }} aria-hidden="true" />
-                    <h3>Supported Algorithms</h3>
+                    <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${logicIconSrc})` }} aria-hidden="true" />
+                    <h3>Supported Interpretation Algorithms</h3>
                   </div>
                   <p className="about-section-lead">
                     Interpretation algorithms extend rule evaluation with additional logic. They are configured per
@@ -1583,16 +1669,16 @@ export function DashboardView({
                     <div className="about-operator-row">
                       <span className="about-operator-pill about-operator-pill-and">frameshift_as_resistant</span>
                       <p>
-                        Frameshifts observed in a configured gene/reference pair are interpreted as resistant for the
-                        specified drug. Populates the <code>phenotype</code> field only. Each rule specifies a
-                        feature, reference, and drug.
+                        Frameshifts observed in a configured feature/reference pair are interpreted as
+                          <span className="about-inline-pill">phenotype='resistant'</span> for the configured drug.
+                          This algorithm does not set <span className="about-inline-pill">clinical_phenotype</span>.
                       </p>
                     </div>
                     <div className="about-operator-row">
                       <span className="about-operator-pill about-operator-pill-or">drug_interpretation</span>
                       <p>
-                        Enables drug-level resistance assessment across all hits. When active, each drug with at least
-                        one resistant or intermediate hit receives an overall assessment shown in the report.
+                        Combines matched rules into one overall drug result. Depending on the database, this can be
+                        based on phenotype labels, scores, IC50 values, or fold-change cutoffs.
                       </p>
                     </div>
                   </div>

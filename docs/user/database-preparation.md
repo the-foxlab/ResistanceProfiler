@@ -108,6 +108,7 @@ Defines report-only metadata interpretation for observed frameshifts. This does 
 - each (`feature`, `reference`, `drug`) tuple must be unique across the list
 
 Each matching observed frameshift produces a metadata hit row with a resistant phenotype. The generated hit always carries a `resistant` value in the `phenotype` field; the `clinical_phenotype` field is left empty.
+This metadata output is only produced when the project database has at least one curated rule with a known phenotype or clinical phenotype.
 
 ### Example
 

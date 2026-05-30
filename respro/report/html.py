@@ -38,6 +38,10 @@ from respro.report.alignment_visualization import (
 
 logger = logging.getLogger(__name__)
 
+_ACCESSION_IDENTIFIER_RE = re.compile(
+    r'^(?P<base>(?:[A-Z]{1,6}_[A-Z0-9]*\d[A-Z0-9]*|[A-Z]{1,6}\d[A-Z0-9]*))(?:\.(?P<version>\d+))?$'
+)
+
 
 def _load_svg_data_url(asset_name: str) -> str:
     """Load an SVG asset and return it as a data URL."""
@@ -433,7 +437,7 @@ def _format_drug_name_with_alias(name: str, alias_map: dict[str, str]) -> str:
 
 def _build_database_hits_rows(
     result: ProfilingResult,
-    project_conn: sqlite3.Connection | None,
+    project_conn: sqlite3.Connection | None = None,
     display_names: dict[str, str] | None = None,
     metric_thresholds: dict[str, tuple[float, float] | None] | None = None,
     drug_class_map: dict[str, str] | None = None,
@@ -619,6 +623,22 @@ def _has_any_phenotype_association(project_conn: sqlite3.Connection | None) -> b
     return bool(row['has_rows'])
 
 
+def _references_match_with_accession_version(
+    configured_reference: str,
+    observed_reference: str,
+) -> bool:
+    """Return whether two references match exactly or by accession base plus version."""
+    if configured_reference == observed_reference:
+        return True
+
+    configured_match = _ACCESSION_IDENTIFIER_RE.fullmatch(configured_reference)
+    observed_match = _ACCESSION_IDENTIFIER_RE.fullmatch(observed_reference)
+    if configured_match is None or observed_match is None:
+        return False
+
+    return configured_match.group('base') == observed_match.group('base')
+
+
 def _build_frameshift_as_resistant_rows(
     result: ProfilingResult,
     project_conn: sqlite3.Connection | None,
@@ -650,7 +670,7 @@ def _build_frameshift_as_resistant_rows(
         drug = rule.get('drug')
         if not isinstance(feature, str) or not isinstance(reference, str) or not isinstance(drug, str):
             continue
-        if reference != result.reference_name:
+        if not _references_match_with_accession_version(reference, result.reference_name):
             continue
         rules_by_feature.setdefault(feature, []).append(rule)
 

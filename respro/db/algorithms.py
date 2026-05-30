@@ -352,7 +352,11 @@ def _validate_frameshift_as_resistant(config: dict) -> None:
                     f'frameshift_as_resistant: rules[{i}][{key!r}] must be a non-empty string.'
                 )
 
-        triplet = (rule['feature'].strip(), rule['reference'].strip(), rule['drug'].strip())
+        rule['feature'] = rule['feature'].strip()
+        rule['reference'] = rule['reference'].strip()
+        rule['drug'] = rule['drug'].strip()
+
+        triplet = (rule['feature'], rule['reference'], rule['drug'])
         if triplet in seen_keys:
             raise ValueError(
                 'frameshift_as_resistant: duplicate rule tuple '

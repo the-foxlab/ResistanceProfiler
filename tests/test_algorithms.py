@@ -167,6 +167,27 @@ class TestValidateInterpretationAlgorithms:
         with pytest.raises(ValueError, match='duplicate rule tuple'):
             validate_interpretation_algorithms(algorithms)
 
+    def test_frameshift_as_resistant_strips_rule_whitespace(self) -> None:
+        algorithms = [
+            {
+                'name': 'frameshift_as_resistant',
+                'rules': [
+                    {
+                        'feature': ' UL23 ',
+                        'reference': ' NC_001806 ',
+                        'drug': ' Aciclovir ',
+                    }
+                ],
+            }
+        ]
+
+        result = validate_interpretation_algorithms(algorithms)
+        assert result[0]['rules'][0] == {
+            'feature': 'UL23',
+            'reference': 'NC_001806',
+            'drug': 'Aciclovir',
+        }
+
     def test_multiple_algorithms_coexist(self) -> None:
         algorithms = [
             {

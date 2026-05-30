@@ -1628,6 +1628,7 @@ th {
   margin: 0.4rem 0;
   display: grid;
   gap: 0.35rem;
+  width: 100%;
 }
 
 .batch-uploaded-file-row {
@@ -1639,6 +1640,42 @@ th {
   border-radius: 8px;
   background: #ffffff;
   padding: 0.28rem 0.45rem;
+  width: 100%;
+}
+
+.profile-upload-row-batch-files {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.profile-upload-row-batch-files .field-optional {
+  margin: 0;
+}
+
+.database-meta-section-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: nowrap;
+}
+
+.database-meta-section-heading-text {
+  white-space: nowrap;
+}
+
+.database-meta-row-heading {
+  grid-column: 1 / -1;
+}
+
+.database-meta-row-table {
+  grid-column: 1 / -1;
+}
+
+.database-algorithm-table td {
+  vertical-align: top;
+}
+
+.about-section-card-algorithms {
+  grid-column: 1 / -1;
 }
 
 .batch-uploaded-file-name {

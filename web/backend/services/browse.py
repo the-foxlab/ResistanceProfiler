@@ -85,7 +85,10 @@ def _extract_display_algorithms(algorithms: list[dict]) -> dict:
         if name == 'frameshift_as_resistant':
             result['frameshift_as_resistant'] = {'rules': config.get('rules', [])}
         elif name == 'drug_interpretation':
-            result['drug_interpretation'] = True
+            result['drug_interpretation'] = {
+                'method': config.get('method', ''),
+                'thresholds': config.get('thresholds', {}),
+            }
     return result
 
 
