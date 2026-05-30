@@ -38,6 +38,10 @@ from respro.report.alignment_visualization import (
 
 logger = logging.getLogger(__name__)
 
+_ACCESSION_IDENTIFIER_RE = re.compile(
+    r'^(?P<base>(?:[A-Z]{1,6}_[A-Z0-9]*\d[A-Z0-9]*|[A-Z]{1,6}\d[A-Z0-9]*))(?:\.(?P<version>\d+))?$'
+)
+
 
 def _load_svg_data_url(asset_name: str) -> str:
     """Load an SVG asset and return it as a data URL."""
@@ -113,6 +117,7 @@ def build_report_context(
     drug_alias_map = load_drug_alias_map(project_conn)
     database_hits = _build_database_hits_rows(
         result,
+        project_conn,
         display_names,
         metric_thresholds,
         drug_class_map,
@@ -432,6 +437,7 @@ def _format_drug_name_with_alias(name: str, alias_map: dict[str, str]) -> str:
 
 def _build_database_hits_rows(
     result: ProfilingResult,
+    project_conn: sqlite3.Connection | None = None,
     display_names: dict[str, str] | None = None,
     metric_thresholds: dict[str, tuple[float, float] | None] | None = None,
     drug_class_map: dict[str, str] | None = None,
@@ -445,6 +451,7 @@ def _build_database_hits_rows(
     Publications are deduplicated globally and referenced by citation number.
 
     :param result: profiling result
+    :param project_conn: optional project DB connection for metadata algorithms
     :param display_names: optional feature display-name overrides
     :param metric_thresholds: optional mean/std per numeric field for tier-badge coloring
     :param drug_class_map: optional mapping of normalized drug name to drug class/group name
@@ -504,6 +511,17 @@ def _build_database_hits_rows(
             '_raw_pubs': list(rs.publications),
         })
 
+    rows.extend(
+        _build_frameshift_as_resistant_rows(
+            result,
+            project_conn,
+            display_names,
+            metric_thresholds,
+            drug_class_map,
+            drug_alias_map,
+        )
+    )
+
     rows.sort(key=lambda r: (
         r['drug'].lower(),
         [(g['feature'], g['muts']) for g in r['mutation_groups']],
@@ -550,6 +568,156 @@ def _build_database_hits_rows(
         'search_icon': _load_svg_data_url('search.svg'),
         'reset_icon': _load_svg_data_url('reset_filter.svg'),
     }
+
+
+def _load_algorithm_config(
+    project_conn: sqlite3.Connection | None,
+    algorithm_name: str,
+) -> dict | None:
+    """Load one interpretation algorithm config by name."""
+    if project_conn is None:
+        return None
+    try:
+        row = project_conn.execute(
+            'SELECT config_json FROM interpretation_algorithm '
+            'WHERE algorithm_name = ? LIMIT 1',
+            (algorithm_name,),
+        ).fetchone()
+    except sqlite3.Error as exc:
+        logger.debug('Failed to load %s algorithm from DB: %s', algorithm_name, exc)
+        return None
+
+    if row is None:
+        return None
+
+    try:
+        config = json.loads(row['config_json'])
+    except (TypeError, json.JSONDecodeError) as exc:
+        logger.debug('Failed to parse %s algorithm config JSON: %s', algorithm_name, exc)
+        return None
+    if not isinstance(config, dict):
+        return None
+    return config
+
+
+def _has_any_phenotype_association(project_conn: sqlite3.Connection | None) -> bool:
+    """Return whether any rule row carries a known phenotype field."""
+    if project_conn is None:
+        return False
+    known_clause = (
+        "(TRIM(COALESCE(phenotype, '')) <> '' AND LOWER(TRIM(phenotype)) <> 'unknown') "
+        "OR (TRIM(COALESCE(clinical_phenotype, '')) <> '' "
+        "AND LOWER(TRIM(clinical_phenotype)) <> 'unknown')"
+    )
+    try:
+        row = project_conn.execute(
+            f'SELECT (EXISTS(SELECT 1 FROM resistance_rule WHERE {known_clause}) '
+            f'OR EXISTS(SELECT 1 FROM resistance_formula_rule WHERE {known_clause})) AS has_rows'
+        ).fetchone()
+    except sqlite3.Error as exc:
+        logger.debug('Failed to check phenotype association rows in DB: %s', exc)
+        return False
+
+    if row is None:
+        return False
+    return bool(row['has_rows'])
+
+
+def _references_match_with_accession_version(
+    configured_reference: str,
+    observed_reference: str,
+) -> bool:
+    """Return whether two references match exactly or by accession base plus version."""
+    if configured_reference == observed_reference:
+        return True
+
+    configured_match = _ACCESSION_IDENTIFIER_RE.fullmatch(configured_reference)
+    observed_match = _ACCESSION_IDENTIFIER_RE.fullmatch(observed_reference)
+    if configured_match is None or observed_match is None:
+        return False
+
+    return configured_match.group('base') == observed_match.group('base')
+
+
+def _build_frameshift_as_resistant_rows(
+    result: ProfilingResult,
+    project_conn: sqlite3.Connection | None,
+    display_names: dict[str, str] | None = None,
+    metric_thresholds: dict[str, tuple[float, float] | None] | None = None,
+    drug_class_map: dict[str, str] | None = None,
+    drug_alias_map: dict[str, str] | None = None,
+) -> list[dict]:
+    """Build metadata-only DB-hit rows for configured frameshift annotations."""
+    if project_conn is None:
+        return []
+
+    frameshift_config = _load_algorithm_config(project_conn, 'frameshift_as_resistant')
+    if frameshift_config is None:
+        return []
+    if not _has_any_phenotype_association(project_conn):
+        return []
+
+    config_rules = frameshift_config.get('rules')
+    if not isinstance(config_rules, list) or not config_rules:
+        return []
+
+    rules_by_feature: dict[str, list[dict]] = {}
+    for rule in config_rules:
+        if not isinstance(rule, dict):
+            continue
+        feature = rule.get('feature')
+        reference = rule.get('reference')
+        drug = rule.get('drug')
+        if not isinstance(feature, str) or not isinstance(reference, str) or not isinstance(drug, str):
+            continue
+        if not _references_match_with_accession_version(reference, result.reference_name):
+            continue
+        rules_by_feature.setdefault(feature, []).append(rule)
+
+    if not rules_by_feature:
+        return []
+
+    rows: list[dict] = []
+    for ann in result.cds_annotations:
+        if ann.consequence != 'frameshift':
+            continue
+        feature_rules = rules_by_feature.get(ann.feature_name, [])
+        if not feature_rules:
+            continue
+
+        feature_display = (display_names or {}).get(ann.feature_name, ann.feature_name)
+        aa_change = (
+            f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+            if ann.ref_aa and ann.alt_aa
+            else ann.feature_name
+        )
+        for rule in feature_rules:
+            drug_name = (rule.get('drug') or '').strip()
+            if not drug_name:
+                continue
+            comment = (
+                'Frameshift interpreted as resistant by metadata algorithm '
+                f'({ann.feature_name}, {result.reference_name}).'
+            )
+            rows.append({
+                'drug_key': drug_name,
+                'drug': _format_drug_name_with_alias(drug_name, drug_alias_map or {}),
+                'drug_class': (drug_class_map or {}).get(drug_name.lower(), ''),
+                'mutation_groups': [{'feature': feature_display, 'muts': [aa_change]}],
+                'metrics': _build_rule_metrics(
+                    'resistant',
+                    '',
+                    '',
+                    '',
+                    '',
+                    thresholds=metric_thresholds,
+                ),
+                'af_bin': ann.af_bin,
+                'source': 'Metadata algorithm',
+                'comment': comment,
+                '_raw_pubs': [],
+            })
+    return rows
 
 
 def _build_bibliography(
@@ -1429,7 +1597,7 @@ def _build_drug_interpretation_table(
             'summary_name': alias if alias and len(alias) < len(name) else name,
             'drug_class': drug_class,
             'hit_count': 0,
-            'resistant_count': 0, 'intermediate_count': 0, 'sensitive_count': 0,
+            'resistant_count': 0, 'intermediate_count': 0, 'sensitive_count': 0, 'contradictory_count': 0,
             'score_total': 0.0, 'score_display': '0',
             'ic50_values': [], 'fold_ic50_values': [],
             'assessment': '', 'assessment_badge_class': '',
@@ -1516,6 +1684,8 @@ def _build_drug_interpretation_table(
             by_drug[drug]['intermediate_count'] += 1
         elif pheno == 'sensitive':
             by_drug[drug]['sensitive_count'] += 1
+        elif pheno == 'contradictory':
+            by_drug[drug]['contradictory_count'] += 1
         for m in metrics:
             if m.get('label') == 'Score':
                 val = _parse_numeric_value((m.get('value') or '').strip())
@@ -1537,7 +1707,7 @@ def _build_drug_interpretation_table(
 
     # Column presence is determined by actual hit data, not zero-hit entries
     has_phenotypes = any(
-        d['resistant_count'] + d['intermediate_count'] + d['sensitive_count'] > 0
+        d['resistant_count'] + d['intermediate_count'] + d['sensitive_count'] + d['contradictory_count'] > 0
         for d in by_drug.values()
     )
     has_scores = any(
@@ -1576,6 +1746,11 @@ def _build_drug_interpretation_table(
                     and drug_data['intermediate_count'] >= intermediate_threshold
                 ):
                     drug_data['assessment'] = 'intermediate'
+                elif drug_data['contradictory_count'] > 0:
+                    # At least one hit carries a contradictory phenotype and no
+                    # resistant/intermediate threshold was reached — surface the
+                    # uncertainty rather than silently reporting sensitive.
+                    drug_data['assessment'] = 'contradictory'
                 else:
                     drug_data['assessment'] = 'sensitive'
             elif method == 'by_score':

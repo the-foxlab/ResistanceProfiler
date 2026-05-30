@@ -19,6 +19,7 @@ from conftest import TINY_REF_SEQ, write_genbank
 
 from respro.cli.init import init_project
 from respro.core.alignment import load_features_with_rules
+from respro.db.algorithms import load_interpretation_algorithms
 from respro.db.cache import load_cached_mappings, sequence_checksum
 from respro.db.features import _is_ncbi_protein_accession, load_features_for_reference
 from respro.db.models import is_internal_formula_component_drug_name
@@ -2086,6 +2087,69 @@ class TestAnchorlessDeletion:
 
 
 class TestProjectMetadataInit:
+    def test_init_project_sanitizes_frameshift_as_resistant_unknown_drugs(
+        self,
+        tmp_path,
+        caplog,
+    ) -> None:
+        genbank_path = write_genbank(
+            tmp_path / 'ref.gb',
+            [
+                {
+                    'id': 'myref',
+                    'accession': 'MYREF001',
+                    'sequence': 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC',
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 30, 'strand': '+'},
+                    ],
+                },
+            ],
+        )
+        rules_path = tmp_path / 'rules.tsv'
+        rules_path.write_text(
+            'feature\treference_identifier\tposition\treference\tmutation\tantiviral\n'
+            'gag\tmyref\t2\tK\tE\tAciclovir\n'
+        )
+        metadata_path = tmp_path / 'metadata.json'
+        metadata_path.write_text(
+            '{\n'
+            '  "interpretation_algorithms": [\n'
+            '    {\n'
+            '      "name": "frameshift_as_resistant",\n'
+            '      "rules": [\n'
+            '        {"feature": "gag", "reference": "MYREF001", "drug": "aciclovir"},\n'
+            '        {"feature": "gag", "reference": "MYREF001", "drug": "UnknownDrug"}\n'
+            '      ]\n'
+            '    }\n'
+            '  ]\n'
+            '}\n'
+        )
+
+        db_path = tmp_path / 'project.db'
+        with caplog.at_level(logging.WARNING, logger='respro.cli.init'):
+            init_project(
+                db_path=db_path,
+                name='Meta Project',
+                genbank_paths=[genbank_path],
+                rules_tsv=rules_path,
+                metadata_json=metadata_path,
+                overwrite=False,
+                additional_info=False,
+            )
+
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        project_id = int(conn.execute('SELECT id FROM project LIMIT 1').fetchone()['id'])
+        algorithms = load_interpretation_algorithms(conn, project_id)
+        conn.close()
+
+        assert len(algorithms) == 1
+        assert algorithms[0]['name'] == 'frameshift_as_resistant'
+        assert algorithms[0]['rules'] == [
+            {'feature': 'gag', 'reference': 'MYREF001', 'drug': 'aciclovir'},
+        ]
+        assert any('ignoring rule for unknown drug' in rec.message for rec in caplog.records)
+
     def test_init_project_stores_metadata_and_resolves_doi(self, tmp_path) -> None:
         genbank_path = write_genbank(
             tmp_path / 'ref.gb',
