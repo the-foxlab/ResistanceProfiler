@@ -138,6 +138,55 @@ function _renderDatabaseMetaValue(entry) {
   return entry.value;
 }
 
+function _renderDatabaseAlgorithms(algorithms) {
+  if (!algorithms) return null;
+  const frameshift = algorithms.frameshift_as_resistant;
+  const drugInterp = algorithms.drug_interpretation;
+  if (!frameshift && !drugInterp) return null;
+
+  return (
+    <section className="database-meta-panel database-algorithms-panel" aria-label="Configured algorithms">
+      <div className="database-meta-row database-meta-row-heading">
+        <span className="database-meta-label database-meta-section-heading">Algorithms</span>
+      </div>
+      {drugInterp ? (
+        <div className="database-meta-row">
+          <span className="database-meta-label">drug_interpretation</span>
+          <span className="database-meta-value">
+            <span className="database-algorithm-badge">configured</span>
+          </span>
+        </div>
+      ) : null}
+      {frameshift && frameshift.rules && frameshift.rules.length > 0 ? (
+        <div className="database-meta-row database-meta-row-table">
+          <span className="database-meta-label">frameshift_as_resistant</span>
+          <span className="database-meta-value">
+            <table className="database-algorithm-table">
+              <thead>
+                <tr>
+                  <th>Feature</th>
+                  <th>Reference</th>
+                  <th>Drug</th>
+                </tr>
+              </thead>
+              <tbody>
+                {frameshift.rules.map((rule, i) => (
+                  // eslint-disable-next-line react/no-array-index-key
+                  <tr key={i}>
+                    <td>{rule.feature}</td>
+                    <td>{rule.reference}</td>
+                    <td>{rule.drug}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </span>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function DashboardView({
   API_BASE,
   PROFILE_MODES,
@@ -1240,6 +1289,7 @@ export function DashboardView({
                       ))}
                     </section>
                   ) : null}
+                  {_renderDatabaseAlgorithms(selectedDatabase?.algorithms)}
                   {summaryTile || ic50Sections.length > 0 || detailSections.length > 0 ? (
                     <div className="database-plot-grid">
                       {summaryTile ? <DatabasePieSummaryRow tile={summaryTile} /> : null}
@@ -1518,6 +1568,34 @@ export function DashboardView({
                     Single rules represent one mutation-to-interpretation mapping. Combination rules fire only when
                     their formula conditions are satisfied.
                   </p>
+                </article>
+
+                <article className="about-section-card" tabIndex={0}>
+                  <div className="about-section-title">
+                    <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${okListIconSrc})` }} aria-hidden="true" />
+                    <h3>Supported Algorithms</h3>
+                  </div>
+                  <p className="about-section-lead">
+                    Interpretation algorithms extend rule evaluation with additional logic. They are configured per
+                    project in the metadata JSON at initialisation time.
+                  </p>
+                  <div className="about-operator-list">
+                    <div className="about-operator-row">
+                      <span className="about-operator-pill about-operator-pill-and">frameshift_as_resistant</span>
+                      <p>
+                        Frameshifts observed in a configured gene/reference pair are interpreted as resistant for the
+                        specified drug. Populates the <code>phenotype</code> field only. Each rule specifies a
+                        feature, reference, and drug.
+                      </p>
+                    </div>
+                    <div className="about-operator-row">
+                      <span className="about-operator-pill about-operator-pill-or">drug_interpretation</span>
+                      <p>
+                        Enables drug-level resistance assessment across all hits. When active, each drug with at least
+                        one resistant or intermediate hit receives an overall assessment shown in the report.
+                      </p>
+                    </div>
+                  </div>
                 </article>
               </section>
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from respro.db.algorithms import load_interpretation_algorithms
 from respro.db.rules_queries import (
     get_project_summary_for_display,
     list_formula_rules_for_display,
@@ -54,6 +55,9 @@ def list_databases(project_databases_dir: Path) -> dict:
             mutation_count_row = project_conn.execute('SELECT COUNT(*) AS count FROM resistance_rule').fetchone()
             mutation_count = int(mutation_count_row['count']) if mutation_count_row else 0
 
+            all_algorithms = load_interpretation_algorithms(project_conn, project_row['id'])
+            algorithms = _extract_display_algorithms(all_algorithms)
+
             items.append(
                 {
                     'id': project_db.name,
@@ -64,12 +68,25 @@ def list_databases(project_databases_dir: Path) -> dict:
                     'supported_organisms': organisms,
                     'mutation_count': mutation_count,
                     'metadata': metadata,
+                    'algorithms': algorithms,
                 }
             )
         finally:
             project_conn.close()
 
     return {'items': items, 'count': len(items)}
+
+
+def _extract_display_algorithms(algorithms: list[dict]) -> dict:
+    """Return only frameshift_as_resistant and drug_interpretation configs for display."""
+    result: dict = {}
+    for config in algorithms:
+        name = config.get('name')
+        if name == 'frameshift_as_resistant':
+            result['frameshift_as_resistant'] = {'rules': config.get('rules', [])}
+        elif name == 'drug_interpretation':
+            result['drug_interpretation'] = True
+    return result
 
 
 def list_rules(

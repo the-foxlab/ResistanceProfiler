@@ -59,7 +59,7 @@ Example metadata file:
 
 ## Interpretation algorithms
 
-`metadata.json` optionally supports a top-level `interpretation_algorithms` array. Each entry configures one algorithm by name. Each algorithm type may appear **at most once** in the list, and all four types can coexist.
+`metadata.json` optionally supports a top-level `interpretation_algorithms` array. Each entry configures one algorithm by name. Each algorithm type may appear **at most once** in the list, and all five types can coexist.
 
 ### `ic50_thresholds`
 
@@ -99,6 +99,16 @@ Defines canonical drug-name to short-alias mappings for report rendering.
 When configured, these mappings are written to the `drug.alias` column during `respro init`
 and used for report drug labels, for example `Aciclovir (ACV)`.
 
+### `frameshift_as_resistant`
+
+Defines report-only metadata interpretation for observed frameshifts. This does not create curated database rule hits.
+
+- `rules` — required non-empty list
+- each rule must include `feature`, `reference`, and `drug` as case-sensitive exact non-empty strings
+- each (`feature`, `reference`, `drug`) tuple must be unique across the list
+
+Each matching observed frameshift produces a metadata hit row with a resistant phenotype. The generated hit always carries a `resistant` value in the `phenotype` field; the `clinical_phenotype` field is left empty.
+
 ### Example
 
 ```json
@@ -134,6 +144,16 @@ and used for report drug labels, for example `Aciclovir (ACV)`.
         "Aciclovir": "ACV",
         "Penciclovir": "PCV"
       }
+    },
+    {
+      "name": "frameshift_as_resistant",
+      "rules": [
+        {
+          "feature": "UL23",
+          "reference": "NC_001806",
+          "drug": "Aciclovir"
+        }
+      ]
     }
   ]
 }

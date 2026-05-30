@@ -7,7 +7,13 @@ import sqlite3
 
 from respro.db._rules_normalize import _append_contradictory_comment, _parse_ic50_value
 
-_KNOWN_ALGORITHM_NAMES = {'ic50_thresholds', 'drug_groups', 'drug_interpretation', 'drug_alias'}
+_KNOWN_ALGORITHM_NAMES = {
+    'ic50_thresholds',
+    'drug_groups',
+    'drug_interpretation',
+    'drug_alias',
+    'frameshift_as_resistant',
+}
 
 
 def validate_interpretation_algorithms(algorithms: object) -> list[dict]:
@@ -54,6 +60,8 @@ def validate_interpretation_algorithms(algorithms: object) -> list[dict]:
             _validate_drug_interpretation(item)
         elif name == 'drug_alias':
             _validate_drug_alias(item)
+        elif name == 'frameshift_as_resistant':
+            _validate_frameshift_as_resistant(item)
 
     return algorithms
 
@@ -317,3 +325,37 @@ def _validate_drug_alias(config: dict) -> None:
                 f'drug_alias: alias value {normalized_alias!r} is duplicated across canonical names.'
             )
         seen_aliases.add(normalized_alias)
+
+
+def _validate_frameshift_as_resistant(config: dict) -> None:
+    rules = config.get('rules')
+    if not isinstance(rules, list) or not rules:
+        raise ValueError('frameshift_as_resistant: "rules" must be a non-empty list.')
+
+    seen_keys: set[tuple[str, str, str]] = set()
+    required_keys = ('feature', 'reference', 'drug')
+    for i, rule in enumerate(rules):
+        if not isinstance(rule, dict):
+            raise ValueError(
+                f'frameshift_as_resistant: rules[{i}] must be a dict, '
+                f'got {type(rule).__name__}.'
+            )
+
+        for key in required_keys:
+            if key not in rule:
+                raise ValueError(
+                    f'frameshift_as_resistant: rules[{i}] is missing required key {key!r}.'
+                )
+            val = rule.get(key)
+            if not isinstance(val, str) or not val.strip():
+                raise ValueError(
+                    f'frameshift_as_resistant: rules[{i}][{key!r}] must be a non-empty string.'
+                )
+
+        triplet = (rule['feature'].strip(), rule['reference'].strip(), rule['drug'].strip())
+        if triplet in seen_keys:
+            raise ValueError(
+                'frameshift_as_resistant: duplicate rule tuple '
+                f'(feature={triplet[0]!r}, reference={triplet[1]!r}, drug={triplet[2]!r}).'
+            )
+        seen_keys.add(triplet)

@@ -91,7 +91,9 @@ def init_project(
         )
         store_project_metadata(conn, project_id, metadata_payload)
         if algorithms:
-            store_interpretation_algorithms(conn, project_id, algorithms)
+            algorithms = _sanitize_frameshift_as_resistant_algorithms(conn, project_id, algorithms)
+            if algorithms:
+                store_interpretation_algorithms(conn, project_id, algorithms)
         alias_config = next((a for a in algorithms if a['name'] == 'drug_alias'), None)
         if alias_config:
             apply_drug_alias_mappings(conn, project_id, alias_config)
@@ -162,6 +164,14 @@ def add_to_project(
             additional_info=additional_info,
         )
         stored_algorithms = load_interpretation_algorithms(conn, project_id)
+        sanitized_algorithms = _sanitize_frameshift_as_resistant_algorithms(
+            conn,
+            project_id,
+            stored_algorithms,
+        )
+        if sanitized_algorithms != stored_algorithms:
+            store_interpretation_algorithms(conn, project_id, sanitized_algorithms)
+        stored_algorithms = sanitized_algorithms
         alias_config = next((a for a in stored_algorithms if a['name'] == 'drug_alias'), None)
         if alias_config:
             apply_drug_alias_mappings(conn, project_id, alias_config)
@@ -191,6 +201,54 @@ def _insert_project(conn: sqlite3.Connection, name: str) -> int:
         (name, PROJECT_SCHEMA_VERSION, str(uuid.uuid4())),
     )
     return cur.lastrowid  # type: ignore[return-value]
+
+
+def _sanitize_frameshift_as_resistant_algorithms(
+    conn: sqlite3.Connection,
+    project_id: int,
+    algorithms: list[dict],
+) -> list[dict]:
+    """
+    Remove frameshift_as_resistant rules that reference drugs absent from the project.
+
+    :param conn: project DB connection
+    :param project_id: project id
+    :param algorithms: interpretation algorithm configs
+    :return: sanitized algorithm list with unknown-drug frameshift rules removed
+    """
+    project_drugs = {
+        row[0]
+        for row in conn.execute('SELECT name FROM drug WHERE project_id = ?', (project_id,)).fetchall()
+    }
+    sanitized: list[dict] = []
+    for config in algorithms:
+        if config.get('name') != 'frameshift_as_resistant':
+            sanitized.append(config)
+            continue
+
+        kept_rules: list[dict] = []
+        for rule in config['rules']:
+            if rule['drug'] in project_drugs:
+                kept_rules.append(rule)
+                continue
+            logger.warning(
+                'frameshift_as_resistant: ignoring rule for unknown drug %r (feature=%r, reference=%r)',
+                rule['drug'],
+                rule['feature'],
+                rule['reference'],
+            )
+
+        if kept_rules:
+            sanitized_config = dict(config)
+            sanitized_config['rules'] = kept_rules
+            sanitized.append(sanitized_config)
+            continue
+
+        logger.warning(
+            'frameshift_as_resistant: removed algorithm because no rules reference known project drugs'
+        )
+
+    return sanitized
 
 
 def _get_existing_project_id(conn: sqlite3.Connection) -> int:
