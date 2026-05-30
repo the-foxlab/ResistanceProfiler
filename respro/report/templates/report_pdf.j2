@@ -2,123 +2,124 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>ResistanceProfiler Report (v{{ version }})</title>
-  <style>{{ css }}</style>
+  <title>{{ context.title }}</title>
+  <style>{{ print_css }}</style>
 </head>
 <body>
-  <header class="report-header">
-    <h1>ResistanceProfiler Report (v{{ version }})</h1>
-    <div class="meta-grid">
-      <div><span class="label">Project Database:</span> {{ summary.project_name or '-' }}</div>
-      <div><span class="label">Species:</span> {{ summary.organism or '-' }}</div>
-      <div><span class="label">Reference:</span> {{ summary.reference or '-' }}</div>
-      <div><span class="label">Sample:</span> {{ summary.sample or '-' }}</div>
-      <div><span class="label">Generated:</span> {{ summary.timestamp or '-' }}</div>
-      <div><span class="label">Input:</span> {{ summary.vcf or '-' }}</div>
-    </div>
-  </header>
+  <div class="page">
+    <header class="report-header">
+      <div class="header-main">
+        <h1 class="header-title">{{ context.header.title }}</h1>
+        <span class="header-version">respro v{{ context.header.version }}</span>
+      </div>
+      <p class="header-meta">{{ context.header.meta_primary }}</p>
+      <p class="header-meta header-meta-secondary">{{ context.header.meta_secondary }}</p>
+    </header>
 
-  <section>
-    <h2 class="section-band-top">Interpretation summary</h2>
-    <p class="summary-text">{{ summary_text_en }}</p>
-    {% if plot_data %}
-    <div class="plot-container">
-      <img src="data:image/png;base64,{{ plot_data }}" alt="Mutation overview plot" />
-    </div>
-    {% endif %}
-  </section>
+    <section class="section section-summary-grid">
+      <div class="summary-grid">
+        <article class="list-card panel">
+          <div class="subsection-title">Sequence Assessment</div>
+          <ul class="kv-list">
+            {% for item in context.summary.sequence_items %}
+            <li><span class="kv-label">{{ item.label }}</span><span class="kv-value">{{ item.value }}</span></li>
+            {% endfor %}
+          </ul>
+        </article>
 
-  <section class="details-section">
-    <h2 class="section-band">Mutations</h2>
-    <div class="mutations-list">
-      {% for group in mutation_groups %}
-      <section class="feature-group">
-        <h3 class="feature-heading">{{ group.feature }}</h3>
-        <ul class="mutation-items">
-        {% for item in group.mutations %}
-        <li class="mutation-item">
-          <p class="mutation-line">
-            {% if item.aa_change %}
-            <span class="field">Mutation:</span> <strong>{{ item.aa_change }}</strong>
-            |
-            {% endif %}
-            <span class="badge badge-effect {{ item.effect_badge_class }}">{{ item.consequence }}</span>
-            |
-            <span class="field">Nucleotide change:</span> {{ item.nt_change }}
-            |
-            <span class="field">Frequency:</span> {{ '%.2f'|format(item.allele_freq) }} ({{ item.af_bin }})
-          </p>
-          <div class="db-hits">
-            <div class="field">Database hits:</div>
-            {% if item.db_hits %}
-            <ul>
-              {% for hit in item.db_hits %}
-              <li class="hit-row">
-                <span class="hit-drug"><strong>{{ hit.drug }}</strong></span>
-                <span class="hit-detail">
-                <span class="badge {{ hit.phenotype_badge_class }}">{{ hit.phenotype }}</span>
-                {% if hit.clinical_phenotype and hit.clinical_phenotype != 'unknown' %}
-                | clinical: {{ hit.clinical_phenotype }}
-                {% endif %}
-                {% if hit.ic50 %} | IC<sub>50</sub>: {{ hit.ic50 }}{% endif %}
-                {% if hit.fold_ic50 %} | Fold-IC50: {{ hit.fold_ic50 }}{% endif %}
-                {% if hit.citation_numbers %}
-                | refs:
-                {% for citation_num in hit.citation_numbers %}[{{ citation_num }}]{% if not loop.last %}, {% endif %}{% endfor %}
-                {% endif %}
-                </span>
-              </li>
+        <article class="list-card panel">
+          <div class="subsection-title">Database Assessment</div>
+          <ul class="kv-list">
+            {% for item in context.summary.database_items %}
+            <li><span class="kv-label">{{ item.label }}</span><span class="kv-value">{{ item.value }}</span></li>
+            {% endfor %}
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section section-features">
+      <div class="section-title">Sequence Features and Mutation Profile</div>
+      <article class="panel">
+        {% if context.summary.mutation_profile %}
+        <ul class="feature-list">
+          {% for entry in context.summary.mutation_profile %}
+          <li class="feature-row">
+            <span class="feature-name">{{ entry.feature }}</span>
+            <span class="feature-cov">{% if context.summary.has_coverage and entry.covered_pct is not none %}({{ entry.covered_pct }}% covered){% endif %}</span>
+            <span class="feature-muts">
+              {% for m in entry.mutations %}
+              <span class="mut-chip{% if m.is_high_impact %} mut-chip--high{% elif m.is_db_hit %} mut-chip--hit{% endif %}">{{ m.label }}</span>{% if not loop.last %}, {% endif %}
               {% endfor %}
-            </ul>
-            {% elif item.similarity_hits %}
-            <div class="field">Similarity to database hits:</div>
-            <ul>
-              {% for hit in item.similarity_hits %}
-              <li class="hit-row">
-                <span class="hit-drug"><strong>{{ hit.drug }}</strong></span>
-                <span class="hit-detail">
-                {% if hit.rule_change %}rule: {{ hit.rule_change }} | {% endif %}
-                similarity: <span class="badge {{ hit.similarity_badge_class }}">{{ hit.similarity }}</span>
-                {% if hit.phenotype %}
-                | phenotype: <span class="badge {{ hit.phenotype_badge_class }}">{{ hit.phenotype }}</span>
-                {% endif %}
-                {% if hit.citation_numbers %}
-                | refs:
-                {% for citation_num in hit.citation_numbers %}[{{ citation_num }}]{% if not loop.last %}, {% endif %}{% endfor %}
-                {% endif %}
-                </span>
-              </li>
-              {% endfor %}
-            </ul>
-            {% else %}
-            <p class="no-hit">No direct database hit</p>
-            {% endif %}
-          </div>
-        </li>
-        {% endfor %}
+            </span>
+          </li>
+          {% endfor %}
         </ul>
-      </section>
-      {% endfor %}
-    </div>
-  </section>
+        {% else %}
+        <p class="empty">No CDS variants were found.</p>
+        {% endif %}
+      </article>
+    </section>
 
-  <section class="citations-section">
-    <h2 class="section-band">Citations</h2>
-    {% if bibliography %}
-    <ol class="citations-list">
-      {% for citation in bibliography %}
-      <li>
-        {% if citation.title %}{{ citation.title }}{% else %}Untitled reference{% endif %}
-        {% if citation.doi %} | DOI: {{ citation.doi }}{% endif %}
-        {% if citation.pubmed_id %} | PMID: {{ citation.pubmed_id }}{% endif %}
-        {% if citation.raw_input %} | {{ citation.raw_input }}{% endif %}
-      </li>
-      {% endfor %}
-    </ol>
-    {% else %}
-    <p>No citations linked to detected mutations.</p>
-    {% endif %}
-  </section>
-  
+    <section class="section section-drug-summary">
+      <div class="section-title">Drug Summary</div>
+      <p class="drug-summary-text">{{ context.summary.narrative | safe }}</p>
+      <article class="panel">
+        {% if context.summary.drug_rows %}
+        <table class="drug-table">
+          <colgroup>
+            {% if context.summary.has_drug_class and context.summary.has_assessment %}
+            <col class="col-class" />
+            <col class="col-drug" />
+            <col class="col-hits" />
+            <col class="col-assessment" />
+            {% elif context.summary.has_drug_class %}
+            <col class="col-class" />
+            <col class="col-drug-wide" />
+            <col class="col-hits" />
+            {% elif context.summary.has_assessment %}
+            <col class="col-drug-widest" />
+            <col class="col-hits" />
+            <col class="col-assessment" />
+            {% else %}
+            <col class="col-drug-widest" />
+            <col class="col-hits-wide" />
+            {% endif %}
+          </colgroup>
+          <thead>
+            <tr>
+              {% if context.summary.has_drug_class %}
+              <th>Class</th>
+              {% endif %}
+              <th>Drug</th>
+              <th>Hits</th>
+              {% if context.summary.has_assessment %}
+              <th>Assessment</th>
+              {% endif %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in context.summary.drug_rows %}
+            <tr>
+              {% if context.summary.has_drug_class %}
+              <td class="drug-class">{{ row.drug_class or '—' }}</td>
+              {% endif %}
+              <td class="drug-name">{{ row.name }}</td>
+              <td class="drug-count">{{ row.hit_count }}</td>
+              {% if context.summary.has_assessment %}
+              <td>
+                <span class="assessment {{ row.assessment_badge_class }}">{{ row.assessment }}</span>
+              </td>
+              {% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="empty">No drug interpretation rows available.</p>
+        {% endif %}
+      </article>
+    </section>
+  </div>
 </body>
 </html>

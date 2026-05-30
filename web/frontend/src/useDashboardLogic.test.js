@@ -233,7 +233,7 @@ describe('useDashboardLogic - File Upload Flow', () => {
       });
     });
 
-    expect(result.current.status).toMatch(/failed|error/);
+    expect(result.current.statusError).toMatch(/upload failed|network error/i);
   });
 });
 
@@ -415,7 +415,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     });
 
     // Verify status reflects failure
-    expect(result.current.status).toContain('Unsupported FASTA format');
+    expect(result.current.statusError).toContain('Unsupported FASTA format');
     expect(result.current.isProfileBusy).toBe(false);
   });
 
@@ -495,7 +495,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     });
 
     await waitFor(() => {
-      expect(result.current.status).toContain('cancellation requested');
+      expect(result.current.activeJobStatus).toBe('canceling');
     });
 
     expect(global.fetch.mock.calls.some(([url, options]) => (
@@ -662,7 +662,6 @@ describe('useDashboardLogic - Report Display Flow', () => {
               database_id: 'db1',
               report_html_path: '/data/results/sample1.report.html',
               report_json_path: '/data/results/sample1.report.json',
-              report_tabular_path: '/data/results/sample1.mutations.tsv',
               report_pdf_path: '/data/results/sample1.report.pdf',
               created_at: '2026-05-12T14:30:00',
               resistance_hits: 3,

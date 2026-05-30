@@ -21,6 +21,7 @@ from respro.cli.profile_helpers import (
     _ProfilingRunContext,
     _resolve_reference,
 )
+from respro.config.cli_settings import CLI_CONFIG
 from respro.core.annotation import annotate_variants
 from respro.core.fasta_to_vcf import fasta_to_vcf
 from respro.core.query import resolve_fasta_query
@@ -71,8 +72,8 @@ def _profile_fasta_command(
     export: Annotated[
         list[str] | None,
         typer.Option(
-            '--export',
-            help='Optional extra export format in addition to HTML (pdf, json, tabular). Can be provided multiple times.',
+            '--export', '-e',
+            help='Optional extra export format in addition to HTML (pdf, json). Pdfs are summaries only. Can be provided multiple times.',
         ),
     ] = None,
     input_display_name: Annotated[
@@ -134,11 +135,7 @@ def _profile_fasta_command(
 
         # FASTA mode frequencies are discrete (1.0, 0.5, 0.33, 0.25) from IUPAC expansion.
         # Bin thresholds are adjusted to reflect these values cleanly.
-        fasta_af_bins = {
-            'high': (0.75, 1.0),
-            'intermediate': (0.35, 0.74),
-            'low': (0.01, 0.34),
-        }
+        fasta_af_bins = CLI_CONFIG.af_bins_fasta.as_dict()
 
         ctx = _ProfilingRunContext(
             annotations=annotations,

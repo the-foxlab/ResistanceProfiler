@@ -117,10 +117,12 @@ class TestFetchPubmedMetadata:
     def test_returns_none_on_unexpected_json(self) -> None:
         with patch('urllib.request.urlopen', return_value=_mock_response({'foo': 'bar'})):
             result = fetch_pubmed_metadata('12345678')
-        # Unexpected structure → empty title and doi, not None
-        assert result is not None
-        assert result['title'] == ''
-        assert result['doi'] == ''
+        assert result is None
+
+    def test_returns_none_when_articleids_is_not_list(self) -> None:
+        payload = {'result': {'12345678': {'title': 'x', 'articleids': {}}}}
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
+            assert fetch_pubmed_metadata('12345678') is None
 
 
 # ── fetch_publication_metadata ─────────────────────────────────────────────────
@@ -167,6 +169,11 @@ class TestFetchPublicationMetadata:
             result = fetch_publication_metadata('10.1234/xyz')
         assert result == {'title': 'A CrossRef Title'}
         mock_sleep.assert_called_once_with(0.0)
+
+    def test_returns_none_when_title_field_is_not_list(self) -> None:
+        payload = {'message': {'title': 'A CrossRef Title'}}
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
+            assert fetch_publication_metadata('10.1234/xyz') is None
 
 
 # ── fetch_pubmed_id_for_doi ───────────────────────────────────────────────────
@@ -229,4 +236,9 @@ class TestFetchPubmedIdForDoi:
             result = fetch_pubmed_id_for_doi('10.1234/xyz')
         assert result == '12345678'
         mock_sleep.assert_called_once_with(0.0)
+
+    def test_returns_none_when_records_field_is_not_list(self) -> None:
+        payload = {'records': {'pmid': '12345678'}}
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
+            assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
 

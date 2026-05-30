@@ -52,12 +52,31 @@ def fetch_pubmed_metadata(pmid: str, timeout: int = CLI_CONFIG.timeouts.pubmed) 
         try:
             with urllib.request.urlopen(url, timeout=timeout) as resp:
                 data = json.loads(resp.read())
-            result_data = data.get('result', {}).get(pmid, {})
-            title = result_data.get('title', '').strip()
+            if not isinstance(data, dict):
+                logger.debug('NCBI PMID lookup malformed payload for %r: root is %s', pmid, type(data).__name__)
+                return None
+            result = data.get('result')
+            if not isinstance(result, dict):
+                logger.debug('NCBI PMID lookup malformed payload for %r: missing result object', pmid)
+                return None
+            result_data = result.get(pmid)
+            if not isinstance(result_data, dict):
+                logger.debug('NCBI PMID lookup malformed payload for %r: missing PMID result object', pmid)
+                return None
+            raw_title = result_data.get('title', '')
+            title = raw_title.strip() if isinstance(raw_title, str) else ''
             doi = ''
-            for entry in result_data.get('articleids', []):
+            article_ids = result_data.get('articleids')
+            if not isinstance(article_ids, list):
+                logger.debug('NCBI PMID lookup malformed payload for %r: articleids is not a list', pmid)
+                return None
+            for entry in article_ids:
+                if not isinstance(entry, dict):
+                    logger.debug('NCBI PMID lookup malformed payload for %r: articleids entry is not an object', pmid)
+                    return None
                 if entry.get('idtype') == 'doi':
-                    doi = entry.get('value', '').strip()
+                    raw_doi = entry.get('value', '')
+                    doi = raw_doi.strip() if isinstance(raw_doi, str) else ''
                     break
             return {'title': title, 'doi': doi}
         except urllib.error.HTTPError as exc:
@@ -104,11 +123,31 @@ def fetch_pubmed_id_for_doi(doi: str, timeout: int = CLI_CONFIG.timeouts.pubmed)
         try:
             with urllib.request.urlopen(url, timeout=timeout) as resp:
                 data = json.loads(resp.read())
-            records = data.get('records', [])
+            if not isinstance(data, dict):
+                logger.debug(
+                    'NCBI DOI->PMID lookup malformed payload for %r: root is %s',
+                    normalized_doi,
+                    type(data).__name__,
+                )
+                return None
+            records = data.get('records')
+            if not isinstance(records, list):
+                logger.debug(
+                    'NCBI DOI->PMID lookup malformed payload for %r: records is not a list',
+                    normalized_doi,
+                )
+                return None
             if not records:
                 return None
 
-            pmid = str(records[0].get('pmid', '')).strip()
+            first_record = records[0]
+            if not isinstance(first_record, dict):
+                logger.debug(
+                    'NCBI DOI->PMID lookup malformed payload for %r: first record is not an object',
+                    normalized_doi,
+                )
+                return None
+            pmid = str(first_record.get('pmid', '')).strip()
             if pmid:
                 return pmid
 
@@ -160,8 +199,19 @@ def fetch_publication_metadata(doi: str, timeout: int = CLI_CONFIG.timeouts.cros
         try:
             with urllib.request.urlopen(url, timeout=timeout) as resp:
                 data = json.loads(resp.read())
-            titles = data.get('message', {}).get('title', [])
-            title = titles[0].strip() if titles else ''
+            if not isinstance(data, dict):
+                logger.debug('CrossRef lookup malformed payload for DOI %r: root is %s', normalized_doi, type(data).__name__)
+                return None
+            message = data.get('message')
+            if not isinstance(message, dict):
+                logger.debug('CrossRef lookup malformed payload for DOI %r: missing message object', normalized_doi)
+                return None
+            titles = message.get('title')
+            if not isinstance(titles, list):
+                logger.debug('CrossRef lookup malformed payload for DOI %r: title is not a list', normalized_doi)
+                return None
+            first_title = titles[0] if titles else ''
+            title = first_title.strip() if isinstance(first_title, str) else ''
             if title:
                 return {'title': title}
             logger.debug('CrossRef: no title found for DOI %r', normalized_doi)

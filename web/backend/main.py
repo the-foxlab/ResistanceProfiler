@@ -7,7 +7,6 @@ import hmac
 import importlib.metadata
 import io
 import logging
-import mimetypes
 import os
 import re
 import threading
@@ -17,25 +16,19 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
-from uuid import uuid4
 
 import redis
 import uvicorn
 from fastapi import (
     Depends,
     FastAPI,
-    File,
     Header,
     HTTPException,
-    Query,
     Request,
-    Response,
-    UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from rq import Queue
 from rq.exceptions import NoSuchJobError
 from rq.job import Job
 from slowapi import Limiter
@@ -46,40 +39,43 @@ from web.backend.config import (
     WEB_BACKEND_CONFIG,
     WEB_ENV,
 )
-from web.backend.jobs import run_profile_fasta, run_profile_vcf, run_regenerate_json
 from web.backend.models import (
     ApiEnvelope,
-    ArtifactBundlePayload,
-    BatchProfileFastaPayload,
-    BatchProfileVcfPayload,
-    BatchSampleEntry,
-    BatchSubmitResponse,
-    JobStatusResponse,
-    JobSubmitResponse,
-    ProfileFastaPayload,
-    ProfileVcfPayload,
-    RegenerateJsonPayload,
-    SessionCleanupPayload,
-    SessionCleanupResponse,
-    UploadResponse,
 )
-from web.backend.queue import build_enqueue_job_options, get_batch_queue, get_queue
-from web.backend.services.browse import list_databases, list_rules
-from web.backend.services.upload import cleanup_session_files, save_upload_stream
+from web.backend.routes.artifacts import build_artifacts_router
+from web.backend.routes.catalog import build_catalog_router
+from web.backend.routes.health import build_health_router
+from web.backend.routes.jobs import build_jobs_router
+from web.backend.routes.profile import build_profile_router
+from web.backend.routes.regenerate import build_regenerate_router
+from web.backend.routes.session import build_session_router
+from web.backend.routes.upload import build_upload_router
+from web.backend.services.upload import save_upload_stream
 from web.backend.startup_config import (
     StartupConfig,
     is_path_within_allowed_roots,
     list_project_db_paths,
     load_startup_config,
     resolve_project_db_path,
+    resolve_regenerate_project_db_path,
 )
 
 logger = logging.getLogger(__name__)
 _SAMPLE_QUOTA_LOCK = threading.Lock()
 _SAMPLE_QUOTA_COUNTER: dict[tuple[str, int], int] = {}
 _WEB_TIMESTAMP_TOKEN = re.compile(
-    r'\.(\d{20})(?=\.(?:report\.html|report\.pdf|results\.json|mutations\.tsv)$)'
+    r'\.(\d{20})(?=\.(?:report\.html|report\.pdf|results\.json)$)'
 )
+
+
+def _is_allowed_artifact_path(artifact_path: Path) -> bool:
+    """Allow only known artifact file types for downloads."""
+    allowed_suffixes = (
+        '.report.pdf',
+        '.results.json',
+        '.report.html',
+    )
+    return any(str(artifact_path).endswith(suffix) for suffix in allowed_suffixes)
 
 
 @asynccontextmanager
@@ -118,515 +114,74 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
 
     branding_dir = Path(__file__).resolve().parents[2] / 'respro' / 'report' / 'static'
 
-    def _is_allowed_artifact_path(artifact_path: Path) -> bool:
-        """Allow only known artifact file types for downloads."""
-        allowed_suffixes = (
-            '.report.pdf',
-            '.results.json',
-            '.mutations.tsv',
-            '.report.html',
-        )
-        return any(str(artifact_path).endswith(suffix) for suffix in allowed_suffixes)
-
-    async def _handle_upload(
-        *,
-        file: UploadFile,
-        file_type: Literal['fasta', 'vcf', 'bam', 'json'],
-    ) -> UploadResponse:
-        try:
-            saved_path, size_bytes = await save_upload_stream(file, file_type, config.uploads_dir)
-            return UploadResponse(
-                file_path=str(saved_path),
-                file_type=file_type,
-                size_bytes=size_bytes,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=_user_facing_error_message(str(exc))) from exc
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=_user_facing_error_message(str(exc))) from exc
-        finally:
-            await file.close()
-
-    @app.get('/api/health', response_model=ApiEnvelope)
-    def health() -> ApiEnvelope:
-        return ApiEnvelope(
-            data={
-                'service': WEB_BACKEND_CONFIG.defaults.service_name,
-            },
-            status='ok',
-        )
-
-    @app.get('/api/readiness', response_model=ApiEnvelope)
-    def readiness() -> JSONResponse | ApiEnvelope:
-        payload = _build_readiness_payload(config)
-        if payload.status == 'ok':
-            return payload
-        return JSONResponse(status_code=503, content=payload.model_dump())
-
-    @app.get('/api/ui/config', response_model=ApiEnvelope)
-    def ui_config(_auth: None = Depends(require_api_token)) -> ApiEnvelope:
-        return ApiEnvelope(
-            data={
-                'batch_max_samples': sample_limit_per_minute,
-                'sample_limit_per_minute': sample_limit_per_minute,
-            }
-        )
-
-    @app.post('/api/upload/fasta', response_model=UploadResponse)
-    @limiter.limit(upload_rate_limit)
-    async def upload_fasta(
-        request: Request,
-        file: UploadFile = File(...),
-        _auth: None = Depends(require_api_token),
-    ) -> UploadResponse:
-        del request
-        return await _handle_upload(file=file, file_type='fasta')
-
-    @app.post('/api/upload/vcf', response_model=UploadResponse)
-    @limiter.limit(upload_rate_limit)
-    async def upload_vcf(
-        request: Request,
-        file: UploadFile = File(...),
-        _auth: None = Depends(require_api_token),
-    ) -> UploadResponse:
-        del request
-        return await _handle_upload(file=file, file_type='vcf')
-
-    @app.post('/api/upload/bam', response_model=UploadResponse)
-    @limiter.limit(upload_rate_limit)
-    async def upload_bam(
-        request: Request,
-        file: UploadFile = File(...),
-        _auth: None = Depends(require_api_token),
-    ) -> UploadResponse:
-        del request
-        return await _handle_upload(file=file, file_type='bam')
-
-    @app.post('/api/upload/json', response_model=UploadResponse)
-    @limiter.limit(upload_rate_limit)
-    async def upload_json(
-        request: Request,
-        file: UploadFile = File(...),
-        _auth: None = Depends(require_api_token),
-    ) -> UploadResponse:
-        del request
-        return await _handle_upload(file=file, file_type='json')
-
-    @app.get('/api/rules', response_model=ApiEnvelope)
-    def rules(
-        database_id: str | None = Query(default=None),
-        reference: str | None = Query(default=None),
-        _auth: None = Depends(require_api_token),
-    ) -> ApiEnvelope:
-        try:
-            data = list_rules(
-                config.project_databases_dir,
-                database_id,
-                reference_filter=reference,
-            )
-            return ApiEnvelope(data=data)
-        except (FileNotFoundError, ValueError, OSError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.get('/api/mutations', response_model=ApiEnvelope)
-    def mutations(
-        database_id: str | None = Query(default=None),
-        reference: str | None = Query(default=None),
-        _auth: None = Depends(require_api_token),
-    ) -> ApiEnvelope:
-        # Alias for /api/rules — delegates to the same handler.
-        return rules(database_id=database_id, reference=reference, _auth=_auth)
-
-    @app.get('/api/databases', response_model=ApiEnvelope)
-    def databases(_auth: None = Depends(require_api_token)) -> ApiEnvelope:
-        try:
-            data = list_databases(config.project_databases_dir)
-            return ApiEnvelope(data=data)
-        except (FileNotFoundError, ValueError, OSError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    @app.post('/api/session/cleanup', response_model=SessionCleanupResponse)
-    def cleanup_session_uploads(
-        payload: SessionCleanupPayload,
-        _auth: None = Depends(require_api_token),
-    ) -> SessionCleanupResponse:
-        deleted_count = cleanup_session_files(
-            payload.upload_paths,
-            payload.report_paths,
-            config.uploads_dir,
-            config.results_dir,
-        )
-        return SessionCleanupResponse(deleted_count=deleted_count)
-
-    @app.post('/api/profile/fasta', response_model=JobSubmitResponse)
-    def profile_fasta_route(
-        request: Request,
-        payload: ProfileFastaPayload,
-        queue: Queue = Depends(get_queue),
-        _auth: None = Depends(require_api_token),
-    ) -> JobSubmitResponse:
-        fasta_path = Path(payload.fasta_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(fasta_path, config.allowed_roots):
-            raise HTTPException(status_code=400, detail='FASTA path is outside allowed upload directory.')
-        if not fasta_path.is_file():
-            raise HTTPException(status_code=404, detail='FASTA file not found.')
-        _consume_sample_quota(
-            request,
-            sample_count=1,
+    app.include_router(
+        build_health_router(
+            config=config,
             sample_limit_per_minute=sample_limit_per_minute,
+            require_api_token=require_api_token,
+            build_readiness_payload=_build_readiness_payload,
         )
-        project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
-        defaults = WEB_BACKEND_CONFIG.defaults
-        enqueue_options = build_enqueue_job_options()
-        job = queue.enqueue(
-            run_profile_fasta,
-            project_db=str(project_db),
-            output_dir=str(config.results_dir),
-            fasta_path=str(fasta_path),
-            sample=payload.sample or defaults.profile_sample_name,
-            threads=payload.threads if payload.threads is not None else defaults.profile_threads,
-            input_display_name=payload.input_display_name,
-            **enqueue_options,
+    )
+    app.include_router(
+        build_upload_router(
+            uploads_dir=config.uploads_dir,
+            limiter=limiter,
+            upload_rate_limit=upload_rate_limit,
+            require_api_token=require_api_token,
+            user_facing_error_message=_user_facing_error_message,
+            save_upload_stream=save_upload_stream,
         )
-        logger.info('Queue job enqueued: job_id=%s mode=fasta database_id=%s', job.id, project_db.name)
-        return JobSubmitResponse(job_id=job.id)
-
-    @app.post('/api/profile/vcf', response_model=JobSubmitResponse)
-    def profile_vcf_route(
-        request: Request,
-        payload: ProfileVcfPayload,
-        queue: Queue = Depends(get_queue),
-        _auth: None = Depends(require_api_token),
-    ) -> JobSubmitResponse:
-        vcf_path = Path(payload.vcf_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(vcf_path, config.allowed_roots):
-            raise HTTPException(status_code=400, detail='VCF path is outside allowed upload directory.')
-        if not vcf_path.is_file():
-            raise HTTPException(status_code=404, detail='VCF file not found.')
-        ref_fasta_path = Path(payload.ref_fasta_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(ref_fasta_path, config.allowed_roots):
-            raise HTTPException(status_code=400, detail='Reference FASTA path is outside allowed upload directory.')
-        if not ref_fasta_path.is_file():
-            raise HTTPException(status_code=404, detail='Reference FASTA file not found.')
-        bam_path: str | None = None
-        if payload.bam_path:
-            resolved_bam = Path(payload.bam_path).expanduser().resolve()
-            if not is_path_within_allowed_roots(resolved_bam, config.allowed_roots):
-                raise HTTPException(status_code=400, detail='BAM path is outside allowed upload directory.')
-            if not resolved_bam.is_file():
-                raise HTTPException(status_code=404, detail='BAM file not found.')
-            bam_path = str(resolved_bam)
-        _consume_sample_quota(
-            request,
-            sample_count=1,
+    )
+    app.include_router(
+        build_catalog_router(
+            project_databases_dir=config.project_databases_dir,
+            require_api_token=require_api_token,
+        )
+    )
+    app.include_router(
+        build_profile_router(
+            config=config,
             sample_limit_per_minute=sample_limit_per_minute,
+            require_api_token=require_api_token,
+            consume_sample_quota=_consume_sample_quota,
+            is_path_within_allowed_roots=is_path_within_allowed_roots,
+            resolve_project_db_path=resolve_project_db_path,
         )
-        project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
-        defaults = WEB_BACKEND_CONFIG.defaults
-        enqueue_options = build_enqueue_job_options()
-        job = queue.enqueue(
-            run_profile_vcf,
-            project_db=str(project_db),
-            output_dir=str(config.results_dir),
-            vcf_path=str(vcf_path),
-            ref_fasta_path=str(ref_fasta_path),
-            sample=payload.sample or defaults.profile_sample_name,
-            min_af=payload.min_af if payload.min_af is not None else defaults.profile_min_af,
-            min_depth=payload.min_depth if payload.min_depth is not None else defaults.profile_min_depth,
-            bam_path=bam_path,
-            threads=payload.threads if payload.threads is not None else defaults.profile_threads,
-            input_display_name=payload.input_display_name,
-            **enqueue_options,
+    )
+    app.include_router(
+        build_jobs_router(
+            require_api_token=require_api_token,
+            map_job_status=_map_job_status,
+            user_facing_error_message=_user_facing_error_message,
+            job_class=Job,
+            no_such_job_error=NoSuchJobError,
         )
-        logger.info('Queue job enqueued: job_id=%s mode=vcf database_id=%s', job.id, project_db.name)
-        return JobSubmitResponse(job_id=job.id)
-
-    @app.post('/api/profile/batch/vcf', response_model=BatchSubmitResponse)
-    def profile_batch_vcf_route(
-        request: Request,
-        payload: BatchProfileVcfPayload,
-        queue: Queue = Depends(get_batch_queue),
-        _auth: None = Depends(require_api_token),
-    ) -> BatchSubmitResponse:
-        if len(payload.vcf_paths) != len(payload.sample_names):
-            raise HTTPException(
-                status_code=422,
-                detail='vcf_paths and sample_names must have the same length.',
-            )
-        input_display_names = _resolve_batch_input_display_names(
-            input_paths=payload.vcf_paths,
-            input_display_names=payload.input_display_names,
-            path_label='vcf_paths',
+    )
+    app.include_router(
+        build_artifacts_router(
+            results_dir=config.results_dir,
+            branding_dir=branding_dir,
+            require_api_token=require_api_token,
+            is_path_within_allowed_roots=is_path_within_allowed_roots,
+            is_allowed_artifact_path=_is_allowed_artifact_path,
         )
-        artifact_base_names = _derive_unique_artifact_base_names(input_display_names)
-        max_batch = sample_limit_per_minute
-        if len(payload.vcf_paths) > max_batch:
-            raise HTTPException(
-                status_code=422,
-                detail=f'Batch size {len(payload.vcf_paths)} exceeds the maximum of {max_batch} samples per batch.',
-            )
-        ref_fasta_path = Path(payload.reference_fasta_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(ref_fasta_path, config.allowed_roots):
-            raise HTTPException(status_code=400, detail='Reference FASTA path is outside allowed upload directory.')
-        if not ref_fasta_path.is_file():
-            raise HTTPException(status_code=404, detail='Reference FASTA file not found.')
-        _consume_sample_quota(
-            request,
-            sample_count=len(payload.vcf_paths),
-            sample_limit_per_minute=sample_limit_per_minute,
+    )
+    app.include_router(
+        build_session_router(
+            uploads_dir=config.uploads_dir,
+            results_dir=config.results_dir,
+            require_api_token=require_api_token,
         )
-        project_db = resolve_project_db_path(config.project_databases_dir, payload.db_path)
-        enqueue_options = build_enqueue_job_options()
-        validated_vcf_inputs: list[tuple[Path, str]] = []
-        for vcf_path_str, sample_name in zip(payload.vcf_paths, payload.sample_names):
-            vcf_path = Path(vcf_path_str).expanduser().resolve()
-            if not is_path_within_allowed_roots(vcf_path, config.allowed_roots):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f'VCF path for sample {sample_name!r} is outside allowed upload directory.',
-                )
-            if not vcf_path.is_file():
-                raise HTTPException(status_code=404, detail=f'VCF file not found for sample {sample_name!r}.')
-            validated_vcf_inputs.append((vcf_path, sample_name))
-
-        samples = []
-        for index, (vcf_path, sample_name) in enumerate(validated_vcf_inputs):
-            job_id = str(uuid4())
-            queue.enqueue(
-                run_profile_vcf,
-                project_db=str(project_db),
-                output_dir=str(config.results_dir),
-                vcf_path=str(vcf_path),
-                ref_fasta_path=str(ref_fasta_path),
-                sample=sample_name,
-                min_af=payload.min_af,
-                min_depth=payload.min_depth,
-                bam_path=None,
-                threads=payload.threads,
-                input_display_name=input_display_names[index],
-                artifact_base_name=artifact_base_names[index],
-                job_id=job_id,
-                **enqueue_options,
-            )
-            samples.append(BatchSampleEntry(job_id=job_id, sample_name=sample_name))
-        logger.info(
-            'Batch VCF jobs enqueued: count=%d database_id=%s',
-            len(samples),
-            project_db.name,
+    )
+    app.include_router(
+        build_regenerate_router(
+            config=config,
+            require_api_token=require_api_token,
+            user_facing_error_message=_user_facing_error_message,
+            is_path_within_allowed_roots=is_path_within_allowed_roots,
+            resolve_regenerate_project_db_path=resolve_regenerate_project_db_path,
         )
-        return BatchSubmitResponse(samples=samples, total=len(samples))
-
-    @app.post('/api/profile/batch/fasta', response_model=BatchSubmitResponse)
-    def profile_batch_fasta_route(
-        request: Request,
-        payload: BatchProfileFastaPayload,
-        queue: Queue = Depends(get_batch_queue),
-        _auth: None = Depends(require_api_token),
-    ) -> BatchSubmitResponse:
-        if len(payload.fasta_paths) != len(payload.sample_names):
-            raise HTTPException(
-                status_code=422,
-                detail='fasta_paths and sample_names must have the same length.',
-            )
-        input_display_names = _resolve_batch_input_display_names(
-            input_paths=payload.fasta_paths,
-            input_display_names=payload.input_display_names,
-            path_label='fasta_paths',
-        )
-        artifact_base_names = _derive_unique_artifact_base_names(input_display_names)
-        max_batch = sample_limit_per_minute
-        if len(payload.fasta_paths) > max_batch:
-            raise HTTPException(
-                status_code=422,
-                detail=f'Batch size {len(payload.fasta_paths)} exceeds the maximum of {max_batch} samples per batch.',
-            )
-        _consume_sample_quota(
-            request,
-            sample_count=len(payload.fasta_paths),
-            sample_limit_per_minute=sample_limit_per_minute,
-        )
-        project_db = resolve_project_db_path(config.project_databases_dir, payload.db_path)
-        enqueue_options = build_enqueue_job_options()
-        validated_fasta_inputs: list[tuple[Path, str]] = []
-        for fasta_path_str, sample_name in zip(payload.fasta_paths, payload.sample_names):
-            fasta_path = Path(fasta_path_str).expanduser().resolve()
-            if not is_path_within_allowed_roots(fasta_path, config.allowed_roots):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f'FASTA path for sample {sample_name!r} is outside allowed upload directory.',
-                )
-            if not fasta_path.is_file():
-                raise HTTPException(status_code=404, detail=f'FASTA file not found for sample {sample_name!r}.')
-            validated_fasta_inputs.append((fasta_path, sample_name))
-
-        samples = []
-        for index, (fasta_path, sample_name) in enumerate(validated_fasta_inputs):
-            job_id = str(uuid4())
-            queue.enqueue(
-                run_profile_fasta,
-                project_db=str(project_db),
-                output_dir=str(config.results_dir),
-                fasta_path=str(fasta_path),
-                sample=sample_name,
-                threads=payload.threads,
-                input_display_name=input_display_names[index],
-                artifact_base_name=artifact_base_names[index],
-                job_id=job_id,
-                **enqueue_options,
-            )
-            samples.append(BatchSampleEntry(job_id=job_id, sample_name=sample_name))
-        logger.info(
-            'Batch FASTA jobs enqueued: count=%d database_id=%s',
-            len(samples),
-            project_db.name,
-        )
-        return BatchSubmitResponse(samples=samples, total=len(samples))
-
-    @app.post('/api/regenerate/json', response_model=JobSubmitResponse)
-    def regenerate_json_route(
-        payload: RegenerateJsonPayload,
-        queue: Queue = Depends(get_queue),
-        _auth: None = Depends(require_api_token),
-    ) -> JobSubmitResponse:
-        project_db = resolve_project_db_path(config.project_databases_dir, payload.database_id)
-        json_path = Path(payload.json_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(json_path, config.allowed_roots):
-            raise HTTPException(status_code=400, detail='JSON path is outside allowed upload/output directory.')
-        if not json_path.is_file():
-            raise HTTPException(status_code=404, detail='JSON file not found.')
-
-        job = queue.enqueue(
-            run_regenerate_json,
-            project_db=str(project_db),
-            output_dir=str(config.results_dir),
-            json_path=str(json_path),
-            **build_enqueue_job_options(),
-        )
-        logger.info(
-            'Queue job enqueued: job_id=%s mode=regenerate-json database_id=%s',
-            job.id,
-            project_db.name,
-        )
-        return JobSubmitResponse(job_id=job.id)
-
-    @app.get('/api/jobs/{job_id}', response_model=JobStatusResponse)
-    def job_status(
-        job_id: str,
-        queue: Queue = Depends(get_queue),
-        _auth: None = Depends(require_api_token),
-    ) -> JobStatusResponse:
-        try:
-            job = Job.fetch(job_id, connection=queue.connection)
-        except NoSuchJobError:
-            raise HTTPException(status_code=404, detail='Job not found.')
-
-        rq_status = job.get_status()
-        status = _map_job_status(rq_status)
-        result = job.return_value() if status == 'succeeded' else None
-        error = _user_facing_error_message(job.exc_info) if status == 'failed' else None
-        if status == 'failed' and rq_status in ('stopped', 'canceled'):
-            error = 'Job canceled by user.'
-        return JobStatusResponse(job_id=job_id, status=status, result=result, error=error)
-
-    @app.delete('/api/jobs/{job_id}', status_code=204)
-    def cancel_job(
-        job_id: str,
-        queue: Queue = Depends(get_queue),
-        _auth: None = Depends(require_api_token),
-    ) -> Response:
-        try:
-            job = Job.fetch(job_id, connection=queue.connection)
-        except NoSuchJobError:
-            raise HTTPException(status_code=404, detail='Job not found.')
-
-        rq_status = job.get_status()
-        if rq_status in ('queued', 'scheduled', 'deferred'):
-            job.cancel()
-            return Response(status_code=204)
-
-        if rq_status == 'started':
-            kill_worker = getattr(job, 'kill_worker', None)
-            if callable(kill_worker):
-                kill_worker()
-                return Response(status_code=204)
-
-            # Fallback when worker-kill support is unavailable in the installed RQ version.
-            job.exc_info = 'Job canceled by user.'
-            job.set_status('failed')
-            job.save()
-            return Response(status_code=204)
-
-        return Response(status_code=204)
-
-    @app.get('/api/report')
-    def open_report(
-        path: str = Query(...),
-        _auth: None = Depends(require_api_token),
-    ) -> FileResponse:
-        report_path = Path(path).expanduser().resolve()
-        if not is_path_within_allowed_roots(report_path, (config.results_dir,)):
-            raise HTTPException(status_code=400, detail='Report path is outside allowed output directory.')
-        if not str(report_path).endswith('.report.html'):
-            raise HTTPException(status_code=400, detail='Unsupported report type. Allowed: .report.html.')
-        if not report_path.is_file():
-            raise HTTPException(status_code=404, detail='Report not found.')
-        return FileResponse(str(report_path), media_type='text/html')
-
-    @app.get('/api/artifact')
-    def download_artifact(
-        path: str = Query(...),
-        _auth: None = Depends(require_api_token),
-    ) -> FileResponse:
-        artifact_path = Path(path).expanduser().resolve()
-        if not is_path_within_allowed_roots(artifact_path, (config.results_dir,)):
-            raise HTTPException(status_code=400, detail='Artifact path is outside allowed results directory.')
-        if not _is_allowed_artifact_path(artifact_path):
-            raise HTTPException(
-                status_code=400,
-                detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .mutations.tsv, .report.html.',
-            )
-        if not artifact_path.is_file():
-            raise HTTPException(status_code=404, detail='Artifact not found.')
-
-        media_type = mimetypes.guess_type(str(artifact_path))[0] or 'application/octet-stream'
-        return FileResponse(
-            str(artifact_path),
-            media_type=media_type,
-            filename=_derive_download_filename(artifact_path),
-        )
-
-    @app.post('/api/artifact-bundle')
-    def download_artifact_bundle(
-        payload: ArtifactBundlePayload,
-        _auth: None = Depends(require_api_token),
-    ) -> Response:
-        if not payload.paths:
-            raise HTTPException(status_code=400, detail='At least one artifact path is required.')
-
-        bundle_bytes = _build_artifact_bundle(
-            payload.paths,
-            config.results_dir,
-            _is_allowed_artifact_path,
-        )
-        return Response(
-            content=bundle_bytes,
-            media_type='application/zip',
-            headers={'Content-Disposition': 'attachment; filename="respro-batch-artifacts.zip"'},
-        )
-
-    @app.get('/api/branding/logo.svg')
-    def branding_logo() -> FileResponse:
-        logo_path = branding_dir / 'logo.svg'
-        if not logo_path.is_file():
-            raise HTTPException(status_code=404, detail='Logo not found.')
-        return FileResponse(str(logo_path), media_type='image/svg+xml')
-
-    @app.get('/api/branding/favicon.svg')
-    def branding_favicon() -> FileResponse:
-        favicon_path = branding_dir / 'favicon.svg'
-        if not favicon_path.is_file():
-            raise HTTPException(status_code=404, detail='Favicon not found.')
-        return FileResponse(str(favicon_path), media_type='image/svg+xml')
+    )
 
     frontend_dist = Path(__file__).resolve().parents[1] / 'frontend' / 'dist'
     if frontend_dist.is_dir():
@@ -656,7 +211,7 @@ def _build_artifact_bundle(
             if not is_allowed_artifact_path(artifact_path):
                 raise HTTPException(
                     status_code=400,
-                    detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .mutations.tsv, .report.html.',
+                    detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .report.html.',
                 )
             if not artifact_path.is_file():
                 raise HTTPException(status_code=404, detail='Artifact not found.')
@@ -704,6 +259,28 @@ def _resolve_batch_input_display_names(
     return [Path(name).name for name in input_display_names]
 
 
+def _validate_batch_paths(
+    *,
+    input_paths: list[str],
+    sample_names: list[str],
+    allowed_roots: tuple[Path, ...],
+    path_kind: Literal['VCF', 'FASTA'],
+) -> list[tuple[Path, str]]:
+    """Resolve and validate per-sample input paths for batch profiling routes."""
+    validated_inputs: list[tuple[Path, str]] = []
+    for input_path_str, sample_name in zip(input_paths, sample_names):
+        input_path = Path(input_path_str).expanduser().resolve()
+        if not is_path_within_allowed_roots(input_path, allowed_roots):
+            raise HTTPException(
+                status_code=400,
+                detail=f'{path_kind} path for sample {sample_name!r} is outside allowed upload directory.',
+            )
+        if not input_path.is_file():
+            raise HTTPException(status_code=404, detail=f'{path_kind} file not found for sample {sample_name!r}.')
+        validated_inputs.append((input_path, sample_name))
+    return validated_inputs
+
+
 def _derive_unique_artifact_base_names(input_display_names: list[str]) -> list[str]:
     """Build deterministic unique artifact base names from display names."""
     seen_counts: dict[str, int] = {}
@@ -736,8 +313,6 @@ def _derive_download_filename(artifact_path: Path) -> str:
         return file_name[:-11] + '.pdf'
     if file_name.endswith('.results.json'):
         return file_name[:-13] + '.json'
-    if file_name.endswith('.mutations.tsv'):
-        return file_name[:-14] + '.tsv'
     return file_name
 
 
@@ -774,19 +349,23 @@ def _sweep_expired_files(results_dir: Path, uploads_dir: Path, ttl_seconds: int)
 
 def _start_ttl_sweep_thread(results_dir: Path, uploads_dir: Path) -> None:
     """Start a background thread that periodically deletes expired files."""
-    logger = logging.getLogger(__name__)
-
-    def sweep_loop() -> None:
-        while True:
-            try:
-                ttl_seconds = int(os.getenv('RESPRO_WEB_RESULT_TTL', '86400'))
-                _sweep_expired_files(results_dir, uploads_dir, ttl_seconds)
-            except Exception as exc:
-                logger.debug(f'Error in TTL sweep: {exc}')
-            time.sleep(WEB_BACKEND_CONFIG.defaults.sweep_frequency_seconds)
-
-    sweep_thread = threading.Thread(target=sweep_loop, daemon=True)
+    sweep_thread = threading.Thread(
+        target=_ttl_sweep_loop,
+        args=(results_dir, uploads_dir, WEB_BACKEND_CONFIG.defaults.sweep_frequency_seconds),
+        daemon=True,
+    )
     sweep_thread.start()
+
+
+def _ttl_sweep_loop(results_dir: Path, uploads_dir: Path, sweep_frequency_seconds: int) -> None:
+    """Continuously sweep expired upload and result files on a fixed interval."""
+    while True:
+        try:
+            ttl_seconds = int(os.getenv('RESPRO_WEB_RESULT_TTL', '86400'))
+            _sweep_expired_files(results_dir, uploads_dir, ttl_seconds)
+        except Exception as exc:
+            logger.debug(f'Error in TTL sweep: {exc}')
+        time.sleep(sweep_frequency_seconds)
 
 
 def _map_job_status(rq_status) -> str:

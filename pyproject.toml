@@ -73,6 +73,6 @@ include = [
     'respro/report/templates/*.j2',
     'respro/report/static/*.css',
     'respro/report/static/*.js',
-    'respro/report/static/*.svg',
+    'respro/report/static/assets/*.svg',
 ]
 

@@ -7,8 +7,10 @@ export function DatabaseSelectorBar({
   selectId,
   className,
 }) {
+  const description = selectedDatabase?.metadata?.description;
+
   return (
-    <div className={`header-db-bar ${className || ''}`.trim()}>
+    <div className={`header-db-bar ${className || ''}`.trim()} title={description}>
       {databases.length > 0 ? (
         <>
           {/* One shared selector component keeps database switching identical across tabs. */}

@@ -57,6 +57,90 @@ Example metadata file:
 }
 ```
 
+## Interpretation algorithms
+
+`metadata.json` optionally supports a top-level `interpretation_algorithms` array. Each entry configures one algorithm by name. Each algorithm type may appear **at most once** in the list, and all four types can coexist.
+
+### `ic50_thresholds`
+
+Defines per-drug IC50 or fold-IC50 breakpoints. With tthis each rule that has a IC50 values associated will be classified for a phenotype during init.
+
+- `use` — required; must be `"ic50"` or `"fold_ic50"`
+- `thresholds` — required non-empty object; each key is a drug name; each value must have `"intermediate"` and `"resistant"` keys with positive numbers; `"resistant"` must be strictly greater than `"intermediate"`
+
+### `drug_groups`
+
+Assigns drugs to named groups (e.g. drug classes). This is only if you wish to group drugs in the final report.
+
+- `groups` — required non-empty object; each key is a group name; each value is a non-empty list of drug name strings; a drug name may not appear in more than one group
+
+### `drug_interpretation`
+
+Specifies how per-drug evidence translates into a final interpretation in the report (`resistant`, `intermediate`, `sensitive`). Only one `drug_interpretation` entry is permitted per project, and its `method` field selects the strategy.
+
+- `by_phenotype` — counts phenotype-labelled hits per drug and compares counts against thresholds
+- `by_score` — sums score values per drug and compares totals against thresholds
+- `by_ic50` — checks per-hit IC50 values per drug; if any value meets the resistant threshold the drug is resistant, otherwise if any value meets the intermediate threshold the drug is intermediate, otherwise sensitive
+- `by_fold_ic50` — same logic as `by_ic50`, but using fold-IC50 values
+
+- `method` — required; must be `"by_phenotype"`, `"by_score"`, `"by_ic50"`, or `"by_fold_ic50"`
+- `thresholds` — required object; must include `"resistant"`; `"intermediate"` is optional
+- for `by_phenotype` and `by_score`, threshold values must be positive integers
+- for `by_ic50` and `by_fold_ic50`, threshold values must be positive numbers; if `intermediate` is set, `resistant` must be strictly greater than `intermediate`
+
+### `drug_alias`
+
+Defines canonical drug-name to short-alias mappings for report rendering.
+
+- `groups` — required non-empty object; keys are canonical drug names; values are aliases
+- each key and value must be a non-empty string
+- alias values must be unique across canonical drug names
+
+When configured, these mappings are written to the `drug.alias` column during `respro init`
+and used for report drug labels, for example `Aciclovir (ACV)`.
+
+### Example
+
+```json
+{
+  "description": "HIV-1 integrase inhibitor resistance database",
+  "interpretation_algorithms": [
+    {
+      "name": "ic50_thresholds",
+      "use": "fold_ic50",
+      "thresholds": {
+        "ACV": {"intermediate": 3.0, "resistant": 10.0},
+        "PCV": {"intermediate": 3.0, "resistant": 10.0}
+      }
+    },
+    {
+      "name": "drug_groups",
+      "groups": {
+        "Nucleoside Analogues": ["ACV", "PCV"],
+        "Pyrophosphate Analogues": ["FOS"]
+      }
+    },
+    {
+      "name": "drug_interpretation",
+      "method": "by_phenotype",
+      "thresholds": {
+        "resistant": 1,
+        "intermediate": 1
+      }
+    },
+    {
+      "name": "drug_alias",
+      "groups": {
+        "Aciclovir": "ACV",
+        "Penciclovir": "PCV"
+      }
+    }
+  ]
+}
+```
+
+Algorithms are validated at `respro init` time and stored in the `interpretation_algorithm` table of the project database. Existing databases without this table are migrated automatically on next open.
+
 ## Inspect project metadata
 
 ```bash

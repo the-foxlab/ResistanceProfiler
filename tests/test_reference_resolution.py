@@ -4,10 +4,8 @@ Tests for reference resolution.
 
 from pathlib import Path
 
+from respro.db.features import load_features_for_reference
 from respro.db.schema import open_project_db
-from respro.io.reference import (
-    load_features_for_reference,
-)
 
 
 class TestLoadFeatures:

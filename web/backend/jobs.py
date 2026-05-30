@@ -139,8 +139,6 @@ def _run_profile_fasta_subprocess(
         '--export',
         'json',
         '--export',
-        'tabular',
-        '--export',
         'pdf',
     ]
     if input_display_name:
@@ -161,7 +159,6 @@ def _run_profile_fasta_subprocess(
         'query_name': _read_first_fasta_name(fasta_path),
         'report_html_path': str(artifacts['html']),
         'report_json_path': str(artifacts['json']),
-        'report_tabular_path': str(artifacts['tabular']),
         'report_pdf_path': str(artifacts['pdf']),
         'resistance_hits': int(run_payload.get('resistance_hits', 0) or 0),
         'total_variants': int(run_payload.get('total_variants', 0) or 0),
@@ -205,8 +202,6 @@ def _run_profile_vcf_subprocess(
         '--export',
         'json',
         '--export',
-        'tabular',
-        '--export',
         'pdf',
     ]
     if input_display_name:
@@ -230,7 +225,6 @@ def _run_profile_vcf_subprocess(
         'query_name': _read_first_fasta_name(ref_fasta_path),
         'report_html_path': str(artifacts['html']),
         'report_json_path': str(artifacts['json']),
-        'report_tabular_path': str(artifacts['tabular']),
         'report_pdf_path': str(artifacts['pdf']),
         'resistance_hits': int(run_payload.get('resistance_hits', 0) or 0),
         'total_variants': int(run_payload.get('total_variants', 0) or 0),
@@ -256,8 +250,6 @@ def _run_regenerate_json_subprocess(
         '--export',
         'json',
         '--export',
-        'tabular',
-        '--export',
         'pdf',
     ]
     _run_respro_command(command)
@@ -272,7 +264,6 @@ def _run_regenerate_json_subprocess(
         'query_name': '',
         'report_html_path': str(artifacts['html']),
         'report_json_path': str(artifacts['json']),
-        'report_tabular_path': str(artifacts['tabular']),
         'report_pdf_path': str(artifacts['pdf']),
         'resistance_hits': int(run_payload.get('resistance_hits', 0) or 0),
         'total_variants': int(run_payload.get('total_variants', 0) or 0),
@@ -328,7 +319,6 @@ def _artifact_paths_for_html(output_html_path: Path) -> dict[str, Path]:
     return {
         'html': html_path,
         'json': html_path.parent / f'{stem}.results.json',
-        'tabular': html_path.parent / f'{stem}.mutations.tsv',
         'pdf': html_path.parent / f'{stem}.report.pdf',
     }
 

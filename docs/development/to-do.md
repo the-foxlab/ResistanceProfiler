@@ -30,8 +30,8 @@ Mark items done and update priorities after each completed milestone.
 - [X] Phenotype and clinical phenotype normalization
 - [X] IC50 column support — `ic50`/`ic_50` and `fold_ic50`/`fold_ic_50` stored separately; both may coexist in one file; report columns shown only when values are present; empty optional columns (ic50, fold_ic50, clinical_phenotype, source) hidden per table section
 - [X] Drug deduplication — case-insensitive; biological duplicate detection for `add`
-- [X] Stable drug badge colors persisted in `drug.badge_color` during rules import for consistent report styling across runs/regeneration
-- [X] Combination rule sets — `resistance_rule_set` + `resistance_rule_set_member` tables; TSV `rule_group` column
+- [X] Drug records normalized and deduplicated case-insensitively during rules import for stable canonical naming across runs/regeneration
+- [X] Formula-rule grouping model — grouped atomic members are imported via TSV `rule_group` and evaluated through the formula-rule workflow
 - [X] Formula-rule import scaffold — grouped atomic rules support `group_id` + unique `member_id`; `respro init` / `respro add` accept optional `--formula-rules` TSV with boolean `AND` / `OR` / `NOT` / `XOR` expressions, normalized formula storage, strict group-to-formula validation, and warning-only behavior when grouped rows are provided without a formula TSV
 - [X] `add` — extend existing project with new rules and optional additional GenBank annotations
 - [X] PubChem integration — best-effort drug CID, canonical URL, short description; fully non-fatal
@@ -88,7 +88,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Combination rule matching (`match_rule_sets`) — all members must co-occur to fire
 - [X] Formula-rule first-class workflow outputs — `resistance_formula_rule` import is wired into profiling-time matching, report rendering, results DB persistence, regenerate, and WebUI
 - [X] BLOSUM62 similarity scoring for matched substitutions (`core/similarity.py`)
-- [X] End-to-end combo rule loading via TSV `init` path — `init_project` + `rule_group` rows tested through `load_rule_sets` (no manual SQL setup)
+- [X] End-to-end formula-rule loading via TSV `init` path — grouped `rule_group` rows are validated and loaded during `init_project` (no manual SQL setup)
 
 ### Reporting and export
 
@@ -175,6 +175,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Surface sample classifications in report and JSON — dedicated "Manual classifications" section in HTML report and `sample_classifications` key in exported JSON, clearly separated from rule-based hits
 - [X] Optional database metadata in `respro init` — `--metadata` accepts validated JSON with fixed keys (`maintainers`, `contact`, `publication_pmid`, `website`, `description`, `maintainer_update`, `license`, `tsv_checksum`); PMID values are DOI-enriched best-effort at creation time and stored on the project row
 - [X] `respro manage database <db_path> --info` — added project metadata inspection mode that prints non-empty project identity and curated metadata fields
+- [X] Interpretation algorithm metadata in `metadata.json` — `interpretation_algorithms` top-level array in metadata JSON accepts coexisting algorithm types (`ic50_thresholds`, `drug_groups`, `drug_interpretation`, `drug_alias`); each is validated on import and stored in the `interpretation_algorithm` table in `project.db`; `load_interpretation_algorithms` exposes the config to downstream consumers (report, scoring); full test coverage in `tests/test_algorithms.py`; documented in `docs/user/database-preparation.md`
 
 ### Web deployment and security (done)
 
@@ -335,9 +336,5 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Smaller Issues
 
-- 🟡 only show relevant combinations and not all (remove badges etc)?
-- 🟡 overlapping orfs minialignments
-- 🟡 init short arguments
-- 🟡 show scores in combinations and singles
-- 🟡 show all mutations in the lolliplot even if they are only part of combinations
-- 🟡 "Phenotypes are interpreted as resistant = reduced susceptibility, sensitive = expected susceptibility, intermediate = partial or uncertain effect, and contradictory = conflicting evidence." --> only when relevant
+- 🟡 add herpes drg assessment of ic50 values
+- 🟡 herpes drg --> fold ic50 ?

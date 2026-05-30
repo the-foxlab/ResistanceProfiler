@@ -13,7 +13,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from respro.core.rules import load_rules
+from respro.db.features import load_features_for_reference
 from respro.db.models import ProfilingResult
 from respro.db.results import (
     load_classifications,
@@ -26,8 +26,8 @@ from respro.db.results import (
     validate_project_fingerprint_match,
 )
 from respro.db.results import project_fingerprint as compute_project_fingerprint
+from respro.db.rules_queries import load_rules
 from respro.db.schema import open_project_db, open_results_db
-from respro.io.reference import load_features_for_reference
 from respro.report.non_html_exports import export_results
 from respro.utils.files import resolve_output_file
 from respro.utils.logging import err_console
@@ -81,7 +81,7 @@ def regenerate(
         list[str] | None,
         typer.Option(
             '--export',
-            help='Optional extra export format in addition to HTML. Can be provided multiple times.',
+            help='Optional extra export format in addition to HTML (pdf, json). Pdfs are summaries only. Can be provided multiple times.',
         ),
     ] = None,
 ) -> None:
@@ -95,9 +95,9 @@ def regenerate(
         extra_export_formats: set[str] = set()
         for raw_export in export or []:
             export_value = raw_export.strip().lower()
-            if export_value not in ('json', 'tabular', 'pdf'):
+            if export_value not in ('json', 'pdf'):
                 raise click.ClickException(
-                    'Invalid --export value. Choose one of: json, tabular, pdf.'
+                    'Invalid --export value. Choose one of: json, pdf.'
                 )
             extra_export_formats.add(export_value)
 

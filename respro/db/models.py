@@ -129,6 +129,13 @@ class FeatureRecord:
             return None
         return (nt_offset - self.codon_start) % 3
 
+    @property
+    def display_name(self) -> str:
+        """Return the preferred display name for reports: protein for mat_peptides (if present), else name."""
+        if self.feature_type == 'mat_peptide' and self.protein:
+            return self.protein
+        return self.name
+
 
 @dataclass(frozen=True)
 class FeatureSegment:
@@ -164,6 +171,29 @@ class ResistanceRule:
     comment: str = ''
     publications: list[Publication] = field(default_factory=list)
     is_internal_formula_component: bool = False
+
+
+@dataclass
+class FormulaRuleRuntime:
+    """Runtime representation of one formula rule and its referenced atomic members."""
+
+    id: int
+    formula_id: str
+    label: str
+    normalized_expression: str
+    drug_name: str
+    drug_id: int
+    phenotype: str
+    clinical_phenotype: str
+    ic50: str
+    fold_ic50: str
+    score: str
+    source: str
+    comment: str
+    pubchem_url: str = ''
+    description: str = ''
+    publications: list[Publication] = field(default_factory=list)
+    member_rules: dict[str, ResistanceRule] = field(default_factory=dict)
 
 
 @dataclass
@@ -372,6 +402,41 @@ class ProfilingResult:
         :return: list of AnnotatedVariant with feature_name set
         """
         return [a for a in self.annotations if a.feature_name]
+
+    @property
+    def database_hit_annotations(self) -> list[AnnotatedVariant]:
+        """
+        Return annotations that should be counted as database hits.
+
+        This includes direct resistance hits and formula-only member annotations referenced by
+        fired formula rules, without double-counting shared annotations.
+        """
+        hit_annotations: list[AnnotatedVariant] = []
+        seen_annotation_ids: set[int] = set()
+
+        for ann in self.annotations:
+            if not ann.is_resistance_hit:
+                continue
+            ann_id = id(ann)
+            if ann_id in seen_annotation_ids:
+                continue
+            seen_annotation_ids.add(ann_id)
+            hit_annotations.append(ann)
+
+        for formula_hit in self.formula_hits:
+            for ann in formula_hit.matched_variants:
+                ann_id = id(ann)
+                if ann_id in seen_annotation_ids:
+                    continue
+                seen_annotation_ids.add(ann_id)
+                hit_annotations.append(ann)
+
+        return hit_annotations
+
+    @property
+    def database_hit_count(self) -> int:
+        """Return the total number of database-hit annotations."""
+        return len(self.database_hit_annotations)
 
     def summary_dict(self) -> dict:
         """

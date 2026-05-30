@@ -2,6 +2,7 @@
 SQLite schema creation and validation for ResistanceProfiler databases.
 """
 
+import re
 import sqlite3
 import uuid
 from pathlib import Path
@@ -80,7 +81,7 @@ CREATE TABLE IF NOT EXISTS drug (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id  INTEGER NOT NULL REFERENCES project(id),
     name        TEXT    NOT NULL,
-    badge_color TEXT    DEFAULT '',
+    alias       TEXT    DEFAULT '',
     pubchem_cid TEXT    DEFAULT '',  -- PubChem compound ID (integer stored as text)
     pubchem_url TEXT    DEFAULT '',  -- canonical PubChem compound URL
     description TEXT    DEFAULT '',  -- short human-readable description from PubChem
@@ -193,6 +194,15 @@ CREATE TABLE IF NOT EXISTS query_feature_mapping (
     strand          TEXT    NOT NULL DEFAULT '+',
     cigar           TEXT    NOT NULL,
     UNIQUE(query_ref_id, feature_id)
+);
+
+-- Interpretation algorithms (non-mutually-exclusive; stored as JSON config blobs)
+CREATE TABLE IF NOT EXISTS interpretation_algorithm (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id     INTEGER NOT NULL REFERENCES project(id),
+    algorithm_name TEXT    NOT NULL,
+    config_json    TEXT    NOT NULL DEFAULT '{}',
+    UNIQUE(project_id, algorithm_name)
 );
 """
 
@@ -395,7 +405,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'parent_feature_name': "TEXT NOT NULL DEFAULT ''",
     },
     'drug': {
-        'badge_color': "TEXT DEFAULT ''",
+        'alias': "TEXT DEFAULT ''",
         'pubchem_cid': "TEXT DEFAULT ''",
         'pubchem_url': "TEXT DEFAULT ''",
         'description': "TEXT DEFAULT ''",
@@ -436,6 +446,15 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'cds_start': 'INTEGER NOT NULL DEFAULT 0',
     },
 }
+
+_SQL_IDENTIFIER_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
+
+
+def _quote_sql_identifier(identifier: str, *, kind: str) -> str:
+    """Validate and quote an SQL identifier for safe interpolation."""
+    if not _SQL_IDENTIFIER_RE.match(identifier):
+        raise ValueError(f'Invalid SQL {kind} identifier: {identifier!r}')
+    return f'"{identifier}"'
 
 
 def _configure_connection(conn: sqlite3.Connection) -> None:
@@ -544,13 +563,14 @@ def _validate_required_schema_overlap(
     missing_tables: list[str] = []
     missing_columns: list[str] = []
     for table_name, expected_columns in required_columns.items():
+        table_identifier = _quote_sql_identifier(table_name, kind='table')
         if table_name not in existing_tables:
             missing_tables.append(table_name)
             continue
 
         available_columns = {
             row['name']
-            for row in conn.execute(f'PRAGMA table_info({table_name})').fetchall()
+            for row in conn.execute(f'PRAGMA table_info({table_identifier})').fetchall()
         }
         missing = sorted(expected_columns - available_columns)
         if missing:
@@ -581,18 +601,20 @@ def _add_missing_optional_columns(
     }
 
     for table_name, column_defs in optional_column_defs.items():
+        table_identifier = _quote_sql_identifier(table_name, kind='table')
         if table_name not in existing_tables:
             continue
 
         available_columns = {
             row['name']
-            for row in conn.execute(f'PRAGMA table_info({table_name})').fetchall()
+            for row in conn.execute(f'PRAGMA table_info({table_identifier})').fetchall()
         }
         for column_name, column_def in column_defs.items():
+            column_identifier = _quote_sql_identifier(column_name, kind='column')
             if column_name in available_columns:
                 continue
             conn.execute(
-                f'ALTER TABLE {table_name} ADD COLUMN {column_name} {column_def}'
+                f'ALTER TABLE {table_identifier} ADD COLUMN {column_identifier} {column_def}'
             )
             changed = True
 
@@ -710,6 +732,13 @@ CREATE TABLE IF NOT EXISTS resistance_formula_rule_publication (
     UNIQUE(formula_rule_id, publication_id)
 );
 CREATE INDEX IF NOT EXISTS idx_resistance_formula_rule_pub ON resistance_formula_rule_publication(formula_rule_id);
+CREATE TABLE IF NOT EXISTS interpretation_algorithm (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id     INTEGER NOT NULL REFERENCES project(id),
+    algorithm_name TEXT    NOT NULL,
+    config_json    TEXT    NOT NULL DEFAULT '{}',
+    UNIQUE(project_id, algorithm_name)
+);
 """)
     conn.commit()
 

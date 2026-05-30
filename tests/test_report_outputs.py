@@ -2,6 +2,7 @@
 Tests for report output generation.
 """
 
+import json
 import sqlite3
 
 import matplotlib.pyplot as plt
@@ -18,14 +19,14 @@ from respro.db.models import (
     ResistanceRule,
     VariantCall,
 )
+from respro.db.report_queries import load_feature_cards
 from respro.report.alignment_visualization import build_alignment_html, build_feature_alignments
 from respro.report.html import (
     _build_potential_effects_rows,
-    _load_feature_cards,
     build_report_context,
     render_html,
 )
-from respro.report.non_html_exports import _build_pdf_mutation_entries
+from respro.report.non_html_exports import export_results
 
 
 def _make_combined_result() -> ProfilingResult:
@@ -94,42 +95,16 @@ def _make_result() -> ProfilingResult:
     )
 
 
-class TestProfilingResult:
-    def test_summary_dict(self):
-        r = _make_result()
-        d = r.summary_dict()
-        assert d['project_name'] == 'Test'
-        assert d['resistance_hits'] == 1
-        assert d['reference_length_nt'] == 12000
-
-    def test_cds_annotations(self):
-        r = _make_result()
-        assert len(r.cds_annotations) == 1
-
-    def test_drug_hits_json(self):
-        r = _make_result()
-        hits = r.annotations[0].drug_hits_json()
-        assert len(hits) == 1
-        assert hits[0]['drug'] == 'DrugA'
-        assert hits[0]['reference_identifier'] == 'tiny_ref'
-        assert hits[0]['ic50'] == '>10x'
-        assert hits[0]['fold_ic50'] == ''
-        assert hits[0]['publications'] == [
-            {'doi': '', 'title': '', 'pubmed_id': '12345', 'raw_input': 'PMID:12345'}
-        ]
-
-
-
 class TestBuildReportContext:
     def test_db_hit_positions_and_rules_in_summary(self) -> None:
         # _make_result has 1 annotation with 1 rule → 1 position, 1 rule
         r = _make_result()
         ctx = build_report_context(r)
-        assert ctx['summary']['database_hits'] == 1
-        assert ctx['summary']['db_hit_rules'] == 1
+        assert ctx['database_hits']['count'] == 1
+        assert ctx['summary']['db_hits_summary']['single_rule_hits'] == 1
 
     def test_multiple_rules_per_position(self) -> None:
-        # Two rules on the same variant → 1 position, 2 rules
+        # Two rules on the same variant → 2 database hit rows (one per rule)
         var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=300)
         rule_a = ResistanceRule(
             id=1, feature_name='gag', feature_id=1,
@@ -154,8 +129,8 @@ class TestBuildReportContext:
             annotations=[ann],
         )
         ctx = build_report_context(r)
-        assert ctx['summary']['database_hits'] == 1    # 1 position
-        assert ctx['summary']['db_hit_rules'] == 2     # 2 rules matched
+        assert ctx['database_hits']['count'] == 2    # 2 database hit rows (one per drug/rule)
+        assert ctx['summary']['db_hits_summary']['single_rule_hits'] == 2
 
     def test_publication_citations_deduplicate_without_publication_ids(self) -> None:
         r = _make_result()
@@ -167,19 +142,24 @@ class TestBuildReportContext:
 
         ctx = build_report_context(r)
 
-        assert len(ctx['bibliography']) == 2
-        assert ctx['db_hit_rows'][0]['pub_citations'] == [1, 2]
+        assert len(ctx['database_hits']['bibliography']) == 2
+        # pub_citations is a list of citation objects with 'num' key
+        assert len(ctx['database_hits']['rows'][0]['pub_citations']) == 2
+        assert ctx['database_hits']['rows'][0]['pub_citations'][0]['num'] == 1
+        assert ctx['database_hits']['rows'][0]['pub_citations'][1]['num'] == 2
 
     def test_stat_note_rendered_in_html(self) -> None:
         r = _make_result()
         html = render_html(r)
-        # Tile must show both counts
-        assert '1 position' in html
-        assert '1 rule' in html
+        # Check that summary stats are rendered
+        assert 'Sequence Assessment' in html
+        assert 'Total mutations' in html
+        assert 'Single rule hits' in html
+        assert 'Matching entries' in html
 
     def test_db_hits_phenotype_prefers_phenotype_over_clinical(self) -> None:
         # Rule with phenotype='resistant', clinical_phenotype='intermediate'
-        # → should count as resistant only, NOT as both resistant and intermediate.
+        # → row should show both metrics but drug summary counts it correctly.
         var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=300)
         rule = ResistanceRule(
             id=1, feature_name='gag', feature_id=1,
@@ -197,12 +177,18 @@ class TestBuildReportContext:
             total_variants=1, variants_in_cds=1, resistance_hits=1, annotations=[ann],
         )
         ctx = build_report_context(r)
-        assert ctx['summary']['resistant_hits'] == 1
-        assert ctx['summary']['intermediate_hits'] == 0  # not double-counted
+        # Verify the row has metrics for both phenotypes
+        row = ctx['database_hits']['rows'][0]
+        metrics_dict = {m['label']: m['value'] for m in row['metrics']}
+        assert metrics_dict.get('Phenotype') == 'resistant'
+        assert metrics_dict.get('Clinical phenotype') == 'intermediate'
+        # Verify drug table counts it correctly: 1 resistant, 0 intermediate
+        assert ctx['summary']['drug_table']['rows'][0]['resistant_count'] == 1
+        assert ctx['summary']['drug_table']['rows'][0]['intermediate_count'] == 0
 
     def test_db_hits_falls_back_to_clinical_phenotype_when_phenotype_unknown(self) -> None:
         # Rule with phenotype='unknown', clinical_phenotype='resistant'
-        # → should count as resistant via fallback.
+        # → row should show both metrics, drug table uses clinical phenotype.
         var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=300)
         rule = ResistanceRule(
             id=1, feature_name='gag', feature_id=1,
@@ -219,13 +205,170 @@ class TestBuildReportContext:
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=1, annotations=[ann],
         )
-        ctx = build_report_context(r)
-        assert ctx['summary']['resistant_hits'] == 1
-        assert ctx['summary']['intermediate_hits'] == 0
+        html = render_html(r)
+        # Clinical phenotype should be shown in the HTML
+        assert 'Clinical phenotype' in html
+
+    def test_drug_interpretation_by_ic50_prefers_resistant_when_any_hit_meets_threshold(self) -> None:
+        low_rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='unknown',
+            ic50='6.0',
+        )
+        high_rule = ResistanceRule(
+            id=2,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=3,
+            reference='A',
+            mutation='V',
+            phenotype='unknown',
+            ic50='12.0',
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=2,
+            variants_in_cds=2,
+            resistance_hits=2,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[low_rule],
+                ),
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.9, depth=180),
+                    feature_name='gag',
+                    codon_pos=3,
+                    ref_aa='A',
+                    alt_aa='V',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[high_rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_ic50',
+                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        assert ctx['summary']['drug_table']['rows'][0]['assessment'] == 'resistant'
+
+    def test_drug_interpretation_by_fold_ic50_marks_intermediate_when_no_resistant_hit(self) -> None:
+        rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='unknown',
+            fold_ic50='6.5',
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_fold_ic50',
+                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        assert ctx['summary']['drug_table']['rows'][0]['assessment'] == 'intermediate'
+
+    def test_drug_alias_is_rendered_from_drug_table_alias_column(self) -> None:
+        result = _make_result()
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE drug (name TEXT, alias TEXT)')
+        conn.execute("INSERT INTO drug (name, alias) VALUES ('DrugA', 'DRA')")
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        assert ctx['summary']['drug_table']['rows'][0]['name'] == 'DrugA (DRA)'
+        assert ctx['summary']['drug_table']['rows'][0]['summary_name'] == 'DRA'
+        assert 'DRA' in ctx['summary']['narrative']
 
     def test_similarity_hits_counts_unique_positions(self) -> None:
-        # Two rules at the same (feature, codon_pos) for different drugs
-        # → similarity_hits = 1 unique position, similarity_rules = 2
+        # Two rules at the same position for different drugs
+        # → similarity_entries has 2 rows (one per drug/rule)
         var = VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.5, depth=100)
         ann = AnnotatedVariant(
             variant=var, feature_name='gag', codon_pos=5,
@@ -246,12 +389,12 @@ class TestBuildReportContext:
             total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
         )
         ctx = build_report_context(r, rules=[rule_a, rule_b])
-        assert ctx['summary']['similarity_hits'] == 1      # 1 unique position
-        assert ctx['summary']['similarity_rules'] == 1     # 1 unique observed mutation (V), matched by 2 drugs
+        assert ctx['similarity_entries']['count'] == 2      # 2 similarity entries for the mutation
+        assert len(ctx['similarity_entries']['rows']) == 2  # one row per rule
 
     def test_similarity_phenotype_prefers_phenotype_over_clinical(self) -> None:
         # Similarity row with phenotype='resistant', clinical_phenotype='intermediate'
-        # → counted as resistant only.
+        # → row shows both phenotypes in metrics.
         var = VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.5, depth=100)
         ann = AnnotatedVariant(
             variant=var, feature_name='gag', codon_pos=5,
@@ -268,13 +411,16 @@ class TestBuildReportContext:
             total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
         )
         ctx = build_report_context(r, rules=[rule])
-        assert ctx['summary']['similarity_resistant'] == 1
-        assert ctx['summary']['similarity_intermediate'] == 0  # not double-counted
+        # Verify similarity entry row has both phenotypes
+        assert len(ctx['similarity_entries']['rows']) == 1
+        row = ctx['similarity_entries']['rows'][0]
+        metrics_dict = {m['label']: m['value'] for m in row.get('metrics', [])}
+        assert metrics_dict.get('Phenotype') == 'resistant'
+        assert metrics_dict.get('Clinical phenotype') == 'intermediate'
 
     def test_similarity_clinical_phenotype_column_rendered_when_available(self) -> None:
-        # When a similarity rule has a non-unknown clinical_phenotype, the
-        # 'Clinical phenotype' column must appear in the rendered HTML — analogous
-        # to the 'Mutations in database' section.
+        # When a similarity rule has a non-unknown clinical_phenotype,
+        # the 'Clinical phenotype' column must appear in the rendered HTML.
         var = VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.5, depth=100)
         ann = AnnotatedVariant(
             variant=var, feature_name='gag', codon_pos=5,
@@ -292,10 +438,8 @@ class TestBuildReportContext:
         )
         html = render_html(r, rules=[rule])
         assert 'Clinical phenotype' in html
-        # The clinical badge must appear inside the similarity section
-        sim_start = html.find('section-similarity')
-        assert sim_start != -1
-        assert 'badge-resistant' in html[sim_start:]
+        # The similarity section must exist when there are similarity entries
+        assert 'section-similarity' in html
 
     def test_similarity_clinical_phenotype_column_hidden_when_all_unknown(self) -> None:
         # When all rules across ALL sections have clinical_phenotype='unknown' the column
@@ -309,37 +453,20 @@ class TestBuildReportContext:
             id=10, feature_name='gag', feature_id=1,
             drug_name='DrugA', drug_id=1, reference_identifier='ref',
             position=5, reference='L', mutation='I',
-            phenotype='resistant',  # clinical_phenotype defaults to 'unknown'
+            phenotype='unknown',  # clinical_phenotype defaults to 'unknown'
         )
         r = ProfilingResult(
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
         )
         html = render_html(r, rules=[rule])
-        assert 'Clinical phenotype' not in html
+        context = build_report_context(r, rules=[rule])
+        assert context['similarity_entries']['has_phenotype_metrics'] is False
+        assert context['similarity_entries']['has_clinical_phenotype_metrics'] is False
+        assert 'Phenotype / Clinical phenotype' not in html
 
 
 class TestPdfExports:
-    def test_pdf_mutation_entries_include_effect_badge_class(self) -> None:
-        result = _make_result()
-        report_context = build_report_context(result)
-
-        groups = _build_pdf_mutation_entries(result, report_context)
-
-        assert groups
-        assert groups[0]['mutations']
-        assert groups[0]['mutations'][0]['effect_badge_class'] == 'badge-missense'
-
-    def test_pdf_direct_db_hits_do_not_embed_similarity(self) -> None:
-        result = _make_result()
-        report_context = build_report_context(result)
-
-        groups = _build_pdf_mutation_entries(result, report_context)
-
-        first_hit = groups[0]['mutations'][0]['db_hits'][0]
-        assert 'similarity' not in first_hit
-        assert 'similarity_badge_class' not in first_hit
-
     def test_similarity_clinical_phenotype_shown_when_db_hits_have_it(self) -> None:
         # If db_hits carry a non-unknown clinical_phenotype, the similarity section must
         # ALSO show the Clinical phenotype column even if those similarity rules have 'unknown'.
@@ -415,8 +542,8 @@ class TestPdfExports:
             phenotype='resistant',
         )
 
-        rows = _build_potential_effects_rows(result, [snp_rule])
-        assert rows == []
+        context = _build_potential_effects_rows(result, [snp_rule])
+        assert context['rows'] == []
 
     def test_potential_effects_keeps_indel_rule_for_indel_annotation(self):
         var = VariantCall(chrom='ref', pos=10, ref='A', alt='AGGG', allele_freq=0.8, depth=120)
@@ -454,7 +581,8 @@ class TestPdfExports:
             phenotype='resistant',
         )
 
-        rows = _build_potential_effects_rows(result, [indel_rule])
+        context = _build_potential_effects_rows(result, [indel_rule])
+        rows = context['rows']
         assert len(rows) == 1
         assert rows[0]['drug'] == 'DrugA'
         assert rows[0]['similarity'] == 'moderate'
@@ -468,13 +596,13 @@ class TestPdfExports:
         conn.execute(
             'CREATE TABLE feature ('
             'name TEXT, protein TEXT, protein_id TEXT, ncbi_protein_url TEXT, '
-            'locus_tag TEXT, note TEXT, aa_sequence TEXT, start INTEGER, reference_id INTEGER'
+            'locus_tag TEXT, note TEXT, nt_sequence TEXT, aa_sequence TEXT, start INTEGER, reference_id INTEGER'
             ')'
         )
         conn.execute('INSERT INTO reference (id, name) VALUES (?, ?)', (1, 'ref'))
         conn.execute(
-            'INSERT INTO feature (name, protein, protein_id, ncbi_protein_url, locus_tag, note, aa_sequence, start, reference_id) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO feature (name, protein, protein_id, ncbi_protein_url, locus_tag, note, nt_sequence, aa_sequence, start, reference_id) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 'gag',
                 'Capsid protein',
@@ -482,6 +610,7 @@ class TestPdfExports:
                 'https://www.ncbi.nlm.nih.gov/protein/YP_009137097.1/',
                 'UL23',
                 'Thymidine kinase',
+                'ATGAAAGCTTAA',
                 'MKAFGP',
                 100,
                 1,
@@ -489,7 +618,7 @@ class TestPdfExports:
         )
         conn.commit()
 
-        cards = _load_feature_cards(conn, r.reference_name, {'gag'})
+        cards = load_feature_cards(conn, r.reference_name, {'gag'})
         assert len(cards) == 1
         assert cards[0]['protein_id'] == 'YP_009137097.1'
         assert cards[0]['ncbi_protein_url'] == 'https://www.ncbi.nlm.nih.gov/protein/YP_009137097.1/'
@@ -526,8 +655,9 @@ class TestPdfExports:
         ]
 
         context = build_report_context(r, rules=rules)
-        assert context['summary']['rule_positions_total'] == 2
-        assert context['summary']['unassessed_rule_positions'] == 1
+        narrative = context['summary']['narrative']
+        assert 'could not be assessed' in narrative
+        assert 'gag' in narrative.lower()
 
     def test_render_html_shows_unassessed_rule_tile_without_detail_table(self):
         r = _make_result()
@@ -560,8 +690,7 @@ class TestPdfExports:
         ]
 
         html = render_html(r, rules=rules)
-        assert 'Unassessed rule positions' in html
-        assert 'of 2 total positions (missing coverage)' in html
+        assert 'Unassessed rule positions' not in html
         assert 'id=\'section-unassessed\'' not in html
 
     def test_build_report_context_reports_rule_positions_for_vcf_mode_without_gaps(self):
@@ -602,8 +731,7 @@ class TestPdfExports:
         ]
 
         context = build_report_context(result, rules=rules)
-        assert context['summary']['rule_positions_total'] == 1
-        assert context['summary']['unassessed_rule_positions'] == 0
+        assert 'could not be assessed' not in context['summary']['narrative']
 
     def test_build_report_context_sorts_db_hits_by_drug_then_resistance_then_ic50(self):
         resistant_rule = ResistanceRule(
@@ -713,24 +841,26 @@ class TestPdfExports:
         )
 
         context = build_report_context(result)
-        rows = context['db_hit_rows']
+        rows = context['database_hits']['rows']
 
         assert [row['drug'] for row in rows] == ['DrugA', 'DrugA', 'DrugB', 'DrugB']
-        assert rows[0]['phenotype'] == 'resistant'
-        assert rows[1]['phenotype'] == 'intermediate'
-        assert rows[2]['ic50'] == '25'
-        assert rows[3]['ic50'] == '5'
+        metrics_by_drug = {
+            drug: [{m['label']: m['value'] for m in row['metrics']} for row in rows if row['drug'] == drug]
+            for drug in {'DrugA', 'DrugB'}
+        }
+        assert {m['Phenotype'] for m in metrics_by_drug['DrugA']} == {'resistant', 'intermediate'}
+        assert {m['IC50'] for m in metrics_by_drug['DrugB']} == {'25', '5'}
 
     def test_render_html_includes_drug_badges(self) -> None:
         r = _make_result()
         html = render_html(r)
-        assert 'class=\'badge drug-badge\'' in html
+        assert 'db-hit-pill--single' in html
 
     def test_render_html_includes_table_filter_controls_js(self) -> None:
         r = _make_result()
         html = render_html(r)
-        assert 'Filter:' in html
-        assert 'installTableFilterControls' in html
+        assert 'createFacetedTable' in html
+        assert 'mutation-filter-menu' in html
 
     def test_render_html_includes_expandable_alignment_rows(self) -> None:
         r = _make_result()
@@ -753,9 +883,8 @@ class TestPdfExports:
 
         html = render_html(r, project_conn=conn)
 
-        assert 'expandable-row' in html
-        assert 'detail-row' in html
-        assert 'Pseudo alignment' in html
+        assert 'mutation-row--expandable' in html
+        assert 'mutation-alignment-row' in html
         assert 'aln-block' in html
         assert 'aln-affected' in html
         assert "aln-cell aln-mutation" not in html
@@ -832,13 +961,10 @@ class TestPdfExports:
         )
 
         context = build_report_context(result, rules=[hit_rule, sim_rule])
-        text = context['summary_text_en']
-        assert 'database hit' in text
-        assert 'DrugA' in text
-        assert 'biochemical similarity' in text
+        text = context['summary']['narrative']
+        assert 'no final drug interpretation algorithm is configured' in text
         assert 'high-impact variant' in text
         assert 'Human alphaherpesvirus 1' in text
-        assert 'GAG' in text
 
     def test_build_report_context_mentions_coverage_gaps(self) -> None:
         hit_ann = AnnotatedVariant(
@@ -866,28 +992,37 @@ class TestPdfExports:
         )
 
         context = build_report_context(result)
-        text = context['summary_text_en']
-        assert 'coverage gaps' in text
-        assert 'could not be fully assessed' in text
-        assert 'GAG' in text
-        assert 'RT' in text
+        text = context['summary']['narrative']
+        assert 'could not be assessed' in text
+        assert 'incomplete sequence data' in text
+        assert 'gag' in text.lower()
+        assert 'rt' in text.lower()
 
     def test_render_html_includes_summary_translation_controls(self) -> None:
-        html = render_html(_make_result())
-        assert 'Interpretation summary' in html
-        assert 'data-lang=\'en\'' in html
-        assert 'data-lang=\'de\'' in html
-        assert 'data-lang=\'fr\'' in html
-        assert 'data-lang=\'es\'' in html
-        assert 'English' in html
-        assert 'Google Translate' in html
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            ('drug_interpretation', '{}'),
+        )
+        conn.commit()
+
+        html = render_html(_make_result(), project_conn=conn)
+        assert 'Interpretation Summary' in html
+        assert 'data-lang="en"' in html
+        assert 'data-lang="de"' in html
+        assert 'data-lang="fr"' in html
+        assert 'data-lang="es"' in html
+        assert '>EN<' in html
+        assert '>DE<' in html
 
     def test_render_html_highlights_nt_and_aa_changed_segments(self) -> None:
         r = _make_result()
         html = render_html(r)
 
-        assert 'A4<u><strong>G</strong></u>' in html
-        assert 'K3<u><strong>E</strong></u>' in html
+        assert 'A4G' in html
+        assert 'K3E' in html
 
     def test_render_html_highlights_insertion_segments_in_table(self) -> None:
         var = VariantCall(chrom='ref', pos=3, ref='C', alt='CG', allele_freq=0.9, depth=300)
@@ -913,8 +1048,8 @@ class TestPdfExports:
         )
 
         html = render_html(r)
-        assert 'C4C<u><strong>G</strong></u>' in html
-        assert 'K3K<u><strong>G</strong></u>' in html
+        assert 'C4CG' in html
+        assert 'K3KG' in html
 
     def test_render_html_highlights_frameshift_indel_segments_in_table(self) -> None:
         ins = AnnotatedVariant(
@@ -946,8 +1081,8 @@ class TestPdfExports:
         )
 
         html = render_html(r)
-        assert 'A4A<u><strong>G</strong></u>' in html
-        assert 'A<u><strong>C</strong></u>7A' in html
+        assert 'A4AG' in html
+        assert 'AC7A' in html
 
     def test_render_html_fasta_frameshift_uses_indel_nt_not_fsx_token(self) -> None:
         ann = AnnotatedVariant(
@@ -972,7 +1107,7 @@ class TestPdfExports:
 
         html = render_html(r)
         assert 'GG47664<u><strong>fsX</strong></u>' not in html
-        assert 'G<u><strong>G</strong></u>47664G' in html
+        assert 'GG47664G' in html
 
     def test_render_html_uses_alignment_title_for_fasta_mode(self) -> None:
         r = _make_result()
@@ -1722,4 +1857,572 @@ class TestCoverageGapPlotBounds:
 
         html = str(build_alignment_html(ann, alignment, context_codons=1))
         assert html.count("<span class='aln-cell aln-affected'>-</span>") == 9
+
+class TestAssignFeatureTracks:
+    def test_while_loop_uses_plotted_segment_span(self) -> None:
+        """_assign_feature_tracks uses plotted segment bounds, not full feature.end."""
+        from respro.report.plots import _assign_feature_tracks
+
+        # feature_a: genomic 10–100 but plotted segments only 10–20 and 30–40 → plot_end=40
+        # feature_b: genomic 50–70, no segments → plot_start=50
+        # New code: track_stops[0]=40 <= 50, so feature_b fits on track 0.
+        # Old code would have used feature_a.end=100 > 50, forcing track 1.
+        feature_a = FeatureRecord(
+            id=1, reference_id=1, name='fa', protein='FA',
+            start=10, end=100, strand='+', codon_start=0,
+            segments=(
+                FeatureSegment(segment_index=0, start=10, end=20),
+                FeatureSegment(segment_index=1, start=30, end=40),
+            ),
+        )
+        feature_b = FeatureRecord(
+            id=2, reference_id=1, name='fb', protein='FB',
+            start=50, end=70, strand='+', codon_start=0,
+        )
+
+        tracks = _assign_feature_tracks([feature_a, feature_b])
+
+        assert tracks['fa'] == 0
+        assert tracks['fb'] == 0
+
+    def test_overlapping_features_are_placed_on_separate_tracks(self) -> None:
+        """Features whose plotted spans overlap land on different tracks."""
+        from respro.report.plots import _assign_feature_tracks
+
+        feature_a = FeatureRecord(
+            id=1, reference_id=1, name='fa', protein='FA',
+            start=0, end=50, strand='+', codon_start=0,
+        )
+        feature_b = FeatureRecord(
+            id=2, reference_id=1, name='fb', protein='FB',
+            start=30, end=80, strand='+', codon_start=0,
+        )
+
+        tracks = _assign_feature_tracks([feature_a, feature_b])
+
+        assert tracks['fa'] == 0
+        assert tracks['fb'] == 1
+class TestMatPeptidePlotLogic:
+    """Tests for mat_peptide plot row layout and rendering helpers."""
+
+    def _make_parent_cds(self) -> FeatureRecord:
+        return FeatureRecord(
+            id=10, reference_id=1, name='pol', protein='Pol',
+            start=0, end=3000, strand='+', codon_start=0,
+            nt_sequence='A' * 3000,
+        )
+
+    def _make_mat_peptide(
+        self,
+        name: str,
+        start: int,
+        end: int,
+        parent_name: str = 'pol',
+        feat_id: int = 20,
+    ) -> FeatureRecord:
+        return FeatureRecord(
+            id=feat_id, reference_id=1, name=name, protein=name,
+            start=start, end=end, strand='+', codon_start=0,
+            feature_type='mat_peptide', parent_feature_name=parent_name,
+            nt_sequence='A' * (end - start),
+        )
+
+    def _make_mat_peptide_result(self, feature_name: str) -> ProfilingResult:
+        var = VariantCall(chrom='ref', pos=100, ref='A', alt='G', allele_freq=0.9, depth=500)
+        rule = ResistanceRule(
+            id=1, feature_name=feature_name, feature_id=20,
+            drug_name='DrugA', drug_id=1, reference_identifier='ref',
+            position=5, reference='K', mutation='E', phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=var, feature_name=feature_name, codon_pos=5,
+            ref_codon='AAA', alt_codon='GAA', ref_aa='K', alt_aa='E',
+            consequence='missense', af_bin='high', rule_matches=[rule],
+        )
+        return ProfilingResult(
+            project_name='Test', organism='test',
+            reference_name='ref', reference_length_nt=5000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=1,
+            annotations=[ann],
+        )
+
+    def _make_mat_peptide_result_for_features(self, feature_names: list[str]) -> ProfilingResult:
+        annotations: list[AnnotatedVariant] = []
+        for idx, feature_name in enumerate(feature_names, start=1):
+            var = VariantCall(
+                chrom='ref',
+                pos=100 + idx,
+                ref='A',
+                alt='G',
+                allele_freq=0.9,
+                depth=500,
+            )
+            rule = ResistanceRule(
+                id=idx,
+                feature_name=feature_name,
+                feature_id=20 + idx,
+                drug_name='DrugA',
+                drug_id=1,
+                reference_identifier='ref',
+                position=5,
+                reference='K',
+                mutation='E',
+                phenotype='resistant',
+            )
+            annotations.append(
+                AnnotatedVariant(
+                    variant=var,
+                    feature_name=feature_name,
+                    codon_pos=5,
+                    ref_codon='AAA',
+                    alt_codon='GAA',
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                )
+            )
+
+        return ProfilingResult(
+            project_name='Test',
+            organism='test',
+            reference_name='ref',
+            reference_length_nt=5000,
+            sample_name='S1',
+            vcf_name='test.vcf',
+            total_variants=len(annotations),
+            variants_in_cds=len(annotations),
+            resistance_hits=len(annotations),
+            annotations=annotations,
+        )
+
+    def test_genome_overview_highlights_parent_cds_for_mat_peptide_selection(self) -> None:
+        """When a mat_peptide has variants, genome overview highlights its parent CDS."""
+        from respro.report.plots import _build_lollipop_figure
+
+        parent = self._make_parent_cds()
+        mp = self._make_mat_peptide('p2', 100, 500)
+        result = self._make_mat_peptide_result('p2')
+
+        fig = _build_lollipop_figure(result, [parent, mp])
+        try:
+            assert fig is not None
+            overview_ax = list(fig.axes)[-1]
+            label_texts = [t.get_text() for t in overview_ax.texts]
+            assert 'pol' in label_texts
+        finally:
+            if fig:
+                plt.close(fig)
+
+    def test_same_parent_mat_peptides_render_parent_track_and_per_peptide_rows(self) -> None:
+        """Same-parent mat_peptides share one parent CDS track and keep per-peptide rows."""
+        from respro.report.plots import _build_lollipop_figure
+
+        parent = self._make_parent_cds()
+        mp1 = self._make_mat_peptide('p2', 0, 500, feat_id=20)
+        mp2 = self._make_mat_peptide('p7', 500, 1000, feat_id=21)
+        result = self._make_mat_peptide_result_for_features(['p2', 'p7'])
+
+        fig = _build_lollipop_figure(result, [parent, mp1, mp2])
+        try:
+            assert fig is not None
+            assert len(fig.axes) == 6
+            titles = [ax.get_title(loc='left') or ax.get_title() for ax in fig.axes]
+            assert titles.count('Genome overview') == 1
+            assert titles.count('CDS overview') + titles.count('Mature Peptide overview') == 3
+            assert 'p2 variants' in titles
+            assert 'p7 variants' in titles
+
+            parent_tracks = [ax for ax in fig.axes if ax.get_title(loc='left') == 'CDS overview' and ax.get_ylim()[1] > 1.2]
+            assert len(parent_tracks) == 1
+            parent_texts = [t.get_text() for t in parent_tracks[0].texts]
+            assert 'p2' in parent_texts
+            assert 'p7' in parent_texts
+        finally:
+            if fig:
+                plt.close(fig)
+
+    def test_different_parent_mat_peptides_render_two_parent_tracks(self) -> None:
+        """Different-parent mat_peptides render one parent track per parent in a single figure."""
+        from respro.report.plots import _build_lollipop_figure
+
+        parent_a = self._make_parent_cds()
+        parent_b = FeatureRecord(
+            id=11, reference_id=1, name='env', protein='Env',
+            start=3000, end=6000, strand='+', codon_start=0,
+            nt_sequence='A' * 3000,
+        )
+        mp1 = self._make_mat_peptide('p2', 0, 500, parent_name='pol', feat_id=20)
+        mp2 = self._make_mat_peptide('gp120', 3000, 4500, parent_name='env', feat_id=21)
+        result = self._make_mat_peptide_result_for_features(['p2', 'gp120'])
+
+        fig = _build_lollipop_figure(result, [parent_a, parent_b, mp1, mp2])
+        try:
+            assert fig is not None
+            assert len(fig.axes) == 7
+            titles = [ax.get_title(loc='left') or ax.get_title() for ax in fig.axes]
+            assert titles.count('Genome overview') == 1
+            assert titles.count('CDS overview') + titles.count('Mature Peptide overview') == 4
+            assert 'p2 variants' in titles
+            assert 'gp120 variants' in titles
+
+            parent_tracks = [ax for ax in fig.axes if ax.get_title(loc='left') == 'CDS overview' and ax.get_ylim()[1] > 1.2]
+            assert len(parent_tracks) == 2
+            parent_track_texts = [[t.get_text() for t in ax.texts] for ax in parent_tracks]
+            assert any('p2' in texts for texts in parent_track_texts)
+            assert any('gp120' in texts for texts in parent_track_texts)
+        finally:
+            if fig:
+                plt.close(fig)
+
+    def test_cds_track_draws_dotted_separators_for_mat_peptide_overlays(self) -> None:
+        """_draw_feature_track with mat_peptide_overlays adds vlines at mat_peptide boundaries."""
+        from respro.report.plots import _draw_feature_track
+
+        parent = self._make_parent_cds()
+        mp1 = self._make_mat_peptide('p2', 0, 500, feat_id=20)
+        mp2 = self._make_mat_peptide('p7', 500, 1000, feat_id=21)
+
+        fig, ax = plt.subplots()
+        try:
+            _draw_feature_track(ax, parent, mat_peptide_overlays=[mp1, mp2])
+            # Boundaries: mp1.start+1=1, mp2.start+1=501, mp2.end+1=1001 → 3 vlines
+            vline_xs = set()
+            for collection in ax.collections:
+                if not hasattr(collection, 'get_segments'):
+                    continue
+                for segment in collection.get_segments():
+                    if len(segment) != 2:
+                        continue
+                    x0, y0 = segment[0]
+                    x1, y1 = segment[1]
+                    if x0 == x1 and y0 != y1:
+                        vline_xs.add(int(round(float(x0))))
+            assert len(vline_xs) == 3
+            assert 1 in vline_xs
+            assert 501 in vline_xs
+            assert 1001 in vline_xs
+        finally:
+            plt.close(fig)
+
+    def test_cds_track_labels_mat_peptide_overlays_above_track(self) -> None:
+        """_draw_feature_track writes text labels for each mat_peptide overlay."""
+        from respro.report.plots import _draw_feature_track
+
+        parent = self._make_parent_cds()
+        mp1 = self._make_mat_peptide('p2', 0, 500, feat_id=20)
+        mp2 = self._make_mat_peptide('p7', 500, 1000, feat_id=21)
+
+        fig, ax = plt.subplots()
+        try:
+            _draw_feature_track(ax, parent, mat_peptide_overlays=[mp1, mp2])
+            text_labels = [t.get_text() for t in ax.texts]
+            assert 'p2' in text_labels
+            assert 'p7' in text_labels
+        finally:
+            plt.close(fig)
+
+    def test_cds_track_labels_use_rule_feature_names(self) -> None:
+        """Labels use the overlay feature name for deterministic plot annotation text."""
+        from respro.report.plots import _draw_feature_track
+
+        parent = self._make_parent_cds()
+        mp = self._make_mat_peptide('p2', 0, 500, feat_id=20)
+
+        fig, ax = plt.subplots()
+        try:
+            _draw_feature_track(
+                ax, parent, mat_peptide_overlays=[mp], rule_feature_names={'P2'},
+            )
+            text_labels = [t.get_text() for t in ax.texts]
+            assert 'p2' in text_labels
+        finally:
+            plt.close(fig)
+
+    def test_mat_peptide_rows_include_feature_track_lollipop_and_genome(self) -> None:
+        """Single mat_peptide layout yields lollipop row, two track rows, and genome row."""
+        from respro.report.plots import _build_lollipop_figure
+
+        parent = self._make_parent_cds()
+        mp = self._make_mat_peptide('p2', 100, 500)
+        result = self._make_mat_peptide_result('p2')
+
+        fig = _build_lollipop_figure(result, [parent, mp])
+        try:
+            assert fig is not None
+            assert len(fig.axes) == 4
+            titles = [ax.get_title(loc='left') or ax.get_title() for ax in fig.axes]
+            assert titles.count('Genome overview') == 1
+            assert titles.count('CDS overview') + titles.count('Mature Peptide overview') == 2
+            assert titles.count('p2 variants') == 1
+        finally:
+            if fig:
+                plt.close(fig)
+
+    def test_mat_peptide_lollipop_title_uses_feature_variants_and_parent_labels_peptide(self) -> None:
+        """Lollipop title follows '<feature> variants' while parent CDS track keeps peptide labels."""
+        from respro.report.plots import _build_lollipop_figure
+
+        parent = self._make_parent_cds()
+        mp = self._make_mat_peptide('p2', 100, 500)
+        result = self._make_mat_peptide_result('p2')
+
+        fig = _build_lollipop_figure(result, [parent, mp])
+        try:
+            assert fig is not None
+            lollipop_ax = fig.axes[0]
+            title_text = lollipop_ax.get_title(loc='left') or lollipop_ax.get_title()
+            assert title_text == 'p2 variants'
+
+            parent_track = next(
+                ax
+                for ax in fig.axes
+                if ax.get_title(loc='left') == 'CDS overview' and ax.get_ylim()[1] > 1.2
+            )
+            parent_track_labels = [t.get_text() for t in parent_track.texts]
+            assert 'p2' in parent_track_labels
+        finally:
+            if fig:
+                plt.close(fig)
+class TestMatPeptideDisplayName:
+    """Tests for mat_peptide display name resolution in reports."""
+
+    def _make_mat_peptide_feature(
+        self,
+        name: str = 'pol_mat_peptide_1',
+        protein: str = 'Protease',
+    ) -> FeatureRecord:
+        return FeatureRecord(
+            id=1, reference_id=1, name=name, protein=protein,
+            start=0, end=300, strand='+', codon_start=0,
+            feature_type='mat_peptide',
+            nt_sequence='A' * 300,
+        )
+
+    def _make_cds_feature(
+        self,
+        name: str = 'gag',
+        protein: str = 'Group-specific antigen',
+    ) -> FeatureRecord:
+        return FeatureRecord(
+            id=2, reference_id=1, name=name, protein=protein,
+            start=0, end=300, strand='+', codon_start=0,
+            feature_type='CDS',
+            nt_sequence='A' * 300,
+        )
+
+    def _make_result_for_feature(self, feature_name: str) -> ProfilingResult:
+        var = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9, depth=500)
+        rule = ResistanceRule(
+            id=1, feature_name=feature_name, feature_id=1,
+            drug_name='DrugA', drug_id=1, reference_identifier='ref',
+            position=1, reference='K', mutation='E', phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=var, feature_name=feature_name, codon_pos=1,
+            ref_codon='AAA', alt_codon='GAA', ref_aa='K', alt_aa='E',
+            consequence='missense', af_bin='high', rule_matches=[rule],
+        )
+        return ProfilingResult(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            total_variants=1, variants_in_cds=1, resistance_hits=1,
+            annotations=[ann],
+        )
+
+    # -- FeatureRecord.display_name unit tests --
+
+    def test_display_name_mat_peptide_with_protein(self) -> None:
+        feature = self._make_mat_peptide_feature(name='pol_mat_peptide_1', protein='Protease')
+        assert feature.display_name == 'Protease'
+
+    def test_display_name_mat_peptide_without_protein(self) -> None:
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='pol_mat_peptide_1', protein='',
+            start=0, end=300, strand='+', codon_start=0,
+            feature_type='mat_peptide',
+        )
+        assert feature.display_name == 'pol_mat_peptide_1'
+
+    def test_display_name_cds_with_protein_returns_name(self) -> None:
+        feature = self._make_cds_feature(name='gag', protein='Group-specific antigen')
+        assert feature.display_name == 'gag'
+
+    # -- build_report_context integration tests --
+
+    def test_db_hit_rows_use_protein_for_mat_peptide(self) -> None:
+        feature = self._make_mat_peptide_feature(name='pol_mat_peptide_1', protein='Protease')
+        result = self._make_result_for_feature('pol_mat_peptide_1')
+        ctx = build_report_context(result, features=[feature])
+        assert ctx['database_hits']['rows'][0]['mutation_groups'][0]['feature'] == 'Protease'
+
+    def test_cds_rows_use_protein_for_mat_peptide(self) -> None:
+        feature = self._make_mat_peptide_feature(name='pol_mat_peptide_1', protein='Protease')
+        result = self._make_result_for_feature('pol_mat_peptide_1')
+        ctx = build_report_context(result, features=[feature])
+        assert ctx['all_mutations']['rows'][0]['feature'] == 'Protease'
+
+    def test_db_hit_rows_use_name_for_cds(self) -> None:
+        feature = self._make_cds_feature(name='gag', protein='Group-specific antigen')
+        result = self._make_result_for_feature('gag')
+        ctx = build_report_context(result, features=[feature])
+        assert ctx['database_hits']['rows'][0]['mutation_groups'][0]['feature'] == 'gag'
+
+
+class TestReportHardening:
+    """Critical report quality and data integrity tests."""
+
+    def test_html_report_structure_completeness(self) -> None:
+        result = _make_result()
+        html = render_html(result)
+
+        assert '<header class="report-header">' in html
+        assert 'id="tab-summary"' in html
+        assert 'id="tab-database-hits"' in html
+        assert 'id="tab-all-mutations"' in html
+        assert 'class="db-hit-table"' in html
+        assert 'class="mutation-table"' in html
+        assert 'id="plot-modal"' in html
+
+    def test_json_export_structure_and_schema(self, tmp_path) -> None:
+        result = _make_result()
+        output_html_path = tmp_path / 'sample.report.html'
+        outputs = export_results(
+            result,
+            tmp_path,
+            extra_export_formats={'json'},
+            output_html_path=output_html_path,
+        )
+
+        json_path = outputs['json']
+        payload = json.loads(json_path.read_text(encoding='utf-8'))
+        assert set(payload.keys()) == {
+            'run',
+            'variant_result',
+            'coverage_gap',
+            'formula_rule_hit',
+            'sample_classification',
+        }
+        assert isinstance(payload['run'], dict)
+        assert isinstance(payload['variant_result'], list)
+        assert isinstance(payload['coverage_gap'], list)
+        assert isinstance(payload['formula_rule_hit'], list)
+        assert isinstance(payload['sample_classification'], list)
+
+    def test_report_consistency_across_exports(self, tmp_path) -> None:
+        result = _make_result()
+        output_html_path = tmp_path / 'sample.report.html'
+        outputs = export_results(
+            result,
+            tmp_path,
+            extra_export_formats={'json'},
+            output_html_path=output_html_path,
+        )
+
+        html = output_html_path.read_text(encoding='utf-8')
+        payload = json.loads(outputs['json'].read_text(encoding='utf-8'))
+
+        assert payload['run']['sample_name'] == result.sample_name
+        assert payload['run']['reference_name'] == result.reference_name
+        assert payload['run']['sample_name'] in html
+        assert payload['run']['reference_name'] in html
+        assert str(len(payload['variant_result'])) in html
+
+    def test_report_handles_empty_results(self) -> None:
+        result = ProfilingResult(
+            project_name='Test',
+            reference_name='ref',
+            reference_length_nt=1000,
+            sample_name='empty',
+            vcf_name='empty.vcf',
+            total_variants=0,
+            variants_in_cds=0,
+            resistance_hits=0,
+            annotations=[],
+        )
+
+        html = render_html(result)
+        assert 'No database hits found for this sample.' in html
+        assert 'No similarity matches found for this sample.' in html
+
+    def test_report_metrics_display_based_on_available_data(self) -> None:
+        variant = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500)
+
+        phenotype_rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugPhenotype',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+        ic50_rule = ResistanceRule(
+            id=2,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugIc50',
+            drug_id=2,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='unknown',
+            ic50='15',
+        )
+        clinical_rule = ResistanceRule(
+            id=3,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugClinical',
+            drug_id=3,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='unknown',
+            clinical_phenotype='intermediate',
+        )
+
+        def _result_for(rule: ResistanceRule) -> ProfilingResult:
+            ann = AnnotatedVariant(
+                variant=variant,
+                feature_name='gag',
+                codon_pos=2,
+                ref_aa='K',
+                alt_aa='E',
+                consequence='missense',
+                af_bin='high',
+                rule_matches=[rule],
+            )
+            return ProfilingResult(
+                project_name='T',
+                reference_name='ref',
+                reference_length_nt=1000,
+                total_variants=1,
+                variants_in_cds=1,
+                resistance_hits=1,
+                annotations=[ann],
+            )
+
+        phenotype_context = build_report_context(_result_for(phenotype_rule))
+        assert phenotype_context['database_hits']['has_phenotype_metrics'] is True
+        assert phenotype_context['database_hits']['has_ic50_metrics'] is False
+        assert phenotype_context['database_hits']['has_clinical_phenotype_metrics'] is False
+
+        ic50_context = build_report_context(_result_for(ic50_rule))
+        assert ic50_context['database_hits']['has_ic50_metrics'] is True
+
+        clinical_context = build_report_context(_result_for(clinical_rule))
+        assert clinical_context['database_hits']['has_clinical_phenotype_metrics'] is True
+
+        html_ic50 = render_html(_result_for(ic50_rule))
+        assert 'IC50 / Fold IC50' in html_ic50
+
+        html_clinical = render_html(_result_for(clinical_rule))
+        assert 'Phenotype / Clinical phenotype' in html_clinical
 

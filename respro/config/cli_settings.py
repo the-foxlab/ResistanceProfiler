@@ -49,6 +49,31 @@ class CliMatchingConfig:
 
 
 @dataclass(frozen=True)
+class CliSimilarityConfig:
+    """BLOSUM62 score thresholds for amino-acid similarity classification."""
+
+    high: int
+    moderate: int
+
+
+@dataclass(frozen=True)
+class CliAfBinsConfig:
+    """Allele-frequency classification bin boundaries (lower_inclusive, upper_inclusive)."""
+
+    high: tuple[float, float]
+    intermediate: tuple[float, float]
+    low: tuple[float, float]
+
+    def as_dict(self) -> dict[str, tuple[float, float]]:
+        """Return bins as a label → (lo, hi) dict for use with assign_af_bins."""
+        return {
+            'high': self.high,
+            'intermediate': self.intermediate,
+            'low': self.low,
+        }
+
+
+@dataclass(frozen=True)
 class CliConfig:
     """Bundled CLI/core configuration loaded from defaults.toml."""
 
@@ -56,6 +81,9 @@ class CliConfig:
     urls: CliUrlConfig
     parsing: CliParsingConfig
     matching: CliMatchingConfig
+    similarity: CliSimilarityConfig
+    af_bins: CliAfBinsConfig
+    af_bins_fasta: CliAfBinsConfig
 
 
 def _load_cli_config() -> CliConfig:
@@ -66,6 +94,14 @@ def _load_cli_config() -> CliConfig:
     urls = payload['urls']
     parsing = payload['parsing']
     matching = payload['matching']
+    similarity = payload['similarity']
+
+    def _bins(section: dict) -> CliAfBinsConfig:
+        return CliAfBinsConfig(
+            high=tuple(section['high']),
+            intermediate=tuple(section['intermediate']),
+            low=tuple(section['low']),
+        )
 
     return CliConfig(
         timeouts=CliTimeoutConfig(
@@ -93,6 +129,12 @@ def _load_cli_config() -> CliConfig:
         matching=CliMatchingConfig(
             combination_member_af_threshold=float(matching['combination_member_af_threshold']),
         ),
+        similarity=CliSimilarityConfig(
+            high=int(similarity['high']),
+            moderate=int(similarity['moderate']),
+        ),
+        af_bins=_bins(payload['af_bins']),
+        af_bins_fasta=_bins(payload['af_bins_fasta']),
     )
 
 

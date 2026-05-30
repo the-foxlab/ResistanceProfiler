@@ -28,14 +28,14 @@ def _maintained_db_command(
     list_mode: Annotated[
         bool,
         typer.Option(
-            '--list',
+            '--list', '-l',
             help='List available maintained databases and their metadata.',
         ),
     ] = False,
     download: Annotated[
         str | None,
         typer.Option(
-            '--download',
+            '--download', '-d',
             help='Database name to download (use value from --list output).',
             metavar='NAME',
         ),

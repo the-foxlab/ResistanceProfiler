@@ -4,14 +4,26 @@ Tests for the CLI profile-vcf command — end-to-end integration.
 
 import json
 import sqlite3
+from io import StringIO
 from pathlib import Path
 
 import pysam
 from conftest import TINY_REF_SEQ, write_genbank
+from rich.console import Console
 from typer.testing import CliRunner
 
 from respro.cli.main import app
+from respro.cli.profile_helpers import _print_completion_panel
+from respro.db.models import (
+    AnnotatedVariant,
+    FormulaRuleHit,
+    ProfilingResult,
+    ResistanceRule,
+    ResistanceRuleSet,
+    VariantCall,
+)
 from respro.db.schema import create_schema, init_results_db
+from respro.report.html import build_report_context
 
 
 class TestProfileCli:
@@ -41,7 +53,7 @@ class TestProfileCli:
         html_path = output_dir / f'{sample_vcf.stem}.report.html'
         assert html_path.exists()
         html = html_path.read_text()
-        assert 'ResistanceProfiler' in html
+        assert 'resistance profile' in html
         assert 'Test Project' in html
         assert 'tiny_ref' in html
 
@@ -80,61 +92,6 @@ class TestProfileCli:
         }
         assert 'id' not in payload['run']
         assert all('run_id' not in row for row in payload['variant_result'])
-
-    def test_profile_vcf_writes_optional_tabular_export(
-        self,
-        project_db: Path,
-        sample_vcf: Path,
-        sample_ref_fasta: Path,
-        tmp_path: Path,
-    ) -> None:
-        output_dir = tmp_path / 'results_tabular'
-        runner = CliRunner()
-        result = runner.invoke(app, [
-            'vcf',
-            '--project', str(project_db),
-            '--vcf', str(sample_vcf),
-            '--ref-fasta', str(sample_ref_fasta),
-            '--output', str(output_dir),
-            '--export', 'tabular',
-            '--min-af', '0.01',
-            '--min-depth', '0',
-        ])
-        assert result.exit_code == 0, result.output
-
-        tsv_path = output_dir / f'{sample_vcf.stem}.mutations.tsv'
-        assert tsv_path.exists()
-        first_line = tsv_path.read_text(encoding='utf-8').splitlines()[0]
-        assert first_line.startswith('Feature\tAA change\tDrug')
-
-    def test_profile_vcf_writes_repeated_export_formats(
-        self,
-        project_db: Path,
-        sample_vcf: Path,
-        sample_ref_fasta: Path,
-        tmp_path: Path,
-    ) -> None:
-        output_dir = tmp_path / 'results_multi_export'
-        runner = CliRunner()
-        result = runner.invoke(app, [
-            'vcf',
-            '--project', str(project_db),
-            '--vcf', str(sample_vcf),
-            '--ref-fasta', str(sample_ref_fasta),
-            '--output', str(output_dir),
-            '--export', 'json',
-            '--export', 'tabular',
-            '--min-af', '0.01',
-            '--min-depth', '0',
-        ])
-        assert result.exit_code == 0, result.output
-
-        html_path = output_dir / f'{sample_vcf.stem}.report.html'
-        json_path = output_dir / f'{sample_vcf.stem}.results.json'
-        tsv_path = output_dir / f'{sample_vcf.stem}.mutations.tsv'
-        assert html_path.exists()
-        assert json_path.exists()
-        assert tsv_path.exists()
 
     def test_profile_vcf_writes_optional_pdf_export(
         self,
@@ -184,7 +141,7 @@ class TestProfileCli:
         html_path = output_dir / f'{sample_vcf.stem}.report.html'
         assert html_path.exists()
         content = html_path.read_text()
-        assert 'ResistanceProfiler' in content
+        assert 'resistance profile' in content
 
     def test_profile_detects_resistance_hit(
         self,
@@ -211,7 +168,244 @@ class TestProfileCli:
             '--min-depth', '0',
         ])
         assert result.exit_code == 0, result.output
-        assert '1 database hit' in result.output
+        assert '1 total database hits' in result.output
+
+    def test_profile_completion_panel_counts_formula_only_member_hits_as_database_hits(self) -> None:
+        variant = VariantCall(chrom='tiny_ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500)
+        internal_rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='__formula_component__',
+            drug_id=1,
+            reference_identifier='tiny_ref',
+            position=1,
+            reference='K',
+            mutation='E',
+            phenotype='unknown',
+            external_id='mut_a',
+            is_internal_formula_component=True,
+        )
+        ann = AnnotatedVariant(
+            variant=variant,
+            feature_name='gag',
+            codon_pos=1,
+            ref_codon='AAA',
+            alt_codon='GAA',
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            rule_matches=[internal_rule],
+        )
+        rule_set = ResistanceRuleSet(
+            id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            phenotype='resistant',
+            group_name='formula_1',
+        )
+        result = ProfilingResult(
+            project_name='Test Project',
+            reference_name='tiny_ref',
+            sample_name='sample01',
+            vcf_name='sample.vcf',
+            reference_length_nt=12,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=0,
+            annotations=[ann],
+            formula_hits=[FormulaRuleHit(rule_set=rule_set, matched_variants=[ann])],
+        )
+
+        console = Console(file=StringIO(), force_terminal=False, color_system=None, width=120)
+        _print_completion_panel(console, 'profile', result, {'html': Path('/tmp/report.html')})
+
+        output = console.file.getvalue()
+        assert '0 rule hit' in output
+        assert '1 formula rule hit' in output
+        assert '1 total database hits' in output
+
+    def test_completion_panel_total_hits_matches_sequence_feature_totals_for_complex_multi_hits(
+        self,
+    ) -> None:
+        """Cumulative totals must stay aligned across CLI and report feature cards."""
+        var_a = VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500)
+        var_b = VariantCall(chrom='ref', pos=6, ref='C', alt='T', allele_freq=0.90, depth=450)
+        var_c = VariantCall(chrom='ref', pos=9, ref='G', alt='A', allele_freq=0.85, depth=420)
+        var_d = VariantCall(chrom='ref', pos=12, ref='T', alt='C', allele_freq=0.80, depth=400)
+
+        rule_a1 = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=1,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+        rule_b1 = ResistanceRule(
+            id=2,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugB',
+            drug_id=2,
+            reference_identifier='ref',
+            position=1,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+        rule_a2 = ResistanceRule(
+            id=3,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='A',
+            mutation='V',
+            phenotype='resistant',
+        )
+        rule_c1 = ResistanceRule(
+            id=4,
+            feature_name='pol',
+            feature_id=2,
+            drug_name='DrugC',
+            drug_id=3,
+            reference_identifier='ref',
+            position=3,
+            reference='D',
+            mutation='N',
+            phenotype='resistant',
+        )
+        internal_formula_member = ResistanceRule(
+            id=5,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='__formula_component__',
+            drug_id=999,
+            reference_identifier='ref',
+            position=4,
+            reference='P',
+            mutation='S',
+            phenotype='unknown',
+            external_id='mut_formula',
+            is_internal_formula_component=True,
+        )
+
+        ann_a = AnnotatedVariant(
+            variant=var_a,
+            feature_name='gag',
+            codon_pos=1,
+            ref_codon='AAA',
+            alt_codon='GAA',
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            rule_matches=[rule_a1, rule_b1],
+        )
+        ann_b = AnnotatedVariant(
+            variant=var_b,
+            feature_name='gag',
+            codon_pos=2,
+            ref_codon='GCT',
+            alt_codon='GTT',
+            ref_aa='A',
+            alt_aa='V',
+            consequence='missense',
+            rule_matches=[rule_a2],
+        )
+        ann_c = AnnotatedVariant(
+            variant=var_c,
+            feature_name='pol',
+            codon_pos=3,
+            ref_codon='GAT',
+            alt_codon='AAT',
+            ref_aa='D',
+            alt_aa='N',
+            consequence='missense',
+            rule_matches=[rule_c1],
+        )
+        ann_d = AnnotatedVariant(
+            variant=var_d,
+            feature_name='pol',
+            codon_pos=4,
+            ref_codon='CCT',
+            alt_codon='TCT',
+            ref_aa='P',
+            alt_aa='S',
+            consequence='missense',
+            rule_matches=[internal_formula_member],
+        )
+
+        formula_rule_set_a = ResistanceRuleSet(
+            id=101,
+            drug_name='FormulaDrugX',
+            drug_id=11,
+            phenotype='resistant',
+            group_name='formula_x',
+        )
+        formula_rule_set_b = ResistanceRuleSet(
+            id=102,
+            drug_name='FormulaDrugY',
+            drug_id=12,
+            phenotype='resistant',
+            group_name='formula_y',
+        )
+        formula_rule_set_c = ResistanceRuleSet(
+            id=103,
+            drug_name='FormulaDrugZ',
+            drug_id=13,
+            phenotype='resistant',
+            group_name='formula_z',
+        )
+
+        formula_hits = [
+            FormulaRuleHit(rule_set=formula_rule_set_a, matched_variants=[ann_a, ann_b]),
+            FormulaRuleHit(rule_set=formula_rule_set_b, matched_variants=[ann_b, ann_c]),
+            FormulaRuleHit(rule_set=formula_rule_set_c, matched_variants=[ann_d]),
+        ]
+
+        result = ProfilingResult(
+            project_name='Test Project',
+            reference_name='ref',
+            sample_name='sample01',
+            vcf_name='sample.vcf',
+            reference_length_nt=100,
+            total_variants=4,
+            variants_in_cds=3,
+            resistance_hits=3,
+            annotations=[ann_a, ann_b, ann_c, ann_d],
+            formula_hits=formula_hits,
+        )
+
+        # direct rule matches: 2 (ann_a) + 1 (ann_b) + 1 (ann_c) + 0 (ann_d, formula-only) = 4
+        # formula fires: 3 (one per FormulaRuleHit)
+        # total database hits = 4 + 3 = 7
+        #
+        # per-feature formula attribution (1 per unique feature per formula hit):
+        #   formula_x members in {gag} → gag +1
+        #   formula_y members in {gag, pol} → gag +1, pol +1
+        #   formula_z members in {pol} → pol +1
+        # feature totals: gag = 3 direct + 2 formula = 5; pol = 1 direct + 2 formula = 3
+        # (feature sum = 8 > global total = 7 because formula_y spans two features)
+
+        console = Console(file=StringIO(), force_terminal=False, color_system=None, width=120)
+        _print_completion_panel(console, 'profile', result, {'html': Path('/tmp/report.html')})
+        cli_output = console.file.getvalue()
+
+        assert '4 rule hit' in cli_output
+        assert '3 formula rule hit' in cli_output
+        assert '7 total database hits' in cli_output
+
+        context = build_report_context(result)
+        cards_by_name = {card['name']: card for card in context['sequence_features']['cards']}
+        assert cards_by_name['gag']['database_hits'] == 5
+        assert cards_by_name['pol']['database_hits'] == 3
 
     def test_profile_drops_variants_with_non_matching_vcf_chrom(
         self,
@@ -240,7 +434,7 @@ class TestProfileCli:
         ])
 
         assert result.exit_code != 0
-        assert 'VCF contig names do not match the uploaded reference FASTA' in result.output
+        assert 'VCF contig names do not match the uploaded reference FASTA' in (result.output + str(result.exception or ''))
 
     def test_profile_with_results_db_creates_new_db(
         self,
@@ -320,7 +514,7 @@ class TestProfileCli:
             '--min-depth', '0',
         ])
         assert result.exit_code != 0
-        assert 'schema mismatch' in result.output.lower()
+        assert 'schema mismatch' in (result.output + str(result.exception or '')).lower()
 
     def test_profile_fails_when_ref_fasta_does_not_match_any_rule_feature(
         self,
@@ -342,7 +536,7 @@ class TestProfileCli:
         ])
 
         assert result.exit_code != 0
-        assert 'no cds matches above thresholds' in result.output.lower()
+        assert 'no cds matches above thresholds' in (result.output + str(result.exception or '')).lower()
 
     def test_profile_vcf_with_bam_persists_coverage_gaps(
         self,
@@ -730,7 +924,7 @@ class TestInitCli:
         ])
 
         assert result.exit_code != 0
-        assert 'schema mismatch' in result.output.lower()
+        assert 'schema mismatch' in (result.output + str(result.exception or '')).lower()
 
     def test_init_add_requires_stored_annotations_when_no_genbank_is_given(self, tmp_path: Path):
         db_path = tmp_path / 'empty_project.db'
@@ -756,7 +950,7 @@ class TestInitCli:
         ])
 
         assert result.exit_code != 0
-        assert 'no stored references/features' in result.output.lower()
+        assert 'no stored references/features' in (result.output + str(result.exception or '')).lower()
 
     def test_init_warns_on_rule_feature_missing_in_genbank(self, tmp_path: Path):
         genbank_path = write_genbank(
@@ -826,7 +1020,7 @@ class TestInitCli:
         ])
 
         assert result.exit_code != 0
-        assert 'missing required field reference_identifier' in result.output
+        assert 'missing required field reference_identifier' in (result.output + str(result.exception or ''))
 
 
     def test_profile_with_results_db_populates_run_and_variants(

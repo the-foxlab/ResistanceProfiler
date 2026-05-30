@@ -28,13 +28,19 @@ Use the `security-and-hardening` skill as your primary procedure. It defines the
 - Always cite file references and the exact vulnerable pattern.
 - Do not flag theoretical issues without evidence in the code.
 
+## Audit Priority
+
+- Prioritize exploitable paths first: auth bypass, traversal, SQL injection, unsafe deserialization, secret exposure.
+- Then cover misconfiguration risks: CORS, rate limiting, token scope, dependency vulnerabilities.
+- Keep output high-signal and fix-oriented.
+
 ## Approach
 
 1. Read `.github/skills/security-and-hardening/SKILL.md` for the full checklist and threat model.
 2. Search for vulnerable patterns starting with highest-risk areas: path handling, SQL, auth checks.
 3. Verify each finding in its full context before reporting — check if mitigation is already applied nearby.
 4. Work through the security review checklist from the skill.
-5. Report findings with severity, evidence, and recommended fix.
+5. Report only validated findings with severity, exploit path, and smallest safe fix.
 
 ## Output Format
 

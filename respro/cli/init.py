@@ -15,6 +15,12 @@ import typer
 from rich.console import Console
 
 from respro.core.rules import import_rules_with_summary, validate_rules_tsv
+from respro.db.algorithms import (
+    apply_drug_alias_mappings,
+    apply_ic50_threshold_classification,
+    load_interpretation_algorithms,
+    store_interpretation_algorithms,
+)
 from respro.db.drugs import _consolidate_drug_names_to_lowercase, _get_drugs_from_pubchem
 from respro.db.features import _load_genbank_records
 from respro.db.project_metadata import load_metadata_json, store_project_metadata
@@ -62,7 +68,7 @@ def init_project(
     require_file(rules_tsv, 'Rules TSV')
     if formula_rules_tsv is not None:
         require_file(formula_rules_tsv, 'Formula rules TSV')
-    metadata_payload = load_metadata_json(metadata_json) if metadata_json else {}
+    metadata_payload, algorithms = load_metadata_json(metadata_json) if metadata_json else ({}, [])
 
     genbank_records = parse_genbank_sources(genbank_paths)
 
@@ -84,6 +90,14 @@ def init_project(
             additional_info=additional_info,
         )
         store_project_metadata(conn, project_id, metadata_payload)
+        if algorithms:
+            store_interpretation_algorithms(conn, project_id, algorithms)
+        alias_config = next((a for a in algorithms if a['name'] == 'drug_alias'), None)
+        if alias_config:
+            apply_drug_alias_mappings(conn, project_id, alias_config)
+        ic50_config = next((a for a in algorithms if a['name'] == 'ic50_thresholds'), None)
+        if ic50_config:
+            apply_ic50_threshold_classification(conn, project_id, ic50_config)
         if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
         conn.commit()
@@ -147,6 +161,13 @@ def add_to_project(
             formula_rules_tsv=formula_rules_tsv,
             additional_info=additional_info,
         )
+        stored_algorithms = load_interpretation_algorithms(conn, project_id)
+        alias_config = next((a for a in stored_algorithms if a['name'] == 'drug_alias'), None)
+        if alias_config:
+            apply_drug_alias_mappings(conn, project_id, alias_config)
+        ic50_config = next((a for a in stored_algorithms if a['name'] == 'ic50_thresholds'), None)
+        if ic50_config:
+            apply_ic50_threshold_classification(conn, project_id, ic50_config)
         if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
         conn.execute(
@@ -204,7 +225,7 @@ def _init_command(
         Path, typer.Option('--rules', '-r', help='Resistance rules TSV.')
     ],
     formula_rules: Annotated[
-        Path | None, typer.Option('--formula-rules', help='Optional formula rules TSV.')
+        Path | None, typer.Option('--formula-rules', '-f', help='Optional formula rules TSV.')
     ] = None,
     genbank_paths: Annotated[
         list[Path] | None, typer.Option(
@@ -216,10 +237,10 @@ def _init_command(
         Path, typer.Option('--output', '-o', help='Output SQLite database path.')
     ] = Path('project.db'),
     metadata: Annotated[
-        Path | None, typer.Option('--metadata', exists=True, help='Optional metadata JSON file.')
+        Path | None, typer.Option('--metadata', '-m', exists=True, help='Optional metadata JSON file.')
     ] = None,
     overwrite: Annotated[
-        bool, typer.Option('--overwrite', help='Overwrite existing database.')
+        bool, typer.Option('--overwrite', '-w', help='Overwrite existing database.')
     ] = False,
     additional_info: Annotated[
         bool, typer.Option(
@@ -263,7 +284,7 @@ def _init_add_command(
         Path, typer.Option('--rules', '-r', exists=True, help='Resistance rules TSV to add.')
     ],
     formula_rules: Annotated[
-        Path | None, typer.Option('--formula-rules',  exists=True, help='Optional formula rules TSV.')
+        Path | None, typer.Option('--formula-rules', '-f', exists=True, help='Optional formula rules TSV.')
     ] = None,
     genbank_paths: Annotated[
         list[Path] | None, typer.Option(
@@ -278,7 +299,7 @@ def _init_add_command(
         )
     ] = True,
     validate: Annotated[
-        bool, typer.Option('--validate', help='Validate rules and exit without writing DB changes.')
+        bool, typer.Option('--validate', '-v', help='Validate rules and exit without writing DB changes.')
     ] = False,
 ) -> None:
     """

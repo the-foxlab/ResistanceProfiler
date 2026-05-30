@@ -14,10 +14,10 @@ Pathogen agnostic antiviral resistance profiling command-line interface (CLI) fo
 - The database creation performs stringent QC and ensures that resistance rules stay coherent with the internal reference sequence.
 - Query sequences and VCF-linked references can be mapped back to internal references before comparison
 - Final profiling is performed on amino-acid mutations after reference normalization
-- Store your results in an SQlite database and regenerate the html report. No need to store everything. ResPro can save your resluts in a compact way and lets you regenerate your results or update them when the database changes. Moreover you can add custom metadata to your results. (these functions are currently only supported by the CLI).
+- Store your results in an SQLite database and regenerate the html report. No need to store everything. ResPro can save your results in a compact way and lets you regenerate your results or update them when the database changes. Moreover you can add custom metadata to your results. (these functions are currently only supported by the CLI).
 - Support for resistence formulas with logical operators (`parenthesis`, `OR`, `AND`, `XOR` and `NOT`) to allow definition of higher complexity rules.
 
-Its lightning fast. No need to specify which pathogen or using a specific reference during profiling against the database. Everything goes automatically. The CLI is made to be incoorporated into existing NGS sequencing workflows and the WebApp is made for non-bioinformatic users.
+Its lightning fast. No need to specify which pathogen or using a specific reference during profiling against the database. Everything goes automatically. The CLI is made to be incorporated into existing NGS sequencing workflows and the WebApp is made for non-bioinformatic users.
 
 > [!TIP]
 > ResPro is strongest when the same curated project database is reused across runs. Treat `project.db` as your internal reference contract.
@@ -71,7 +71,7 @@ lookups during build:
 respro databases --download db_name --no-additional-info --output my_folder/
 ```
 
-In this step respro automatically downloads tsv rules and genbank files temporarily and then builds the respro compatible SQlite database from scratch. As ResPro automatically enriches the databases with Pubmed and Pubchem information database creation can take a bit. If you want to see what ResPro is doing, just add a `-vv` to your command: `respro -vv databases ...`. The database files are available [here](https://github.com/jonas-fuchs/respro-db/tree/main).
+In this step respro automatically downloads tsv rules and genbank files temporarily and then builds the respro compatible SQLite database from scratch. As ResPro automatically enriches the databases with Pubmed and Pubchem information database creation can take a bit. If you want to see what ResPro is doing, just add a `-vv` to your command: `respro -vv databases ...`. The database files are available [here](https://github.com/jonas-fuchs/respro-db/tree/main).
 
 ### 3) Run profiling
 
@@ -84,7 +84,7 @@ respro fasta \
     --output my_output \
     --results-db my_results.db \
     --export json \
-    --export tabular
+    --export pdf
 ```
 
 Or from vcf files:
@@ -97,7 +97,7 @@ respro vcf \
     --output my_output \
     --results-db my_results.db \
     --export json \
-    --export tabular
+    --export pdf
 ```
 
 For bundled, ready-to-run sample inputs, see [example_data/README](example_data/README).
@@ -148,7 +148,6 @@ Open the app at: `http://127.0.0.1:8000/`
 - [CLI tutorial](docs/user/cli-detailed-tutorial.md)
 - [How to run and host the web app (detailed)](docs/user/webapp-hosting.md)
 - [Output interpretation guide (HTML, JSON, TSV)](docs/user/output-interpretation.md)
-- [Comparision to other antiviral resistance testing tools](docs/user/tool-comparision.md)
 
 ### Development Documentation
 

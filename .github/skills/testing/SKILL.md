@@ -1,6 +1,6 @@
 ---
 name: testing
-description: 'Drives development with tests for ResistanceProfiler. Use when implementing any logic, fixing any bug, or changing any behavior. Use when writing pytest tests, adding regression tests for codon-level edge cases, adding fixtures, or proving a bug fix works.'
+description: 'Use when implementing logic, fixing bugs, or changing behavior. Drive the work with a red-green-refactor loop and prove the result with pytest.'
 argument-hint: 'What to test: new feature, bug fix, edge case, or module name.'
 user-invocable: true
 disable-model-invocation: false
@@ -10,7 +10,7 @@ disable-model-invocation: false
 
 ## Overview
 
-Write a failing test before writing the code that makes it pass. For bug fixes, reproduce the bug with a test before attempting a fix. Tests are proof — "seems right" is not done. A codebase with good tests is the fastest path to confident refactoring; a codebase without tests is a liability.
+This is the repository's TDD skill. Write a failing test before writing the code that makes it pass. For bug fixes, reproduce the bug with a test before attempting a fix. Tests are proof — "seems right" is not done. A codebase with good tests is the fastest path to confident refactoring; a codebase without tests is a liability.
 
 Run the full test suite with:
 

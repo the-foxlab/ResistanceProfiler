@@ -18,14 +18,20 @@ from rich.console import Console
 from rich.panel import Panel
 
 from respro.config.cli_settings import CLI_CONFIG
-from respro.core.annotation import assign_af_bins
+from respro.core.annotation import _suppress_ruleless_overlap_annotations, assign_af_bins
 from respro.core.query import pick_best_reference_id, select_matches_for_reference
-from respro.core.rules import load_formula_rules, load_rules, match_formula_rules, match_rules
+from respro.core.rules import match_formula_rules, match_rules
+from respro.db.features import load_features_for_reference
 from respro.db.models import AnnotatedVariant, CoverageGap, FeatureMatch, ProfilingResult
+from respro.db.profile_queries import (
+    load_existing_run_project_fingerprint,
+    load_reference_metadata,
+    load_reference_name,
+)
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.results import save_run
+from respro.db.rules_queries import load_formula_rules, load_rules
 from respro.db.schema import init_results_db
-from respro.io.reference import load_features_for_reference
 from respro.report.non_html_exports import export_results
 from respro.utils.files import resolve_output_file
 
@@ -38,8 +44,8 @@ def _parse_export_formats(export_values: list[str] | None) -> set[str] | None:
     normalized_formats: set[str] = set()
     for export_value in export_values:
         normalized_value = export_value.strip().lower()
-        if normalized_value not in ('json', 'tabular', 'pdf'):
-            raise click.ClickException('Invalid --export value. Choose one of: json, tabular, pdf.')
+        if normalized_value not in ('json', 'pdf'):
+            raise click.ClickException('Invalid --export value. Choose one of: json, pdf.')
         normalized_formats.add(normalized_value)
 
     return normalized_formats if normalized_formats else None
@@ -71,10 +77,8 @@ def _init_results_db_connection(
     if existed:
         logger.info('Results database validated: %s', results_db_path)
         current_fp = compute_project_fingerprint(project_conn)
-        existing_run = results_conn.execute(
-            "SELECT project_fingerprint FROM run WHERE project_fingerprint != '' LIMIT 1"
-        ).fetchone()
-        if existing_run and existing_run['project_fingerprint'] != current_fp:
+        existing_run_fp = load_existing_run_project_fingerprint(results_conn)
+        if existing_run_fp is not None and existing_run_fp != current_fp:
             results_conn.close()
             raise click.ClickException(
                 'Project fingerprint mismatch: the provided --project database does not match '
@@ -105,12 +109,9 @@ def _resolve_reference(
     ref_id = pick_best_reference_id(fasta_matches)
     fasta_matches = select_matches_for_reference(fasta_matches, ref_id)
 
-    ref_name_row = project_conn.execute(
-        'SELECT name FROM reference WHERE id = ?', (ref_id,)
-    ).fetchone()
-    if ref_name_row is None:
+    ref_name = load_reference_name(project_conn, ref_id)
+    if ref_name is None:
         raise click.ClickException(f'Reference id {ref_id} not found in project database')
-    ref_name = ref_name_row['name']
 
     logger.info('Matched query reference %r to internal reference %r', query_name, ref_name)
     matched_feature_names = sorted({match.feature.name for match in fasta_matches})
@@ -144,51 +145,6 @@ def _load_reference_data(
         for member_rule in formula_rule.member_rules.values():
             rule_feature_names.add(member_rule.feature_name)
     return features, rules, formula_rules, rule_feature_names
-
-
-def _suppress_ruleless_overlap_annotations(
-    annotations: list[AnnotatedVariant],
-    rule_feature_names: set[str],
-) -> list[AnnotatedVariant]:
-    """
-    Filter out annotations for features that have no rules when multiple features overlap a variant.
-
-    Groups annotations by the underlying variant object identity (same VariantCall).
-    For groups with more than one annotation (overlapping features):
-    - If at least one feature_name is in rule_feature_names, keep only those annotations.
-    - If no feature_name is in rule_feature_names, keep all (variants in ruleless features alone).
-
-    Single-annotation groups (common case) are always left unchanged.
-
-    :param annotations: list of annotated variants
-    :param rule_feature_names: set of feature names that have at least one rule
-    :return: filtered list of annotated variants
-    """
-    # Group by variant object identity (each annotation for the same underlying variant
-    # shares the exact same VariantCall object).
-    variant_groups: dict[int, list[AnnotatedVariant]] = {}
-    for ann in annotations:
-        variant_id = id(ann.variant)
-        if variant_id not in variant_groups:
-            variant_groups[variant_id] = []
-        variant_groups[variant_id].append(ann)
-
-    filtered: list[AnnotatedVariant] = []
-    for group in variant_groups.values():
-        # Single-annotation groups always pass through unchanged.
-        if len(group) == 1:
-            filtered.extend(group)
-            continue
-
-        # Multi-annotation group: check if any feature_name is in rule_feature_names.
-        has_ruled_feature = any(ann.feature_name in rule_feature_names for ann in group)
-
-        if has_ruled_feature:
-            filtered.extend(ann for ann in group if ann.feature_name in rule_feature_names)
-        else:
-            filtered.extend(group)
-
-    return filtered
 
 
 @dataclass
@@ -236,7 +192,7 @@ def _finalize_and_export(
     :param results_conn: open results database connection, or None
     :param project_path: path to the project database file
     :param logger: logger instance
-    :param extra_export_formats: optional additional output formats ('json', 'tabular', 'pdf')
+    :param extra_export_formats: optional additional output formats ('json', 'pdf')
     :return: (ProfilingResult, export path dict)
     """
     annotations = _suppress_ruleless_overlap_annotations(ctx.annotations, ctx.rule_feature_names)
@@ -248,11 +204,7 @@ def _finalize_and_export(
     )
     annotations = assign_af_bins(annotations, bins=ctx.af_bins)
 
-    reference_row = project_conn.execute(
-        'SELECT organism, length FROM reference WHERE id = ?', (ref_id,)
-    ).fetchone()
-    organism = reference_row['organism'] or '' if reference_row else ''
-    reference_length_nt = int(reference_row['length'] or 0) if reference_row else 0
+    organism, reference_length_nt = load_reference_metadata(project_conn, ref_id)
 
     result = ProfilingResult(
         project_name=project_name,
@@ -295,10 +247,14 @@ def _finalize_and_export(
 
 def _print_completion_panel(console: Console, title: str, result: ProfilingResult, outputs: dict) -> None:
     """Render a summary panel after a profiling run."""
-    hit_line = f'{result.resistance_hits} database hit(s)'
-    if hasattr(result, 'formula_hits') and result.formula_hits:
+    direct_rule_hit_total = sum(len(ann.non_formula_component_rule_matches) for ann in result.annotations)
+    hit_line = f'{direct_rule_hit_total} rule hit(s)'
+    if result.formula_hits:
         hit_line += f'  ·  {len(result.formula_hits)} formula rule hit(s)'
-    lines = [hit_line, '']
+    total_database_hits = direct_rule_hit_total + len(result.formula_hits)
+    total_hit_line = f'{total_database_hits} total database hits'
+
+    lines = [hit_line, total_hit_line, '']
     for fmt, path in outputs.items():
         lines.append(f'[dim]{fmt}[/dim]   {path}')
     console.print(Panel('\n'.join(lines), title=f'[green]{title}[/green]', border_style='green'))

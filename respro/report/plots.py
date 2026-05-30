@@ -15,12 +15,13 @@ import numpy as np
 
 from respro.db.models import AnnotatedVariant, CoverageGap, FeatureRecord, ProfilingResult
 from respro.report.palette import (
+    CDS_HIGHLIGHTED_COLOUR,
     FEATURE_BASELINE_COLOUR,
     FEATURE_DEFAULT_COLOUR,
     FEATURE_DEFAULT_EDGE,
-    FEATURE_HIGHLIGHTED_COLOUR,
     FEATURE_HIGHLIGHTED_EDGE,
     FEATURE_INTRON_COLOUR,
+    MATPEPTIDE_HIGHLIGHTED_COLOUR,
     MUTATION_COLOURS,
     NON_COVERED_COLOUR,
     mutation_legend_patches,
@@ -120,31 +121,92 @@ def _build_lollipop_figure(
     feature_annotations = _group_annotations_by_feature(cds, plot_features)
     feature_by_name = {feature.name: feature for feature in features}
 
-    # One row for overview, then two rows per feature (track + lollipop)
-    height_ratios = [2.0, 0.5] * len(plot_features) + [0.5]
-    # Cap height so the overview typically fits a full-size 1080p browser window.
-    fig_height = 2 + 3.4 * len(plot_features)
+    mat_peptides_by_parent: dict[str, list[FeatureRecord]] = {}
+    for feature in plot_features:
+        if feature.feature_type == 'mat_peptide' and feature.parent_feature_name:
+            mat_peptides_by_parent.setdefault(feature.parent_feature_name, []).append(feature)
+
+    main_features_by_name: dict[str, FeatureRecord] = {
+        feature.name: feature
+        for feature in plot_features
+        if feature.feature_type != 'mat_peptide'
+    }
+    for parent_name in mat_peptides_by_parent:
+        parent_feature = feature_by_name.get(parent_name)
+        if parent_feature is not None:
+            main_features_by_name[parent_name] = parent_feature
+
+    main_features = sorted(
+        main_features_by_name.values(),
+        key=lambda feature: (feature.start, feature.end, feature.name),
+    )
+    if not main_features:
+        logger.warning('No main features available for plotting')
+        return None
+
+    # Map mat_peptide variant feature names to parent CDS for genome overview highlighting.
+    cds_highlighted: set[str] = set()
+    for feature_name in feature_annotations:
+        feature = feature_by_name.get(feature_name)
+        if feature and feature.feature_type == 'mat_peptide' and feature.parent_feature_name:
+            cds_highlighted.add(feature.parent_feature_name)
+        else:
+            cds_highlighted.add(feature_name)
+
+    rows: list[dict] = [{'kind': 'genome'}]
+    for feature in main_features:
+        mat_peptides = sorted(
+            mat_peptides_by_parent.get(feature.name, []),
+            key=lambda mat_peptide: (mat_peptide.start, mat_peptide.end, mat_peptide.name),
+        )
+        rows.append({'kind': 'track', 'feature': feature, 'mat_peptides': mat_peptides, 'parent_feature': None})
+        if mat_peptides:
+            for mat_peptide in mat_peptides:
+                rows.append({'kind': 'track', 'feature': mat_peptide, 'parent_feature': feature})
+                rows.append({'kind': 'lollipop', 'feature': mat_peptide})
+        else:
+            rows.append({'kind': 'lollipop', 'feature': feature})
+
+    subplot_rows = list(reversed(rows))
+    height_ratios = [
+        2.0 if row['kind'] == 'lollipop' else 0.5
+        for row in subplot_rows
+    ]
+    fig_height = 2 + 1.7*(len(height_ratios)-1)
     fig, axes = plt.subplots(
         len(height_ratios),
         1,
         figsize=(16, fig_height),
-        height_ratios=height_ratios
+        height_ratios=height_ratios,
     )
     axes_list = list(axes if isinstance(axes, (list, tuple)) else axes.flat)
-    overview_ax = axes_list[-1]
-    feature_pair_axes = axes_list[0:-1]
 
-    highlighted_feature_names = set(feature_annotations)
+    row_axes = list(zip(subplot_rows, axes_list))
+    overview_ax = next(
+        ax
+        for row, ax in row_axes
+        if row['kind'] == 'genome'
+    )
+
     _draw_genome_overview(
         overview_ax,
         features,
-        highlighted_feature_names,
+        cds_highlighted,
         reference_length_nt=result.reference_length_nt,
     )
-    # Legend handles
+
     effects_for_legend = {ann.consequence for ann in cds}
-    has_coverage_overlay = any(coverage_gaps_by_feature.get(feature.name) for feature in plot_features)
-    has_introns = any(_feature_intron_gaps(feature) for feature in plot_features)
+    lollipop_feature_names = {
+        row['feature'].name
+        for row in rows
+        if row['kind'] == 'lollipop'
+    }
+    has_coverage_overlay = any(
+        coverage_gaps_by_feature.get(feature_name)
+        for feature_name in lollipop_feature_names
+    )
+    has_introns = any(_feature_intron_gaps(f) for f in plot_features)
+    database_hit_annotation_ids = {id(ann) for ann in result.database_hit_annotations}
     handles = [
         plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='white',
                    markeredgecolor='black', markersize=8, label='Database hit'),
@@ -155,23 +217,72 @@ def _build_lollipop_figure(
         handles.append(mpatches.Patch(facecolor=FEATURE_INTRON_COLOUR, label='Intron (non-coding)'))
     handles.extend(mutation_legend_patches(effects_for_legend))
 
-    for i, feature in enumerate(plot_features):
-        lollipop_ax = feature_pair_axes[2 * i]
-        track_ax = feature_pair_axes[2 * i + 1]
-        annotations = feature_annotations.get(feature.name, [])
-        _draw_feature_panel(
-            lollipop_ax,
-            feature,
-            annotations,
-            coverage_gaps=coverage_gaps_by_feature.get(feature.name, []),
-            shared_track_ax=track_ax,
-        )
-        parent_feature = None
-        if feature.parent_feature_name:
-            parent_feature = feature_by_name.get(feature.parent_feature_name)
-        _draw_feature_track(track_ax, feature, parent_feature=parent_feature)
+    lollipop_rows_by_feature_name: dict[str, list[tuple[dict[str, object], object]]] = {}
+    for row, ax in row_axes:
+        if row['kind'] != 'lollipop':
+            continue
+        feature = row['feature']
+        lollipop_rows_by_feature_name.setdefault(feature.name, []).append((row, ax))
 
-    feature_pair_axes[0].legend(handles=handles, loc='upper right', fontsize=7, ncol=len(handles), frameon=False, bbox_to_anchor=(1, 1.25), borderaxespad=0.0)
+    shared_track_ax_by_row_id: dict[int, object] = {}
+    for row, ax in row_axes:
+        if row['kind'] != 'track':
+            continue
+        feature = row['feature']
+        row_id = id(row)
+        lollipop_candidates = lollipop_rows_by_feature_name.get(feature.name, [])
+        if lollipop_candidates:
+            shared_track_ax_by_row_id[row_id] = lollipop_candidates[0][1]
+
+    first_lollipop_ax = None
+    for row, ax in row_axes:
+        row_kind = row['kind']
+        if row_kind == 'genome':
+            continue
+
+        feature = row['feature']
+        if row_kind == 'track':
+            mat_peptides = row.get('mat_peptides')
+            panel_name = 'Mature Peptide' if feature.feature_type == 'mat_peptide' else 'CDS'
+            if mat_peptides:
+                _draw_feature_track(
+                    ax,
+                    feature,
+                    mat_peptide_overlays=mat_peptides,
+                    rule_feature_names=rule_feature_names,
+                    panel_name=panel_name,
+                )
+            else:
+                _draw_feature_track(
+                    ax,
+                    feature,
+                    parent_feature=row.get('parent_feature'),
+                    rule_feature_names=rule_feature_names,
+                    panel_name=panel_name,
+                )
+
+            shared_lollipop_ax = shared_track_ax_by_row_id.get(id(row))
+            if shared_lollipop_ax is not None:
+                ax.set_xlim(shared_lollipop_ax.get_xlim())
+            continue
+
+        if first_lollipop_ax is None:
+            first_lollipop_ax = ax
+        _draw_feature_panel(
+            ax,
+            feature,
+            feature_annotations.get(feature.name, []),
+            coverage_gaps=coverage_gaps_by_feature.get(feature.name, []),
+            database_hit_annotation_ids=database_hit_annotation_ids,
+            shared_track_ax=None,
+        )
+
+    if first_lollipop_ax is not None:
+        first_lollipop_ax.legend(
+            handles=handles, loc='upper right', fontsize=7,
+            ncol=len(handles), frameon=False,
+            bbox_to_anchor=(1, 1.25), borderaxespad=0.0,
+        )
     plt.tight_layout()
     return fig
 
@@ -236,23 +347,30 @@ def _assign_feature_tracks(features: list[FeatureRecord]) -> dict[str, int]:
     """
     Assign features to non-overlapping overview tracks.
 
+    Uses the plotted segment span from _feature_plot_segments for overlap checks,
+    so that features with sparse segments do not wastefully block track space.
+
     :param features: feature records to place
     :return: mapping of feature name to overview track index
     """
-    last_end_by_track: list[int] = []
+    track_stops: list[int] = []
     tracks: dict[str, int] = {}
 
     for feature in sorted(features, key=lambda item: (item.start, item.end, item.name)):
-        assigned_track = None
-        for track_idx, last_end in enumerate(last_end_by_track):
-            if feature.start >= last_end:
-                assigned_track = track_idx
-                last_end_by_track[track_idx] = feature.end
-                break
-        if assigned_track is None:
-            assigned_track = len(last_end_by_track)
-            last_end_by_track.append(feature.end)
-        tracks[feature.name] = assigned_track
+        segments = _feature_plot_segments(feature)
+        plot_start = segments[0][0]
+        plot_end = segments[-1][1]
+
+        track_idx = 0
+        while track_idx < len(track_stops) and track_stops[track_idx] > plot_start:
+            track_idx += 1
+
+        if track_idx < len(track_stops):
+            track_stops[track_idx] = plot_end
+        else:
+            track_stops.append(plot_end)
+
+        tracks[feature.name] = track_idx
 
     return tracks
 
@@ -295,6 +413,7 @@ def _draw_genome_overview(
     :param highlighted_feature_names: features with plotted mutations
     """
     sorted_features = sorted(features, key=lambda feature: (feature.start, feature.end, feature.name))
+    sorted_features = [feature for feature in sorted_features if feature.feature_type == 'CDS']
     if not sorted_features:
         ax.set_axis_off()
         return
@@ -302,22 +421,20 @@ def _draw_genome_overview(
     tracks = _assign_feature_tracks(sorted_features)
     genome_start, genome_end = _resolve_overview_bounds(sorted_features, reference_length_nt)
     max_track = max(tracks.values(), default=0)
-    track_height = 0.44
-    track_step = track_height * 0.2
     # Baseline beneath the tracks
-    ax.hlines(0.0, genome_start, genome_end, color=FEATURE_BASELINE_COLOUR, linewidth=1.0, zorder=1)
+    ax.hlines(0.5, genome_start, genome_end, color=FEATURE_BASELINE_COLOUR, linewidth=1.0, zorder=1)
 
     for feature in sorted_features:
         track = tracks[feature.name]
-        y = -(track * track_step)
+        y = -track
         is_highlighted = feature.name in highlighted_feature_names
-        colour = FEATURE_HIGHLIGHTED_COLOUR if is_highlighted else FEATURE_DEFAULT_COLOUR
+        colour = CDS_HIGHLIGHTED_COLOUR if is_highlighted else FEATURE_DEFAULT_COLOUR
         edge = FEATURE_HIGHLIGHTED_EDGE if is_highlighted else FEATURE_DEFAULT_EDGE
         for segment_start, segment_end in _feature_plot_segments(feature):
             ax.add_patch(mpatches.Rectangle(
-                (segment_start + 1, y - (track_height / 2.0)),
+                (segment_start + 1, y),
                 max(1, segment_end - segment_start),
-                track_height,
+                0.9,
                 facecolor=colour,
                 edgecolor=edge,
                 linewidth=0.7,
@@ -325,23 +442,24 @@ def _draw_genome_overview(
             ))
 
         if is_highlighted:
-            label_y = y + (track_height / 2.0) + 0.11
+            label_y = 1
             label_x = feature.start + 1 + ((feature.end - feature.start) / 2)
             ax.text(
                 label_x,
                 label_y,
-                feature.name,
+                feature.display_name,
                 ha='center',
                 va='bottom',
-                fontsize=8,
+                fontsize=7,
                 fontweight='bold',
                 color=FEATURE_HIGHLIGHTED_EDGE,
+                zorder=200 + y,
             )
 
     ax.set_title('Genome overview', fontsize=8, loc='left', fontweight='bold')
     ax.set_xlim(genome_start, genome_end)
-    lower = -(max_track * track_step) - (track_height / 2.0) - 0.2
-    ax.set_ylim(lower, 0.9)
+    lower = -(max_track + 0.2)
+    ax.set_ylim(lower, 1.2)
     ax.set_yticks([])
     ax.set_xlabel('Genomic position')
     ax.spines['top'].set_visible(False)
@@ -372,14 +490,23 @@ def _resolve_overview_bounds(
     return 1, max(feature.end for feature in features)
 
 
-def _draw_feature_track(ax, feature: FeatureRecord, parent_feature: FeatureRecord | None = None) -> None:
+def _draw_feature_track(
+    ax,
+    feature: FeatureRecord,
+    parent_feature: FeatureRecord | None = None,
+    mat_peptide_overlays: list[FeatureRecord] | None = None,
+    rule_feature_names: set[str] | None = None,
+    panel_name: str = 'CDS',
+) -> None:
     """
     Draw a simple feature track visualization above the lollipop plot.
 
     :param ax: matplotlib axis
     :param feature: feature to render
+    :param parent_feature: optional parent feature for mat_peptide precursor strip
+    :param mat_peptide_overlays: optional mat_peptide features to mark on the track
+    :param rule_feature_names: optional rule-backed names for overlay labels
     """
-    # Draw feature arrow/rectangle
     feature_width = feature.end - feature.start
     pad = max(10, int((feature.end - feature.start) * 0.03))
     ax.hlines(0.5, feature.start + 1 - pad, feature.end + pad, color=FEATURE_BASELINE_COLOUR, linewidth=1.0, zorder=-10)
@@ -389,7 +516,7 @@ def _draw_feature_track(ax, feature: FeatureRecord, parent_feature: FeatureRecor
         (feature.start + 1, 0.3),
         max(1, feature.end - feature.start),
         0.4,
-        facecolor=FEATURE_HIGHLIGHTED_COLOUR,
+        facecolor=CDS_HIGHLIGHTED_COLOUR if feature.feature_type == 'CDS' else MATPEPTIDE_HIGHLIGHTED_COLOUR,
         edgecolor=FEATURE_HIGHLIGHTED_EDGE,
         alpha=1,
         linewidth=1.0,
@@ -411,43 +538,54 @@ def _draw_feature_track(ax, feature: FeatureRecord, parent_feature: FeatureRecor
     ax.text(
         feature_x,
         0.5,
-        f'← {feature.name} ←' if feature.strand == '-' else f'→ {feature.name} →',
+        f'← {feature.display_name} ←' if feature.strand == '-' else f'→ {feature.display_name} →',
         ha='center',
         va='center',
-        fontsize=8,
+        fontsize=7,
         fontweight='bold',
-        color='white',
+        color='white'
     )
 
-    ax.set_title('Gene overview', fontsize=8, loc='left', fontweight='bold')
-    ax.set_ylim(0, 1)
-    ax.set_yticks([])
+    ax.set_title(f'{panel_name} overview', fontsize=8, loc='left', fontweight='bold')
     ax.set_xlim(max(1, feature.start + 1 - pad), feature.end + pad)
 
-    if feature.feature_type == 'mat_peptide' and feature.parent_feature_name:
+    if mat_peptide_overlays:
+        sorted_mps = sorted(mat_peptide_overlays, key=lambda f: f.start)
+        # Draw dotted separator at each mat_peptide start, and at the final mat_peptide end.
+        boundaries: set[float] = {mp.start + 1 for mp in sorted_mps}
+        boundaries.add(sorted_mps[-1].end + 1)
+        for x_boundary in sorted(boundaries):
+            ax.vlines(
+                x=x_boundary, ymin=0.3, ymax=0.7,
+                colors=FEATURE_DEFAULT_COLOUR, linewidth=1.5, zorder=5,
+            )
+        for mp in sorted_mps:
+            label = mp.display_name
+            label_x = mp.start + 1 + max(1, mp.end - mp.start) / 2
+            ax.text(
+                label_x, 0.76, label,
+                ha='center', va='bottom',
+                fontsize=7, color=MATPEPTIDE_HIGHLIGHTED_COLOUR, fontweight='bold',
+                clip_on=True,
+            )
+        ax.set_ylim(0, 1.4)
+    elif feature.feature_type == 'mat_peptide' and feature.parent_feature_name:
         strip_start, strip_end = _resolve_precursor_strip_bounds(ax, parent_feature)
         strip_width = max(1, strip_end - strip_start)
         ax.add_patch(mpatches.Rectangle(
-            (strip_start, 0.84),
+            (strip_start, 0.3),
             strip_width,
-            0.09,
-            facecolor=FEATURE_DEFAULT_COLOUR,
-            edgecolor=FEATURE_DEFAULT_EDGE,
-            alpha=0.55,
+            0.4,
+            facecolor=CDS_HIGHLIGHTED_COLOUR,
+            edgecolor=FEATURE_HIGHLIGHTED_EDGE,
             linewidth=0.6,
-            zorder=4,
+            zorder=-4,
         ))
-        label_x = strip_start + (strip_width / 2.0)
-        ax.text(
-            label_x,
-            0.945,
-            f'precursor: {feature.parent_feature_name}',
-            ha='center',
-            va='bottom',
-            fontsize=7,
-            color=FEATURE_DEFAULT_EDGE,
-        )
+        ax.set_ylim(0, 1)
+    else:
+        ax.set_ylim(0, 1)
 
+    ax.set_yticks([])
     ax.spines['top'].set_visible(False)
     ax.spines['left'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -478,6 +616,7 @@ def _draw_feature_panel(
     feature: FeatureRecord,
     annotations: list[AnnotatedVariant],
     coverage_gaps: list[CoverageGap] | None = None,
+    database_hit_annotation_ids: set[int] | None = None,
     shared_track_ax=None,
 ) -> None:
     """
@@ -494,6 +633,8 @@ def _draw_feature_panel(
         'no_database_hit': 'o',
     }
 
+    database_hit_annotation_ids = database_hit_annotation_ids or set()
+
     _draw_non_covered_regions(ax, feature, coverage_gaps or [])
 
     jittered = _apply_top_jitter(annotations, feature_length=feature.end - feature.start)
@@ -507,16 +648,16 @@ def _draw_feature_panel(
             y_top,
             color=colour,
             marker=(
-                marker_shapes['database_hit'] if ann.is_resistance_hit
+                marker_shapes['database_hit'] if id(ann) in database_hit_annotation_ids
                 else marker_shapes['no_database_hit']
             ),
-            s=50 if ann.is_resistance_hit else 40,
+            s=50 if id(ann) in database_hit_annotation_ids else 40,
             zorder=4,
-            edgecolors='black' if ann.is_resistance_hit else  'white',
+            edgecolors='black' if id(ann) in database_hit_annotation_ids else 'white',
             linewidths=0.5,
         )
 
-        if ann.is_resistance_hit:
+        if id(ann) in database_hit_annotation_ids:
             label = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             # Alternate text alignment left/right to reduce label overlap
             ax.annotate(
@@ -537,8 +678,8 @@ def _draw_feature_panel(
     ax.set_ylim(-0.19, 1.05)
     ax.set_ylabel('variant frequency')
     ax.set_title(
-        f'{feature.name} variants',
-        fontsize=9,
+        f'{feature.display_name} variants',
+        fontsize=8,
         loc='left',
         pad=25,
         fontweight='bold',

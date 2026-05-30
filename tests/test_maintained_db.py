@@ -318,7 +318,7 @@ class TestMaintainedDbListCommand:
         ):
             result = runner.invoke(app, ['databases', '--list'])
         assert result.exit_code != 0
-        assert 'Network error' in result.output
+        assert 'Network error' in (result.output + str(result.exception or ''))
 
     def test_list_prints_no_databases_message_when_empty(self) -> None:
         with patch('respro.cli.maintained_db.list_maintained_databases', return_value=[]):
@@ -332,12 +332,12 @@ class TestMaintainedDbListCommand:
             ['databases', '--list', '--download', 'hsv_daehne_jaki'],
         )
         assert result.exit_code != 0
-        assert 'Use either --list or --download' in _strip_ansi(result.output)
+        assert 'Use either --list or --download' in _strip_ansi(result.output + str(result.exception or ''))
 
     def test_requires_list_or_download(self) -> None:
         result = runner.invoke(app, ['databases'])
         assert result.exit_code != 0
-        assert 'Provide either --list or --download NAME' in _strip_ansi(result.output)
+        assert 'Provide either --list or --download NAME' in _strip_ansi(result.output + str(result.exception or ''))
 
 
 # ── CLI: databases --download ────────────────────────────────────────────
@@ -387,7 +387,7 @@ class TestMaintainedDbDownloadCommand:
                 '--output', str(tmp_path / 'custom.db'),
             ])
         assert result.exit_code != 0
-        assert 'No GenBank records' in result.output
+        assert 'No GenBank records' in (result.output + str(result.exception or ''))
 
     def test_download_fails_on_network_error(self, tmp_path: Path) -> None:
         with patch(
@@ -400,7 +400,7 @@ class TestMaintainedDbDownloadCommand:
                 '--output', str(tmp_path / 'custom.db'),
             ])
         assert result.exit_code != 0
-        assert 'HTTP 404' in result.output
+        assert 'HTTP 404' in (result.output + str(result.exception or ''))
 
     def test_download_outputs_success_path(self, tmp_path: Path) -> None:
         fake_gb = tmp_path / 'X04770.gb'

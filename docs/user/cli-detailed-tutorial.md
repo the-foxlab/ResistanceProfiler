@@ -9,9 +9,8 @@ This tutorial covers all primary CLI command groups:
 - `fasta`
 - `regenerate`
 - `classify`
-- `sync`
 - `manage database`
-- `manage results`
+- `manage results` (including sync via `--sync` option)
 
 The important workflow idea is that ResPro profiles against one internal project database. New sample data is first normalized to that internal reference space before amino-acid rules are matched.
 
@@ -29,10 +28,10 @@ Download a database by name:
 respro databases --download db_name --output my_folder/
 ```
 
-ResPro automatically downloads TSV rules and GenBank files, then builds a ResPro-compatible SQLite database from scratch. Database creation can take a moment because ResPro enriches entries with PubMed and PubChem information. Add `--VV` to see verbose progress:
+ResPro automatically downloads TSV rules and GenBank files, then builds a ResPro-compatible SQLite database from scratch. Database creation can take a moment because ResPro enriches entries with PubMed and PubChem information. Add `-vv` to see verbose progress:
 
 ```bash
-respro --VV databases --download db_name --output my_folder/
+respro -vv databases --download db_name --output my_folder/
 ```
 
 ## 2. Initialize a project database (`respro init`)
@@ -80,7 +79,7 @@ respro fasta \
   --output my_output \
   --results-db my_results.db \
   --export json \
-  --export tabular
+  --export pdf
 ```
 
 ## 5. Profile VCF input (`respro vcf`)
@@ -95,7 +94,7 @@ respro vcf \
   --min-af 0.01 \
   --min-depth 0 \
   --export json \
-  --export tabular
+  --export pdf
 ```
 
 ## 6. Inspect project metadata and curated rules (`respro manage database`)
@@ -132,23 +131,12 @@ Delete one run without interactive confirmation:
 respro manage results my_results.db --delete 1 --force
 ```
 
-## 8. Re-annotate stored runs against updated rules (`respro sync`)
-
-Sync one run:
-
-```bash
-respro sync \
-  --results-db my_results.db \
-  --project myrespro.db \
-  --run-id 1
-```
+## 8. Re-annotate stored runs against updated rules (`respro manage results --sync`)
 
 Sync all runs with matching project fingerprint:
 
 ```bash
-respro sync \
-  --results-db my_results.db \
-  --project myrespro.db
+respro manage results my_results.db --sync myrespro.db
 ```
 
 ## 9. Add manual interpretation fields (`respro classify`)
@@ -172,7 +160,7 @@ respro regenerate \
   --results-db my_results.db \
   --run-id 1 \
   --output my_output \
-  --export tabular
+  --export pdf
 ```
 
 From a JSON export:

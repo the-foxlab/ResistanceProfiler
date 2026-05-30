@@ -51,17 +51,3 @@ respro regenerate \
   --json my_output/sample_variants.results.json \
   --output my_output
 ```
-
-## Tabular export (`*.mutations.tsv`)
-
-Compact table of matched mutation-level outputs.
-
-Typical columns include feature, nucleotide/amino-acid changes, drug, and interpretation fields.
-
-Best use:
-
-- spreadsheet-based review
-- quick filtering and ad hoc summaries
-
-> [!CAUTION]
-> TSV is compact and convenient but does not preserve the full run context available in JSON.

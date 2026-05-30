@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import textwrap
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -17,17 +18,17 @@ from Bio.SeqRecord import SeqRecord
 from conftest import TINY_REF_SEQ, write_genbank
 
 from respro.cli.init import init_project
-from respro.core.alignment import load_cached_mappings, load_features_with_rules, sequence_checksum
-from respro.db.features import _is_ncbi_protein_accession
+from respro.core.alignment import load_features_with_rules
+from respro.db.cache import load_cached_mappings, sequence_checksum
+from respro.db.features import _is_ncbi_protein_accession, load_features_for_reference
 from respro.db.models import is_internal_formula_component_drug_name
 from respro.db.rules_import import (
     _detect_coordinate_base,
     _resolve_anchorless_deletion,
     _validate_reference_amino_acids,
 )
-from respro.db.rules_queries import list_rules_for_display
+from respro.db.rules_queries import list_plot_metadata_for_display, list_rules_for_display
 from respro.db.schema import create_schema, open_project_db
-from respro.io.reference import load_features_for_reference
 
 # Amino acid sequence used across tests:
 #   index:  0  1  2  3  4  5
@@ -499,6 +500,31 @@ class TestComboRuleParsing:
         assert formula_count == 1
         assert member_count == 2
 
+    def test_rules_display_includes_alias_and_group_metadata(self, project_db: Path) -> None:
+        conn = sqlite3.connect(str(project_db))
+        conn.row_factory = sqlite3.Row
+        conn.execute("UPDATE drug SET name = ?, alias = ? WHERE id = 1", ('Acyclovir', 'ACV'))
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (project_id, algorithm_name, config_json) VALUES (?, ?, ?)',
+            (
+                1,
+                'drug_groups',
+                textwrap.dedent('''\
+                    {"name": "drug_groups", "groups": {"Nucleoside analogues": ["Acyclovir"]}}
+                ''').strip(),
+            ),
+        )
+        conn.commit()
+
+        rows = list_rules_for_display(conn)
+        plot_meta = list_plot_metadata_for_display(conn)
+        conn.close()
+
+        assert rows[0]['drug'] == 'Acyclovir'
+        assert rows[0]['drug_group'] == 'Nucleoside analogues'
+        assert plot_meta['drug_aliases']['acyclovir'] == 'ACV'
+        assert plot_meta['drug_groups']['acyclovir'] == 'Nucleoside analogues'
+
     def test_member_ids_must_be_unique(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
@@ -594,7 +620,7 @@ class TestComboRuleParsing:
         assert row is not None
         assert row[0] == '10.1086/590668'
 
-    def test_drug_badge_color_is_persisted_and_stable(self, tmp_path, tiny_genbank) -> None:
+    def test_drug_names_are_canonicalized_case_insensitively(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             feature\treference_identifier\tposition\treference\tmutation\tantiviral
@@ -605,12 +631,11 @@ class TestComboRuleParsing:
         init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
-        rows = conn.execute('SELECT name, badge_color FROM drug ORDER BY id').fetchall()
+        rows = conn.execute('SELECT name FROM drug ORDER BY id').fetchall()
         conn.close()
 
         assert len(rows) == 1
         assert rows[0][0] == 'druga'
-        assert rows[0][1].startswith('#') and len(rows[0][1]) == 7
 
     def test_single_rule_publication_https_doi_is_stored(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -1074,6 +1099,63 @@ class TestPhenotypeNormalization:
         conn.close()
         assert phenotype == 'resistant'
         assert clinical == 'sensitive'
+
+    def test_missing_phenotype_columns_do_not_default_to_unknown(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral
+            gag\ttiny_ref\t2\tK\tE\tDrugA
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        phenotype, clinical = conn.execute(
+            'SELECT phenotype, clinical_phenotype FROM resistance_rule'
+        ).fetchone()
+        conn.close()
+        assert phenotype == ''
+        assert clinical == ''
+
+    def test_missing_phenotype_defaults_to_unknown_when_ruleset_has_phenotypes(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant
+            gag\ttiny_ref\t3\tA\tV\tDrugB\t
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        rows = conn.execute(
+            'SELECT phenotype, clinical_phenotype FROM resistance_rule ORDER BY id'
+        ).fetchall()
+        conn.close()
+        assert rows[0] == ('resistant', '')
+        assert rows[1] == ('unknown', '')
+
+    def test_missing_clinical_phenotype_defaults_to_unknown_when_ruleset_has_clinical_values(
+        self,
+        tmp_path,
+        tiny_genbank,
+    ) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tclinical_phenotype
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant
+            gag\ttiny_ref\t3\tA\tV\tDrugB\t
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        rows = conn.execute(
+            'SELECT phenotype, clinical_phenotype FROM resistance_rule ORDER BY id'
+        ).fetchall()
+        conn.close()
+        assert rows[0] == ('', 'resistant')
+        assert rows[1] == ('', 'unknown')
 
     def test_rejects_ambiguous_deletion_tokens(self, tmp_path, tiny_genbank) -> None:
         # F67del at position 2 with reference K: deleted block 'F' does not match

@@ -16,12 +16,7 @@ from conftest import TINY_REF_NAME, TINY_REF_SEQ
 from typer.testing import CliRunner
 
 from respro.cli.main import app
-from respro.core.alignment import (
-    load_cached_mappings,
-    match_query_to_features,
-    sequence_checksum,
-    store_mappings,
-)
+from respro.core.alignment import match_query_to_features
 from respro.core.annotation import annotate_variants
 from respro.core.fasta_to_vcf import (
     _make_variant_from_coding_nt,
@@ -36,6 +31,7 @@ from respro.core.vcf_remap import (
     _build_query_to_cds_map,
     remap_variants,
 )
+from respro.db.cache import load_cached_mappings, sequence_checksum, store_mappings
 from respro.db.models import FeatureMatch, FeatureRecord, FeatureSegment, VariantCall
 from respro.db.schema import create_schema, open_project_db
 
@@ -698,7 +694,7 @@ class TestProfileFastaCli:
         ])
 
         assert result.exit_code == 0, result.output
-        assert '1 database hit' in result.output
+        assert '1 total database hits' in result.output
 
     def test_fasta_profile_excludes_non_cds_variants(
         self, fasta_db: Path, tmp_path: Path,
@@ -728,7 +724,7 @@ class TestProfileFastaCli:
         ])
 
         assert result.exit_code == 0, result.output
-        assert '0 database hit' in result.output
+        assert '0 total database hits' in result.output
 
     def test_fasta_profile_html_output_contains_expected_fields(
         self, fasta_db: Path, tmp_path: Path,
@@ -1001,7 +997,7 @@ class TestFastaConsensusCli:
         ])
 
         assert result.exit_code == 0, result.output
-        assert '1 database hit' in result.output
+        assert '1 total database hits' in result.output
 
     def test_fasta_consensus_no_change_no_hits(
         self, fasta_db: Path, tmp_path: Path,
@@ -1019,7 +1015,7 @@ class TestFastaConsensusCli:
         ])
 
         assert result.exit_code == 0, result.output
-        assert '0 database hit' in result.output
+        assert '0 total database hits' in result.output
 
     def test_fasta_consensus_writes_optional_json_export(
         self, fasta_db: Path, tmp_path: Path,
@@ -1053,16 +1049,16 @@ class TestFastaConsensusCli:
             '--fasta', str(fasta_path),
             '--output', str(output_dir),
             '--export', 'json',
-            '--export', 'tabular',
+            '--export', 'pdf',
         ])
 
         assert result.exit_code == 0, result.output
         html_path = output_dir / f'{fasta_path.stem}.report.html'
         json_path = output_dir / f'{fasta_path.stem}.results.json'
-        tsv_path = output_dir / f'{fasta_path.stem}.mutations.tsv'
+        pdf_path = output_dir / f'{fasta_path.stem}.report.pdf'
         assert html_path.exists()
         assert json_path.exists()
-        assert tsv_path.exists()
+        assert pdf_path.exists()
 
 class TestReverseStrandMappyParity:
     """Regression tests for reverse-strand FASTA profiling with mappy CIGAR handling."""

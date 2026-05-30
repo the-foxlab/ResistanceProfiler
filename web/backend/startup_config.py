@@ -6,7 +6,7 @@ import logging
 import os
 import shutil
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from respro.db.schema import open_project_db
@@ -26,6 +26,7 @@ class StartupConfig:
     data_dir: Path
     allowed_roots: tuple[Path, ...]
     api_token: str
+    project_db_uuid_index: dict[str, Path] = field(default_factory=dict)
 
 
 def load_startup_config() -> StartupConfig:
@@ -68,6 +69,7 @@ def load_startup_config() -> StartupConfig:
         logger.info('Maintained database bootstrap enabled — downloading missing databases')
         bootstrap_missing_maintained_databases(project_databases_dir)
     _validate_at_least_one_project_db(project_databases_dir)
+    project_db_uuid_index = build_project_db_uuid_index(project_databases_dir)
     _validate_startup_policy(api_token)
 
     return StartupConfig(
@@ -77,6 +79,7 @@ def load_startup_config() -> StartupConfig:
         data_dir=data_dir,
         allowed_roots=allowed_roots,
         api_token=api_token,
+        project_db_uuid_index=project_db_uuid_index,
     )
 
 
@@ -96,6 +99,25 @@ def resolve_project_db_path(project_databases_dir: Path, database_id: str | None
     if not matches:
         raise ValueError(f'Unknown database_id {database_id!r}.')
     return matches[0]
+
+
+def resolve_regenerate_project_db_path(
+    startup_config: StartupConfig,
+    *,
+    project_fingerprint: str,
+    fallback_database_id: str | None,
+) -> Path:
+    """Resolve project DB for regenerate requests using JSON fingerprint when present."""
+    normalized_fingerprint = project_fingerprint.strip()
+    if normalized_fingerprint:
+        project_db = startup_config.project_db_uuid_index.get(normalized_fingerprint)
+        if project_db is None:
+            raise ValueError(
+                f'No project database found for JSON project_fingerprint {normalized_fingerprint!r}.'
+            )
+        return project_db
+
+    return resolve_project_db_path(startup_config.project_databases_dir, fallback_database_id)
 
 
 def is_path_within_allowed_roots(path: Path, allowed_roots: tuple[Path, ...]) -> bool:
@@ -155,6 +177,23 @@ def list_project_db_paths(project_databases_dir: Path) -> list[Path]:
     return validated_paths
 
 
+def build_project_db_uuid_index(project_databases_dir: Path) -> dict[str, Path]:
+    """Return UUID->project DB path mapping for all validated project databases."""
+    uuid_index: dict[str, Path] = {}
+    for db_path in list_project_db_paths(project_databases_dir):
+        project_uuid = _read_project_uuid(db_path)
+        if project_uuid in uuid_index:
+            logger.warning(
+                'Duplicate project database UUID detected: uuid=%s keeping=%s ignoring=%s',
+                project_uuid,
+                uuid_index[project_uuid].name,
+                db_path.name,
+            )
+            continue
+        uuid_index[project_uuid] = db_path
+    return uuid_index
+
+
 def _initialize_workspace_dirs(
     *,
     project_databases_dir: Path,
@@ -198,3 +237,19 @@ def _validate_project_db(project_db: Path) -> None:
         raise FileNotFoundError(f'Project DB not found: {project_db}')
     connection = open_project_db(project_db)
     connection.close()
+
+
+def _read_project_uuid(project_db: Path) -> str:
+    """Read and validate the stable project UUID from one project database."""
+    connection = open_project_db(project_db)
+    try:
+        row = connection.execute('SELECT uuid FROM project LIMIT 1').fetchone()
+    finally:
+        connection.close()
+
+    if row is None:
+        raise ValueError(f'Project database missing project row: {project_db}')
+    project_uuid = str(row['uuid'] or '').strip()
+    if not project_uuid:
+        raise ValueError(f'Project database missing UUID in project table: {project_db}')
+    return project_uuid

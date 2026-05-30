@@ -91,8 +91,8 @@ def _profile_vcf_command(
     export: Annotated[
         list[str] | None,
         typer.Option(
-            '--export',
-            help='Optional extra export format in addition to HTML (pdf, json, tabular). Can be provided multiple times.',
+            '--export', '-e',
+            help='Optional extra export format in addition to HTML (pdf, json). Pdfs are summaries only. Can be provided multiple times.',
         ),
     ] = None,
     input_display_name: Annotated[

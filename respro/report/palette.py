@@ -23,7 +23,8 @@ MUTATION_COLOURS = {
 NON_COVERED_COLOUR = '#6b7280'
 
 # Genome overview feature track colours
-FEATURE_HIGHLIGHTED_COLOUR = 'steelblue'
+CDS_HIGHLIGHTED_COLOUR = "#627BAA"
+MATPEPTIDE_HIGHLIGHTED_COLOUR = "#398588"
 FEATURE_INTRON_COLOUR = "#b2b2b2"  # muted blue-grey for intron / non-coding intervals within split genes
 FEATURE_DEFAULT_COLOUR = '#d9dde3'
 FEATURE_HIGHLIGHTED_EDGE = 'black'
@@ -67,23 +68,3 @@ def mutation_legend_patches(effects: set[str] | None = None) -> list[mpatches.Pa
         for effect, colour in MUTATION_COLOURS.items()
         if effect in selected
     ]
-
-def badge_text_colour(hex_colour: str) -> str:
-    """
-    Return color based on WCAG relative luminance of the background colour.
-
-    Uses the contrast threshold of 0.179 to select between white and black text.
-
-    :param hex_colour: CSS hex colour string (e.g. '#e74c3c' or '#abc')
-    :return: color depending on lumi
-    """
-    h = hex_colour.lstrip('#')
-    if len(h) == 3:
-        h = ''.join(c * 2 for c in h)
-    r, g, b = (int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
-
-    def _linearise(c: float) -> float:
-        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-
-    luminance = 0.299 * _linearise(r) + 0.587 * _linearise(g) + 0.114 * _linearise(b)
-    return "#ffffff" if luminance <= 0.5 else "#242424"

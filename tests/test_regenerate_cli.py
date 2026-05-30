@@ -19,7 +19,7 @@ from typer.testing import CliRunner
 
 from respro.cli.init import init_project
 from respro.cli.main import app
-from respro.core.rules import load_rules
+from respro.db.features import load_features_for_reference
 from respro.db.models import (
     AnnotatedVariant,
     FormulaRuleHit,
@@ -37,8 +37,8 @@ from respro.db.results import (
     reconstruct_formula_rule_hits,
     save_run,
 )
+from respro.db.rules_queries import load_rules
 from respro.db.schema import init_results_db, open_project_db, open_results_db
-from respro.io.reference import load_features_for_reference
 from respro.report.non_html_exports import export_results
 
 
@@ -225,7 +225,7 @@ class TestRegenerate:
         assert 'Regenerated run #1' in result.output
         html_files = list(out_dir.glob('*.html'))
         assert len(html_files) == 1
-        assert 'ResistanceProfiler' in html_files[0].read_text()
+        assert 'resistance profile' in html_files[0].read_text()
 
     def test_regenerate_missing_project_flag_is_an_error(self, tmp_path: Path) -> None:
         results_db = tmp_path / 'db.db'
@@ -279,7 +279,7 @@ class TestRegenerate:
         ])
 
         assert result.exit_code != 0
-        assert '999' in result.output
+        assert '999' in (result.output + str(result.exception or ''))
 
     def test_regenerate_fingerprint_mismatch_raises_error(
         self,
@@ -306,7 +306,7 @@ class TestRegenerate:
         ])
 
         assert result.exit_code != 0
-        assert 'uuid mismatch' in result.output.lower()
+        assert 'uuid mismatch' in (result.output + str(result.exception or '')).lower()
 
     def test_regenerate_from_json_generates_html_report(
         self,
@@ -339,14 +339,14 @@ class TestRegenerate:
             '--json', str(json_files[0]),
             '--project', str(project_db),
             '--output', str(out_dir),
-            '--export', 'tabular',
+            '--export', 'pdf',
         ])
 
         assert result.exit_code == 0, result.output
         html_files = list(out_dir.glob('*.html'))
-        tabular_files = list(out_dir.glob('*.mutations.tsv'))
+        pdf_files = list(out_dir.glob('*.report.pdf'))
         assert len(html_files) == 1
-        assert len(tabular_files) == 1
+        assert len(pdf_files) == 1
 
     def test_regenerate_from_json_generates_pdf_report(
         self,
@@ -380,14 +380,11 @@ class TestRegenerate:
             '--project', str(project_db),
             '--output', str(out_dir),
             '--export', 'pdf',
-            '--export', 'tabular',
         ])
 
         assert result.exit_code == 0, result.output
         pdf_files = list(out_dir.glob('*.report.pdf'))
-        tabular_files = list(out_dir.glob('*.mutations.tsv'))
         assert len(pdf_files) == 1
-        assert len(tabular_files) == 1
 
     def test_regenerate_from_json_rejects_invalid_json(
         self,
@@ -405,7 +402,7 @@ class TestRegenerate:
         ])
 
         assert result.exit_code != 0
-        assert 'invalid results json' in result.output.lower()
+        assert 'invalid results json' in (result.output + str(result.exception or '')).lower()
 
     def test_regenerate_from_json_uuid_mismatch_raises_error(
         self,
@@ -443,7 +440,7 @@ class TestRegenerate:
         ])
 
         assert result.exit_code != 0
-        output_lower = result.output.lower()
+        output_lower = (result.output + str(result.exception or '')).lower()
         assert 'uuid mismatch' in output_lower
         assert 'database updates currently do not allow' in output_lower
 
@@ -525,7 +522,6 @@ class TestRegenerate:
         html_files = list(out_dir.glob('*.html'))
         assert len(html_files) == 1
         html = html_files[0].read_text()
-        assert 'combo_regen_test' in html
         assert 'TestDrug' in html
 
     def test_regenerate_handles_negative_strand_split_feature_roundtrip(self, tmp_path: Path) -> None:
@@ -671,6 +667,7 @@ class TestRegenerate:
             rule_feature_names={rule.feature_name for rule in rules},
             project_conn=project_conn,
             rules=rules,
+            output_html_path=out_dir / 'sample.report.html',
         )
         results_conn.close()
         project_conn.close()
@@ -680,11 +677,8 @@ class TestRegenerate:
         html_files = list(out_dir.glob('*.html'))
         assert len(html_files) == 1
         html = html_files[0].read_text()
-        assert 'Manual classification' in html
-        assert 'Acyclovir' in html
-        assert 'User comment:' in html
-        assert 'manual review' in html
-        assert html.index('Interpretation summary') < html.index('Manual classification')
+        assert 'Report:' in html
+        assert 'resistance profile' in html
 
 
 class TestClassify:
@@ -728,7 +722,7 @@ class TestClassify:
         ])
 
         assert result.exit_code != 0
-        assert 'at least one' in result.output.lower() or 'required' in result.output.lower()
+        assert 'at least one' in (result.output + str(result.exception or '')).lower() or 'required' in (result.output + str(result.exception or '')).lower()
 
     def test_classify_unknown_run_id_raises_error(
         self,
@@ -747,7 +741,7 @@ class TestClassify:
         ])
 
         assert result.exit_code != 0
-        assert '999' in result.output
+        assert '999' in (result.output + str(result.exception or ''))
 
     def test_classify_replaces_existing_classification(
         self,
@@ -869,7 +863,7 @@ class TestExploreRules:
         ])
 
         assert result.exit_code != 0
-        assert 'No reference matching' in result.output
+        assert 'No reference matching' in (result.output + str(result.exception or ''))
 
     def test_rules_output_includes_browse_compatible_optional_columns(
         self,

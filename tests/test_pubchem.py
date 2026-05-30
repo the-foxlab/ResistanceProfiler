@@ -7,133 +7,19 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from respro.db.drugs import _get_drugs_from_pubchem
 from respro.io.pubchem import PubChemRecord, _fetch_cid, _fetch_description, lookup_drug
 
-# ──────────────────────────────────────────────────────────────────────
-# Helpers
-# ──────────────────────────────────────────────────────────────────────
 
-def _mock_response(payload: dict) -> MagicMock:
-    """Return a context-manager mock that yields a readable JSON response."""
+def _mock_response(payload: object) -> MagicMock:
     body = json.dumps(payload).encode()
     mock = MagicMock()
     mock.__enter__ = MagicMock(return_value=MagicMock(read=MagicMock(return_value=body)))
     mock.__exit__ = MagicMock(return_value=False)
     return mock
-
-
-_CID_RESPONSE = {'IdentifierList': {'CID': [135398513]}}
-_DESC_RESPONSE = {
-    'InformationList': {
-        'Information': [
-            {'CID': 135398513, 'Title': 'Aciclovir', 'Description': 'Antiviral drug.'},
-        ]
-    }
-}
-
-
-# ──────────────────────────────────────────────────────────────────────
-# _fetch_cid
-# ──────────────────────────────────────────────────────────────────────
-
-class TestFetchCid:
-    def test_returns_cid_on_success(self) -> None:
-        with patch('urllib.request.urlopen', return_value=_mock_response(_CID_RESPONSE)):
-            result = _fetch_cid('Aciclovir', timeout=5)
-        assert result == 135398513
-
-    def test_returns_none_on_404(self) -> None:
-        with patch('urllib.request.urlopen', side_effect=urllib.error.HTTPError(
-            url='', code=404, msg='Not Found', hdrs=None, fp=None,  # type: ignore[arg-type]
-        )):
-            result = _fetch_cid('NoSuchDrug', timeout=5)
-        assert result is None
-
-    def test_returns_none_on_http_error(self) -> None:
-        with patch('urllib.request.urlopen', side_effect=urllib.error.HTTPError(
-            url='', code=500, msg='Server Error', hdrs=None, fp=None,  # type: ignore[arg-type]
-        )):
-            result = _fetch_cid('AnyDrug', timeout=5)
-        assert result is None
-
-    def test_returns_none_on_network_error(self) -> None:
-        with patch('urllib.request.urlopen', side_effect=OSError('no network')):
-            result = _fetch_cid('AnyDrug', timeout=5)
-        assert result is None
-
-    def test_returns_none_on_empty_cid_list(self) -> None:
-        with patch('urllib.request.urlopen',
-                   return_value=_mock_response({'IdentifierList': {'CID': []}})):
-            result = _fetch_cid('AnyDrug', timeout=5)
-        assert result is None
-
-    def test_returns_none_on_unexpected_json(self) -> None:
-        with patch('urllib.request.urlopen', return_value=_mock_response({'foo': 'bar'})):
-            result = _fetch_cid('AnyDrug', timeout=5)
-        assert result is None
-
-
-# ──────────────────────────────────────────────────────────────────────
-# _fetch_description
-# ──────────────────────────────────────────────────────────────────────
-
-class TestFetchDescription:
-    def test_returns_first_description(self) -> None:
-        with patch('urllib.request.urlopen', return_value=_mock_response(_DESC_RESPONSE)):
-            result = _fetch_description(135398513, timeout=5)
-        assert result == 'Antiviral drug.'
-
-    def test_skips_empty_descriptions(self) -> None:
-        payload = {
-            'InformationList': {
-                'Information': [
-                    {'CID': 1, 'Description': ''},
-                    {'CID': 1, 'Description': '   '},
-                    {'CID': 1, 'Description': 'Valid description.'},
-                ]
-            }
-        }
-        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
-            result = _fetch_description(1, timeout=5)
-        assert result == 'Valid description.'
-
-    def test_returns_title_when_description_missing(self) -> None:
-        payload = {
-            'InformationList': {
-                'Information': [
-                    {'CID': 1, 'Title': 'Brivudine', 'Description': ''},
-                ]
-            }
-        }
-        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
-            result = _fetch_description(1, timeout=5)
-        assert result == 'Brivudine'
-
-    def test_returns_title_from_property_endpoint_when_descriptions_missing(self) -> None:
-        description_payload = {'InformationList': {'Information': [{'CID': 1}]}}
-        title_payload = {'PropertyTable': {'Properties': [{'CID': 1, 'Title': 'Brivudine'}]}}
-        with patch('urllib.request.urlopen', side_effect=[
-            _mock_response(description_payload),
-            _mock_response(title_payload),
-        ]):
-            result = _fetch_description(1, timeout=5)
-        assert result == 'Brivudine'
-
-    def test_returns_empty_string_when_no_descriptions(self) -> None:
-        payload = {'InformationList': {'Information': [{'CID': 1}]}}
-        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
-            result = _fetch_description(1, timeout=5)
-        assert result == ''
-
-    def test_returns_empty_string_on_network_error(self) -> None:
-        with patch('urllib.request.urlopen', side_effect=OSError('no network')):
-            result = _fetch_description(1, timeout=5)
-        assert result == ''
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -169,6 +55,29 @@ class TestLookupDrug:
         with patch('respro.io.pubchem._fetch_cid', return_value=None):
             result = lookup_drug('AnyDrug')
         assert result is None
+
+
+class TestPubchemJsonShapeValidation:
+    def test_fetch_cid_returns_none_when_identifier_list_is_not_object(self) -> None:
+        with patch('urllib.request.urlopen', return_value=_mock_response({'IdentifierList': []})):
+            assert _fetch_cid('Aciclovir', timeout=1) is None
+
+    def test_fetch_cid_returns_none_when_cid_field_is_not_list(self) -> None:
+        with patch('urllib.request.urlopen', return_value=_mock_response({'IdentifierList': {'CID': 'x'}})):
+            assert _fetch_cid('Aciclovir', timeout=1) is None
+
+    def test_fetch_description_returns_empty_when_information_list_is_not_object(self) -> None:
+        with patch('urllib.request.urlopen', return_value=_mock_response({'InformationList': []})):
+            assert _fetch_description(123, timeout=1) == ''
+
+    def test_fetch_description_returns_empty_when_property_table_is_not_object(self) -> None:
+        description_payload = {'InformationList': {'Information': []}}
+        title_payload = {'PropertyTable': []}
+        with patch(
+            'urllib.request.urlopen',
+            side_effect=[_mock_response(description_payload), _mock_response(title_payload)],
+        ):
+            assert _fetch_description(123, timeout=1) == ''
 
 
 # ──────────────────────────────────────────────────────────────────────

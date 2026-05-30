@@ -88,6 +88,43 @@ def annotate_variants(
     return results
 
 
+def _suppress_ruleless_overlap_annotations(
+    annotations: list[AnnotatedVariant],
+    rule_feature_names: set[str],
+) -> list[AnnotatedVariant]:
+    """
+    Suppress overlap annotations for features without rules when a ruled feature also matches.
+
+    Groups by variant locus/alleles, keeps all single-feature groups unchanged, and for
+    overlap groups keeps only annotations whose feature has rules when at least one such
+    feature exists.
+
+    :param annotations: list of annotated variants
+    :param rule_feature_names: feature names covered by at least one rule
+    :return: filtered annotation list
+    """
+    variant_groups: dict[tuple[str, int, str, str], list[AnnotatedVariant]] = {}
+    for ann in annotations:
+        variant_key = (ann.variant.chrom, ann.variant.pos, ann.variant.ref, ann.variant.alt)
+        if variant_key not in variant_groups:
+            variant_groups[variant_key] = []
+        variant_groups[variant_key].append(ann)
+
+    filtered: list[AnnotatedVariant] = []
+    for group in variant_groups.values():
+        if len(group) == 1:
+            filtered.extend(group)
+            continue
+
+        has_ruled_feature = any(ann.feature_name in rule_feature_names for ann in group)
+        if has_ruled_feature:
+            filtered.extend(ann for ann in group if ann.feature_name in rule_feature_names)
+        else:
+            filtered.extend(group)
+
+    return filtered
+
+
 def reverse_complement(seq: str) -> str:
     """
     Return the reverse complement of a DNA sequence.
@@ -131,11 +168,6 @@ def _is_insertion(ref: str, alt: str) -> bool:
 def _is_deletion(ref: str, alt: str) -> bool:
     """Return True when REF is longer than ALT (VCF anchor-base convention)."""
     return len(ref) > len(alt)
-
-
-def _is_inframe(ref: str, alt: str) -> bool:
-    """Return True when the indel length is a multiple of 3."""
-    return abs(len(alt) - len(ref)) % 3 == 0
 
 
 def _translate_indel_bases(bases: str, strand: str) -> str:
@@ -290,6 +322,8 @@ def _annotate_variant_in_feature(
     if cds_variant_pos is None:
         return AnnotatedVariant(variant=var, feature_name=feature.name)
 
+    # codon_start can place CDS after a non-coding prefix in feature.nt_sequence,
+    # so this remaps absolute CDS coordinates into the translated coding frame.
     coding_variant_pos = cds_variant_pos - feature.codon_start
     if coding_variant_pos < 0:
         return AnnotatedVariant(variant=var, feature_name=feature.name)
@@ -441,7 +475,7 @@ def _annotate_insertion(
     :param frame_offset: position of anchor base within its codon (0, 1, or 2)
     :return: AnnotatedVariant
     """
-    if not _is_inframe(var.ref, var.alt):
+    if abs(len(var.alt) - len(var.ref)) % 3 != 0:
         return _annotate_frameshift(var, feature, coding_nt, codon_idx)
 
     if not _is_vcf_anchor_at_codon_boundary(frame_offset):
@@ -500,7 +534,7 @@ def _annotate_deletion(
     :param frame_offset: position of anchor base within its codon (0, 1, or 2)
     :return: AnnotatedVariant
     """
-    if not _is_inframe(var.ref, var.alt):
+    if abs(len(var.alt) - len(var.ref)) % 3 != 0:
         return _annotate_frameshift(var, feature, coding_nt, codon_idx)
 
     if not _is_vcf_anchor_at_codon_boundary(frame_offset):
@@ -563,6 +597,8 @@ def _indel_anchor_coding_pos(coding_variant_pos: int, ref_len: int, strand: str)
     """
     if strand == '+':
         return coding_variant_pos
+    # On '-' features, VCF's left-anchor in genomic space is rightward in coding space;
+    # shifting by REF length realigns to the coding-preceding anchor nucleotide.
     return coding_variant_pos - ref_len
 
 
@@ -680,7 +716,12 @@ def normalize_mutation(
     return None
 
 
-def classify_similarity(observed_aa: str, rule_aa: str) -> str:
+def classify_similarity(
+    observed_aa: str,
+    rule_aa: str,
+    high_threshold: int = 1,
+    moderate_threshold: int = 0,
+) -> str:
     """
     Classify amino acid similarity based on BLOSUM62 score.
 
@@ -691,6 +732,8 @@ def classify_similarity(observed_aa: str, rule_aa: str) -> str:
 
     :param observed_aa: observed alternate amino acid
     :param rule_aa: amino acid from the resistance rule
+    :param high_threshold: score threshold for high similarity
+    :param moderate_threshold: score threshold for moderate similarity
     :return: similarity class string
     """
     try:
@@ -699,9 +742,9 @@ def classify_similarity(observed_aa: str, rule_aa: str) -> str:
         # Non-standard tokens (e.g. 'fsX', '*') are not in the matrix
         logger.debug('BLOSUM62 matrix does not contain %s/%s — defaulting to low', observed_aa, rule_aa)
         return 'low'
-    if score >= 1:
+    if score >= high_threshold:
         return 'high'
-    if score >= 0:
+    if score >= moderate_threshold:
         return 'moderate'
     return 'low'
 
