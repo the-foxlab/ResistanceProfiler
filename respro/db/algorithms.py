@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from respro.db._rules_normalize import _parse_ic50_value
+from respro.db._rules_normalize import _append_contradictory_comment, _parse_ic50_value
 
 _KNOWN_ALGORITHM_NAMES = {'ic50_thresholds', 'drug_groups', 'drug_interpretation', 'drug_alias'}
 
@@ -122,7 +122,7 @@ def apply_ic50_threshold_classification(
     use_column = config['use']
     thresholds = config['thresholds']
     q = (
-        f'SELECT r.id, d.name AS drug_name, r.{use_column} AS value '
+        f'SELECT r.id, d.name AS drug_name, r.{use_column} AS value, r.phenotype, r.comment '
         'FROM resistance_rule r '
         'JOIN drug d ON d.id = r.drug_id '
         'JOIN feature f ON f.id = r.feature_id '
@@ -140,9 +140,20 @@ def apply_ic50_threshold_classification(
         if parsed is None:
             continue
         new_phenotype = _classify_ic50(parsed, thresholds[drug_name])
+        existing_phenotype = (row['phenotype'] or '').strip().lower()
+        # If an existing non-trivial phenotype conflicts with the IC50-derived call,
+        # flag as contradictory and append the standard comment rather than silently
+        # overwriting the stored association.
+        if existing_phenotype and existing_phenotype not in ('unknown', 'contradictory') and existing_phenotype != new_phenotype:
+            new_phenotype = 'contradictory'
+        updated_comment = _append_contradictory_comment(
+            row['comment'] or '',
+            phenotype=new_phenotype,
+            clinical_phenotype='',
+        )
         conn.execute(
-            'UPDATE resistance_rule SET phenotype = ? WHERE id = ?',
-            (new_phenotype, int(row['id'])),
+            'UPDATE resistance_rule SET phenotype = ?, comment = ? WHERE id = ?',
+            (new_phenotype, updated_comment, int(row['id'])),
         )
         updated += 1
     return updated

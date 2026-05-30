@@ -624,6 +624,27 @@ class TestApplyIc50ThresholdClassification:
         row = conn.execute('SELECT phenotype FROM resistance_rule').fetchone()
         assert row['phenotype'] == 'resistant'
 
+    def test_conflicting_existing_phenotype_becomes_contradictory(
+        self, db_with_rules: tuple[sqlite3.Connection, int]
+    ) -> None:
+        conn, project_id = db_with_rules
+        # Overwrite the stored phenotype with one that conflicts with the IC50-derived call
+        # (ic50=15.0 → resistant, but existing phenotype = 'sensitive').
+        conn.execute(
+            "UPDATE resistance_rule SET phenotype = 'sensitive', comment = '' "
+            "WHERE ic50 = '15.0'"
+        )
+        conn.commit()
+        config = {'name': 'ic50_thresholds', 'use': 'ic50', 'thresholds': self._THRESHOLDS}
+        apply_ic50_threshold_classification(conn, project_id, config)
+        conn.commit()
+        row = conn.execute(
+            "SELECT r.phenotype, r.comment FROM resistance_rule r "
+            "JOIN drug d ON d.id = r.drug_id WHERE d.name = 'DrugA' AND r.ic50 = '15.0'"
+        ).fetchone()
+        assert row['phenotype'] == 'contradictory'
+        assert 'contradictory' in row['comment'].lower()
+
 
 class TestApplyDrugAliasMappings:
 

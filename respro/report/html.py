@@ -1429,7 +1429,7 @@ def _build_drug_interpretation_table(
             'summary_name': alias if alias and len(alias) < len(name) else name,
             'drug_class': drug_class,
             'hit_count': 0,
-            'resistant_count': 0, 'intermediate_count': 0, 'sensitive_count': 0,
+            'resistant_count': 0, 'intermediate_count': 0, 'sensitive_count': 0, 'contradictory_count': 0,
             'score_total': 0.0, 'score_display': '0',
             'ic50_values': [], 'fold_ic50_values': [],
             'assessment': '', 'assessment_badge_class': '',
@@ -1516,6 +1516,8 @@ def _build_drug_interpretation_table(
             by_drug[drug]['intermediate_count'] += 1
         elif pheno == 'sensitive':
             by_drug[drug]['sensitive_count'] += 1
+        elif pheno == 'contradictory':
+            by_drug[drug]['contradictory_count'] += 1
         for m in metrics:
             if m.get('label') == 'Score':
                 val = _parse_numeric_value((m.get('value') or '').strip())
@@ -1537,7 +1539,7 @@ def _build_drug_interpretation_table(
 
     # Column presence is determined by actual hit data, not zero-hit entries
     has_phenotypes = any(
-        d['resistant_count'] + d['intermediate_count'] + d['sensitive_count'] > 0
+        d['resistant_count'] + d['intermediate_count'] + d['sensitive_count'] + d['contradictory_count'] > 0
         for d in by_drug.values()
     )
     has_scores = any(
@@ -1576,6 +1578,11 @@ def _build_drug_interpretation_table(
                     and drug_data['intermediate_count'] >= intermediate_threshold
                 ):
                     drug_data['assessment'] = 'intermediate'
+                elif drug_data['contradictory_count'] > 0:
+                    # At least one hit carries a contradictory phenotype and no
+                    # resistant/intermediate threshold was reached — surface the
+                    # uncertainty rather than silently reporting sensitive.
+                    drug_data['assessment'] = 'contradictory'
                 else:
                     drug_data['assessment'] = 'sensitive'
             elif method == 'by_score':
