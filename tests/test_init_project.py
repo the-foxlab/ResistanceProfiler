@@ -19,8 +19,8 @@ from conftest import TINY_REF_SEQ, write_genbank
 
 from respro.cli.init import init_project
 from respro.core.alignment import load_features_with_rules
-from respro.db.cache import load_cached_mappings, sequence_checksum
 from respro.db.algorithms import load_interpretation_algorithms
+from respro.db.cache import load_cached_mappings, sequence_checksum
 from respro.db.features import _is_ncbi_protein_accession, load_features_for_reference
 from respro.db.models import is_internal_formula_component_drug_name
 from respro.db.rules_import import (
