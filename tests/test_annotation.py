@@ -118,6 +118,18 @@ class TestNormalizeMutation:
         assert normalize_mutation('insGG', reference='F', position_1based=50) == 'F50FGG'
         assert normalize_mutation('insGG') is None
 
+    def test_ins_any_token_normalized(self):
+        assert normalize_mutation('ins_any') == 'INS_any'
+
+    def test_ins_any_case_insensitive(self):
+        assert normalize_mutation('INS_ANY') == 'INS_any'
+        assert normalize_mutation('Ins_Any') == 'INS_any'
+        assert normalize_mutation('ins_Any') == 'INS_any'
+
+    def test_ins_any_is_not_confused_with_bare_ins(self):
+        # Regression guard: specific bare insertion still works normally
+        assert normalize_mutation('insGG', reference='F', position_1based=50) == 'F50FGG'
+
     def test_rejects_wildcard_notation(self):
         assert normalize_mutation('any') is None
         assert normalize_mutation('x') is None

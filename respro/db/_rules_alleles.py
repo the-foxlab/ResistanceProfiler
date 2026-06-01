@@ -31,6 +31,8 @@ def _is_supported_mutation_token(mutation: str) -> bool:
     token = mutation.upper()
     if token == 'ANY':
         return False
+    if mutation == 'INS_any':
+        return True
     if token in {'FSX', '*'} or (token.endswith('FSX') and len(token) == 4):
         return True
     if re.fullmatch(r'[A-Z]+', token):

@@ -63,10 +63,14 @@ Supported canonical categories:
 3. Frameshift: `fs`, `fsX`, `A336fs`, `A336frameshift`
 4. Insertion: canonical and HGVS-like insertion forms
 5. Deletion: canonical and HGVS-like deletion forms
+6. Generic insertion wildcard: `INS_any` — matches any in-frame insertion at this position
 
 Notes:
 
-- Non-standard wildcard tokens (for example `X`, `any`) are not accepted as rule alleles.
+- Non-standard wildcard tokens (for example `X`, `any`) are not accepted as rule alleles, except `INS_any`.
+- `INS_any` matches any in-frame insertion at the given position regardless of inserted sequence or length.
+- The `reference` column is still required and validated against the GenBank translation even for `INS_any` rules.
+- If both a specific insertion rule and an `INS_any` rule exist for the same position and drug, the specific rule takes precedence and `INS_any` is suppressed (deterministic matching).
 - No-op rules (`mutation == reference`) are rejected.
 - Mutation tokens are normalized before DB insertion to support deterministic matching.
 
@@ -135,6 +139,21 @@ Anchor-less deletion note:
 - Helper forms like `Q35del` depend on upstream sequence context.
 - If the required anchor context is biologically inconsistent with the reference, the row is rejected or skipped according to validation rules.
 
+#### Generic insertion wildcard
+
+`INS_any` is a special token that matches any in-frame insertion at the given position. The `reference` column is still required and validated as with all other rules.
+
+| Input mutation | Example row context               | Canonical interpretation                     |
+| -------------- | --------------------------------- | -------------------------------------------- |
+| `ins_any`    | `reference=F`, `position=50`  | any insertion after the F at position 50     |
+| `INS_ANY`    | `reference=F`, `position=50`  | any insertion after the F at position 50     |
+
+Matching note:
+
+- `INS_any` matches only in-frame insertions — frameshifts and deletions are not matched.
+- If a specific insertion rule (e.g. `F50FGG`) fires for the same position and drug, `INS_any` is suppressed. Specific rules always win over the wildcard.
+- In the database hits report tab, the rule label shown is `INS_any`. In the mutations tab, the actual sample allele is shown.
+
 ### Complex and edge-case events
 
 #### Complex in-frame events
@@ -151,7 +170,7 @@ For curated rules TSV:
 
 Examples that are not accepted as mutation rules:
 
-- wildcard-like tokens (`X`, `any`),
+- wildcard-like tokens (`X`, `any`) — note that `INS_any` is the one supported wildcard exception,
 - malformed HGVS-like fragments that cannot be resolved,
 - no-op entries where `mutation` equals `reference`.
 

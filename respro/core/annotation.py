@@ -692,6 +692,10 @@ def normalize_mutation(
     if s == '*' or s_upper == 'STOP':
         return '*'
 
+    # Generic insertion wildcard token — matches any in-frame insertion at this position.
+    if s_upper == 'INS_ANY':
+        return 'INS_any'
+
     # Bare insertion, e.g. insGG -> requires row context.
     if s_upper.startswith('INS'):
         inserted = s[3:].strip().upper()

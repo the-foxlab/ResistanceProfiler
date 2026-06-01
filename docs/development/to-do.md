@@ -89,6 +89,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Formula-rule first-class workflow outputs — `resistance_formula_rule` import is wired into profiling-time matching, report rendering, results DB persistence, regenerate, and WebUI
 - [X] BLOSUM62 similarity scoring for matched substitutions (`core/similarity.py`)
 - [X] End-to-end formula-rule loading via TSV `init` path — grouped `rule_group` rows are validated and loaded during `init_project` (no manual SQL setup)
+- [X] Generic insertion wildcard rule support — `INS_any` token matches any in-frame insertion at the given position; specific rules take precedence; allowed as a formula-rule member
 
 ### Reporting and export
 
