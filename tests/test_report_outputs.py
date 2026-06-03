@@ -269,7 +269,7 @@ class TestBuildReportContext:
 
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
         conn.execute(
             'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
             (
@@ -323,7 +323,7 @@ class TestBuildReportContext:
 
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
         conn.execute(
             'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
             (
@@ -340,12 +340,215 @@ class TestBuildReportContext:
         ctx = build_report_context(result, project_conn=conn)
         assert ctx['summary']['drug_table']['rows'][0]['assessment'] == 'intermediate'
 
+    def test_ic50_value_column_displayed_for_by_ic50_method(self) -> None:
+        low_rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='unknown',
+            ic50='6.0',
+        )
+        high_rule = ResistanceRule(
+            id=2,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=3,
+            reference='A',
+            mutation='V',
+            phenotype='unknown',
+            ic50='12.0',
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=2,
+            variants_in_cds=2,
+            resistance_hits=2,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[low_rule],
+                ),
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.9, depth=180),
+                    feature_name='gag',
+                    codon_pos=3,
+                    ref_aa='A',
+                    alt_aa='V',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[high_rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_ic50',
+                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        drug_row = ctx['summary']['drug_table']['rows'][0]
+        # Highest IC50 should be 12.0 (the max of 6.0 and 12.0)
+        assert drug_row['ic50_display'] == '12'
+        # Verify method_labels include value column info for by_ic50
+        ic50_label = next(ml for ml in ctx['summary']['drug_table']['method_labels'] if ml['method'] == 'by_ic50')
+        assert ic50_label['value_header'] == 'Highest IC50'
+        assert ic50_label['value_field'] == 'ic50_display'
+        # Verify col_count includes the value column (+1 for the Highest IC50 column)
+        assert ctx['summary']['drug_table']['col_count'] == 5  # Drug, Hits, Highest IC50, IC50 Assessment, Assessment
+
+    def test_ic50_value_column_shows_dash_when_no_ic50_values(self) -> None:
+        # A rule with phenotype but no IC50 value, using by_ic50 method
+        rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_ic50',
+                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        drug_row = ctx['summary']['drug_table']['rows'][0]
+        # No IC50 values → should show em dash
+        assert drug_row['ic50_display'] == '\u2014'
+
+    def test_fold_ic50_value_column_displayed_for_by_fold_ic50_method(self) -> None:
+        rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='unknown',
+            fold_ic50='6.5',
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_fold_ic50',
+                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        drug_row = ctx['summary']['drug_table']['rows'][0]
+        # Highest Fold IC50 should be 6.5
+        assert drug_row['fold_ic50_display'] == '6.5'
+        # Verify method_labels include value column info for by_fold_ic50
+        fold_label = next(ml for ml in ctx['summary']['drug_table']['method_labels'] if ml['method'] == 'by_fold_ic50')
+        assert fold_label['value_header'] == 'Highest Fold IC50'
+        assert fold_label['value_field'] == 'fold_ic50_display'
+        # Verify col_count includes the value column
+        assert ctx['summary']['drug_table']['col_count'] == 5  # Drug, Hits, Highest Fold IC50, Fold IC50 Assessment, Assessment
+
     def test_drug_alias_is_rendered_from_drug_table_alias_column(self) -> None:
         result = _make_result()
 
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
         conn.execute('CREATE TABLE drug (name TEXT, alias TEXT)')
         conn.execute("INSERT INTO drug (name, alias) VALUES ('DrugA', 'DRA')")
         conn.execute(
@@ -389,7 +592,7 @@ class TestBuildReportContext:
 
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
         conn.execute('CREATE TABLE resistance_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute('CREATE TABLE resistance_formula_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute(
@@ -456,7 +659,7 @@ class TestBuildReportContext:
 
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
         conn.execute('CREATE TABLE resistance_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute('CREATE TABLE resistance_formula_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute(
@@ -519,7 +722,7 @@ class TestBuildReportContext:
 
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
         conn.execute('CREATE TABLE resistance_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute('CREATE TABLE resistance_formula_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute(
@@ -567,7 +770,7 @@ class TestBuildReportContext:
 
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
         conn.execute('CREATE TABLE resistance_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute('CREATE TABLE resistance_formula_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute(
@@ -619,7 +822,7 @@ class TestBuildReportContext:
 
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
         conn.execute('CREATE TABLE resistance_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute('CREATE TABLE resistance_formula_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute(
@@ -671,7 +874,7 @@ class TestBuildReportContext:
 
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
         conn.execute('CREATE TABLE resistance_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute('CREATE TABLE resistance_formula_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute(
@@ -734,7 +937,7 @@ class TestBuildReportContext:
 
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
         conn.execute('CREATE TABLE resistance_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute('CREATE TABLE resistance_formula_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute(
@@ -786,7 +989,7 @@ class TestBuildReportContext:
 
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
         conn.execute('CREATE TABLE resistance_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute('CREATE TABLE resistance_formula_rule (phenotype TEXT, clinical_phenotype TEXT)')
         conn.execute(
@@ -1461,7 +1664,7 @@ class TestPdfExports:
     def test_render_html_includes_summary_translation_controls(self) -> None:
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
         conn.execute(
             'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
             ('drug_interpretation', '{}'),

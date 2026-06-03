@@ -1487,13 +1487,13 @@ def _build_summary_narrative(
             lead = (
                 f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
-                'The assessment found no evidence for antiviral resistance in any drug.'
+                'The assessment found no evidence for antiviral resistance for any drug.'
             )
         elif len(sensitive_drugs) == 0 and len(intermediate_drugs) == 0:
             lead = (
                 f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
-                'The assessment found evidence for antiviral resistance in all analysed drugs.'
+                'The assessment found evidence for antiviral resistance for all analysed drugs.'
             )
         else:
             lead = (
@@ -1609,6 +1609,7 @@ def _build_drug_interpretation_table(
             'hit_count': 0,
             'resistant_count': 0, 'intermediate_count': 0, 'sensitive_count': 0, 'contradictory_count': 0,
             'score_total': 0.0, 'score_display': '0',
+            'ic50_display': '\u2014', 'fold_ic50_display': '\u2014',
             'ic50_values': [], 'fold_ic50_values': [],
             'assessment': '', 'assessment_badge_class': '',
             'method_assessments': [],
@@ -1619,21 +1620,25 @@ def _build_drug_interpretation_table(
             parts = [f'Resistant: \u2265{resistant_t} resistant phenotype hit(s).']
             if intermediate_t is not None:
                 parts.append(f'Intermediate: \u2265{intermediate_t} intermediate phenotype hit(s).')
+            parts.append('Contradictory: any contradictory hit(s).')
+            parts.append('Otherwise: Sensitive.')
         elif method == 'by_score':
             parts = [f'Resistant: total score \u2265 {resistant_t}.']
             if intermediate_t is not None:
                 parts.append(f'Intermediate: total score \u2265 {intermediate_t}.')
+            parts.append('Otherwise: Sensitive.')
         elif method == 'by_ic50':
             parts = [f'Resistant: any IC50 value \u2265 {resistant_t}.']
             if intermediate_t is not None:
                 parts.append(f'Intermediate: any IC50 value \u2265 {intermediate_t}.')
+            parts.append('Otherwise: Sensitive.')
         elif method == 'by_fold_ic50':
             parts = [f'Resistant: any fold IC50 value \u2265 {resistant_t}.']
             if intermediate_t is not None:
                 parts.append(f'Intermediate: any fold IC50 value \u2265 {intermediate_t}.')
+            parts.append('Otherwise: Sensitive.')
         else:
             parts = []
-        parts.append('Otherwise: Sensitive.')
         return ' '.join(parts)
 
     hit_rows = database_hits.get('rows', [])
@@ -1747,21 +1752,31 @@ def _build_drug_interpretation_table(
         from respro.db.algorithms import _METHOD_LABEL, compute_drug_assessment
         for config in drug_interp_configs:
             method = config.get('method', '')
-            method_labels.append({
-                'method': method,
-                'label': _METHOD_LABEL.get(method, method),
-            })
-        # Build combined description from all methods
-        desc_parts: list[str] = []
-        for config in drug_interp_configs:
-            method = config.get('method', '')
             thresholds = config.get('thresholds', {})
             resistant_threshold = thresholds.get('resistant', 1)
             intermediate_threshold = thresholds.get('intermediate')
-            desc = _assessment_description(method, resistant_threshold, intermediate_threshold)
-            label = _METHOD_LABEL.get(method, method)
-            desc_parts.append(f'[{label}] {desc}')
-        assessment_description = ' '.join(desc_parts)
+
+            value_header = None
+            value_field = None
+            if method == 'by_ic50':
+                value_header = 'Highest IC50'
+                value_field = 'ic50_display'
+            elif method == 'by_fold_ic50':
+                value_header = 'Highest Fold IC50'
+                value_field = 'fold_ic50_display'
+
+            method_labels.append({
+                'method': method,
+                'label': _METHOD_LABEL.get(method, method),
+                'description': _assessment_description(method, resistant_threshold, intermediate_threshold),
+                'value_header': value_header,
+                'value_field': value_field,
+            })
+        # Final assessment description
+        assessment_description = (
+            'Final assessment: most severe result across all methods '
+            '(resistant > contradictory > intermediate > sensitive).'
+        )
 
         for drug_data in by_drug.values():
             final_assessment, method_assessments = compute_drug_assessment(
@@ -1776,17 +1791,27 @@ def _build_drug_interpretation_table(
         )
         score = drug_data['score_total']
         drug_data['score_display'] = str(int(score)) if score == int(score) else f'{score:.2g}'
+        ic50_vals = drug_data['ic50_values']
+        if ic50_vals:
+            highest = max(ic50_vals)
+            drug_data['ic50_display'] = f'{highest:g}'
+        fold_ic50_vals = drug_data['fold_ic50_values']
+        if fold_ic50_vals:
+            highest = max(fold_ic50_vals)
+            drug_data['fold_ic50_display'] = f'{highest:g}'
 
     drug_rows = sorted(by_drug.values(), key=lambda d: d['name'].lower())
     groups: dict[str, list[dict]] = {}
     for drug_data in drug_rows:
         groups.setdefault(drug_data['drug_class'], []).append(drug_data)
 
+    num_value_columns = sum(1 for ml in method_labels if ml['value_header'])
     col_count = (
         2
         + (3 if has_phenotypes else 0)
         + (1 if has_scores else 0)
         + (len(method_labels) if has_assessment else 0)
+        + (num_value_columns if has_assessment else 0)
         + (1 if has_assessment else 0)
     )
     return {

@@ -685,12 +685,13 @@ class TestComputeDrugAssessment:
         final, methods = compute_drug_assessment(drug, configs)
         assert final == 'sensitive'
 
-    def test_single_method_no_hits_empty_result(self):
+    def test_single_method_no_hits_defaults_to_sensitive(self):
         drug = self._drug(hit_count=0)
         configs = [{'method': 'by_phenotype', 'thresholds': {'resistant': 1}}]
         final, methods = compute_drug_assessment(drug, configs)
-        assert final == ''
-        assert methods == []
+        assert final == 'sensitive'
+        assert len(methods) == 1
+        assert methods[0]['assessment'] == 'sensitive'
 
     def test_two_methods_strongest_wins_resistant_over_intermediate(self):
         drug = self._drug(hit_count=2, resistant_count=1, score_total=3.0)
@@ -731,12 +732,13 @@ class TestComputeDrugAssessment:
         assert final == 'resistant'
         assert methods[0]['label'] == 'IC50'
 
-    def test_fold_ic50_method_no_values_skipped(self):
+    def test_fold_ic50_method_no_values_defaults_to_sensitive(self):
         drug = self._drug(hit_count=1)
         configs = [{'method': 'by_fold_ic50', 'thresholds': {'resistant': 10.0}}]
         final, methods = compute_drug_assessment(drug, configs)
-        assert final == ''
-        assert methods == []
+        assert final == 'sensitive'
+        assert len(methods) == 1
+        assert methods[0]['assessment'] == 'sensitive'
 
     def test_three_methods_resistant_wins(self):
         drug = self._drug(hit_count=3, resistant_count=1, sensitive_count=2, score_total=1.0, ic50_values=[15.0])
@@ -749,8 +751,8 @@ class TestComputeDrugAssessment:
         assert final == 'resistant'
         assert len(methods) == 3
 
-    def test_method_with_no_data_produces_empty(self):
-        # by_phenotype sees hits but by_ic50 has no ic50_values
+    def test_method_with_no_data_defaults_to_sensitive(self):
+        # by_phenotype sees hits and returns sensitive; by_ic50 has no ic50_values and defaults to sensitive
         drug = self._drug(hit_count=1, sensitive_count=1)
         configs = [
             {'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
@@ -758,8 +760,25 @@ class TestComputeDrugAssessment:
         ]
         final, methods = compute_drug_assessment(drug, configs)
         assert final == 'sensitive'
-        assert len(methods) == 1
+        assert len(methods) == 2
         assert methods[0]['method'] == 'by_phenotype'
+        assert methods[0]['assessment'] == 'sensitive'
+        assert methods[1]['method'] == 'by_ic50'
+        assert methods[1]['assessment'] == 'sensitive'
+
+    def test_by_score_zero_score_defaults_to_sensitive(self):
+        drug = self._drug(hit_count=0, score_total=0.0)
+        configs = [{'method': 'by_score', 'thresholds': {'resistant': 1}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+        assert methods[0]['assessment'] == 'sensitive'
+
+    def test_by_phenotype_no_hits_defaults_to_sensitive(self):
+        drug = self._drug(hit_count=0, resistant_count=0, intermediate_count=0)
+        configs = [{'method': 'by_phenotype', 'thresholds': {'resistant': 1}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+        assert methods[0]['assessment'] == 'sensitive'
 
 
 # ──────────────────────────────────────────────────────────────────────

@@ -427,10 +427,10 @@ def compute_drug_assessment(
         ``ic50_values``, ``fold_ic50_values``, ``hit_count``
     :param configs: list of validated ``drug_interpretation`` config dicts
     :return: ``(final_assessment, method_assessments)`` where
-        ``final_assessment`` is the strongest-wins result (empty string if no
-        method produces an assessment) and ``method_assessments`` is a list of
-        ``{'method': ..., 'label': ..., 'assessment': ...}`` dicts (only for
-        methods that produced a non-empty assessment)
+        ``final_assessment`` is the strongest-wins result and
+        ``method_assessments`` is a list of
+        ``{'method': ..., 'label': ..., 'assessment': ...}`` dicts (one per
+        configured method; methods with no evidence default to \"sensitive\")
     """
     method_assessments: list[dict] = []
 
@@ -443,15 +443,17 @@ def compute_drug_assessment(
         assessment = _compute_single_method(
             method, drug_data, resistant_threshold, intermediate_threshold,
         )
-        if assessment:
-            method_assessments.append({
-                'method': method,
-                'label': _METHOD_LABEL.get(method, method),
-                'assessment': assessment,
-            })
-
-    if not method_assessments:
-        return '', []
+        # Default to "sensitive" when the method has no evidence of resistance.
+        # Previous single-method logic defaulted no-hit drugs to "sensitive";
+        # the multi-method refactoring changed this to empty string (meaning "—").
+        # Restore the original behavior: no evidence = sensitive.
+        if not assessment:
+            assessment = 'sensitive'
+        method_assessments.append({
+            'method': method,
+            'label': _METHOD_LABEL.get(method, method),
+            'assessment': assessment,
+        })
 
     best = min(method_assessments, key=lambda m: _ASSESSMENT_RANK.get(m['assessment'], 99))
     return best['assessment'], method_assessments
