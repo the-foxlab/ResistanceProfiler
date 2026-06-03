@@ -13,6 +13,7 @@ import pytest
 from respro.db.algorithms import (
     apply_drug_alias_mappings,
     apply_ic50_threshold_classification,
+    compute_drug_assessment,
     load_interpretation_algorithms,
     store_interpretation_algorithms,
     validate_interpretation_algorithms,
@@ -393,13 +394,22 @@ class TestValidateInterpretationAlgorithms:
         with pytest.raises(ValueError, match="Duplicate algorithm name 'drug_groups'"):
             validate_interpretation_algorithms(algorithms)
 
-    def test_rejects_two_drug_interpretation_entries(self) -> None:
-        """by_phenotype and by_score are mutually exclusive — two drug_interpretation entries must fail."""
+    def test_allows_two_drug_interpretation_entries_with_different_methods(self) -> None:
+        """by_phenotype and by_score can coexist when methods differ."""
         algorithms = [
             {'name': 'drug_interpretation', 'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
             {'name': 'drug_interpretation', 'method': 'by_score', 'thresholds': {'resistant': 5}},
         ]
-        with pytest.raises(ValueError, match="Duplicate algorithm name 'drug_interpretation'"):
+        result = validate_interpretation_algorithms(algorithms)
+        assert len(result) == 2
+
+    def test_rejects_two_drug_interpretation_entries_same_method(self) -> None:
+        """Two drug_interpretation entries with the same method must fail."""
+        algorithms = [
+            {'name': 'drug_interpretation', 'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'name': 'drug_interpretation', 'method': 'by_phenotype', 'thresholds': {'resistant': 2}},
+        ]
+        with pytest.raises(ValueError, match="Duplicate drug_interpretation method 'by_phenotype'"):
             validate_interpretation_algorithms(algorithms)
 
     def test_rejects_non_list_input(self) -> None:
@@ -628,6 +638,128 @@ class TestStoreAndLoadAlgorithms:
 
         loaded = load_interpretation_algorithms(project_db, project_id)
         assert loaded == second_batch
+
+    def test_store_and_load_multiple_drug_interpretation(
+        self, project_db: sqlite3.Connection, project_id: int
+    ) -> None:
+        config = [
+            {'name': 'drug_interpretation', 'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'name': 'drug_interpretation', 'method': 'by_score', 'thresholds': {'resistant': 5}},
+        ]
+        store_interpretation_algorithms(project_db, project_id, config)
+        project_db.commit()
+        loaded = load_interpretation_algorithms(project_db, project_id)
+        assert loaded == config
+
+
+# ──────────────────────────────────────────────────────────────────────
+# compute_drug_assessment tests
+# ──────────────────────────────────────────────────────────────────────
+
+class TestComputeDrugAssessment:
+
+    def _drug(self, **overrides) -> dict:
+        base = {
+            'hit_count': 0,
+            'resistant_count': 0, 'intermediate_count': 0,
+            'sensitive_count': 0, 'contradictory_count': 0,
+            'score_total': 0.0,
+            'ic50_values': [], 'fold_ic50_values': [],
+        }
+        base.update(overrides)
+        return base
+
+    def test_single_method_by_phenotype_resistant(self):
+        drug = self._drug(hit_count=2, resistant_count=1)
+        configs = [{'method': 'by_phenotype', 'thresholds': {'resistant': 1}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+        assert len(methods) == 1
+        assert methods[0]['method'] == 'by_phenotype'
+        assert methods[0]['label'] == 'Phenotype'
+        assert methods[0]['assessment'] == 'resistant'
+
+    def test_single_method_by_phenotype_sensitive(self):
+        drug = self._drug(hit_count=1, sensitive_count=1)
+        configs = [{'method': 'by_phenotype', 'thresholds': {'resistant': 1}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+
+    def test_single_method_no_hits_empty_result(self):
+        drug = self._drug(hit_count=0)
+        configs = [{'method': 'by_phenotype', 'thresholds': {'resistant': 1}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == ''
+        assert methods == []
+
+    def test_two_methods_strongest_wins_resistant_over_intermediate(self):
+        drug = self._drug(hit_count=2, resistant_count=1, score_total=3.0)
+        configs = [
+            {'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'method': 'by_score', 'thresholds': {'resistant': 5, 'intermediate': 2}},
+        ]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+        assert len(methods) == 2
+
+    def test_two_methods_strongest_wins_intermediate_over_sensitive(self):
+        drug = self._drug(hit_count=1, sensitive_count=1, score_total=3.0)
+        configs = [
+            {'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'method': 'by_score', 'thresholds': {'resistant': 5, 'intermediate': 2}},
+        ]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'intermediate'
+        assert len(methods) == 2
+
+    def test_two_methods_contradictory_ranks_between_resistant_and_intermediate(self):
+        drug = self._drug(hit_count=2, contradictory_count=1, score_total=3.0)
+        configs = [
+            {'method': 'by_phenotype', 'thresholds': {'resistant': 2}},
+            {'method': 'by_score', 'thresholds': {'resistant': 5, 'intermediate': 2}},
+        ]
+        final, methods = compute_drug_assessment(drug, configs)
+        # by_phenotype: contradictory (no threshold met, contradictory > 0)
+        # by_score: intermediate (3 >= 2)
+        # strongest: contradictory (rank 1) > intermediate (rank 2)
+        assert final == 'contradictory'
+
+    def test_ic50_method(self):
+        drug = self._drug(hit_count=1, ic50_values=[15.0])
+        configs = [{'method': 'by_ic50', 'thresholds': {'resistant': 10.0, 'intermediate': 3.0}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+        assert methods[0]['label'] == 'IC50'
+
+    def test_fold_ic50_method_no_values_skipped(self):
+        drug = self._drug(hit_count=1)
+        configs = [{'method': 'by_fold_ic50', 'thresholds': {'resistant': 10.0}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == ''
+        assert methods == []
+
+    def test_three_methods_resistant_wins(self):
+        drug = self._drug(hit_count=3, resistant_count=1, sensitive_count=2, score_total=1.0, ic50_values=[15.0])
+        configs = [
+            {'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'method': 'by_score', 'thresholds': {'resistant': 5}},
+            {'method': 'by_ic50', 'thresholds': {'resistant': 10.0, 'intermediate': 3.0}},
+        ]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+        assert len(methods) == 3
+
+    def test_method_with_no_data_produces_empty(self):
+        # by_phenotype sees hits but by_ic50 has no ic50_values
+        drug = self._drug(hit_count=1, sensitive_count=1)
+        configs = [
+            {'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'method': 'by_ic50', 'thresholds': {'resistant': 10.0}},
+        ]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+        assert len(methods) == 1
+        assert methods[0]['method'] == 'by_phenotype'
 
 
 # ──────────────────────────────────────────────────────────────────────

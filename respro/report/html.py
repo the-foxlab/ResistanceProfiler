@@ -1483,14 +1483,27 @@ def _build_summary_narrative(
     n_drugs = len(assessed_rows) if assessed_rows else len(drug_rows)
     if has_assessment and n_drugs:
         drug_word = 'drug' if n_drugs == 1 else 'drugs'
-        lead = (
-            f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
-            f'known resistance-associated mutations for {n_drugs} {drug_word}. '
-            f'The assessment found evidence for antiviral resistance against '
-            f"{len(resistant_drugs)} {'drug' if len(resistant_drugs) == 1 else 'drugs'}, "
-            f"intermediate resistance against {len(intermediate_drugs)} {'drug' if len(intermediate_drugs) == 1 else 'drugs'}, "
-            f"and sensitivity for {len(sensitive_drugs)} {'drug' if len(sensitive_drugs) == 1 else 'drugs'}."
-        )
+        if len(resistant_drugs) == 0 and len(intermediate_drugs) == 0:
+            lead = (
+                f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
+                f'known resistance-associated mutations for {n_drugs} {drug_word}. '
+                'The assessment found no evidence for antiviral resistance in any drug.'
+            )
+        elif len(sensitive_drugs) == 0 and len(intermediate_drugs) == 0:
+            lead = (
+                f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
+                f'known resistance-associated mutations for {n_drugs} {drug_word}. '
+                'The assessment found evidence for antiviral resistance in all analysed drugs.'
+            )
+        else:
+            lead = (
+                f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
+                f'known resistance-associated mutations for {n_drugs} {drug_word}. '
+                f'The assessment found evidence for antiviral resistance against '
+                f"{len(resistant_drugs)} {'drug' if len(resistant_drugs) == 1 else 'drugs'}, "
+                f"intermediate resistance against {len(intermediate_drugs)} {'drug' if len(intermediate_drugs) == 1 else 'drugs'}, "
+                f"and sensitivity for {len(sensitive_drugs)} {'drug' if len(sensitive_drugs) == 1 else 'drugs'}."
+            )
     elif drug_rows:
         lead = (
             f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
@@ -1598,6 +1611,7 @@ def _build_drug_interpretation_table(
             'score_total': 0.0, 'score_display': '0',
             'ic50_values': [], 'fold_ic50_values': [],
             'assessment': '', 'assessment_badge_class': '',
+            'method_assessments': [],
         }
 
     def _assessment_description(method: str, resistant_t, intermediate_t) -> str:
@@ -1714,72 +1728,47 @@ def _build_drug_interpretation_table(
     )
     has_groups = any(d['drug_class'] for d in by_drug.values())
 
-    drug_interp_config: dict | None = None
+    drug_interp_configs: list[dict] = []
     assessment_description = ''
     if project_conn is not None:
         try:
-            interp_row = project_conn.execute(
+            interp_rows = project_conn.execute(
                 "SELECT config_json FROM interpretation_algorithm "
-                "WHERE algorithm_name = 'drug_interpretation' LIMIT 1"
-            ).fetchone()
-            if interp_row:
-                drug_interp_config = json.loads(interp_row['config_json'])
+                "WHERE algorithm_name = 'drug_interpretation' ORDER BY id"
+            ).fetchall()
+            for row in interp_rows:
+                drug_interp_configs.append(json.loads(row['config_json']))
         except sqlite3.Error as exc:
             logger.debug('Failed to load drug_interpretation algorithm: %s', exc)
 
-    has_assessment = drug_interp_config is not None
+    has_assessment = len(drug_interp_configs) > 0
+    method_labels: list[dict] = []
     if has_assessment:
-        method = drug_interp_config.get('method', '')
-        thresholds = drug_interp_config.get('thresholds', {})
-        resistant_threshold = thresholds.get('resistant', 1)
-        intermediate_threshold = thresholds.get('intermediate')
-        assessment_description = _assessment_description(method, resistant_threshold, intermediate_threshold)
+        from respro.db.algorithms import _METHOD_LABEL, compute_drug_assessment
+        for config in drug_interp_configs:
+            method = config.get('method', '')
+            method_labels.append({
+                'method': method,
+                'label': _METHOD_LABEL.get(method, method),
+            })
+        # Build combined description from all methods
+        desc_parts: list[str] = []
+        for config in drug_interp_configs:
+            method = config.get('method', '')
+            thresholds = config.get('thresholds', {})
+            resistant_threshold = thresholds.get('resistant', 1)
+            intermediate_threshold = thresholds.get('intermediate')
+            desc = _assessment_description(method, resistant_threshold, intermediate_threshold)
+            label = _METHOD_LABEL.get(method, method)
+            desc_parts.append(f'[{label}] {desc}')
+        assessment_description = ' '.join(desc_parts)
+
         for drug_data in by_drug.values():
-            if method == 'by_phenotype':
-                if drug_data['resistant_count'] >= resistant_threshold:
-                    drug_data['assessment'] = 'resistant'
-                elif (
-                    intermediate_threshold is not None
-                    and drug_data['intermediate_count'] >= intermediate_threshold
-                ):
-                    drug_data['assessment'] = 'intermediate'
-                elif drug_data['contradictory_count'] > 0:
-                    # At least one hit carries a contradictory phenotype and no
-                    # resistant/intermediate threshold was reached — surface the
-                    # uncertainty rather than silently reporting sensitive.
-                    drug_data['assessment'] = 'contradictory'
-                else:
-                    drug_data['assessment'] = 'sensitive'
-            elif method == 'by_score':
-                total = drug_data['score_total']
-                if total >= resistant_threshold:
-                    drug_data['assessment'] = 'resistant'
-                elif intermediate_threshold is not None and total >= intermediate_threshold:
-                    drug_data['assessment'] = 'intermediate'
-                else:
-                    drug_data['assessment'] = 'sensitive'
-            elif method == 'by_ic50':
-                ic50_values = drug_data['ic50_values']
-                if any(value >= resistant_threshold for value in ic50_values):
-                    drug_data['assessment'] = 'resistant'
-                elif (
-                    intermediate_threshold is not None
-                    and any(value >= intermediate_threshold for value in ic50_values)
-                ):
-                    drug_data['assessment'] = 'intermediate'
-                else:
-                    drug_data['assessment'] = 'sensitive'
-            elif method == 'by_fold_ic50':
-                fold_ic50_values = drug_data['fold_ic50_values']
-                if any(value >= resistant_threshold for value in fold_ic50_values):
-                    drug_data['assessment'] = 'resistant'
-                elif (
-                    intermediate_threshold is not None
-                    and any(value >= intermediate_threshold for value in fold_ic50_values)
-                ):
-                    drug_data['assessment'] = 'intermediate'
-                else:
-                    drug_data['assessment'] = 'sensitive'
+            final_assessment, method_assessments = compute_drug_assessment(
+                drug_data, drug_interp_configs,
+            )
+            drug_data['assessment'] = final_assessment
+            drug_data['method_assessments'] = method_assessments
 
     for drug_data in by_drug.values():
         drug_data['assessment_badge_class'] = _PHENOTYPE_BADGE_CLASS.get(
@@ -1797,6 +1786,7 @@ def _build_drug_interpretation_table(
         2
         + (3 if has_phenotypes else 0)
         + (1 if has_scores else 0)
+        + (len(method_labels) if has_assessment else 0)
         + (1 if has_assessment else 0)
     )
     return {
@@ -1806,6 +1796,8 @@ def _build_drug_interpretation_table(
         'has_phenotypes': has_phenotypes,
         'has_scores': has_scores,
         'has_assessment': has_assessment,
+        'has_method_assessments': has_assessment,
+        'method_labels': method_labels,
         'assessment_description': assessment_description,
         'col_count': col_count,
     }

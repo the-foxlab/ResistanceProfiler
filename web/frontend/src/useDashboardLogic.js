@@ -1221,11 +1221,11 @@ export function useDashboardLogic() {
       lines.push(row.join('\t'));
     });
 
-    const blob = new Blob([`${lines.join('\n')}\n`], { type: 'application/json;charset=utf-8' });
+    const blob = new Blob([`${lines.join('\n')}\n`], { type: 'text/tab-separated-values;charset=utf-8' });
     const href = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = href;
-    anchor.download = 'results.json';
+    anchor.download = 'single-mutations.tsv';
     anchor.click();
     URL.revokeObjectURL(href);
   };

@@ -34,6 +34,7 @@ def validate_interpretation_algorithms(algorithms: object) -> list[dict]:
         )
 
     seen_names: set[str] = set()
+    seen_drug_interp_methods: set[str] = set()
     for i, item in enumerate(algorithms):
         if not isinstance(item, dict):
             raise ValueError(
@@ -49,22 +50,31 @@ def validate_interpretation_algorithms(algorithms: object) -> list[dict]:
                 f'Known names: {known}.'
             )
 
-        if name in seen_names:
-            raise ValueError(
-                f'Duplicate algorithm name {name!r}: each algorithm may appear at most once.'
-            )
-        seen_names.add(name)
-
-        if name == 'ic50_thresholds':
-            _validate_ic50_thresholds(item)
-        elif name == 'drug_groups':
-            _validate_drug_groups(item)
-        elif name == 'drug_interpretation':
+        if name == 'drug_interpretation':
+            # Multiple drug_interpretation entries are allowed if their methods differ.
             _validate_drug_interpretation(item)
-        elif name == 'drug_alias':
-            _validate_drug_alias(item)
-        elif name == 'effect_as_resistant':
-            _validate_effect_as_resistant(item)
+            method = item.get('method', '')
+            if method in seen_drug_interp_methods:
+                raise ValueError(
+                    f'Duplicate drug_interpretation method {method!r}: '
+                    f'each method may appear at most once.'
+                )
+            seen_drug_interp_methods.add(method)
+        else:
+            if name in seen_names:
+                raise ValueError(
+                    f'Duplicate algorithm name {name!r}: each algorithm may appear at most once.'
+                )
+            seen_names.add(name)
+
+            if name == 'ic50_thresholds':
+                _validate_ic50_thresholds(item)
+            elif name == 'drug_groups':
+                _validate_drug_groups(item)
+            elif name == 'drug_alias':
+                _validate_drug_alias(item)
+            elif name == 'effect_as_resistant':
+                _validate_effect_as_resistant(item)
 
     return algorithms
 
@@ -388,3 +398,123 @@ def _validate_effect_as_resistant(config: dict) -> None:
                 f'(feature={triplet[0]!r}, reference={triplet[1]!r}, drug={triplet[2]!r}).'
             )
         seen_keys.add(triplet)
+
+
+_METHOD_LABEL: dict[str, str] = {
+    'by_phenotype': 'Phenotype',
+    'by_score': 'Score',
+    'by_ic50': 'IC50',
+    'by_fold_ic50': 'Fold IC50',
+}
+
+_ASSESSMENT_RANK: dict[str, int] = {
+    'resistant': 0,
+    'contradictory': 1,
+    'intermediate': 2,
+    'sensitive': 3,
+}
+
+
+def compute_drug_assessment(
+    drug_data: dict,
+    configs: list[dict],
+) -> tuple[str, list[dict]]:
+    """
+    Compute per-method assessments and a final merged assessment for one drug.
+
+    :param drug_data: dict with keys ``resistant_count``, ``intermediate_count``,
+        ``sensitive_count``, ``contradictory_count``, ``score_total``,
+        ``ic50_values``, ``fold_ic50_values``, ``hit_count``
+    :param configs: list of validated ``drug_interpretation`` config dicts
+    :return: ``(final_assessment, method_assessments)`` where
+        ``final_assessment`` is the strongest-wins result (empty string if no
+        method produces an assessment) and ``method_assessments`` is a list of
+        ``{'method': ..., 'label': ..., 'assessment': ...}`` dicts (only for
+        methods that produced a non-empty assessment)
+    """
+    method_assessments: list[dict] = []
+
+    for config in configs:
+        method = config.get('method', '')
+        thresholds = config.get('thresholds', {})
+        resistant_threshold = thresholds.get('resistant', 1)
+        intermediate_threshold = thresholds.get('intermediate')
+
+        assessment = _compute_single_method(
+            method, drug_data, resistant_threshold, intermediate_threshold,
+        )
+        if assessment:
+            method_assessments.append({
+                'method': method,
+                'label': _METHOD_LABEL.get(method, method),
+                'assessment': assessment,
+            })
+
+    if not method_assessments:
+        return '', []
+
+    best = min(method_assessments, key=lambda m: _ASSESSMENT_RANK.get(m['assessment'], 99))
+    return best['assessment'], method_assessments
+
+
+def _compute_single_method(
+    method: str,
+    drug_data: dict,
+    resistant_threshold,
+    intermediate_threshold,
+) -> str:
+    """Compute assessment for a single method. Returns empty string if no data."""
+    if method == 'by_phenotype':
+        return _assess_by_phenotype(drug_data, resistant_threshold, intermediate_threshold)
+    if method == 'by_score':
+        return _assess_by_score(drug_data, resistant_threshold, intermediate_threshold)
+    if method == 'by_ic50':
+        return _assess_by_ic50(drug_data, resistant_threshold, intermediate_threshold)
+    if method == 'by_fold_ic50':
+        return _assess_by_fold_ic50(drug_data, resistant_threshold, intermediate_threshold)
+    return ''
+
+
+def _assess_by_phenotype(drug_data: dict, resistant_threshold, intermediate_threshold) -> str:
+    if drug_data['resistant_count'] >= resistant_threshold:
+        return 'resistant'
+    if intermediate_threshold is not None and drug_data['intermediate_count'] >= intermediate_threshold:
+        return 'intermediate'
+    if drug_data['contradictory_count'] > 0:
+        return 'contradictory'
+    if drug_data['hit_count'] > 0:
+        return 'sensitive'
+    return ''
+
+
+def _assess_by_score(drug_data: dict, resistant_threshold, intermediate_threshold) -> str:
+    total = drug_data['score_total']
+    if total >= resistant_threshold:
+        return 'resistant'
+    if intermediate_threshold is not None and total >= intermediate_threshold:
+        return 'intermediate'
+    if drug_data['hit_count'] > 0:
+        return 'sensitive'
+    return ''
+
+
+def _assess_by_ic50(drug_data: dict, resistant_threshold, intermediate_threshold) -> str:
+    ic50_values = drug_data['ic50_values']
+    if not ic50_values:
+        return ''
+    if any(value >= resistant_threshold for value in ic50_values):
+        return 'resistant'
+    if intermediate_threshold is not None and any(value >= intermediate_threshold for value in ic50_values):
+        return 'intermediate'
+    return 'sensitive'
+
+
+def _assess_by_fold_ic50(drug_data: dict, resistant_threshold, intermediate_threshold) -> str:
+    fold_ic50_values = drug_data['fold_ic50_values']
+    if not fold_ic50_values:
+        return ''
+    if any(value >= resistant_threshold for value in fold_ic50_values):
+        return 'resistant'
+    if intermediate_threshold is not None and any(value >= intermediate_threshold for value in fold_ic50_values):
+        return 'intermediate'
+    return 'sensitive'

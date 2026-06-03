@@ -198,6 +198,11 @@
                     {% if context.summary.drug_table.has_scores %}
                       <th class="drug-table-count">Sum of Scores</th>
                     {% endif %}
+                    {% if context.summary.drug_table.has_method_assessments %}
+                      {% for ml in context.summary.drug_table.method_labels %}
+                      <th>{{ ml.label }} Assessment</th>
+                      {% endfor %}
+                    {% endif %}
                     {% if context.summary.drug_table.has_assessment %}
                       <th>
                         Assessment
@@ -229,6 +234,14 @@
                           {% if context.summary.drug_table.has_scores %}
                             <td class="drug-table-count">{{ drug.score_display }}</td>
                           {% endif %}
+                          {% if context.summary.drug_table.has_method_assessments %}
+                            {% for ml in context.summary.drug_table.method_labels %}
+                            <td>
+                              {% set ma = drug.method_assessments | selectattr('method', 'eq', ml.method) | list %}
+                              {% if ma and ma[0].assessment %}{{ ma[0].assessment }}{% else %}—{% endif %}
+                            </td>
+                            {% endfor %}
+                          {% endif %}
                           {% if context.summary.drug_table.has_assessment %}
                             <td>
                               {% if drug.assessment %}
@@ -251,6 +264,14 @@
                         {% endif %}
                         {% if context.summary.drug_table.has_scores %}
                           <td class="drug-table-count">{{ drug.score_display }}</td>
+                        {% endif %}
+                        {% if context.summary.drug_table.has_method_assessments %}
+                          {% for ml in context.summary.drug_table.method_labels %}
+                          <td>
+                            {% set ma = drug.method_assessments | selectattr('method', 'eq', ml.method) | list %}
+                            {% if ma and ma[0].assessment %}{{ ma[0].assessment }}{% else %}—{% endif %}
+                          </td>
+                          {% endfor %}
                         {% endif %}
                         {% if context.summary.drug_table.has_assessment %}
                           <td>

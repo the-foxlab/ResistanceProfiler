@@ -302,6 +302,7 @@ def _build_pdf_summary_context(
     drug_rows = _build_pdf_drug_rows(drug_table)
     has_drug_class = any((row.get('drug_class', '') or '').strip() for row in drug_rows)
     has_assessment = bool(drug_table.get('has_assessment'))
+    method_labels = drug_table.get('method_labels', [])
 
     return {
         'title': context.get('title', 'Resistance profile summary'),
@@ -321,6 +322,7 @@ def _build_pdf_summary_context(
             'drug_rows': drug_rows,
             'has_drug_class': has_drug_class,
             'has_assessment': has_assessment,
+            'method_labels': method_labels,
             'narrative': _condense_pdf_narrative(summary.get('narrative', '')),
         },
     }
@@ -389,6 +391,10 @@ def _build_pdf_drug_rows(drug_table: dict) -> list[dict]:
                             row.get('assessment', ''),
                         ),
                         'hit_count': int(row.get('hit_count', 0)),
+                        'method_assessments_by_method': {
+                            ma['method']: ma['assessment']
+                            for ma in row.get('method_assessments', [])
+                        },
                     }
                 )
     else:
@@ -403,6 +409,10 @@ def _build_pdf_drug_rows(drug_table: dict) -> list[dict]:
                         row.get('assessment', ''),
                     ),
                     'hit_count': int(row.get('hit_count', 0)),
+                    'method_assessments_by_method': {
+                        ma['method']: ma['assessment']
+                        for ma in row.get('method_assessments', [])
+                    },
                 }
             )
     return flattened_rows

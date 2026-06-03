@@ -224,26 +224,24 @@ function _renderDatabaseAlgorithms(algorithms) {
           </button>
         </span>
       </div>
-      {drugInterp ? (
+      {drugInterp && drugInterp.length > 0 ? (
         <div className="database-meta-row database-meta-row-table">
           <span className="database-meta-label">drug_interpretation</span>
           <span className="database-meta-value">
             <table className="database-algorithm-table">
               <thead>
                 <tr>
-                  <th>Field</th>
-                  <th>Value</th>
+                  <th>Method</th>
+                  <th>Thresholds</th>
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <td>Method</td>
-                  <td>{String(drugInterp.method || '').trim() || 'Not configured'}</td>
-                </tr>
-                <tr>
-                  <td>Thresholds</td>
-                  <td>{_formatAlgorithmThresholds(drugInterp.thresholds)}</td>
-                </tr>
+                {drugInterp.map((entry, idx) => (
+                  <tr key={entry.method || idx}>
+                    <td>{String(entry.method || '').trim() || 'Not configured'}</td>
+                    <td>{_formatAlgorithmThresholds(entry.thresholds)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </span>
@@ -1064,7 +1062,7 @@ export function DashboardView({
                                   </span>
                                 </td>
                                 <td>{sample.errorMessage || '—'}</td>
-                                <td>{sample.reportHtmlPath ? <a href={buildArtifactUrl(sample.reportHtmlPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                                <td>{sample.reportHtmlPath ? <a href={buildReportUrl(sample.reportHtmlPath)} target="_blank" rel="noreferrer">View</a> : '—'}</td>
                                 <td>{sample.reportPdfPath ? <a href={buildArtifactUrl(sample.reportPdfPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
                                 <td>{sample.reportJsonPath ? <a href={buildArtifactUrl(sample.reportJsonPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
                               </tr>

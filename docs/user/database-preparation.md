@@ -76,7 +76,7 @@ Assigns drugs to named groups (e.g. drug classes). This is only if you wish to g
 
 ### `drug_interpretation`
 
-Specifies how per-drug evidence translates into a final interpretation in the report (`resistant`, `intermediate`, `sensitive`). Only one `drug_interpretation` entry is permitted per project, and its `method` field selects the strategy.
+Specifies how per-drug evidence translates into a final interpretation in the report (`resistant`, `intermediate`, `sensitive`). Multiple `drug_interpretation` entries may coexist in a project, each with a different `method`. This is useful when a database contains rules with mixed evidence types (e.g. one source provides phenotype labels while another provides numeric scores).
 
 - `by_phenotype` — counts phenotype-labelled hits per drug and compares counts against thresholds
 - `by_score` — sums score values per drug and compares totals against thresholds
@@ -87,6 +87,9 @@ Specifies how per-drug evidence translates into a final interpretation in the re
 - `thresholds` — required object; must include `"resistant"`; `"intermediate"` is optional
 - for `by_phenotype` and `by_score`, threshold values must be positive integers
 - for `by_ic50` and `by_fold_ic50`, threshold values must be positive numbers; if `intermediate` is set, `resistant` must be strictly greater than `intermediate`
+- each method may appear at most once; two entries with the same `method` are rejected
+
+When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final **Assessment** column. The final assessment uses strongest-wins resolution: `resistant` &gt; `contradictory` &gt; `intermediate` &gt; `sensitive`. The most resistant result across all methods is taken as the final call.
 
 ### `drug_alias`
 
@@ -116,7 +119,7 @@ This metadata output is only produced when the project database has at least one
 
 ```json
 {
-  "description": "HIV-1 integrase inhibitor resistance database",
+  "description": "HSV database",
   "interpretation_algorithms": [
     {
       "name": "ic50_thresholds",
@@ -139,6 +142,14 @@ This metadata output is only produced when the project database has at least one
       "thresholds": {
         "resistant": 1,
         "intermediate": 1
+      }
+    },
+    {
+      "name": "drug_interpretation",
+      "method": "by_score",
+      "thresholds": {
+        "resistant": 5,
+        "intermediate": 2
       }
     },
     {

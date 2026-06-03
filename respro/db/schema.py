@@ -201,8 +201,7 @@ CREATE TABLE IF NOT EXISTS interpretation_algorithm (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id     INTEGER NOT NULL REFERENCES project(id),
     algorithm_name TEXT    NOT NULL,
-    config_json    TEXT    NOT NULL DEFAULT '{}',
-    UNIQUE(project_id, algorithm_name)
+    config_json    TEXT    NOT NULL DEFAULT '{}'
 );
 """
 
@@ -736,9 +735,43 @@ CREATE TABLE IF NOT EXISTS interpretation_algorithm (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id     INTEGER NOT NULL REFERENCES project(id),
     algorithm_name TEXT    NOT NULL,
-    config_json    TEXT    NOT NULL DEFAULT '{}',
-    UNIQUE(project_id, algorithm_name)
+    config_json    TEXT    NOT NULL DEFAULT '{}'
 );
+""")
+    conn.commit()
+    _drop_interpretation_algorithm_unique_constraint(conn)
+
+
+def _drop_interpretation_algorithm_unique_constraint(conn: sqlite3.Connection) -> None:
+    """
+    Migrate the interpretation_algorithm table to remove the UNIQUE(project_id, algorithm_name) constraint.
+
+    This allows multiple rows with algorithm_name='drug_interpretation' (different methods).
+    SQLite does not support dropping constraints directly, so we recreate the table.
+    """
+    # Check if the unique constraint still exists
+    try:
+        table_info = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='interpretation_algorithm'"
+        ).fetchone()
+    except sqlite3.Error:
+        return
+
+    if not table_info or 'UNIQUE(project_id, algorithm_name)' not in (table_info['sql'] or ''):
+        return
+
+    # Recreate without the unique constraint
+    conn.executescript("""\
+CREATE TABLE IF NOT EXISTS interpretation_algorithm_v2 (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id     INTEGER NOT NULL REFERENCES project(id),
+    algorithm_name TEXT    NOT NULL,
+    config_json    TEXT    NOT NULL DEFAULT '{}'
+);
+INSERT INTO interpretation_algorithm_v2 (id, project_id, algorithm_name, config_json)
+    SELECT id, project_id, algorithm_name, config_json FROM interpretation_algorithm;
+DROP TABLE interpretation_algorithm;
+ALTER TABLE interpretation_algorithm_v2 RENAME TO interpretation_algorithm;
 """)
     conn.commit()
 

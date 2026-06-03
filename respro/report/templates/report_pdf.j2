@@ -72,6 +72,9 @@
             <col class="col-class" />
             <col class="col-drug" />
             <col class="col-hits" />
+            {% for ml in context.summary.method_labels %}
+            <col class="col-assessment" />
+            {% endfor %}
             <col class="col-assessment" />
             {% elif context.summary.has_drug_class %}
             <col class="col-class" />
@@ -80,6 +83,9 @@
             {% elif context.summary.has_assessment %}
             <col class="col-drug-widest" />
             <col class="col-hits" />
+            {% for ml in context.summary.method_labels %}
+            <col class="col-assessment" />
+            {% endfor %}
             <col class="col-assessment" />
             {% else %}
             <col class="col-drug-widest" />
@@ -94,6 +100,9 @@
               <th>Drug</th>
               <th>Hits</th>
               {% if context.summary.has_assessment %}
+              {% for ml in context.summary.method_labels %}
+              <th>{{ ml.label }}</th>
+              {% endfor %}
               <th>Assessment</th>
               {% endif %}
             </tr>
@@ -107,6 +116,9 @@
               <td class="drug-name">{{ row.name }}</td>
               <td class="drug-count">{{ row.hit_count }}</td>
               {% if context.summary.has_assessment %}
+              {% for ml in context.summary.method_labels %}
+              <td>{{ row.method_assessments_by_method.get(ml.method, '') or '—' }}</td>
+              {% endfor %}
               <td>
                 <span class="assessment {{ row.assessment_badge_class }}">{{ row.assessment }}</span>
               </td>
