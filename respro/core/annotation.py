@@ -15,6 +15,19 @@ from respro.db.models import AnnotatedVariant, FeatureRecord, VariantCall
 
 logger = logging.getLogger(__name__)
 
+# Shared high-impact consequence set and human-readable labels.
+HIGH_IMPACT_CONSEQUENCES: frozenset[str] = frozenset({
+    'frameshift', 'stop_gained', 'stop_lost', 'start_lost', 'insertion', 'deletion',
+})
+CONSEQUENCE_LABELS: dict[str, str] = {
+    'frameshift': 'frameshift',
+    'stop_gained': 'premature stop',
+    'stop_lost': 'stop loss',
+    'start_lost': 'start loss',
+    'insertion': 'in-frame insertion',
+    'deletion': 'in-frame deletion',
+}
+
 # Compiled patterns for normalize_mutation — module-level per Python performance convention.
 _RE_FS_ANY = re.compile(r'^(?:[A-Z*]\d+)?(?:fs|frameshift)', re.IGNORECASE)
 _RE_STOP_FULL = re.compile(r'^[A-Z*]\d+stop$', re.IGNORECASE)

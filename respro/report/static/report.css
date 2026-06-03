@@ -1044,7 +1044,6 @@ body {
 .mutation-consequence--start_loss   { background: #fffae9; color: #765e09; border-color: #9e821d; }
 .mutation-consequence--insertion    { background: #dcfbf5; color: #03624f; border-color: #16a085; }
 .mutation-consequence--deletion     { background: #d8edfb; color: #05436c; border-color: #2980b9; }
-.mutation-consequence--complex      { background: #ffe3fa; color: #5d064e; border-color: #831b71; }
 .mutation-consequence--unknown      { background: #deeef8; color: #242424; border-color: #bdc3c7; }
 
 /* Database hit pills */

@@ -78,12 +78,12 @@ def list_databases(project_databases_dir: Path) -> dict:
 
 
 def _extract_display_algorithms(algorithms: list[dict]) -> dict:
-    """Return only frameshift_as_resistant and drug_interpretation configs for display."""
+    """Return only effect_as_resistant and drug_interpretation configs for display."""
     result: dict = {}
     for config in algorithms:
         name = config.get('name')
-        if name == 'frameshift_as_resistant':
-            result['frameshift_as_resistant'] = {'rules': config.get('rules', [])}
+        if name == 'effect_as_resistant':
+            result['effect_as_resistant'] = {'rules': config.get('rules', [])}
         elif name == 'drug_interpretation':
             result['drug_interpretation'] = {
                 'method': config.get('method', ''),

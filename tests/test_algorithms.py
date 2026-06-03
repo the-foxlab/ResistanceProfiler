@@ -130,13 +130,14 @@ class TestValidateInterpretationAlgorithms:
         result = validate_interpretation_algorithms(algorithms)
         assert result == algorithms
 
-    def test_valid_frameshift_as_resistant(self) -> None:
+    def test_valid_effect_as_resistant(self) -> None:
         algorithms = [
             {
-                'name': 'frameshift_as_resistant',
+                'name': 'effect_as_resistant',
                 'rules': [
                     {
                         'feature': 'UL23',
+                        'effect': ['frameshift'],
                         'reference': 'NC_001806',
                         'drug': 'Aciclovir',
                     }
@@ -146,18 +147,54 @@ class TestValidateInterpretationAlgorithms:
         result = validate_interpretation_algorithms(algorithms)
         assert result == algorithms
 
-    def test_frameshift_as_resistant_rejects_duplicate_rule_tuple(self) -> None:
+    def test_valid_effect_as_resistant_multiple_effects(self) -> None:
         algorithms = [
             {
-                'name': 'frameshift_as_resistant',
+                'name': 'effect_as_resistant',
                 'rules': [
                     {
                         'feature': 'UL23',
+                        'effect': ['frameshift', 'stop_gained', 'stop_lost'],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result == algorithms
+
+    def test_effect_as_resistant_all_valid_effects(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': ['frameshift', 'stop_gained', 'stop_lost', 'start_lost', 'insertion', 'deletion'],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result == algorithms
+
+    def test_effect_as_resistant_rejects_duplicate_rule_tuple(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': ['frameshift'],
                         'reference': 'NC_001806',
                         'drug': 'Aciclovir',
                     },
                     {
                         'feature': 'UL23',
+                        'effect': ['stop_gained'],
                         'reference': 'NC_001806',
                         'drug': 'Aciclovir',
                     },
@@ -167,13 +204,14 @@ class TestValidateInterpretationAlgorithms:
         with pytest.raises(ValueError, match='duplicate rule tuple'):
             validate_interpretation_algorithms(algorithms)
 
-    def test_frameshift_as_resistant_strips_rule_whitespace(self) -> None:
+    def test_effect_as_resistant_strips_rule_whitespace(self) -> None:
         algorithms = [
             {
-                'name': 'frameshift_as_resistant',
+                'name': 'effect_as_resistant',
                 'rules': [
                     {
                         'feature': ' UL23 ',
+                        'effect': [' frameshift '],
                         'reference': ' NC_001806 ',
                         'drug': ' Aciclovir ',
                     }
@@ -184,9 +222,144 @@ class TestValidateInterpretationAlgorithms:
         result = validate_interpretation_algorithms(algorithms)
         assert result[0]['rules'][0] == {
             'feature': 'UL23',
+            'effect': ['frameshift'],
             'reference': 'NC_001806',
             'drug': 'Aciclovir',
         }
+
+    def test_effect_as_resistant_rejects_empty_effect_list(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': [],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match="effect.*non-empty list"):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_effect_as_resistant_rejects_missing_effect_key(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match="missing required key 'effect'"):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_effect_as_resistant_rejects_unknown_effect(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': ['nonsense'],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match='invalid value'):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_effect_as_resistant_rejects_missense(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': ['missense'],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match='invalid value'):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_effect_as_resistant_rejects_synonymous(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': ['synonymous'],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match='invalid value'):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_effect_as_resistant_rejects_unknown_consequence(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': ['unknown'],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match='invalid value'):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_effect_as_resistant_effect_must_be_list(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': 'frameshift',
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match="effect.*non-empty list"):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_frameshift_as_resistant_no_longer_accepted(self) -> None:
+        algorithms = [
+            {
+                'name': 'frameshift_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match='Unknown algorithm name'):
+            validate_interpretation_algorithms(algorithms)
 
     def test_multiple_algorithms_coexist(self) -> None:
         algorithms = [

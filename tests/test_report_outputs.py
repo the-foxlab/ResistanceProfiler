@@ -366,7 +366,7 @@ class TestBuildReportContext:
         assert ctx['summary']['drug_table']['rows'][0]['summary_name'] == 'DRA'
         assert 'DRA' in ctx['summary']['narrative']
 
-    def test_frameshift_as_resistant_adds_metadata_hit_row(self) -> None:
+    def test_effect_as_resistant_adds_metadata_hit_row(self) -> None:
         result = ProfilingResult(
             project_name='T',
             reference_name='NC_001806',
@@ -399,12 +399,13 @@ class TestBuildReportContext:
         conn.execute(
             'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
             (
-                'frameshift_as_resistant',
+                'effect_as_resistant',
                 json.dumps({
-                    'name': 'frameshift_as_resistant',
+                    'name': 'effect_as_resistant',
                     'rules': [
                         {
                             'feature': 'UL23',
+                            'effect': ['frameshift'],
                             'reference': 'NC_001806',
                             'drug': 'Aciclovir',
                         }
@@ -424,7 +425,7 @@ class TestBuildReportContext:
         )
         assert metadata_row is not None
         assert (
-            'Frameshift interpreted as resistant by metadata algorithm (UL23, NC_001806).'
+            'frameshift interpreted as resistant by metadata algorithm (UL23, NC_001806).'
             in metadata_row['comment']
         )
         aciclovir_row = next(
@@ -432,7 +433,7 @@ class TestBuildReportContext:
         )
         assert aciclovir_row['assessment'] == ''
 
-    def test_frameshift_as_resistant_matches_reference_accession_without_version(self) -> None:
+    def test_effect_as_resistant_matches_reference_accession_without_version(self) -> None:
         result = ProfilingResult(
             project_name='T',
             reference_name='NC_001806.2',
@@ -465,12 +466,13 @@ class TestBuildReportContext:
         conn.execute(
             'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
             (
-                'frameshift_as_resistant',
+                'effect_as_resistant',
                 json.dumps({
-                    'name': 'frameshift_as_resistant',
+                    'name': 'effect_as_resistant',
                     'rules': [
                         {
                             'feature': 'UL23',
+                            'effect': ['frameshift'],
                             'reference': 'NC_001806',
                             'drug': 'Aciclovir',
                         }
@@ -490,11 +492,11 @@ class TestBuildReportContext:
         )
         assert metadata_row is not None
         assert (
-            'Frameshift interpreted as resistant by metadata algorithm (UL23, NC_001806.2).'
+            'frameshift interpreted as resistant by metadata algorithm (UL23, NC_001806.2).'
             in metadata_row['comment']
         )
 
-    def test_frameshift_as_resistant_shows_nothing_without_known_phenotypes(self) -> None:
+    def test_effect_as_resistant_shows_nothing_without_known_phenotypes(self) -> None:
         result = ProfilingResult(
             project_name='T',
             reference_name='NC_001806',
@@ -523,12 +525,13 @@ class TestBuildReportContext:
         conn.execute(
             'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
             (
-                'frameshift_as_resistant',
+                'effect_as_resistant',
                 json.dumps({
-                    'name': 'frameshift_as_resistant',
+                    'name': 'effect_as_resistant',
                     'rules': [
                         {
                             'feature': 'UL23',
+                            'effect': ['frameshift'],
                             'reference': 'NC_001806',
                             'drug': 'Aciclovir',
                         }
@@ -541,7 +544,7 @@ class TestBuildReportContext:
         ctx = build_report_context(result, project_conn=conn)
         assert not any(row['source'] == 'Metadata algorithm' for row in ctx['database_hits']['rows'])
 
-    def test_frameshift_as_resistant_does_not_fire_for_non_frameshift_consequence(self) -> None:
+    def test_effect_as_resistant_does_not_fire_for_non_matching_consequence(self) -> None:
         result = ProfilingResult(
             project_name='T',
             reference_name='NC_001806',
@@ -574,12 +577,13 @@ class TestBuildReportContext:
         conn.execute(
             'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
             (
-                'frameshift_as_resistant',
+                'effect_as_resistant',
                 json.dumps({
-                    'name': 'frameshift_as_resistant',
+                    'name': 'effect_as_resistant',
                     'rules': [
                         {
                             'feature': 'UL23',
+                            'effect': ['frameshift', 'stop_gained'],
                             'reference': 'NC_001806',
                             'drug': 'Aciclovir',
                         }
@@ -592,7 +596,7 @@ class TestBuildReportContext:
         ctx = build_report_context(result, project_conn=conn)
         assert not any(row['source'] == 'Metadata algorithm' for row in ctx['database_hits']['rows'])
 
-    def test_frameshift_as_resistant_does_not_fire_for_reference_mismatch(self) -> None:
+    def test_effect_as_resistant_does_not_fire_for_reference_mismatch(self) -> None:
         result = ProfilingResult(
             project_name='T',
             reference_name='NC_001999',
@@ -625,12 +629,13 @@ class TestBuildReportContext:
         conn.execute(
             'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
             (
-                'frameshift_as_resistant',
+                'effect_as_resistant',
                 json.dumps({
-                    'name': 'frameshift_as_resistant',
+                    'name': 'effect_as_resistant',
                     'rules': [
                         {
                             'feature': 'UL23',
+                            'effect': ['frameshift'],
                             'reference': 'NC_001806',
                             'drug': 'Aciclovir',
                         }
@@ -642,6 +647,184 @@ class TestBuildReportContext:
 
         ctx = build_report_context(result, project_conn=conn)
         assert not any(row['source'] == 'Metadata algorithm' for row in ctx['database_hits']['rows'])
+
+    def test_effect_as_resistant_matches_stop_gained(self) -> None:
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='NC_001806',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=0,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='NC_001806', pos=50, ref='C', alt='T', allele_freq=0.95, depth=200),
+                    feature_name='UL23',
+                    codon_pos=17,
+                    ref_aa='Q',
+                    alt_aa='*',
+                    consequence='stop_gained',
+                    af_bin='high',
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE resistance_rule (phenotype TEXT, clinical_phenotype TEXT)')
+        conn.execute('CREATE TABLE resistance_formula_rule (phenotype TEXT, clinical_phenotype TEXT)')
+        conn.execute(
+            'INSERT INTO resistance_rule (phenotype, clinical_phenotype) VALUES (?, ?)',
+            ('resistant', 'unknown'),
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'effect_as_resistant',
+                json.dumps({
+                    'name': 'effect_as_resistant',
+                    'rules': [
+                        {
+                            'feature': 'UL23',
+                            'effect': ['stop_gained'],
+                            'reference': 'NC_001806',
+                            'drug': 'Aciclovir',
+                        }
+                    ],
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        metadata_row = next(
+            (
+                row for row in ctx['database_hits']['rows']
+                if row['drug_key'] == 'Aciclovir' and row['source'] == 'Metadata algorithm'
+            ),
+            None,
+        )
+        assert metadata_row is not None
+        assert (
+            'premature stop interpreted as resistant by metadata algorithm (UL23, NC_001806).'
+            in metadata_row['comment']
+        )
+
+    def test_effect_as_resistant_does_not_match_missense(self) -> None:
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='NC_001806',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=0,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='NC_001806', pos=18, ref='C', alt='A', allele_freq=0.95, depth=200),
+                    feature_name='UL23',
+                    codon_pos=6,
+                    ref_aa='P',
+                    alt_aa='T',
+                    consequence='missense',
+                    af_bin='high',
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE resistance_rule (phenotype TEXT, clinical_phenotype TEXT)')
+        conn.execute('CREATE TABLE resistance_formula_rule (phenotype TEXT, clinical_phenotype TEXT)')
+        conn.execute(
+            'INSERT INTO resistance_rule (phenotype, clinical_phenotype) VALUES (?, ?)',
+            ('resistant', 'unknown'),
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'effect_as_resistant',
+                json.dumps({
+                    'name': 'effect_as_resistant',
+                    'rules': [
+                        {
+                            'feature': 'UL23',
+                            'effect': ['frameshift', 'stop_gained'],
+                            'reference': 'NC_001806',
+                            'drug': 'Aciclovir',
+                        }
+                    ],
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        assert not any(row['source'] == 'Metadata algorithm' for row in ctx['database_hits']['rows'])
+
+    def test_effect_as_resistant_multiple_effects_match(self) -> None:
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='NC_001806',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=0,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='NC_001806', pos=30, ref='A', alt='ACGT', allele_freq=0.95, depth=200),
+                    feature_name='UL23',
+                    codon_pos=10,
+                    ref_aa='K',
+                    alt_aa='Kdel',
+                    consequence='deletion',
+                    af_bin='high',
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (algorithm_name TEXT, config_json TEXT)')
+        conn.execute('CREATE TABLE resistance_rule (phenotype TEXT, clinical_phenotype TEXT)')
+        conn.execute('CREATE TABLE resistance_formula_rule (phenotype TEXT, clinical_phenotype TEXT)')
+        conn.execute(
+            'INSERT INTO resistance_rule (phenotype, clinical_phenotype) VALUES (?, ?)',
+            ('resistant', 'unknown'),
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'effect_as_resistant',
+                json.dumps({
+                    'name': 'effect_as_resistant',
+                    'rules': [
+                        {
+                            'feature': 'UL23',
+                            'effect': ['frameshift', 'deletion'],
+                            'reference': 'NC_001806',
+                            'drug': 'Aciclovir',
+                        }
+                    ],
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        metadata_row = next(
+            (
+                row for row in ctx['database_hits']['rows']
+                if row['drug_key'] == 'Aciclovir' and row['source'] == 'Metadata algorithm'
+            ),
+            None,
+        )
+        assert metadata_row is not None
+        assert (
+            'in-frame deletion interpreted as resistant by metadata algorithm (UL23, NC_001806).'
+            in metadata_row['comment']
+        )
 
     def test_similarity_hits_counts_unique_positions(self) -> None:
         # Two rules at the same position for different drugs

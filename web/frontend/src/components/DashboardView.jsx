@@ -163,7 +163,7 @@ function _formatAlgorithmThresholds(thresholds) {
   return values.join('; ');
 }
 
-function _groupFrameshiftRules(rules) {
+function _groupEffectRules(rules) {
   if (!Array.isArray(rules) || rules.length === 0) {
     return [];
   }
@@ -173,9 +173,13 @@ function _groupFrameshiftRules(rules) {
     const feature = String(rule.feature || '').trim();
     const reference = String(rule.reference || '').trim();
     const drug = String(rule.drug || '').trim();
+    const effects = Array.isArray(rule.effect) ? rule.effect.map((e) => String(e).trim()).filter(Boolean) : [];
     const key = `${feature}|||${reference}`;
     if (!grouped.has(key)) {
-      grouped.set(key, { feature, reference, drugs: new Set() });
+      grouped.set(key, { feature, reference, effects: new Set(), drugs: new Set() });
+    }
+    for (const eff of effects) {
+      grouped.get(key).effects.add(eff);
     }
     if (drug) {
       grouped.get(key).drugs.add(drug);
@@ -186,6 +190,7 @@ function _groupFrameshiftRules(rules) {
     .map((row) => ({
       feature: row.feature,
       reference: row.reference,
+      effects: [...row.effects].sort((a, b) => a.localeCompare(b)),
       drugs: [...row.drugs].sort((a, b) => a.localeCompare(b)),
     }))
     .sort((a, b) => {
@@ -199,10 +204,10 @@ function _groupFrameshiftRules(rules) {
 
 function _renderDatabaseAlgorithms(algorithms) {
   if (!algorithms) return null;
-  const frameshift = algorithms.frameshift_as_resistant;
+  const effectAsResistant = algorithms.effect_as_resistant;
   const drugInterp = algorithms.drug_interpretation;
-  const groupedFrameshiftRules = _groupFrameshiftRules(frameshift?.rules);
-  if (!frameshift && !drugInterp) return null;
+  const groupedEffectRules = _groupEffectRules(effectAsResistant?.rules);
+  if (!effectAsResistant && !drugInterp) return null;
 
   return (
     <section className="database-meta-panel database-algorithms-panel" aria-label="Configured algorithms">
@@ -244,22 +249,24 @@ function _renderDatabaseAlgorithms(algorithms) {
           </span>
         </div>
       ) : null}
-      {groupedFrameshiftRules.length > 0 ? (
+      {groupedEffectRules.length > 0 ? (
         <div className="database-meta-row database-meta-row-table">
-          <span className="database-meta-label">frameshift_as_resistant</span>
+          <span className="database-meta-label">effect_as_resistant</span>
           <span className="database-meta-value">
             <table className="database-algorithm-table">
               <thead>
                 <tr>
                   <th>Feature</th>
+                  <th>Effects</th>
                   <th>Reference</th>
                   <th>Drugs</th>
                 </tr>
               </thead>
               <tbody>
-                {groupedFrameshiftRules.map((rule) => (
+                {groupedEffectRules.map((rule) => (
                   <tr key={`${rule.feature}-${rule.reference}`}>
                     <td>{rule.feature}</td>
+                    <td>{rule.effects.join(', ')}</td>
                     <td>{rule.reference}</td>
                     <td>{rule.drugs.join(', ')}</td>
                   </tr>
@@ -1662,9 +1669,10 @@ export function DashboardView({
                   </p>
                   <div className="about-operator-list">
                     <div className="about-operator-row">
-                      <span className="about-operator-pill about-operator-pill-and">frameshift_as_resistant</span>
+                      <span className="about-operator-pill about-operator-pill-and">effect_as_resistant</span>
                       <p>
-                        Frameshifts observed in a configured feature/reference pair are interpreted as
+                        Configured high-impact variant effects (frameshift, stop_gained, stop_lost, start_lost,
+                        insertion, deletion) observed in a feature/reference pair are interpreted as
                           <span className="about-inline-pill">phenotype='resistant'</span> for the configured drug.
                           This algorithm does not set <span className="about-inline-pill">clinical_phenotype</span>.
                       </p>

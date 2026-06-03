@@ -91,7 +91,7 @@ def init_project(
         )
         store_project_metadata(conn, project_id, metadata_payload)
         if algorithms:
-            algorithms = _sanitize_frameshift_as_resistant_algorithms(conn, project_id, algorithms)
+            algorithms = _sanitize_effect_as_resistant_algorithms(conn, project_id, algorithms)
             if algorithms:
                 store_interpretation_algorithms(conn, project_id, algorithms)
         alias_config = next((a for a in algorithms if a['name'] == 'drug_alias'), None)
@@ -164,7 +164,7 @@ def add_to_project(
             additional_info=additional_info,
         )
         stored_algorithms = load_interpretation_algorithms(conn, project_id)
-        sanitized_algorithms = _sanitize_frameshift_as_resistant_algorithms(
+        sanitized_algorithms = _sanitize_effect_as_resistant_algorithms(
             conn,
             project_id,
             stored_algorithms,
@@ -203,18 +203,18 @@ def _insert_project(conn: sqlite3.Connection, name: str) -> int:
     return cur.lastrowid  # type: ignore[return-value]
 
 
-def _sanitize_frameshift_as_resistant_algorithms(
+def _sanitize_effect_as_resistant_algorithms(
     conn: sqlite3.Connection,
     project_id: int,
     algorithms: list[dict],
 ) -> list[dict]:
     """
-    Remove frameshift_as_resistant rules that reference drugs absent from the project.
+    Remove effect_as_resistant rules that reference drugs absent from the project.
 
     :param conn: project DB connection
     :param project_id: project id
     :param algorithms: interpretation algorithm configs
-    :return: sanitized algorithm list with unknown-drug frameshift rules removed
+    :return: sanitized algorithm list with unknown-drug effect rules removed
     """
     project_drugs = {
         row[0]
@@ -222,7 +222,7 @@ def _sanitize_frameshift_as_resistant_algorithms(
     }
     sanitized: list[dict] = []
     for config in algorithms:
-        if config.get('name') != 'frameshift_as_resistant':
+        if config.get('name') != 'effect_as_resistant':
             sanitized.append(config)
             continue
 
@@ -232,7 +232,7 @@ def _sanitize_frameshift_as_resistant_algorithms(
                 kept_rules.append(rule)
                 continue
             logger.warning(
-                'frameshift_as_resistant: ignoring rule for unknown drug %r (feature=%r, reference=%r)',
+                'effect_as_resistant: ignoring rule for unknown drug %r (feature=%r, reference=%r)',
                 rule['drug'],
                 rule['feature'],
                 rule['reference'],
@@ -245,7 +245,7 @@ def _sanitize_frameshift_as_resistant_algorithms(
             continue
 
         logger.warning(
-            'frameshift_as_resistant: removed algorithm because no rules reference known project drugs'
+            'effect_as_resistant: removed algorithm because no rules reference known project drugs'
         )
 
     return sanitized

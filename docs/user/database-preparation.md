@@ -99,15 +99,17 @@ Defines canonical drug-name to short-alias mappings for report rendering.
 When configured, these mappings are written to the `drug.alias` column during `respro init`
 and used for report drug labels, for example `Aciclovir (ACV)`.
 
-### `frameshift_as_resistant`
+### `effect_as_resistant`
 
-Defines report-only metadata interpretation for observed frameshifts. This does not create curated database rule hits.
+Defines report-only metadata interpretation for observed high-impact variant effects. This does not create curated database rule hits.
 
 - `rules` — required non-empty list
-- each rule must include `feature`, `reference`, and `drug` as case-sensitive exact non-empty strings
+- each rule must include `feature`, `effect`, `reference`, and `drug` as case-sensitive exact non-empty strings
+- `effect` — required non-empty list of strings; each must be one of: `frameshift`, `stop_gained`, `stop_lost`, `start_lost`, `insertion`, `deletion`
 - each (`feature`, `reference`, `drug`) tuple must be unique across the list
 
-Each matching observed frameshift produces a metadata hit row with a resistant phenotype. The generated hit always carries a `resistant` value in the `phenotype` field; the `clinical_phenotype` field is left empty.
+Each rule states: if a variant annotation in the given feature/reference has a consequence matching **any** of the listed effects, produce a metadata hit row with a resistant phenotype for the specified drug. The generated hit always carries a `resistant` value in the `phenotype` field; the `clinical_phenotype` field is left empty.
+
 This metadata output is only produced when the project database has at least one curated rule with a known phenotype or clinical phenotype.
 
 ### Example
@@ -147,10 +149,11 @@ This metadata output is only produced when the project database has at least one
       }
     },
     {
-      "name": "frameshift_as_resistant",
+      "name": "effect_as_resistant",
       "rules": [
         {
           "feature": "UL23",
+          "effect": ["frameshift", "stop_gained", "stop_lost"],
           "reference": "NC_001806",
           "drug": "Aciclovir"
         }

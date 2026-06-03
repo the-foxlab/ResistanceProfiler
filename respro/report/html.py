@@ -15,7 +15,7 @@ from jinja2 import BaseLoader, Environment
 from markupsafe import Markup, escape
 
 from respro import __version__
-from respro.core.annotation import classify_similarity
+from respro.core.annotation import CONSEQUENCE_LABELS, HIGH_IMPACT_CONSEQUENCES, classify_similarity
 from respro.db.models import (
     FeatureRecord,
     ProfilingResult,
@@ -385,18 +385,6 @@ def _build_all_mutations_rows(
 # Matches an optional qualifier (>, <, ≥, ≤, ~) followed by a leading number.
 _RE_LEADING_NUM = re.compile(r'^[><=~≥≤≈\s]*(-?\d+(?:\.\d+)?)')
 
-_HIGH_IMPACT_CONSEQUENCES: frozenset[str] = frozenset({
-    'frameshift', 'stop_gained', 'stop_lost', 'start_lost', 'insertion', 'deletion',
-})
-_CONSEQUENCE_LABELS: dict[str, str] = {
-    'frameshift': 'frameshift',
-    'stop_gained': 'premature stop',
-    'stop_lost': 'stop loss',
-    'start_lost': 'start loss',
-    'insertion': 'in-frame insertion',
-    'deletion': 'in-frame deletion',
-}
-
 
 def _parse_numeric_value(value_str: str) -> float | None:
     """Extract a leading float from a potentially qualified metric string (e.g. '>0.5 µM' → 0.5)."""
@@ -516,7 +504,7 @@ def _build_database_hits_rows(
         })
 
     rows.extend(
-        _build_frameshift_as_resistant_rows(
+        _build_effect_as_resistant_rows(
             result,
             project_conn,
             display_names,
@@ -643,7 +631,7 @@ def _references_match_with_accession_version(
     return configured_match.group('base') == observed_match.group('base')
 
 
-def _build_frameshift_as_resistant_rows(
+def _build_effect_as_resistant_rows(
     result: ProfilingResult,
     project_conn: sqlite3.Connection | None,
     display_names: dict[str, str] | None = None,
@@ -651,17 +639,17 @@ def _build_frameshift_as_resistant_rows(
     drug_class_map: dict[str, str] | None = None,
     drug_alias_map: dict[str, str] | None = None,
 ) -> list[dict]:
-    """Build metadata-only DB-hit rows for configured frameshift annotations."""
+    """Build metadata-only DB-hit rows for configured effect annotations."""
     if project_conn is None:
         return []
 
-    frameshift_config = _load_algorithm_config(project_conn, 'frameshift_as_resistant')
-    if frameshift_config is None:
+    effect_config = _load_algorithm_config(project_conn, 'effect_as_resistant')
+    if effect_config is None:
         return []
     if not _has_any_phenotype_association(project_conn):
         return []
 
-    config_rules = frameshift_config.get('rules')
+    config_rules = effect_config.get('rules')
     if not isinstance(config_rules, list) or not config_rules:
         return []
 
@@ -683,12 +671,12 @@ def _build_frameshift_as_resistant_rows(
 
     rows: list[dict] = []
     for ann in result.cds_annotations:
-        if ann.consequence != 'frameshift':
-            continue
         feature_rules = rules_by_feature.get(ann.feature_name, [])
         if not feature_rules:
             continue
 
+        # Collect all effect lists from matching rules for this annotation's feature
+        matched = False
         feature_display = (display_names or {}).get(ann.feature_name, ann.feature_name)
         aa_change = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
@@ -696,11 +684,16 @@ def _build_frameshift_as_resistant_rows(
             else ann.feature_name
         )
         for rule in feature_rules:
+            rule_effects = rule.get('effect', [])
+            if ann.consequence not in rule_effects:
+                continue
+            matched = True
             drug_name = (rule.get('drug') or '').strip()
             if not drug_name:
                 continue
+            label = CONSEQUENCE_LABELS.get(ann.consequence, ann.consequence)
             comment = (
-                'Frameshift interpreted as resistant by metadata algorithm '
+                f'{label} interpreted as resistant by metadata algorithm '
                 f'({ann.feature_name}, {result.reference_name}).'
             )
             rows.append({
@@ -1049,7 +1042,7 @@ def _build_potential_effects_rows(
     For single-rule variants that are NOT direct database hits, find resistance rules at
     the same feature + codon position and score amino acid similarity via BLOSUM62.
     Indels at indel-rule positions are reported with 'moderate' similarity.
-    Frameshifts, stop gains, synonymous changes, and complex indels are excluded.
+    Frameshifts, stop gains, and synonymous changes are excluded.
 
     :param result: profiling result
     :param rules: loaded resistance rules for position-based lookup
@@ -1322,14 +1315,14 @@ def _build_sequence_assessment(
         feature_seen.add(feature)
         if ann.consequence not in ('synonymous_variant', 'synonymous'):
             non_synonymous_count += 1
-        if ann.consequence in _HIGH_IMPACT_CONSEQUENCES:
+        if ann.consequence in HIGH_IMPACT_CONSEQUENCES:
             high_impact_features.add(feature)
             high_impact_by_consequence[ann.consequence] += 1
 
     high_impact_count = sum(high_impact_by_consequence.values())
     high_impact_type_parts = [
-        f"{cnt} {_CONSEQUENCE_LABELS[c]}{'s' if cnt != 1 else ''}"
-        for c in _CONSEQUENCE_LABELS
+        f"{cnt} {CONSEQUENCE_LABELS[c]}{'s' if cnt != 1 else ''}"
+        for c in CONSEQUENCE_LABELS
         if (cnt := high_impact_by_consequence.get(c, 0))
     ]
     return {
@@ -1408,12 +1401,12 @@ def _build_mutation_profile(
                 or ann.is_resistance_hit
                 or id(ann) in formula_hit_annotation_ids
             )
-            seen[key]['is_high_impact'] = seen[key]['is_high_impact'] or ann.consequence in _HIGH_IMPACT_CONSEQUENCES
+            seen[key]['is_high_impact'] = seen[key]['is_high_impact'] or ann.consequence in HIGH_IMPACT_CONSEQUENCES
         else:
             seen[key] = {
                 'label': label,
                 'is_db_hit': ann.is_resistance_hit or id(ann) in formula_hit_annotation_ids,
-                'is_high_impact': ann.consequence in _HIGH_IMPACT_CONSEQUENCES,
+                'is_high_impact': ann.consequence in HIGH_IMPACT_CONSEQUENCES,
             }
 
     feature_mutations: dict[str, list[tuple[int, dict]]] = {}
@@ -1531,7 +1524,7 @@ def _build_summary_narrative(
 
     high_impact_without_db = [
         ann for ann in result.cds_annotations
-        if ann.consequence in _HIGH_IMPACT_CONSEQUENCES
+        if ann.consequence in HIGH_IMPACT_CONSEQUENCES
         and not ann.is_resistance_hit
         and id(ann) not in formula_hit_annotation_ids
     ]
