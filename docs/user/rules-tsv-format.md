@@ -154,11 +154,11 @@ Matching note:
 - If a specific insertion rule (e.g. `F50FGG`) fires for the same position and drug, `INS_any` is suppressed. Specific rules always win over the wildcard.
 - In the database hits report tab, the rule label shown is `INS_any`. In the mutations tab, the actual sample allele is shown.
 
-### Complex and edge-case events
+### Edge-case events
 
-#### Complex in-frame events
+#### Mid-codon in-frame events
 
-Some observed sample variants can be complex (for example mixed mid-codon insertions/deletions). In reporting, these may appear as complex consequence classes.
+Mid-codon in-frame insertions and deletions are split into two annotations: a missense (or synonymous) annotation for the anchor codon change, and an insertion or deletion annotation for the indel payload. Synonymous anchor changes are omitted, producing a single indel annotation.
 
 For curated rules TSV:
 

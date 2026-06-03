@@ -15,7 +15,6 @@ MUTATION_COLOURS = {
     'frameshift': '#e74c3c',
     'insertion': '#16a085',
     'deletion': '#2980b9',
-    'inframe_complex': '#831b71',
     'unknown': '#bdc3c7',
 }
 

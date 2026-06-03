@@ -355,7 +355,7 @@ def _build_all_mutations_rows(
 
         is_single_hit = ann.is_resistance_hit
         is_formula_hit = id(ann) in formula_hit_annotation_ids
-        display_consequence = 'complex' if ann.consequence == 'inframe_complex' else ann.consequence
+        display_consequence = ann.consequence
 
         pos_1based = ann.variant.pos + 1
         nt_change = f'{ann.variant.ref}{pos_1based}{ann.variant.alt}'
@@ -467,6 +467,10 @@ def _build_database_hits_rows(
                 if ann.ref_aa and ann.alt_aa
                 else ann.feature_name
             )
+            # For wildcard insertion rules, prefix the rule label so the
+            # database-hits table shows both the rule type and actual allele.
+            if rule.mutation == 'INS_any':
+                aa_change = f'INS_any ({aa_change})'
             rows.append({
                 'drug_key': rule.drug_name,
                 'drug': _format_drug_name_with_alias(rule.drug_name, drug_alias_map or {}),
@@ -1074,7 +1078,7 @@ def _build_potential_effects_rows(
     for rule in rules:
         rules_by_pos.setdefault((rule.feature_name, rule.position), []).append(rule)
 
-    excluded_consequences = {'frameshift', 'stop_gained', 'synonymous', 'inframe_complex'}
+    excluded_consequences = {'frameshift', 'stop_gained', 'synonymous'}
     # These classes are excluded because AA-level similarity is not interpretable:
     # they are either disruptive, no-op, or not representable as one AA substitution.
     rows: list[dict] = []

@@ -336,7 +336,7 @@ def _build_affected_mask(
 ) -> list[bool]:
     """Build a shared affected-cell mask from native positions plus event semantics."""
     affected_ref_positions = _affected_nt_positions(ann, alignment, codon_nt_start)
-    indel_like = {'insertion', 'deletion', 'frameshift', 'inframe_complex'}
+    indel_like = {'insertion', 'deletion', 'frameshift'}
     is_indel_like = ann.consequence in indel_like or len(ann.variant.ref) != len(ann.variant.alt)
     is_insertion_like = len(ann.variant.alt) > len(ann.variant.ref)
     variant_anchor_pos = _variant_native_pos(ann, alignment)

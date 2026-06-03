@@ -84,13 +84,6 @@ def _assert_aa_token(ann, expected: str) -> None:
         assert ann.alt_aa == f'{ann.ref_aa}fsX'
         assert ann.consequence == 'frameshift'
         return
-    if expected.endswith('?'):
-        assert ann.ref_aa == expected[0]
-        assert ann.codon_pos == int(expected[1:-1])
-        assert ann.alt_aa == '?'
-        assert ann.consequence == 'inframe_complex'
-        return
-
     m = re.match(r'^([A-Z*]+)(\d+)([A-Z*]+)$', expected)
     if m is None:
         raise ValueError(f'Invalid AA expectation: {expected!r}')
@@ -124,8 +117,8 @@ class TestTransformAllele:
         ('+', '+', 'ATGCAAGTCGGAAACTAA', 'A4G', 'A4G', 'Q1R'),
         ('+', '+', 'ATGCAAGTCGGAAACTAA', 'A5ATT', 'A5ATT', 'Q1fsX'),
         ('+', '+', 'ATGCAAGTCGGAAACTAA', 'CA3C', 'CA3C', 'Q1fsX'),
-        ('+', '+', 'ATGCAAGTCGGAAACTAA', 'C3CTTT', 'C3CTTT', 'Q1?'),
-        ('+', '+', 'ATGCAAGTCGGAAACTAA', 'CAAG3C', 'CAAG3C', 'Q1?'),
+        ('+', '+', 'ATGCAAGTCGGAAACTAA', 'C3CTTT', 'C3CTTT', ('Q1L', 'Q1Q*')),
+        ('+', '+', 'ATGCAAGTCGGAAACTAA', 'CAAG3C', 'CAAG3C', ('Q1L', 'QV2Q')),
         ('+', '+', 'ATGCAAGTCGGAAACTAA', 'A5ATTT', 'A5ATTT', 'Q1QF'),
         ('+', '+', 'ATGCAAGTCGGAAACTAA', 'AGTC5A', 'AGTC5A', 'QV2Q'),
         ('+', '-', 'TTAGTTTCCGACTTGCAT', 'T13C', 'A4G', 'Q1R'),
@@ -162,8 +155,13 @@ def test_examples_e1_to_e4(
     )
 
     anns = annotate_variants(remapped, [feature])
-    assert len(anns) == 1
-    _assert_aa_token(anns[0], expected_aa)
+    if isinstance(expected_aa, tuple):
+        assert len(anns) == len(expected_aa)
+        for ann, exp in zip(anns, expected_aa):
+            _assert_aa_token(ann, exp)
+    else:
+        assert len(anns) == 1
+        _assert_aa_token(anns[0], expected_aa)
 
 
 def test_example_e5_query_deletion_rc_orientation() -> None:
@@ -341,7 +339,7 @@ def test_anchor_changed_indel_is_split_forward_orientation() -> None:
     anns = annotate_variants(remapped, [feature])
     consequences = {a.consequence for a in anns}
     assert 'missense' in consequences
-    assert any(c in consequences for c in ('deletion', 'inframe_complex', 'frameshift'))
+    assert any(c in consequences for c in ('deletion', 'frameshift'))
 
 
 def test_anchor_changed_indel_is_split_reverse_orientation() -> None:
@@ -363,4 +361,4 @@ def test_anchor_changed_indel_is_split_reverse_orientation() -> None:
     anns = annotate_variants(remapped, [feature])
     consequences = {a.consequence for a in anns}
     assert 'missense' in consequences
-    assert any(c in consequences for c in ('deletion', 'inframe_complex', 'frameshift'))
+    assert any(c in consequences for c in ('deletion', 'frameshift'))

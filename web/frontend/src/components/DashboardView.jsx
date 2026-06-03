@@ -1596,11 +1596,6 @@ export function DashboardView({
                           <td>Reading-frame shift after the L at position 201.</td>
                         </tr>
                         <tr>
-                          <td>Complex</td>
-                          <td><span className="about-inline-pill">L201complex</span></td>
-                          <td>Triplet indel within the L codon at position 201.</td>
-                        </tr>
-                        <tr>
                           <td>Phenotype</td>
                           <td><span className="about-inline-pill">sensitive / resistant</span></td>
                           <td>Captures in-vitro susceptibility interpretation.</td>
