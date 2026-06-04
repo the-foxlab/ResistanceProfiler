@@ -118,6 +118,7 @@ class SessionCleanupPayload(BaseModel):
 
     upload_paths: list[str] = Field(default_factory=list)
     report_paths: list[str] = Field(default_factory=list)
+    token: str | None = None
 
 
 class SessionCleanupResponse(BaseModel):

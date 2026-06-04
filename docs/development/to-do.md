@@ -333,3 +333,5 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 Established wet-lab protocols
 
 ### Smaller Issues
+
+- 🟢 Frontend chart library consolidation — the dashboard currently uses both recharts and plotly.js; migrate remaining plotly charts (comparison heatmap, IC50 distribution) to recharts to reduce bundle size and remove the plotly dependency

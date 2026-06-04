@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildApiUrl, formatUserError } from '../useDashboardLogic';
+import { buildApiUrl, formatUserError } from '../api';
+import { isPopulated, buildDrugAliasLookup } from '../utils';
 
 describe('API Utility Functions', () => {
   describe('buildApiUrl', () => {
@@ -61,5 +62,68 @@ describe('API Utility Functions', () => {
       const result = formatUserError('');
       expect(result).toBe('The operation failed.');
     });
+  });
+});
+
+describe('isPopulated', () => {
+  it('returns false for null', () => {
+    expect(isPopulated(null)).toBe(false);
+  });
+
+  it('returns false for undefined', () => {
+    expect(isPopulated(undefined)).toBe(false);
+  });
+
+  it('returns false for empty string', () => {
+    expect(isPopulated('')).toBe(false);
+  });
+
+  it('returns false for whitespace-only string', () => {
+    expect(isPopulated('   ')).toBe(false);
+    expect(isPopulated('\t\n')).toBe(false);
+  });
+
+  it('returns true for non-empty string', () => {
+    expect(isPopulated('hello')).toBe(true);
+  });
+
+  it('returns true for 0', () => {
+    expect(isPopulated(0)).toBe(true);
+  });
+
+  it('returns true for false', () => {
+    expect(isPopulated(false)).toBe(true);
+  });
+});
+
+describe('buildDrugAliasLookup', () => {
+  it('builds lookup from drug_aliases', () => {
+    const plotMeta = { drug_aliases: { Acyclovir: 'ACV', Ganciclovir: 'GCV' } };
+    const lookup = buildDrugAliasLookup(plotMeta);
+    expect(lookup.get('acyclovir')).toBe('ACV');
+    expect(lookup.get('ganciclovir')).toBe('GCV');
+    expect(lookup.size).toBe(2);
+  });
+
+  it('handles empty aliases object', () => {
+    const plotMeta = { drug_aliases: {} };
+    const lookup = buildDrugAliasLookup(plotMeta);
+    expect(lookup.size).toBe(0);
+  });
+
+  it('returns empty Map for null plotMeta', () => {
+    const lookup = buildDrugAliasLookup(null);
+    expect(lookup.size).toBe(0);
+  });
+
+  it('returns empty Map for missing drug_aliases', () => {
+    const lookup = buildDrugAliasLookup({});
+    expect(lookup.size).toBe(0);
+  });
+
+  it('skips entries with empty drug name or alias', () => {
+    const plotMeta = { drug_aliases: { '': 'Alias', Drug: '' } };
+    const lookup = buildDrugAliasLookup(plotMeta);
+    expect(lookup.size).toBe(0);
   });
 });

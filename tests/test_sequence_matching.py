@@ -181,7 +181,7 @@ class TestMatchQueryToFeatures:
         mutated[10] = 'A' if mutated[10] != 'A' else 'C'
         mutated[20] = 'A' if mutated[20] != 'A' else 'C'
         query = ''.join(mutated)
-        matches = match_query_to_features(query, [feature_with_rules], min_identity=0.80)
+        matches = match_query_to_features(query, [feature_with_rules])
         assert len(matches) == 1
         assert matches[0].identity < 1.0
 
@@ -429,7 +429,7 @@ class TestMappyBackend:
             mutated[i] = 'A' if mutated[i] != 'A' else 'C'
         query = ''.join(mutated)
         feature = self._make_feature(_LONG_CDS)
-        matches = match_query_to_features(query, [feature], min_identity=0.80)
+        matches = match_query_to_features(query, [feature])
         assert len(matches) == 1
         assert matches[0].identity < 1.0
 

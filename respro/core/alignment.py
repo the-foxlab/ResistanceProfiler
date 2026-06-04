@@ -30,22 +30,20 @@ def match_query_to_features(
     query_sequence: str,
     features: list[FeatureRecord],
     *,
-    min_identity: float = 0.9,
     threads: int = 1,
 ) -> list[FeatureMatch]:
     """
     Match a query nucleotide sequence against internal feature sequences.
 
-    A match is accepted when ``identity >= min_identity``. Coverage metrics
-    (``cds_coverage`` and ``query_coverage``) are computed and included in results.
+    Coverage metrics (``cds_coverage`` and ``query_coverage``) are computed and
+    included in results.
 
     :param query_sequence: user-provided nucleotide sequence
     :param features: feature records to screen (typically only those with rules)
-    :param min_identity: minimum nucleotide identity to accept
     :param threads: number of mapper threads forwarded to mappy as ``n_threads``
     :return: accepted FeatureMatch list sorted by identity descending
     """
-    matches = _match_with_mappy(query_sequence, features, min_identity, threads)
+    matches = _match_with_mappy(query_sequence, features, threads)
 
     for m in matches:
         ref = m.feature.reference_accession or str(m.feature.reference_id)
@@ -121,7 +119,6 @@ def load_features_with_rules(
 def _match_with_mappy(
     query_sequence: str,
     features: list[FeatureRecord],
-    min_identity: float,
     threads: int,
 ) -> list[FeatureMatch]:
     """
@@ -174,14 +171,6 @@ def _match_with_mappy(
         identity = h.mlen / h.blen if h.blen else 0.0
         cds_coverage = (h.q_en - h.q_st) / len(cds)
         query_coverage = (h.r_en - h.r_st) / len(query_upper)
-        if identity < min_identity:
-            logger.debug(
-                '%s — Feature %r: identity %.2f below threshold',
-                feature.reference_accession or str(feature.reference_id),
-                feature.name,
-                identity,
-            )
-            continue
 
         strand = '+' if h.strand == 1 else '-'
         cigar = _normalize_mappy_cigar(h.cigar_str, strand)

@@ -1,6 +1,12 @@
 import Plotly from 'plotly.js-dist-min';
 import { useRef, useEffect, useState } from 'react';
 import { Spinner } from './Spinner';
+import {
+  prepareHeatmapData,
+  consequenceColor,
+  featureColorPalette,
+  uniqueConsequenceTypes,
+} from './comparison-heatmap-data';
 
 /**
  * Interactive comparison heatmap rendered with Plotly.js.
@@ -86,7 +92,7 @@ export function ComparisonHeatmap({ data, isBusy }) {
   let featureLegend = null;
 
   if (data.features && data.features.length > 0) {
-    const featureColors = _featureColorPalette(Math.max(data.features.length, 1));
+    const featureColors = featureColorPalette(Math.max(data.features.length, 1));
     const displayNames = data.feature_display_names || {};
     featureLegend = (
       <>
@@ -116,11 +122,11 @@ export function ComparisonHeatmap({ data, isBusy }) {
   const consequenceLegend = data.consequences && data.consequences.length > 0 ? (
     <>
       <span className="comparison-consequence-legend-title">Consequences:</span>
-      {_uniqueConsequenceTypes(data.consequences).map((ctype) => (
+      {uniqueConsequenceTypes(data.consequences).map((ctype) => (
         <span key={ctype} className="comparison-consequence-legend-item">
           <span
             className="comparison-consequence-swatch"
-            style={{ backgroundColor: _consequenceColor(ctype) }}
+            style={{ backgroundColor: consequenceColor(ctype) }}
           />
           {ctype}
         </span>
@@ -147,73 +153,19 @@ export function ComparisonHeatmap({ data, isBusy }) {
 }
 
 function renderHeatmap(container, data) {
-  const {
-    samples,
-    mutation_labels,
-    mutation_tick_labels,
-    features,
-    feature_map,
-    feature_display_names,
-    consequences,
-    db_hit_map,
-    matrix,
-  } = data;
-
-  const hasFeatures = features && features.length > 0;
-  const hasDbHits = db_hit_map && db_hit_map.length > 0;
-  const hasConsequences = consequences && consequences.length > 0;
-  const displayNames = feature_display_names || {};
-
-  // Create unique x labels that display as amino acid changes only.
-  // When the same label appears in multiple features, append invisible
-  // zero-width spaces to make them unique Plotly categories while
-  // displaying identically.
-  const xLabels = [];
-  const labelCounts = {};
-  for (const label of (mutation_tick_labels || mutation_labels)) {
-    labelCounts[label] = (labelCounts[label] || 0) + 1;
+  const prepared = prepareHeatmapData(data);
+  if (!prepared) {
+    Plotly.purge(container);
+    return;
   }
-  const labelSeen = {};
-  for (const label of (mutation_tick_labels || mutation_labels)) {
-    labelSeen[label] = (labelSeen[label] || 0) + 1;
-    if (labelCounts[label] > 1) {
-      xLabels.push(label + '\u200B'.repeat(labelSeen[label] - 1));
-    } else {
-      xLabels.push(label);
-    }
-  }
-
-  // Auto-calculate left margin to avoid clipping long sample names
-  const maxSampleLen = Math.max(...samples.map((s) => s.length), 1);
-  const leftMargin = Math.max(150, Math.min(300, maxSampleLen * 8));
-
-  // Pre-compute display names for features (used in customdata)
-  const featureDisplayList = features
-    ? features.map((f) => displayNames[f] || f)
-    : [];
 
   const traces = [];
 
   // 1. Coverage gap overlay trace (behind main trace)
-  //    z=1 for gap cells, null for non-gap cells
-  const gapZ = samples.map((_si, si) =>
-    mutation_labels.map((_mi, mi) => {
-      const af = matrix[si][mi].allele_freq;
-      return (af === null || af === undefined) ? 1 : null;
-    })
-  );
-  const gapCustomdata = samples.map((_si, si) =>
-    mutation_labels.map((mi, miIdx) => {
-      const feature = features ? features[feature_map[miIdx]] : '';
-      const featureDisplayName = displayNames[feature] || feature;
-      const tickLabel = mutation_tick_labels ? mutation_tick_labels[miIdx] : mi;
-      return [tickLabel, featureDisplayName];
-    })
-  );
   const gapTrace = {
-    z: gapZ,
-    x: xLabels,
-    y: samples,
+    z: prepared.gapZ,
+    x: prepared.xLabels,
+    y: prepared.samples,
     type: 'heatmap',
     colorscale: [[0, '#e0e0e0'], [1, '#b0b0b0']],
     showscale: false,
@@ -223,31 +175,17 @@ function renderHeatmap(container, data) {
     ygap: 1,
     xaxis: 'x',
     yaxis: 'y',
-    customdata: gapCustomdata,
+    customdata: prepared.gapCustomdata,
     hovertemplate: 'Sample: %{y}<br>Mutation: %{customdata[0]}<br>Feature: %{customdata[1]}<br>Coverage gap<extra></extra>',
     line: { color: '#333', width: 1 },
   };
   traces.push(gapTrace);
 
-  // 2. Main allele frequency trace: null for gaps, 0-1 for values
-  const mainZ = samples.map((_si, si) =>
-    mutation_labels.map((_mi, mi) => {
-      const af = matrix[si][mi].allele_freq;
-      return (af === null || af === undefined) ? null : af;
-    })
-  );
-  const mainCustomdata = samples.map((_si, si) =>
-    mutation_labels.map((mi, miIdx) => {
-      const feature = features ? features[feature_map[miIdx]] : '';
-      const featureDisplayName = displayNames[feature] || feature;
-      const tickLabel = mutation_tick_labels ? mutation_tick_labels[miIdx] : mi;
-      return [tickLabel, featureDisplayName];
-    })
-  );
+  // 2. Main allele frequency trace
   const mainTrace = {
-    z: mainZ,
-    x: xLabels,
-    y: samples,
+    z: prepared.mainZ,
+    x: prepared.xLabels,
+    y: prepared.samples,
     type: 'heatmap',
     colorscale: [
       [0, '#440154'],
@@ -269,40 +207,28 @@ function renderHeatmap(container, data) {
     ygap: 1,
     xaxis: 'x',
     yaxis: 'y',
-    customdata: mainCustomdata,
+    customdata: prepared.mainCustomdata,
     hovertemplate: 'Sample: %{y}<br>Mutation: %{customdata[0]}<br>Feature: %{customdata[1]}<br>Allele freq: %{z}<extra></extra>',
     line: { color: '#333', width: 1 },
   };
   traces.push(mainTrace);
 
-  // 3. Feature annotation row (only if features exist)
-  if (hasFeatures) {
-    const featureColors = _featureColorPalette(Math.max(features.length, 1));
-    const featureZValues = [mutation_labels.map((_mi, mi) => feature_map[mi])];
-    const featureCustomdata = [mutation_labels.map((mi, miIdx) => {
-      const feature = features[feature_map[miIdx]];
-      const featureDisplayName = displayNames[feature] || feature;
-      const tickLabel = mutation_tick_labels ? mutation_tick_labels[miIdx] : mi;
-      return [featureDisplayName, tickLabel];
-    })];
-    const featureColorscale = features.length === 1
-      ? [[0, featureColors[0]], [1, featureColors[0]]]
-      : featureColors.map((color, idx) => [idx / (features.length - 1), color]);
-
+  // 3. Feature annotation row
+  if (prepared.hasFeatures) {
     const featureTrace = {
-      z: featureZValues,
-      x: xLabels,
+      z: prepared.featureZValues,
+      x: prepared.xLabels,
       y: ['Feature'],
       type: 'heatmap',
-      colorscale: featureColorscale,
+      colorscale: prepared.featureColorscale,
       zmin: 0,
-      zmax: Math.max(features.length - 1, 1),
+      zmax: Math.max(data.features.length - 1, 1),
       showscale: false,
       xgap: 1,
       ygap: 1,
       xaxis: 'x',
       yaxis: 'y2',
-      customdata: featureCustomdata,
+      customdata: prepared.featureCustomdata,
       hovertemplate: 'Feature: %{customdata[0]}<br>Mutation: %{customdata[1]}<extra></extra>',
       line: { color: '#333', width: 1 },
     };
@@ -310,12 +236,10 @@ function renderHeatmap(container, data) {
   }
 
   // 4. DB hit annotation bar
-  if (hasDbHits) {
-    const dbHitZ = [db_hit_map.map((hit) => (hit ? 1 : 0))];
-    const dbHitCustomdata = [db_hit_map.map((hit) => [hit ? 'In database' : 'Not in database'])];
+  if (prepared.hasDbHits) {
     const dbHitTrace = {
-      z: dbHitZ,
-      x: xLabels,
+      z: prepared.dbHitZ,
+      x: prepared.xLabels,
       y: ['DB hit'],
       type: 'heatmap',
       colorscale: [[0, '#f0f0f0'], [1, '#d62728']],
@@ -326,7 +250,7 @@ function renderHeatmap(container, data) {
       ygap: 1,
       xaxis: 'x',
       yaxis: 'y3',
-      customdata: dbHitCustomdata,
+      customdata: prepared.dbHitCustomdata,
       hovertemplate: '%{customdata[0]}<extra></extra>',
       line: { color: '#333', width: 1 },
     };
@@ -334,115 +258,63 @@ function renderHeatmap(container, data) {
   }
 
   // 5. Consequence annotation row
-  if (hasConsequences) {
-    const consequenceTypes = _uniqueConsequenceTypes(consequences);
-    const consequenceIndex = {};
-    consequenceTypes.forEach((ctype, idx) => { consequenceIndex[ctype] = idx; });
-
-    const consequenceZValues = [consequences.map((c) => consequenceIndex[c] || 0)];
-    const consequenceColorscale = consequenceTypes.length === 1
-      ? [[0, _consequenceColor(consequenceTypes[0])], [1, _consequenceColor(consequenceTypes[0])]]
-      : consequenceTypes.map((ctype, idx) => [idx / (consequenceTypes.length - 1), _consequenceColor(ctype)]);
-
-    const consequenceCustomdata = [consequences.map((c) => [c])];
-
+  if (prepared.hasConsequences) {
     const consequenceTrace = {
-      z: consequenceZValues,
-      x: xLabels,
+      z: prepared.consequenceZValues,
+      x: prepared.xLabels,
       y: ['Consequence'],
       type: 'heatmap',
-      colorscale: consequenceColorscale,
+      colorscale: prepared.consequenceColorscale,
       zmin: 0,
-      zmax: Math.max(consequenceTypes.length - 1, 1),
+      zmax: Math.max(prepared.consequenceTypes.length - 1, 1),
       showscale: false,
       xgap: 1,
       ygap: 1,
       xaxis: 'x',
       yaxis: 'y4',
-      customdata: consequenceCustomdata,
+      customdata: prepared.consequenceCustomdata,
       hovertemplate: 'Consequence: %{customdata[0]}<extra></extra>',
       line: { color: '#333', width: 1 },
     };
     traces.push(consequenceTrace);
   }
 
-  // Layout with domains for all axes — proportional to total conceptual rows
-  const annotationRows = (hasFeatures ? 1 : 0) + (hasDbHits ? 1 : 0) + (hasConsequences ? 1 : 0);
-  const totalRows = samples.length + annotationRows;
-  const gapBudget = annotationRows > 0 ? 0.04 : 0;
-  const gapBetweenSections = gapBudget / Math.max(annotationRows, 1);
-  const availableFraction = 1 - gapBudget;
-  const cellFraction = availableFraction / totalRows;
-
-  // Main heatmap domain
-  const heatmapDomainEnd = samples.length * cellFraction;
-  let currentY = heatmapDomainEnd;
-
-  // Feature row domain (if present)
-  let featureDomainStart = 0;
-  let featureDomainEnd = 0;
-  if (hasFeatures) {
-    currentY += gapBetweenSections;
-    featureDomainStart = currentY;
-    featureDomainEnd = currentY + cellFraction;
-    currentY = featureDomainEnd;
-  }
-
-  // DB hit row domain (if present)
-  let dbHitDomainStart = 0;
-  let dbHitDomainEnd = 0;
-  if (hasDbHits) {
-    currentY += gapBetweenSections;
-    dbHitDomainStart = currentY;
-    dbHitDomainEnd = currentY + cellFraction;
-    currentY = dbHitDomainEnd;
-  }
-
-  // Consequence row domain (if present)
-  let consequenceDomainStart = 0;
-  let consequenceDomainEnd = 0;
-  if (hasConsequences) {
-    currentY += gapBetweenSections;
-    consequenceDomainStart = currentY;
-    consequenceDomainEnd = currentY + cellFraction;
-    currentY = consequenceDomainEnd;
-  }
-
+  // Layout with domains for all axes
   const layout = {
-    margin: { l: leftMargin, r: 80, t: 20, b: 160 },
+    margin: { l: prepared.leftMargin, r: 80, t: 20, b: 160 },
     xaxis: {
       tickangle: 45,
       side: 'bottom',
       showgrid: false,
     },
-    yaxis: { showgrid: false, domain: [0, heatmapDomainEnd] },
-    height: Math.max(300, totalRows * 40 + 200),
+    yaxis: { showgrid: false, domain: [0, prepared.heatmapDomainEnd] },
+    height: prepared.height,
     autosize: true,
   };
 
-  if (hasFeatures) {
+  if (prepared.hasFeatures) {
     layout.yaxis2 = {
       showticklabels: true,
       showgrid: false,
-      domain: [featureDomainStart, featureDomainEnd],
+      domain: [prepared.featureDomainStart, prepared.featureDomainEnd],
       tickfont: { size: 10 },
     };
   }
 
-  if (hasDbHits) {
+  if (prepared.hasDbHits) {
     layout.yaxis3 = {
       showticklabels: true,
       showgrid: false,
-      domain: [dbHitDomainStart, dbHitDomainEnd],
+      domain: [prepared.dbHitDomainStart, prepared.dbHitDomainEnd],
       tickfont: { size: 10 },
     };
   }
 
-  if (hasConsequences) {
+  if (prepared.hasConsequences) {
     layout.yaxis4 = {
       showticklabels: true,
       showgrid: false,
-      domain: [consequenceDomainStart, consequenceDomainEnd],
+      domain: [prepared.consequenceDomainStart, prepared.consequenceDomainEnd],
       tickfont: { size: 10 },
     };
   }
@@ -458,53 +330,4 @@ function renderHeatmap(container, data) {
   });
 }
 
-/** Predefined consequence-to-color mapping. */
-const CONSEQUENCE_COLORS = {
-  missense: '#f39c12',
-  synonymous: '#27ae60',
-  stop_gained: '#1d1e1f',
-  stop_loss: '#3e0c8d',
-  start_loss: '#9e821d',
-  frameshift: '#e74c3c',
-  insertion: '#16a085',
-  deletion: '#2980b9',
-  splice_region: '#95a5a6',
-  unknown: '#bdc3c7',
-};
 
-function _consequenceColor(ctype) {
-  return CONSEQUENCE_COLORS[ctype] || '#cccccc';
-}
-
-function _uniqueConsequenceTypes(consequences) {
-  const seen = new Set();
-  const result = [];
-  for (const c of consequences) {
-    if (!seen.has(c)) {
-      seen.add(c);
-      result.push(c);
-    }
-  }
-  // Sort for deterministic ordering
-  result.sort();
-  return result;
-}
-
-function _featureColorPalette(count) {
-  // Generate a distinct categorical color palette for features
-  const baseColors = [
-    '#4e79a7', '#f28e2b', '#e15759', '#76b7b2', '#59a14f',
-    '#edc948', '#b07aa1', '#ff9da7', '#9c755f', '#bab0ac',
-    '#86bcb6', '#8cd17d', '#b6992d', '#499894', '#eabe7a',
-    '#d37295', '#a0cbe8', '#f1ce63', '#d4a6c8', '#9d7660',
-  ];
-  if (count <= baseColors.length) {
-    return baseColors.slice(0, count);
-  }
-  // For more features than base colors, cycle through them
-  const result = [];
-  for (let i = 0; i < count; i++) {
-    result.push(baseColors[i % baseColors.length]);
-  }
-  return result;
-}

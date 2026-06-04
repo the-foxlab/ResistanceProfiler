@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import random
 import re
-from inspect import signature
 from pathlib import Path
 
 import pytest
@@ -416,10 +415,6 @@ class TestRemapVariants:
 # ──────────────────────────────────────────────────────────────────────
 
 class TestResolveFastaReference:
-    def test_defaults_use_fixed_alignment_constants(self) -> None:
-        parameters = signature(resolve_fasta_query).parameters
-        assert parameters['min_identity'].default == 0.9
-
     def test_resolves_and_caches(self, fasta_db: Path, tmp_path: Path) -> None:
         fasta_path = tmp_path / 'query.fasta'
         fasta_path.write_text(f'>user_ref\n{TINY_REF_SEQ}\n')
@@ -1094,7 +1089,6 @@ class TestReverseStrandMappyParity:
         matches = match_query_to_features(
             query,
             [feature],
-            min_identity=0.7,
         )
         assert len(matches) == 1
         assert matches[0].strand == '-'
