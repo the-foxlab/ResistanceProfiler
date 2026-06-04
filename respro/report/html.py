@@ -1747,6 +1747,7 @@ def _build_drug_interpretation_table(
             logger.debug('Failed to load drug_interpretation algorithm: %s', exc)
 
     has_assessment = len(drug_interp_configs) > 0
+    has_final_assessment = len(drug_interp_configs) > 1
     method_labels: list[dict] = []
     if has_assessment:
         from respro.db.algorithms import _METHOD_LABEL, compute_drug_assessment
@@ -1784,6 +1785,11 @@ def _build_drug_interpretation_table(
             )
             drug_data['assessment'] = final_assessment
             drug_data['method_assessments'] = method_assessments
+            # Add badge classes for per-method assessment styling
+            for ma in method_assessments:
+                ma['assessment_badge_class'] = _PHENOTYPE_BADGE_CLASS.get(
+                    ma['assessment'].lower(), ''
+                )
 
     for drug_data in by_drug.values():
         drug_data['assessment_badge_class'] = _PHENOTYPE_BADGE_CLASS.get(
@@ -1812,7 +1818,7 @@ def _build_drug_interpretation_table(
         + (1 if has_scores else 0)
         + (len(method_labels) if has_assessment else 0)
         + (num_value_columns if has_assessment else 0)
-        + (1 if has_assessment else 0)
+        + (1 if has_final_assessment else 0)
     )
     return {
         'rows': drug_rows,
@@ -1822,6 +1828,7 @@ def _build_drug_interpretation_table(
         'has_scores': has_scores,
         'has_assessment': has_assessment,
         'has_method_assessments': has_assessment,
+        'has_final_assessment': has_final_assessment,
         'method_labels': method_labels,
         'assessment_description': assessment_description,
         'col_count': col_count,

@@ -26,7 +26,7 @@ from respro.report.html import (
     build_report_context,
     render_html,
 )
-from respro.report.non_html_exports import export_results
+from respro.report.non_html_exports import _build_pdf_drug_rows, export_results
 
 
 def _make_combined_result() -> ProfilingResult:
@@ -285,6 +285,13 @@ class TestBuildReportContext:
 
         ctx = build_report_context(result, project_conn=conn)
         assert ctx['summary']['drug_table']['rows'][0]['assessment'] == 'resistant'
+        # Single method: has_assessment=True but has_final_assessment=False
+        assert ctx['summary']['drug_table']['has_assessment'] is True
+        assert ctx['summary']['drug_table']['has_final_assessment'] is False
+        # Method assessments should have badge classes for single method
+        ma = ctx['summary']['drug_table']['rows'][0]['method_assessments']
+        assert len(ma) == 1
+        assert ma[0]['assessment_badge_class'] == 'phenotype--resistant'
 
     def test_drug_interpretation_by_fold_ic50_marks_intermediate_when_no_resistant_hit(self) -> None:
         rule = ResistanceRule(
@@ -339,6 +346,11 @@ class TestBuildReportContext:
 
         ctx = build_report_context(result, project_conn=conn)
         assert ctx['summary']['drug_table']['rows'][0]['assessment'] == 'intermediate'
+        # Single method: has_assessment=True but has_final_assessment=False
+        assert ctx['summary']['drug_table']['has_final_assessment'] is False
+        ma = ctx['summary']['drug_table']['rows'][0]['method_assessments']
+        assert len(ma) == 1
+        assert ma[0]['assessment_badge_class'] == 'phenotype--intermediate'
 
     def test_ic50_value_column_displayed_for_by_ic50_method(self) -> None:
         low_rule = ResistanceRule(
@@ -423,7 +435,8 @@ class TestBuildReportContext:
         assert ic50_label['value_header'] == 'Highest IC50'
         assert ic50_label['value_field'] == 'ic50_display'
         # Verify col_count includes the value column (+1 for the Highest IC50 column)
-        assert ctx['summary']['drug_table']['col_count'] == 5  # Drug, Hits, Highest IC50, IC50 Assessment, Assessment
+        # Single method: no final Assessment column
+        assert ctx['summary']['drug_table']['col_count'] == 4  # Drug, Hits, Highest IC50, IC50 Assessment
 
     def test_ic50_value_column_shows_dash_when_no_ic50_values(self) -> None:
         # A rule with phenotype but no IC50 value, using by_ic50 method
@@ -541,7 +554,154 @@ class TestBuildReportContext:
         assert fold_label['value_header'] == 'Highest Fold IC50'
         assert fold_label['value_field'] == 'fold_ic50_display'
         # Verify col_count includes the value column
-        assert ctx['summary']['drug_table']['col_count'] == 5  # Drug, Hits, Highest Fold IC50, Fold IC50 Assessment, Assessment
+        # Single method: no final Assessment column
+        assert ctx['summary']['drug_table']['col_count'] == 4  # Drug, Hits, Highest Fold IC50, Fold IC50 Assessment
+
+    def test_multi_method_drug_interpretation_shows_final_assessment_column(self) -> None:
+        """With 2+ drug_interpretation methods, has_final_assessment is True and Assessment column appears."""
+        rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+            ic50='8.0',
+            fold_ic50='6.0',
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                }),
+            ),
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_ic50',
+                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        drug_table = ctx['summary']['drug_table']
+        # Two methods: has_final_assessment is True, has_assessment is True
+        assert drug_table['has_assessment'] is True
+        assert drug_table['has_final_assessment'] is True
+        # Two method labels: by_phenotype + by_ic50
+        assert len(drug_table['method_labels']) == 2
+        # col_count includes Drug, Hits, Resistant/Intermediate/Sensitive (3),
+        # by_phenotype assessment (1), Highest IC50 value (1), by_ic50 assessment (1), + Final Assessment (1) = 9
+        assert drug_table['col_count'] == 9
+        # The final assessment should be 'resistant' (most severe across methods)
+        assert drug_table['rows'][0]['assessment'] == 'resistant'
+        # Per-method assessments should NOT have badge class in multi-method
+        # (badge_class is set on each method assessment, but template renders as plain text)
+        for ma in drug_table['rows'][0]['method_assessments']:
+            assert 'assessment_badge_class' in ma
+
+    def test_single_method_drug_interpretation_hides_final_assessment_column(self) -> None:
+        """With a single drug_interpretation method, has_final_assessment is False and
+        per-method assessment entries have badge classes."""
+        rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='sensitive',
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        drug_table = ctx['summary']['drug_table']
+        # Single method: has_assessment=True but has_final_assessment=False
+        assert drug_table['has_assessment'] is True
+        assert drug_table['has_final_assessment'] is False
+        # col_count: Drug + Hits + 3 phenotype cols + by_phenotype assessment = 6
+        assert drug_table['col_count'] == 6
+        # Method assessments should have badge classes
+        ma = drug_table['rows'][0]['method_assessments']
+        assert len(ma) == 1
+        assert ma[0]['assessment'] == 'sensitive'
+        assert ma[0]['assessment_badge_class'] == 'phenotype--sensitive'
 
     def test_drug_alias_is_rendered_from_drug_table_alias_column(self) -> None:
         result = _make_result()
@@ -3088,4 +3248,255 @@ class TestReportHardening:
 
         html_clinical = render_html(_result_for(clinical_rule))
         assert 'Phenotype / Clinical phenotype' in html_clinical
+
+
+class TestPdfDrugRows:
+    """Tests for _build_pdf_drug_rows field mapping."""
+
+    def test_pdf_drug_rows_include_method_badge_classes_single_method(self) -> None:
+        """Single-method rows must include method_badge_classes_by_method with normalized classes."""
+        rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            'CREATE TABLE interpretation_algorithm '
+            '(id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)'
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        drug_table = ctx['summary']['drug_table']
+        pdf_rows = _build_pdf_drug_rows(drug_table)
+
+        assert len(pdf_rows) >= 1
+        row = pdf_rows[0]
+        # method_badge_classes_by_method must be present and use PDF CSS class format
+        assert 'method_badge_classes_by_method' in row
+        badge_classes = row['method_badge_classes_by_method']
+        assert 'by_phenotype' in badge_classes
+        # Badge class should be normalized to PDF format (is-* not phenotype--*)
+        assert badge_classes['by_phenotype'] == 'is-resistant'
+        # ic50_display and fold_ic50_display must be present (em dash when no values)
+        assert 'ic50_display' in row
+        assert 'fold_ic50_display' in row
+        assert row['ic50_display'] == '\u2014'
+        assert row['fold_ic50_display'] == '\u2014'
+
+    def test_pdf_drug_rows_include_value_fields_with_ic50(self) -> None:
+        """Rows with IC50 data must include ic50_display with the highest value."""
+        low_rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='unknown',
+            ic50='6.0',
+        )
+        high_rule = ResistanceRule(
+            id=2,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=3,
+            reference='A',
+            mutation='V',
+            phenotype='unknown',
+            ic50='12.0',
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=2,
+            variants_in_cds=2,
+            resistance_hits=2,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[low_rule],
+                ),
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=6, ref='A', alt='T', allele_freq=0.9, depth=180),
+                    feature_name='gag',
+                    codon_pos=3,
+                    ref_aa='A',
+                    alt_aa='V',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[high_rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            'CREATE TABLE interpretation_algorithm '
+            '(id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)'
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_ic50',
+                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        drug_table = ctx['summary']['drug_table']
+        pdf_rows = _build_pdf_drug_rows(drug_table)
+
+        row = pdf_rows[0]
+        assert row['ic50_display'] == '12'
+        assert row['fold_ic50_display'] == '\u2014'
+        # method_labels must include value_header and value_field for by_ic50
+        ic50_label = next(
+            ml for ml in drug_table['method_labels'] if ml['method'] == 'by_ic50'
+        )
+        assert ic50_label['value_header'] == 'Highest IC50'
+        assert ic50_label['value_field'] == 'ic50_display'
+
+    def test_pdf_drug_rows_multi_method_badge_classes(self) -> None:
+        """Multi-method rows must include method_badge_classes_by_method for all methods."""
+        rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+            ic50='8.0',
+            fold_ic50='6.0',
+        )
+        result = ProfilingResult(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            'CREATE TABLE interpretation_algorithm '
+            '(id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)'
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                }),
+            ),
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_ic50',
+                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(result, project_conn=conn)
+        drug_table = ctx['summary']['drug_table']
+        pdf_rows = _build_pdf_drug_rows(drug_table)
+
+        row = pdf_rows[0]
+        assert 'method_badge_classes_by_method' in row
+        badge_classes = row['method_badge_classes_by_method']
+        # Both methods should be present
+        assert 'by_phenotype' in badge_classes
+        assert 'by_ic50' in badge_classes
+        assert badge_classes['by_phenotype'] == 'is-resistant'
+        # by_ic50 sees IC50=8.0 which is < 10.0 resistant threshold but >= 5.0 intermediate
+        assert badge_classes['by_ic50'] == 'is-intermediate'
+        # Final assessment badge class should also be present and normalized
+        assert row['assessment_badge_class'] == 'is-resistant'
 

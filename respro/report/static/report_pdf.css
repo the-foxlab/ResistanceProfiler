@@ -215,7 +215,7 @@ body {
 .drug-table {
   width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
+  table-layout: auto;
 }
 
 .drug-table th,
@@ -242,32 +242,12 @@ body {
   text-align: center;
 }
 
-.col-class {
-  width: 46%;
+.drug-name {
+  white-space: nowrap;
 }
 
-.col-drug {
-  width: 30%;
-}
-
-.col-drug-wide {
-  width: 52%;
-}
-
-.col-drug-widest {
-  width: 82%;
-}
-
-.col-hits {
-  width: 8%;
-}
-
-.col-hits-wide {
-  width: 18%;
-}
-
-.col-assessment {
-  width: 16%;
+.drug-class {
+  white-space: nowrap;
 }
 
 .assessment {
