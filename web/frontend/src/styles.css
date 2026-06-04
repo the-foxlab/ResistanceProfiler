@@ -1057,7 +1057,7 @@ th {
 
 .database-chart-scroll {
   display: block;
-  overflow-x: auto;
+  overflow-x: hidden;
   overflow-y: hidden;
   padding-bottom: 0.15rem;
   width: 100%;
@@ -1069,8 +1069,8 @@ th {
   min-width: 0;
 }
 
-.database-plot-canvas .recharts-wrapper,
-.database-pie-chart-wrap .recharts-wrapper {
+.database-plot-canvas .js-plotly-plot,
+.database-pie-chart-wrap .js-plotly-plot {
   font-family: inherit;
 }
 
@@ -1117,21 +1117,9 @@ th {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: min(100%, 280px);
-  min-height: 250px;
+  width: 100%;
+  min-height: 230px;
   margin-inline: auto;
-}
-
-.database-center-value {
-  font-size: var(--font-size-xxl);
-  font-weight: 700;
-  fill: var(--ink);
-}
-
-.database-center-label {
-  font-size: var(--font-size-xs);
-  letter-spacing: 0.05em;
-  fill: var(--muted);
 }
 
 .database-pie-legend {
@@ -2314,8 +2302,9 @@ th.sortable-col {
   width: 100%;
   min-height: 200px;
   overflow-x: auto;
-  display: flex;
-  justify-content: center;
+}
+.comparison-heatmap-container .js-plotly-plot {
+  margin: 0 auto;
 }
 
 .comparison-heatmap-loading {

@@ -1,17 +1,5 @@
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  ResponsiveContainer,
-  Scatter,
-  ScatterChart,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
-
-import { chartLabelStyle } from './shared';
+import Plotly from 'plotly.js-dist-min';
+import { useRef, useEffect, useState } from 'react';
 
 function _formatIc50Tick(value) {
   const numeric = Number(value);
@@ -42,54 +30,167 @@ function _formatRawMeasurement(value) {
   return String(Math.round(numeric * 100) / 100);
 }
 
-function _formatMetricLabel(metricLabel) {
-  const text = String(metricLabel || 'IC50');
-  return text.replace('IC50', 'IC₅₀');
+function _renderScoreCountPlot(container, plot) {
+  const trace = {
+    type: 'bar',
+    x: plot.bars.map((b) => b.scoreLabel),
+    y: plot.bars.map((b) => b.count),
+    marker: {
+      color: plot.bars.map((b) => b.color),
+      opacity: 0.82,
+    },
+    hovertemplate: 'Score: %{x}<br>Count: %{y}<extra></extra>',
+  };
+
+  const layout = {
+    bargap: 0.2,
+    xaxis: {
+      title: { text: plot.xAxisLabel || 'Score', font: { size: 12, color: '#4c6072' } },
+      tickangle: 0,
+      showgrid: false,
+    },
+    yaxis: {
+      title: { text: plot.yAxisLabel || 'Rule count', font: { size: 12, color: '#4c6072' } },
+      showgrid: true,
+      gridcolor: '#dbe6ee',
+      gridwidth: 1,
+      griddash: 'dot',
+      rangemode: 'tozero',
+    },
+    barmode: 'group',
+    autosize: true,
+    margin: { l: 50, r: 16, t: 10, b: 40 },
+    height: 320,
+    showlegend: false,
+    dragmode: false,
+  };
+
+  const config = { responsive: true, displayModeBar: false, scrollZoom: false };
+  Plotly.react(container, [trace], layout, config);
 }
 
-function _TooltipContent({ active, payload }) {
-  if (!active || !payload || payload.length === 0) {
-    return null;
-  }
-
-  const point = payload[0].payload;
-  if (!point) {
-    return null;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(point, 'scoreLabel')) {
-    return (
-      <div className="database-tooltip-card">
-        <p><strong>Score: {point.scoreLabel}</strong></p>
-        <p>Rules: {point.count}</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="database-tooltip-card">
-      <p><strong>{point.drug}</strong></p>
-      <p>{_formatMetricLabel(point.metricLabel)}: {_formatRawMeasurement(point.value)}</p>
-    </div>
+function _renderIc50DistributionPlot(container, plot) {
+  const majorTickSet = new Set(
+    (plot.majorTicks || []).map((tick) => Math.round(tick * 1000000) / 1000000)
   );
-}
 
-export function DatabaseDrugDistributionPlot({ plot }) {
-  const axisStyle = chartLabelStyle();
-  const majorTickSet = new Set((plot.majorTicks || []).map((tick) => Math.round(tick * 1000000) / 1000000));
-  const isLogScale = plot.xScale === 'log';
-  const isScoreCountPlot = plot.kind === 'score-counts';
-
-  const formatMajorTick = (value) => {
-    if (!isLogScale) {
-      return _formatRawMeasurement(value);
-    }
-    const rounded = Math.round(Number(value) * 1000000) / 1000000;
+  // Build x-axis tick text: only show labels at major tick positions
+  const ticktext = (plot.xTicks || []).map((tickVal) => {
+    const rounded = Math.round(Number(tickVal) * 1000000) / 1000000;
     if (!majorTickSet.has(rounded)) {
       return '';
     }
-    return _formatIc50Tick(value);
+    return _formatIc50Tick(tickVal);
+  });
+
+  // Build y-axis tick labels from lane labels
+  const yTickLabels = (plot.yTicks || []).map((t) => plot.laneLabels[String(Math.round(t))] || '');
+
+  const trace = {
+    type: 'scatter',
+    mode: 'markers',
+    x: plot.points.map((p) => p.x),
+    y: plot.points.map((p) => p.y),
+    marker: {
+      color: plot.points.map((p) => p.color),
+      opacity: 0.78,
+      size: 8,
+    },
+    customdata: plot.points.map((p) => {
+      const label = String(p.metricLabel || 'IC50').replace('IC50', 'IC₅₀');
+      return [p.drug, p.value, label];
+    }),
+    hovertemplate: '<b>%{customdata[0]}</b><br>%{customdata[2]}: %{customdata[1]:.2f}<extra></extra>',
   };
+
+  const xlabel = plot.xAxisLabel || 'IC₅₀ (log scale)';
+
+  const layout = {
+    xaxis: {
+      type: 'linear',
+      title: { text: xlabel, font: { size: 12, color: '#4c6072' } },
+      tickvals: plot.xTicks,
+      ticktext,
+      range: plot.xDomain,
+      autorange: false,
+      showgrid: true,
+      gridcolor: '#dbe6ee',
+      gridwidth: 1,
+      griddash: 'dot',
+      zeroline: false,
+    },
+    yaxis: {
+      tickvals: plot.yTicks,
+      ticktext: yTickLabels,
+      showgrid: false,
+      range: plot.yDomain,
+      autorange: false,
+    },
+    autosize: true,
+    margin: { l: 110, r: 16, t: 10, b: 40 },
+    height: 320,
+    showlegend: false,
+    dragmode: false,
+  };
+
+  const config = { responsive: true, displayModeBar: false, scrollZoom: false };
+  Plotly.react(container, [trace], layout, config);
+}
+
+export function DatabaseDrugDistributionPlot({ plot }) {
+  const containerRef = useRef(null);
+  const [plotError, setPlotError] = useState('');
+
+  useEffect(() => {
+    if (!containerRef.current) {
+      return;
+    }
+
+    setPlotError('');
+
+    try {
+      if (plot.kind === 'score-counts') {
+        _renderScoreCountPlot(containerRef.current, plot);
+      } else {
+        _renderIc50DistributionPlot(containerRef.current, plot);
+      }
+    } catch (err) {
+      setPlotError(String(err.message || err));
+    }
+
+    return () => {
+      if (containerRef.current) {
+        Plotly.purge(containerRef.current);
+      }
+    };
+  }, [plot]);
+
+  // Re-render on window resize (debounced)
+  useEffect(() => {
+    if (!containerRef.current) {
+      return;
+    }
+
+    let timeoutId = null;
+    const handleResize = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        if (containerRef.current) {
+          try {
+            Plotly.react(containerRef.current, containerRef.current.data, containerRef.current.layout, containerRef.current._config);
+          } catch (_) {
+            // ignore re-render errors on resize
+          }
+        }
+      }, 300);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(timeoutId);
+    };
+  }, [plot]);
 
   return (
     <section className="database-plot-card">
@@ -99,94 +200,13 @@ export function DatabaseDrugDistributionPlot({ plot }) {
       </div>
       <div className="database-chart-scroll">
         <div className="database-plot-canvas">
-          <ResponsiveContainer width="100%" height={320}>
-            {isScoreCountPlot ? (
-              <BarChart data={plot.bars} margin={{ top: 10, right: 16, left: 24, bottom: 16 }}>
-                <CartesianGrid vertical={false} stroke="#dbe6ee" strokeDasharray="3 3" />
-                <XAxis
-                  type="category"
-                  dataKey="scoreLabel"
-                  tick={axisStyle}
-                  interval={0}
-                  minTickGap={8}
-                  label={{
-                    value: plot.xAxisLabel || 'Score',
-                    position: 'insideBottom',
-                    offset: -4,
-                    ...axisStyle,
-                  }}
-                />
-                <YAxis
-                  type="number"
-                  dataKey="count"
-                  allowDecimals={false}
-                  tick={axisStyle}
-                  label={{
-                    value: plot.yAxisLabel || 'Rule count',
-                    angle: -90,
-                    position: 'left',
-                    offset: 8,
-                    style: {
-                      ...axisStyle,
-                      textAnchor: 'middle',
-                    },
-                  }}
-                />
-                <Tooltip content={<_TooltipContent />} />
-                <Bar dataKey="count" isAnimationActive animationDuration={260}>
-                  {plot.bars.map((entry, idx) => (
-                    <Cell key={`score-bar-${idx}`} fill={entry.color} fillOpacity={0.82} />
-                  ))}
-                </Bar>
-              </BarChart>
-            ) : (
-              <ScatterChart margin={{ top: 10, right: 16, left: 24, bottom: 8 }}>
-                <CartesianGrid vertical={false} stroke="#dbe6ee" strokeDasharray="3 3" />
-                <XAxis
-                  type="number"
-                  dataKey="x"
-                  domain={plot.xDomain}
-                  ticks={plot.xTicks}
-                  tick={axisStyle}
-                  tickFormatter={formatMajorTick}
-                  label={{
-                    value: plot.xAxisLabel || (isLogScale ? 'IC₅₀ (log scale)' : 'Value'),
-                    position: 'insideBottom',
-                    offset: -4,
-                    ...axisStyle,
-                  }}
-                />
-                <YAxis
-                  type="number"
-                  dataKey="y"
-                  domain={plot.yDomain}
-                  ticks={plot.yTicks}
-                  tick={axisStyle}
-                  tickFormatter={(value) => plot.laneLabels[String(Math.round(value))] || ''}
-                  width={110}
-                  label={{
-                    value: plot.yAxisLabel || 'Drug',
-                    angle: -90,
-                    position: 'left',
-                    offset: 8,
-                    style: {
-                      ...axisStyle,
-                      textAnchor: 'middle',
-                    },
-                  }}
-                />
-                <Tooltip content={<_TooltipContent />} />
-                <Scatter data={plot.points} name="Metric values" isAnimationActive animationDuration={260}>
-                  {plot.points.map((point, idx) => (
-                    <Cell key={`ic50-point-${idx}`} fill={point.color} fillOpacity={0.78} />
-                  ))}
-                </Scatter>
-              </ScatterChart>
-            )}
-          </ResponsiveContainer>
+          <div ref={containerRef} />
         </div>
       </div>
       <p className="database-plot-footer">{plot.footer}</p>
+      {plotError && (
+        <p className="status" style={{ color: '#c2410c' }}>Chart error: {plotError}</p>
+      )}
     </section>
   );
 }

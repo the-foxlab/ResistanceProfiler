@@ -259,7 +259,9 @@ export function prepareHeatmapData(data) {
     currentY = consequenceDomainEnd;
   }
 
-  const height = Math.max(300, totalRows * 40 + 200);
+  // Scale cell height: ~32px for small heatmaps, shrinking to 20px floor for larger ones
+  const targetCellHeight = Math.max(20, Math.min(32, 600 / totalRows));
+  const height = Math.max(260, Math.round(totalRows * targetCellHeight + 160));
 
   return {
     samples,

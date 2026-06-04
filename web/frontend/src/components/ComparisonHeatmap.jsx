@@ -281,7 +281,7 @@ function renderHeatmap(container, data) {
 
   // Layout with domains for all axes
   const layout = {
-    margin: { l: prepared.leftMargin, r: 80, t: 20, b: 160 },
+    margin: { l: prepared.leftMargin, r: 80, t: 20, b: 60 },
     xaxis: {
       tickangle: 45,
       side: 'bottom',

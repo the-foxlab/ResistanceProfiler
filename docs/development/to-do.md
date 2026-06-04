@@ -269,6 +269,10 @@ Mark items done and update priorities after each completed milestone.
 - [X] Download selected artifacts — "Download selected" button in Reports tab sends selected result paths to `/api/artifact-bundle` for ZIP download; "Download all" retained alongside
 - [X] 18 tests in `tests/test_compare.py` covering matrix assembly, coverage gaps, formula-rule db-hit detection, path validation, same-database rejection, same-reference rejection, endpoint integration, and error responses
 
+### Web — Chart consolidation
+
+- [X] Frontend chart library consolidation — migrated all recharts components (pie charts, IC50 scatter/bar, position stacked bars) to Plotly.js; removed recharts dependency; all charts now use a single rendering library
+
 ---
 
 ## Next
@@ -333,5 +337,3 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 Established wet-lab protocols
 
 ### Smaller Issues
-
-- 🟢 Frontend chart library consolidation — the dashboard currently uses both recharts and plotly.js; migrate remaining plotly charts (comparison heatmap, IC50 distribution) to recharts to reduce bundle size and remove the plotly dependency

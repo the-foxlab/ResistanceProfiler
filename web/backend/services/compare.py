@@ -352,7 +352,8 @@ def _formula_variant_key(mv: dict) -> tuple[str, int, str, str] | None:
     """
     Build a unique mutation key tuple from a formula_rule_hit matched_variant.
 
-    Converts 0-based codon_pos to 1-based display position.
+    codon_pos in formula hit JSON is already 1-based (from FormulaRuleHit.to_dict()),
+    so no conversion is needed here.
     """
     feature = mv.get('feature', '')
     codon_pos = mv.get('codon_pos')
@@ -360,7 +361,7 @@ def _formula_variant_key(mv: dict) -> tuple[str, int, str, str] | None:
     alt_aa = mv.get('alt_aa', '')
     if codon_pos is None or not feature:
         return None
-    return (feature, codon_pos + 1, ref_aa, alt_aa)
+    return (feature, codon_pos, ref_aa, alt_aa)
 
 
 def _build_variant_lookup(payload: dict) -> dict[tuple[str, int, str, str], dict]:

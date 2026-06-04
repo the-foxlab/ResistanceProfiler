@@ -399,7 +399,7 @@ class TestBuildComparisonMatrixFormulaHit:
                 _formula_hit([
                     {
                         'feature': 'gene_a',
-                        'codon_pos': 102,
+                        'codon_pos': 103,
                         'ref_aa': 'K',
                         'alt_aa': 'N',
                         'allele_freq': 1.0,
@@ -438,7 +438,7 @@ class TestBuildComparisonMatrixFormulaHit:
                 _formula_hit([
                     {
                         'feature': 'gene_a',
-                        'codon_pos': 200,
+                        'codon_pos': 201,
                         'ref_aa': 'T',
                         'alt_aa': 'Y',
                         'allele_freq': 1.0,

@@ -1,52 +1,102 @@
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+import Plotly from 'plotly.js-dist-min';
+import { useRef, useEffect, useState } from 'react';
 
-import { chartLabelStyle, CLASSIFICATION_COLORS, CLASSIFICATION_LABELS } from './shared';
-
-function _PositionTooltipContent({ active, payload }) {
-  if (!active || !payload || payload.length === 0) {
-    return null;
-  }
-
-  const entry = payload[0].payload;
-  if (!entry) {
-    return null;
-  }
-
-  const start = Number(entry.rangeStart);
-  const end = Number(entry.rangeEnd);
-  const resistant = Number(entry.resistant || 0);
-  const sensitive = Number(entry.susceptible || 0);
-
-  return (
-    <div className="database-tooltip-card">
-      <p><strong>Position range:</strong> {start}-{end}</p>
-      <p><strong>Counts resistant:</strong> {resistant}</p>
-      <p><strong>Counts sensitive:</strong> {sensitive}</p>
-    </div>
-  );
-}
+import { CLASSIFICATION_COLORS, CLASSIFICATION_LABELS } from './shared';
 
 export function DatabasePositionPlot({ plot }) {
-  const barGap = 6;
-  const axisStyle = chartLabelStyle();
-  const yAxisLabel = {
-    value: 'Mutation count',
-    angle: -90,
-    position: 'left',
-    offset: 8,
-    style: {
-      ...axisStyle,
-      textAnchor: 'middle',
-    },
-  };
+  const containerRef = useRef(null);
+  const [plotError, setPlotError] = useState('');
+
+  useEffect(() => {
+    if (!containerRef.current) {
+      return;
+    }
+
+    setPlotError('');
+
+    try {
+      const xLabels = plot.positions.map((p) => p.label);
+
+      const traces = plot.tones.map((tone) => ({
+        type: 'bar',
+        x: xLabels,
+        y: plot.positions.map((p) => p[tone] || 0),
+        name: CLASSIFICATION_LABELS[tone] || 'Rules',
+        marker: {
+          color: CLASSIFICATION_COLORS[tone] || CLASSIFICATION_COLORS.count,
+        },
+        customdata: plot.positions.map((p) => [p.rangeStart, p.rangeEnd]),
+        hovertemplate: 'Range: %{customdata[0]}-%{customdata[1]}<br>' + (CLASSIFICATION_LABELS[tone] || 'Rules') + ': %{y}<extra></extra>',
+      }));
+
+      const positionsLength = plot.positions.length;
+      const xaxisConfig = positionsLength > 24
+        ? { tickmode: 'auto', nticks: 25 }
+        : { tickmode: 'auto', dtick: 1 };
+
+      const layout = {
+        barmode: 'stack',
+        bargap: 0.15,
+        xaxis: {
+          title: { text: plot.xAxisLabel || 'Amino-acid position', font: { size: 12, color: '#4c6072' } },
+          tickangle: 0,
+          showgrid: false,
+          ...xaxisConfig,
+        },
+        yaxis: {
+          title: { text: 'Mutation count', font: { size: 12, color: '#4c6072' } },
+          showgrid: true,
+          gridcolor: '#dbe6ee',
+          gridwidth: 1,
+          griddash: 'dot',
+          rangemode: 'tozero',
+        },
+        margin: { l: 50, r: 12, t: 8, b: 40 },
+        height: 250,
+        showlegend: false,
+        dragmode: false,
+      };
+
+      const config = { responsive: true, displayModeBar: false, scrollZoom: false };
+
+      Plotly.react(containerRef.current, traces, layout, config);
+    } catch (err) {
+      setPlotError(String(err.message || err));
+    }
+
+    return () => {
+      if (containerRef.current) {
+        Plotly.purge(containerRef.current);
+      }
+    };
+  }, [plot]);
+
+  // Re-render on window resize (debounced)
+  useEffect(() => {
+    if (!containerRef.current) {
+      return;
+    }
+
+    let timeoutId = null;
+    const handleResize = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        if (containerRef.current) {
+          try {
+            Plotly.react(containerRef.current, containerRef.current.data, containerRef.current.layout, containerRef.current._config);
+          } catch (_) {
+            // ignore re-render errors on resize
+          }
+        }
+      }, 300);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(timeoutId);
+    };
+  }, [plot]);
 
   return (
     <section className="database-plot-card">
@@ -56,41 +106,7 @@ export function DatabasePositionPlot({ plot }) {
       </div>
       <div className="database-chart-scroll">
         <div className="database-plot-canvas">
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={plot.positions} margin={{ top: 8, right: 12, left: 24, bottom: 8 }} barCategoryGap={barGap}>
-              <CartesianGrid vertical={false} stroke="#dbe6ee" strokeDasharray="3 3" />
-              <XAxis
-                dataKey="label"
-                tick={axisStyle}
-                minTickGap={18}
-                // Reduce label crowding for long genes by only keeping start/end ticks.
-                interval={plot.positions.length > 24 ? 'preserveStartEnd' : 0}
-                label={{ value: plot.xAxisLabel || 'Amino-acid position', position: 'insideBottom', offset: -4, ...axisStyle }}
-              />
-              <YAxis
-                allowDecimals={false}
-                tick={axisStyle}
-                width={48}
-                label={yAxisLabel}
-              />
-              <Tooltip content={<_PositionTooltipContent />} />
-              {plot.tones.map((tone) => (
-                <Bar
-                  key={tone}
-                  dataKey={tone}
-                  stackId={plot.hasTypedClassification ? 'rules' : undefined}
-                  fill={CLASSIFICATION_COLORS[tone] || CLASSIFICATION_COLORS.count}
-                  radius={[4, 4, 0, 0]}
-                  barSize={12}
-                  // Short animation keeps visual feedback without heavy render cost.
-                  isAnimationActive
-                  animationDuration={320}
-                  animationEasing="ease-out"
-                  name={CLASSIFICATION_LABELS[tone] || 'Rules'}
-                />
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
+          <div ref={containerRef} />
         </div>
       </div>
       <p className="database-plot-footer">{plot.footer}</p>
@@ -102,6 +118,9 @@ export function DatabasePositionPlot({ plot }) {
           </span>
         ))}
       </div>
+      {plotError && (
+        <p className="status" style={{ color: '#c2410c' }}>Chart error: {plotError}</p>
+      )}
     </section>
   );
 }

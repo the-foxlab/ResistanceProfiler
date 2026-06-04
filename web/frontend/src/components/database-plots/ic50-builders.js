@@ -163,6 +163,34 @@ export function buildIc50DistributionSections(rules, formulaRules, plotMeta) {
     }
   });
 
+  // Compute global IC50 range across all organisms
+  let globalMinValue = Number.POSITIVE_INFINITY;
+  let globalMaxValue = Number.NEGATIVE_INFINITY;
+  for (const group of groups.values()) {
+    for (const bucket of group.byDrug.values()) {
+      const values = bucket.ic50Values.length > 0 ? bucket.ic50Values : bucket.foldValues;
+      for (const v of values) {
+        if (v > 0) {
+          globalMinValue = Math.min(globalMinValue, v);
+          globalMaxValue = Math.max(globalMaxValue, v);
+        }
+      }
+    }
+  }
+  if (!Number.isFinite(globalMinValue) || !Number.isFinite(globalMaxValue)) {
+    return [];
+  }
+  if (globalMinValue === globalMaxValue) {
+    globalMinValue = globalMinValue / 2;
+    globalMaxValue = globalMaxValue * 2;
+  }
+  const globalTickConfig = buildLogTicks(globalMinValue, globalMaxValue);
+  const globalMinLog = Math.log10(globalMinValue);
+  const globalMaxLog = Math.log10(globalMaxValue);
+  const globalXDomain = globalMinLog === globalMaxLog
+    ? [globalMinLog - 0.3, globalMaxLog + 0.3]
+    : [globalMinLog, globalMaxLog];
+
   const plots = Array.from(groups.values())
     .map((group) => {
       const drugEntries = Array.from(group.byDrug.entries())
@@ -186,8 +214,6 @@ export function buildIc50DistributionSections(rules, formulaRules, plotMeta) {
       const laneLabels = {};
       const points = [];
       const metricLabels = new Set();
-      let minValue = Number.POSITIVE_INFINITY;
-      let maxValue = Number.NEGATIVE_INFINITY;
 
       drugEntries.forEach((entry, laneIdx) => {
         const lane = laneIdx + 1;
@@ -206,26 +232,9 @@ export function buildIc50DistributionSections(rules, formulaRules, plotMeta) {
             metricLabel: entry.metricLabel,
             color: PIE_COLORS[laneIdx % PIE_COLORS.length],
           });
-          minValue = Math.min(minValue, value);
-          maxValue = Math.max(maxValue, value);
         });
       });
 
-      if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) {
-        return null;
-      }
-
-      if (minValue === maxValue) {
-        minValue = minValue / 2;
-        maxValue = maxValue * 2;
-      }
-
-      const minLog = Math.log10(minValue);
-      const maxLog = Math.log10(maxValue);
-      const xDomain = minLog === maxLog
-        ? [minLog - 0.3, maxLog + 0.3]
-        : [minLog, maxLog];
-      const tickConfig = buildLogTicks(minValue, maxValue);
       const metricLabelList = Array.from(metricLabels).map((label) => label.replace('IC50', 'IC₅₀'));
       const axisMetricLabel = metricLabelList.length === 1
         ? metricLabelList[0]
@@ -253,9 +262,9 @@ export function buildIc50DistributionSections(rules, formulaRules, plotMeta) {
         xTickMode: 'ic50-log',
         xAxisLabel: xAxisUnitLabel,
         yAxisLabel: 'Drug',
-        xDomain,
-        xTicks: tickConfig.ticks,
-        majorTicks: tickConfig.majorTicks,
+        xDomain: globalXDomain,
+        xTicks: globalTickConfig.ticks,
+        majorTicks: globalTickConfig.majorTicks,
         yDomain: [0.5, drugEntries.length + 0.5],
         yTicks: drugEntries.map((_, idx) => idx + 1),
         laneLabels,
