@@ -124,3 +124,44 @@ class SessionCleanupResponse(BaseModel):
     """Summary of session upload cleanup."""
 
     deleted_count: int
+
+
+class ComparePayload(BaseModel):
+    """List of result JSON paths to compare."""
+
+    paths: list[str]
+    non_synonymous_only: bool = False
+    db_hits_only: bool = False
+
+
+class CompareMutationKey(BaseModel):
+    """Unique mutation identifier used as a heatmap column."""
+
+    feature: str
+    position: int
+    ref_aa: str
+    alt_aa: str
+    label: str
+
+
+class CompareCell(BaseModel):
+    """Cell content for one sample x mutation."""
+
+    allele_freq: float | None = None
+    db_hit: bool = False
+
+
+class CompareResponse(BaseModel):
+    """Matrix data for the comparison heatmap."""
+
+    samples: list[str]
+    references: list[str]
+    mutations: list[CompareMutationKey]
+    mutation_labels: list[str]
+    mutation_tick_labels: list[str]  # AA-only labels for x-axis display (no feature prefix)
+    features: list[str]
+    feature_map: list[int]
+    feature_display_names: dict[str, str]  # feature_name -> display_name mapping
+    consequences: list[str]  # consequence type per mutation column
+    db_hit_map: list[bool]  # True if any sample has a db_hit for that mutation column
+    matrix: list[list[CompareCell]]

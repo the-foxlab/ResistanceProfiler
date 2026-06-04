@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import faviconSrc from './assets/favicon.svg';
 import { FRONTEND_CONFIG } from './config';
 
@@ -417,6 +417,14 @@ export function useDashboardLogic() {
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [isBatchDownloadBusy, setIsBatchDownloadBusy] = useState(false);
   const [isSessionDownloadBusy, setIsSessionDownloadBusy] = useState(false);
+
+  // --- Comparison state ---
+  const [selectedResultIndices, setSelectedResultIndices] = useState(new Set());
+  const [comparisonData, setComparisonData] = useState(null);
+  const [isComparisonBusy, setIsComparisonBusy] = useState(false);
+  const [nonSynonymousOnly, setNonSynonymousOnly] = useState(false);
+  const [dbHitsOnly, setDbHitsOnly] = useState(false);
+
   const [batchError, setBatchError] = useState(null);
   const [batchRateLimitCooldown, setBatchRateLimitCooldown] = useState(0);
   const [batchSubmitted, setBatchSubmitted] = useState(false);
@@ -429,6 +437,36 @@ export function useDashboardLogic() {
 
   // Resolve currently selected database once for all consumers.
   const selectedDatabase = databases.find((item) => item.id === selectedDatabaseId) || null;
+
+  // Derived: which database the selected comparison results share
+  const comparisonDbId = useMemo(() => {
+    const indices = [...selectedResultIndices];
+    if (indices.length === 0) return null;
+    return sessionResults[indices[0]]?.database_id || null;
+  }, [selectedResultIndices, sessionResults]);
+
+  // Derived: which reference the selected comparison results share
+  const comparisonRefName = useMemo(() => {
+    const indices = [...selectedResultIndices];
+    if (indices.length === 0) return null;
+    return sessionResults[indices[0]]?.reference_name || null;
+  }, [selectedResultIndices, sessionResults]);
+
+  const selectAllComparable = () => {
+    if (selectedResultIndices.size === 0) return;
+    const firstIdx = [...selectedResultIndices][0];
+    const firstResult = sessionResults[firstIdx];
+    if (!firstResult) return;
+    const targetDbId = firstResult.database_id;
+    const targetRefName = firstResult.reference_name;
+    const allMatching = new Set();
+    sessionResults.forEach((result, idx) => {
+      if (result.database_id === targetDbId && result.reference_name === targetRefName) {
+        allMatching.add(idx);
+      }
+    });
+    setSelectedResultIndices(allMatching);
+  };
 
   useEffect(() => {
     const initData = async () => {
@@ -1190,6 +1228,76 @@ export function useDashboardLogic() {
     }
   };
 
+  const fetchComparisonData = async (nonSynOnly, dbHitsOnlyOverride) => {
+    const effectiveNonSyn = nonSynOnly !== undefined ? nonSynOnly : nonSynonymousOnly;
+    const effectiveDbHits = dbHitsOnlyOverride !== undefined ? dbHitsOnlyOverride : dbHitsOnly;
+
+    const selectedResults = [...selectedResultIndices]
+      .map((i) => sessionResults[i])
+      .filter(Boolean);
+
+    if (selectedResults.length < 2) return;
+
+    const jsonPaths = selectedResults
+      .map((r) => r.report_json_path)
+      .filter(Boolean);
+
+    if (jsonPaths.length < 2) return;
+
+    setIsComparisonBusy(true);
+    setComparisonData(null);
+    try {
+      const response = await apiPost('/api/compare', { paths: jsonPaths, non_synonymous_only: effectiveNonSyn, db_hits_only: effectiveDbHits });
+      setComparisonData(response);
+    } catch (error) {
+      setStatusError(formatUserError(error.message));
+    } finally {
+      setIsComparisonBusy(false);
+    }
+  };
+
+  const downloadSelectedArtifacts = async () => {
+    const selectedResults = [...selectedResultIndices]
+      .map((i) => sessionResults[i])
+      .filter(Boolean);
+
+    const artifactPaths = selectedResults.flatMap((r) => [
+      r.report_html_path,
+      r.report_pdf_path,
+      r.report_json_path,
+    ].filter(Boolean));
+
+    if (artifactPaths.length === 0) return;
+
+    try {
+      const response = await fetch(`${API_BASE}/api/artifact-bundle`, {
+        method: 'POST',
+        headers: buildHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ paths: artifactPaths }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
+      }
+
+      const href = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a');
+      anchor.href = href;
+      anchor.download = 'respro-selected-artifacts.zip';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(href);
+    } catch (error) {
+      setStatusError(formatUserError(error.message));
+    }
+  };
+
+  const clearComparison = () => {
+    setComparisonData(null);
+    setSelectedResultIndices(new Set());
+  };
+
   const canCancelJob = Boolean(activeJobId) && ['queued', 'running'].includes(activeJobStatus);
 
   const runSelectedProfile = async () => {
@@ -1342,5 +1450,20 @@ export function useDashboardLogic() {
     // Session
     isSessionDownloadBusy,
     downloadAllSessionArtifacts,
+    // Comparison
+    selectedResultIndices,
+    setSelectedResultIndices,
+    comparisonDbId,
+    comparisonRefName,
+    selectAllComparable,
+    comparisonData,
+    isComparisonBusy,
+    nonSynonymousOnly,
+    setNonSynonymousOnly,
+    dbHitsOnly,
+    setDbHitsOnly,
+    fetchComparisonData,
+    downloadSelectedArtifacts,
+    clearComparison,
   };
 }

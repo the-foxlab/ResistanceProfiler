@@ -78,7 +78,7 @@ flowchart TD
 
 - backend API entry in `web/backend/main.py`
 - job logic in `web/backend/jobs.py`
-- service layer under `web/backend/services/`
+- service layer under `web/backend/services/` (browse, upload, compare)
 - startup/runtime config in `web/backend/startup_config.py` and `web/backend/config.py`
   with startup-managed `project_databases/`, `uploads/`, and `results/` directories
 - frontend app in `web/frontend/src/`
@@ -103,6 +103,9 @@ flowchart TD
 2. Reuse `respro/` logic instead of reimplementing domain behavior.
 3. Preserve startup-managed path constraints and auth assumptions, including
   database-catalog selection via `database_id` for browse/profile/regenerate routes.
+4. Comparison and artifact-bundle routes (`/api/compare`, `/api/artifact-bundle`)
+  reuse persisted result JSONs and enforce same-database/same-reference constraints
+  before assembling cross-sample matrices or ZIP downloads.
 
 ## Annotation and profiling algorithm (detailed)
 

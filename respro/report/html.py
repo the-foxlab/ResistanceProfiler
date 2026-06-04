@@ -676,7 +676,6 @@ def _build_effect_as_resistant_rows(
             continue
 
         # Collect all effect lists from matching rules for this annotation's feature
-        matched = False
         feature_display = (display_names or {}).get(ann.feature_name, ann.feature_name)
         aa_change = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
@@ -687,7 +686,6 @@ def _build_effect_as_resistant_rows(
             rule_effects = rule.get('effect', [])
             if ann.consequence not in rule_effects:
                 continue
-            matched = True
             drug_name = (rule.get('drug') or '').strip()
             if not drug_name:
                 continue

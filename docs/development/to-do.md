@@ -177,6 +177,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Optional database metadata in `respro init` — `--metadata` accepts validated JSON with fixed keys (`maintainers`, `contact`, `publication_pmid`, `website`, `description`, `maintainer_update`, `license`, `tsv_checksum`); PMID values are DOI-enriched best-effort at creation time and stored on the project row
 - [X] `respro manage database <db_path> --info` — added project metadata inspection mode that prints non-empty project identity and curated metadata fields
 - [X] Interpretation algorithm metadata in `metadata.json` — `interpretation_algorithms` top-level array in metadata JSON accepts coexisting algorithm types (`ic50_thresholds`, `drug_groups`, `drug_interpretation`, `drug_alias`); each is validated on import and stored in the `interpretation_algorithm` table in `project.db`; `load_interpretation_algorithms` exposes the config to downstream consumers (report, scoring); full test coverage in `tests/test_algorithms.py`; documented in `docs/user/database-preparation.md`
+- [X] Drug-level cumulative score interpretation (Stanford-like)
 
 ### Web deployment and security (done)
 
@@ -259,19 +260,21 @@ Mark items done and update priorities after each completed milestone.
 - [X] Batch tab in web dashboard — VCF and FASTA batch modes with multi-file upload (up to 25), shared reference FASTA for VCF, project selector, per-sample results table with status polling, live 429 rate-limit countdown, and "New batch" reset button
 - [X] 5 new tests in `tests/test_web_api.py` covering batch submit success (VCF + FASTA), max-size enforcement (VCF + FASTA), and mismatched sample-name/path lengths
 
+### Web — Multi-sample comparison
+
+- [X] Multi-sample comparison heatmap feature — Reports tab supports selecting multiple session results (checkboxes with same-database + same-reference enforcement), "Compare selected" button triggers `POST /api/compare` endpoint returning a mutation × sample matrix with allele frequencies, coverage gaps, db-hit annotations, and feature annotation; Plotly.js client-side heatmap renders with viridis colorscale, grey coverage-gap sentinel, ★ db-hit markers, and categorical feature annotation row
+- [X] `POST /api/compare` backend endpoint and `web/backend/services/compare.py` — `build_comparison_matrix` assembles union of mutation keys (sorted by feature, position, ref/alt AA), builds allele frequency matrix with coverage-gap and db-hit detection (combining `rule_match` and `formula_rule_hit` sources), returns `CompareResponse` with `samples`, `references`, `mutations`, `mutation_labels`, `features`, `feature_map`, and `matrix`
+- [X] Same-database and same-reference validation — backend `_validate_same_database` and `_validate_same_reference` enforce homogeneous `project_name` and `reference_name` across selected results; frontend disables checkboxes from different databases and displays reference name in heatmap header
+- [X] `ComparisonHeatmap.jsx` component — Plotly.js-dist-min heatmap with feature annotation track (y2 axis), cell-value legends, feature legend, and proper cleanup via `Plotly.purge()`
+- [X] Download selected artifacts — "Download selected" button in Reports tab sends selected result paths to `/api/artifact-bundle` for ZIP download; "Download all" retained alongside
+- [X] 18 tests in `tests/test_compare.py` covering matrix assembly, coverage gaps, formula-rule db-hit detection, path validation, same-database rejection, same-reference rejection, endpoint integration, and error responses
+
 ---
 
 ## Next
 
 Items are grouped by theme and ordered by priority within each group.
 Priority: 🔴 high · 🟡 medium · 🟢 low
-
-### Overlapping ORFs
-
-- 🟡 Regression tests for overlapping ORF annotation — no test currently verifies that a
-  variant falling inside two genes simultaneously produces correct, independent annotations for
-  both across all profiling paths; VCF remap-level coverage now exists in `tests/test_profile_vcf.py`
-  and FASTA-path coverage is still required
 
 ### Usability and workflow
 
@@ -293,11 +296,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   chrom the gene's query FASTA record came from; (3) a single-chrom VCF with the existing test
   reference still produces byte-identical report output as before the change (guard against
   inadvertent regression)
-- 🟡 Drug-level cumulative score interpretation (Stanford-like) — add score aggregation across
-  all matched single and formula rules per drug, expose per-drug totals in report/JSON output,
-  and support optional metadata-driven score-to-classification threshold maps (global defaults
-  with optional per-drug overrides) so cumulative scores can be translated into resistance
-  classes when curated mappings are provided
 - 🟢 Sanger AB1 input — add `respro profile-ab1` that reads an AB1 trace file via
   `SeqIO.read(..., 'abi')` and derives a quality-aware consensus sequence that feeds directly into
   the existing FASTA profiling pipeline; the quality model uses raw trace peak data
@@ -324,7 +322,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟢 Optional lightweight run cache for active session UX — if needed for frontend refresh
   resilience, keep a short-lived in-memory or Redis-backed session cache keyed by browser session
   ID (no durable per-user storage)
-- 🟡 Paste sequence ?
 
 ### Public release
 
@@ -336,6 +333,3 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 - 🟡 Established wet-lab protocols
 
 ### Smaller Issues
-
-- 🟡 add herpes drg assessment of ic50 values
-- 🟡 herpes drg --> fold ic50 ?

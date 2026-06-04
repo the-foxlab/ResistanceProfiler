@@ -1422,6 +1422,7 @@ th {
   margin: 0 0 0 auto;
 }
 
+
 /* Analyze tab shell: header with submode switch */
 
 .analyze-shell-header {
@@ -1977,7 +1978,7 @@ th {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 .website-link-icon {
@@ -1996,7 +1997,7 @@ th {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
-  align-items: center;
+  align-items: left;
   gap: 0.5rem 1rem;
 }
 
@@ -2275,7 +2276,7 @@ th.sortable-col {
     flex-direction: row;
     justify-content: space-between;
     align-items: center;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     padding: 0.35rem 0.6rem;
   }
 
@@ -2291,4 +2292,159 @@ th.sortable-col {
   .database-plot-card {
     padding: 0.75rem;
   }
+}
+
+/* ----- Comparison heatmap ----- */
+.comparison-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1.5rem;
+  padding: 1rem 0;
+  border-top: 1px solid var(--color-border, #e0e0e0);
+}
+
+.comparison-section .workspace-output-header {
+  align-self: flex-start;
+  width: 100%;
+}
+
+.comparison-heatmap-container {
+  width: 100%;
+  min-height: 200px;
+  overflow-x: auto;
+  display: flex;
+  justify-content: center;
+}
+
+.comparison-heatmap-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2rem;
+  color: var(--color-text-secondary, #666);
+}
+
+.comparison-heatmap-error {
+  padding: 1rem;
+  color: var(--color-error, #c2410c);
+}
+
+.comparison-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary, #666);
+}
+
+.comparison-legend-separator {
+  display: inline-block;
+  width: 1px;
+  height: 1rem;
+  background-color: #ccc;
+  margin: 0 0.25rem;
+}
+
+.comparison-feature-legend-title {
+  font-weight: 600;
+}
+
+.comparison-feature-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.comparison-feature-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.comparison-cell-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.comparison-cell-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid #ccc;
+}
+
+.comparison-db-hit-marker {
+  font-size: 0.9rem;
+  color: #333;
+}
+
+.comparison-consequence-legend-title {
+  font-weight: 600;
+}
+
+.comparison-consequence-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.comparison-consequence-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid #ccc;
+}
+
+.comparison-clear-btn {
+  background-color: #6c757d;
+  border-color: #6c757d;
+  color: #fff;
+  padding: 0.4rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.comparison-clear-btn:hover {
+  background-color: #5a6268;
+  border-color: #5a6268;
+}
+
+.comparison-clear-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.comparison-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary, #666);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.comparison-switch-right {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.comparison-switch input[type="checkbox"] {
+  cursor: pointer;
+}
+
+/* Checkbox column in session results table */
+.checkbox-col {
+  width: 2rem;
+  min-width: 2rem;
+  text-align: center;
 }

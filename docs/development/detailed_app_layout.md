@@ -56,6 +56,22 @@ flowchart TD
     E --> F["respro/report"]
 ```
 
+### Report Artifacts and Comparison
+
+```mermaid
+flowchart TD
+    A["GET /api/artifact?path=..."] --> B["web/backend/routes/artifacts.py"]
+    A2["POST /api/artifact-bundle"] --> B
+    A3["POST /api/compare"] --> C["web/backend/services/compare.py"]
+    C --> D["results/*.results.json"]
+```
+
+- `/api/artifact` serves individual report files (HTML, PDF, JSON, TSV) from the results directory.
+- `/api/artifact-bundle` accepts a list of paths and returns a ZIP archive of all requested artifacts.
+- `/api/compare` accepts a list of result JSON paths, validates same-database and same-reference
+  constraints, and returns a mutation × sample allele-frequency matrix with coverage-gap and
+  db-hit annotations for Plotly.js client-side rendering.
+
 ## Security and Runtime Boundaries
 
 - Auth, CORS, and rate limiting enforcement in `web/backend/main.py`

@@ -27,6 +27,7 @@ import { DatabasePositionPlot } from './database-plots/DatabasePositionPlot';
 import { DatabaseDrugDistributionPlot } from './database-plots/DatabaseDrugDistributionPlot';
 import { DatabaseSelectorBar } from './DatabaseSelectorBar';
 import { Spinner } from './Spinner';
+import { ComparisonHeatmap } from './ComparisonHeatmap';
 import regenerateIconSrc from '../assets/icon-regenerate.svg';
 import homeIconSrc from '../assets/home.svg';
 import reportIconSrc from '../assets/reports.svg';
@@ -365,6 +366,21 @@ export function DashboardView({
   submitBatch,
   downloadAllBatchArtifacts,
   downloadAllSessionArtifacts,
+  // Comparison
+  selectedResultIndices,
+  setSelectedResultIndices,
+  comparisonDbId,
+  comparisonRefName,
+  selectAllComparable,
+  comparisonData,
+  isComparisonBusy,
+  nonSynonymousOnly,
+  setNonSynonymousOnly,
+  dbHitsOnly,
+  setDbHitsOnly,
+  fetchComparisonData,
+  downloadSelectedArtifacts,
+  clearComparison,
   resetBatch,
 }) {
   // These controls only affect database charts, not mutation browsing or profiling.
@@ -1147,6 +1163,7 @@ export function DashboardView({
                   <table>
                     <thead>
                       <tr>
+                        <th className="checkbox-col"></th>
                         <th>Mode</th>
                         <th>Sample</th>
                         <th>Reference</th>
@@ -1158,22 +1175,47 @@ export function DashboardView({
                       </tr>
                     </thead>
                     <tbody>
-                      {[...sessionResults].reverse().map((result, index) => (
-                        <tr key={result.run_id || index}>
-                          <td>
-                            <span className={`job-status-badge mode-badge-${String(result.mode || '').replace(/[^a-z]/g, '')}`}>
-                              {result.mode || '—'}
-                            </span>
-                          </td>
-                          <td>{result.sample_name || '—'}</td>
-                          <td>{result.reference_name || '—'}</td>
-                          <td>{result.database_id || '—'}</td>
-                          <td>{result.created_at ? new Date(result.created_at).toLocaleString() : '—'}</td>
-                          <td>{result.report_html_path ? <a href={buildReportUrl(result.report_html_path)} target="_blank" rel="noreferrer">View</a> : '—'}</td>
-                          <td>{result.report_pdf_path ? <a href={buildArtifactUrl(result.report_pdf_path)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
-                          <td>{result.report_json_path ? <a href={buildArtifactUrl(result.report_json_path)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
-                        </tr>
-                      ))}
+                      {[...sessionResults].reverse().map((result, revIndex) => {
+                        const originalIndex = sessionResults.length - 1 - revIndex;
+                        const isSelected = selectedResultIndices.has(originalIndex);
+                        const resultDbId = result.database_id || '';
+                        const resultRefName = result.reference_name || '';
+                        const isDisabled = comparisonDbId !== null && (resultDbId !== comparisonDbId || resultRefName !== comparisonRefName);
+                        return (
+                          <tr key={result.run_id || revIndex}>
+                            <td className="checkbox-col">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                disabled={isDisabled}
+                                onChange={() => {
+                                  setSelectedResultIndices((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(originalIndex)) {
+                                      next.delete(originalIndex);
+                                    } else {
+                                      next.add(originalIndex);
+                                    }
+                                    return next;
+                                  });
+                                }}
+                              />
+                            </td>
+                            <td>
+                              <span className={`job-status-badge mode-badge-${String(result.mode || '').replace(/[^a-z]/g, '')}`}>
+                                {result.mode || '—'}
+                              </span>
+                            </td>
+                            <td>{result.sample_name || '—'}</td>
+                            <td>{result.reference_name || '—'}</td>
+                            <td>{result.database_id || '—'}</td>
+                            <td>{result.created_at ? new Date(result.created_at).toLocaleString() : '—'}</td>
+                            <td>{result.report_html_path ? <a href={buildReportUrl(result.report_html_path)} target="_blank" rel="noreferrer">View</a> : '—'}</td>
+                            <td>{result.report_pdf_path ? <a href={buildArtifactUrl(result.report_pdf_path)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                            <td>{result.report_json_path ? <a href={buildArtifactUrl(result.report_json_path)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1190,7 +1232,81 @@ export function DashboardView({
                       'Download all'
                     )}
                   </button>
+                  <button
+                    type="button"
+                    className="analyze-primary"
+                    onClick={() => downloadSelectedArtifacts()}
+                    disabled={selectedResultIndices.size === 0 || isSessionDownloadBusy}
+                  >
+                    Download selected
+                  </button>
                 </div>
+                <div className="profile-analyze-row">
+                  <button
+                    type="button"
+                    className="analyze-primary"
+                    onClick={() => selectAllComparable()}
+                    disabled={selectedResultIndices.size === 0}
+                  >
+                    Select all comparable
+                  </button>
+                  <button
+                    type="button"
+                    className="analyze-primary"
+                    onClick={() => fetchComparisonData()}
+                    disabled={selectedResultIndices.size < 2 || isComparisonBusy}
+                  >
+                    {isComparisonBusy ? <><Spinner /> Comparing...</> : 'Compare selected'}
+                  </button>
+                  <button
+                    type="button"
+                    className="comparison-clear-btn"
+                    onClick={() => clearComparison()}
+                    disabled={!comparisonData}
+                  >
+                    Clear comparison
+                  </button>
+                  <label className="comparison-switch comparison-switch-right" title="Show only non-synonymous mutations">
+                    <input
+                      type="checkbox"
+                      checked={nonSynonymousOnly}
+                      onChange={(e) => {
+                        setNonSynonymousOnly(e.target.checked);
+                        if (selectedResultIndices.size >= 2) {
+                          fetchComparisonData(e.target.checked);
+                        }
+                      }}
+                    />
+                    <span>Non-synonymous only</span>
+                  </label>
+                  <label className="comparison-switch" title="Show only database hits">
+                    <input
+                      type="checkbox"
+                      checked={dbHitsOnly}
+                      onChange={(e) => {
+                        setDbHitsOnly(e.target.checked);
+                        if (selectedResultIndices.size >= 2) {
+                          fetchComparisonData(undefined, e.target.checked);
+                        }
+                      }}
+                    />
+                    <span>DB hits only</span>
+                  </label>
+                </div>
+                {comparisonData && (
+                  <section className="comparison-section">
+                    <div className="workspace-output-header section-header">
+                      <div>
+                        <h3>Comparison heatmap</h3>
+                        <p>
+                          {comparisonData.samples.length} samples × {comparisonData.mutations.length} mutations
+                          {comparisonData.references.length > 0 && ` — Reference: ${comparisonData.references[0]}`}
+                        </p>
+                      </div>
+                    </div>
+                    <ComparisonHeatmap data={comparisonData} isBusy={isComparisonBusy} />
+                  </section>
+                )}
                 </>
               )}
             </article>
