@@ -62,6 +62,11 @@ describe('API Utility Functions', () => {
       const result = formatUserError('');
       expect(result).toBe('The operation failed.');
     });
+
+    it('should convert no CDS matches error to user-friendly message', () => {
+      const result = formatUserError('ValueError: No CDS matches found in tmp123.fa');
+      expect(result).toBe('No matches to references in the database found.');
+    });
   });
 });
 

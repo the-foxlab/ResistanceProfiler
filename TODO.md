@@ -276,6 +276,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] `ComparisonHeatmap.jsx` component — Plotly.js-dist-min heatmap with feature annotation track (y2 axis), cell-value legends, feature legend, and proper cleanup via `Plotly.purge()`
 - [X] Download selected artifacts — "Download selected" button in Reports tab sends selected result paths to `/api/artifact-bundle` for ZIP download; "Download all" retained alongside
 - [X] 18 tests in `tests/test_compare.py` covering matrix assembly, coverage gaps, formula-rule db-hit detection, path validation, same-database rejection, same-reference rejection, endpoint integration, and error responses
+- [X] Optional lightweight run cache assessed as unnecessary — current ephemeral session model (React in-memory state + results.db persistence + filesystem artifacts) provides sufficient UX; Redis session cache would add complexity with negligible benefit
 
 ### Web — Chart consolidation
 
@@ -299,15 +300,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   query name matches the variant's CHROM; all remapped variants from all chroms are then fed into
   the existing `annotate_variants` + rule-matching pipeline unchanged and aggregated into a single
   `ProfilingResult`; the report should note the number of distinct chroms processed
-- 🟡 Regression tests for multi-chrom VCF correctness — must be written before and validated
-  after the multi-chrom implementation to ensure no breakage of existing single-chrom behaviour;
-  required coverage: (1) per-variant local alignment snippets (mini-alignments) rendered in the
-  HTML report are correctly anchored to the right query sequence and CDS when multiple CHROM
-  entries are present; (2) BAM-based coverage gaps (`compute_coverage_gaps_from_bam`) project
-  depth per CHROM and emit `CoverageGap` entries correctly for each gene regardless of which
-  chrom the gene's query FASTA record came from; (3) a single-chrom VCF with the existing test
-  reference still produces byte-identical report output as before the change (guard against
-  inadvertent regression)
 - 🟢 Sanger AB1 input — add `respro profile-ab1` that reads an AB1 trace file via
   `SeqIO.read(..., 'abi')` and derives a quality-aware consensus sequence that feeds directly into
   the existing FASTA profiling pipeline; the quality model uses raw trace peak data
@@ -329,15 +321,8 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   (`letter_annotations['phred_quality']`) can serve as a fast pre-filter (Phred < 20 → ambiguous)
   before the trace-peak analysis for positions that passed Phred but still show secondary peaks
 
-### Web deployment and security
-
-- 🟢 Optional lightweight run cache for active session UX — if needed for frontend refresh
-  resilience, keep a short-lived in-memory or Redis-backed session cache keyed by browser session
-  ID (no durable per-user storage)
-
 ### Public release
 
-- 🔴 GitHub Actions CI — add a PyPI publish workflow triggered by version tags
 - 🔴 Bioconda package — write a Bioconda recipe (`meta.yaml`) and submit a PR to
   bioconda-recipes; Bioconda is the standard distribution channel for bioinformatics CLI tools
   and avoids requiring users to have a working pip/Python setup; dependency on pysam makes

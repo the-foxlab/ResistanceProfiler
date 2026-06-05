@@ -11,6 +11,7 @@ const ANALYZE_SUBMODES = [
 ];
 
 export function AnalyzeTab({
+  selectedDatabase,
   vcfInput,
   setVcfInput,
   fastaInput,
@@ -358,6 +359,9 @@ export function AnalyzeTab({
                   {isCancelingJob ? 'Canceling...' : 'Cancel job'}
                 </button>
               ) : null}
+              {selectedDatabase && !isProfileBusy && !isRegenerateBusy ? (
+                <span className="field-optional" style={{ marginLeft: '0.5rem' }}>using {selectedDatabase.display_name}</span>
+              ) : null}
               {statusError ? (
                 <p className="status" style={{ color: 'var(--color-error, #c2410c)', marginLeft: '1rem' }}>{statusError}</p>
               ) : null}
@@ -600,6 +604,9 @@ export function AnalyzeTab({
                     'Submit batch'
                   )}
                 </button>
+                {selectedDatabase && !batchSubmitting ? (
+                  <span className="field-optional" style={{ marginLeft: '0.5rem' }}>using {selectedDatabase.display_name}</span>
+                ) : null}
               </div>
               {batchRateLimitCooldown > 0 ? <p className="status">{`Rate limit reached. Try again in ${batchRateLimitCooldown}s.`}</p> : null}
               {batchError ? <p className="status" style={{ color: 'var(--color-error, #c2410c)' }}>{batchError}</p> : null}

@@ -177,6 +177,7 @@ export function DashboardView({
         <section className="panel-stack">
           {activeMode === 'analyze' && (
             <AnalyzeTab
+              selectedDatabase={selectedDatabase}
               vcfInput={vcfInput}
               setVcfInput={setVcfInput}
               fastaInput={fastaInput}

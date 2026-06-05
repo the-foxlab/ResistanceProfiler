@@ -61,6 +61,9 @@ export function formatUserError(message) {
       + 'of reports from older database versions.'
     );
   }
+  if (lowered.includes('no cds matches found')) {
+    return 'No matches to references in the database found.';
+  }
   if (normalized.startsWith('Request failed:')) {
     return 'The request failed.';
   }
