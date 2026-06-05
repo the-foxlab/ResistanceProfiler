@@ -35,7 +35,7 @@ Always cross-check configuration changes against:
 - `web/backend/config.py`
 - `web/backend/defaults.toml`
 - `docker-compose.web.yml`
-- `docs/manual/docs/webapp.md`
+- `docs/docs/webapp.md`
 
 Do not treat only one file as authoritative. Runtime behavior is defined by defaults + env overrides + compose wiring.
 
@@ -104,7 +104,7 @@ Check that runtime defaults remain safe:
 
 When deployment/runtime behavior changes, update in the same pass:
 
-- `docs/manual/docs/webapp.md`
+- `docs/docs/webapp.md`
 - `README.md` (if quickstart/runtime assumptions changed)
 - Inline comments in `docker-compose.web.yml` when operationally relevant
 

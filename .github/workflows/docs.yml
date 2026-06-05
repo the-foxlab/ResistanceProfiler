@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'docs/manual/**'
+      - 'docs/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -32,21 +32,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[docs]"
 
-      - name: Build example report for /example-report/
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p data/project_databases
-          DB_NAME="herpesdrg"
-          respro databases --download "$DB_NAME" --no-additional-info --output "data/project_databases/${DB_NAME}.db"
-          respro vcf \
-            --project "data/project_databases/${DB_NAME}.db" \
-            --vcf example_data/example_vcf.vcf \
-            --ref-fasta example_data/vcf_reference.fasta \
-            --sample example_data \
-            --output "docs/manual/docs/example-report/index.html"
-          test -s docs/manual/docs/example-report/index.html
-
       - name: Deploy to GitHub Pages
-        working-directory: docs/manual
+        working-directory: docs
         run: mkdocs gh-deploy --force

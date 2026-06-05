@@ -1,6 +1,6 @@
 ---
 name: public-documentation
-description: 'Maintains public documentation for ResistanceProfiler. Use when reviewing or updating the manual (docs/manual/), README, or public-facing development docs for technical accuracy, end-user readability, and drift from current CLI, web, database, or configuration behavior.'
+description: 'Maintains public documentation for ResistanceProfiler. Use when reviewing or updating the manual (docs/), README, or public-facing development docs for technical accuracy, end-user readability, and drift from current CLI, web, database, or configuration behavior.'
 argument-hint: 'Documentation scope, affected feature, and whether to review, update, or rewrite.'
 user-invocable: true
 disable-model-invocation: false
@@ -15,11 +15,11 @@ Public documentation must be technically correct, current with the codebase, and
 ## When to Use
 
 - Reviewing `README.md` for drift from current behavior
-- Updating anything under `docs/manual/docs/`
+- Updating anything under `docs/docs/`
 - Checking whether install, hosting, CLI, output, or configuration docs are outdated
 - Rewriting documentation that is technically correct but too developer-centric or hard to follow
 - Updating public-facing workflow or architecture docs when a user-visible change makes them inaccurate
-- Adding new manual pages or reorganizing the manual nav in `docs/manual/mkdocs.yml`
+- Adding new manual pages or reorganizing the manual nav in `docs/mkdocs.yml`
 
 When NOT to use:
 - Internal code comments
@@ -32,24 +32,24 @@ When NOT to use:
 The public documentation has two layers:
 
 1. **README.md** — concise billboard (~70 lines). Links to the manual for everything detailed. No long explanations or full command references.
-2. **Manual** (`docs/manual/`) — MkDocs Material static site hosted at https://jonas-fuchs.github.io/ResistanceProfiler/. All user-facing content lives here as Markdown files.
+2. **Manual** (`docs/`) — MkDocs Material static site hosted at https://jonas-fuchs.github.io/ResistanceProfiler/. All user-facing content lives here as Markdown files.
 
 ### Preview and build commands
 
 ```bash
 # Preview locally
-cd docs/manual && mkdocs serve
+cd docs && mkdocs serve
 
 # Build static site
-cd docs/manual && mkdocs build
+cd docs && mkdocs build
 
 # Deploy to GitHub Pages (normally handled by CI)
-cd docs/manual && mkdocs gh-deploy --force
+cd docs && mkdocs gh-deploy --force
 ```
 
 ### Deployment
 
-The `.github/workflows/docs.yml` workflow auto-deploys on pushes to `main` that touch `docs/manual/`. Manual deployment is available via `workflow_dispatch`.
+The `.github/workflows/docs.yml` workflow auto-deploys on pushes to `main` that touch `docs/`. Manual deployment is available via `workflow_dispatch`.
 
 ---
 
@@ -69,11 +69,10 @@ For non-development docs, prefer direct explanations, concrete examples, and exp
 
 Primary scope:
 - `README.md` (concise billboard — keep it short)
-- `docs/manual/docs/` (all manual pages)
-- `docs/manual/mkdocs.yml` (nav structure and config)
+- `docs/docs/` (all manual pages)
+- `docs/mkdocs.yml` (nav structure and config)
 
 Secondary scope:
-- Public-facing sections of `docs/development/` when they affect user understanding of workflows or architecture
 - Webapp About tab (`web/frontend/src/components/tabs/AboutTab.jsx`) when its link or quick-reference content drifts from the manual
 
 Always verify claims against current code and configuration before editing.
@@ -89,7 +88,7 @@ Before editing docs, verify the implementation surface:
 - CLI behavior: `respro/cli/`
 - Core workflow and outputs: `respro/core/`, `respro/report/`, `respro/db/`
 - Web behavior and configuration: `web/backend/`, `web/frontend/`, `docker-compose.web.yml`
-- Project-level examples and current messaging: `README.md`, `docs/manual/docs/*`, `docs/development/*`
+- Project-level examples and current messaging: `README.md`, `docs/docs/*`
 - Repo conventions: `.github/copilot-instructions.md`
 
 Do not trust existing documentation as evidence of current behavior.
@@ -128,9 +127,8 @@ When updating user-facing docs:
 When a user-visible behavior changes, update all affected public docs in the same pass. At minimum, check whether the change also affects:
 
 - `README.md` (if the feature is mentioned there)
-- Relevant `docs/manual/docs/*` pages
+- Relevant `docs/docs/*` pages
 - The webapp About tab link if the manual URL changed
-- Relevant `docs/development/*` pages
 
 ### Step 5: Verify the Documentation Change
 
@@ -142,7 +140,7 @@ Check that:
 - The document does not omit critical warnings or limitations
 - Terminology is consistent across the manual pages
 - `mkdocs.yml` nav includes the page if a new one was added
-- Custom CSS classes used in Markdown match those defined in `docs/manual/stylesheets/extra.css`
+- Custom CSS classes used in Markdown match those defined in `docs/stylesheets/extra.css`
 
 ---
 
@@ -180,7 +178,7 @@ Always verify these areas when relevant:
 - HTML / JSON / TSV export behavior
 - Web hosting and environment variables in `docker-compose.web.yml` and `web/backend/`
 - Maintained database workflow and download/init behavior
-- Output interpretation language in `docs/manual/docs/output.md`
+- Output interpretation language in `docs/docs/output.md`
 
 ---
 
