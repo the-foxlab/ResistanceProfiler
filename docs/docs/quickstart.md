@@ -9,12 +9,10 @@ Get ResistanceProfiler running in three steps.
 
 ## 1. Install
 
-Create a virtual environment and install ResPro:
+Install ResPro via bioconda:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+conda install respro
 ```
 
 Verify the installation:
@@ -22,9 +20,6 @@ Verify the installation:
 ```bash
 respro --version
 ```
-
-!!! note
-    If installation fails during a `mappy` build step, see the [Installation](install.md) page for troubleshooting steps.
 
 ## 2. Initialize or download a database
 

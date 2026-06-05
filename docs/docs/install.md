@@ -12,7 +12,7 @@ Choose the installation method that fits your use case:
 
 ## CLI installation
 
-### pip
+### via pip
 
 ```bash
 pip install respro
@@ -26,21 +26,16 @@ cd ResistanceProfiler
 pip install -e ".[dev]"
 ```
 
-### Bioconda
-
-!!! info "Available on release"
-    The Bioconda package will be published alongside the first release. This section will be updated when the package is available on `bioconda`.
-
-Once published:
+### via Bioconda
 
 ```bash
-mamba create -n respro -c conda-forge -c bioconda respro
-mamba activate respro
+conda create -n respro -c conda-forge -c bioconda respro
+conda activate respro
 ```
 
 Bioconda is the recommended install path if you already use conda/mamba — it handles the `mappy` native dependency automatically without a C compiler.
 
-### Troubleshooting: `mappy` fails to install
+### Troubleshooting: `mappy` fails to install during installation with pip
 
 On some systems, pip-based installs fail while building `mappy` (the minimap2 Python binding). Try these steps:
 
@@ -84,7 +79,7 @@ Or pull the released image directly:
 docker pull ghcr.io/jonas-fuchs/resistanceprofiler:latest
 ```
 
-The stack includes the FastAPI backend, an RQ worker, and Redis. Open the app at `http://127.0.0.1:9000/`.
+The stack includes the FastAPI backend, an RQ worker, and Redis. Open the app at `http://127.0.0.1:8000/`.
 
 For configuration options (authentication, CORS, rate limiting, data directories), see [Web app](webapp.md).
 

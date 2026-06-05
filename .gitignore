@@ -35,5 +35,6 @@ example/
 sample.report.html
 .env
 .vscode/
+docker-compose.web_2.yml
 # MkDocs build output
 site/
