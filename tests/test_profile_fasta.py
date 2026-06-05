@@ -85,27 +85,25 @@ def fasta_db_multi_reference(tmp_path: Path) -> Path:
         'INSERT INTO project (name, schema_version) VALUES (?, ?)',
         ('FASTA Test Multi', 15),
     )
+    ref_a_seq = ('ATGAAAGCTTTTGGCCCCAAATTTGGGCCC' * 20)[:600]
+    ref_b_seq = ('CCCCGGGAAATTTCCCGGGAAATTTCCCGG' * 20)[:600]
     conn.execute(
         'INSERT INTO reference (project_id, name, length, organism) VALUES (?, ?, ?, ?)',
-        (1, 'refA', 30, 'Organism A'),
+        (1, 'refA', len(ref_a_seq), 'Organism A'),
     )
     conn.execute(
         'INSERT INTO reference (project_id, name, length, organism) VALUES (?, ?, ?, ?)',
-        (1, 'refB', 30, 'Organism B'),
-    )
-
-    ref_a_seq = 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC'
-    ref_b_seq = 'CCCCGGGAAATTTCCCGGGAAATTTCCCGG'
-
-    conn.execute(
-        'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?)',
-        (1, 'gagA', 'GagA', 0, 30, '+', ref_a_seq),
+        (1, 'refB', len(ref_b_seq), 'Organism B'),
     )
     conn.execute(
         'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
         'VALUES (?, ?, ?, ?, ?, ?, ?)',
-        (2, 'gagB', 'GagB', 0, 30, '+', ref_b_seq),
+        (1, 'gagA', 'GagA', 0, len(ref_a_seq), '+', ref_a_seq),
+    )
+    conn.execute(
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (2, 'gagB', 'GagB', 0, len(ref_b_seq), '+', ref_b_seq),
     )
     conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'testdrug'))
     conn.execute(
@@ -634,7 +632,9 @@ class TestProfileFastaCli:
     ) -> None:
         """Report metadata should come from the reference of the matched feature."""
         fasta_path = tmp_path / 'user_ref_b.fasta'
-        query = 'CCCCGGGAAATTTCCCGGGAAATTTCCCGG'
+        # Use the same repeated motif as refB in the fixture
+        ref_b_seq = ('CCCCGGGAAATTTCCCGGGAAATTTCCCGG' * 20)[:600]
+        query = ref_b_seq
         fasta_path.write_text(f'>user_ref_b\n{query}\n')
 
         vcf_path = tmp_path / 'fasta_ref_b.vcf'

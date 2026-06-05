@@ -38,6 +38,8 @@ from respro.report.alignment_visualization import (
 
 logger = logging.getLogger(__name__)
 
+_SYNONYMOUS_CONSEQUENCES: frozenset[str] = frozenset({'synonymous_variant', 'synonymous'})
+
 _ACCESSION_IDENTIFIER_RE = re.compile(
     r'^(?P<base>(?:[A-Z]{1,6}_[A-Z0-9]*\d[A-Z0-9]*|[A-Z]{1,6}\d[A-Z0-9]*))(?:\.(?P<version>\d+))?$'
 )
@@ -1310,9 +1312,9 @@ def _build_sequence_assessment(
 
     for ann in result.cds_annotations:
         feature = display_names.get(ann.feature_name, ann.feature_name)
-        feature_seen.add(feature)
-        if ann.consequence not in ('synonymous_variant', 'synonymous'):
+        if ann.consequence not in _SYNONYMOUS_CONSEQUENCES:
             non_synonymous_count += 1
+            feature_seen.add(feature)
         if ann.consequence in HIGH_IMPACT_CONSEQUENCES:
             high_impact_features.add(feature)
             high_impact_by_consequence[ann.consequence] += 1
@@ -1386,6 +1388,8 @@ def _build_mutation_profile(
     # in the same codon can produce the same AA label; deduplicate and OR the flags.
     seen: dict[tuple[str, int, str], dict] = {}
     for ann in result.cds_annotations:
+        if ann.consequence in _SYNONYMOUS_CONSEQUENCES:
+            continue
         feature = display_names.get(ann.feature_name, ann.feature_name)
         label = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
