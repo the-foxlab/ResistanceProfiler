@@ -14,6 +14,7 @@ import sqlite3
 
 import mappy
 
+from respro.config.cli_settings import CLI_CONFIG
 from respro.db.features import load_feature_segments_by_feature_id
 from respro.db.models import FeatureMatch, FeatureRecord
 
@@ -30,22 +31,20 @@ def match_query_to_features(
     query_sequence: str,
     features: list[FeatureRecord],
     *,
-    min_identity: float = 0.9,
     threads: int = 1,
 ) -> list[FeatureMatch]:
     """
     Match a query nucleotide sequence against internal feature sequences.
 
-    A match is accepted when ``identity >= min_identity``. Coverage metrics
-    (``cds_coverage`` and ``query_coverage``) are computed and included in results.
+    Coverage metrics (``cds_coverage`` and ``query_coverage``) are computed and
+    included in results.
 
     :param query_sequence: user-provided nucleotide sequence
     :param features: feature records to screen (typically only those with rules)
-    :param min_identity: minimum nucleotide identity to accept
     :param threads: number of mapper threads forwarded to mappy as ``n_threads``
     :return: accepted FeatureMatch list sorted by identity descending
     """
-    matches = _match_with_mappy(query_sequence, features, min_identity, threads)
+    matches = _match_with_mappy(query_sequence, features, threads)
 
     for m in matches:
         ref = m.feature.reference_accession or str(m.feature.reference_id)
@@ -121,35 +120,34 @@ def load_features_with_rules(
 def _match_with_mappy(
     query_sequence: str,
     features: list[FeatureRecord],
-    min_identity: float,
     threads: int,
 ) -> list[FeatureMatch]:
     """
     Run mappy (minimap2) feature matching.
 
-    Indexes the query once using an adaptive minimap2 preset, then maps each
-    CDS against the index. The mappy CIGAR (feature=query, genome=reference) is
-    converted to the pipeline convention (genome=query, CDS=reference) by
-    swapping I and D operations.  Coordinate fields ``query_start``/``query_end``
-    and ``cds_start`` are mapped from mappy's ``r_st``/``r_en`` and ``q_st``
-    directly, compatible with ``cigar_to_coordinate_map`` and
-    ``_build_query_to_cds_map`` for both strand orientations.
+    Indexes the query with settings from ``CLI_CONFIG.alignment``, then maps
+    each CDS against the index. The mappy CIGAR (feature=query,
+    genome=reference) is converted to the pipeline convention (genome=query,
+    CDS=reference) by swapping I and D. Coordinate fields use mappy's
+    ``r_st``/``r_en`` and ``q_st`` directly, compatible with
+    ``cigar_to_coordinate_map`` and ``_build_query_to_cds_map`` for both
+    strand orientations.
     """
     query_upper = query_sequence.upper()
-    preset = 'sr' if len(query_upper) < 5000 else 'map-ont'
-    aligner_kwargs: dict[str, int | str] = {
+    cfg = CLI_CONFIG.alignment
+    aligner_kwargs: dict[str, int | str | tuple[int, ...]] = {
         'seq': query_upper,
-        'preset': preset,
+        'preset': cfg.preset,
+        'k': cfg.k,
+        'w': cfg.w,
+        'best_n': cfg.best_n,
         'n_threads': max(1, threads),
     }
-    if preset == 'sr':
-        # Short queries need denser minimizers to retain local matches.
-        if len(query_upper) < 100:
-            aligner_kwargs['k'] = 7
-            aligner_kwargs['w'] = 2
-        else:
-            aligner_kwargs['k'] = 11
-            aligner_kwargs['w'] = 5
+    # Build scoring tuple: (A, B, O1, E1, O2, E2).
+    # Only O1 (gap_open_penalty) is configurable; remaining values are map-ont defaults.
+    aligner_kwargs['scoring'] = (
+        2, 4, cfg.gap_open_penalty, 2, 24, 1,
+    )
     aligner = mappy.Aligner(**aligner_kwargs)
     if not aligner:
         raise RuntimeError('mappy: failed to build index for query sequence')
@@ -174,14 +172,6 @@ def _match_with_mappy(
         identity = h.mlen / h.blen if h.blen else 0.0
         cds_coverage = (h.q_en - h.q_st) / len(cds)
         query_coverage = (h.r_en - h.r_st) / len(query_upper)
-        if identity < min_identity:
-            logger.debug(
-                '%s — Feature %r: identity %.2f below threshold',
-                feature.reference_accession or str(feature.reference_id),
-                feature.name,
-                identity,
-            )
-            continue
 
         strand = '+' if h.strand == 1 else '-'
         cigar = _normalize_mappy_cigar(h.cigar_str, strand)

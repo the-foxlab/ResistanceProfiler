@@ -198,7 +198,21 @@
                     {% if context.summary.drug_table.has_scores %}
                       <th class="drug-table-count">Sum of Scores</th>
                     {% endif %}
-                    {% if context.summary.drug_table.has_assessment %}
+                    {% if context.summary.drug_table.has_method_assessments %}
+                      {% for ml in context.summary.drug_table.method_labels %}
+                      {% if ml.value_header %}
+                      <th class="drug-table-count">{{ ml.value_header }}</th>
+                      {% endif %}
+                      <th>
+                        {{ ml.label }} Assessment
+                        <span class="db-hit-freq-info">
+                          <img class="db-hit-info-icon" src="{{ context.summary.info_icon }}" alt="info" width="13" height="13">
+                          <div class="db-hit-info-panel">{{ ml.description }}</div>
+                        </span>
+                      </th>
+                      {% endfor %}
+                    {% endif %}
+                    {% if context.summary.drug_table.has_final_assessment %}
                       <th>
                         Assessment
                         <span class="db-hit-freq-info">
@@ -229,7 +243,24 @@
                           {% if context.summary.drug_table.has_scores %}
                             <td class="drug-table-count">{{ drug.score_display }}</td>
                           {% endif %}
-                          {% if context.summary.drug_table.has_assessment %}
+                          {% if context.summary.drug_table.has_method_assessments %}
+                            {% for ml in context.summary.drug_table.method_labels %}
+                            {% if ml.value_header %}
+                            <td class="drug-table-count">{{ drug[ml.value_field] }}</td>
+                            {% endif %}
+                            <td>
+                              {% set ma = drug.method_assessments | selectattr('method', 'eq', ml.method) | list %}
+                              {% if ma and ma[0].assessment %}
+                                {% if context.summary.drug_table.has_final_assessment %}
+                                  {{ ma[0].assessment }}
+                                {% else %}
+                                  <span class="db-hit-phenotype {{ ma[0].assessment_badge_class }}">{{ ma[0].assessment }}</span>
+                                {% endif %}
+                              {% else %}—{% endif %}
+                            </td>
+                            {% endfor %}
+                          {% endif %}
+                          {% if context.summary.drug_table.has_final_assessment %}
                             <td>
                               {% if drug.assessment %}
                                 <span class="db-hit-phenotype {{ drug.assessment_badge_class }}">{{ drug.assessment }}</span>
@@ -252,7 +283,24 @@
                         {% if context.summary.drug_table.has_scores %}
                           <td class="drug-table-count">{{ drug.score_display }}</td>
                         {% endif %}
-                        {% if context.summary.drug_table.has_assessment %}
+                        {% if context.summary.drug_table.has_method_assessments %}
+                          {% for ml in context.summary.drug_table.method_labels %}
+                          {% if ml.value_header %}
+                          <td class="drug-table-count">{{ drug[ml.value_field] }}</td>
+                          {% endif %}
+                          <td>
+                            {% set ma = drug.method_assessments | selectattr('method', 'eq', ml.method) | list %}
+                            {% if ma and ma[0].assessment %}
+                              {% if context.summary.drug_table.has_final_assessment %}
+                                {{ ma[0].assessment }}
+                              {% else %}
+                                <span class="db-hit-phenotype {{ ma[0].assessment_badge_class }}">{{ ma[0].assessment }}</span>
+                              {% endif %}
+                            {% else %}—{% endif %}
+                          </td>
+                          {% endfor %}
+                        {% endif %}
+                        {% if context.summary.drug_table.has_final_assessment %}
                           <td>
                             {% if drug.assessment %}
                               <span class="db-hit-phenotype {{ drug.assessment_badge_class }}">{{ drug.assessment }}</span>

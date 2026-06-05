@@ -66,6 +66,14 @@ Mark items done and update priorities after each completed milestone.
   large sequences; pairwise backend and `--aligner` selection were removed after equivalence validation;
   CIGAR convention verified compatible with downstream VCF remap and coordinate mapping; `mappy>=2.24`
   added as a dependency
+- [X] Sensitive mappy alignment settings — switched from `sr` preset (k=11/w=5) to `map-ont` (k=6/w=3/best_n=1) following Stanford HIVDB's approach; enables alignment of divergent sequences (~60–75% identity); settings externalized to `[alignment]` section in `defaults.toml`
+- [X] Gap-open penalty (O1) externalized and tuned — `gap_open_penalty = 6` added to `[alignment]` in
+  `defaults.toml` (map-ont default is 4); passed as O1 component of the `scoring` tuple in
+  `_match_with_mappy()`; raising O1 from 4→6 suppresses compensating indel pairs (adjacent I/D
+  in CIGAR that represent a single divergence event and cause spurious double-frameshift calls)
+  without losing real indels; identity unchanged (0.757→0.755 on HIV FJ554792 test case);
+  comprehensive test coverage in `TestMappyGapPenalty` (9 tests: forward/reverse frameshifts,
+  triplet indels, divergent SNP-only, real indels in divergent context)
 
 ### Codon-aware annotation
 
@@ -89,6 +97,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Formula-rule first-class workflow outputs — `resistance_formula_rule` import is wired into profiling-time matching, report rendering, results DB persistence, regenerate, and WebUI
 - [X] BLOSUM62 similarity scoring for matched substitutions (`core/similarity.py`)
 - [X] End-to-end formula-rule loading via TSV `init` path — grouped `rule_group` rows are validated and loaded during `init_project` (no manual SQL setup)
+- [X] Generic insertion wildcard rule support — `INS_any` token matches any in-frame insertion at the given position; specific rules take precedence; allowed as a formula-rule member
 
 ### Reporting and export
 
@@ -176,6 +185,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Optional database metadata in `respro init` — `--metadata` accepts validated JSON with fixed keys (`maintainers`, `contact`, `publication_pmid`, `website`, `description`, `maintainer_update`, `license`, `tsv_checksum`); PMID values are DOI-enriched best-effort at creation time and stored on the project row
 - [X] `respro manage database <db_path> --info` — added project metadata inspection mode that prints non-empty project identity and curated metadata fields
 - [X] Interpretation algorithm metadata in `metadata.json` — `interpretation_algorithms` top-level array in metadata JSON accepts coexisting algorithm types (`ic50_thresholds`, `drug_groups`, `drug_interpretation`, `drug_alias`); each is validated on import and stored in the `interpretation_algorithm` table in `project.db`; `load_interpretation_algorithms` exposes the config to downstream consumers (report, scoring); full test coverage in `tests/test_algorithms.py`; documented in `docs/user/database-preparation.md`
+- [X] Drug-level cumulative score interpretation (Stanford-like)
 
 ### Web deployment and security (done)
 
@@ -258,19 +268,26 @@ Mark items done and update priorities after each completed milestone.
 - [X] Batch tab in web dashboard — VCF and FASTA batch modes with multi-file upload (up to 25), shared reference FASTA for VCF, project selector, per-sample results table with status polling, live 429 rate-limit countdown, and "New batch" reset button
 - [X] 5 new tests in `tests/test_web_api.py` covering batch submit success (VCF + FASTA), max-size enforcement (VCF + FASTA), and mismatched sample-name/path lengths
 
+### Web — Multi-sample comparison
+
+- [X] Multi-sample comparison heatmap feature — Reports tab supports selecting multiple session results (checkboxes with same-database + same-reference enforcement), "Compare selected" button triggers `POST /api/compare` endpoint returning a mutation × sample matrix with allele frequencies, coverage gaps, db-hit annotations, and feature annotation; Plotly.js client-side heatmap renders with viridis colorscale, grey coverage-gap sentinel, ★ db-hit markers, and categorical feature annotation row
+- [X] `POST /api/compare` backend endpoint and `web/backend/services/compare.py` — `build_comparison_matrix` assembles union of mutation keys (sorted by feature, position, ref/alt AA), builds allele frequency matrix with coverage-gap and db-hit detection (combining `rule_match` and `formula_rule_hit` sources), returns `CompareResponse` with `samples`, `references`, `mutations`, `mutation_labels`, `features`, `feature_map`, and `matrix`
+- [X] Same-database and same-reference validation — backend `_validate_same_database` and `_validate_same_reference` enforce homogeneous `project_name` and `reference_name` across selected results; frontend disables checkboxes from different databases and displays reference name in heatmap header
+- [X] `ComparisonHeatmap.jsx` component — Plotly.js-dist-min heatmap with feature annotation track (y2 axis), cell-value legends, feature legend, and proper cleanup via `Plotly.purge()`
+- [X] Download selected artifacts — "Download selected" button in Reports tab sends selected result paths to `/api/artifact-bundle` for ZIP download; "Download all" retained alongside
+- [X] 18 tests in `tests/test_compare.py` covering matrix assembly, coverage gaps, formula-rule db-hit detection, path validation, same-database rejection, same-reference rejection, endpoint integration, and error responses
+- [X] Optional lightweight run cache assessed as unnecessary — current ephemeral session model (React in-memory state + results.db persistence + filesystem artifacts) provides sufficient UX; Redis session cache would add complexity with negligible benefit
+
+### Web — Chart consolidation
+
+- [X] Frontend chart library consolidation — migrated all recharts components (pie charts, IC50 scatter/bar, position stacked bars) to Plotly.js; removed recharts dependency; all charts now use a single rendering library
+
 ---
 
 ## Next
 
 Items are grouped by theme and ordered by priority within each group.
 Priority: 🔴 high · 🟡 medium · 🟢 low
-
-### Overlapping ORFs
-
-- 🟡 Regression tests for overlapping ORF annotation — no test currently verifies that a
-  variant falling inside two genes simultaneously produces correct, independent annotations for
-  both across all profiling paths; VCF remap-level coverage now exists in `tests/test_profile_vcf.py`
-  and FASTA-path coverage is still required
 
 ### Usability and workflow
 
@@ -283,20 +300,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   query name matches the variant's CHROM; all remapped variants from all chroms are then fed into
   the existing `annotate_variants` + rule-matching pipeline unchanged and aggregated into a single
   `ProfilingResult`; the report should note the number of distinct chroms processed
-- 🟡 Regression tests for multi-chrom VCF correctness — must be written before and validated
-  after the multi-chrom implementation to ensure no breakage of existing single-chrom behaviour;
-  required coverage: (1) per-variant local alignment snippets (mini-alignments) rendered in the
-  HTML report are correctly anchored to the right query sequence and CDS when multiple CHROM
-  entries are present; (2) BAM-based coverage gaps (`compute_coverage_gaps_from_bam`) project
-  depth per CHROM and emit `CoverageGap` entries correctly for each gene regardless of which
-  chrom the gene's query FASTA record came from; (3) a single-chrom VCF with the existing test
-  reference still produces byte-identical report output as before the change (guard against
-  inadvertent regression)
-- 🟡 Drug-level cumulative score interpretation (Stanford-like) — add score aggregation across
-  all matched single and formula rules per drug, expose per-drug totals in report/JSON output,
-  and support optional metadata-driven score-to-classification threshold maps (global defaults
-  with optional per-drug overrides) so cumulative scores can be translated into resistance
-  classes when curated mappings are provided
 - 🟢 Sanger AB1 input — add `respro profile-ab1` that reads an AB1 trace file via
   `SeqIO.read(..., 'abi')` and derives a quality-aware consensus sequence that feeds directly into
   the existing FASTA profiling pipeline; the quality model uses raw trace peak data
@@ -318,23 +321,10 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   (`letter_annotations['phred_quality']`) can serve as a fast pre-filter (Phred < 20 → ambiguous)
   before the trace-peak analysis for positions that passed Phred but still show secondary peaks
 
-### Web deployment and security
-
-- 🟢 Optional lightweight run cache for active session UX — if needed for frontend refresh
-  resilience, keep a short-lived in-memory or Redis-backed session cache keyed by browser session
-  ID (no durable per-user storage)
-- 🟡 Paste sequence ?
-
 ### Public release
 
-- 🔴 GitHub Actions CI — add a PyPI publish workflow triggered by version tags
 - 🔴 Bioconda package — write a Bioconda recipe (`meta.yaml`) and submit a PR to
   bioconda-recipes; Bioconda is the standard distribution channel for bioinformatics CLI tools
   and avoids requiring users to have a working pip/Python setup; dependency on pysam makes
   Bioconda the natural distribution path once pysam is a requirement
 - 🟡 Established wet-lab protocols
-
-### Smaller Issues
-
-- 🟡 add herpes drg assessment of ic50 values
-- 🟡 herpes drg --> fold ic50 ?

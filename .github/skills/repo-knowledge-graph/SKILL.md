@@ -1,6 +1,6 @@
 ---
 name: repo-knowledge-graph
-description: 'Builds and maintains a repository interaction map for ResistanceProfiler. Use when module boundaries change, new cross-module call paths are introduced, or development architecture docs risk drifting from code. Produces and updates docs/development/detailed_respro_layout.md and docs/development/detailed_app_layout.md.'
+description: 'Builds and maintains a repository interaction map for ResistanceProfiler. Use when module boundaries change, new cross-module call paths are introduced, or development architecture docs risk drifting from code.'
 argument-hint: 'Scope (respro, web, or full repo), thoroughness (quick/medium/deep), and whether to refresh docs or review drift only.'
 user-invocable: true
 disable-model-invocation: false
@@ -11,11 +11,6 @@ disable-model-invocation: false
 ## Overview
 
 This skill maintains a practical architecture knowledge graph for ResistanceProfiler. It is for module interaction mapping and function-level flow tracing in change-critical areas, not for generating full static call graphs on every task.
-
-Primary outputs:
-
-- `docs/development/detailed_respro_layout.md`
-- `docs/development/detailed_app_layout.md`
 
 ## When to Use
 
@@ -69,8 +64,8 @@ Mode expectations:
 4. Identify architecture drift:
    - compare discovered edges with existing development docs
    - flag outdated statements or missing boundaries
-5. Update docs selectively:
-   - update only impacted sections in `detailed_respro_layout.md` and/or `detailed_app_layout.md`
+5. Update contributing.md selectively:
+   - update the "Design principles" and "Module layout" sections in `docs/docs/contributing.md` when module responsibilities change
    - preserve stable terminology and module responsibilities
 6. Report confidence and unknowns:
    - list assumptions and unverified dynamic paths
@@ -85,7 +80,7 @@ When running this skill, produce:
 2. Key flow chains
    - concise bullet list of function-level paths in scope
 3. Doc impact
-   - which file(s) were updated
+   - which sections in `docs/docs/contributing.md` were updated
    - which sections changed
 4. Residual uncertainty
    - dynamic/runtime edges not fully verified
@@ -104,7 +99,7 @@ Prefer concise graphs over exhaustive graphs.
 
 - [ ] Scope and mode selected explicitly
 - [ ] Only structural/interaction-relevant paths documented
-- [ ] No stale architecture statements remain in touched sections
+- [ ] No stale architecture statements remain in touched sections of contributing.md
 - [ ] Updated docs reflect current module boundaries and key function chains
 - [ ] Unknowns or assumptions are listed explicitly
 
@@ -113,5 +108,5 @@ Prefer concise graphs over exhaustive graphs.
 - Generating full call graphs for every PR
 - Rewriting entire docs for small local changes
 - Treating speculative flows as facts
-- Duplicating content already covered in `contribution-and-architecture.md`
+- Duplicating content that is already covered in `contributing.md`
 - Mandating this skill for all agents on all tasks

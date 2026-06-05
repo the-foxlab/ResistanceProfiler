@@ -15,7 +15,8 @@ env/
 
 # IDE
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 *.swp
 *.swo
 
@@ -33,3 +34,7 @@ reports/
 example/
 sample.report.html
 .env
+.vscode/
+docker-compose.web_2.yml
+# MkDocs build output
+site/

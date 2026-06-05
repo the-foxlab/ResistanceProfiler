@@ -118,6 +118,18 @@ class TestNormalizeMutation:
         assert normalize_mutation('insGG', reference='F', position_1based=50) == 'F50FGG'
         assert normalize_mutation('insGG') is None
 
+    def test_ins_any_token_normalized(self):
+        assert normalize_mutation('ins_any') == 'INS_any'
+
+    def test_ins_any_case_insensitive(self):
+        assert normalize_mutation('INS_ANY') == 'INS_any'
+        assert normalize_mutation('Ins_Any') == 'INS_any'
+        assert normalize_mutation('ins_Any') == 'INS_any'
+
+    def test_ins_any_is_not_confused_with_bare_ins(self):
+        # Regression guard: specific bare insertion still works normally
+        assert normalize_mutation('insGG', reference='F', position_1based=50) == 'F50FGG'
+
     def test_rejects_wildcard_notation(self):
         assert normalize_mutation('any') is None
         assert normalize_mutation('x') is None
@@ -531,9 +543,8 @@ class TestInsertionAnnotation:
         feature = self._fwd_feature()
         # VCF anchor is the preceding nucleotide in genomic 5'->3': boundary after codon 0 -> pos=2.
         var = VariantCall(chrom='c', pos=2, ref='G', alt='GGGG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.feature_name == 'feature'
         assert ann.codon_pos == 0
         assert ann.ref_aa == 'M'
@@ -545,9 +556,8 @@ class TestInsertionAnnotation:
         feature = self._fwd_feature()
         # Boundary after codon 1 -> anchor at pos=5.
         var = VariantCall(chrom='c', pos=5, ref='G', alt='GGGG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.ref_aa == 'G'
         assert ann.alt_aa == 'GG'
         assert ann.consequence == 'insertion'
@@ -556,33 +566,32 @@ class TestInsertionAnnotation:
         """1-nt insertion at codon boundary is annotated as frameshift."""
         feature = self._fwd_feature()
         var = VariantCall(chrom='c', pos=2, ref='G', alt='GG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.ref_aa == 'M'
         assert ann.alt_aa == 'MfsX'
         assert ann.consequence == 'frameshift'
 
     def test_inframe_insertion_at_mid_codon_is_complex(self) -> None:
-        """In-frame insertion anchored mid-codon is annotated as inframe_complex."""
+        """In-frame insertion anchored mid-codon is now split into insertion annotation."""
         feature = self._fwd_feature()
         # pos=1 is mid-codon for codon 0 under VCF-anchor semantics.
         var = VariantCall(chrom='c', pos=1, ref='T', alt='TGGG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        anns = _annotate_variant_in_feature(var, feature)
 
-        assert ann is not None
+        assert len(anns) == 1
+        ann = anns[0]
         assert ann.ref_aa == 'M'
-        assert ann.alt_aa == '?'
-        assert ann.consequence == 'inframe_complex'
+        assert ann.alt_aa == 'MG'
+        assert ann.consequence == 'insertion'
 
     def test_mid_codon_non_inframe_insertion_is_frameshift(self) -> None:
         """Non-in-frame insertion is frameshift even when anchored mid-codon."""
         feature = self._fwd_feature()
         # pos=1 is frame_offset 1 within codon 0; 1-nt payload insertion -> frameshift
         var = VariantCall(chrom='c', pos=1, ref='T', alt='TG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.ref_aa == 'M'
         assert ann.alt_aa == 'MfsX'
         assert ann.consequence == 'frameshift'
@@ -592,9 +601,8 @@ class TestInsertionAnnotation:
         feature = self._rev_feature()
         # Boundary after codon 0 on '-' strand maps to genomic anchor pos=5.
         var = VariantCall(chrom='c', pos=5, ref='C', alt='CGGG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.ref_aa == 'M'
         assert ann.alt_aa == 'MP'
         assert ann.consequence == 'insertion'
@@ -608,9 +616,8 @@ class TestInsertionAnnotation:
             chrom='c', pos=5, ref='G', alt='GGGG', allele_freq=0.9, depth=100,
             query_ref_codon='AGG',
         )
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.ref_aa == 'R'
         assert ann.alt_aa == 'RG'
         assert ann.consequence == 'insertion'
@@ -627,9 +634,8 @@ class TestInsertionAnnotation:
             chrom='c', pos=5, ref='C', alt='CCCC', allele_freq=0.9, depth=100,
             query_ref_codon='AGG',
         )
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.ref_aa == 'R'
         assert ann.alt_aa == 'RG'
         assert ann.consequence == 'insertion'
@@ -652,9 +658,8 @@ class TestDeletionAnnotation:
         feature = self._fwd_feature()
         # Boundary after codon 0 -> anchor at pos=2.
         var = VariantCall(chrom='c', pos=2, ref='GTGG', alt='G', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.feature_name == 'feature'
         assert ann.codon_pos == 0
         assert ann.ref_aa == 'MW'
@@ -666,9 +671,8 @@ class TestDeletionAnnotation:
         feature = self._fwd_feature()
         # Boundary after codon 0, deleting 6-nt payload.
         var = VariantCall(chrom='c', pos=2, ref='GTGGGGT', alt='G', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.codon_pos == 0
         assert ann.ref_aa == 'MWG'
         assert ann.alt_aa == 'M'
@@ -678,33 +682,32 @@ class TestDeletionAnnotation:
         """1-nt deletion at codon boundary is annotated as frameshift."""
         feature = self._fwd_feature()
         var = VariantCall(chrom='c', pos=2, ref='GT', alt='G', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.ref_aa == 'M'
         assert ann.alt_aa == 'MfsX'
         assert ann.consequence == 'frameshift'
 
     def test_inframe_deletion_at_mid_codon_is_complex(self) -> None:
-        """In-frame deletion anchored mid-codon is annotated as inframe_complex."""
+        """In-frame deletion anchored mid-codon is now split into deletion annotation."""
         feature = self._fwd_feature()
         # pos=1 is frame_offset 1 within codon 0
         var = VariantCall(chrom='c', pos=1, ref='TGGG', alt='T', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        anns = _annotate_variant_in_feature(var, feature)
 
-        assert ann is not None
-        assert ann.ref_aa == 'M'
-        assert ann.alt_aa == '?'
-        assert ann.consequence == 'inframe_complex'
+        assert len(anns) == 1
+        ann = anns[0]
+        assert ann.ref_aa == 'MG'
+        assert ann.alt_aa == 'M'
+        assert ann.consequence == 'deletion'
 
     def test_mid_codon_non_inframe_deletion_is_frameshift(self) -> None:
         """Non-in-frame deletion is frameshift even when anchored mid-codon."""
         feature = self._fwd_feature()
         # pos=1 is frame_offset 1 within codon 0; delete 1 nt payload -> frameshift
         var = VariantCall(chrom='c', pos=1, ref='TG', alt='T', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.ref_aa == 'M'
         assert ann.alt_aa == 'MfsX'
         assert ann.consequence == 'frameshift'
@@ -717,9 +720,8 @@ class TestDeletionAnnotation:
         )
         # Boundary after codon 0 on '-' strand maps to genomic anchor pos=2.
         var = VariantCall(chrom='c', pos=2, ref='AAAA', alt='A', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.ref_aa == 'MF'
         assert ann.alt_aa == 'M'
         assert ann.consequence == 'deletion'
@@ -733,9 +735,8 @@ class TestDeletionAnnotation:
             chrom='c', pos=5, ref='GGGG', alt='G', allele_freq=0.9, depth=100,
             query_ref_codon='AGG',
         )
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.ref_aa == 'RG'   # anchor from query (R) + deleted G
         assert ann.alt_aa == 'R'
         assert ann.consequence == 'deletion'
@@ -751,9 +752,8 @@ class TestDeletionAnnotation:
             chrom='c', pos=2, ref='AAAA', alt='A', allele_freq=0.9, depth=100,
             query_ref_codon='AGG',
         )
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.ref_aa == 'RF'   # anchor R (from query) + deleted F
         assert ann.alt_aa == 'R'
         assert ann.consequence == 'deletion'
@@ -773,9 +773,8 @@ class TestFrameshiftAnnotation:
     def test_frameshift_insertion_stores_anchor_aa(self) -> None:
         feature = self._fwd_feature()
         var = VariantCall(chrom='c', pos=3, ref='G', alt='GG', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.codon_pos == 1
         assert ann.ref_aa == 'G'   # codon GGG → G
         assert ann.alt_aa == 'GfsX'
@@ -785,9 +784,8 @@ class TestFrameshiftAnnotation:
     def test_frameshift_deletion_stores_anchor_aa(self) -> None:
         feature = self._fwd_feature()
         var = VariantCall(chrom='c', pos=3, ref='GG', alt='G', allele_freq=0.9, depth=100)
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.ref_aa == 'G'
         assert ann.alt_aa == 'GfsX'
         assert ann.consequence == 'frameshift'
@@ -809,9 +807,8 @@ class TestFrameshiftAnnotation:
             chrom='c', pos=3, ref='GG', alt='G', allele_freq=0.9, depth=100,
             query_ref_codon='AGG',
         )
-        ann = _annotate_variant_in_feature(var, feature)
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        assert ann is not None
         assert ann.ref_aa == 'R'   # from query, not internal G
         assert ann.alt_aa == 'RfsX'
         assert ann.consequence == 'frameshift'
@@ -1002,3 +999,765 @@ class TestSuppressRulelessOverlapAnnotations:
 
         assert len(filtered) == 1
         assert filtered[0].feature_name == 'gag-pol_5'
+
+
+# ─── Mid-codon in-frame indel splitting ───────────────────────────────
+
+class TestMidCodonInframeIndelSplit:
+    """
+    Mid-codon in-frame indels produce missense + indel annotations
+    instead of a single inframe_complex annotation.
+    """
+
+    # ── helpers ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _fwd_feature(nt_sequence: str = 'ATGGGGTTT') -> FeatureRecord:
+        """Forward-strand feature. Default: ATG GGG TTT → M G F."""
+        return FeatureRecord(
+            id=1, reference_id=1, name='feature', protein='P',
+            start=0, end=len(nt_sequence), strand='+', codon_start=0,
+            nt_sequence=nt_sequence,
+        )
+
+    @staticmethod
+    def _rev_feature(nt_sequence: str = 'ATGGGGTTT') -> FeatureRecord:
+        """Minus-strand feature. nt_sequence is in coding orientation."""
+        return FeatureRecord(
+            id=1, reference_id=1, name='feature', protein='P',
+            start=0, end=len(nt_sequence), strand='-', codon_start=0,
+            nt_sequence=nt_sequence,
+        )
+
+    # ── forward-strand insertion tests ─────────────────────────────────
+
+    def test_inframe_insertion_mid_codon_frame1_synonymous_anchor(self) -> None:
+        """
+        3-nt insertion at frame_offset=1 where anchor codon does NOT change.
+
+        Feature: ATGGGGTTT (M G F), pos=1, ref='T', alt='TGGG'
+        Anchor codon 0 = ATG → M, preserved=2 (AT)
+        Inserted bases (coding) = GGG
+        Query anchor codon = AT + G = ATG → M (synonymous)
+        Insertion payload: GG + displaced G = GGG → G
+        → Only insertion annotation: ref_aa=M, alt_aa=MG
+        """
+        feature = self._fwd_feature()
+        var = VariantCall(chrom='c', pos=1, ref='T', alt='TGGG', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.consequence == 'insertion'
+        assert ann.codon_pos == 0
+        assert ann.ref_aa == 'M'
+        assert ann.alt_aa == 'MG'
+
+    def test_inframe_insertion_mid_codon_frame0_missense_anchor(self) -> None:
+        """
+        3-nt insertion at frame_offset=0 where anchor codon changes.
+
+        Feature: ATGGGGTTT (M G F), pos=3, ref='G', alt='GCCC'
+        Anchor codon 1 = GGG → G, preserved=1 (G)
+        Inserted bases = CCC
+        Query anchor codon = G + CC = GCC → A
+        → Missense: G→A at codon 1
+        → Insertion: ref_aa=G, alt_aa=GR (payload: C + displaced GG = CGG → R)
+        """
+        feature = self._fwd_feature()
+        var = VariantCall(chrom='c', pos=3, ref='G', alt='GCCC', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        missense = [a for a in results if a.consequence == 'missense']
+        insertion = [a for a in results if a.consequence == 'insertion']
+        assert len(missense) == 1
+        assert len(insertion) == 1
+
+        m = missense[0]
+        assert m.codon_pos == 1
+        assert m.ref_aa == 'G'
+        assert m.alt_aa == 'A'
+        assert m.ref_codon == 'GGG'
+        assert m.alt_codon == 'GCC'
+
+        i = insertion[0]
+        assert i.codon_pos == 1
+        assert i.ref_aa == 'G'
+        assert i.alt_aa == 'GR'
+
+    def test_inframe_insertion_mid_codon_frame1_missense_anchor(self) -> None:
+        """
+        3-nt insertion at frame_offset=1 where anchor codon changes.
+
+        Feature: ATGAAAGGG (M K G), pos=4, ref='A', alt='ACCC'
+        Anchor codon 1 = AAA → K, preserved=2 (AA)
+        Inserted bases = CCC
+        Query anchor codon = AA + C = AAC → N
+        → Missense: K→N at codon 1
+        → Insertion: ref_aa=K, alt_aa=KP (payload: CC + displaced A = CCA → P)
+        """
+        feature = self._fwd_feature('ATGAAAGGG')
+        var = VariantCall(chrom='c', pos=4, ref='A', alt='ACCC', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        missense = [a for a in results if a.consequence == 'missense']
+        insertion = [a for a in results if a.consequence == 'insertion']
+        assert len(missense) == 1
+        assert len(insertion) == 1
+
+        m = missense[0]
+        assert m.codon_pos == 1
+        assert m.ref_aa == 'K'
+        assert m.alt_aa == 'N'
+
+        i = insertion[0]
+        assert i.codon_pos == 1
+        assert i.ref_aa == 'K'
+        assert i.alt_aa == 'KP'
+
+    def test_inframe_insertion_mid_codon_frame0_stop_gained(self) -> None:
+        """
+        3-nt insertion at frame_offset=0 where anchor codon becomes a stop codon.
+
+        Feature: ATGTGGAAG (M W K), pos=3, ref='T', alt='TAAG'
+        Anchor codon 1 = TGG → W, preserved=1 (T)
+        Inserted bases = AAG
+        Query anchor codon = T + AA = TAA → * (stop)
+        → stop_gained: W→* at codon 1
+        → Insertion: ref_aa=W, alt_aa=WG (payload: G + displaced GG = GGG → G)
+        """
+        feature = self._fwd_feature('ATGTGGAAG')
+        var = VariantCall(chrom='c', pos=3, ref='T', alt='TAAG', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        stop = [a for a in results if a.consequence == 'stop_gained']
+        insertion = [a for a in results if a.consequence == 'insertion']
+        assert len(stop) == 1
+        assert len(insertion) == 1
+
+        s = stop[0]
+        assert s.codon_pos == 1
+        assert s.ref_aa == 'W'
+        assert s.alt_aa == '*'
+        assert s.ref_codon == 'TGG'
+        assert s.alt_codon == 'TAA'
+
+        i = insertion[0]
+        assert i.codon_pos == 1
+        assert i.ref_aa == 'W'
+        assert i.alt_aa == 'WG'
+
+    def test_inframe_insertion_mid_codon_6nt(self) -> None:
+        """
+        6-nt insertion at frame_offset=1 produces 2 inserted AAs.
+
+        Feature: ATGAAAGGG (M K G), pos=4, ref='A', alt='ACCCCCC'
+        Anchor codon 1 = AAA → K, preserved=2 (AA)
+        Inserted bases = CCCCCC (6 bases)
+        Query anchor codon = AA + C = AAC → N
+        → Missense: K→N at codon 1
+        → Insertion: ref_aa=K, alt_aa=KPP
+          (payload: CCCCC + displaced A = CCCCCA → CCC|CCA → P|P → PP)
+        """
+        feature = self._fwd_feature('ATGAAAGGG')
+        var = VariantCall(chrom='c', pos=4, ref='A', alt='ACCCCCC', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        missense = [a for a in results if a.consequence == 'missense']
+        insertion = [a for a in results if a.consequence == 'insertion']
+        assert len(missense) == 1
+        assert len(insertion) == 1
+
+        m = missense[0]
+        assert m.codon_pos == 1
+        assert m.ref_aa == 'K'
+        assert m.alt_aa == 'N'
+
+        i = insertion[0]
+        assert i.codon_pos == 1
+        assert i.ref_aa == 'K'
+        assert i.alt_aa == 'KPP'
+
+    # ── forward-strand deletion tests ──────────────────────────────────
+
+    def test_inframe_deletion_mid_codon_frame1_synonymous_anchor(self) -> None:
+        """
+        3-nt deletion at frame_offset=1 where anchor codon does NOT change.
+
+        Feature: ATGGGGTTT (M G F), pos=1, ref='TGGG', alt='T'
+        Anchor codon 0 = ATG → M, preserved=2 (AT)
+        Deleted bases = GGG
+        Query anchor codon = AT + G(5) = ATG → M (synonymous)
+        Deleted codons: 1 (GGG → G)
+        → Only deletion annotation: ref_aa=MG, alt_aa=M
+        """
+        feature = self._fwd_feature()
+        var = VariantCall(chrom='c', pos=1, ref='TGGG', alt='T', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.consequence == 'deletion'
+        assert ann.codon_pos == 0
+        assert ann.ref_aa == 'MG'
+        assert ann.alt_aa == 'M'
+
+    def test_inframe_deletion_mid_codon_frame0_missense_anchor(self) -> None:
+        """
+        3-nt deletion at frame_offset=0 where anchor codon changes.
+
+        Feature: ATGCGAAAA (M R K), pos=3, ref='CGAA', alt='C'
+        Anchor codon 1 = CGA → R, preserved=1 (C)
+        Deleted bases = GAA
+        Query anchor codon = C + A(7) + A(8) = CAA → Q
+        → Missense: R→Q at codon 1
+        → Deletion: ref_aa=RK, alt_aa=R (deleted codon 2: AAA → K)
+        """
+        feature = self._fwd_feature('ATGCGAAAA')
+        var = VariantCall(chrom='c', pos=3, ref='CGAA', alt='C', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        missense = [a for a in results if a.consequence == 'missense']
+        deletion = [a for a in results if a.consequence == 'deletion']
+        assert len(missense) == 1
+        assert len(deletion) == 1
+
+        m = missense[0]
+        assert m.codon_pos == 1
+        assert m.ref_aa == 'R'
+        assert m.alt_aa == 'Q'
+        assert m.ref_codon == 'CGA'
+        assert m.alt_codon == 'CAA'
+
+        d = deletion[0]
+        assert d.codon_pos == 1
+        assert d.ref_aa == 'RK'
+        assert d.alt_aa == 'R'
+
+    def test_inframe_deletion_mid_codon_frame1_missense_anchor(self) -> None:
+        """
+        3-nt deletion at frame_offset=1 where anchor codon changes.
+
+        Feature: ATGATGCAATTTAAA (M M Q F K), pos=4, ref='TGCA', alt='T'
+        Anchor codon 1 = ATG → M, preserved=2 (AT)
+        Deleted bases = GCA
+        Query anchor codon = AT + A(8) = ATA → I
+        → Missense: M→I at codon 1
+        → Deletion: ref_aa=MQ, alt_aa=M (deleted codon 2: CAA → Q)
+        """
+        feature = self._fwd_feature('ATGATGCAATTTAAA')
+        var = VariantCall(chrom='c', pos=4, ref='TGCA', alt='T', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        missense = [a for a in results if a.consequence == 'missense']
+        deletion = [a for a in results if a.consequence == 'deletion']
+        assert len(missense) == 1
+        assert len(deletion) == 1
+
+        m = missense[0]
+        assert m.codon_pos == 1
+        assert m.ref_aa == 'M'
+        assert m.alt_aa == 'I'
+        assert m.ref_codon == 'ATG'
+        assert m.alt_codon == 'ATA'
+
+        d = deletion[0]
+        assert d.codon_pos == 1
+        assert d.ref_aa == 'MQ'
+        assert d.alt_aa == 'M'
+
+    def test_inframe_deletion_mid_codon_6nt(self) -> None:
+        """
+        6-nt deletion at frame_offset=1 removes 2 codons.
+
+        Feature: ATGATGCAATTTAAA (M M Q F K), pos=4, ref='TGCAATT', alt='T'
+        Anchor codon 1 = ATG → M, preserved=2 (AT)
+        Deleted bases = GCAATT (6 bases)
+        Query anchor codon = AT + A(11) = ATA → I
+        → Missense: M→I at codon 1
+        → Deletion: ref_aa=MQF, alt_aa=M (deleted codons 2-3: CAA→Q, TTT→F)
+        """
+        feature = self._fwd_feature('ATGATGCAATTTAAA')
+        # pos=4, ref='TGCAATT' = T(4)G(5)C(6)A(7)A(8)T(9)T(10), alt='T'
+        # Deleted bases = GCAATT (6 bases)
+        var = VariantCall(chrom='c', pos=4, ref='TGCAATT', alt='T', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        missense = [a for a in results if a.consequence == 'missense']
+        deletion = [a for a in results if a.consequence == 'deletion']
+        assert len(missense) == 1
+        assert len(deletion) == 1
+
+        m = missense[0]
+        assert m.codon_pos == 1
+        assert m.ref_aa == 'M'
+        assert m.alt_aa == 'I'
+
+        d = deletion[0]
+        assert d.codon_pos == 1
+        assert d.ref_aa == 'MQF'
+        assert d.alt_aa == 'M'
+
+    # ── negative-strand tests ──────────────────────────────────────────
+
+    def test_inframe_insertion_mid_codon_negative_strand(self) -> None:
+        """
+        3-nt mid-codon insertion on minus strand.
+
+        Feature: ATGGGGTTT (M G F) on '-' strand.
+        Genomic: AAACCCCAT (revcomp of ATGGGGTTT)
+
+        For frame_offset=1 in codon 0, anchor_coding_pos=1.
+        On '-' strand: anchor_coding_pos = coding_variant_pos - ref_len.
+        For insertion (ref_len=1): coding_variant_pos = 2.
+        Genomic pos for cds_pos=2: (9-1) - 2 = 6 (C in genomic).
+
+        Insert 'CAA' in coding orientation → genomic insertion = revcomp('CAA') = 'TTG'
+        VCF: pos=6, ref='C', alt='CTTG'
+
+        Anchor codon 0 = ATG → M, preserved=2 (AT)
+        Inserted bases (coding) = CAA
+        Query anchor codon = AT + C = ATC → I
+        → start_lost: M→I at codon 0 (start codon disrupted)
+        → Insertion: ref_aa=M, alt_aa=MK (payload: AA + displaced G = AAG → K)
+        """
+        feature = self._rev_feature()
+        var = VariantCall(chrom='c', pos=6, ref='C', alt='CTTG', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        anchor_change = [a for a in results if a.consequence == 'start_lost']
+        insertion = [a for a in results if a.consequence == 'insertion']
+        assert len(anchor_change) == 1
+        assert len(insertion) == 1
+
+        m = anchor_change[0]
+        assert m.codon_pos == 0
+        assert m.ref_aa == 'M'
+        assert m.alt_aa == 'I'
+
+        i = insertion[0]
+        assert i.codon_pos == 0
+        assert i.ref_aa == 'M'
+        assert i.alt_aa == 'MK'
+
+    def test_inframe_deletion_mid_codon_negative_strand(self) -> None:
+        """
+        3-nt mid-codon deletion on minus strand.
+
+        Feature: ATGGGGTTT (M G F) on '-' strand.
+        Genomic: AAACCCCAT
+
+        For frame_offset=1 in codon 0, anchor_coding_pos=1.
+        On '-' strand: anchor_coding_pos = coding_variant_pos - ref_len.
+        For deletion (ref_len=4): coding_variant_pos = 5.
+        Genomic pos for cds_pos=5: (9-1) - 5 = 3 (C in genomic).
+
+        VCF: pos=3, ref='CCCC', alt='C'
+        Genomic at pos 3,4,5,6 = C,C,C,C → deleted CCC at pos 4,5,6
+        Deleted bases (coding) = revcomp('CCC') = 'GGG'
+
+        Anchor codon 0 = ATG → M, preserved=2 (AT)
+        Query anchor codon = AT + G(5) = ATG → M (synonymous)
+        Deleted codons: 1 (GGG → G)
+        → Only deletion annotation: ref_aa=MG, alt_aa=M
+        """
+        feature = self._rev_feature()
+        var = VariantCall(chrom='c', pos=3, ref='CCCC', alt='C', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.consequence == 'deletion'
+        assert ann.codon_pos == 0
+        assert ann.ref_aa == 'MG'
+        assert ann.alt_aa == 'M'
+
+    # ── edge cases ─────────────────────────────────────────────────────
+
+    def test_mid_codon_insertion_near_cds_end(self) -> None:
+        """
+        Mid-codon insertion in the last codon still produces valid annotations.
+
+        Feature: ATGGGGTTT (M G F), pos=6, ref='T', alt='TCCC'
+        pos=6 is the first base of codon 2 (TTT → F), frame_offset=0
+        Anchor codon 2 = TTT → F, preserved=1 (T)
+        Inserted bases = CCC
+        Query anchor codon = T + CC = TCC → S
+        → Missense: F→S at codon 2
+        → Insertion: ref_aa=F, alt_aa=FL (payload: C + displaced TT = CTT → L)
+        """
+        feature = self._fwd_feature()
+        var = VariantCall(chrom='c', pos=6, ref='T', alt='TCCC', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        missense = [a for a in results if a.consequence == 'missense']
+        insertion = [a for a in results if a.consequence == 'insertion']
+        assert len(missense) == 1
+        assert len(insertion) == 1
+
+        m = missense[0]
+        assert m.codon_pos == 2
+        assert m.ref_aa == 'F'
+        assert m.alt_aa == 'S'
+
+        i = insertion[0]
+        assert i.codon_pos == 2
+        assert i.ref_aa == 'F'
+        assert i.alt_aa == 'FL'
+
+    def test_mid_codon_deletion_near_cds_end(self) -> None:
+        """
+        Mid-codon deletion in the penultimate codon.
+
+        Feature: ATGGGGTTT (M G F), pos=3, ref='GGGT', alt='G'
+        pos=3 is the first base of codon 1 (GGG → G), frame_offset=0
+        Anchor codon 1 = GGG → G, preserved=1 (G)
+        Deleted bases = GGT (pos 4,5,6)
+        Query anchor codon = G + T(7) + T(8) = GTT → V
+        → Missense: G→V at codon 1
+        → Deletion: ref_aa=GF, alt_aa=G (deleted codon 2: TTT → F)
+        """
+        feature = self._fwd_feature()
+        # pos=3, ref='GGGT' means G(3)G(4)G(5)T(6), alt='G'
+        # Deleted bases = GGT (pos 4,5,6)
+        var = VariantCall(chrom='c', pos=3, ref='GGGT', alt='G', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        missense = [a for a in results if a.consequence == 'missense']
+        deletion = [a for a in results if a.consequence == 'deletion']
+        assert len(missense) == 1
+        assert len(deletion) == 1
+
+        m = missense[0]
+        assert m.codon_pos == 1
+        assert m.ref_aa == 'G'
+        assert m.alt_aa == 'V'
+
+        d = deletion[0]
+        assert d.codon_pos == 1
+        assert d.ref_aa == 'GF'
+        assert d.alt_aa == 'G'
+
+    def test_mid_codon_insertion_with_query_ref_codon(self) -> None:
+        """
+        Mid-codon insertion uses query_ref_codon for the anchor AA in both annotations.
+
+        Feature: ATGGGGTTT (M G F), pos=3, ref='G', alt='GCCC'
+        Internal codon 1 = GGG → G; query_ref_codon = 'AGG' → R
+        The missense annotation uses query_ref_codon for ref_codon and ref_aa.
+        The query anchor codon is reconstructed from the query_ref_codon + insertion.
+        The insertion annotation uses the query anchor AA (R) as ref_aa.
+        """
+        feature = self._fwd_feature()
+        var = VariantCall(
+            chrom='c', pos=3, ref='G', alt='GCCC',
+            allele_freq=0.9, depth=100, query_ref_codon='AGG',
+        )
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        missense = [a for a in results if a.consequence == 'missense']
+        insertion = [a for a in results if a.consequence == 'insertion']
+        assert len(missense) == 1
+        assert len(insertion) == 1
+
+        # Missense uses query ref codon for ref_codon and ref_aa
+        m = missense[0]
+        assert m.codon_pos == 1
+        assert m.ref_aa == 'R'  # from query AGG → R
+        # Query anchor codon from AGG with CC at pos 1,2: ACC → T
+        assert m.alt_aa == 'T'
+        assert m.ref_codon == 'AGG'  # query ref codon
+        assert m.alt_codon == 'ACC'
+
+        # Insertion uses query anchor AA
+        i = insertion[0]
+        assert i.codon_pos == 1
+        assert i.ref_aa == 'R'  # from query AGG → R
+        assert i.alt_aa == 'RR'  # R + inserted AA (payload: C + displaced GG = CGG → R)
+
+    def test_mid_codon_deletion_with_query_ref_codon(self) -> None:
+        """
+        Mid-codon deletion uses query_ref_codon for the anchor AA.
+
+        Feature: ATGGGGTTT (M G F), pos=1, ref='TGGG', alt='T'
+        Internal codon 0 = ATG → M; query_ref_codon = 'ATA' → I
+        The query anchor codon is reconstructed: AT + G(5) = ATG → M.
+        Since I ≠ M, a missense annotation is emitted.
+        The deletion annotation uses the query anchor AA (I) as ref_aa.
+        """
+        feature = self._fwd_feature()
+        var = VariantCall(
+            chrom='c', pos=1, ref='TGGG', alt='T',
+            allele_freq=0.9, depth=100, query_ref_codon='ATA',
+        )
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        missense = [a for a in results if a.consequence == 'missense']
+        deletion = [a for a in results if a.consequence == 'deletion']
+        assert len(missense) == 1
+        assert len(deletion) == 1
+
+        m = missense[0]
+        assert m.codon_pos == 0
+        assert m.ref_aa == 'I'  # from query ATA → I
+        assert m.alt_aa == 'M'  # reconstructed ATG → M
+        assert m.ref_codon == 'ATA'
+        assert m.alt_codon == 'ATG'
+
+        d = deletion[0]
+        assert d.codon_pos == 0
+        # Query anchor codon ATA → I, deleted codon GGG → G
+        assert d.ref_aa == 'IG'
+        assert d.alt_aa == 'I'
+
+    def test_mid_codon_insertion_synonymous_anchor_only_insertion(self) -> None:
+        """
+        When the anchor codon change is synonymous, only the insertion annotation is emitted.
+
+        Feature: ATGGGGTTT (M G F), pos=1, ref='T', alt='TGGG'
+        Anchor codon 0 = ATG → M, preserved=2 (AT)
+        Query anchor codon = AT + G = ATG → M (synonymous)
+        → Only insertion: ref_aa=M, alt_aa=MG
+        """
+        feature = self._fwd_feature()
+        var = VariantCall(chrom='c', pos=1, ref='T', alt='TGGG', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        # Only insertion, no missense (anchor codon is synonymous)
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.consequence == 'insertion'
+        assert ann.ref_aa == 'M'
+        assert ann.alt_aa == 'MG'
+
+    def test_mid_codon_deletion_synonymous_anchor_only_deletion(self) -> None:
+        """
+        When the anchor codon change is synonymous, only the deletion annotation is emitted.
+
+        Feature: ATGGGGTTT (M G F), pos=1, ref='TGGG', alt='T'
+        Anchor codon 0 = ATG → M, preserved=2 (AT)
+        Query anchor codon = AT + G(5) = ATG → M (synonymous)
+        → Only deletion: ref_aa=MG, alt_aa=M
+        """
+        feature = self._fwd_feature()
+        var = VariantCall(chrom='c', pos=1, ref='TGGG', alt='T', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        # Only deletion, no missense (anchor codon is synonymous)
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.consequence == 'deletion'
+        assert ann.ref_aa == 'MG'
+        assert ann.alt_aa == 'M'
+
+    def test_mid_codon_insertion_start_lost(self) -> None:
+        """
+        Mid-codon insertion at codon 0 where anchor codon change loses the start codon.
+
+        Feature: ATGAAAGGG (M K G), pos=0, ref='A', alt='ATAA'
+        pos=0 is the first base of codon 0 (ATG → M), frame_offset=0
+        Anchor codon 0 = ATG → M, preserved=1 (A)
+        Inserted bases = TAA
+        Query anchor codon = A + TA = ATA → I
+        → start_lost: M→I at codon 0
+        → Insertion: ref_aa=M, alt_aa=MM (payload: A + displaced TG = ATG → M)
+        """
+        feature = self._fwd_feature('ATGAAAGGG')
+        var = VariantCall(chrom='c', pos=0, ref='A', alt='ATAA', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        start_lost = [a for a in results if a.consequence == 'start_lost']
+        insertion = [a for a in results if a.consequence == 'insertion']
+        assert len(start_lost) == 1
+        assert len(insertion) == 1
+
+        s = start_lost[0]
+        assert s.codon_pos == 0
+        assert s.ref_aa == 'M'
+        assert s.alt_aa == 'I'
+
+        i = insertion[0]
+        assert i.codon_pos == 0
+        assert i.ref_aa == 'M'
+        assert i.alt_aa == 'MM'
+
+    def test_mid_codon_deletion_start_lost(self) -> None:
+        """
+        Mid-codon deletion at codon 0 where anchor codon change loses the start codon.
+
+        Feature: ATGAAAGGG (M K G), pos=0, ref='ATGA', alt='A'
+        pos=0, frame_offset=0, preserved=1 (A)
+        Deleted bases = TGA
+        Query anchor codon = A + A(4) + A(5) = AAA → K
+        → start_lost: M→K at codon 0
+        → Deletion: ref_aa=MK, alt_aa=M (deleted codon 1: AAA → K)
+        """
+        feature = self._fwd_feature('ATGAAAGGG')
+        var = VariantCall(chrom='c', pos=0, ref='ATGA', alt='A', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        start_lost = [a for a in results if a.consequence == 'start_lost']
+        deletion = [a for a in results if a.consequence == 'deletion']
+        assert len(start_lost) == 1
+        assert len(deletion) == 1
+
+        s = start_lost[0]
+        assert s.codon_pos == 0
+        assert s.ref_aa == 'M'
+        assert s.alt_aa == 'K'
+
+        d = deletion[0]
+        assert d.codon_pos == 0
+        assert d.ref_aa == 'MK'
+        assert d.alt_aa == 'M'
+
+    def test_both_split_annotations_share_same_variant(self) -> None:
+        """
+        Both annotations from a split mid-codon indel reference the same VariantCall.
+        """
+        feature = self._fwd_feature()
+        var = VariantCall(chrom='c', pos=3, ref='G', alt='GCCC', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        # Both annotations must reference the same variant object
+        assert results[0].variant is var
+        assert results[1].variant is var
+
+    def test_both_split_annotations_share_same_codon_pos(self) -> None:
+        """
+        Both annotations from a split mid-codon indel have the same codon_pos.
+        """
+        feature = self._fwd_feature()
+        var = VariantCall(chrom='c', pos=3, ref='G', alt='GCCC', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        assert len(results) == 2
+        assert results[0].codon_pos == results[1].codon_pos
+        assert results[0].codon_pos == 1
+
+    def test_split_annotations_not_combined_snp_event(self) -> None:
+        """
+        Split mid-codon indel annotations are NOT marked as combined SNP events.
+        """
+        feature = self._fwd_feature()
+        var = VariantCall(chrom='c', pos=3, ref='G', alt='GCCC', allele_freq=0.9, depth=100)
+        results = annotate_variants([var], [feature])
+
+        for ann in results:
+            assert ann.is_combined_codon_event is False
+
+    def test_snp_with_gapped_query_ref_codon_uses_internal_cds(self) -> None:
+        """
+        When a SNP shares a codon with a deletion, query_ref_codon may contain gaps.
+        The SNP should fall back to the internal CDS codon for alt_aa computation.
+
+        Feature: ATGCAAGTTTAA (M Q V *)
+        Codon 1 = CAA → Q
+        SNP at position 3 (first base of codon 1): C→G
+        Gapped query_ref_codon = 'G--' (positions 4,5 are gaps from deletion)
+        With fix: query_ref_codon is cleared, falls back to internal CAA
+        alt_codon = GAA → E, so Q1E (missense)
+        """
+        feature = self._fwd_feature('ATGCAAGTTTAA')
+        var = VariantCall(
+            chrom='c', pos=3, ref='C', alt='G',
+            allele_freq=0.9, depth=100,
+            query_ref_codon='G--',
+        )
+        results = annotate_variants([var], [feature])
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.consequence == 'missense'
+        assert ann.ref_aa == 'Q'
+        assert ann.alt_aa == 'E'
+        assert ann.codon_pos == 1
+
+
+# ─── Combined codon event display fields ─────────────────────────────
+
+class TestCombinedCodonEventDisplayFields:
+    """
+    Verify that AnnotatedVariant fields used by display logic are set correctly
+    for combined codon events (multiple SNPs within one codon).
+    """
+
+    @staticmethod
+    def _fwd_feature(seq: str = 'ATGTCTAAAAAA') -> FeatureRecord:
+        """Forward-strand feature with sensible default (M S K K)."""
+        return FeatureRecord(
+            id=1, reference_id=1, name='testf', protein='TestF',
+            start=0, end=12, strand='+', codon_start=0,
+            nt_sequence=seq,
+        )
+
+    def test_combined_snp_codon_sets_flag_and_count(self) -> None:
+        """
+        Two SNPs in the same codon produce one combined AnnotatedVariant
+        with is_combined_codon_event=True and combined_member_count=2.
+        """
+        # Feature: ATG TCT AAA AAA (M S K K)
+        # Codon 1 (0-based) = TCT → S
+        # Two SNPs at positions 3 and 5: T→A, T→G
+        # Together: TCT → AGC (S → S, synonymous)
+        feature = self._fwd_feature()
+        variants = [
+            VariantCall(chrom='c', pos=3, ref='T', alt='A', allele_freq=0.95, depth=100),
+            VariantCall(chrom='c', pos=5, ref='T', alt='G', allele_freq=0.95, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.is_combined_codon_event is True
+        assert ann.combined_member_count == 2
+
+    def test_combined_snp_codon_has_codon_level_fields(self) -> None:
+        """
+        The combined annotation carries full ref_codon and alt_codon
+        so that display code can format codon-level nt_change (e.g. TCT2ACG).
+
+        Feature: ATG TCT AAA AAA (M S K K)
+        Codon 1 (0-based) = TCT → S
+        SNP at pos 3 (1st base): T→A → codon becomes ACT
+        SNP at pos 5 (3rd base): T→G → codon becomes ACG
+        Combined: TCT → ACG (S → T, missense)
+        """
+        feature = self._fwd_feature()
+        variants = [
+            VariantCall(chrom='c', pos=3, ref='T', alt='A', allele_freq=0.95, depth=100),
+            VariantCall(chrom='c', pos=5, ref='T', alt='G', allele_freq=0.95, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        ann = results[0]
+        assert ann.ref_codon == 'TCT'
+        assert ann.alt_codon == 'ACG'
+        assert ann.codon_pos == 1
+        # Display logic uses: f'{ann.ref_codon}{ann.codon_pos + 1}{ann.alt_codon}'
+        # This would produce 'TCT2ACG'
+        assert f'{ann.ref_codon}{ann.codon_pos + 1}{ann.alt_codon}' == 'TCT2ACG'
+
+    def test_single_snp_not_combined(self) -> None:
+        """A single SNP in a codon is NOT a combined event."""
+        feature = self._fwd_feature()
+        variants = [
+            VariantCall(chrom='c', pos=3, ref='T', alt='A', allele_freq=0.95, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.is_combined_codon_event is False
+        assert ann.combined_member_count == 1

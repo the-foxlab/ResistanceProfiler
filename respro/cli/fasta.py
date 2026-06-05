@@ -62,13 +62,6 @@ def _profile_fasta_command(
             help='Cache FASTA reference mapping in the project database for report regeneration (default: off).',
         )
     ] = False,
-    min_identity: Annotated[
-        float,
-        typer.Option(
-            '--min-identity', '-mi', min=0.0, max=1.0,
-            help='Minimum nucleotide identity for FASTA-to-reference matching (0-1).',
-        )
-    ] = 0.9,
     export: Annotated[
         list[str] | None,
         typer.Option(
@@ -94,12 +87,6 @@ def _profile_fasta_command(
     results_conn = None
 
     try:
-        if min_identity <= 0.75:
-            logger.warning(
-                'Low min-identity threshold (%.2f) may increase mismatches and false-positive mappings.',
-                min_identity,
-            )
-
         export_formats = _parse_export_formats(export)
 
         project_conn = open_project_db(project)
@@ -114,7 +101,6 @@ def _profile_fasta_command(
         with err_console.status('[dim]Aligning fasta sequence to internal references…[/dim]'):
             query_name, query_seq, fasta_matches = resolve_fasta_query(
                 project_conn, consensus_fasta, use_cache=cache, threads=threads,
-                min_identity=min_identity,
             )
 
         ref_id, ref_name, fasta_matches = _resolve_reference(

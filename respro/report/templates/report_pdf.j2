@@ -68,22 +68,21 @@
         {% if context.summary.drug_rows %}
         <table class="drug-table">
           <colgroup>
-            {% if context.summary.has_drug_class and context.summary.has_assessment %}
-            <col class="col-class" />
-            <col class="col-drug" />
-            <col class="col-hits" />
-            <col class="col-assessment" />
-            {% elif context.summary.has_drug_class %}
-            <col class="col-class" />
-            <col class="col-drug-wide" />
-            <col class="col-hits" />
-            {% elif context.summary.has_assessment %}
-            <col class="col-drug-widest" />
-            <col class="col-hits" />
-            <col class="col-assessment" />
-            {% else %}
-            <col class="col-drug-widest" />
-            <col class="col-hits-wide" />
+            {% if context.summary.has_drug_class %}
+            <col style="width: 22%" />
+            {% endif %}
+            <col style="width: auto" />
+            <col style="width: 6%" />
+            {% if context.summary.has_assessment %}
+              {% for ml in context.summary.method_labels %}
+                {% if ml.value_header %}
+            <col style="width: 8%" />
+                {% endif %}
+            <col style="width: 12%" />
+              {% endfor %}
+              {% if context.summary.has_final_assessment %}
+            <col style="width: 12%" />
+              {% endif %}
             {% endif %}
           </colgroup>
           <thead>
@@ -94,7 +93,15 @@
               <th>Drug</th>
               <th>Hits</th>
               {% if context.summary.has_assessment %}
+              {% for ml in context.summary.method_labels %}
+                {% if ml.value_header %}
+              <th>{{ ml.value_header }}</th>
+                {% endif %}
+              <th>{{ ml.label }}</th>
+              {% endfor %}
+              {% if context.summary.has_final_assessment %}
               <th>Assessment</th>
+              {% endif %}
               {% endif %}
             </tr>
           </thead>
@@ -107,9 +114,24 @@
               <td class="drug-name">{{ row.name }}</td>
               <td class="drug-count">{{ row.hit_count }}</td>
               {% if context.summary.has_assessment %}
+              {% for ml in context.summary.method_labels %}
+                {% if ml.value_header %}
+              <td class="drug-count">{{ row.get(ml.value_field, '—') }}</td>
+                {% endif %}
+                {% set assessment_value = row.method_assessments_by_method.get(ml.method, '') %}
+                {% if context.summary.has_final_assessment %}
+              <td>{{ assessment_value or '—' }}</td>
+                {% else %}
+              <td>
+                <span class="assessment {{ row.method_badge_classes_by_method.get(ml.method, 'is-unknown') }}">{{ assessment_value or '—' }}</span>
+              </td>
+                {% endif %}
+              {% endfor %}
+              {% if context.summary.has_final_assessment %}
               <td>
                 <span class="assessment {{ row.assessment_badge_class }}">{{ row.assessment }}</span>
               </td>
+              {% endif %}
               {% endif %}
             </tr>
             {% endfor %}

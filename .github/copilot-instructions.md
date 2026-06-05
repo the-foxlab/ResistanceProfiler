@@ -2,10 +2,9 @@
 
 ## Primary references
 
-- Repository structure and module responsibilities: `docs/development/contribution-and-architecture.md`
-- Detailed module/function interaction layouts: `docs/development/detailed_respro_layout.md`, `docs/development/detailed_app_layout.md`
-- Planning source of truth and current priorities: `docs/development/to-do.md`
-- Rules TSV formatting, allowed column values, and mutation notation: `docs/user/rules-tsv-format.md`
+- Project guardrails and module layout: see `docs/docs/contributing.md`
+- Planning source of truth and current priorities: `TODO.md`
+- Rules TSV formatting, allowed column values, and mutation notation: `docs/docs/rules-format.md`
 - Public project overview and usage examples: `README.md`
 
 Keep this file focused on how code should be written in this repository.
@@ -182,14 +181,13 @@ a collection.
 
 ## Editing guidance
 
-- Align implementation with `docs/development/to-do.md` priorities unless direct user instructions say otherwise.
-- When changing repository layout or module responsibilities, update
-  `docs/development/contribution-and-architecture.md` in the same change.
-- For architecture-relevant changes, update affected sections in
-  `docs/development/detailed_respro_layout.md` and/or `docs/development/detailed_app_layout.md`.
-  Use `repo-knowledge-graph` selectively for drift checks; do not run it on routine local edits.
+- Align implementation with `TODO.md` priorities unless direct user instructions say otherwise.
+- When changing repository layout or module responsibilities, update the "Design principles"
+  and "Module layout" sections in `docs/docs/contributing.md` in the same change.
+- For architecture-relevant changes, use `repo-knowledge-graph` selectively for drift checks;
+  do not run it on routine local edits.
 - When behavior changes can make documentation inaccurate, update affected docs in the same
-  change (at minimum `README.md`, relevant `docs/user/*`, and `docs/development/*` pages).
+  change (at minimum `README.md` and relevant `docs/docs/*` pages).
 - In Markdown docs, do not introduce artificial manual line breaks in normal paragraphs.
   Keep prose as natural paragraphs and only break lines where structure requires it.
 - Put format-specific parsing in `respro/io/`, domain interpretation in `respro/core/`,
@@ -199,7 +197,7 @@ a collection.
 
 ## Planning source of truth
 
-`docs/development/to-do.md` is the single planning source of truth. Review it before any substantial change.
+`TODO.md` is the single planning source of truth. Review it before any substantial change.
 Full todo management rules (structure, priority selection, marking done, adding items) are defined
 in the `todo-management` skill.
 

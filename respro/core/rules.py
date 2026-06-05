@@ -172,6 +172,9 @@ def match_rules(
                 ann.rule_matches.append(rule)
                 hit_count += 1
 
+        # Suppress INS_any when a specific insertion rule fires for the same position+drug.
+        _suppress_ins_any_when_specific_fires(ann.rule_matches)
+
     logger.info('Matched %d rule hit(s) across %d annotation(s)', hit_count, len(annotations))
     return annotations
 
@@ -372,6 +375,19 @@ def _evaluate_formula_expression(
     return result, contributors
 
 
+def _suppress_ins_any_when_specific_fires(rule_matches: list[ResistanceRule]) -> None:
+    """Remove INS_any matches when a specific insertion rule fires at the same position+drug."""
+    specific_keys: set[tuple[int, int]] = set()
+    for rule in rule_matches:
+        if rule.mutation != 'INS_any' and len(rule.mutation) > len(rule.reference):
+            specific_keys.add((rule.position, rule.drug_id))
+    if specific_keys:
+        rule_matches[:] = [
+            r for r in rule_matches
+            if not (r.mutation == 'INS_any' and (r.position, r.drug_id) in specific_keys)
+        ]
+
+
 def _matches_rule_alleles(
     *,
     reference: str,
@@ -383,6 +399,10 @@ def _matches_rule_alleles(
     """Compare one rule allele pair with one annotation allele pair."""
     if ann_consequence == 'frameshift':
         return _is_frameshift_token(mutation) and _is_frameshift_token(ann_alt)
+
+    # Wildcard insertion rule: match any in-frame insertion.
+    if mutation == 'INS_any':
+        return ann_consequence == 'insertion'
 
     # In-frame insertion-like rules are matched by inserted payload only.
     if ann_consequence == 'insertion' and len(mutation) > len(reference):

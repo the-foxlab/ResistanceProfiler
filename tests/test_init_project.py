@@ -2087,7 +2087,7 @@ class TestAnchorlessDeletion:
 
 
 class TestProjectMetadataInit:
-    def test_init_project_sanitizes_frameshift_as_resistant_unknown_drugs(
+    def test_init_project_sanitizes_effect_as_resistant_unknown_drugs(
         self,
         tmp_path,
         caplog,
@@ -2115,10 +2115,10 @@ class TestProjectMetadataInit:
             '{\n'
             '  "interpretation_algorithms": [\n'
             '    {\n'
-            '      "name": "frameshift_as_resistant",\n'
+            '      "name": "effect_as_resistant",\n'
             '      "rules": [\n'
-            '        {"feature": "gag", "reference": "MYREF001", "drug": "aciclovir"},\n'
-            '        {"feature": "gag", "reference": "MYREF001", "drug": "UnknownDrug"}\n'
+            '        {"feature": "gag", "effect": ["frameshift"], "reference": "MYREF001", "drug": "aciclovir"},\n'
+            '        {"feature": "gag", "effect": ["frameshift"], "reference": "MYREF001", "drug": "UnknownDrug"}\n'
             '      ]\n'
             '    }\n'
             '  ]\n'
@@ -2144,9 +2144,9 @@ class TestProjectMetadataInit:
         conn.close()
 
         assert len(algorithms) == 1
-        assert algorithms[0]['name'] == 'frameshift_as_resistant'
+        assert algorithms[0]['name'] == 'effect_as_resistant'
         assert algorithms[0]['rules'] == [
-            {'feature': 'gag', 'reference': 'MYREF001', 'drug': 'aciclovir'},
+            {'feature': 'gag', 'effect': ['frameshift'], 'reference': 'MYREF001', 'drug': 'aciclovir'},
         ]
         assert any('ignoring rule for unknown drug' in rec.message for rec in caplog.records)
 

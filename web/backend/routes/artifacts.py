@@ -12,7 +12,8 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse
 
-from web.backend.models import ArtifactBundlePayload
+from web.backend.models import ArtifactBundlePayload, ComparePayload, CompareResponse
+from web.backend.services.compare import build_comparison_matrix
 
 _WEB_TIMESTAMP_TOKEN = re.compile(
     r'\.(\d{20})(?=\.(?:report\.html|report\.pdf|results\.json)$)'
@@ -100,6 +101,30 @@ def build_artifacts_router(
         if not favicon_path.is_file():
             raise HTTPException(status_code=404, detail='Favicon not found.')
         return FileResponse(str(favicon_path), media_type='image/svg+xml')
+
+    @router.post('/api/compare')
+    def compare_samples(
+        payload: ComparePayload,
+        _auth: None = Depends(require_api_token),
+    ) -> CompareResponse:
+        if not payload.paths:
+            raise HTTPException(status_code=400, detail='At least one result path is required.')
+
+        resolved_paths = [Path(p).expanduser().resolve() for p in payload.paths]
+        try:
+            return build_comparison_matrix(
+                result_json_paths=resolved_paths,
+                results_dir=results_dir,
+                is_path_within_allowed_roots=is_path_within_allowed_roots,
+                is_allowed_artifact_path=is_allowed_artifact_path,
+                non_synonymous_only=payload.non_synonymous_only,
+                db_hits_only=payload.db_hits_only,
+            )
+        except ValueError as exc:
+            msg = str(exc)
+            if 'not found' in msg.lower():
+                raise HTTPException(status_code=404, detail=msg) from exc
+            raise HTTPException(status_code=400, detail=msg) from exc
 
     return router
 

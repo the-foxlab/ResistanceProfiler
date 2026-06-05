@@ -180,7 +180,7 @@ def _variants_from_alignment(
             query_codon = _get_query_codon(coding, ref_idx)
             for alt_base, af in _iupac_alt_bases(ref_base, query_base):
                 var = _make_variant_from_coding_nt(feature, ref_idx, ref_base, alt_base, af=af)
-                var.query_ref_codon = query_codon
+                var.query_ref_codon = query_codon if '-' not in query_codon else ''
                 variants.append(var)
 
         # Handle deletion at this position (accumulate run of deletions)

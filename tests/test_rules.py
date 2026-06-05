@@ -448,6 +448,195 @@ class TestMatchFormulaRules:
         assert hits[0].matched_variants[0].alt_aa == 'V'
 
 
+class TestInsAnyRuleMatching:
+    def _make_ins_rule(self, mutation: str = 'INS_any') -> ResistanceRule:
+        return ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='',
+            position=4,
+            reference='F',
+            mutation=mutation,
+            phenotype='resistant',
+        )
+
+    def _make_ann(self, consequence: str, alt_aa: str = 'FGG') -> AnnotatedVariant:
+        return AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=12, ref='A', alt='T', allele_freq=0.9, depth=100),
+            feature_name='gag',
+            codon_pos=4,
+            ref_aa='F',
+            alt_aa=alt_aa,
+            consequence=consequence,
+        )
+
+    def test_ins_any_matches_any_insertion(self):
+        ann = self._make_ann('insertion')
+        result = match_rules([ann], [self._make_ins_rule()])
+        assert result[0].is_resistance_hit
+
+    def test_ins_any_does_not_match_frameshift(self):
+        ann = self._make_ann('frameshift', alt_aa='FfsX')
+        result = match_rules([ann], [self._make_ins_rule()])
+        assert not result[0].is_resistance_hit
+
+    def test_ins_any_does_not_match_deletion(self):
+        ann = self._make_ann('deletion', alt_aa='F')
+        result = match_rules([ann], [self._make_ins_rule()])
+        assert not result[0].is_resistance_hit
+
+    def test_specific_insertion_takes_precedence_over_ins_any(self):
+        specific_rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='',
+            position=4,
+            reference='F',
+            mutation='FGG',
+            phenotype='resistant',
+        )
+        wildcard_rule = ResistanceRule(
+            id=2,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='',
+            position=4,
+            reference='F',
+            mutation='INS_any',
+            phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=12, ref='A', alt='T', allele_freq=0.9, depth=100),
+            feature_name='gag',
+            codon_pos=4,
+            ref_aa='F',
+            alt_aa='FGG',
+            consequence='insertion',
+        )
+        result = match_rules([ann], [specific_rule, wildcard_rule])
+        matched_mutations = [r.mutation for r in result[0].rule_matches]
+        assert 'FGG' in matched_mutations
+        assert 'INS_any' not in matched_mutations
+
+
+class TestInsAnyRuleEndToEnd:
+    """End-to-end tests for INS_any rule import, matching, and reporting."""
+
+    def _setup_project(self, tmp_path: Path) -> tuple[Path, Path]:
+        """Return (project_db, output_dir) for a project with an INS_any rule at codon 2."""
+        genbank_path = tmp_path / 'tiny.gb'
+        write_genbank(
+            genbank_path,
+            [
+                {
+                    'id': 'tiny_ref',
+                    'accession': 'tiny_ref',
+                    'sequence': TINY_REF_SEQ,
+                    'features': [
+                        {'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}
+                    ],
+                }
+            ],
+        )
+        rules_tsv = tmp_path / 'rules.tsv'
+        # Position 2 (1-based) = codon 1 (0-based) = K in TINY_REF_SEQ
+        rules_tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            gag\ttiny_ref\t2\tK\tins_any\tDrugA\tresistant
+        """))
+        project_db = tmp_path / 'project.db'
+        init_project(
+            db_path=project_db,
+            name='test_ins_any',
+            genbank_paths=[genbank_path],
+            rules_tsv=rules_tsv,
+            additional_info=False,
+        )
+        return project_db, tmp_path / 'output'
+
+    def test_ins_any_rule_imports_and_is_stored(self, tmp_path: Path) -> None:
+        """INS_any rule should be stored in the DB with canonical mutation token."""
+        project_db, _ = self._setup_project(tmp_path)
+        conn = open_project_db(project_db)
+        row = conn.execute(
+            "SELECT mutation FROM resistance_rule WHERE position = 1"
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row['mutation'] == 'INS_any'
+
+    def test_ins_any_fires_for_in_frame_insertion_via_vcf(self, tmp_path: Path) -> None:
+        """Profiling a VCF with an in-frame insertion at the INS_any position should fire the rule."""
+        project_db, output_dir = self._setup_project(tmp_path)
+
+        # TINY_REF_SEQ codon 1 (0-based) starts at nucleotide pos 3.
+        # Insert 3 nt (AAA) after pos 3 (0-based) = pos 4 (1-based VCF).
+        # VCF: REF=A (pos 4), ALT=AAAA (in-frame +3 nt insertion)
+        ref_fasta = tmp_path / 'ref.fasta'
+        ref_fasta.write_text(f'>tiny_ref\n{TINY_REF_SEQ}\n')
+
+        vcf_path = tmp_path / 'ins.vcf'
+        vcf_path.write_text(textwrap.dedent("""\
+            ##fileformat=VCFv4.2
+            ##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">
+            ##INFO=<ID=DP,Number=1,Type=Integer,Description="Read Depth">
+            #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO
+            tiny_ref\t4\t.\tA\tAAAA\t100\tPASS\tAF=0.95;DP=500
+        """))
+
+        result = CliRunner().invoke(app, [
+            'vcf',
+            '--project', str(project_db),
+            '--vcf', str(vcf_path),
+            '--ref-fasta', str(ref_fasta),
+            '--output', str(output_dir),
+            '--min-af', '0.01',
+            '--min-depth', '0',
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert '1 total database hits' in result.output
+
+    def test_ins_any_report_shows_rule_label_and_actual_allele(self, tmp_path: Path) -> None:
+        """HTML report should show INS_any as rule label and actual inserted AA as allele."""
+        project_db, output_dir = self._setup_project(tmp_path)
+
+        ref_fasta = tmp_path / 'ref.fasta'
+        ref_fasta.write_text(f'>tiny_ref\n{TINY_REF_SEQ}\n')
+
+        vcf_path = tmp_path / 'ins_report.vcf'
+        vcf_path.write_text(textwrap.dedent("""\
+            ##fileformat=VCFv4.2
+            ##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">
+            ##INFO=<ID=DP,Number=1,Type=Integer,Description="Read Depth">
+            #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO
+            tiny_ref\t4\t.\tA\tAAAA\t100\tPASS\tAF=0.95;DP=500
+        """))
+
+        result = CliRunner().invoke(app, [
+            'vcf',
+            '--project', str(project_db),
+            '--vcf', str(vcf_path),
+            '--ref-fasta', str(ref_fasta),
+            '--output', str(output_dir),
+            '--min-af', '0.01',
+            '--min-depth', '0',
+        ])
+
+        assert result.exit_code == 0, result.output
+        html = (output_dir / 'ins_report.report.html').read_text()
+        # Rule label in database hits tab should show INS_any
+        assert 'INS_any' in html
+
+
 class TestInitAddValidate:
     def test_add_validate_checks_rules_without_writing(self, tmp_path: Path) -> None:
         genbank_path = tmp_path / 'tiny.gb'

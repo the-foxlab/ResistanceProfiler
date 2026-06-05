@@ -13,6 +13,7 @@ import pytest
 from respro.db.algorithms import (
     apply_drug_alias_mappings,
     apply_ic50_threshold_classification,
+    compute_drug_assessment,
     load_interpretation_algorithms,
     store_interpretation_algorithms,
     validate_interpretation_algorithms,
@@ -130,13 +131,14 @@ class TestValidateInterpretationAlgorithms:
         result = validate_interpretation_algorithms(algorithms)
         assert result == algorithms
 
-    def test_valid_frameshift_as_resistant(self) -> None:
+    def test_valid_effect_as_resistant(self) -> None:
         algorithms = [
             {
-                'name': 'frameshift_as_resistant',
+                'name': 'effect_as_resistant',
                 'rules': [
                     {
                         'feature': 'UL23',
+                        'effect': ['frameshift'],
                         'reference': 'NC_001806',
                         'drug': 'Aciclovir',
                     }
@@ -146,18 +148,54 @@ class TestValidateInterpretationAlgorithms:
         result = validate_interpretation_algorithms(algorithms)
         assert result == algorithms
 
-    def test_frameshift_as_resistant_rejects_duplicate_rule_tuple(self) -> None:
+    def test_valid_effect_as_resistant_multiple_effects(self) -> None:
         algorithms = [
             {
-                'name': 'frameshift_as_resistant',
+                'name': 'effect_as_resistant',
                 'rules': [
                     {
                         'feature': 'UL23',
+                        'effect': ['frameshift', 'stop_gained', 'stop_lost'],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result == algorithms
+
+    def test_effect_as_resistant_all_valid_effects(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': ['frameshift', 'stop_gained', 'stop_lost', 'start_lost', 'insertion', 'deletion'],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result == algorithms
+
+    def test_effect_as_resistant_rejects_duplicate_rule_tuple(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': ['frameshift'],
                         'reference': 'NC_001806',
                         'drug': 'Aciclovir',
                     },
                     {
                         'feature': 'UL23',
+                        'effect': ['stop_gained'],
                         'reference': 'NC_001806',
                         'drug': 'Aciclovir',
                     },
@@ -167,13 +205,14 @@ class TestValidateInterpretationAlgorithms:
         with pytest.raises(ValueError, match='duplicate rule tuple'):
             validate_interpretation_algorithms(algorithms)
 
-    def test_frameshift_as_resistant_strips_rule_whitespace(self) -> None:
+    def test_effect_as_resistant_strips_rule_whitespace(self) -> None:
         algorithms = [
             {
-                'name': 'frameshift_as_resistant',
+                'name': 'effect_as_resistant',
                 'rules': [
                     {
                         'feature': ' UL23 ',
+                        'effect': [' frameshift '],
                         'reference': ' NC_001806 ',
                         'drug': ' Aciclovir ',
                     }
@@ -184,9 +223,144 @@ class TestValidateInterpretationAlgorithms:
         result = validate_interpretation_algorithms(algorithms)
         assert result[0]['rules'][0] == {
             'feature': 'UL23',
+            'effect': ['frameshift'],
             'reference': 'NC_001806',
             'drug': 'Aciclovir',
         }
+
+    def test_effect_as_resistant_rejects_empty_effect_list(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': [],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match="effect.*non-empty list"):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_effect_as_resistant_rejects_missing_effect_key(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match="missing required key 'effect'"):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_effect_as_resistant_rejects_unknown_effect(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': ['nonsense'],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match='invalid value'):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_effect_as_resistant_rejects_missense(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': ['missense'],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match='invalid value'):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_effect_as_resistant_rejects_synonymous(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': ['synonymous'],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match='invalid value'):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_effect_as_resistant_rejects_unknown_consequence(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': ['unknown'],
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match='invalid value'):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_effect_as_resistant_effect_must_be_list(self) -> None:
+        algorithms = [
+            {
+                'name': 'effect_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'effect': 'frameshift',
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match="effect.*non-empty list"):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_frameshift_as_resistant_no_longer_accepted(self) -> None:
+        algorithms = [
+            {
+                'name': 'frameshift_as_resistant',
+                'rules': [
+                    {
+                        'feature': 'UL23',
+                        'reference': 'NC_001806',
+                        'drug': 'Aciclovir',
+                    }
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match='Unknown algorithm name'):
+            validate_interpretation_algorithms(algorithms)
 
     def test_multiple_algorithms_coexist(self) -> None:
         algorithms = [
@@ -220,13 +394,22 @@ class TestValidateInterpretationAlgorithms:
         with pytest.raises(ValueError, match="Duplicate algorithm name 'drug_groups'"):
             validate_interpretation_algorithms(algorithms)
 
-    def test_rejects_two_drug_interpretation_entries(self) -> None:
-        """by_phenotype and by_score are mutually exclusive — two drug_interpretation entries must fail."""
+    def test_allows_two_drug_interpretation_entries_with_different_methods(self) -> None:
+        """by_phenotype and by_score can coexist when methods differ."""
         algorithms = [
             {'name': 'drug_interpretation', 'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
             {'name': 'drug_interpretation', 'method': 'by_score', 'thresholds': {'resistant': 5}},
         ]
-        with pytest.raises(ValueError, match="Duplicate algorithm name 'drug_interpretation'"):
+        result = validate_interpretation_algorithms(algorithms)
+        assert len(result) == 2
+
+    def test_rejects_two_drug_interpretation_entries_same_method(self) -> None:
+        """Two drug_interpretation entries with the same method must fail."""
+        algorithms = [
+            {'name': 'drug_interpretation', 'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'name': 'drug_interpretation', 'method': 'by_phenotype', 'thresholds': {'resistant': 2}},
+        ]
+        with pytest.raises(ValueError, match="Duplicate drug_interpretation method 'by_phenotype'"):
             validate_interpretation_algorithms(algorithms)
 
     def test_rejects_non_list_input(self) -> None:
@@ -455,6 +638,147 @@ class TestStoreAndLoadAlgorithms:
 
         loaded = load_interpretation_algorithms(project_db, project_id)
         assert loaded == second_batch
+
+    def test_store_and_load_multiple_drug_interpretation(
+        self, project_db: sqlite3.Connection, project_id: int
+    ) -> None:
+        config = [
+            {'name': 'drug_interpretation', 'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'name': 'drug_interpretation', 'method': 'by_score', 'thresholds': {'resistant': 5}},
+        ]
+        store_interpretation_algorithms(project_db, project_id, config)
+        project_db.commit()
+        loaded = load_interpretation_algorithms(project_db, project_id)
+        assert loaded == config
+
+
+# ──────────────────────────────────────────────────────────────────────
+# compute_drug_assessment tests
+# ──────────────────────────────────────────────────────────────────────
+
+class TestComputeDrugAssessment:
+
+    def _drug(self, **overrides) -> dict:
+        base = {
+            'hit_count': 0,
+            'resistant_count': 0, 'intermediate_count': 0,
+            'sensitive_count': 0, 'contradictory_count': 0,
+            'score_total': 0.0,
+            'ic50_values': [], 'fold_ic50_values': [],
+        }
+        base.update(overrides)
+        return base
+
+    def test_single_method_by_phenotype_resistant(self):
+        drug = self._drug(hit_count=2, resistant_count=1)
+        configs = [{'method': 'by_phenotype', 'thresholds': {'resistant': 1}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+        assert len(methods) == 1
+        assert methods[0]['method'] == 'by_phenotype'
+        assert methods[0]['label'] == 'Phenotype'
+        assert methods[0]['assessment'] == 'resistant'
+
+    def test_single_method_by_phenotype_sensitive(self):
+        drug = self._drug(hit_count=1, sensitive_count=1)
+        configs = [{'method': 'by_phenotype', 'thresholds': {'resistant': 1}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+
+    def test_single_method_no_hits_defaults_to_sensitive(self):
+        drug = self._drug(hit_count=0)
+        configs = [{'method': 'by_phenotype', 'thresholds': {'resistant': 1}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+        assert len(methods) == 1
+        assert methods[0]['assessment'] == 'sensitive'
+
+    def test_two_methods_strongest_wins_resistant_over_intermediate(self):
+        drug = self._drug(hit_count=2, resistant_count=1, score_total=3.0)
+        configs = [
+            {'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'method': 'by_score', 'thresholds': {'resistant': 5, 'intermediate': 2}},
+        ]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+        assert len(methods) == 2
+
+    def test_two_methods_strongest_wins_intermediate_over_sensitive(self):
+        drug = self._drug(hit_count=1, sensitive_count=1, score_total=3.0)
+        configs = [
+            {'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'method': 'by_score', 'thresholds': {'resistant': 5, 'intermediate': 2}},
+        ]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'intermediate'
+        assert len(methods) == 2
+
+    def test_two_methods_contradictory_ranks_between_resistant_and_intermediate(self):
+        drug = self._drug(hit_count=2, contradictory_count=1, score_total=3.0)
+        configs = [
+            {'method': 'by_phenotype', 'thresholds': {'resistant': 2}},
+            {'method': 'by_score', 'thresholds': {'resistant': 5, 'intermediate': 2}},
+        ]
+        final, methods = compute_drug_assessment(drug, configs)
+        # by_phenotype: contradictory (no threshold met, contradictory > 0)
+        # by_score: intermediate (3 >= 2)
+        # strongest: contradictory (rank 1) > intermediate (rank 2)
+        assert final == 'contradictory'
+
+    def test_ic50_method(self):
+        drug = self._drug(hit_count=1, ic50_values=[15.0])
+        configs = [{'method': 'by_ic50', 'thresholds': {'resistant': 10.0, 'intermediate': 3.0}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+        assert methods[0]['label'] == 'IC50'
+
+    def test_fold_ic50_method_no_values_defaults_to_sensitive(self):
+        drug = self._drug(hit_count=1)
+        configs = [{'method': 'by_fold_ic50', 'thresholds': {'resistant': 10.0}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+        assert len(methods) == 1
+        assert methods[0]['assessment'] == 'sensitive'
+
+    def test_three_methods_resistant_wins(self):
+        drug = self._drug(hit_count=3, resistant_count=1, sensitive_count=2, score_total=1.0, ic50_values=[15.0])
+        configs = [
+            {'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'method': 'by_score', 'thresholds': {'resistant': 5}},
+            {'method': 'by_ic50', 'thresholds': {'resistant': 10.0, 'intermediate': 3.0}},
+        ]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+        assert len(methods) == 3
+
+    def test_method_with_no_data_defaults_to_sensitive(self):
+        # by_phenotype sees hits and returns sensitive; by_ic50 has no ic50_values and defaults to sensitive
+        drug = self._drug(hit_count=1, sensitive_count=1)
+        configs = [
+            {'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'method': 'by_ic50', 'thresholds': {'resistant': 10.0}},
+        ]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+        assert len(methods) == 2
+        assert methods[0]['method'] == 'by_phenotype'
+        assert methods[0]['assessment'] == 'sensitive'
+        assert methods[1]['method'] == 'by_ic50'
+        assert methods[1]['assessment'] == 'sensitive'
+
+    def test_by_score_zero_score_defaults_to_sensitive(self):
+        drug = self._drug(hit_count=0, score_total=0.0)
+        configs = [{'method': 'by_score', 'thresholds': {'resistant': 1}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+        assert methods[0]['assessment'] == 'sensitive'
+
+    def test_by_phenotype_no_hits_defaults_to_sensitive(self):
+        drug = self._drug(hit_count=0, resistant_count=0, intermediate_count=0)
+        configs = [{'method': 'by_phenotype', 'thresholds': {'resistant': 1}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'sensitive'
+        assert methods[0]['assessment'] == 'sensitive'
 
 
 # ──────────────────────────────────────────────────────────────────────

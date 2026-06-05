@@ -1,16 +1,21 @@
-# Prepare a Database
+---
+title: Database Preparation
+description: Create and extend a project database
+---
+
+# Database Preparation
 
 ResistanceProfiler uses a project SQLite database (`project.db`) created from:
 
 - at least one GenBank reference file
-- one resistance [rules TSV](docs/user/rules-tsv-format.md)
+- one resistance [rules TSV](rules-format.md)
 
 If you are preparing your first database, make sure the rules file uses feature names that exist in the GenBank CDS annotations.
 
 This database is the central asset of a ResPro workflow. It does not just store reference files. It defines the internal references, feature annotations, and curated rule set that later FASTA and VCF samples are compared against.
 
-> [!IMPORTANT]
-> Build `project.db` carefully and version it in your workflow. Most downstream interpretation quality depends on this curated project database.
+!!! important "Build carefully and version it"
+    Build `project.db` carefully and version it in your workflow. Most downstream interpretation quality depends on this curated project database.
 
 ## Create a new project database
 
@@ -53,17 +58,39 @@ Example metadata file:
   "description": "Curated antiviral resistance database.",
   "maintainer update": "2026-04-21",
   "license": "CC-BY-4.0",
-  "tsv checksum": "sha256:abc123"
+  "tsv checksum": "sha256:abc123",
+  "interpretation_algorithms": [
+    {
+      "name": "ic50_thresholds",
+      "use": "fold_ic50",
+      "thresholds": {
+        "ACV": {"intermediate": 3.0, "resistant": 10.0},
+        "PCV": {"intermediate": 3.0, "resistant": 10.0}
+      }
+    },
+    {
+      "name": "drug_interpretation",
+      "method": "by_phenotype",
+      "thresholds": {
+        "resistant": 1,
+        "intermediate": 1
+      }
+    }
+  ]
 }
 ```
+
+> Algorithms are optional. See [Interpretation algorithms](#interpretation-algorithms) below for all supported types and configuration keys.
 
 ## Interpretation algorithms
 
 `metadata.json` optionally supports a top-level `interpretation_algorithms` array. Each entry configures one algorithm by name. Each algorithm type may appear **at most once** in the list, and all five types can coexist.
 
+Detailed algorithm descriptions are on the [Interpretation Algorithms](algorithms.md) page. Below is a summary of each type and its configuration keys.
+
 ### `ic50_thresholds`
 
-Defines per-drug IC50 or fold-IC50 breakpoints. With tthis each rule that has a IC50 values associated will be classified for a phenotype during init.
+Defines per-drug IC50 or fold-IC50 breakpoints. With this, each rule that has an IC50 value associated will be classified for a phenotype during init.
 
 - `use` — required; must be `"ic50"` or `"fold_ic50"`
 - `thresholds` — required non-empty object; each key is a drug name; each value must have `"intermediate"` and `"resistant"` keys with positive numbers; `"resistant"` must be strictly greater than `"intermediate"`
@@ -76,17 +103,24 @@ Assigns drugs to named groups (e.g. drug classes). This is only if you wish to g
 
 ### `drug_interpretation`
 
-Specifies how per-drug evidence translates into a final interpretation in the report (`resistant`, `intermediate`, `sensitive`). Only one `drug_interpretation` entry is permitted per project, and its `method` field selects the strategy.
+Specifies how per-drug evidence translates into a final interpretation in the report (`resistant`, `intermediate`, `sensitive`). Multiple `drug_interpretation` entries may coexist in a project, each with a different `method`. This is useful when a database contains rules with mixed evidence types (e.g. one source provides phenotype labels while another provides numeric scores).
+
+Supported methods:
 
 - `by_phenotype` — counts phenotype-labelled hits per drug and compares counts against thresholds
 - `by_score` — sums score values per drug and compares totals against thresholds
 - `by_ic50` — checks per-hit IC50 values per drug; if any value meets the resistant threshold the drug is resistant, otherwise if any value meets the intermediate threshold the drug is intermediate, otherwise sensitive
 - `by_fold_ic50` — same logic as `by_ic50`, but using fold-IC50 values
 
+Keys:
+
 - `method` — required; must be `"by_phenotype"`, `"by_score"`, `"by_ic50"`, or `"by_fold_ic50"`
 - `thresholds` — required object; must include `"resistant"`; `"intermediate"` is optional
 - for `by_phenotype` and `by_score`, threshold values must be positive integers
 - for `by_ic50` and `by_fold_ic50`, threshold values must be positive numbers; if `intermediate` is set, `resistant` must be strictly greater than `intermediate`
+- each method may appear at most once; two entries with the same `method` are rejected
+
+When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final **Assessment** column. The final assessment uses strongest-wins resolution: `resistant` > `contradictory` > `intermediate` > `sensitive`. The most resistant result across all methods is taken as the final call.
 
 ### `drug_alias`
 
@@ -96,25 +130,26 @@ Defines canonical drug-name to short-alias mappings for report rendering.
 - each key and value must be a non-empty string
 - alias values must be unique across canonical drug names
 
-When configured, these mappings are written to the `drug.alias` column during `respro init`
-and used for report drug labels, for example `Aciclovir (ACV)`.
+When configured, these mappings are written to the `drug.alias` column during `respro init` and used for report drug labels, for example `Aciclovir (ACV)`.
 
-### `frameshift_as_resistant`
+### `effect_as_resistant`
 
-Defines report-only metadata interpretation for observed frameshifts. This does not create curated database rule hits.
+Defines report-only metadata interpretation for observed high-impact variant effects. This does not create curated database rule hits.
 
 - `rules` — required non-empty list
-- each rule must include `feature`, `reference`, and `drug` as case-sensitive exact non-empty strings
+- each rule must include `feature`, `effect`, `reference`, and `drug` as case-sensitive exact non-empty strings
+- `effect` — required non-empty list of strings; each must be one of: `frameshift`, `stop_gained`, `stop_lost`, `start_lost`, `insertion`, `deletion`
 - each (`feature`, `reference`, `drug`) tuple must be unique across the list
 
-Each matching observed frameshift produces a metadata hit row with a resistant phenotype. The generated hit always carries a `resistant` value in the `phenotype` field; the `clinical_phenotype` field is left empty.
+Each rule states: if a variant annotation in the given feature/reference has a consequence matching **any** of the listed effects, produce a metadata hit row with a resistant phenotype for the specified drug. The generated hit always carries a `resistant` value in the `phenotype` field; the `clinical_phenotype` field is left empty.
+
 This metadata output is only produced when the project database has at least one curated rule with a known phenotype or clinical phenotype.
 
 ### Example
 
 ```json
 {
-  "description": "HIV-1 integrase inhibitor resistance database",
+  "description": "HSV database",
   "interpretation_algorithms": [
     {
       "name": "ic50_thresholds",
@@ -140,6 +175,14 @@ This metadata output is only produced when the project database has at least one
       }
     },
     {
+      "name": "drug_interpretation",
+      "method": "by_score",
+      "thresholds": {
+        "resistant": 5,
+        "intermediate": 2
+      }
+    },
+    {
       "name": "drug_alias",
       "groups": {
         "Aciclovir": "ACV",
@@ -147,10 +190,11 @@ This metadata output is only produced when the project database has at least one
       }
     },
     {
-      "name": "frameshift_as_resistant",
+      "name": "effect_as_resistant",
       "rules": [
         {
           "feature": "UL23",
+          "effect": ["frameshift", "stop_gained", "stop_lost"],
           "reference": "NC_001806",
           "drug": "Aciclovir"
         }
@@ -183,7 +227,7 @@ respro add \
   --validate
 ```
 
-> [!TIP]
-> Use `--validate` in CI or curation review before importing rules into a production project database.
+!!! tip
+    Use `--validate` in CI or curation review before importing rules into a production project database.
 
-For detailed column and mutation token requirements, see `docs/user/rules-tsv-format.md`.
+For detailed column and mutation token requirements, see [Rules TSV Format](rules-format.md).

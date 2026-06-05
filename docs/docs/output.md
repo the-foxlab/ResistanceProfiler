@@ -1,9 +1,14 @@
+---
+title: Output Interpretation
+description: Understanding HTML, JSON, and TSV outputs
+---
+
 # Output Interpretation Guide (HTML, JSON, TSV)
 
 ResistanceProfiler produces one required output and optional structured exports.
 
-> [!TIP]
-> Use the HTML report first for interpretation context, then use JSON/TSV for automation and downstream processing.
+!!! tip "Start with the HTML report"
+    Use the HTML report first for interpretation context, then use JSON/TSV for automation and downstream processing.
 
 ## HTML report (`*.report.html`)
 
@@ -40,8 +45,8 @@ Best use:
 - archival and deterministic regeneration
 - data integration with external systems
 
-> [!IMPORTANT]
-> JSON exports are intended as reproducible artifacts and can be used directly with `respro regenerate --json`.
+!!! important "Reproducible artifacts"
+    JSON exports are intended as reproducible artifacts and can be used directly with `respro regenerate --json`.
 
 Regenerate a report from JSON:
 
@@ -51,3 +56,5 @@ respro regenerate \
   --json my_output/sample_variants.results.json \
   --output my_output
 ```
+
+See [CLI Reference](cli-reference.md) for all regeneration options.

@@ -15,7 +15,7 @@ from jinja2 import BaseLoader, Environment
 from markupsafe import Markup, escape
 
 from respro import __version__
-from respro.core.annotation import classify_similarity
+from respro.core.annotation import CONSEQUENCE_LABELS, HIGH_IMPACT_CONSEQUENCES, classify_similarity
 from respro.db.models import (
     FeatureRecord,
     ProfilingResult,
@@ -37,6 +37,8 @@ from respro.report.alignment_visualization import (
 )
 
 logger = logging.getLogger(__name__)
+
+_SYNONYMOUS_CONSEQUENCES: frozenset[str] = frozenset({'synonymous_variant', 'synonymous'})
 
 _ACCESSION_IDENTIFIER_RE = re.compile(
     r'^(?P<base>(?:[A-Z]{1,6}_[A-Z0-9]*\d[A-Z0-9]*|[A-Z]{1,6}\d[A-Z0-9]*))(?:\.(?P<version>\d+))?$'
@@ -355,10 +357,13 @@ def _build_all_mutations_rows(
 
         is_single_hit = ann.is_resistance_hit
         is_formula_hit = id(ann) in formula_hit_annotation_ids
-        display_consequence = 'complex' if ann.consequence == 'inframe_complex' else ann.consequence
+        display_consequence = ann.consequence
 
         pos_1based = ann.variant.pos + 1
-        nt_change = f'{ann.variant.ref}{pos_1based}{ann.variant.alt}'
+        if ann.is_combined_codon_event and ann.ref_codon and ann.alt_codon:
+            nt_change = f'{ann.ref_codon}{ann.codon_pos + 1}{ann.alt_codon}'
+        else:
+            nt_change = f'{ann.variant.ref}{pos_1based}{ann.variant.alt}'
         aa_change = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             if ann.ref_aa and ann.alt_aa
@@ -384,18 +389,6 @@ def _build_all_mutations_rows(
 
 # Matches an optional qualifier (>, <, ≥, ≤, ~) followed by a leading number.
 _RE_LEADING_NUM = re.compile(r'^[><=~≥≤≈\s]*(-?\d+(?:\.\d+)?)')
-
-_HIGH_IMPACT_CONSEQUENCES: frozenset[str] = frozenset({
-    'frameshift', 'stop_gained', 'stop_lost', 'start_lost', 'insertion', 'deletion',
-})
-_CONSEQUENCE_LABELS: dict[str, str] = {
-    'frameshift': 'frameshift',
-    'stop_gained': 'premature stop',
-    'stop_lost': 'stop loss',
-    'start_lost': 'start loss',
-    'insertion': 'in-frame insertion',
-    'deletion': 'in-frame deletion',
-}
 
 
 def _parse_numeric_value(value_str: str) -> float | None:
@@ -467,6 +460,10 @@ def _build_database_hits_rows(
                 if ann.ref_aa and ann.alt_aa
                 else ann.feature_name
             )
+            # For wildcard insertion rules, prefix the rule label so the
+            # database-hits table shows both the rule type and actual allele.
+            if rule.mutation == 'INS_any':
+                aa_change = f'INS_any ({aa_change})'
             rows.append({
                 'drug_key': rule.drug_name,
                 'drug': _format_drug_name_with_alias(rule.drug_name, drug_alias_map or {}),
@@ -512,7 +509,7 @@ def _build_database_hits_rows(
         })
 
     rows.extend(
-        _build_frameshift_as_resistant_rows(
+        _build_effect_as_resistant_rows(
             result,
             project_conn,
             display_names,
@@ -639,7 +636,7 @@ def _references_match_with_accession_version(
     return configured_match.group('base') == observed_match.group('base')
 
 
-def _build_frameshift_as_resistant_rows(
+def _build_effect_as_resistant_rows(
     result: ProfilingResult,
     project_conn: sqlite3.Connection | None,
     display_names: dict[str, str] | None = None,
@@ -647,17 +644,17 @@ def _build_frameshift_as_resistant_rows(
     drug_class_map: dict[str, str] | None = None,
     drug_alias_map: dict[str, str] | None = None,
 ) -> list[dict]:
-    """Build metadata-only DB-hit rows for configured frameshift annotations."""
+    """Build metadata-only DB-hit rows for configured effect annotations."""
     if project_conn is None:
         return []
 
-    frameshift_config = _load_algorithm_config(project_conn, 'frameshift_as_resistant')
-    if frameshift_config is None:
+    effect_config = _load_algorithm_config(project_conn, 'effect_as_resistant')
+    if effect_config is None:
         return []
     if not _has_any_phenotype_association(project_conn):
         return []
 
-    config_rules = frameshift_config.get('rules')
+    config_rules = effect_config.get('rules')
     if not isinstance(config_rules, list) or not config_rules:
         return []
 
@@ -679,12 +676,11 @@ def _build_frameshift_as_resistant_rows(
 
     rows: list[dict] = []
     for ann in result.cds_annotations:
-        if ann.consequence != 'frameshift':
-            continue
         feature_rules = rules_by_feature.get(ann.feature_name, [])
         if not feature_rules:
             continue
 
+        # Collect all effect lists from matching rules for this annotation's feature
         feature_display = (display_names or {}).get(ann.feature_name, ann.feature_name)
         aa_change = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
@@ -692,11 +688,15 @@ def _build_frameshift_as_resistant_rows(
             else ann.feature_name
         )
         for rule in feature_rules:
+            rule_effects = rule.get('effect', [])
+            if ann.consequence not in rule_effects:
+                continue
             drug_name = (rule.get('drug') or '').strip()
             if not drug_name:
                 continue
+            label = CONSEQUENCE_LABELS.get(ann.consequence, ann.consequence)
             comment = (
-                'Frameshift interpreted as resistant by metadata algorithm '
+                f'{label} interpreted as resistant by metadata algorithm '
                 f'({ann.feature_name}, {result.reference_name}).'
             )
             rows.append({
@@ -1045,7 +1045,7 @@ def _build_potential_effects_rows(
     For single-rule variants that are NOT direct database hits, find resistance rules at
     the same feature + codon position and score amino acid similarity via BLOSUM62.
     Indels at indel-rule positions are reported with 'moderate' similarity.
-    Frameshifts, stop gains, synonymous changes, and complex indels are excluded.
+    Frameshifts, stop gains, and synonymous changes are excluded.
 
     :param result: profiling result
     :param rules: loaded resistance rules for position-based lookup
@@ -1074,7 +1074,7 @@ def _build_potential_effects_rows(
     for rule in rules:
         rules_by_pos.setdefault((rule.feature_name, rule.position), []).append(rule)
 
-    excluded_consequences = {'frameshift', 'stop_gained', 'synonymous', 'inframe_complex'}
+    excluded_consequences = {'frameshift', 'stop_gained', 'synonymous'}
     # These classes are excluded because AA-level similarity is not interpretable:
     # they are either disruptive, no-op, or not representable as one AA substitution.
     rows: list[dict] = []
@@ -1315,17 +1315,17 @@ def _build_sequence_assessment(
 
     for ann in result.cds_annotations:
         feature = display_names.get(ann.feature_name, ann.feature_name)
-        feature_seen.add(feature)
-        if ann.consequence not in ('synonymous_variant', 'synonymous'):
+        if ann.consequence not in _SYNONYMOUS_CONSEQUENCES:
             non_synonymous_count += 1
-        if ann.consequence in _HIGH_IMPACT_CONSEQUENCES:
+            feature_seen.add(feature)
+        if ann.consequence in HIGH_IMPACT_CONSEQUENCES:
             high_impact_features.add(feature)
             high_impact_by_consequence[ann.consequence] += 1
 
     high_impact_count = sum(high_impact_by_consequence.values())
     high_impact_type_parts = [
-        f"{cnt} {_CONSEQUENCE_LABELS[c]}{'s' if cnt != 1 else ''}"
-        for c in _CONSEQUENCE_LABELS
+        f"{cnt} {CONSEQUENCE_LABELS[c]}{'s' if cnt != 1 else ''}"
+        for c in CONSEQUENCE_LABELS
         if (cnt := high_impact_by_consequence.get(c, 0))
     ]
     return {
@@ -1391,6 +1391,8 @@ def _build_mutation_profile(
     # in the same codon can produce the same AA label; deduplicate and OR the flags.
     seen: dict[tuple[str, int, str], dict] = {}
     for ann in result.cds_annotations:
+        if ann.consequence in _SYNONYMOUS_CONSEQUENCES:
+            continue
         feature = display_names.get(ann.feature_name, ann.feature_name)
         label = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
@@ -1404,12 +1406,12 @@ def _build_mutation_profile(
                 or ann.is_resistance_hit
                 or id(ann) in formula_hit_annotation_ids
             )
-            seen[key]['is_high_impact'] = seen[key]['is_high_impact'] or ann.consequence in _HIGH_IMPACT_CONSEQUENCES
+            seen[key]['is_high_impact'] = seen[key]['is_high_impact'] or ann.consequence in HIGH_IMPACT_CONSEQUENCES
         else:
             seen[key] = {
                 'label': label,
                 'is_db_hit': ann.is_resistance_hit or id(ann) in formula_hit_annotation_ids,
-                'is_high_impact': ann.consequence in _HIGH_IMPACT_CONSEQUENCES,
+                'is_high_impact': ann.consequence in HIGH_IMPACT_CONSEQUENCES,
             }
 
     feature_mutations: dict[str, list[tuple[int, dict]]] = {}
@@ -1486,14 +1488,27 @@ def _build_summary_narrative(
     n_drugs = len(assessed_rows) if assessed_rows else len(drug_rows)
     if has_assessment and n_drugs:
         drug_word = 'drug' if n_drugs == 1 else 'drugs'
-        lead = (
-            f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
-            f'known resistance-associated mutations for {n_drugs} {drug_word}. '
-            f'The assessment found evidence for antiviral resistance against '
-            f"{len(resistant_drugs)} {'drug' if len(resistant_drugs) == 1 else 'drugs'}, "
-            f"intermediate resistance against {len(intermediate_drugs)} {'drug' if len(intermediate_drugs) == 1 else 'drugs'}, "
-            f"and sensitivity for {len(sensitive_drugs)} {'drug' if len(sensitive_drugs) == 1 else 'drugs'}."
-        )
+        if len(resistant_drugs) == 0 and len(intermediate_drugs) == 0:
+            lead = (
+                f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
+                f'known resistance-associated mutations for {n_drugs} {drug_word}. '
+                'The assessment found no evidence for antiviral resistance for any drug.'
+            )
+        elif len(sensitive_drugs) == 0 and len(intermediate_drugs) == 0:
+            lead = (
+                f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
+                f'known resistance-associated mutations for {n_drugs} {drug_word}. '
+                'The assessment found evidence for antiviral resistance for all analysed drugs.'
+            )
+        else:
+            lead = (
+                f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
+                f'known resistance-associated mutations for {n_drugs} {drug_word}. '
+                f'The assessment found evidence for antiviral resistance against '
+                f"{len(resistant_drugs)} {'drug' if len(resistant_drugs) == 1 else 'drugs'}, "
+                f"intermediate resistance against {len(intermediate_drugs)} {'drug' if len(intermediate_drugs) == 1 else 'drugs'}, "
+                f"and sensitivity for {len(sensitive_drugs)} {'drug' if len(sensitive_drugs) == 1 else 'drugs'}."
+            )
     elif drug_rows:
         lead = (
             f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
@@ -1527,7 +1542,7 @@ def _build_summary_narrative(
 
     high_impact_without_db = [
         ann for ann in result.cds_annotations
-        if ann.consequence in _HIGH_IMPACT_CONSEQUENCES
+        if ann.consequence in HIGH_IMPACT_CONSEQUENCES
         and not ann.is_resistance_hit
         and id(ann) not in formula_hit_annotation_ids
     ]
@@ -1599,8 +1614,10 @@ def _build_drug_interpretation_table(
             'hit_count': 0,
             'resistant_count': 0, 'intermediate_count': 0, 'sensitive_count': 0, 'contradictory_count': 0,
             'score_total': 0.0, 'score_display': '0',
+            'ic50_display': '\u2014', 'fold_ic50_display': '\u2014',
             'ic50_values': [], 'fold_ic50_values': [],
             'assessment': '', 'assessment_badge_class': '',
+            'method_assessments': [],
         }
 
     def _assessment_description(method: str, resistant_t, intermediate_t) -> str:
@@ -1608,21 +1625,25 @@ def _build_drug_interpretation_table(
             parts = [f'Resistant: \u2265{resistant_t} resistant phenotype hit(s).']
             if intermediate_t is not None:
                 parts.append(f'Intermediate: \u2265{intermediate_t} intermediate phenotype hit(s).')
+            parts.append('Contradictory: any contradictory hit(s).')
+            parts.append('Otherwise: Sensitive.')
         elif method == 'by_score':
             parts = [f'Resistant: total score \u2265 {resistant_t}.']
             if intermediate_t is not None:
                 parts.append(f'Intermediate: total score \u2265 {intermediate_t}.')
+            parts.append('Otherwise: Sensitive.')
         elif method == 'by_ic50':
             parts = [f'Resistant: any IC50 value \u2265 {resistant_t}.']
             if intermediate_t is not None:
                 parts.append(f'Intermediate: any IC50 value \u2265 {intermediate_t}.')
+            parts.append('Otherwise: Sensitive.')
         elif method == 'by_fold_ic50':
             parts = [f'Resistant: any fold IC50 value \u2265 {resistant_t}.']
             if intermediate_t is not None:
                 parts.append(f'Intermediate: any fold IC50 value \u2265 {intermediate_t}.')
+            parts.append('Otherwise: Sensitive.')
         else:
             parts = []
-        parts.append('Otherwise: Sensitive.')
         return ' '.join(parts)
 
     hit_rows = database_hits.get('rows', [])
@@ -1717,72 +1738,63 @@ def _build_drug_interpretation_table(
     )
     has_groups = any(d['drug_class'] for d in by_drug.values())
 
-    drug_interp_config: dict | None = None
+    drug_interp_configs: list[dict] = []
     assessment_description = ''
     if project_conn is not None:
         try:
-            interp_row = project_conn.execute(
+            interp_rows = project_conn.execute(
                 "SELECT config_json FROM interpretation_algorithm "
-                "WHERE algorithm_name = 'drug_interpretation' LIMIT 1"
-            ).fetchone()
-            if interp_row:
-                drug_interp_config = json.loads(interp_row['config_json'])
+                "WHERE algorithm_name = 'drug_interpretation' ORDER BY id"
+            ).fetchall()
+            for row in interp_rows:
+                drug_interp_configs.append(json.loads(row['config_json']))
         except sqlite3.Error as exc:
             logger.debug('Failed to load drug_interpretation algorithm: %s', exc)
 
-    has_assessment = drug_interp_config is not None
+    has_assessment = len(drug_interp_configs) > 0
+    has_final_assessment = len(drug_interp_configs) > 1
+    method_labels: list[dict] = []
     if has_assessment:
-        method = drug_interp_config.get('method', '')
-        thresholds = drug_interp_config.get('thresholds', {})
-        resistant_threshold = thresholds.get('resistant', 1)
-        intermediate_threshold = thresholds.get('intermediate')
-        assessment_description = _assessment_description(method, resistant_threshold, intermediate_threshold)
-        for drug_data in by_drug.values():
-            if method == 'by_phenotype':
-                if drug_data['resistant_count'] >= resistant_threshold:
-                    drug_data['assessment'] = 'resistant'
-                elif (
-                    intermediate_threshold is not None
-                    and drug_data['intermediate_count'] >= intermediate_threshold
-                ):
-                    drug_data['assessment'] = 'intermediate'
-                elif drug_data['contradictory_count'] > 0:
-                    # At least one hit carries a contradictory phenotype and no
-                    # resistant/intermediate threshold was reached — surface the
-                    # uncertainty rather than silently reporting sensitive.
-                    drug_data['assessment'] = 'contradictory'
-                else:
-                    drug_data['assessment'] = 'sensitive'
-            elif method == 'by_score':
-                total = drug_data['score_total']
-                if total >= resistant_threshold:
-                    drug_data['assessment'] = 'resistant'
-                elif intermediate_threshold is not None and total >= intermediate_threshold:
-                    drug_data['assessment'] = 'intermediate'
-                else:
-                    drug_data['assessment'] = 'sensitive'
-            elif method == 'by_ic50':
-                ic50_values = drug_data['ic50_values']
-                if any(value >= resistant_threshold for value in ic50_values):
-                    drug_data['assessment'] = 'resistant'
-                elif (
-                    intermediate_threshold is not None
-                    and any(value >= intermediate_threshold for value in ic50_values)
-                ):
-                    drug_data['assessment'] = 'intermediate'
-                else:
-                    drug_data['assessment'] = 'sensitive'
+        from respro.db.algorithms import _METHOD_LABEL, compute_drug_assessment
+        for config in drug_interp_configs:
+            method = config.get('method', '')
+            thresholds = config.get('thresholds', {})
+            resistant_threshold = thresholds.get('resistant', 1)
+            intermediate_threshold = thresholds.get('intermediate')
+
+            value_header = None
+            value_field = None
+            if method == 'by_ic50':
+                value_header = 'Highest IC50'
+                value_field = 'ic50_display'
             elif method == 'by_fold_ic50':
-                fold_ic50_values = drug_data['fold_ic50_values']
-                if any(value >= resistant_threshold for value in fold_ic50_values):
-                    drug_data['assessment'] = 'resistant'
-                elif (
-                    intermediate_threshold is not None
-                    and any(value >= intermediate_threshold for value in fold_ic50_values)
-                ):
-                    drug_data['assessment'] = 'intermediate'
-                else:
-                    drug_data['assessment'] = 'sensitive'
+                value_header = 'Highest Fold IC50'
+                value_field = 'fold_ic50_display'
+
+            method_labels.append({
+                'method': method,
+                'label': _METHOD_LABEL.get(method, method),
+                'description': _assessment_description(method, resistant_threshold, intermediate_threshold),
+                'value_header': value_header,
+                'value_field': value_field,
+            })
+        # Final assessment description
+        assessment_description = (
+            'Final assessment: most severe result across all methods '
+            '(resistant > contradictory > intermediate > sensitive).'
+        )
+
+        for drug_data in by_drug.values():
+            final_assessment, method_assessments = compute_drug_assessment(
+                drug_data, drug_interp_configs,
+            )
+            drug_data['assessment'] = final_assessment
+            drug_data['method_assessments'] = method_assessments
+            # Add badge classes for per-method assessment styling
+            for ma in method_assessments:
+                ma['assessment_badge_class'] = _PHENOTYPE_BADGE_CLASS.get(
+                    ma['assessment'].lower(), ''
+                )
 
     for drug_data in by_drug.values():
         drug_data['assessment_badge_class'] = _PHENOTYPE_BADGE_CLASS.get(
@@ -1790,17 +1802,28 @@ def _build_drug_interpretation_table(
         )
         score = drug_data['score_total']
         drug_data['score_display'] = str(int(score)) if score == int(score) else f'{score:.2g}'
+        ic50_vals = drug_data['ic50_values']
+        if ic50_vals:
+            highest = max(ic50_vals)
+            drug_data['ic50_display'] = f'{highest:g}'
+        fold_ic50_vals = drug_data['fold_ic50_values']
+        if fold_ic50_vals:
+            highest = max(fold_ic50_vals)
+            drug_data['fold_ic50_display'] = f'{highest:g}'
 
     drug_rows = sorted(by_drug.values(), key=lambda d: d['name'].lower())
     groups: dict[str, list[dict]] = {}
     for drug_data in drug_rows:
         groups.setdefault(drug_data['drug_class'], []).append(drug_data)
 
+    num_value_columns = sum(1 for ml in method_labels if ml['value_header'])
     col_count = (
         2
         + (3 if has_phenotypes else 0)
         + (1 if has_scores else 0)
-        + (1 if has_assessment else 0)
+        + (len(method_labels) if has_assessment else 0)
+        + (num_value_columns if has_assessment else 0)
+        + (1 if has_final_assessment else 0)
     )
     return {
         'rows': drug_rows,
@@ -1809,6 +1832,9 @@ def _build_drug_interpretation_table(
         'has_phenotypes': has_phenotypes,
         'has_scores': has_scores,
         'has_assessment': has_assessment,
+        'has_method_assessments': has_assessment,
+        'has_final_assessment': has_final_assessment,
+        'method_labels': method_labels,
         'assessment_description': assessment_description,
         'col_count': col_count,
     }

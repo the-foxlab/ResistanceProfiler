@@ -24,7 +24,6 @@ def resolve_fasta_query(
     conn: sqlite3.Connection,
     fasta_path: Path,
     *,
-    min_identity: float = 0.9,
     use_cache: bool = True,
     threads: int = 1,
 ) -> tuple[str, str, list[FeatureMatch]]:
@@ -33,7 +32,6 @@ def resolve_fasta_query(
 
     :param conn: project database connection
     :param fasta_path: path to single-record user FASTA
-    :param min_identity: minimum nucleotide identity
     :param use_cache: if True, reuse/store mapping cache in project DB
     :param threads: number of worker processes for parallel feature alignment
     :return: (query_name, query_sequence, feature_matches)
@@ -65,13 +63,11 @@ def resolve_fasta_query(
 
     matches = match_query_to_features(
         query_seq, features,
-        min_identity=min_identity,
         threads=threads,
     )
     if not matches:
         raise ValueError(
-            f'No CDS matches above thresholds '
-            f'(identity>={min_identity:.0%}) in {fasta_path.name}'
+            f'No CDS matches found in {fasta_path.name}'
         )
 
     if use_cache:

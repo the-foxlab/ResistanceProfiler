@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Background -->
+  <rect width="64" height="64" rx="10" fill="#ffffff"/>
+
+  <!-- Centered 3 bars with more spacing -->
+  <g transform="translate(11,16)">
+    <rect x="0" y="0"  width="40" height="6" fill="#111827"/>
+    <rect x="6" y="14" width="40" height="6" fill="#059669"/>
+    <rect x="3" y="28" width="40" height="6" fill="#111827"/>
+  </g>
+</svg>

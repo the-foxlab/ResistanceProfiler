@@ -1,6 +1,11 @@
-# CLI Tutorial
+---
+title: CLI Reference
+description: Complete CLI command reference with examples
+---
 
-This tutorial covers all primary CLI command groups:
+# CLI Reference
+
+This reference covers all primary CLI command groups:
 
 - `databases`
 - `init`
@@ -14,7 +19,7 @@ This tutorial covers all primary CLI command groups:
 
 The important workflow idea is that ResPro profiles against one internal project database. New sample data is first normalized to that internal reference space before amino-acid rules are matched.
 
-## 1. Download a maintained database (`respro databases`)
+## Download a maintained database
 
 List available pre-ported databases:
 
@@ -28,13 +33,15 @@ Download a database by name:
 respro databases --download db_name --output my_folder/
 ```
 
-ResPro automatically downloads TSV rules and GenBank files, then builds a ResPro-compatible SQLite database from scratch. Database creation can take a moment because ResPro enriches entries with PubMed and PubChem information. Add `-vv` to see verbose progress:
+ResPro automatically downloads TSV rules and GenBank files, then builds a ResPro-compatible SQLite database from scratch. Database creation can take a moment because ResPro enriches entries with PubMed and PubChem information.
 
-```bash
-respro -vv databases --download db_name --output my_folder/
-```
+!!! tip "Verbose progress"
+    Add `-vv` to see verbose progress:
+    ```bash
+    respro -vv databases --download db_name --output my_folder/
+    ```
 
-## 2. Initialize a project database (`respro init`)
+## Initialize a project database
 
 Use this when you have your own GenBank reference and rules TSV instead of a maintained database:
 
@@ -49,7 +56,9 @@ respro init \
 
 If your dataset only contains atomic mutation rules, omit `--formula-rules`.
 
-## 3. Extend or validate rules in an existing project (`respro add`)
+For metadata and interpretation algorithm options, see [Database Preparation](database-preparation.md).
+
+## Extend or validate rules in an existing project
 
 Validate rules without writing changes:
 
@@ -70,7 +79,7 @@ respro add \
   --formula-rules combinatorial_rules.tsv
 ```
 
-## 4. Profile FASTA input (`respro fasta`)
+## Profile FASTA input
 
 ```bash
 respro fasta \
@@ -82,7 +91,7 @@ respro fasta \
   --export pdf
 ```
 
-## 5. Profile VCF input (`respro vcf`)
+## Profile VCF input
 
 ```bash
 respro vcf \
@@ -97,7 +106,7 @@ respro vcf \
   --export pdf
 ```
 
-## 6. Inspect project metadata and curated rules (`respro manage database`)
+## Inspect project metadata and curated rules
 
 Project metadata:
 
@@ -117,7 +126,7 @@ Rules table filtered by reference:
 respro manage database myrespro.db --rules --reference NC_001806
 ```
 
-## 7. Inspect and delete stored runs (`respro manage results`)
+## Inspect and delete stored runs
 
 List runs:
 
@@ -131,7 +140,7 @@ Delete one run without interactive confirmation:
 respro manage results my_results.db --delete 1 --force
 ```
 
-## 8. Re-annotate stored runs against updated rules (`respro manage results --sync`)
+## Re-annotate stored runs against updated rules
 
 Sync all runs with matching project fingerprint:
 
@@ -139,7 +148,7 @@ Sync all runs with matching project fingerprint:
 respro manage results my_results.db --sync myrespro.db
 ```
 
-## 9. Add manual interpretation fields (`respro classify`)
+## Add manual interpretation fields
 
 ```bash
 respro classify \
@@ -150,7 +159,7 @@ respro classify \
   --note "manual check"
 ```
 
-## 10. Regenerate reports (`respro regenerate`)
+## Regenerate reports
 
 From a stored run:
 
@@ -171,3 +180,6 @@ respro regenerate \
   --json my_output/sample_variants.results.json \
   --output my_output
 ```
+
+!!! tip "Regenerate from JSON"
+    You can also regenerate your result from a JSON file. This is useful for archival and deterministic reproduction without needing the original results database.

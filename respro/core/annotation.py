@@ -15,6 +15,19 @@ from respro.db.models import AnnotatedVariant, FeatureRecord, VariantCall
 
 logger = logging.getLogger(__name__)
 
+# Shared high-impact consequence set and human-readable labels.
+HIGH_IMPACT_CONSEQUENCES: frozenset[str] = frozenset({
+    'frameshift', 'stop_gained', 'stop_lost', 'start_lost', 'insertion', 'deletion',
+})
+CONSEQUENCE_LABELS: dict[str, str] = {
+    'frameshift': 'frameshift',
+    'stop_gained': 'premature stop',
+    'stop_lost': 'stop loss',
+    'start_lost': 'start loss',
+    'insertion': 'in-frame insertion',
+    'deletion': 'in-frame deletion',
+}
+
 # Compiled patterns for normalize_mutation — module-level per Python performance convention.
 _RE_FS_ANY = re.compile(r'^(?:[A-Z*]\d+)?(?:fs|frameshift)', re.IGNORECASE)
 _RE_STOP_FULL = re.compile(r'^[A-Z*]\d+stop$', re.IGNORECASE)
@@ -71,12 +84,13 @@ def annotate_variants(
                     combined_annotation.is_fasta_mode = is_fasta_mode
                     results.append(combined_annotation)
                 continue
-            ann = _annotate_variant_in_feature(var, feature)
-            if ann is None:
+            anns = _annotate_variant_in_feature(var, feature)
+            if not anns:
                 skipped_non_snp += 1
                 continue
-            ann.is_fasta_mode = is_fasta_mode
-            results.append(ann)
+            for ann in anns:
+                ann.is_fasta_mode = is_fasta_mode
+                results.append(ann)
 
     logger.info(
         'Annotated %d variant(s) -> %d annotation(s) (%d in CDS, %d non-assessable skipped)',
@@ -250,7 +264,10 @@ def _annotate_combined_snp_codon(
     internal_codon = seq_cds[codon_start:codon_start + 3]
     ref_aa = translate_codon(internal_codon)
 
-    query_codons = {v.query_ref_codon.upper() for v in variants if len(v.query_ref_codon) == 3}
+    query_codons = {
+        v.query_ref_codon.upper() for v in variants
+        if len(v.query_ref_codon) == 3 and '-' not in v.query_ref_codon
+    }
     # Only use query codon when all members agree on one context; otherwise stay internal.
     affected_codon = next(iter(query_codons)) if len(query_codons) == 1 else internal_codon
 
@@ -285,7 +302,7 @@ def _annotate_combined_snp_codon(
         allele_freq=min(v.allele_freq for v in variants),
         depth=anchor.depth,
         filter_status=anchor.filter_status,
-        query_ref_codon=affected_codon if len(affected_codon) == 3 else '',
+        query_ref_codon=affected_codon if len(affected_codon) == 3 and '-' not in affected_codon else '',
     )
 
     return AnnotatedVariant(
@@ -305,28 +322,30 @@ def _annotate_combined_snp_codon(
 def _annotate_variant_in_feature(
     var: VariantCall,
     feature: FeatureRecord,
-) -> AnnotatedVariant | None:
+) -> list[AnnotatedVariant]:
     """
     Annotate a single variant within a feature.
 
     Handles SNPs, in-frame insertions, in-frame deletions, frameshifts, and mid-codon in-frame
-    indels (annotated as inframe_complex).
+    indels (split into missense + indel annotations).
+
+    :return: list of AnnotatedVariant; empty list when the variant is a skipped non-SNP
     """
     seq_cds = feature.nt_sequence.upper()
     if not seq_cds:
-        return AnnotatedVariant(variant=var, feature_name=feature.name)
+        return [AnnotatedVariant(variant=var, feature_name=feature.name)]
 
     coding_nt = seq_cds[feature.codon_start:]
 
     cds_variant_pos = feature.genomic_to_cds_position(var.pos)
     if cds_variant_pos is None:
-        return AnnotatedVariant(variant=var, feature_name=feature.name)
+        return [AnnotatedVariant(variant=var, feature_name=feature.name)]
 
     # codon_start can place CDS after a non-coding prefix in feature.nt_sequence,
     # so this remaps absolute CDS coordinates into the translated coding frame.
     coding_variant_pos = cds_variant_pos - feature.codon_start
     if coding_variant_pos < 0:
-        return AnnotatedVariant(variant=var, feature_name=feature.name)
+        return [AnnotatedVariant(variant=var, feature_name=feature.name)]
 
     codon_idx = coding_variant_pos // 3
     frame_offset = coding_variant_pos % 3
@@ -334,14 +353,14 @@ def _annotate_variant_in_feature(
     if _is_snp(var.ref, var.alt):
         cds_codons = [list(coding_nt[i:i + 3]) for i in range(0, len(coding_nt), 3)]
         if codon_idx >= len(cds_codons):
-            return AnnotatedVariant(variant=var, feature_name=feature.name)
+            return [AnnotatedVariant(variant=var, feature_name=feature.name)]
         mut = reverse_complement(var.alt) if feature.strand == '-' else var.alt
-        return _annotate_snp(var, feature, cds_codons, codon_idx, frame_offset, mut)
+        return [_annotate_snp(var, feature, cds_codons, codon_idx, frame_offset, mut)]
 
     if _is_insertion(var.ref, var.alt):
         indel_anchor_pos = _indel_anchor_coding_pos(coding_variant_pos, len(var.ref), feature.strand)
         if indel_anchor_pos < 0:
-            return AnnotatedVariant(variant=var, feature_name=feature.name)
+            return [AnnotatedVariant(variant=var, feature_name=feature.name)]
         return _annotate_insertion(
             var,
             feature,
@@ -353,7 +372,7 @@ def _annotate_variant_in_feature(
     if _is_deletion(var.ref, var.alt):
         indel_anchor_pos = _indel_anchor_coding_pos(coding_variant_pos, len(var.ref), feature.strand)
         if indel_anchor_pos < 0:
-            return AnnotatedVariant(variant=var, feature_name=feature.name)
+            return [AnnotatedVariant(variant=var, feature_name=feature.name)]
         return _annotate_deletion(
             var,
             feature,
@@ -362,7 +381,7 @@ def _annotate_variant_in_feature(
             indel_anchor_pos % 3,
         )
 
-    return None
+    return []
 
 
 def _annotate_snp(
@@ -458,40 +477,27 @@ def _annotate_insertion(
     coding_nt: str,
     codon_idx: int,
     frame_offset: int,
-) -> AnnotatedVariant:
+) -> list[AnnotatedVariant]:
     """
     Annotate an in-frame insertion or frameshift insertion.
 
     Non-in-frame insertions are always annotated as frameshift.
     In-frame insertions whose anchor is at a codon boundary (frame_offset == 2) are
-    annotated as insertion. Mid-codon in-frame insertions are annotated as inframe_complex
-    because two neighbouring codons are partially rewritten; the AA consequence is not
-    resolvable to a single canonical token.
+    annotated as insertion. Mid-codon in-frame insertions are split into a missense
+    annotation (if the anchor codon changes) plus an insertion annotation.
 
     :param var: variant call; ALT uses VCF anchor-base convention (alt[1:] are inserted bases)
     :param feature: feature record
     :param coding_nt: coding nucleotide sequence (from codon_start onward)
     :param codon_idx: 0-based codon index of the anchor base
     :param frame_offset: position of anchor base within its codon (0, 1, or 2)
-    :return: AnnotatedVariant
+    :return: list of AnnotatedVariant
     """
     if abs(len(var.alt) - len(var.ref)) % 3 != 0:
-        return _annotate_frameshift(var, feature, coding_nt, codon_idx)
+        return [_annotate_frameshift(var, feature, coding_nt, codon_idx)]
 
     if not _is_vcf_anchor_at_codon_boundary(frame_offset):
-        internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
-        anchor_codon = _resolve_anchor_codon(var, internal_codon)
-        anchor_aa = translate_codon(anchor_codon)
-        return AnnotatedVariant(
-            variant=var,
-            feature_name=feature.name,
-            codon_pos=codon_idx,
-            ref_codon=anchor_codon,
-            alt_codon='',
-            ref_aa=anchor_aa,
-            alt_aa='?',
-            consequence='inframe_complex',
-        )
+        return _split_mid_codon_insertion(var, feature, coding_nt, codon_idx, frame_offset)
 
     internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
     anchor_codon = _resolve_anchor_codon(var, internal_codon)
@@ -499,7 +505,7 @@ def _annotate_insertion(
     inserted_bases = var.alt[1:]  # strip anchor base
     inserted_aas = _translate_indel_bases(inserted_bases, feature.strand)
 
-    return AnnotatedVariant(
+    return [AnnotatedVariant(
         variant=var,
         feature_name=feature.name,
         codon_pos=codon_idx,
@@ -508,7 +514,7 @@ def _annotate_insertion(
         ref_aa=anchor_aa,
         alt_aa=anchor_aa + inserted_aas,
         consequence='insertion',
-    )
+    )]
 
 
 def _annotate_deletion(
@@ -517,40 +523,27 @@ def _annotate_deletion(
     coding_nt: str,
     codon_idx: int,
     frame_offset: int,
-) -> AnnotatedVariant:
+) -> list[AnnotatedVariant]:
     """
     Annotate an in-frame deletion or frameshift deletion.
 
     Non-in-frame deletions are always annotated as frameshift.
     In-frame deletions whose anchor is at a codon boundary (frame_offset == 2) are
-    annotated as deletion. Mid-codon in-frame deletions are annotated as inframe_complex
-    because two neighbouring codons are partially rewritten; the AA consequence is not
-    resolvable to a single canonical token.
+    annotated as deletion. Mid-codon in-frame deletions are split into a missense
+    annotation (if the anchor codon changes) plus a deletion annotation.
 
     :param var: variant call; REF uses VCF anchor-base convention (ref[1:] are deleted bases)
     :param feature: feature record
     :param coding_nt: coding nucleotide sequence (from codon_start onward)
     :param codon_idx: 0-based codon index of the anchor base
     :param frame_offset: position of anchor base within its codon (0, 1, or 2)
-    :return: AnnotatedVariant
+    :return: list of AnnotatedVariant
     """
     if abs(len(var.alt) - len(var.ref)) % 3 != 0:
-        return _annotate_frameshift(var, feature, coding_nt, codon_idx)
+        return [_annotate_frameshift(var, feature, coding_nt, codon_idx)]
 
     if not _is_vcf_anchor_at_codon_boundary(frame_offset):
-        internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
-        anchor_codon = _resolve_anchor_codon(var, internal_codon)
-        anchor_aa = translate_codon(anchor_codon)
-        return AnnotatedVariant(
-            variant=var,
-            feature_name=feature.name,
-            codon_pos=codon_idx,
-            ref_codon=anchor_codon,
-            alt_codon='',
-            ref_aa=anchor_aa,
-            alt_aa='?',
-            consequence='inframe_complex',
-        )
+        return _split_mid_codon_deletion(var, feature, coding_nt, codon_idx, frame_offset)
 
     internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
     anchor_codon = _resolve_anchor_codon(var, internal_codon)
@@ -558,7 +551,7 @@ def _annotate_deletion(
     deleted_bases = var.ref[1:]  # strip anchor base
     deleted_aas = _translate_indel_bases(deleted_bases, feature.strand)
 
-    return AnnotatedVariant(
+    return [AnnotatedVariant(
         variant=var,
         feature_name=feature.name,
         codon_pos=codon_idx,
@@ -567,13 +560,179 @@ def _annotate_deletion(
         ref_aa=anchor_aa + deleted_aas,
         alt_aa=anchor_aa,
         consequence='deletion',
-    )
+    )]
+
+
+def _split_mid_codon_insertion(
+    var: VariantCall,
+    feature: FeatureRecord,
+    coding_nt: str,
+    codon_idx: int,
+    frame_offset: int,
+) -> list[AnnotatedVariant]:
+    """
+    Split a mid-codon in-frame insertion into missense + insertion annotations.
+
+    When an in-frame insertion starts mid-codon, the anchor codon is partially rewritten.
+    This function reconstructs the query anchor codon and emits up to 2 annotations:
+    a missense/synonymous/stop_gained/stop_loss/start_lost for the anchor codon change
+    (skipped if synonymous), and an insertion for the inserted amino acids.
+
+    :param var: variant call; ALT uses VCF anchor-base convention
+    :param feature: feature record
+    :param coding_nt: coding nucleotide sequence (from codon_start onward)
+    :param codon_idx: 0-based codon index of the anchor base
+    :param frame_offset: position of anchor base within its codon (0 or 1)
+    :return: list of 1 or 2 AnnotatedVariant
+    """
+    internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+    ref_codon = _resolve_anchor_codon(var, internal_codon)
+    ref_aa = translate_codon(ref_codon)
+    preserved = frame_offset + 1
+
+    # Get inserted bases in coding orientation
+    inserted_bases_genomic = var.alt[1:]
+    inserted_coding = reverse_complement(inserted_bases_genomic) if feature.strand == '-' else inserted_bases_genomic.upper()
+
+    # Reconstruct query anchor codon: preserved bases from ref + (3-preserved) bases from inserted
+    suffix_len = 3 - preserved
+    query_codon = ref_codon[:preserved] + inserted_coding[:suffix_len]
+    query_aa = translate_codon(query_codon)
+
+    results: list[AnnotatedVariant] = []
+
+    # Anchor codon annotation (missense/synonymous/stop_gained/stop_loss/start_lost)
+    if ref_aa != query_aa:
+        consequence = _classify_snp_consequence(ref_aa, query_aa, codon_idx)
+        results.append(AnnotatedVariant(
+            variant=var,
+            feature_name=feature.name,
+            codon_pos=codon_idx,
+            ref_codon=ref_codon,
+            alt_codon=query_codon,
+            ref_aa=ref_aa,
+            alt_aa=query_aa,
+            consequence=consequence,
+        ))
+
+    # Insertion payload: remaining inserted bases + displaced bases from end of ref anchor codon
+    payload_bases = inserted_coding[suffix_len:] + ref_codon[preserved:]
+    inserted_aas = str(Seq(payload_bases).translate()) if len(payload_bases) >= 3 else ''
+
+    # Insertion annotation uses the anchor AA from the reference codon
+    anchor_aa = ref_aa
+    results.append(AnnotatedVariant(
+        variant=var,
+        feature_name=feature.name,
+        codon_pos=codon_idx,
+        ref_codon=ref_codon,
+        alt_codon='',
+        ref_aa=anchor_aa,
+        alt_aa=anchor_aa + inserted_aas,
+        consequence='insertion',
+    ))
+
+    return results
+
+
+def _split_mid_codon_deletion(
+    var: VariantCall,
+    feature: FeatureRecord,
+    coding_nt: str,
+    codon_idx: int,
+    frame_offset: int,
+) -> list[AnnotatedVariant]:
+    """
+    Split a mid-codon in-frame deletion into missense + deletion annotations.
+
+    When an in-frame deletion starts mid-codon, the anchor codon is partially rewritten.
+    This function reconstructs the query anchor codon from the reference CDS after the
+    deleted region and emits up to 2 annotations: a missense/synonymous/stop_gained/
+    stop_loss/start_lost for the anchor codon change (skipped if synonymous), and a
+    deletion for the removed amino acids.
+
+    :param var: variant call; REF uses VCF anchor-base convention
+    :param feature: feature record
+    :param coding_nt: coding nucleotide sequence (from codon_start onward)
+    :param codon_idx: 0-based codon index of the anchor base
+    :param frame_offset: position of anchor base within its codon (0 or 1)
+    :return: list of 1 or 2 AnnotatedVariant
+    """
+    internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+    ref_codon = _resolve_anchor_codon(var, internal_codon)
+    ref_aa = translate_codon(ref_codon)
+    preserved = frame_offset + 1
+
+    deleted_bases = var.ref[1:]  # strip anchor base
+    suffix_len = 3 - preserved
+
+    # Position in CDS immediately after the deleted region
+    post_delete_pos = codon_idx * 3 + preserved + len(deleted_bases)
+
+    # Check CDS bounds: need suffix_len bases after the deletion
+    if post_delete_pos + suffix_len > len(coding_nt):
+        logger.warning(
+            'Mid-codon deletion at codon %d extends beyond CDS; falling back to deletion with unknown AA change',
+            codon_idx,
+        )
+        return [AnnotatedVariant(
+            variant=var,
+            feature_name=feature.name,
+            codon_pos=codon_idx,
+            ref_codon=ref_codon,
+            alt_codon='',
+            ref_aa=ref_aa,
+            alt_aa='?',
+            consequence='deletion',
+        )]
+
+    # Reconstruct query anchor codon: preserved bases from ref + suffix from CDS after deletion
+    query_codon = ref_codon[:preserved] + coding_nt[post_delete_pos:post_delete_pos + suffix_len]
+    query_aa = translate_codon(query_codon)
+
+    results: list[AnnotatedVariant] = []
+
+    # Anchor codon annotation
+    if ref_aa != query_aa:
+        consequence = _classify_snp_consequence(ref_aa, query_aa, codon_idx)
+        results.append(AnnotatedVariant(
+            variant=var,
+            feature_name=feature.name,
+            codon_pos=codon_idx,
+            ref_codon=ref_codon,
+            alt_codon=query_codon,
+            ref_aa=ref_aa,
+            alt_aa=query_aa,
+            consequence=consequence,
+        ))
+
+    # Deleted AAs: translate the removed codons from the reference CDS
+    n_removed = len(deleted_bases) // 3
+    deleted_codons = coding_nt[(codon_idx + 1) * 3:(codon_idx + 1 + n_removed) * 3]
+    deleted_aas = _translate_indel_bases(deleted_codons, '+')  # already in coding orientation
+
+    # Deletion annotation uses the anchor AA from the reference codon
+    anchor_aa = ref_aa
+    results.append(AnnotatedVariant(
+        variant=var,
+        feature_name=feature.name,
+        codon_pos=codon_idx,
+        ref_codon=ref_codon,
+        alt_codon='',
+        ref_aa=anchor_aa + deleted_aas,
+        alt_aa=anchor_aa,
+        consequence='deletion',
+    ))
+
+    return results
 
 
 def _resolve_anchor_codon(var: VariantCall, internal_codon: str) -> str:
     """Use query codon context when valid, otherwise use internal CDS codon."""
     query_codon = var.query_ref_codon.upper()
-    return query_codon if len(query_codon) == 3 else internal_codon
+    if len(query_codon) == 3 and '-' not in query_codon:
+        return query_codon
+    return internal_codon
 
 
 def _is_vcf_anchor_at_codon_boundary(frame_offset: int) -> bool:
@@ -691,6 +850,10 @@ def normalize_mutation(
     # Bare stop token/word
     if s == '*' or s_upper == 'STOP':
         return '*'
+
+    # Generic insertion wildcard token — matches any in-frame insertion at this position.
+    if s_upper == 'INS_ANY':
+        return 'INS_any'
 
     # Bare insertion, e.g. insGG -> requires row context.
     if s_upper.startswith('INS'):

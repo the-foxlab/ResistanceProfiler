@@ -1,6 +1,6 @@
 # Bundled example data
 
-This folder contains small, ready-to-run example inputs:
+This folder contains small, ready-to-run example inputs for HSV-1:
 
 - `example_fasta.fasta` for FASTA profiling
 - `example_vcf.vcf` for VCF profiling
@@ -9,11 +9,11 @@ This folder contains small, ready-to-run example inputs:
 ## Before you run the examples
 
 First download and build a maintained, HerpesDRG-compatible ResPro project database.
-Use the maintained database flow:
+Use the maintained database flow and download:
 
 ```bash
 respro databases --list
-respro databases --download <db_name> --output data/project_databases/
+respro databases --download herpesdrg --output data/project_databases/
 ```
 
 After download, use the generated `.db` file path as `--project` in the commands below.
@@ -39,4 +39,4 @@ respro vcf \
     --export pdf
 ```
 
-The HTML report is written into the selected output folder.
+The HTML report, pdf summary and a json are written into the selected output folder.

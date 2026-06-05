@@ -69,8 +69,9 @@ def save_run(
             'INSERT INTO variant_result '
             '(run_id, chrom, pos, ref, alt, allele_freq, depth, '
             'feature_name, codon_pos, ref_codon, alt_codon, ref_aa, alt_aa, '
-            'consequence, af_bin, rule_match, drug_hits) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'consequence, af_bin, rule_match, drug_hits, '
+            'is_combined_codon_event, combined_member_count) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 run_id,
                 v.chrom,
@@ -89,6 +90,8 @@ def save_run(
                 ann.af_bin,
                 int(ann.is_resistance_hit),
                 json.dumps(ann.drug_hits_json()),
+                int(ann.is_combined_codon_event),
+                ann.combined_member_count,
             ),
         )
 
@@ -292,6 +295,8 @@ def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
             alt_aa=row.get('alt_aa', ''),
             consequence=row.get('consequence', ''),
             af_bin=row.get('af_bin', ''),
+            is_combined_codon_event=bool(row.get('is_combined_codon_event', 0)),
+            combined_member_count=row.get('combined_member_count', 1) or 1,
             rule_matches=rule_matches,
         )
         annotations.append(ann)

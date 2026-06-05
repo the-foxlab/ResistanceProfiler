@@ -536,7 +536,7 @@ class TestProfileCli:
         ])
 
         assert result.exit_code != 0
-        assert 'no cds matches above thresholds' in (result.output + str(result.exception or '')).lower()
+        assert 'no cds matches found' in (result.output + str(result.exception or '')).lower()
 
     def test_profile_vcf_with_bam_persists_coverage_gaps(
         self,

@@ -25,10 +25,8 @@ Use this skill to surface architectural friction and propose deepening opportuni
 
 ## Inputs To Read First
 
-- `docs/development/contribution-and-architecture.md`
-- `docs/development/detailed_respro_layout.md`
-- `docs/development/detailed_app_layout.md`
-- `docs/development/to-do.md`
+- `docs/docs/contributing.md`
+- `TODO.md`
 - `.github/copilot-instructions.md`
 
 These documents are the domain and architecture baseline for this repository.

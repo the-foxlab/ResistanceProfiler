@@ -160,6 +160,8 @@ def write_json(
             'af_bin': ann.af_bin,
             'rule_match': int(ann.is_resistance_hit),
             'drug_hits': json.dumps(ann.drug_hits_json()),
+            'is_combined_codon_event': ann.is_combined_codon_event,
+            'combined_member_count': ann.combined_member_count,
         })
 
     coverage_rows = [
@@ -302,6 +304,8 @@ def _build_pdf_summary_context(
     drug_rows = _build_pdf_drug_rows(drug_table)
     has_drug_class = any((row.get('drug_class', '') or '').strip() for row in drug_rows)
     has_assessment = bool(drug_table.get('has_assessment'))
+    has_final_assessment = bool(drug_table.get('has_final_assessment'))
+    method_labels = drug_table.get('method_labels', [])
 
     return {
         'title': context.get('title', 'Resistance profile summary'),
@@ -321,6 +325,8 @@ def _build_pdf_summary_context(
             'drug_rows': drug_rows,
             'has_drug_class': has_drug_class,
             'has_assessment': has_assessment,
+            'has_final_assessment': has_final_assessment,
+            'method_labels': method_labels,
             'narrative': _condense_pdf_narrative(summary.get('narrative', '')),
         },
     }
@@ -389,6 +395,19 @@ def _build_pdf_drug_rows(drug_table: dict) -> list[dict]:
                             row.get('assessment', ''),
                         ),
                         'hit_count': int(row.get('hit_count', 0)),
+                        'method_assessments_by_method': {
+                            ma['method']: ma['assessment']
+                            for ma in row.get('method_assessments', [])
+                        },
+                        'method_badge_classes_by_method': {
+                            ma['method']: _normalize_assessment_badge_class(
+                                ma.get('assessment_badge_class', ''),
+                                ma.get('assessment', ''),
+                            )
+                            for ma in row.get('method_assessments', [])
+                        },
+                        'ic50_display': row.get('ic50_display', '—'),
+                        'fold_ic50_display': row.get('fold_ic50_display', '—'),
                     }
                 )
     else:
@@ -403,6 +422,19 @@ def _build_pdf_drug_rows(drug_table: dict) -> list[dict]:
                         row.get('assessment', ''),
                     ),
                     'hit_count': int(row.get('hit_count', 0)),
+                    'method_assessments_by_method': {
+                        ma['method']: ma['assessment']
+                        for ma in row.get('method_assessments', [])
+                    },
+                    'method_badge_classes_by_method': {
+                        ma['method']: _normalize_assessment_badge_class(
+                            ma.get('assessment_badge_class', ''),
+                            ma.get('assessment', ''),
+                        )
+                        for ma in row.get('method_assessments', [])
+                    },
+                    'ic50_display': row.get('ic50_display', '—'),
+                    'fold_ic50_display': row.get('fold_ic50_display', '—'),
                 }
             )
     return flattened_rows

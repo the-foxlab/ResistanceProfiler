@@ -1,5 +1,5 @@
 ---
-description: "Use when updating or reviewing public documentation: README, docs/user, and public-facing setup or usage guides. Use when checking whether documentation is outdated, improving end-user readability, or syncing docs with current CLI, web, and database behavior."
+description: "Use when updating or reviewing public documentation: README, the manual (docs/), and public-facing setup or usage guides. Use when checking whether documentation is outdated, improving end-user readability, or syncing docs with current CLI, web, and database behavior."
 name: "Public Documentation Specialist"
 tools: [read, search, edit]
 argument-hint: "Documentation scope, affected feature, and whether to review, update, or fully rewrite."
@@ -13,9 +13,8 @@ Use the `public-documentation` skill as your main procedure. It defines the docu
 
 ## Scope
 
-- Primary targets: `README.md` and everything under `docs/user/`.
-- Secondary target: public-facing sections of `docs/development/` when architecture or workflow changes make them inaccurate.
-- Structural target: `docs/development/detailed_respro_layout.md` and `docs/development/detailed_app_layout.md` when cross-module interaction flow has changed.
+- Primary targets: `README.md` and everything under `docs/docs/`.
+- Secondary target: contributing.md design principles and module layout when architecture changes affect them.
 - Always cross-check documentation claims against the current codebase and repository conventions before updating text.
 
 ## Priorities
@@ -41,12 +40,12 @@ Use the `public-documentation` skill as your main procedure. It defines the docu
 
 ## Approach
 
-1. Identify the docs in scope: `README.md`, `docs/user/`, and any related public-facing development docs.
+1. Identify the docs in scope: `README.md`, `docs/docs/`, and any related public-facing development docs.
 2. Verify current behavior against the codebase, config files, and examples rather than trusting existing docs.
 3. Follow the `public-documentation` skill to classify issues, rewrite for accuracy/readability, and sync related files.
 4. Use `repo-knowledge-graph` only for architecture-relevant changes to verify interaction drift before editing detailed layout docs.
 5. Preserve repository terminology and module boundaries from `.github/copilot-instructions.md`.
-6. When a user-facing behavior changes, update the affected docs in the same pass: at minimum `README.md`, related `docs/user/*`, and relevant `docs/development/*` pages.
+6. When a user-facing behavior changes, update the affected docs in the same pass: at minimum `README.md` and related `docs/docs/*` pages.
 
 ## Review Checklist
 
