@@ -5,7 +5,7 @@
 - Repository structure and module responsibilities: `docs/development/contribution-and-architecture.md`
 - Detailed module/function interaction layouts: `docs/development/detailed_respro_layout.md`, `docs/development/detailed_app_layout.md`
 - Planning source of truth and current priorities: `docs/development/to-do.md`
-- Rules TSV formatting, allowed column values, and mutation notation: `docs/user/rules-tsv-format.md`
+- Rules TSV formatting, allowed column values, and mutation notation: `docs/manual/docs/rules-format.md`
 - Public project overview and usage examples: `README.md`
 
 Keep this file focused on how code should be written in this repository.
@@ -189,7 +189,7 @@ a collection.
   `docs/development/detailed_respro_layout.md` and/or `docs/development/detailed_app_layout.md`.
   Use `repo-knowledge-graph` selectively for drift checks; do not run it on routine local edits.
 - When behavior changes can make documentation inaccurate, update affected docs in the same
-  change (at minimum `README.md`, relevant `docs/user/*`, and `docs/development/*` pages).
+  change (at minimum `README.md`, relevant `docs/manual/docs/*`, and `docs/development/*` pages).
 - In Markdown docs, do not introduce artificial manual line breaks in normal paragraphs.
   Keep prose as natural paragraphs and only break lines where structure requires it.
 - Put format-specific parsing in `respro/io/`, domain interpretation in `respro/core/`,

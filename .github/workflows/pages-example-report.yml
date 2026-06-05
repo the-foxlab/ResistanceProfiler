@@ -1,9 +1,8 @@
 name: Publish Example Report to Pages
 
+# NOTE: Example report deployment is now handled by docs.yml (MkDocs deployment).
+# This workflow is kept for manual-only rebuilding of the standalone report if needed.
 on:
-  release:
-    types:
-      - published
   workflow_dispatch:
     inputs:
       db_name:

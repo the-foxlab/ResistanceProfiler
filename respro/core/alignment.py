@@ -126,8 +126,9 @@ def _match_with_mappy(
     Run mappy (minimap2) feature matching.
 
     Indexes the query once using configurable minimap2 settings from
-    ``CLI_CONFIG.alignment``, then maps each CDS against the index. The mappy CIGAR (feature=query, genome=reference) is
-    converted to the pipeline convention (genome=query, CDS=reference) by
+    ``CLI_CONFIG.alignment``, then maps each CDS against the index.  The mappy
+    CIGAR (feature=query, genome=reference) is converted to the pipeline
+    convention (genome=query, CDS=reference) by
     swapping I and D operations.  Coordinate fields ``query_start``/``query_end``
     and ``cds_start`` are mapped from mappy's ``r_st``/``r_en`` and ``q_st``
     directly, compatible with ``cigar_to_coordinate_map`` and

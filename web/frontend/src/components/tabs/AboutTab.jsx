@@ -90,7 +90,7 @@ export function AboutTab({ setActiveMode }) {
             <button type="button" onClick={() => setActiveMode('analyze')}>Start analysis</button>
             <a
               className="about-hero-link"
-              href="https://github.com/jonas-fuchs/ResistanceProfiler/tree/master/docs/user"
+              href="https://jonas-fuchs.github.io/ResistanceProfiler/"
               target="_blank"
               rel="noreferrer"
             >
