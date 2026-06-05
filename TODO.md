@@ -67,6 +67,13 @@ Mark items done and update priorities after each completed milestone.
   CIGAR convention verified compatible with downstream VCF remap and coordinate mapping; `mappy>=2.24`
   added as a dependency
 - [X] Sensitive mappy alignment settings — switched from `sr` preset (k=11/w=5) to `map-ont` (k=6/w=3/best_n=1) following Stanford HIVDB's approach; enables alignment of divergent sequences (~60–75% identity); settings externalized to `[alignment]` section in `defaults.toml`
+- [X] Gap-open penalty (O1) externalized and tuned — `gap_open_penalty = 6` added to `[alignment]` in
+  `defaults.toml` (map-ont default is 4); passed as O1 component of the `scoring` tuple in
+  `_match_with_mappy()`; raising O1 from 4→6 suppresses compensating indel pairs (adjacent I/D
+  in CIGAR that represent a single divergence event and cause spurious double-frameshift calls)
+  without losing real indels; identity unchanged (0.757→0.755 on HIV FJ554792 test case);
+  comprehensive test coverage in `TestMappyGapPenalty` (9 tests: forward/reverse frameshifts,
+  triplet indels, divergent SNP-only, real indels in divergent context)
 
 ### Codon-aware annotation
 

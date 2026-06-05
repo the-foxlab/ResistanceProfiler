@@ -247,7 +247,9 @@ CREATE TABLE IF NOT EXISTS variant_result (
     consequence TEXT    DEFAULT '',
     af_bin      TEXT    DEFAULT '',
     rule_match  INTEGER DEFAULT 0,
-    drug_hits   TEXT    DEFAULT '[]'
+    drug_hits   TEXT    DEFAULT '[]',
+    is_combined_codon_event INTEGER DEFAULT 0,
+    combined_member_count   INTEGER DEFAULT 1
 );
 
 CREATE INDEX IF NOT EXISTS idx_vr_run ON variant_result(run_id);
@@ -352,6 +354,8 @@ _OPTIONAL_RESULTS_COLUMN_DEFS = {
         'af_bin': "TEXT DEFAULT ''",
         'rule_match': 'INTEGER DEFAULT 0',
         'drug_hits': "TEXT DEFAULT '[]'",
+        'is_combined_codon_event': 'INTEGER DEFAULT 0',
+        'combined_member_count': 'INTEGER DEFAULT 1',
     },
 }
 

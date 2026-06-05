@@ -160,6 +160,8 @@ def write_json(
             'af_bin': ann.af_bin,
             'rule_match': int(ann.is_resistance_hit),
             'drug_hits': json.dumps(ann.drug_hits_json()),
+            'is_combined_codon_event': ann.is_combined_codon_event,
+            'combined_member_count': ann.combined_member_count,
         })
 
     coverage_rows = [

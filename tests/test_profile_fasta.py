@@ -1184,3 +1184,261 @@ class TestReverseStrandMappyParity:
             pos == 1 and ref == 'Q' and alt == 'K'
             for pos, ref, alt in aa_changes
         ), f'Expected Q→K at codon 1, got: {aa_changes}'
+
+
+class TestMappyGapPenalty:
+    """Tests that the elevated gap open penalty (O1=6) preserves real indels
+    while suppressing compensating indel artifacts on divergent sequences."""
+
+    @staticmethod
+    def _build_long_coding_reference() -> str:
+        """Generate a ~2100 nt coding reference from 20 codons, seed 42."""
+        rng = random.Random(42)
+        codons = (
+            'GCT', 'GAT', 'GAA', 'TCC', 'CAG', 'AAC', 'CTG', 'TAC',
+            'GGA', 'ATC', 'CAA', 'TTG', 'GTC', 'AGC', 'AAG', 'TTC',
+            'GCG', 'ACC', 'GGT', 'CAT',
+        )
+        return ''.join(rng.choice(codons) for _ in range(700))
+
+    @staticmethod
+    def _profile_forward_query(
+        coding_reference: str,
+        coding_query: str,
+    ) -> list[tuple[int, str, str, str]]:
+        """Align + strand coding_query to coding_reference and return annotated variants."""
+        feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='fwd',
+            protein='Fwd',
+            start=0,
+            end=len(coding_reference),
+            strand='+',
+            codon_start=0,
+            nt_sequence=coding_reference,
+            aa_sequence='',
+        )
+        matches = match_query_to_features(coding_query, [feature])
+        assert len(matches) == 1
+        assert matches[0].strand == '+'
+        variants, gaps = fasta_to_vcf(coding_query, [matches[0]])
+        assert gaps == []
+        annotations = annotate_variants(variants, [feature], is_fasta_mode=True)
+        return [
+            (ann.codon_pos, ann.consequence, ann.ref_aa, ann.alt_aa)
+            for ann in annotations
+        ]
+
+    @staticmethod
+    def _profile_reverse_query(
+        coding_reference: str,
+        coding_query: str,
+    ) -> list[tuple[int, str, str, str]]:
+        """Align - strand coding_query (RC) to coding_reference and return annotated variants."""
+        query = str(Seq(coding_query).reverse_complement())
+        feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='rev',
+            protein='Rev',
+            start=0,
+            end=len(coding_reference),
+            strand='-',
+            codon_start=0,
+            nt_sequence=coding_reference,
+            aa_sequence='',
+        )
+        matches = match_query_to_features(query, [feature])
+        assert len(matches) == 1
+        assert matches[0].strand == '-'
+        variants, gaps = fasta_to_vcf(query, [matches[0]])
+        assert gaps == []
+        annotations = annotate_variants(variants, [feature], is_fasta_mode=True)
+        return [
+            (ann.codon_pos, ann.consequence, ann.ref_aa, ann.alt_aa)
+            for ann in annotations
+        ]
+
+    # ── Single-nt deletion (true frameshift) must still be detected ──
+
+    def test_forward_single_nt_deletion_detected_as_frameshift(self) -> None:
+        """A 1-nt deletion must still be called as a frameshift with O1=6."""
+        ref = self._build_long_coding_reference()
+        event_pos = 901
+        query = ref[:event_pos] + ref[event_pos + 1:]
+        result = self._profile_forward_query(ref, query)
+        frameshifts = [(pos, cs) for pos, cs, _, _ in result if cs == 'frameshift']
+        assert len(frameshifts) >= 1, (
+            f'Expected at least 1 frameshift, got: {result}'
+        )
+
+    def test_reverse_single_nt_deletion_detected_as_frameshift(self) -> None:
+        """A 1-nt deletion on reverse strand must still be called as frameshift with O1=6."""
+        ref = self._build_long_coding_reference()
+        event_pos = 901
+        query = ref[:event_pos] + ref[event_pos + 1:]
+        result = self._profile_reverse_query(ref, query)
+        frameshifts = [(pos, cs) for pos, cs, _, _ in result if cs == 'frameshift']
+        assert len(frameshifts) >= 1, (
+            f'Expected at least 1 frameshift, got: {result}'
+        )
+
+    # ── In-frame 3-nt deletion (codon deletion) must still be detected ──
+
+    def test_forward_triplet_deletion_detected(self) -> None:
+        """A 3-nt in-frame deletion must still be called as a deletion with O1=6."""
+        ref = self._build_long_coding_reference()
+        event_pos = 900
+        query = ref[:event_pos] + ref[event_pos + 3:]
+        result = self._profile_forward_query(ref, query)
+        deletions = [(pos, cs) for pos, cs, _, _ in result if cs == 'deletion']
+        assert len(deletions) >= 1, (
+            f'Expected at least 1 deletion, got: {result}'
+        )
+
+    def test_reverse_triplet_deletion_detected(self) -> None:
+        """A 3-nt in-frame deletion on reverse strand must still be detected with O1=6."""
+        ref = self._build_long_coding_reference()
+        event_pos = 900
+        query = ref[:event_pos] + ref[event_pos + 3:]
+        result = self._profile_reverse_query(ref, query)
+        deletions = [(pos, cs) for pos, cs, _, _ in result if cs == 'deletion']
+        assert len(deletions) >= 1, (
+            f'Expected at least 1 deletion, got: {result}'
+        )
+
+    # ── In-frame 3-nt insertion (codon insertion) must still be detected ──
+
+    def test_forward_triplet_insertion_detected(self) -> None:
+        """A 3-nt in-frame insertion must still be called as an insertion with O1=6."""
+        ref = self._build_long_coding_reference()
+        event_pos = 900
+        query = ref[:event_pos] + 'GCC' + ref[event_pos:]
+        result = self._profile_forward_query(ref, query)
+        insertions = [(pos, cs) for pos, cs, _, _ in result if cs == 'insertion']
+        assert len(insertions) >= 1, (
+            f'Expected at least 1 insertion, got: {result}'
+        )
+
+    def test_reverse_triplet_insertion_detected(self) -> None:
+        """A 3-nt in-frame insertion on reverse strand must still be detected with O1=6."""
+        ref = self._build_long_coding_reference()
+        event_pos = 900
+        query = ref[:event_pos] + 'GCC' + ref[event_pos:]
+        result = self._profile_reverse_query(ref, query)
+        insertions = [(pos, cs) for pos, cs, _, _ in result if cs == 'insertion']
+        assert len(insertions) >= 1, (
+            f'Expected at least 1 insertion, got: {result}'
+        )
+
+    # ── Divergent sequences with SNPs only should produce no indels ──
+
+    def test_divergent_snp_only_sequence_no_spurious_indels(self) -> None:
+        """~85% identity with SNPs only must not produce spurious frameshifts with O1=6."""
+        ref = self._build_long_coding_reference()
+        rng = random.Random(99)
+        bases = 'ACGT'
+        query_chars = list(ref)
+        # Mutate ~15% of positions — enough to be divergent but O1=6 reliably
+        # prevents compensating indel artifacts at this identity level
+        for i in range(len(query_chars)):
+            if rng.random() < 0.15:
+                alt = rng.choice([b for b in bases if b != query_chars[i]])
+                query_chars[i] = alt
+        query = ''.join(query_chars)
+
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='fwd', protein='Fwd',
+            start=0, end=len(ref), strand='+', codon_start=0,
+            nt_sequence=ref, aa_sequence='',
+        )
+        matches = match_query_to_features(query, [feature])
+        assert len(matches) == 1
+        # Identity should be around 0.85
+        assert matches[0].identity > 0.80, (
+            f'Identity too low: {matches[0].identity:.3f}'
+        )
+
+        variants, gaps = fasta_to_vcf(query, [matches[0]])
+        annotations = annotate_variants(variants, [feature], is_fasta_mode=True)
+        frameshifts = [a for a in annotations if a.consequence == 'frameshift']
+        assert len(frameshifts) == 0, (
+            f'Expected 0 frameshifts on SNP-only divergent sequence, '
+            f'got {len(frameshifts)}: '
+            f'{[(a.codon_pos, a.ref_aa, a.alt_aa) for a in frameshifts]}'
+        )
+
+    # ── Divergent sequences with a real 1-nt frameshift ──
+
+    def test_divergent_sequence_real_frameshift_detected(self) -> None:
+        """~85% identity + real 1-nt deletion must produce at least 1 frameshift with O1=6."""
+        ref = self._build_long_coding_reference()
+        rng = random.Random(99)
+        bases = 'ACGT'
+        query_chars = list(ref)
+        for i in range(len(query_chars)):
+            if rng.random() < 0.15:
+                alt = rng.choice([b for b in bases if b != query_chars[i]])
+                query_chars[i] = alt
+                alt = rng.choice([b for b in bases if b != query_chars[i]])
+                query_chars[i] = alt
+        # Introduce a real 1-nt deletion at the last quarter of the sequence
+        event_pos = 3 * len(ref) // 4
+        query = ''.join(query_chars[:event_pos]) + ''.join(query_chars[event_pos + 1:])
+
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='fwd', protein='Fwd',
+            start=0, end=len(ref), strand='+', codon_start=0,
+            nt_sequence=ref, aa_sequence='',
+        )
+        matches = match_query_to_features(query, [feature])
+        assert len(matches) == 1
+
+        variants, gaps = fasta_to_vcf(query, [matches[0]])
+        annotations = annotate_variants(variants, [feature], is_fasta_mode=True)
+        frameshifts = [a for a in annotations if a.consequence == 'frameshift']
+        assert len(frameshifts) >= 1, (
+            f'Expected at least 1 frameshift on divergent sequence with real '
+            f'1-nt deletion, got {len(frameshifts)}: '
+            f'{[(a.codon_pos, a.ref_aa, a.alt_aa) for a in frameshifts]}'
+        )
+
+    # ── Divergent sequences with a real 3-nt codon deletion ──
+
+    def test_divergent_sequence_real_codon_deletion_detected(self) -> None:
+        """~85% identity + real 3-nt deletion must produce a deletion with O1=6."""
+        ref = self._build_long_coding_reference()
+        rng = random.Random(99)
+        bases = 'ACGT'
+        query_chars = list(ref)
+        for i in range(len(query_chars)):
+            if rng.random() < 0.15:
+                alt = rng.choice([b for b in bases if b != query_chars[i]])
+                query_chars[i] = alt
+                alt = rng.choice([b for b in bases if b != query_chars[i]])
+                query_chars[i] = alt
+        event_pos = 3 * len(ref) // 4
+        # Ensure we delete a full codon (align to codon boundary)
+        codon_aligned_pos = event_pos - (event_pos % 3)
+        query = (
+            ''.join(query_chars[:codon_aligned_pos])
+            + ''.join(query_chars[codon_aligned_pos + 3:])
+        )
+
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='fwd', protein='Fwd',
+            start=0, end=len(ref), strand='+', codon_start=0,
+            nt_sequence=ref, aa_sequence='',
+        )
+        matches = match_query_to_features(query, [feature])
+        assert len(matches) == 1
+
+        variants, gaps = fasta_to_vcf(query, [matches[0]])
+        annotations = annotate_variants(variants, [feature], is_fasta_mode=True)
+        deletions = [a for a in annotations if a.consequence == 'deletion']
+        assert len(deletions) >= 1, (
+            f'Expected at least 1 deletion on divergent sequence with real '
+            f'3-nt deletion, got {len(deletions)}: '
+            f'{[(a.codon_pos, a.ref_aa, a.alt_aa) for a in deletions]}'
+        )

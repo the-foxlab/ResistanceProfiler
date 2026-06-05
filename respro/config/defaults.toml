@@ -53,3 +53,7 @@ preset = 'map-ont'
 k = 6
 w = 3
 best_n = 1
+# Short-gap open penalty passed to mappy as the O1 component of the scoring tuple.
+# map-ont default is 4; raising to 6 suppresses compensating indel pairs (adjacent
+# I/D in CIGAR that represent a single divergence event) without losing real indels.
+gap_open_penalty = 6

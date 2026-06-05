@@ -360,7 +360,10 @@ def _build_all_mutations_rows(
         display_consequence = ann.consequence
 
         pos_1based = ann.variant.pos + 1
-        nt_change = f'{ann.variant.ref}{pos_1based}{ann.variant.alt}'
+        if ann.is_combined_codon_event and ann.ref_codon and ann.alt_codon:
+            nt_change = f'{ann.ref_codon}{ann.codon_pos + 1}{ann.alt_codon}'
+        else:
+            nt_change = f'{ann.variant.ref}{pos_1based}{ann.variant.alt}'
         aa_change = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             if ann.ref_aa and ann.alt_aa

@@ -125,17 +125,17 @@ def _match_with_mappy(
     """
     Run mappy (minimap2) feature matching.
 
-    Indexes the query once using configurable minimap2 settings from
-    ``CLI_CONFIG.alignment``, then maps each CDS against the index. The mappy CIGAR (feature=query, genome=reference) is
-    converted to the pipeline convention (genome=query, CDS=reference) by
-    swapping I and D operations.  Coordinate fields ``query_start``/``query_end``
-    and ``cds_start`` are mapped from mappy's ``r_st``/``r_en`` and ``q_st``
-    directly, compatible with ``cigar_to_coordinate_map`` and
-    ``_build_query_to_cds_map`` for both strand orientations.
+    Indexes the query with settings from ``CLI_CONFIG.alignment``, then maps
+    each CDS against the index. The mappy CIGAR (feature=query,
+    genome=reference) is converted to the pipeline convention (genome=query,
+    CDS=reference) by swapping I and D. Coordinate fields use mappy's
+    ``r_st``/``r_en`` and ``q_st`` directly, compatible with
+    ``cigar_to_coordinate_map`` and ``_build_query_to_cds_map`` for both
+    strand orientations.
     """
     query_upper = query_sequence.upper()
     cfg = CLI_CONFIG.alignment
-    aligner_kwargs: dict[str, int | str] = {
+    aligner_kwargs: dict[str, int | str | tuple[int, ...]] = {
         'seq': query_upper,
         'preset': cfg.preset,
         'k': cfg.k,
@@ -143,6 +143,11 @@ def _match_with_mappy(
         'best_n': cfg.best_n,
         'n_threads': max(1, threads),
     }
+    # Build scoring tuple: (A, B, O1, E1, O2, E2).
+    # Only O1 (gap_open_penalty) is configurable; remaining values are map-ont defaults.
+    aligner_kwargs['scoring'] = (
+        2, 4, cfg.gap_open_penalty, 2, 24, 1,
+    )
     aligner = mappy.Aligner(**aligner_kwargs)
     if not aligner:
         raise RuntimeError('mappy: failed to build index for query sequence')

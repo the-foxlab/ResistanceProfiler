@@ -211,8 +211,9 @@ def _sync_single_run(
             'INSERT INTO variant_result '
             '(run_id, chrom, pos, ref, alt, allele_freq, depth, '
             'feature_name, codon_pos, ref_codon, alt_codon, ref_aa, alt_aa, '
-            'consequence, af_bin, rule_match, drug_hits) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'consequence, af_bin, rule_match, drug_hits, '
+            'is_combined_codon_event, combined_member_count) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 run_id,
                 vv.chrom,
@@ -231,6 +232,8 @@ def _sync_single_run(
                 ann.af_bin,
                 int(ann.is_resistance_hit),
                 json.dumps(ann.drug_hits_json()),
+                int(ann.is_combined_codon_event),
+                ann.combined_member_count,
             ),
         )
 

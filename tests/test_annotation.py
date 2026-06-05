@@ -1686,3 +1686,78 @@ class TestMidCodonInframeIndelSplit:
         assert ann.ref_aa == 'Q'
         assert ann.alt_aa == 'E'
         assert ann.codon_pos == 1
+
+
+# ─── Combined codon event display fields ─────────────────────────────
+
+class TestCombinedCodonEventDisplayFields:
+    """
+    Verify that AnnotatedVariant fields used by display logic are set correctly
+    for combined codon events (multiple SNPs within one codon).
+    """
+
+    @staticmethod
+    def _fwd_feature(seq: str = 'ATGTCTAAAAAA') -> FeatureRecord:
+        """Forward-strand feature with sensible default (M S K K)."""
+        return FeatureRecord(
+            id=1, reference_id=1, name='testf', protein='TestF',
+            start=0, end=12, strand='+', codon_start=0,
+            nt_sequence=seq,
+        )
+
+    def test_combined_snp_codon_sets_flag_and_count(self) -> None:
+        """
+        Two SNPs in the same codon produce one combined AnnotatedVariant
+        with is_combined_codon_event=True and combined_member_count=2.
+        """
+        # Feature: ATG TCT AAA AAA (M S K K)
+        # Codon 1 (0-based) = TCT → S
+        # Two SNPs at positions 3 and 5: T→A, T→G
+        # Together: TCT → AGC (S → S, synonymous)
+        feature = self._fwd_feature()
+        variants = [
+            VariantCall(chrom='c', pos=3, ref='T', alt='A', allele_freq=0.95, depth=100),
+            VariantCall(chrom='c', pos=5, ref='T', alt='G', allele_freq=0.95, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.is_combined_codon_event is True
+        assert ann.combined_member_count == 2
+
+    def test_combined_snp_codon_has_codon_level_fields(self) -> None:
+        """
+        The combined annotation carries full ref_codon and alt_codon
+        so that display code can format codon-level nt_change (e.g. TCT2ACG).
+
+        Feature: ATG TCT AAA AAA (M S K K)
+        Codon 1 (0-based) = TCT → S
+        SNP at pos 3 (1st base): T→A → codon becomes ACT
+        SNP at pos 5 (3rd base): T→G → codon becomes ACG
+        Combined: TCT → ACG (S → T, missense)
+        """
+        feature = self._fwd_feature()
+        variants = [
+            VariantCall(chrom='c', pos=3, ref='T', alt='A', allele_freq=0.95, depth=100),
+            VariantCall(chrom='c', pos=5, ref='T', alt='G', allele_freq=0.95, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        ann = results[0]
+        assert ann.ref_codon == 'TCT'
+        assert ann.alt_codon == 'ACG'
+        assert ann.codon_pos == 1
+        # Display logic uses: f'{ann.ref_codon}{ann.codon_pos + 1}{ann.alt_codon}'
+        # This would produce 'TCT2ACG'
+        assert f'{ann.ref_codon}{ann.codon_pos + 1}{ann.alt_codon}' == 'TCT2ACG'
+
+    def test_single_snp_not_combined(self) -> None:
+        """A single SNP in a codon is NOT a combined event."""
+        feature = self._fwd_feature()
+        variants = [
+            VariantCall(chrom='c', pos=3, ref='T', alt='A', allele_freq=0.95, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.is_combined_codon_event is False
+        assert ann.combined_member_count == 1

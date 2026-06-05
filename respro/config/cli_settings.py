@@ -81,6 +81,7 @@ class CliAlignmentConfig:
     k: int
     w: int
     best_n: int
+    gap_open_penalty: int
 
 
 @dataclass(frozen=True)
@@ -153,6 +154,7 @@ def _load_cli_config() -> CliConfig:
             k=int(alignment['k']),
             w=int(alignment['w']),
             best_n=int(alignment['best_n']),
+            gap_open_penalty=int(alignment['gap_open_penalty']),
         ),
     )
 
