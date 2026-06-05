@@ -22,7 +22,6 @@ import re
 
 from Bio.Seq import Seq
 
-from respro.config.cli_settings import CLI_CONFIG
 from respro.core.vcf_coverage import _merge_codon_gaps
 from respro.db.models import CoverageGap, FeatureMatch, FeatureRecord, VariantCall
 
@@ -83,11 +82,6 @@ def _profile_feature_to_variants(
         match.cigar,
         match.cds_start,
     )
-    max_gap_distance = CLI_CONFIG.alignment.max_gap_distance
-    if max_gap_distance > 0:
-        aligned_ref, aligned_query = _collapse_compensating_indels(
-            aligned_ref, aligned_query, max_gap_distance,
-        )
     return _variants_from_alignment(
         aligned_ref,
         aligned_query,
@@ -300,146 +294,6 @@ def _gapped_strings_from_cigar(
         aligned_query.append('-' * (len(cds) - ref_pos))
 
     return ''.join(aligned_ref), ''.join(aligned_query)
-
-
-def _collapse_compensating_indels(
-    aligned_ref: str,
-    aligned_query: str,
-    max_gap_distance: int,
-) -> tuple[str, str]:
-    """
-    Collapse nearby compensating indels in gapped alignment strings.
-
-    Mirrors Stanford PostAlign's ``remove_redundant_gaps()``: when a local
-    alignment window contains gaps on both the reference and query side,
-    the overlapping (compensating) gap count is removed from both sides.
-
-    Nearby gap windows within ``max_gap_distance`` aligned positions of
-    each other are merged into one window before checking for
-    compensating gaps.  This handles cases where multiple small indels
-    cluster in the same region.
-
-    Set ``max_gap_distance`` to 0 to disable collapsing entirely.
-
-    :param aligned_ref: reference CDS with gap characters (``-``)
-    :param aligned_query: query sequence with gap characters (``-``)
-    :param max_gap_distance: max aligned-position distance to merge
-        gap windows; 0 disables the function
-    :return: ``(aligned_ref, aligned_query)`` with compensating
-        indels collapsed
-    """
-    if max_gap_distance <= 0:
-        return aligned_ref, aligned_query
-
-    n = len(aligned_ref)
-    if n != len(aligned_query):
-        return aligned_ref, aligned_query
-
-    # Step 1: Find gap windows — maximal contiguous regions where either
-    # aligned_ref or aligned_query has a gap character.
-    windows: list[tuple[int, int]] = []
-    i = 0
-    while i < n:
-        if aligned_ref[i] == '-' or aligned_query[i] == '-':
-            start = i
-            while i < n and (aligned_ref[i] == '-' or aligned_query[i] == '-'):
-                i += 1
-            windows.append((start, i - 1))  # inclusive end
-        else:
-            i += 1
-
-    if not windows:
-        return aligned_ref, aligned_query
-
-    # Step 2: Merge nearby windows iteratively. If the gap between two
-    # windows is ≤ max_gap_distance aligned positions, merge them.
-    merged: list[tuple[int, int]] = list(windows)
-    changed = True
-    while changed:
-        changed = False
-        new_merged: list[tuple[int, int]] = [merged[0]]
-        for start, end in merged[1:]:
-            prev_start, prev_end = new_merged[-1]
-            gap_between = start - prev_end - 1
-            if gap_between <= max_gap_distance:
-                new_merged[-1] = (prev_start, end)
-                changed = True
-            else:
-                new_merged.append((start, end))
-        merged = new_merged
-
-    # Step 3: Process each merged window.
-    ref_list = list(aligned_ref)
-    query_list = list(aligned_query)
-
-    for start, end in merged:
-        n_ref_gaps = sum(1 for j in range(start, end + 1) if ref_list[j] == '-')
-        n_query_gaps = sum(1 for j in range(start, end + 1) if query_list[j] == '-')
-
-        if n_ref_gaps == 0 or n_query_gaps == 0:
-            continue
-
-        compensating = min(n_ref_gaps, n_query_gaps)
-
-        # Remove ALL gap characters from both sides of the window.
-        ungapped_ref = ''.join(ref_list[j] for j in range(start, end + 1) if ref_list[j] != '-')
-        ungapped_query = ''.join(
-            query_list[j] for j in range(start, end + 1) if query_list[j] != '-'
-        )
-
-        net_delta = len(ungapped_ref) - len(ungapped_query)
-
-        if net_delta == 0:
-            # Net in-frame — all gaps cancelled out.
-            new_ref = ungapped_ref
-            new_query = ungapped_query
-        elif net_delta > 0:
-            # Net deletion remains (ref longer than query).
-            # Place query-gaps at the center of the window.
-            gap_pos = len(ungapped_query) // 2
-            new_ref = ungapped_ref[:gap_pos] + ungapped_ref[gap_pos:]
-            new_query = ungapped_query[:gap_pos] + '-' * net_delta + ungapped_query[gap_pos:]
-        else:
-            # Net insertion remains (query longer than ref).
-            # Place ref-gaps at the center of the window.
-            ins_len = abs(net_delta)
-            gap_pos = len(ungapped_ref) // 2
-            new_ref = ungapped_ref[:gap_pos] + '-' * ins_len + ungapped_ref[gap_pos:]
-            new_query = ungapped_query[:gap_pos] + ungapped_query[gap_pos:]
-
-        # Replace the window region with the new content.
-        window_len = end - start + 1
-        new_window_len = len(new_ref)
-
-        # Pad or trim to fit — the replacement should always fit within
-        # or be shorter. If longer (shouldn't happen given gap removal),
-        # we truncate pairs from the center.
-        if new_window_len <= window_len:
-            # Fill remaining positions with matched pairs from the
-            # surrounding alignment context if window shrunk.
-            # Since we're replacing in-place and the window may shrink,
-            # we rebuild the full strings after processing all windows.
-            for j in range(new_window_len):
-                ref_list[start + j] = new_ref[j]
-                query_list[start + j] = new_query[j]
-            # Mark remaining positions in the original window as
-            # to-be-removed by setting them to a sentinel that we
-            # strip later.
-            for j in range(new_window_len, window_len):
-                ref_list[start + j] = ''
-                query_list[start + j] = ''
-        else:
-            # Window grew — this shouldn't happen since we removed gaps.
-            # Fall back to just writing what we can.
-            for j in range(window_len):
-                ref_list[start + j] = new_ref[j]
-                query_list[start + j] = new_query[j]
-
-    # Rebuild strings, stripping sentinels from shrunk windows.
-    result_ref = ''.join(c for c in ref_list if c != '')
-    result_query = ''.join(c for c in query_list if c != '')
-
-    return result_ref, result_query
 
 
 def _codon_outside_coverage(

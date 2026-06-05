@@ -1,0 +1,343 @@
+/* ── ResistanceProfiler palette ── */
+/* Light mode (derived from webapp About page) */
+:root {
+  --md-primary-fg-color: #0f766e;
+  --md-primary-fg-color--light: #0f8b7c;
+  --md-primary-fg-color--dark: #0a5a53;
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: #eefaf7;
+
+  --md-accent-fg-color: #0f8b7c;
+  --md-accent-fg-color--transparent: rgba(15, 139, 124, 0.12);
+
+  --respro-ink: #122131;
+  --respro-muted: #4c6072;
+  --respro-paper: #edf3f8;
+  --respro-surface: #fbfdff;
+  --respro-line: #d4e0e9;
+  --respro-accent-soft: #d8eee9;
+
+  --md-default-bg-color: var(--respro-paper);
+  --md-code-bg-color: #f4f8fc;
+  --md-code-fg-color: var(--respro-ink);
+}
+
+/* Dark mode adjustments */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #0f8b7c;
+  --md-primary-fg-color--light: #10a393;
+  --md-primary-fg-color--dark: #0a5a53;
+  --md-accent-fg-color: #10a393;
+  --md-default-bg-color: #1a2332;
+  --md-code-bg-color: #232f3e;
+  --respro-ink: #e0e8f0;
+  --respro-muted: #9eb3c8;
+  --respro-paper: #1a2332;
+  --respro-surface: #232f3e;
+  --respro-line: #3a4a5c;
+  --respro-accent-soft: #1e3a36;
+}
+
+/* ── Manual page title (logo + heading) ── */
+.respro-manual-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+  border: none;
+  padding: 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--respro-ink);
+  line-height: 1;
+}
+
+.respro-manual-title img {
+  height: 48px;
+  width: auto;
+  flex-shrink: 0;
+}
+
+/* ── Base typography ── */
+body {
+  color: var(--respro-ink);
+}
+
+/* ── Card-like sections (matching webapp About cards) ── */
+.md-typeset .respro-card {
+  border: 1px solid var(--respro-line);
+  border-radius: 16px;
+  background: var(--md-primary-bg-color);
+  padding: 1.25rem;
+  box-shadow: 0 10px 24px rgba(11, 35, 65, 0.06);
+  margin-bottom: 1rem;
+}
+
+/* ── Inline pill (matching .about-inline-pill) ── */
+.md-typeset .respro-pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d2deea;
+  border-radius: 999px;
+  background: #f5f9fd;
+  font-family: 'Fira Code', 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 0.82em;
+  color: #1f4263;
+  padding: 0.12rem 0.48rem;
+}
+
+/* ── Admonition accent ── */
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 12px;
+  border-color: var(--respro-line);
+}
+
+.md-typeset .admonition.tip,
+.md-typeset details.tip {
+  border-color: var(--md-primary-fg-color--light);
+}
+
+/* ── Hero landing section ── */
+.respro-hero {
+  display: grid;
+  grid-template-columns: 1.2fr minmax(180px, 0.8fr);
+  gap: 1.25rem;
+  align-items: center;
+  border: 1px solid var(--respro-line);
+  border-radius: 16px;
+  padding: clamp(1.5rem, 2.2vw, 2rem);
+  background:
+    radial-gradient(circle at 88% 18%, rgba(15, 139, 124, 0.11), rgba(15, 139, 124, 0) 42%),
+    linear-gradient(125deg, #ffffff, #f4fbff 46%, #eefaf7);
+  box-shadow: 0 14px 28px rgba(10, 35, 65, 0.08);
+  margin-bottom: 1.5rem;
+}
+
+[data-md-color-scheme="slate"] .respro-hero {
+  background:
+    radial-gradient(circle at 88% 18%, rgba(15, 139, 124, 0.18), rgba(15, 139, 124, 0) 42%),
+    linear-gradient(125deg, #1a2332, #1e2e3e 46%, #1e3a36);
+}
+
+.respro-hero h2 {
+  margin: 0;
+  color: #0b2341;
+  font-size: clamp(1.75rem, 2.7vw, 2.2rem);
+  line-height: 1.2;
+}
+
+[data-md-color-scheme="slate"] .respro-hero h2 {
+  color: #e0e8f0;
+}
+
+.respro-hero p {
+  max-width: 66ch;
+  font-size: 0.95rem;
+  color: var(--respro-muted);
+}
+
+.respro-hero img {
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+}
+
+/* ── Notice cards (matching .about-notice-card) ── */
+.respro-notices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.1rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 600px) {
+  .respro-notices {
+    grid-template-columns: 1fr;
+  }
+}
+
+.respro-notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 0.7rem;
+  border: 1px solid var(--respro-line);
+  border-radius: 15px;
+  padding: 1rem 1.1rem;
+}
+
+.respro-notice-research {
+  background: var(--respro-accent-soft);
+}
+
+.respro-notice-database {
+  background: #f3f8ff;
+}
+
+[data-md-color-scheme="slate"] .respro-notice-database {
+  background: var(--respro-accent-soft);
+}
+
+.respro-notice h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.respro-notice p {
+  margin: 0.25rem 0 0;
+  font-size: 0.86rem;
+}
+
+/* ── Workflow steps (matching .about-workflow) ── */
+.respro-workflow {
+  display: grid;
+  gap: 0.7rem;
+  margin: 1rem 0;
+}
+
+.respro-step {
+  border: 1px solid var(--respro-line);
+  border-radius: 12px;
+  background: #fafdff;
+  padding: 0.65rem 0.7rem;
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: flex-start;
+}
+
+[data-md-color-scheme="slate"] .respro-step {
+  background: var(--respro-surface);
+}
+
+.respro-step-number {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid var(--md-primary-fg-color);
+  background: var(--respro-accent-soft);
+  color: var(--md-primary-fg-color);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.respro-step h4,
+.respro-step p {
+  margin: 0;
+}
+
+.respro-step h4 {
+  color: #173a5b;
+  font-size: 0.9rem;
+}
+
+[data-md-color-scheme="slate"] .respro-step h4 {
+  color: #c4d4e4;
+}
+
+.respro-step p {
+  font-size: 0.8rem;
+  color: var(--respro-muted);
+}
+
+/* ── Operator pills (matching .about-operator-pill) ── */
+.respro-operator-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.6rem;
+  align-items: center;
+  margin: 0.5rem 0;
+  padding: 0.4rem 0.6rem;
+  border-radius: 8px;
+  background: var(--md-primary-bg-color);
+}
+
+.respro-operator-pill {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.respro-operator-pill-and {
+  background: #d8eee9;
+  color: #0a5a53;
+}
+
+.respro-operator-pill-or {
+  background: #e0ecf9;
+  color: #1a4d7e;
+}
+
+.respro-operator-pill-not {
+  background: #fde8e8;
+  color: #8b1a1a;
+}
+
+.respro-operator-pill-xor {
+  background: #fef3d8;
+  color: #7a5a10;
+}
+
+/* ── Terminal block (matching .about-terminal) ── */
+.respro-terminal {
+  border: 1px solid var(--respro-line);
+  border-radius: 12px;
+  background: #1a2332;
+  overflow: hidden;
+  margin: 1rem 0;
+}
+
+.respro-terminal-header {
+  padding: 0.5rem 0.8rem;
+  border-bottom: 1px solid #3a4a5c;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.respro-terminal-header p {
+  margin: 0;
+  color: #9eb3c8;
+  font-size: 0.78rem;
+}
+
+.respro-terminal pre {
+  margin: 0;
+  padding: 0.8rem 1rem;
+  color: #e0e8f0;
+  font-family: 'Fira Code', 'JetBrains Mono', monospace;
+  font-size: 0.82rem;
+  overflow-x: auto;
+}
+
+.respro-terminal code {
+  color: inherit;
+  background: none;
+}
+
+/* ── Table styling ── */
+.md-typeset table:not([class]) {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--respro-line);
+}
+
+.md-typeset table:not([class]) th {
+  background: #e8f3f9;
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
+  background: #232f3e;
+}
+
+/* ── Footer ── */
+.md-footer {
+  background-color: var(--md-primary-fg-color--dark);
+}

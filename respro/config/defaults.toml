@@ -48,13 +48,8 @@ low          = [0.01, 0.34]
 
 [alignment]
 # Minimap2/mappy alignment settings for CDS-to-query mapping.
-# Stanford Sierra uses map-nt with k=6, w=3 for HIV sensitivity.
-# best_n=1 keeps only the primary alignment (avoids secondary hits).
-# max_gap_distance controls how far apart opposing indels (one insertion,
-# one deletion) may be to be collapsed as a compensating pair.
-# Stanford PostAlign uses 15 nt for HIV-1. Set to 0 to disable collapse.
+# Tuned for sensitivity across divergent sequences (~60–75% identity).
 preset = 'map-ont'
 k = 6
 w = 3
 best_n = 1
-max_gap_distance = 15

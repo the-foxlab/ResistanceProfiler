@@ -1,0 +1,78 @@
+site_name: ResistanceProfiler
+site_description: Pathogen-agnostic antiviral resistance profiling — documentation
+site_url: https://jonas-fuchs.github.io/ResistanceProfiler/
+repo_url: https://github.com/jonas-fuchs/ResistanceProfiler
+repo_name: GitHub
+
+theme:
+  name: material
+  custom_dir: overrides
+  logo: assets/favicon.svg
+  favicon: assets/logo.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  font:
+    text: Source Sans 3
+    code: Fira Code
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tooltips
+
+extra_css:
+  - stylesheets/extra.css
+
+nav:
+  - Manual: index.md
+  - Install: install.md
+  - Quickstart: quickstart.md
+  - How it works: how-it-works.md
+  - Database preparation: database-preparation.md
+  - Rules TSV format: rules-format.md
+  - Interpretation algorithms: algorithms.md
+  - CLI reference: cli-reference.md
+  - Output interpretation: output.md
+  - Web app: webapp.md
+  - Contributing: contributing.md
+  - License: license.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mermaid2:
+      version: 11.4.1

@@ -81,7 +81,6 @@ class CliAlignmentConfig:
     k: int
     w: int
     best_n: int
-    max_gap_distance: int
 
 
 @dataclass(frozen=True)
@@ -154,7 +153,6 @@ def _load_cli_config() -> CliConfig:
             k=int(alignment['k']),
             w=int(alignment['w']),
             best_n=int(alignment['best_n']),
-            max_gap_distance=int(alignment['max_gap_distance']),
         ),
     )
 
