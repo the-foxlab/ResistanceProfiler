@@ -45,3 +45,12 @@ low          = [0.01, 0.2499]
 high         = [0.75, 1.0]
 intermediate = [0.35, 0.74]
 low          = [0.01, 0.34]
+
+[alignment]
+# Minimap2/mappy alignment settings for CDS-to-query mapping.
+# Tuned for sensitivity across divergent sequences (~60–75% identity).
+# Stanford HIVDB uses equivalent settings (k=6, w=3) with minimap2.
+preset = 'map-ont'
+k = 6
+w = 3
+best_n = 1

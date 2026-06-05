@@ -74,6 +74,16 @@ class CliAfBinsConfig:
 
 
 @dataclass(frozen=True)
+class CliAlignmentConfig:
+    """Minimap2/mappy alignment settings for CDS-to-query mapping."""
+
+    preset: str
+    k: int
+    w: int
+    best_n: int
+
+
+@dataclass(frozen=True)
 class CliConfig:
     """Bundled CLI/core configuration loaded from defaults.toml."""
 
@@ -84,6 +94,7 @@ class CliConfig:
     similarity: CliSimilarityConfig
     af_bins: CliAfBinsConfig
     af_bins_fasta: CliAfBinsConfig
+    alignment: CliAlignmentConfig
 
 
 def _load_cli_config() -> CliConfig:
@@ -95,6 +106,8 @@ def _load_cli_config() -> CliConfig:
     parsing = payload['parsing']
     matching = payload['matching']
     similarity = payload['similarity']
+
+    alignment = payload['alignment']
 
     def _bins(section: dict) -> CliAfBinsConfig:
         return CliAfBinsConfig(
@@ -135,6 +148,12 @@ def _load_cli_config() -> CliConfig:
         ),
         af_bins=_bins(payload['af_bins']),
         af_bins_fasta=_bins(payload['af_bins_fasta']),
+        alignment=CliAlignmentConfig(
+            preset=str(alignment['preset']),
+            k=int(alignment['k']),
+            w=int(alignment['w']),
+            best_n=int(alignment['best_n']),
+        ),
     )
 
 

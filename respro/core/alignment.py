@@ -14,6 +14,7 @@ import sqlite3
 
 import mappy
 
+from respro.config.cli_settings import CLI_CONFIG
 from respro.db.features import load_feature_segments_by_feature_id
 from respro.db.models import FeatureMatch, FeatureRecord
 
@@ -124,8 +125,8 @@ def _match_with_mappy(
     """
     Run mappy (minimap2) feature matching.
 
-    Indexes the query once using an adaptive minimap2 preset, then maps each
-    CDS against the index. The mappy CIGAR (feature=query, genome=reference) is
+    Indexes the query once using configurable minimap2 settings from
+    ``CLI_CONFIG.alignment``, then maps each CDS against the index. The mappy CIGAR (feature=query, genome=reference) is
     converted to the pipeline convention (genome=query, CDS=reference) by
     swapping I and D operations.  Coordinate fields ``query_start``/``query_end``
     and ``cds_start`` are mapped from mappy's ``r_st``/``r_en`` and ``q_st``
@@ -133,20 +134,15 @@ def _match_with_mappy(
     ``_build_query_to_cds_map`` for both strand orientations.
     """
     query_upper = query_sequence.upper()
-    preset = 'sr' if len(query_upper) < 5000 else 'map-ont'
+    cfg = CLI_CONFIG.alignment
     aligner_kwargs: dict[str, int | str] = {
         'seq': query_upper,
-        'preset': preset,
+        'preset': cfg.preset,
+        'k': cfg.k,
+        'w': cfg.w,
+        'best_n': cfg.best_n,
         'n_threads': max(1, threads),
     }
-    if preset == 'sr':
-        # Short queries need denser minimizers to retain local matches.
-        if len(query_upper) < 100:
-            aligner_kwargs['k'] = 7
-            aligner_kwargs['w'] = 2
-        else:
-            aligner_kwargs['k'] = 11
-            aligner_kwargs['w'] = 5
     aligner = mappy.Aligner(**aligner_kwargs)
     if not aligner:
         raise RuntimeError('mappy: failed to build index for query sequence')

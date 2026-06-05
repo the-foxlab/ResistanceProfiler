@@ -439,6 +439,21 @@ class TestMappyBackend:
         matches = match_query_to_features(unrelated, [feature])
         assert len(matches) == 0
 
+    def test_divergent_sequence_still_aligns(self) -> None:
+        """Divergent sequences (~75% identity) must still produce alignments
+        with sensitive mappy settings (map-ont, k=6, w=3)."""
+        # Introduce ~25% mismatches to simulate divergent HIV-like sequences
+        mutated = list(_LONG_CDS)
+        for i in range(0, len(mutated), 4):  # every 4th position
+            mutated[i] = 'A' if mutated[i] != 'A' else 'C'
+        query = ''.join(mutated)
+        feature = self._make_feature(_LONG_CDS)
+        matches = match_query_to_features(query, [feature])
+        assert len(matches) >= 1
+        m = matches[0]
+        assert m.identity < 0.85  # confirms divergence
+        assert m.cds_coverage > 0.5  # alignment covers a substantial portion
+
     def test_skips_feature_without_nt_sequence(self) -> None:
         feature = FeatureRecord(
             id=2, reference_id=1, name='empty', protein='', start=0, end=30,

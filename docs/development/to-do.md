@@ -66,6 +66,7 @@ Mark items done and update priorities after each completed milestone.
   large sequences; pairwise backend and `--aligner` selection were removed after equivalence validation;
   CIGAR convention verified compatible with downstream VCF remap and coordinate mapping; `mappy>=2.24`
   added as a dependency
+- [X] Sensitive mappy alignment settings — switched from `sr` preset (k=11/w=5) to `map-ont` (k=6/w=3/best_n=1) following Stanford HIVDB's approach; enables alignment of divergent sequences (~60–75% identity); settings externalized to `[alignment]` section in `defaults.toml`
 
 ### Codon-aware annotation
 
