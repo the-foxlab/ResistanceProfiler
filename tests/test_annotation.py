@@ -1750,6 +1750,43 @@ class TestCombinedCodonEventDisplayFields:
         # This would produce 'TCT2ACG'
         assert f'{ann.ref_codon}{ann.codon_pos + 1}{ann.alt_codon}' == 'TCT2ACG'
 
+    def test_combined_snp_codon_uses_internal_codon_not_query_codon(self) -> None:
+        """
+        Even when individual SNPs carry query_ref_codon (e.g. FASTA mode), the combined
+        annotation must always use the internal CDS reference codon as ref_codon.
+
+        Without this fix, query_ref_codon containing the ALT bases would be stored as
+        ref_codon, producing displays like ACG2ACG instead of TCT2ACG.
+
+        Feature: ATG TCT AAA AAA (M S K K)
+        Codon 1 (0-based) = TCT → S (internal reference)
+        SNP at pos 3 (1st base): T→A → codon becomes ACT
+        SNP at pos 5 (3rd base): T→G → codon becomes ACG
+        Combined: TCT → ACG (S → T, missense)
+
+        Each SNP's query_ref_codon would be the query's codon at that position (which
+        already includes the ALT), so if both agree it would be 'ACG'. The combined
+        event must NOT use 'ACG' as ref_codon; it must use 'TCT'.
+        """
+        feature = self._fwd_feature()
+        variants = [
+            VariantCall(
+                chrom='c', pos=3, ref='T', alt='A',
+                allele_freq=0.95, depth=100,
+                query_ref_codon='ACG',
+            ),
+            VariantCall(
+                chrom='c', pos=5, ref='T', alt='G',
+                allele_freq=0.95, depth=100,
+                query_ref_codon='ACG',
+            ),
+        ]
+        results = annotate_variants(variants, [feature])
+        ann = results[0]
+        assert ann.is_combined_codon_event is True
+        assert ann.ref_codon == 'TCT'
+        assert ann.alt_codon == 'ACG'
+
     def test_single_snp_not_combined(self) -> None:
         """A single SNP in a codon is NOT a combined event."""
         feature = self._fwd_feature()

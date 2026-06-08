@@ -243,7 +243,7 @@ def _annotate_combined_snp_codon(
     feature: FeatureRecord,
 ) -> AnnotatedVariant:
     """
-    Annotate multiple SNPs in one codon as a single codon event.
+    Annotate multiple SNPs in one codon as a single codon event. Ref codon is taken from the internal reference.
 
     :param variants: SNPs from the same codon (same feature)
     :param feature: feature containing the codon
@@ -263,15 +263,7 @@ def _annotate_combined_snp_codon(
     codon_start = feature.codon_start + (codon_idx * 3)
     internal_codon = seq_cds[codon_start:codon_start + 3]
     ref_aa = translate_codon(internal_codon)
-
-    query_codons = {
-        v.query_ref_codon.upper() for v in variants
-        if len(v.query_ref_codon) == 3 and '-' not in v.query_ref_codon
-    }
-    # Only use query codon when all members agree on one context; otherwise stay internal.
-    affected_codon = next(iter(query_codons)) if len(query_codons) == 1 else internal_codon
-
-    alt_codon_bases = list(affected_codon)
+    alt_codon_bases = list(internal_codon)
     seen: dict[int, str] = {}
     for var in sorted(variants, key=lambda v: v.pos):
         codon_pos = feature.codon_position_in_codon(var.pos)
@@ -302,14 +294,14 @@ def _annotate_combined_snp_codon(
         allele_freq=min(v.allele_freq for v in variants),
         depth=anchor.depth,
         filter_status=anchor.filter_status,
-        query_ref_codon=affected_codon if len(affected_codon) == 3 and '-' not in affected_codon else '',
+        query_ref_codon=internal_codon if len(internal_codon) == 3 and '-' not in internal_codon else '',
     )
 
     return AnnotatedVariant(
         variant=combined_var,
         feature_name=feature.name,
         codon_pos=codon_idx,
-        ref_codon=affected_codon,
+        ref_codon=internal_codon,
         alt_codon=alt_codon,
         ref_aa=ref_aa,
         alt_aa=alt_aa,

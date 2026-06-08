@@ -222,6 +222,19 @@ def _apply_vcf_overlay(
     native_pos = list(native_positions)
     native_anchor_pos = list(native_anchor_positions)
 
+    # Combined codon events: overlay all codon positions where ref differs from alt.
+    if ann.is_combined_codon_event and len(ann.ref_codon) == 3 and len(ann.alt_codon) == 3:
+        for idx, (ref_nt, alt_nt) in enumerate(zip(ann.ref_codon, ann.alt_codon)):
+            if ref_nt == alt_nt:
+                continue
+            coding_target = alignment.codon_start + ann.codon_pos * 3 + idx
+            # Find the alignment index for this coding position in the window
+            for aln_idx, cpos in enumerate(coding_pos):
+                if cpos == coding_target:
+                    query_chars[aln_idx] = alt_nt
+                    break
+        return ''.join(ref_chars), ''.join(query_chars), coding_pos, native_pos, native_anchor_pos
+
     anchor_pos = _variant_native_pos(ann, alignment)
     anchor_idx = next((i for i, pos in enumerate(native_pos) if pos == anchor_pos), None)
     if anchor_idx is None:
@@ -381,10 +394,26 @@ def _affected_nt_positions(
         deleted_len = ref_len - alt_len
         return set(range(anchor_pos + 1, anchor_pos + 1 + deleted_len))
 
-    # Equal-length replacements (SNP/MNV) should always highlight the replaced block.
+    # Combined codon events: highlight all positions where ref_codon differs from alt_codon.
+    # Must come before the generic equal-length branch because combined events have
+    # single-base variant.ref/variant.alt but need codon-level highlighting.
+    if ann.is_combined_codon_event and len(ann.ref_codon) == 3 and len(ann.alt_codon) == 3:
+        affected: set[int] = set()
+        for idx, (ref_nt, alt_nt) in enumerate(zip(ann.ref_codon, ann.alt_codon)):
+            if ref_nt == alt_nt:
+                continue
+            coding_pos = codon_nt_start + idx
+            if alignment.strand == '-':
+                affected.add(alignment.feature_length - 1 - coding_pos)
+            else:
+                affected.add(coding_pos)
+        return affected
+
+    # Equal-length replacements (SNP/MNV) highlight the replaced block.
     if ref_len == alt_len and ref_len > 0:
         return set(range(anchor_pos, anchor_pos + ref_len))
 
+    # Fallback for any edge case with both 3-letter codons but not combined.
     if len(ann.ref_codon) == 3 and len(ann.alt_codon) == 3:
         affected: set[int] = set()
         for idx, (ref_nt, alt_nt) in enumerate(zip(ann.ref_codon, ann.alt_codon)):
