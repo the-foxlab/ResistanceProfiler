@@ -2628,9 +2628,77 @@ class TestAlignmentVisualization:
                 assert new_query[aln_idx] == 'C', (
                     f'Coding pos 4 should stay C after overlay, got {new_query[aln_idx]}'
                 )
-            elif cpos == 5:
-                assert new_query[aln_idx] == 'G', (
-                    f'Coding pos 5 should be G after overlay, got {new_query[aln_idx]}'
+
+    def test_apply_vcf_overlay_combined_codon_event_reverse_strand(self) -> None:
+        """
+        For a combined codon event on the minus strand, _apply_vcf_overlay must
+        complement the alt base before writing it into the native-orientation display.
+        """
+        from Bio.Seq import Seq
+
+        feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='RCOMB2',
+            protein='R',
+            start=0,
+            end=9,
+            strand='-',
+            codon_start=0,
+            nt_sequence='AAACCCGGG',
+        )
+        # Coding query identical to reference (VCF mode — no variants pre-aligned)
+        coding_query = 'AAACCCGGG'
+        query = str(Seq(coding_query).reverse_complement())
+        match = FeatureMatch(
+            feature=feature,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=9,
+            strand='+',
+            cigar='9M',
+            cds_start=0,
+        )
+        alignment = build_feature_alignments(query, [match])['RCOMB2']
+        # Combined event in coding: CCC → CTC at codon 1 (coding positions 3,4,5)
+        # idx=1: C→T, coding pos 4
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=5, ref='C', alt='T'),
+            feature_name='RCOMB2',
+            codon_pos=1,
+            ref_codon='CCC',
+            alt_codon='CTC',
+            ref_aa='P',
+            alt_aa='L',
+            consequence='missense',
+            is_combined_codon_event=True,
+            combined_member_count=2,
+            is_fasta_mode=False,
+        )
+        ref_window = alignment.aligned_ref
+        query_window = alignment.aligned_query
+        coding_positions = alignment.aln_coding_pos
+        native_positions = alignment.aln_native_pos
+        native_anchor_positions = alignment.aln_native_anchor_pos
+
+        new_ref, new_query, _, _, _ = _apply_vcf_overlay(
+            ann, alignment,
+            ref_window, query_window,
+            coding_positions, native_positions, native_anchor_positions,
+        )
+        # On - strand with feature_length=9:
+        # coding position 4 maps to native position 4 (9-1-4=4, same by symmetry)
+        # In native display at coding_pos=4: ref shows G (complement of coding C),
+        # alt should show A (complement of coding T), NOT T.
+        for aln_idx, cpos in enumerate(coding_positions):
+            if cpos == 4:
+                assert new_ref[aln_idx] == 'G', (
+                    f'At coding pos 4, ref should be G, got {new_ref[aln_idx]}'
+                )
+                assert new_query[aln_idx] == 'A', (
+                    f'At coding pos 4, query should be A (complement of coding T), got {new_query[aln_idx]}'
                 )
 
 

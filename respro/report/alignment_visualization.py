@@ -231,7 +231,8 @@ def _apply_vcf_overlay(
             # Find the alignment index for this coding position in the window
             for aln_idx, cpos in enumerate(coding_pos):
                 if cpos == coding_target:
-                    query_chars[aln_idx] = alt_nt
+                    display_alt = reverse_complement(alt_nt) if alignment.strand == '-' else alt_nt
+                    query_chars[aln_idx] = display_alt
                     break
         return ''.join(ref_chars), ''.join(query_chars), coding_pos, native_pos, native_anchor_pos
 
