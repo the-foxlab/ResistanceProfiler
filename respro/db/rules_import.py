@@ -519,8 +519,6 @@ def _insert_prepared_atomic_rules(
                 f'pos {prepared.position_raw} {prepared.reference_aa!r}>{prepared.mutation!r} '
                 f'({prepared.drug_name})'
             )
-            if prepared.external_id:
-                skipped_external_ids[prepared.external_id] = 'duplicate of an existing rule'
             continue
 
         conn.execute(
