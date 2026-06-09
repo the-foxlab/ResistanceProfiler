@@ -385,7 +385,7 @@ class TestSchemaFormulaRules:
 
 
 class TestComboRuleParsing:
-    """Verify grouped atomic-rule behavior for group_id/member_id workflows."""
+    """Verify formula-rule and member-id workflows."""
 
     @pytest.fixture()
     def tiny_genbank(self, tmp_path):
@@ -401,18 +401,17 @@ class TestComboRuleParsing:
         ])
         return gb
 
-    def test_grouped_rows_without_formula_still_load_atomic_rules(self, tmp_path, tiny_genbank, caplog) -> None:
+    def test_rows_with_member_id_without_formula_still_load_atomic_rules(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_1\tmut_A
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tgroup_1\tmut_B
-            gag\ttiny_ref\t4\tF\tL\tDrugA\tresistant\t\t
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tmut_A
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tmut_B
+            gag\ttiny_ref\t4\tF\tL\tDrugA\tresistant
         """))
         db = tmp_path / 'proj.db'
-        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
-                         rules_tsv=tsv, additional_info=False)
+        init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                     rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
         single_count = conn.execute('SELECT COUNT(*) FROM resistance_rule').fetchone()[0]
@@ -423,25 +422,13 @@ class TestComboRuleParsing:
         assert single_count == 3
         assert formula_count == 0
         assert member_count == 0
-        assert any('combinatorial rules are ignored' in rec.message for rec in caplog.records)
-
-    def test_grouped_rows_require_member_id_even_without_formula_tsv(self, tmp_path, tiny_genbank) -> None:
-        tsv = tmp_path / 'rules.tsv'
-        tsv.write_text(textwrap.dedent("""\
-            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_1
-        """))
-        db = tmp_path / 'proj.db'
-        with pytest.raises(ValueError, match='missing required field member_id'):
-            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
-                         rules_tsv=tsv, additional_info=False)
 
     def test_formula_member_placeholder_rows_are_hidden_from_rule_display(self, tmp_path, tiny_genbank) -> None:
         rules_tsv = tmp_path / 'rules.tsv'
         rules_tsv.write_text(textwrap.dedent("""\
-            feature\treference_identifier\tposition\treference\tmutation\tphenotype\tgroup_id\tmember_id
-            gag\ttiny_ref\t2\tK\tE\tunknown\tgroup_1\tmut_A
-            gag\ttiny_ref\t6\tP\tV\tunknown\tgroup_1\tmut_B
+            feature\treference_identifier\tposition\treference\tmutation\tphenotype\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tunknown\tmut_A
+            gag\ttiny_ref\t6\tP\tV\tunknown\tmut_B
         """))
         formula_tsv = tmp_path / 'formula.tsv'
         formula_tsv.write_text(textwrap.dedent("""\
@@ -529,9 +516,9 @@ class TestComboRuleParsing:
     def test_member_ids_must_be_unique(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_1\tmut_dup
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tgroup_2\tmut_dup
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tmut_dup
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tmut_dup
         """))
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='duplicate atomic rule ids'):
@@ -541,9 +528,9 @@ class TestComboRuleParsing:
     def test_identical_duplicate_member_id_rows_are_skipped_with_warning(self, tmp_path, tiny_genbank, caplog) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_1\tmut_same
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tgroup_2\tmut_same
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tmut_same
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tmut_same
         """))
         db = tmp_path / 'proj.db'
 
@@ -862,9 +849,9 @@ class TestComboRuleParsing:
     def test_formula_rule_publication_doi_is_stored(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tcombo_KE_PV\tmut_A
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_KE_PV\tmut_B
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tmut_A
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tmut_B
         """))
         formula_tsv = tmp_path / 'formula.tsv'
         formula_tsv.write_text(textwrap.dedent("""\
@@ -964,9 +951,9 @@ class TestIc50ParsingAndAggregation:
     def test_formula_rule_uses_declared_numeric_ic50_values(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tgroup_id\tmember_id
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tcombo_1\tmut_A
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tcombo_1\tmut_B
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tmut_A
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tmut_B
         """))
         formula_tsv = tmp_path / 'formula.tsv'
         formula_tsv.write_text(textwrap.dedent("""\
@@ -1183,9 +1170,9 @@ class TestPhenotypeNormalization:
     def test_rejects_noop_combo_member(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
-            gag\ttiny_ref\t2\tK\tK\tDrugA\tresistant\tcombo_noop\tmut_A
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_noop\tmut_B
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tmember_id
+            gag\ttiny_ref\t2\tK\tK\tDrugA\tresistant\tmut_A
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tmut_B
         """))
         db = tmp_path / 'proj.db'
         with pytest.raises(ValueError, match='does not change reference'):
@@ -1261,9 +1248,9 @@ class TestPhenotypeNormalization:
 
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
-            gag\ttiny_ref\t2\tK\tK2Z\tDrugA\tresistant\tcombo_bad\tmut_bad
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_bad\tmut_ok
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tmember_id
+            gag\ttiny_ref\t2\tK\tK2Z\tDrugA\tresistant\tmut_bad
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tmut_ok
         """))
         db = tmp_path / 'proj.db'
 
@@ -1329,9 +1316,9 @@ class TestRefAaMismatchSkip:
         # pos 2 has 'K', not 'Z' → mismatching row is skipped while valid atomic rows still load.
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
-            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id
-            gag\ttiny_ref\t2\tZ\tE\tDrugA\tresistant\tcombo_bad\tmut_bad
-            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tcombo_bad\tmut_ok
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tmember_id
+            gag\ttiny_ref\t2\tZ\tE\tDrugA\tresistant\tmut_bad
+            gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tmut_ok
         """))
         db = tmp_path / 'proj.db'
 
@@ -2251,7 +2238,7 @@ class TestProjectMetadataInit:
 
 
 class TestFormulaRuleImport:
-    def test_init_project_rejects_grouped_rule_without_member_id(self, tmp_path) -> None:
+    def test_init_project_imports_formula_rules_without_member_id_in_atomic_tsv(self, tmp_path) -> None:
         genbank_path = write_genbank(
             tmp_path / 'ref.gb',
             [
@@ -2269,8 +2256,8 @@ class TestFormulaRuleImport:
         rules_path.write_text(
             textwrap.dedent(
                 """\
-                group_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral
-                group_1\tgag\tmyref\t2\tK\tE\tDrugA
+                feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tmember_id
+                gag\tmyref\t2\tK\tE\tDrugA\tunknown\tmut_k2e
                 """
             )
         )
@@ -2284,15 +2271,21 @@ class TestFormulaRuleImport:
             )
         )
 
-        with pytest.raises(ValueError, match='missing required field member_id'):
-            init_project(
-                db_path=tmp_path / 'project.db',
-                name='Formula Project',
-                genbank_paths=[genbank_path],
-                rules_tsv=rules_path,
-                formula_rules_tsv=formula_path,
-                additional_info=False,
-            )
+        db_path = tmp_path / 'project.db'
+        init_project(
+            db_path=db_path,
+            name='Formula Project',
+            genbank_paths=[genbank_path],
+            rules_tsv=rules_path,
+            formula_rules_tsv=formula_path,
+            additional_info=False,
+        )
+
+        conn = sqlite3.connect(str(db_path))
+        formula_row = conn.execute('SELECT formula_id FROM resistance_formula_rule').fetchone()
+        conn.close()
+        assert formula_row is not None
+        assert formula_row[0] == 'group_1'
 
     def test_init_project_imports_formula_rules_from_second_tsv(self, tmp_path) -> None:
         genbank_path = write_genbank(
@@ -2312,10 +2305,10 @@ class TestFormulaRuleImport:
         rules_path.write_text(
             textwrap.dedent(
                 """\
-                member_id\tgroup_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
-                mut_k2e\tgroup_1\tgag\tmyref\t2\tK\tE\tDrugA\tunknown
-                mut_f4l\tgroup_1\tgag\tmyref\t4\tF\tL\tDrugA\tunknown
-                mut_a6v\tgroup_1\tgag\tmyref\t6\tP\tV\tDrugA\tunknown
+                member_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+                mut_k2e\tgag\tmyref\t2\tK\tE\tDrugA\tunknown
+                mut_f4l\tgag\tmyref\t4\tF\tL\tDrugA\tunknown
+                mut_a6v\tgag\tmyref\t6\tP\tV\tDrugA\tunknown
                 """
             )
         )
@@ -2383,10 +2376,10 @@ class TestFormulaRuleImport:
         rules_path.write_text(
             textwrap.dedent(
                 """\
-                member_id\tgroup_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
-                mut_shared\tgroup_a,group_b\tgag\tmyref\t2\tK\tE\tDrugSingle\tresistant
-                mut_only_a\tgroup_a\tgag\tmyref\t4\tF\tL\tDrugSingle\tunknown
-                mut_only_b\tgroup_b\tgag\tmyref\t6\tP\tV\tDrugSingle\tunknown
+                member_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+                mut_shared\tgag\tmyref\t2\tK\tE\tDrugSingle\tresistant
+                mut_only_a\tgag\tmyref\t4\tF\tL\tDrugSingle\tunknown
+                mut_only_b\tgag\tmyref\t6\tP\tV\tDrugSingle\tunknown
                 """
             )
         )
@@ -2510,9 +2503,9 @@ class TestFormulaRuleImport:
         rules_path.write_text(
             textwrap.dedent(
                 """\
-                member_id\tgroup_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
-                mut_k2e\tgroup_1\tgag\tmyref\t2\tK\tE\tDrugA\tunknown
-                mut_p6v\tgroup_1\tgag\tmyref\t6\tP\tV\tDrugA\tunknown
+                member_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+                mut_k2e\tgag\tmyref\t2\tK\tE\tDrugA\tunknown
+                mut_p6v\tgag\tmyref\t6\tP\tV\tDrugA\tunknown
                 """
             )
         )
@@ -2598,8 +2591,8 @@ class TestFormulaRuleImport:
         initial_rules.write_text(
             textwrap.dedent(
                 """\
-                member_id\tgroup_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral
-                mut_k2e\tgroup_1\tgag\tmyref\t2\tK\tE\tDrugA
+                member_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral
+                mut_k2e\tgag\tmyref\t2\tK\tE\tDrugA
                 """
             )
         )
@@ -2615,8 +2608,8 @@ class TestFormulaRuleImport:
         additional_rules.write_text(
             textwrap.dedent(
                 """\
-                member_id\tgroup_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral
-                mut_a6v\tgroup_1\tgag\tmyref\t6\tP\tV\tDrugA
+                member_id\tfeature\treference_identifier\tposition\treference\tmutation\tantiviral
+                mut_a6v\tgag\tmyref\t6\tP\tV\tDrugA
                 """
             )
         )

@@ -31,8 +31,8 @@ Mark items done and update priorities after each completed milestone.
 - [X] IC50 column support — `ic50`/`ic_50` and `fold_ic50`/`fold_ic_50` stored separately; both may coexist in one file; report columns shown only when values are present; empty optional columns (ic50, fold_ic50, clinical_phenotype, source) hidden per table section
 - [X] Drug deduplication — case-insensitive; biological duplicate detection for `add`
 - [X] Drug records normalized and deduplicated case-insensitively during rules import for stable canonical naming across runs/regeneration
-- [X] Formula-rule grouping model — grouped atomic members are imported via TSV `rule_group` and evaluated through the formula-rule workflow
-- [X] Formula-rule import scaffold — grouped atomic rules support `group_id` + unique `member_id`; `respro init` / `respro add` accept optional `--formula-rules` TSV with boolean `AND` / `OR` / `NOT` / `XOR` expressions, normalized formula storage, strict group-to-formula validation, and warning-only behavior when grouped rows are provided without a formula TSV
+- [X] Formula-rule grouping model — atomic members are imported via TSV `member_id` and evaluated through the formula-rule workflow
+- [X] Formula-rule import scaffold — atomic rules support unique `member_id`; `respro init` / `respro add` accept optional `--formula-rules` TSV with `group_id` formula identifiers and boolean `AND` / `OR` / `NOT` / `XOR` expressions, normalized formula storage, and member-id linkage via formula expressions
 - [X] `add` — extend existing project with new rules and optional additional GenBank annotations
 - [X] PubChem integration — best-effort drug CID, canonical URL, short description; fully non-fatal
 - [X] Publication table — deduplicated `publication` table + `rule_publication` / `rule_set_publication` join tables; all publications from all combo-group members collected; PMID resolved to DOI via NCBI E-utilities; title fetched from CrossRef; `--drug-info` renamed to `--additional-info` covering both drugs and publications; citation-number bibliography section in HTML report
@@ -96,7 +96,7 @@ Mark items done and update priorities after each completed milestone.
 - [X] Combination rule matching (`match_rule_sets`) — all members must co-occur to fire
 - [X] Formula-rule first-class workflow outputs — `resistance_formula_rule` import is wired into profiling-time matching, report rendering, results DB persistence, regenerate, and WebUI
 - [X] BLOSUM62 similarity scoring for matched substitutions (`core/similarity.py`)
-- [X] End-to-end formula-rule loading via TSV `init` path — grouped `rule_group` rows are validated and loaded during `init_project` (no manual SQL setup)
+- [X] End-to-end formula-rule loading via TSV `init` path — atomic rows with `member_id` are validated and loaded during `init_project` (no manual SQL setup)
 - [X] Generic insertion wildcard rule support — `INS_any` token matches any in-frame insertion at the given position; specific rules take precedence; allowed as a formula-rule member
 
 ### Reporting and export

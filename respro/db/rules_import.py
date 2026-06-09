@@ -62,18 +62,18 @@ def load_resistance_rules(
     require_external_ids: bool = False,
     additional_info: bool = False,
     publication_lookup_failures: list[str] | None = None,
-) -> tuple[int, set[str], set[str], dict[str, str]]:
+) -> tuple[int, set[str], dict[str, str]]:
     """
-    Load resistance rules from TSV file; return count of inserted rules and grouped IDs.
+    Load resistance rules from TSV file; return count of inserted rules and declared IDs.
 
     All rows are imported as atomic single rules into ``resistance_rule``.
-    Grouping metadata from ``group_id``/``member_id`` is captured for formula
-    validation only; no implicit combination rules are created during this step.
+    ``member_id`` values are captured as external IDs for formula-rule linkage;
+    no implicit combination rules are created during this step.
 
     :param conn: SQLite database connection
     :param project_id: ID of the project
     :param rules_tsv: path to resistance rules TSV file
-    :return: (inserted atomic-rule count, set of group_id values found in rules TSV,
+    :return: (inserted atomic-rule count,
              set of declared external_ids in rules TSV,
              dict of external_id -> skip reason for ids that were skipped)
     """
@@ -85,7 +85,7 @@ def load_resistance_rules(
         reader = csv.DictReader(fh, delimiter='\t')
         all_rows = _expand_anchor_changed_indel_rules(list(reader))
 
-    grouped_ids, declared_external_ids = _validate_rules_header_and_collect_ids(
+    declared_external_ids = _validate_rules_header_and_collect_ids(
         conn,
         all_rows,
         reader.fieldnames,
@@ -163,15 +163,8 @@ def load_resistance_rules(
         formatted = '\n'.join(f'- {message}' for message in sorted(set(state.errors)))
         raise ValueError(f'Rules validation failed:\n{formatted}')
 
-    if grouped_ids and not require_external_ids:
-        logger.warning(
-            'Detected grouped atomic rules (%d group_id values), but no formula TSV was provided; '
-            'combinatorial rules are ignored while atomic rules are still imported',
-            len(grouped_ids),
-        )
-
     logger.info('Loaded %d single resistance rule(s)', count)
-    return count, grouped_ids, declared_external_ids, state.skipped_external_ids
+    return count, declared_external_ids, state.skipped_external_ids
 
 
 @dataclass
@@ -180,7 +173,6 @@ class _PreparedAtomicRule:
     feature_name: str
     feature_id: int
     drug_name: str
-    group_ids: list[str]
     external_id: str
     reference_identifier: str
     position_raw: str
@@ -215,9 +207,9 @@ def _validate_rules_header_and_collect_ids(
     conn: sqlite3.Connection,
     all_rows: list[dict[str, str]],
     fieldnames: list[str] | None,
-) -> tuple[set[str], set[str]]:
+) -> set[str]:
     """
-    Validate header-level constraints and collect grouped and external rule IDs.
+    Validate header-level constraints and collect declared external rule IDs.
     """
     header_columns = {col.strip() for col in (fieldnames or []) if col}
     present_ic50 = sorted(header_columns & {'ic50', 'ic_50'})
@@ -238,7 +230,6 @@ def _validate_rules_header_and_collect_ids(
     required_field_errors: list[str] = []
     external_ids: list[str] = []
     declared_external_ids: set[str] = set()
-    grouped_ids: set[str] = set()
     for row_number, row in enumerate(all_rows, start=2):
         if not _get_value(row, 'reference_identifier'):
             required_field_errors.append(
@@ -248,12 +239,6 @@ def _validate_rules_header_and_collect_ids(
             required_field_errors.append(
                 f'row {row_number}: missing required field reference'
             )
-        group_ids = [
-            value.strip()
-            for value in _get_value(row, 'group_id', 'rule_group').split(',')
-            if value.strip()
-        ]
-        grouped_ids.update(group_ids)
 
         external_id = _get_value(row, 'member_id', 'rule_id')
         if external_id:
@@ -263,10 +248,6 @@ def _validate_rules_header_and_collect_ids(
                 )
             external_ids.append(external_id)
             declared_external_ids.add(external_id)
-        elif group_ids:
-            required_field_errors.append(
-                f'row {row_number}: missing required field member_id'
-            )
 
     existing_external_ids = sorted(
         external_id for external_id in set(external_ids) if _external_rule_id_exists(conn, external_id)
@@ -281,7 +262,7 @@ def _validate_rules_header_and_collect_ids(
         formatted = '\n'.join(f'- {message}' for message in required_field_errors)
         raise ValueError(f'Rules validation failed:\n{formatted}')
 
-    return grouped_ids, declared_external_ids
+    return declared_external_ids
 
 
 def _prepare_atomic_rule_rows(
@@ -351,11 +332,6 @@ def _prepare_atomic_rule_rows(
 
         drug_name = _get_value(row, 'antiviral')
         external_id = _get_value(row, 'member_id', 'rule_id')
-        group_ids = [
-            value.strip()
-            for value in _get_value(row, 'group_id', 'rule_group').split(',')
-            if value.strip()
-        ]
 
         if not drug_name:
             if require_external_ids and external_id:
@@ -486,7 +462,6 @@ def _prepare_atomic_rule_rows(
                 feature_name=feature_name,
                 feature_id=feature_id,
                 drug_name=drug_name,
-                group_ids=group_ids,
                 external_id=external_id,
                 reference_identifier=reference_identifier,
                 position_raw=position_raw,
@@ -529,7 +504,7 @@ def _insert_prepared_atomic_rules(
         # mutation across multiple formula groups. Each has a unique external_id, so skip
         # mutation-level deduplication; the unique index on external_id prevents true duplicates.
         drug_id = _get_or_create_drug_id(conn, project_id, prepared.drug_name, drug_cache)
-        if not prepared.group_ids and _rule_exists(
+        if not prepared.external_id and _rule_exists(
             conn,
             feature_id=prepared.feature_id,
             drug_id=drug_id,
@@ -590,7 +565,6 @@ def load_formula_rules(
     conn: sqlite3.Connection,
     project_id: int,
     formula_rules_tsv: Path,
-    expected_group_ids: set[str] | None = None,
     declared_atomic_ids: set[str] | None = None,
     skipped_atomic_ids: dict[str, str] | None = None,
     additional_info: bool = False,
@@ -618,7 +592,7 @@ def load_formula_rules(
         context = f'Formula rule row {row_number}'
 
         if not formula_id:
-            errors.append(f'{context}: missing required field group_id')
+            errors.append(f'{context}: missing required field formula_id')
             continue
         if not drug_name:
             errors.append(f'{context}: missing required field antiviral')
@@ -673,27 +647,6 @@ def load_formula_rules(
             len(skipped_formula_validation),
             '\n'.join(f'  - {msg}' for msg in skipped_formula_validation),
         )
-
-    if expected_group_ids:
-        provided_group_ids = set(formula_ids)
-        missing_group_ids = sorted(expected_group_ids - provided_group_ids)
-        if missing_group_ids:
-            missing_list = ', '.join(repr(group_id) for group_id in missing_group_ids)
-            logger.warning(
-                'missing formula rule(s) for group id(s): %s',
-                missing_list
-            )
-
-        unknown_group_ids = sorted(provided_group_ids - expected_group_ids)
-        if unknown_group_ids:
-            unknown_list = ', '.join(
-                f'{group_id!r} (row {formula_id_to_row.get(group_id, "?")})'
-                for group_id in unknown_group_ids
-            )
-            logger.warning(
-                'formula rule(s) reference unknown atomic rule id(s) from grouped rules: %s',
-                unknown_list
-            )
 
     referenced_atomic_ids = {
         ref_id

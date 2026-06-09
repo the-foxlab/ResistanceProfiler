@@ -51,7 +51,7 @@ def import_rules_with_summary(
     )
     publication_lookup_failures: list[str] = []
 
-    single_rules, grouped_ids, declared_external_ids, skipped_external_ids = _db_load_resistance_rules(
+    single_rules, declared_external_ids, skipped_external_ids = _db_load_resistance_rules(
         conn,
         project_id,
         rules_tsv,
@@ -64,16 +64,10 @@ def import_rules_with_summary(
             conn,
             project_id,
             formula_rules_tsv,
-            expected_group_ids=grouped_ids,
             declared_atomic_ids=declared_external_ids,
             skipped_atomic_ids=skipped_external_ids,
             additional_info=additional_info,
             publication_lookup_failures=publication_lookup_failures,
-        )
-    elif grouped_ids:
-        logger.warning(
-            'Detected grouped atomic rules in rules TSV, but --formula-rules was not provided; '
-            'the database was created and atomic rules were imported, while combinatorial rules were ignored'
         )
 
     _report_publication_lookup_failures(publication_lookup_failures)

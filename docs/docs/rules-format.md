@@ -15,10 +15,10 @@ A minimal rules TSV with only the required columns:
 
 With optional columns for metadata and combination rules:
 
-| feature | reference_identifier | position | reference | mutation | antiviral | phenotype | ic50 | fold_ic50 | group_id | member_id |
-|---|---|---:|---|---|---|---|---|---|---|---|
-| UL23 | NC_001806 | 336 | A | V | Aciclovir | resistant | 32.5 | 4.1 | group_1 | mut_A |
-| UL30 | NC_001806 | 715 | K | I | Aciclovir | resistant | 28.0 | 3.5 | group_1 | mut_B |
+| feature | reference_identifier | position | reference | mutation | antiviral | phenotype | ic50 | fold_ic50 | member_id |
+|---|---|---|:---|---|---|---|---|---|---|
+| UL23 | NC_001806 | 336 | A | V | Aciclovir | resistant | 32.5 | 4.1 | mut_A |
+| UL30 | NC_001806 | 715 | K | I | Aciclovir | resistant | 28.0 | 3.5 | mut_B |
 
 Combination rules use a separate formula TSV (`--formula-rules`) that defines boolean expressions over member IDs:
 
@@ -35,7 +35,7 @@ This document is the source of truth for curated rules TSV files used by `respro
 - The primary rules TSV defines atomic mutation rules, one row per mutation.
 - Atomic rules can carry their own metadata or act mainly as building blocks for higher-order rules.
 - Optional boolean combination rules can be provided in a second TSV via `--formula-rules`.
-- Grouped combinatorial association is defined via `group_id` + `member_id` in the primary TSV and a matching `group_id` row in the formula TSV.
+- Combinatorial association is defined via `member_id` values in the primary TSV that are referenced by boolean expressions in a formula TSV.
 
 ---
 
@@ -63,18 +63,14 @@ This document is the source of truth for curated rules TSV files used by `respro
 | `publication` | DOI, PMID, or source publication text | |
 | `source` | Provenance label | |
 | `comment` | Free-text curator note | |
-| `group_id` | Combination group key | |
-| `member_id` | Stable atomic member identifier | Required only if `group_id` is present |
+| `member_id` | Stable atomic rule identifier | Required when referenced by formula rules |
 | `score` | Numeric quality/evidence score | |
 
 Notes:
 
-- Single rules (without `group_id`) do not require `member_id`.
-- `member_id` is only used when a row belongs to a combination group (`group_id` is present).
+- `member_id` is required when atomic rules are referenced by formula expressions in the formula TSV.
 - `member_id` values must be unique when provided.
 - `member_id` values must not use reserved boolean keywords such as `AND`, `OR`, `NOT`, or `XOR`.
-- Rows with `group_id` must also provide `member_id` when `--formula-rules` is used.
-- If grouped rows exist but `--formula-rules` is omitted, the project DB is still built and atomic rules are imported, but combinatorial rules are ignored with a warning.
 
 ### Coordinate rules (`position`)
 
@@ -302,7 +298,7 @@ The optional formula TSV defines higher-order resistance rules over atomic `memb
 
 | Column | Meaning | Constraints |
 |---|---|---|
-| `group_id` | Combination group identifier | Must match a `group_id` from the primary rules TSV |
+| `group_id` | Formula rule identifier | Must be unique across all formula rules |
 | `antiviral` | Drug name | Stored normalized like atomic rules |
 | `expression` | Boolean rule formula | Uses atomic `member_id` values and `AND` / `OR` / `NOT` / `XOR` |
 
@@ -325,7 +321,7 @@ The optional formula TSV defines higher-order resistance rules over atomic `memb
 - Supported operators are `AND`, `OR`, `NOT`, and `XOR`. Parentheses are supported and should be used whenever precedence should be explicit.
 - Atomic identifiers in `expression` must match `member_id` values from the primary rules TSV.
 - Unsupported characters, duplicate group ids, duplicate normalized formulas for the same drug, and unknown atomic ids are rejected during import.
-- Each `group_id` present in grouped atomic rows must have exactly one formula row.
+- Each `group_id` in the formula TSV must be unique.
 - Duplicate atomic ids inside one formula are rejected.
 
 See [Interpretation Algorithms](algorithms.md) for a visual overview of the boolean operators.
@@ -336,11 +332,11 @@ See [Interpretation Algorithms](algorithms.md) for a visual overview of the bool
 
 Define the individual mutations:
 
-| feature | reference_identifier | position | reference | mutation | antiviral | phenotype | ic50 | fold_ic50 | group_id | member_id |
-|---|---|---:|---|---|---|---|---|---|---|---|
-| UL23 | NC_001806 | 336 | A | <span class="respro-pill">V</span> | Aciclovir | resistant | 32.5 | 4.1 | group_1 | mut_A |
-| UL30 | NC_001806 | 715 | K | <span class="respro-pill">I</span> | Aciclovir | resistant | 28.0 | 3.5 | group_1 | mut_B |
-| UL30 | NC_001806 | 725 | A | <span class="respro-pill">AGG</span> | | | | | group_1 | mut_C |
+| feature | reference_identifier | position | reference | mutation | antiviral | phenotype | ic50 | fold_ic50 | member_id |
+|---|---|---|:---|---|---|---|---|---|---|
+| UL23 | NC_001806 | 336 | A | <span class="respro-pill">V</span> | Aciclovir | resistant | 32.5 | 4.1 | mut_A |
+| UL30 | NC_001806 | 715 | K | <span class="respro-pill">I</span> | Aciclovir | resistant | 28.0 | 3.5 | mut_B |
+| UL30 | NC_001806 | 725 | A | <span class="respro-pill">AGG</span> | | | | | mut_C |
 
 #### Combination rule (formula.tsv)
 
@@ -350,7 +346,7 @@ Define a formula that requires both mutations:
 |---|---|---|---|---|
 | group_1 | Aciclovir | (mut_A OR mut_B) AND NOT mut_C | resistant | resistant |
 
-Positions can have multiple comma-separated `group_id` classifiers. This means that one position can be its own single rule (if metadata is provided) but also part of multiple groups. If you have one position that has different effects for multiple drugs, it is enough to provide the `group_id` and `member_id` once. Metadata for the combination rules is strictly taken from the combination rule associated metadata.
+The `group_id` in the formula TSV identifies each formula rule. Each `member_id` value from the atomic rules TSV that appears in an `expression` must correspond to an atomic rule.
 
 ### Annotation handling
 
@@ -380,5 +376,5 @@ For reproducible curation workflows:
 
 - keep `reference_identifier` explicit in every row
 - keep mutation notation consistent across sources
-- use `group_id` + `member_id` for combinatorial association and keep formula expressions explicit
+- use `member_id` and formula expressions for combinatorial association
 - when possible, prefer canonical insertion/deletion forms to reduce ambiguity

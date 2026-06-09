@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 # Form: one or more AA letters + position digits + "del" (case-insensitive), e.g. "Q35del", "DD676del".
 _RE_ANCHORLESS_DEL = re.compile(r'^([A-Za-z]+)\d+del$', re.IGNORECASE)
 _RE_REWRITE_TOKEN = re.compile(r'^([A-Z*]+)(\d+)([A-Z*]+)$')
-_AUTO_SPLIT_GROUP_PREFIX = '__auto_anchor_split_row_'
 
 
 def _is_noop_mutation(reference_aa: str, mutation: str) -> bool:
@@ -155,28 +154,23 @@ def _expand_anchor_changed_indel_rules(rows: list[dict[str, str]]) -> list[dict[
             continue
 
         sub_ref, sub_mut, indel_ref, indel_mut = split
-        group_name = _get_value(row, 'group_id', 'rule_group') or (
-            f'{_AUTO_SPLIT_GROUP_PREFIX}{row_number}'
-        )
 
         substitution_row = dict(row)
         substitution_row['reference'] = sub_ref
         substitution_row['mutation'] = sub_mut
-        substitution_row['group_id'] = group_name
         member_id = _get_value(row, 'member_id', 'rule_id')
         if member_id:
             substitution_row['member_id'] = f'{member_id}__sub'
         else:
-            substitution_row['member_id'] = f'{group_name}__sub'
+            substitution_row['member_id'] = f'__auto_anchor_split_row_{row_number}__sub'
 
         indel_row = dict(row)
         indel_row['reference'] = indel_ref
         indel_row['mutation'] = indel_mut
-        indel_row['group_id'] = group_name
         if member_id:
             indel_row['member_id'] = f'{member_id}__indel'
         else:
-            indel_row['member_id'] = f'{group_name}__indel'
+            indel_row['member_id'] = f'__auto_anchor_split_row_{row_number}__indel'
 
         expanded_rows.extend([substitution_row, indel_row])
         split_count += 1
