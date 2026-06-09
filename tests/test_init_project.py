@@ -521,11 +521,13 @@ class TestComboRuleParsing:
             gag\ttiny_ref\t6\tP\tV\tDrugA\tresistant\tmut_dup
         """))
         db = tmp_path / 'proj.db'
-        with pytest.raises(ValueError, match='duplicate atomic rule ids'):
+        with pytest.raises(ValueError, match='duplicate member_id'):
             init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
                          rules_tsv=tsv, additional_info=False)
 
-    def test_identical_duplicate_member_id_rows_are_skipped_with_warning(self, tmp_path, tiny_genbank, caplog) -> None:
+    def test_duplicate_member_id_with_identical_signature_strips_member_id(
+        self, tmp_path, tiny_genbank, caplog
+    ) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tmember_id
@@ -539,14 +541,50 @@ class TestComboRuleParsing:
                          rules_tsv=tsv, additional_info=False)
 
         conn = sqlite3.connect(str(db))
-        count = conn.execute(
-            'SELECT COUNT(*) FROM resistance_rule WHERE external_id = ?',
-            ('mut_same',),
-        ).fetchone()[0]
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            'SELECT external_id FROM resistance_rule ORDER BY rowid'
+        ).fetchall()
         conn.close()
 
-        assert count == 1
-        assert any('duplicate member_id with identical atomic definition' in rec.message for rec in caplog.records)
+        # First row keeps member_id; second row has member_id stripped and is then
+        # skipped as a DB-level duplicate (same feature+drug+pos+ref+mutation, no external_id)
+        assert len(rows) == 1
+        assert rows[0]['external_id'] == 'mut_same'
+        assert any('member_id stripped' in rec.message for rec in caplog.records)
+
+    def test_duplicate_member_id_with_different_drug_strips_member_id(
+        self, tmp_path, tiny_genbank, caplog
+    ) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tmember_id
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tmut_shared
+            gag\ttiny_ref\t2\tK\tE\tDrugB\tresistant\tmut_shared
+        """))
+        db = tmp_path / 'proj.db'
+
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank],
+                         rules_tsv=tsv, additional_info=False)
+
+        conn = sqlite3.connect(str(db))
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            'SELECT r.external_id, d.name AS drug '
+            'FROM resistance_rule r '
+            'JOIN drug d ON d.id = r.drug_id '
+            'ORDER BY r.rowid'
+        ).fetchall()
+        conn.close()
+
+        # Both rules imported with their respective drugs; second loses member_id
+        assert len(rows) == 2
+        assert rows[0]['external_id'] == 'mut_shared'
+        assert rows[0]['drug'] == 'druga'
+        assert rows[1]['external_id'] == ''
+        assert rows[1]['drug'] == 'drugb'
+        assert any('member_id stripped' in rec.message for rec in caplog.records)
 
     def test_single_mixed_anchor_change_insertion_splits_into_atomic_rows(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -2561,7 +2599,7 @@ class TestFormulaRuleImport:
             )
         )
 
-        with pytest.raises(ValueError, match='duplicate atomic rule ids'):
+        with pytest.raises(ValueError, match='duplicate member_id'):
             init_project(
                 db_path=tmp_path / 'project.db',
                 name='Formula Project',

@@ -151,12 +151,12 @@ def load_resistance_rules(
             '\n'.join(f'  {rule}' for rule in sorted(skipped_duplicates_detail)),
         )
 
-    if state.skipped_identical_member_id_rows:
+    if state.stripped_member_id_rows:
         logger.warning(
-            '%d row(s) skipped — duplicate member_id with identical atomic definition '
-            '(first occurrence kept):\n%s',
-            len(state.skipped_identical_member_id_rows),
-            '\n'.join(f'  - {msg}' for msg in sorted(state.skipped_identical_member_id_rows)),
+            '%d row(s) had member_id stripped — duplicate member_id with identical atomic '
+            'definition (first occurrence kept the member_id):\n%s',
+            len(state.stripped_member_id_rows),
+            '\n'.join(f'  - {msg}' for msg in sorted(state.stripped_member_id_rows)),
         )
 
     if state.errors:
@@ -198,7 +198,7 @@ class _AtomicRuleLoadState:
     skipped_feature: list[str] = field(default_factory=list)
     skipped_feature_pairs: list[tuple[str, str]] = field(default_factory=list)
     skipped_invalid_aa: list[str] = field(default_factory=list)
-    skipped_identical_member_id_rows: list[str] = field(default_factory=list)
+    stripped_member_id_rows: list[str] = field(default_factory=list)
     # Maps external_id → skip reason, for formula rule skip messages.
     skipped_external_ids: dict[str, str] = field(default_factory=dict)
 
@@ -438,18 +438,19 @@ def _prepare_atomic_rule_rows(
             if seen is not None:
                 first_row, first_signature = seen
                 if signature == first_signature:
-                    state.skipped_identical_member_id_rows.append(
-                        f'row {row_number}: member_id {external_id!r} duplicates identical atomic '
-                        f'definition from row {first_row}'
+                    state.stripped_member_id_rows.append(
+                        f'row {row_number}: member_id {external_id!r} stripped — '
+                        f'duplicates identical atomic definition from row {first_row}'
                     )
-                    state.skipped_external_ids[external_id] = 'duplicate of an earlier identical row'
+                    external_id = ''
+                else:
+                    state.errors.append(
+                        f'duplicate member_id: {external_id!r} '
+                        f'(conflicting definitions in rows {first_row} and {row_number})'
+                    )
                     continue
-                state.errors.append(
-                    f'duplicate atomic rule ids: {external_id!r} '
-                    f'(conflicting definitions in rows {first_row} and {row_number})'
-                )
-                continue
-            seen_external_id_signatures[external_id] = (row_number, signature)
+            else:
+                seen_external_id_signatures[external_id] = (row_number, signature)
 
         comment_value = _append_contradictory_comment(
             _get_value(row, 'comment'),
