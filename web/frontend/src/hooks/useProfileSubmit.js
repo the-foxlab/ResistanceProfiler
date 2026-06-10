@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { FRONTEND_CONFIG } from '../config';
-import { apiGet, apiDelete, apiPost, apiUpload, formatUserError, formatResultTimestamp, buildApiUrl } from '../api';
+import { apiGet, apiDelete, apiPost, apiUpload, formatUserError, formatResultTimestamp, buildApiUrl, formatPathStem } from '../api';
 
 export function useProfileSubmit({
   setStatusError,
@@ -22,14 +22,14 @@ export function useProfileSubmit({
     input_display_name: '',
     ref_fasta_path: '',
     bam_path: null,
-    sample: FRONTEND_CONFIG.defaults.sampleName,
+    sample: '',
     min_af: FRONTEND_CONFIG.profile.vcf.minAf,
     min_depth: FRONTEND_CONFIG.profile.vcf.minDepth,
   });
   const [fastaInput, setFastaInput] = useState({
     fasta_path: '',
     input_display_name: '',
-    sample: FRONTEND_CONFIG.defaults.sampleName,
+    sample: '',
   });
   const [jsonInputPath, setJsonInputPath] = useState('');
   const [isProcessingFasta, setIsProcessingFasta] = useState(false);
@@ -65,11 +65,13 @@ export function useProfileSubmit({
     setIsProcessingFasta(true);
     setStatusError('');
     try {
-      const submitResponse = await apiPost('/api/profile/fasta', {
+      const fastaPayload = {
         ...fastaInput,
+        sample: fastaInput.sample || formatPathStem(fastaInput.input_display_name),
         database_id: databaseId,
         threads: FRONTEND_CONFIG.profile.threads,
-      });
+      };
+      const submitResponse = await apiPost('/api/profile/fasta', fastaPayload);
       setActiveJobId(submitResponse.job_id);
       setActiveJobStatus('queued');
       const result = await pollJob(submitResponse.job_id);
@@ -101,11 +103,13 @@ export function useProfileSubmit({
         throw new Error('Coverage cutoff (min depth) must be an integer greater than or equal to 0.');
       }
 
-      const submitResponse = await apiPost('/api/profile/vcf', {
+      const vcfPayload = {
         ...vcfInput,
+        sample: vcfInput.sample || formatPathStem(vcfInput.input_display_name),
         database_id: databaseId,
         threads: FRONTEND_CONFIG.profile.threads,
-      });
+      };
+      const submitResponse = await apiPost('/api/profile/vcf', vcfPayload);
       setActiveJobId(submitResponse.job_id);
       setActiveJobStatus('queued');
       const result = await pollJob(submitResponse.job_id);
