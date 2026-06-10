@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 _RE_CIGAR = re.compile(r'(\d+)([MIDNSHP=X])')
 
-
 # ──────────────────────────────────────────────────────────────────────
 # Public API
 # ──────────────────────────────────────────────────────────────────────
@@ -144,9 +143,13 @@ def _match_with_mappy(
         'n_threads': max(1, threads),
     }
     # Build scoring tuple: (A, B, O1, E1, O2, E2).
-    # Only O1 (gap_open_penalty) is configurable; remaining values are map-ont defaults.
     aligner_kwargs['scoring'] = (
-        2, 4, cfg.gap_open_penalty, 2, 24, 1,
+        cfg.match_score,
+        cfg.mismatch_penalty,
+        cfg.gap_open_penalty,
+        cfg.gap_extension_penalty_1,
+        cfg.gap_open_penalty_2,
+        cfg.gap_extension_penalty_2,
     )
     aligner = mappy.Aligner(**aligner_kwargs)
     if not aligner:

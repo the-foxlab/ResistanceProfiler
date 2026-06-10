@@ -334,6 +334,12 @@ async def save_upload_stream(
         Path(temp_path).unlink(missing_ok=True)
         raise
 
+    # Defense-in-depth: verify the resolved path stays within upload_dir
+    saved_resolved = Path(temp_path).resolve()
+    if not _is_within_root(saved_resolved, upload_dir.resolve()):
+        Path(temp_path).unlink(missing_ok=True)
+        raise ValueError('Upload path escapes target directory')
+
     return Path(temp_path), total_size
 
 

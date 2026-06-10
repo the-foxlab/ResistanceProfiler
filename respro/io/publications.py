@@ -91,15 +91,16 @@ def fetch_pubmed_metadata(pmid: str, timeout: int = CLI_CONFIG.timeouts.pubmed) 
                 )
                 time.sleep(delay)
                 continue
-            logger.debug('NCBI PMID lookup failed for %r: HTTP %s', pmid, exc.code)
+            logger.warning('NCBI PMID lookup failed for %r: HTTP %s', pmid, exc.code)
             return None
         except OSError as exc:
-            logger.debug('NCBI PMID lookup failed for %r (network): %s', pmid, exc)
+            logger.warning('NCBI PMID lookup failed for %r (network): %s', pmid, exc)
             return None
         except Exception as exc:
-            logger.debug('NCBI PMID lookup failed for %r: %s', pmid, exc)
+            logger.warning('NCBI PMID lookup failed for %r: %s', pmid, exc)
             return None
 
+    logger.warning('NCBI PMID lookup failed for %r: all %d retries exhausted', pmid, _PUBMED_RATE_LIMIT_RETRIES + 1)
     return None
 
 
@@ -167,15 +168,16 @@ def fetch_pubmed_id_for_doi(doi: str, timeout: int = CLI_CONFIG.timeouts.pubmed)
             if exc.code in (400, 404):
                 logger.debug('NCBI DOI->PMID lookup returned HTTP %s for %r', exc.code, normalized_doi)
                 return None
-            logger.debug('NCBI DOI->PMID lookup failed for %r: HTTP %s', normalized_doi, exc.code)
+            logger.warning('NCBI DOI->PMID lookup failed for %r: HTTP %s', normalized_doi, exc.code)
             return None
         except OSError as exc:
-            logger.debug('NCBI DOI->PMID lookup failed for %r (network): %s', normalized_doi, exc)
+            logger.warning('NCBI DOI->PMID lookup failed for %r (network): %s', normalized_doi, exc)
             return None
         except Exception as exc:
-            logger.debug('NCBI DOI->PMID lookup failed for %r: %s', normalized_doi, exc)
+            logger.warning('NCBI DOI->PMID lookup failed for %r: %s', normalized_doi, exc)
             return None
 
+    logger.warning('NCBI DOI->PMID lookup failed for %r: all %d retries exhausted', normalized_doi, _DOI_RATE_LIMIT_RETRIES + 1)
     return None
 
 
@@ -231,15 +233,16 @@ def fetch_publication_metadata(doi: str, timeout: int = CLI_CONFIG.timeouts.cros
             if exc.code == 404:
                 logger.debug('CrossRef: no record found for DOI %r', normalized_doi)
             else:
-                logger.debug('CrossRef lookup failed for DOI %r: HTTP %s', normalized_doi, exc.code)
+                logger.warning('CrossRef lookup failed for DOI %r: HTTP %s', normalized_doi, exc.code)
             return None
         except OSError as exc:
-            logger.debug('CrossRef lookup failed for DOI %r (network): %s', normalized_doi, exc)
+            logger.warning('CrossRef lookup failed for DOI %r (network): %s', normalized_doi, exc)
             return None
         except Exception as exc:
-            logger.debug('CrossRef lookup failed for DOI %r: %s', normalized_doi, exc)
+            logger.warning('CrossRef lookup failed for DOI %r: %s', normalized_doi, exc)
             return None
 
+    logger.warning('CrossRef lookup failed for DOI %r: all %d retries exhausted', normalized_doi, _DOI_RATE_LIMIT_RETRIES + 1)
     return None
 
 

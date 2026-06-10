@@ -82,6 +82,11 @@ class CliAlignmentConfig:
     w: int
     best_n: int
     gap_open_penalty: int
+    match_score: int
+    mismatch_penalty: int
+    gap_extension_penalty_1: int
+    gap_open_penalty_2: int
+    gap_extension_penalty_2: int
 
 
 @dataclass(frozen=True)
@@ -155,6 +160,11 @@ def _load_cli_config() -> CliConfig:
             w=int(alignment['w']),
             best_n=int(alignment['best_n']),
             gap_open_penalty=int(alignment['gap_open_penalty']),
+            match_score=int(alignment['match_score']),
+            mismatch_penalty=int(alignment['mismatch_penalty']),
+            gap_extension_penalty_1=int(alignment['gap_extension_penalty_1']),
+            gap_open_penalty_2=int(alignment['gap_open_penalty_2']),
+            gap_extension_penalty_2=int(alignment['gap_extension_penalty_2']),
         ),
     )
 

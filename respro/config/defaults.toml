@@ -57,3 +57,13 @@ best_n = 1
 # map-ont default is 4; raising to 6 suppresses compensating indel pairs (adjacent
 # I/D in CIGAR that represent a single divergence event) without losing real indels.
 gap_open_penalty = 6
+# Scoring tuple components (A, B, O1, E1, O2, E2) passed to mappy.
+# These are map-ont preset defaults from minimap2.
+# See: https://github.com/lh3/minimap2/blob/master/main.cs
+# Only change these if you understand minimap2 scoring; wrong values can
+# degrade alignment quality for divergent sequences.
+match_score = 2
+mismatch_penalty = 4
+gap_extension_penalty_1 = 2
+gap_open_penalty_2 = 24
+gap_extension_penalty_2 = 1
