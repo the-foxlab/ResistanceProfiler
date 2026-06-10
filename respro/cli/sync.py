@@ -17,6 +17,7 @@ from respro.cli.profile_helpers import (
     _load_reference_data,
     _ProfilingRunContext,
 )
+from respro.config.cli_settings import CLI_CONFIG
 from respro.core.query import resolve_cached_query_reference
 from respro.db.models import AnnotatedVariant, FeatureMatch, VariantCall
 from respro.db.results import (
@@ -185,7 +186,7 @@ def _sync_single_run(
             coverage_gaps=coverage_gaps or [],
             query_sequence=query_sequence,
             feature_matches=feature_matches or [],
-            af_bins=None,
+            af_bins=CLI_CONFIG.af_bins.as_dict(),
         )
         result, _outputs = _finalize_and_export(
             ctx=ctx,

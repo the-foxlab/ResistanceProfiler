@@ -402,7 +402,7 @@ class TestProfileCli:
         assert '3 formula rule hit' in cli_output
         assert '7 total database hits' in cli_output
 
-        context = build_report_context(result)
+        context = build_report_context(result, similarity_high=1, similarity_moderate=0)
         cards_by_name = {card['name']: card for card in context['sequence_features']['cards']}
         assert cards_by_name['gag']['database_hits'] == 5
         assert cards_by_name['pol']['database_hits'] == 3

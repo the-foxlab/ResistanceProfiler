@@ -15,6 +15,8 @@ from respro.db.models import AnnotatedVariant, FeatureRecord, VariantCall
 
 logger = logging.getLogger(__name__)
 
+_BLOSUM62 = _load_matrix('BLOSUM62')
+
 # Shared high-impact consequence set and human-readable labels.
 HIGH_IMPACT_CONSEQUENCES: frozenset[str] = frozenset({
     'frameshift', 'stop_gained', 'stop_lost', 'start_lost', 'insertion', 'deletion',
@@ -892,7 +894,7 @@ def classify_similarity(
     :return: similarity class string
     """
     try:
-        score = _load_matrix('BLOSUM62')[observed_aa.upper(), rule_aa.upper()]
+        score = _BLOSUM62[observed_aa.upper(), rule_aa.upper()]
     except (KeyError, IndexError):
         # Non-standard tokens (e.g. 'fsX', '*') are not in the matrix
         logger.debug('BLOSUM62 matrix does not contain %s/%s — defaulting to low', observed_aa, rule_aa)
@@ -906,7 +908,7 @@ def classify_similarity(
 
 def assign_af_bins(
     annotations: list[AnnotatedVariant],
-    bins: dict[str, tuple[float, float]] | None = None,
+    bins: dict[str, tuple[float, float]],
 ) -> list[AnnotatedVariant]:
     """
     Assign an allele-frequency bin label to each annotated variant.
@@ -914,16 +916,9 @@ def assign_af_bins(
     Mutates ``af_bin`` in place and returns the same list.
 
     :param annotations: annotated variants to bin
-    :param bins: mapping of bin label to (lower_inclusive, upper_inclusive);
-        defaults to the built-in high/intermediate/low bins
+    :param bins: mapping of bin label to (lower_inclusive, upper_inclusive)
     :return: the same annotations list with af_bin populated
     """
-    if bins is None:
-        bins = {
-            'high': (0.75, 1.0),
-            'intermediate': (0.25, 0.7499),
-            'low': (0.01, 0.2499),
-        }
 
     # Sort bins by lower bound descending so higher bins are checked first
     sorted_bins = sorted(bins.items(), key=lambda x: -x[1][0])

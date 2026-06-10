@@ -34,6 +34,8 @@ def export_results(
     extra_export_formats: set[str] | None = None,
     project_db_path: Path | None = None,
     output_html_path: Path | None = None,
+    similarity_high: int = 1,
+    similarity_moderate: int = 0,
 ) -> dict[str, Path]:
     """
     Write all report outputs to a directory and return a format-to-path mapping.
@@ -48,6 +50,8 @@ def export_results(
     :param project_db_path: optional path to project database used for this run
     :param output_html_path: explicit HTML output file path; HTML is written exactly to this
         path and JSON files use its basename stem
+    :param similarity_high: BLOSUM62 score threshold for high similarity
+    :param similarity_moderate: BLOSUM62 score threshold for moderate similarity
     :return: dict mapping format names to output file paths
     """
     if output_html_path is None:
@@ -84,6 +88,8 @@ def export_results(
         plot_svg_data=plot_svg_data,
         project_conn=project_conn,
         rules=rules,
+        similarity_high=similarity_high,
+        similarity_moderate=similarity_moderate,
     )
 
     outputs: dict[str, Path] = {'html': html_path}
@@ -109,6 +115,8 @@ def export_results(
             context=context,
             plot_svg_data=plot_svg_data,
             features=features,
+            similarity_high=similarity_high,
+            similarity_moderate=similarity_moderate,
         )
         outputs['pdf'] = pdf_path
 
@@ -219,6 +227,8 @@ def write_pdf(
     context: dict | None = None,
     plot_svg_data: bytes | None = None,
     features: list[FeatureRecord] | None = None,
+    similarity_high: int = 1,
+    similarity_moderate: int = 0,
 ) -> Path:
     """
     Render and write a dedicated PDF report to a file.
@@ -241,6 +251,8 @@ def write_pdf(
         project_conn=project_conn,
         rules=rules,
         features=features,
+        similarity_high=similarity_high,
+        similarity_moderate=similarity_moderate,
     )
     env = Environment(loader=BaseLoader())
     template = env.from_string(_load_pdf_template_text())
@@ -277,6 +289,8 @@ def _build_pdf_summary_context(
     project_conn: sqlite3.Connection | None,
     rules: list[ResistanceRule] | None,
     features: list[FeatureRecord] | None,
+    similarity_high: int = 1,
+    similarity_moderate: int = 0,
 ) -> dict:
     """
     Build PDF context from the existing HTML report context.
@@ -294,6 +308,8 @@ def _build_pdf_summary_context(
             project_conn=project_conn,
             rules=rules,
             features=features,
+            similarity_high=similarity_high,
+            similarity_moderate=similarity_moderate,
         )
 
     summary = context.get('summary', {})

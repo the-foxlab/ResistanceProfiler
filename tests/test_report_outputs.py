@@ -104,7 +104,7 @@ class TestBuildReportContext:
     def test_db_hit_positions_and_rules_in_summary(self) -> None:
         # _make_result has 1 annotation with 1 rule → 1 position, 1 rule
         r = _make_result()
-        ctx = build_report_context(r)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
         assert ctx['database_hits']['count'] == 1
         assert ctx['summary']['db_hits_summary']['single_rule_hits'] == 1
 
@@ -133,7 +133,7 @@ class TestBuildReportContext:
             total_variants=1, variants_in_cds=1, resistance_hits=1,
             annotations=[ann],
         )
-        ctx = build_report_context(r)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
         assert ctx['database_hits']['count'] == 2    # 2 database hit rows (one per drug/rule)
         assert ctx['summary']['db_hits_summary']['single_rule_hits'] == 2
 
@@ -145,7 +145,7 @@ class TestBuildReportContext:
             Publication(id=0, doi='', title='', pubmed_id='22222', raw_input='PMID:22222'),
         ]
 
-        ctx = build_report_context(r)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
 
         assert len(ctx['database_hits']['bibliography']) == 2
         # pub_citations is a list of citation objects with 'num' key
@@ -155,7 +155,7 @@ class TestBuildReportContext:
 
     def test_stat_note_rendered_in_html(self) -> None:
         r = _make_result()
-        html = render_html(r)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
         # Check that summary stats are rendered
         assert 'Sequence Assessment' in html
         assert 'Total mutations' in html
@@ -181,7 +181,7 @@ class TestBuildReportContext:
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=1, annotations=[ann],
         )
-        ctx = build_report_context(r)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
         # Verify the row has metrics for both phenotypes
         row = ctx['database_hits']['rows'][0]
         metrics_dict = {m['label']: m['value'] for m in row['metrics']}
@@ -210,7 +210,7 @@ class TestBuildReportContext:
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=1, annotations=[ann],
         )
-        html = render_html(r)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
         # Clinical phenotype should be shown in the HTML
         assert 'Clinical phenotype' in html
 
@@ -288,7 +288,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         assert ctx['summary']['drug_table']['rows'][0]['assessment'] == 'resistant'
         # Single method: has_assessment=True but has_final_assessment=False
         assert ctx['summary']['drug_table']['has_assessment'] is True
@@ -349,7 +351,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         assert ctx['summary']['drug_table']['rows'][0]['assessment'] == 'intermediate'
         # Single method: has_assessment=True but has_final_assessment=False
         assert ctx['summary']['drug_table']['has_final_assessment'] is False
@@ -431,7 +435,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         drug_row = ctx['summary']['drug_table']['rows'][0]
         # Highest IC50 should be 12.0 (the max of 6.0 and 12.0)
         assert drug_row['ic50_display'] == '12'
@@ -494,7 +500,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         drug_row = ctx['summary']['drug_table']['rows'][0]
         # No IC50 values → should show em dash
         assert drug_row['ic50_display'] == '\u2014'
@@ -550,7 +558,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         drug_row = ctx['summary']['drug_table']['rows'][0]
         # Highest Fold IC50 should be 6.5
         assert drug_row['fold_ic50_display'] == '6.5'
@@ -626,7 +636,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         drug_table = ctx['summary']['drug_table']
         # Two methods: has_final_assessment is True, has_assessment is True
         assert drug_table['has_assessment'] is True
@@ -695,7 +707,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         drug_table = ctx['summary']['drug_table']
         # Single method: has_assessment=True but has_final_assessment=False
         assert drug_table['has_assessment'] is True
@@ -729,7 +743,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         assert ctx['summary']['drug_table']['rows'][0]['name'] == 'DrugA (DRA)'
         assert ctx['summary']['drug_table']['rows'][0]['summary_name'] == 'DRA'
         assert 'DRA' in ctx['summary']['narrative']
@@ -783,7 +799,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         metadata_row = next(
             (
                 row for row in ctx['database_hits']['rows']
@@ -850,7 +868,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         metadata_row = next(
             (
                 row for row in ctx['database_hits']['rows']
@@ -909,7 +929,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         assert not any(row['source'] == 'Metadata algorithm' for row in ctx['database_hits']['rows'])
 
     def test_effect_as_resistant_does_not_fire_for_non_matching_consequence(self) -> None:
@@ -961,7 +983,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         assert not any(row['source'] == 'Metadata algorithm' for row in ctx['database_hits']['rows'])
 
     def test_effect_as_resistant_does_not_fire_for_reference_mismatch(self) -> None:
@@ -1013,7 +1037,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         assert not any(row['source'] == 'Metadata algorithm' for row in ctx['database_hits']['rows'])
 
     def test_effect_as_resistant_matches_stop_gained(self) -> None:
@@ -1065,7 +1091,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         metadata_row = next(
             (
                 row for row in ctx['database_hits']['rows']
@@ -1128,7 +1156,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         assert not any(row['source'] == 'Metadata algorithm' for row in ctx['database_hits']['rows'])
 
     def test_effect_as_resistant_multiple_effects_match(self) -> None:
@@ -1180,7 +1210,9 @@ class TestBuildReportContext:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         metadata_row = next(
             (
                 row for row in ctx['database_hits']['rows']
@@ -1216,7 +1248,9 @@ class TestBuildReportContext:
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
         )
-        ctx = build_report_context(r, rules=[rule_a, rule_b])
+        ctx = build_report_context(
+            r, similarity_high=1, similarity_moderate=0, rules=[rule_a, rule_b],
+        )
         assert ctx['similarity_entries']['count'] == 2      # 2 similarity entries for the mutation
         assert len(ctx['similarity_entries']['rows']) == 2  # one row per rule
 
@@ -1238,7 +1272,7 @@ class TestBuildReportContext:
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
         )
-        ctx = build_report_context(r, rules=[rule])
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0, rules=[rule])
         # Verify similarity entry row has both phenotypes
         assert len(ctx['similarity_entries']['rows']) == 1
         row = ctx['similarity_entries']['rows'][0]
@@ -1264,7 +1298,7 @@ class TestBuildReportContext:
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
         )
-        html = render_html(r, rules=[rule])
+        html = render_html(r, similarity_high=1, similarity_moderate=0, rules=[rule])
         assert 'Clinical phenotype' in html
         # The similarity section must exist when there are similarity entries
         assert 'section-similarity' in html
@@ -1287,8 +1321,8 @@ class TestBuildReportContext:
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
         )
-        html = render_html(r, rules=[rule])
-        context = build_report_context(r, rules=[rule])
+        html = render_html(r, similarity_high=1, similarity_moderate=0, rules=[rule])
+        context = build_report_context(r, similarity_high=1, similarity_moderate=0, rules=[rule])
         assert context['similarity_entries']['has_phenotype_metrics'] is False
         assert context['similarity_entries']['has_clinical_phenotype_metrics'] is False
         assert 'Phenotype / Clinical phenotype' not in html
@@ -1327,7 +1361,7 @@ class TestPdfExports:
             total_variants=2, variants_in_cds=2, resistance_hits=1,
             annotations=[ann_hit, ann_sim],
         )
-        html = render_html(r, rules=[rule_hit, rule_sim])
+        html = render_html(r, similarity_high=1, similarity_moderate=0, rules=[rule_hit, rule_sim])
         sim_start = html.find('section-similarity')
         assert sim_start != -1
         # Clinical phenotype column must appear in the similarity section too
@@ -1370,7 +1404,9 @@ class TestPdfExports:
             phenotype='resistant',
         )
 
-        context = _build_potential_effects_rows(result, [snp_rule])
+        context = _build_potential_effects_rows(
+            result, rules=[snp_rule], similarity_high=1, similarity_moderate=0,
+        )
         assert context['rows'] == []
 
     def test_potential_effects_keeps_indel_rule_for_indel_annotation(self):
@@ -1409,7 +1445,9 @@ class TestPdfExports:
             phenotype='resistant',
         )
 
-        context = _build_potential_effects_rows(result, [indel_rule])
+        context = _build_potential_effects_rows(
+            result, rules=[indel_rule], similarity_high=1, similarity_moderate=0,
+        )
         rows = context['rows']
         assert len(rows) == 1
         assert rows[0]['drug'] == 'DrugA'
@@ -1482,7 +1520,7 @@ class TestPdfExports:
             ),
         ]
 
-        context = build_report_context(r, rules=rules)
+        context = build_report_context(r, similarity_high=1, similarity_moderate=0, rules=rules)
         narrative = context['summary']['narrative']
         assert 'could not be assessed' in narrative
         assert 'gag' in narrative.lower()
@@ -1517,7 +1555,7 @@ class TestPdfExports:
             ),
         ]
 
-        html = render_html(r, rules=rules)
+        html = render_html(r, similarity_high=1, similarity_moderate=0, rules=rules)
         assert 'Unassessed rule positions' not in html
         assert 'id=\'section-unassessed\'' not in html
 
@@ -1558,7 +1596,9 @@ class TestPdfExports:
             ),
         ]
 
-        context = build_report_context(result, rules=rules)
+        context = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, rules=rules,
+        )
         assert 'could not be assessed' not in context['summary']['narrative']
 
     def test_build_report_context_sorts_db_hits_by_drug_then_resistance_then_ic50(self):
@@ -1668,7 +1708,7 @@ class TestPdfExports:
             ],
         )
 
-        context = build_report_context(result)
+        context = build_report_context(result, similarity_high=1, similarity_moderate=0)
         rows = context['database_hits']['rows']
 
         assert [row['drug'] for row in rows] == ['DrugA', 'DrugA', 'DrugB', 'DrugB']
@@ -1681,12 +1721,12 @@ class TestPdfExports:
 
     def test_render_html_includes_drug_badges(self) -> None:
         r = _make_result()
-        html = render_html(r)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
         assert 'db-hit-pill--single' in html
 
     def test_render_html_includes_table_filter_controls_js(self) -> None:
         r = _make_result()
-        html = render_html(r)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
         assert 'createFacetedTable' in html
         assert 'mutation-filter-menu' in html
 
@@ -1709,7 +1749,7 @@ class TestPdfExports:
         )
         conn.commit()
 
-        html = render_html(r, project_conn=conn)
+        html = render_html(r, similarity_high=1, similarity_moderate=0, project_conn=conn)
 
         assert 'mutation-row--expandable' in html
         assert 'mutation-alignment-row' in html
@@ -1788,7 +1828,9 @@ class TestPdfExports:
             annotations=[hit_ann, sim_ann, high_impact_ann],
         )
 
-        context = build_report_context(result, rules=[hit_rule, sim_rule])
+        context = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, rules=[hit_rule, sim_rule],
+        )
         text = context['summary']['narrative']
         assert 'no final drug interpretation algorithm is configured' in text
         assert 'high-impact variant' in text
@@ -1819,7 +1861,7 @@ class TestPdfExports:
             ],
         )
 
-        context = build_report_context(result)
+        context = build_report_context(result, similarity_high=1, similarity_moderate=0)
         text = context['summary']['narrative']
         assert 'could not be assessed' in text
         assert 'incomplete sequence data' in text
@@ -1836,7 +1878,9 @@ class TestPdfExports:
         )
         conn.commit()
 
-        html = render_html(_make_result(), project_conn=conn)
+        html = render_html(
+            _make_result(), similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         assert 'Interpretation Summary' in html
         assert 'data-lang="en"' in html
         assert 'data-lang="de"' in html
@@ -1847,7 +1891,7 @@ class TestPdfExports:
 
     def test_render_html_highlights_nt_and_aa_changed_segments(self) -> None:
         r = _make_result()
-        html = render_html(r)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
 
         assert 'A4G' in html
         assert 'K3E' in html
@@ -1875,7 +1919,7 @@ class TestPdfExports:
             annotations=[ann],
         )
 
-        html = render_html(r)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
         assert 'C4CG' in html
         assert 'K3KG' in html
 
@@ -1908,7 +1952,7 @@ class TestPdfExports:
             annotations=[ins, dele],
         )
 
-        html = render_html(r)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
         assert 'A4AG' in html
         assert 'AC7A' in html
 
@@ -1933,7 +1977,7 @@ class TestPdfExports:
             annotations=[ann],
         )
 
-        html = render_html(r)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
         assert 'GG47664<u><strong>fsX</strong></u>' not in html
         assert 'GG47664G' in html
 
@@ -1957,7 +2001,7 @@ class TestPdfExports:
         )
         conn.commit()
 
-        html = render_html(r, project_conn=conn)
+        html = render_html(r, similarity_high=1, similarity_moderate=0, project_conn=conn)
         assert 'Alignment' in html
 
     def test_lollipop_svg_contains_non_covered_legend(self):
@@ -3327,19 +3371,25 @@ class TestMatPeptideDisplayName:
     def test_db_hit_rows_use_protein_for_mat_peptide(self) -> None:
         feature = self._make_mat_peptide_feature(name='pol_mat_peptide_1', protein='Protease')
         result = self._make_result_for_feature('pol_mat_peptide_1')
-        ctx = build_report_context(result, features=[feature])
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, features=[feature],
+        )
         assert ctx['database_hits']['rows'][0]['mutation_groups'][0]['feature'] == 'Protease'
 
     def test_cds_rows_use_protein_for_mat_peptide(self) -> None:
         feature = self._make_mat_peptide_feature(name='pol_mat_peptide_1', protein='Protease')
         result = self._make_result_for_feature('pol_mat_peptide_1')
-        ctx = build_report_context(result, features=[feature])
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, features=[feature],
+        )
         assert ctx['all_mutations']['rows'][0]['feature'] == 'Protease'
 
     def test_db_hit_rows_use_name_for_cds(self) -> None:
         feature = self._make_cds_feature(name='gag', protein='Group-specific antigen')
         result = self._make_result_for_feature('gag')
-        ctx = build_report_context(result, features=[feature])
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, features=[feature],
+        )
         assert ctx['database_hits']['rows'][0]['mutation_groups'][0]['feature'] == 'gag'
 
 
@@ -3348,7 +3398,7 @@ class TestReportHardening:
 
     def test_html_report_structure_completeness(self) -> None:
         result = _make_result()
-        html = render_html(result)
+        html = render_html(result, similarity_high=1, similarity_moderate=0)
 
         assert '<header class="report-header">' in html
         assert 'id="tab-summary"' in html
@@ -3415,7 +3465,7 @@ class TestReportHardening:
             annotations=[],
         )
 
-        html = render_html(result)
+        html = render_html(result, similarity_high=1, similarity_moderate=0)
         assert 'No database hits found for this sample.' in html
         assert 'No similarity matches found for this sample.' in html
 
@@ -3482,21 +3532,29 @@ class TestReportHardening:
                 annotations=[ann],
             )
 
-        phenotype_context = build_report_context(_result_for(phenotype_rule))
+        phenotype_context = build_report_context(
+            _result_for(phenotype_rule), similarity_high=1, similarity_moderate=0,
+        )
         assert phenotype_context['database_hits']['has_phenotype_metrics'] is True
         assert phenotype_context['database_hits']['has_ic50_metrics'] is False
         assert phenotype_context['database_hits']['has_clinical_phenotype_metrics'] is False
 
-        ic50_context = build_report_context(_result_for(ic50_rule))
+        ic50_context = build_report_context(
+            _result_for(ic50_rule), similarity_high=1, similarity_moderate=0,
+        )
         assert ic50_context['database_hits']['has_ic50_metrics'] is True
 
-        clinical_context = build_report_context(_result_for(clinical_rule))
+        clinical_context = build_report_context(
+            _result_for(clinical_rule), similarity_high=1, similarity_moderate=0,
+        )
         assert clinical_context['database_hits']['has_clinical_phenotype_metrics'] is True
 
-        html_ic50 = render_html(_result_for(ic50_rule))
+        html_ic50 = render_html(_result_for(ic50_rule), similarity_high=1, similarity_moderate=0)
         assert 'IC50 / Fold IC50' in html_ic50
 
-        html_clinical = render_html(_result_for(clinical_rule))
+        html_clinical = render_html(
+            _result_for(clinical_rule), similarity_high=1, similarity_moderate=0,
+        )
         assert 'Phenotype / Clinical phenotype' in html_clinical
 
 
@@ -3557,7 +3615,9 @@ class TestPdfDrugRows:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         drug_table = ctx['summary']['drug_table']
         pdf_rows = _build_pdf_drug_rows(drug_table)
 
@@ -3653,7 +3713,9 @@ class TestPdfDrugRows:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         drug_table = ctx['summary']['drug_table']
         pdf_rows = _build_pdf_drug_rows(drug_table)
 
@@ -3734,7 +3796,9 @@ class TestPdfDrugRows:
         )
         conn.commit()
 
-        ctx = build_report_context(result, project_conn=conn)
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
         drug_table = ctx['summary']['drug_table']
         pdf_rows = _build_pdf_drug_rows(drug_table)
 

@@ -161,7 +161,7 @@ class _ProfilingRunContext:
     coverage_gaps: list[CoverageGap]
     query_sequence: str
     feature_matches: list[FeatureMatch]
-    af_bins: dict[str, tuple[float, float]] | None
+    af_bins: dict[str, tuple[float, float]]
 
 
 def _finalize_and_export(
@@ -237,6 +237,8 @@ def _finalize_and_export(
         extra_export_formats=extra_export_formats,
         project_db_path=project_path.resolve(),
         output_html_path=html_output_path,
+        similarity_high=CLI_CONFIG.similarity.high,
+        similarity_moderate=CLI_CONFIG.similarity.moderate,
     )
 
     if results_conn is not None:
