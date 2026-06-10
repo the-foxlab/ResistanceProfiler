@@ -92,14 +92,14 @@ def _fetch_cid(name: str, timeout: int) -> int | None:
         if exc.code == 404:
             logger.debug('PubChem: no compound found for %r', name)
         else:
-            logger.debug('PubChem CID lookup failed for %r: HTTP %s', name, exc.code)
+            logger.warning('PubChem CID lookup failed for %r: HTTP %s', name, exc.code)
         return None
     except OSError as exc:
         # Covers socket timeouts, connection refused, no network, etc.
-        logger.debug('PubChem CID lookup failed for %r (network): %s', name, exc)
+        logger.warning('PubChem CID lookup failed for %r (network): %s', name, exc)
         return None
     except Exception as exc:
-        logger.debug('PubChem CID lookup failed for %r: %s', name, exc)
+        logger.warning('PubChem CID lookup failed for %r: %s', name, exc)
         return None
 
 
@@ -156,9 +156,9 @@ def _fetch_description(cid: int, timeout: int) -> str:
                 if description:
                     return description
     except OSError as exc:
-        logger.debug('PubChem description lookup failed for CID %s (network): %s', cid, exc)
+        logger.warning('PubChem description lookup failed for CID %s (network): %s', cid, exc)
     except Exception as exc:
-        logger.debug('PubChem description lookup failed for CID %s: %s', cid, exc)
+        logger.warning('PubChem description lookup failed for CID %s: %s', cid, exc)
 
     if first_title:
         return first_title
@@ -187,9 +187,9 @@ def _fetch_description(cid: int, timeout: int) -> str:
                 if title:
                     return title
     except OSError as exc:
-        logger.debug('PubChem title lookup failed for CID %s (network): %s', cid, exc)
+        logger.warning('PubChem title lookup failed for CID %s (network): %s', cid, exc)
     except Exception as exc:
-        logger.debug('PubChem title lookup failed for CID %s: %s', cid, exc)
+        logger.warning('PubChem title lookup failed for CID %s: %s', cid, exc)
 
     return ''
 

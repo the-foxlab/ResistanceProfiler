@@ -20,7 +20,12 @@ from respro.db.models import (
     VariantCall,
 )
 from respro.db.report_queries import load_feature_cards
-from respro.report.alignment_visualization import build_alignment_html, build_feature_alignments
+from respro.report.alignment_visualization import (
+    _affected_nt_positions,
+    _apply_vcf_overlay,
+    build_alignment_html,
+    build_feature_alignments,
+)
 from respro.report.html import (
     _build_potential_effects_rows,
     build_report_context,
@@ -2446,6 +2451,251 @@ class TestAlignmentVisualization:
             "<span class='aln-cell'>C</span><span class='aln-cell'>C</span>"
             "<span class='aln-cell'>C</span><span class='aln-sep'></span>"
         ) in html
+
+    def test_affected_nt_positions_combined_codon_event_highlights_all_differing_positions(self) -> None:
+        """
+        For a combined codon event (two SNPs in one codon), _affected_nt_positions
+        should return all positions where ref_codon differs from alt_codon, not just
+        the anchor SNP's position.
+
+        Feature: ATG TCT AAA AAA (positions 0-11 on + strand)
+        Codon 1 = TCT at coding positions 3,4,5
+        Combined event: TCT → ACG (positions 3 and 5 differ)
+        The anchor SNP is at position 3, but position 5 must also be highlighted.
+        """
+        feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='COMB',
+            protein='C',
+            start=0,
+            end=12,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATGTCTAAAAAA',
+        )
+        match = FeatureMatch(
+            feature=feature,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=12,
+            strand='+',
+            cigar='12M',
+            cds_start=0,
+        )
+        alignment = build_feature_alignments('ATGACAAAAAAA', [match])['COMB']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='T', alt='A'),
+            feature_name='COMB',
+            codon_pos=1,
+            ref_codon='TCT',
+            alt_codon='ACG',
+            ref_aa='S',
+            alt_aa='T',
+            consequence='missense',
+            is_combined_codon_event=True,
+            combined_member_count=2,
+        )
+        codon_nt_start = alignment.codon_start + ann.codon_pos * 3
+        affected = _affected_nt_positions(ann, alignment, codon_nt_start)
+        # On + strand, coding positions 3 and 5 differ (T→A at pos 0 of codon,
+        # T→G at pos 2 of codon). Position 4 (C→C) is unchanged.
+        assert 3 in affected
+        assert 5 in affected
+        assert 4 not in affected
+
+    def test_affected_nt_positions_combined_codon_reverse_strand(self) -> None:
+        """
+        Combined codon event on reverse strand must correctly map coding
+        positions to native positions.
+        """
+        feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='RCOMB',
+            protein='R',
+            start=0,
+            end=9,
+            strand='-',
+            codon_start=0,
+            nt_sequence='AAACCCGGG',
+        )
+        coding_query = 'AAATCCGGG'
+        query = str(Seq(coding_query).reverse_complement())
+        match = FeatureMatch(
+            feature=feature,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=9,
+            strand='+',
+            cigar='9M',
+            cds_start=0,
+        )
+        alignment = build_feature_alignments(query, [match])['RCOMB']
+        # On - strand, codon 1 coding positions 3,4,5 map to native 5,4,3
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=5, ref='C', alt='T'),
+            feature_name='RCOMB',
+            codon_pos=1,
+            ref_codon='CCC',
+            alt_codon='CTC',
+            ref_aa='P',
+            alt_aa='L',
+            consequence='missense',
+            is_combined_codon_event=True,
+            combined_member_count=2,
+        )
+        codon_nt_start = alignment.codon_start + ann.codon_pos * 3
+        affected = _affected_nt_positions(ann, alignment, codon_nt_start)
+        # Native positions for coding 3,4,5 on - strand feature_length=9:
+        # coding 3 → native 5, coding 4 → native 4, coding 5 → native 3
+        # CCC→CTC: C→C at idx0 (coding 3→native 5), C→T at idx1 (coding 4→native 4), C→C at idx2
+        assert 4 in affected
+        assert 5 not in affected
+        assert 3 not in affected
+
+    def test_apply_vcf_overlay_combined_codon_event_overlays_all_differing_positions(self) -> None:
+        """
+        For a combined codon event in VCF mode, _apply_vcf_overlay must overlay
+        all positions where ref_codon differs from alt_codon, not just the anchor SNP.
+        """
+        feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='VOVER',
+            protein='V',
+            start=0,
+            end=12,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATGTCTAAAAAA',
+        )
+        match = FeatureMatch(
+            feature=feature,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=12,
+            strand='+',
+            cigar='12M',
+            cds_start=0,
+        )
+        # VCF mode: query is identical to reference (no variants pre-aligned)
+        alignment = build_feature_alignments('ATGTCTAAAAAA', [match])['VOVER']
+        # Combined event: TCT → ACG, anchor is the first SNP at pos 3
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='T', alt='A'),
+            feature_name='VOVER',
+            codon_pos=1,
+            ref_codon='TCT',
+            alt_codon='ACG',
+            ref_aa='S',
+            alt_aa='T',
+            consequence='missense',
+            is_combined_codon_event=True,
+            combined_member_count=2,
+            is_fasta_mode=False,
+        )
+        # Use the full alignment as the window for simplicity
+        ref_window = alignment.aligned_ref
+        query_window = alignment.aligned_query
+        coding_positions = alignment.aln_coding_pos
+        native_positions = alignment.aln_native_pos
+        native_anchor_positions = alignment.aln_native_anchor_pos
+
+        new_ref, new_query, _, _, _ = _apply_vcf_overlay(
+            ann, alignment,
+            ref_window, query_window,
+            coding_positions, native_positions, native_anchor_positions,
+        )
+        # After overlay, positions 3 (coding) should be A, position 5 should be G
+        # Reference has TCT at coding 3,4,5; overlay should change to ACG
+        for aln_idx, cpos in enumerate(coding_positions):
+            if cpos == 3:
+                assert new_query[aln_idx] == 'A', (
+                    f'Coding pos 3 should be A after overlay, got {new_query[aln_idx]}'
+                )
+            elif cpos == 4:
+                assert new_query[aln_idx] == 'C', (
+                    f'Coding pos 4 should stay C after overlay, got {new_query[aln_idx]}'
+                )
+
+    def test_apply_vcf_overlay_combined_codon_event_reverse_strand(self) -> None:
+        """
+        For a combined codon event on the minus strand, _apply_vcf_overlay must
+        complement the alt base before writing it into the native-orientation display.
+        """
+        from Bio.Seq import Seq
+
+        feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='RCOMB2',
+            protein='R',
+            start=0,
+            end=9,
+            strand='-',
+            codon_start=0,
+            nt_sequence='AAACCCGGG',
+        )
+        # Coding query identical to reference (VCF mode — no variants pre-aligned)
+        coding_query = 'AAACCCGGG'
+        query = str(Seq(coding_query).reverse_complement())
+        match = FeatureMatch(
+            feature=feature,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=9,
+            strand='+',
+            cigar='9M',
+            cds_start=0,
+        )
+        alignment = build_feature_alignments(query, [match])['RCOMB2']
+        # Combined event in coding: CCC → CTC at codon 1 (coding positions 3,4,5)
+        # idx=1: C→T, coding pos 4
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=5, ref='C', alt='T'),
+            feature_name='RCOMB2',
+            codon_pos=1,
+            ref_codon='CCC',
+            alt_codon='CTC',
+            ref_aa='P',
+            alt_aa='L',
+            consequence='missense',
+            is_combined_codon_event=True,
+            combined_member_count=2,
+            is_fasta_mode=False,
+        )
+        ref_window = alignment.aligned_ref
+        query_window = alignment.aligned_query
+        coding_positions = alignment.aln_coding_pos
+        native_positions = alignment.aln_native_pos
+        native_anchor_positions = alignment.aln_native_anchor_pos
+
+        new_ref, new_query, _, _, _ = _apply_vcf_overlay(
+            ann, alignment,
+            ref_window, query_window,
+            coding_positions, native_positions, native_anchor_positions,
+        )
+        # On - strand with feature_length=9:
+        # coding position 4 maps to native position 4 (9-1-4=4, same by symmetry)
+        # In native display at coding_pos=4: ref shows G (complement of coding C),
+        # alt should show A (complement of coding T), NOT T.
+        for aln_idx, cpos in enumerate(coding_positions):
+            if cpos == 4:
+                assert new_ref[aln_idx] == 'G', (
+                    f'At coding pos 4, ref should be G, got {new_ref[aln_idx]}'
+                )
+                assert new_query[aln_idx] == 'A', (
+                    f'At coding pos 4, query should be A (complement of coding T), got {new_query[aln_idx]}'
+                )
 
 
 class TestCoverageGapPlotBounds:

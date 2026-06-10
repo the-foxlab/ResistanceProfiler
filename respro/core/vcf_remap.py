@@ -95,6 +95,10 @@ def remap_variants(
 
             # Transform REF/ALT to internal reference forward strand.
             # Reverse-orientation indels also switch anchor side.
+            # On the reverse strand, VCF anchors the rightmost base but the
+            # internal forward reference needs the leftmost base as anchor,
+            # so the anchor position and inserted/deleted payload must both
+            # be remapped to the opposite side.
             if _is_indel(var.ref, var.alt) and reverse_to_reference:
                 ref_base, alt_base = _remap_reverse_indel_alleles(var, feature, genomic_pos)
             else:
@@ -109,6 +113,9 @@ def remap_variants(
                 continue
 
             codon_context_pos = cds_pos
+            # Reverse-strand indels anchor on the rightmost base in CDS
+            # coordinates, which falls in a different codon than the leftmost
+            # position; shift the codon context accordingly.
             if _is_indel(var.ref, var.alt):
                 codon_context_pos = _indel_anchor_cds_pos(cds_pos, len(var.ref), feature.strand)
 
@@ -250,6 +257,11 @@ def _map_variant_anchor_cds_pos(
     For reverse-orientation indels, the VCF anchor switches to the opposite side after
     projection to the internal forward reference.
     """
+    # Reverse-orientation indels need special anchor remapping.
+    # VCF anchors the leftmost base of the REF allele, but on the reverse
+    # strand the CDS reads right-to-left, so the amino-acid context is
+    # determined by the rightmost projected CDS position — shifted one base
+    # further depending on feature strand direction.
     if var.pos not in query_to_cds:
         return None
     if not reverse_to_reference or not _is_indel(var.ref, var.alt):
@@ -347,6 +359,10 @@ def _build_query_to_cds_map(
             else:
                 cds_to_query[cds_pos] = None
 
+    # cds_start is the 0-based offset of this alignment's first CDS
+    # position within the full coding sequence; shift all mapped positions
+    # so coordinates are relative to the entire CDS rather than the local
+    # alignment fragment.
     if cds_start:
         cds_to_query = {cds_pos + cds_start: qpos for cds_pos, qpos in cds_to_query.items()}
 

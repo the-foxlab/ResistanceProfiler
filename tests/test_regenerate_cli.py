@@ -901,9 +901,9 @@ class TestExploreRules:
         )
         rules_tsv = tmp_path / 'rules.tsv'
         rules_tsv.write_text(
-            'feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tgroup_id\tmember_id\n'
-            'gag\ttiny_ref\t2\tK\tE\tDrugA\tunknown\tgroup_1\tmut_k2e\n'
-            'gag\ttiny_ref\t6\tP\tV\tDrugA\tunknown\tgroup_1\tmut_p6v\n',
+            'feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tmember_id\n'
+            'gag\ttiny_ref\t2\tK\tE\tDrugA\tunknown\tmut_k2e\n'
+            'gag\ttiny_ref\t6\tP\tV\tDrugA\tunknown\tmut_p6v\n',
             encoding='utf-8',
         )
         formula_tsv = tmp_path / 'formula.tsv'
