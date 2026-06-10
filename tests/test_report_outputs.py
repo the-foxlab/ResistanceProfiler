@@ -21,7 +21,6 @@ from respro.db.models import (
 )
 from respro.db.report_queries import load_feature_cards
 from respro.report.alignment_visualization import (
-    FeatureAlignment,
     _affected_nt_positions,
     _apply_vcf_overlay,
     build_alignment_html,
@@ -2602,9 +2601,6 @@ class TestAlignmentVisualization:
             combined_member_count=2,
             is_fasta_mode=False,
         )
-        # Build a window that covers the affected codon (coding positions 3,4,5)
-        codon_nt_start = alignment.codon_start + ann.codon_pos * 3
-        start_idx = max(0, alignment.coding_to_aln_idx[codon_nt_start] - 3)
         # Use the full alignment as the window for simplicity
         ref_window = alignment.aligned_ref
         query_window = alignment.aligned_query
