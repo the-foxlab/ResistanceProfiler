@@ -1,7 +1,7 @@
 ---
 description: "Use when updating or reviewing public documentation: README, the manual (docs/), and public-facing setup or usage guides. Use when checking whether documentation is outdated, improving end-user readability, or syncing docs with current CLI, web, and database behavior."
 name: "Public Documentation Specialist"
-tools: [read, search, edit]
+tools: [read, search, edit, execute]
 argument-hint: "Documentation scope, affected feature, and whether to review, update, or fully rewrite."
 user-invocable: true
 ---
@@ -43,9 +43,8 @@ Use the `public-documentation` skill as your main procedure. It defines the docu
 1. Identify the docs in scope: `README.md`, `docs/docs/`, and any related public-facing development docs.
 2. Verify current behavior against the codebase, config files, and examples rather than trusting existing docs.
 3. Follow the `public-documentation` skill to classify issues, rewrite for accuracy/readability, and sync related files.
-4. Use `repo-knowledge-graph` only for architecture-relevant changes to verify interaction drift before editing detailed layout docs.
-5. Preserve repository terminology and module boundaries from `.github/copilot-instructions.md`.
-6. When a user-facing behavior changes, update the affected docs in the same pass: at minimum `README.md` and related `docs/docs/*` pages.
+4. Preserve repository terminology and module boundaries from `.github/copilot-instructions.md`.
+5. When a user-facing behavior changes, update the affected docs in the same pass: at minimum `README.md` and related `docs/docs/*` pages.
 
 ## Review Checklist
 
