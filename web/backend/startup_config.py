@@ -11,7 +11,10 @@ from pathlib import Path
 
 from respro.db.schema import open_project_db
 from web.backend.config import WEB_BACKEND_CONFIG, WEB_ENV
-from web.backend.services.maintained_bootstrap import bootstrap_missing_maintained_databases
+from web.backend.services.maintained_bootstrap import (
+    bootstrap_missing_maintained_databases,
+    check_and_update_maintained_databases,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +47,7 @@ def load_startup_config() -> StartupConfig:
     uploads_dir = (data_dir / 'uploads').resolve()
     results_dir = (data_dir / 'results').resolve()
     api_token = os.getenv(WEB_ENV.api_token, '').strip()
-    maintained_bootstrap = _resolve_bool(
-        os.getenv(
-            WEB_ENV.maintained_bootstrap,
-            str(WEB_BACKEND_CONFIG.defaults.maintained_bootstrap),
-        ),
-        setting_name=WEB_ENV.maintained_bootstrap,
-    )
+    maintained_bootstrap = _resolve_maintained_bootstrap_enabled()
 
     allowed_roots_env = os.getenv(WEB_ENV.allowed_roots, '')
     allowed_roots = _parse_allowed_roots(
@@ -68,6 +65,10 @@ def load_startup_config() -> StartupConfig:
     if maintained_bootstrap:
         logger.info('Maintained database bootstrap enabled — downloading missing databases')
         bootstrap_missing_maintained_databases(project_databases_dir)
+        try:
+            check_and_update_maintained_databases(project_databases_dir)
+        except Exception:  # noqa: BLE001 — update failures must never block startup
+            logger.exception('Maintained database update check failed — continuing with existing databases')
     _validate_at_least_one_project_db(project_databases_dir)
     project_db_uuid_index = build_project_db_uuid_index(project_databases_dir)
     _validate_startup_policy(api_token)
@@ -102,22 +103,36 @@ def resolve_project_db_path(project_databases_dir: Path, database_id: str | None
 
 
 def resolve_regenerate_project_db_path(
-    startup_config: StartupConfig,
+    project_databases_dir: Path,
+    project_db_uuid_index: dict[str, Path],
     *,
     project_fingerprint: str,
     fallback_database_id: str | None,
 ) -> Path:
-    """Resolve project DB for regenerate requests using JSON fingerprint when present."""
+    """Resolve project DB for regenerate requests using JSON fingerprint when present.
+
+    The ``project_db_uuid_index`` is the mutable, refreshable UUID->path cache held on
+    ``app.state`` (seeded from the frozen :class:`StartupConfig` at startup and rebuilt
+    by the weekly maintained-DB update thread). Passing it in keeps the frozen config
+    authoritative for request handling while allowing the index to be refreshed in
+    place after a weekly DB swap.
+
+    :param project_databases_dir: directory containing project ``.db`` files
+    :param project_db_uuid_index: mutable UUID->path cache (refreshable at runtime)
+    :param project_fingerprint: project UUID from the submitted results JSON
+    :param fallback_database_id: explicit database id from the request body
+    :return: resolved project database path
+    """
     normalized_fingerprint = project_fingerprint.strip()
     if normalized_fingerprint:
-        project_db = startup_config.project_db_uuid_index.get(normalized_fingerprint)
+        project_db = project_db_uuid_index.get(normalized_fingerprint)
         if project_db is None:
             raise ValueError(
                 f'No project database found for JSON project_fingerprint {normalized_fingerprint!r}.'
             )
         return project_db
 
-    return resolve_project_db_path(startup_config.project_databases_dir, fallback_database_id)
+    return resolve_project_db_path(project_databases_dir, fallback_database_id)
 
 
 def is_path_within_allowed_roots(path: Path, allowed_roots: tuple[Path, ...]) -> bool:
@@ -194,6 +209,18 @@ def build_project_db_uuid_index(project_databases_dir: Path) -> dict[str, Path]:
     return uuid_index
 
 
+def refresh_project_db_uuid_index(project_databases_dir: Path) -> dict[str, Path]:
+    """Recompute the UUID->project DB path index after a maintained-DB refresh.
+
+    Called by the weekly update thread to rebuild the mutable cache on
+    ``app.state.project_db_uuid_index`` because refreshed databases receive a new UUID.
+
+    :param project_databases_dir: directory containing project ``.db`` files
+    :return: freshly computed UUID->path mapping
+    """
+    return build_project_db_uuid_index(project_databases_dir)
+
+
 def _initialize_workspace_dirs(
     *,
     project_databases_dir: Path,
@@ -213,6 +240,21 @@ def _resolve_bool(raw_value: str, *, setting_name: str) -> bool:
     if normalized in {'0', 'false', 'no', 'off', ''}:
         return False
     raise ValueError(f'Invalid boolean for {setting_name}: {raw_value!r}')
+
+
+def _resolve_maintained_bootstrap_enabled() -> bool:
+    """Resolve the maintained-bootstrap flag from env with the config default.
+
+    Shared by :func:`load_startup_config` and the lifespan startup of the weekly update
+    thread so both resolve the same source of truth.
+    """
+    return _resolve_bool(
+        os.getenv(
+            WEB_ENV.maintained_bootstrap,
+            str(WEB_BACKEND_CONFIG.defaults.maintained_bootstrap),
+        ),
+        setting_name=WEB_ENV.maintained_bootstrap,
+    )
 
 
 def _validate_startup_policy(api_token: str) -> None:

@@ -20,6 +20,7 @@ from respro.io.maintained_db import (
     download_database_files,
     fetch_database_metadata,
     list_maintained_databases,
+    list_maintained_databases_with_checksums,
     list_output_files,
 )
 
@@ -124,6 +125,34 @@ class TestListMaintainedDatabases:
         with patch('urllib.request.urlopen', side_effect=OSError('no network')):
             with pytest.raises(RuntimeError, match='Network error'):
                 list_maintained_databases()
+
+
+# ── list_maintained_databases_with_checksums ──────────────────────────────────
+
+class TestListMaintainedDatabasesWithChecksums:
+    def test_returns_sorted_name_checksum_tuples(self) -> None:
+        with patch('urllib.request.urlopen', return_value=_json_mock(_MANIFEST)):
+            result = list_maintained_databases_with_checksums()
+        assert result == [
+            ('hiv_hivdb', ''),
+            ('hsv_daehne_jaki', 'sha256:abc123'),
+        ]
+
+    def test_empty_checksum_when_metadata_lacks_tsv_checksum(self) -> None:
+        manifest = json.loads(json.dumps(_MANIFEST))
+        manifest['databases'][0]['metadata'] = {'description': 'no checksum here'}
+        manifest['databases'][1]['metadata'] = {'tsv_checksum': 'sha256:def456'}
+        with patch('urllib.request.urlopen', return_value=_json_mock(manifest)):
+            result = list_maintained_databases_with_checksums()
+        assert result == [
+            ('hiv_hivdb', 'sha256:def456'),
+            ('hsv_daehne_jaki', ''),
+        ]
+
+    def test_raises_on_network_error(self) -> None:
+        with patch('urllib.request.urlopen', side_effect=OSError('no network')):
+            with pytest.raises(RuntimeError, match='Network error'):
+                list_maintained_databases_with_checksums()
 
 
 # ── fetch_database_metadata ───────────────────────────────────────────────────

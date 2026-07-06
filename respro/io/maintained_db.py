@@ -32,6 +32,21 @@ def list_maintained_databases() -> list[str]:
     return sorted(entry['source_name'] for entry in manifest['databases'])
 
 
+def list_maintained_databases_with_checksums() -> list[tuple[str, str]]:
+    """
+    Return ``(source_name, tsv_checksum)`` for every database in the manifest.
+
+    :return: sorted list of (database name, tsv_checksum) tuples; checksum may be
+        empty string if the manifest entry lacks one
+    """
+    manifest = _fetch_manifest()
+    entries = [
+        (entry['source_name'], str(entry.get('metadata', {}).get('tsv_checksum', '') or ''))
+        for entry in manifest['databases']
+    ]
+    return sorted(entries, key=lambda item: item[0])
+
+
 def fetch_database_metadata(db_name: str) -> dict:
     """
     Fetch the metadata.json for a named database.

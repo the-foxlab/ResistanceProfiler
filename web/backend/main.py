@@ -50,12 +50,17 @@ from web.backend.routes.profile import build_profile_router
 from web.backend.routes.regenerate import build_regenerate_router
 from web.backend.routes.session import build_session_router
 from web.backend.routes.upload import build_upload_router
+from web.backend.services.maintained_bootstrap import (
+    check_and_update_maintained_databases,
+)
 from web.backend.services.upload import save_upload_stream
 from web.backend.startup_config import (
     StartupConfig,
+    _resolve_maintained_bootstrap_enabled,
     is_path_within_allowed_roots,
     list_project_db_paths,
     load_startup_config,
+    refresh_project_db_uuid_index,
     resolve_project_db_path,
     resolve_regenerate_project_db_path,
 )
@@ -83,6 +88,13 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     """FastAPI lifespan context manager."""
     config: StartupConfig = app.state.startup_config
     _start_ttl_sweep_thread(config.results_dir, config.uploads_dir)
+    if _resolve_maintained_bootstrap_enabled():
+        interval_seconds = _resolve_maintained_db_update_interval()
+        _start_maintained_db_update_thread(
+            config.project_databases_dir,
+            interval_seconds,
+            app.state,
+        )
     yield
 
 
@@ -96,6 +108,9 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     )
     config = startup_config or load_startup_config()
     app.state.startup_config = config
+    # Seed a mutable UUID->path cache refreshed by the weekly update thread; the frozen
+    # StartupConfig stays authoritative for everything else.
+    app.state.project_db_uuid_index = dict(config.project_db_uuid_index)
     cors_origins = _resolve_cors_origins(config.api_token)
     limiter = _create_rate_limiter()
     app.state.limiter = limiter
@@ -366,6 +381,70 @@ def _ttl_sweep_loop(results_dir: Path, uploads_dir: Path, sweep_frequency_second
         except Exception as exc:
             logger.debug(f'Error in TTL sweep: {exc}')
         time.sleep(sweep_frequency_seconds)
+
+
+def _start_maintained_db_update_thread(
+    project_databases_dir: Path,
+    interval_seconds: int,
+    app_state,
+) -> None:
+    """Start a daemon thread that periodically refreshes maintained databases.
+
+    :param project_databases_dir: directory containing project ``.db`` files
+    :param interval_seconds: seconds between update checks; ``0`` disables the thread
+    :param app_state: FastAPI ``app.state`` holding the mutable ``project_db_uuid_index``
+    """
+    if interval_seconds <= 0:
+        logger.debug('Maintained database auto-update thread disabled (interval=0)')
+        return
+    update_thread = threading.Thread(
+        target=_maintained_db_update_loop,
+        args=(project_databases_dir, interval_seconds, app_state),
+        daemon=True,
+    )
+    update_thread.start()
+
+
+def _maintained_db_update_loop(
+    project_databases_dir: Path,
+    interval_seconds: int,
+    app_state,
+) -> None:
+    """Periodically refresh maintained databases and rebuild the UUID index cache."""
+    while True:
+        try:
+            check_and_update_maintained_databases(project_databases_dir)
+            new_index = refresh_project_db_uuid_index(project_databases_dir)
+            app_state.project_db_uuid_index.clear()
+            app_state.project_db_uuid_index.update(new_index)
+        except Exception:  # noqa: BLE001 — a failed update pass must not kill the daemon
+            logger.exception('Maintained database weekly update pass failed')
+        time.sleep(interval_seconds)
+
+
+def _resolve_maintained_db_update_interval() -> int:
+    """Resolve the weekly update interval, falling back to the config default on invalid input."""
+    default = WEB_BACKEND_CONFIG.defaults.maintained_db_update_interval_seconds
+    raw_value = os.getenv(WEB_ENV.maintained_db_update_interval, str(default)).strip()
+    if not raw_value:
+        return default
+    try:
+        parsed = int(raw_value)
+    except ValueError:
+        logger.warning(
+            '%s must be an integer; falling back to default %s',
+            WEB_ENV.maintained_db_update_interval,
+            default,
+        )
+        return default
+    if parsed < 0:
+        logger.warning(
+            '%s must be >= 0; falling back to default %s',
+            WEB_ENV.maintained_db_update_interval,
+            default,
+        )
+        return default
+    return parsed
 
 
 def _map_job_status(rq_status) -> str:
