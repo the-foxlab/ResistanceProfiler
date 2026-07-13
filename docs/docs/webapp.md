@@ -53,6 +53,87 @@ The backend creates and uses these folders inside the mounted data root:
 
 If `RESPRO_WEB_MAINTAINED_BOOTSTRAP=true`, missing maintained databases are downloaded into `data/project_databases/` at startup. The flag also triggers a checksum-based update check: each existing maintained database is compared against the companion manifest's `tsv_checksum`, and a changed database is rebuilt into a temp file and atomically swapped in. A weekly background thread re-runs the same check. Set `RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS` to control the interval (default `604800` seconds = 7 days; `0` disables the weekly thread). Update failures are logged and never block startup.
 
+## Configuration reference
+
+All webapp settings are optional environment variables. Set them in a `.env` file next to your `docker-compose.web.yml`, or inline under `services.respro-web.environment` (and `services.respro-worker.environment` where noted). Defaults are tuned for local development — review every variable before public hosting.
+
+### Server and binding
+
+| Variable | Default | Description |
+|---|---|---|
+| `RESPRO_WEB_HOST` | `127.0.0.1` | Network interface the API binds to. Use `0.0.0.0` to listen on all interfaces (required when behind a reverse proxy in Docker). |
+| `RESPRO_WEB_PORT` | `8000` | TCP port the API listens on. |
+
+!!! warning "Public bind requires a token"
+    Binding to anything other than `127.0.0.1`, `localhost`, or `0.0.0.0` without setting `RESPRO_WEB_API_TOKEN` fails fast at startup. `0.0.0.0` is allowed without a token only because it is the standard Docker bind address — combine it with a reverse proxy and a token for public hosting.
+
+### Data and filesystem
+
+| Variable | Default | Description |
+|---|---|---|
+| `RESPRO_WEB_DATA_DIR` | `/data` if it exists, otherwise `./data` | Root directory for `project_databases/`, `uploads/`, and `results/`. Created if missing. Must be writable. |
+| `RESPRO_WEB_ALLOWED_ROOTS` | the three subdirectories of `RESPRO_WEB_DATA_DIR` | Comma-separated list of absolute paths the API is allowed to read from and write to. Override only if you mount upload or result directories outside the data root. |
+| `RESPRO_WEB_RESULT_TTL` | `86400` (24 hours) | Time-to-live in seconds for files in `uploads/` and `results/`. A background sweep thread deletes files older than this value. |
+
+### Authentication and security
+
+| Variable | Default | Description |
+|---|---|---|
+| `RESPRO_WEB_API_TOKEN` | *(empty — auth disabled)* | Bearer token required for all protected API endpoints. Leave empty for local-only deployments; **set a strong random secret for any non-local deployment**. |
+| `RESPRO_WEB_CORS_ORIGINS` | `http://127.0.0.1:5173`, `http://localhost:5173` | Comma-separated list of allowed origins for cross-origin requests. Must be set explicitly when `RESPRO_WEB_API_TOKEN` is set. For public hosting, list your exact frontend origin(s), e.g. `https://respro.example.com`. |
+| `RESPRO_WEB_TRUSTED_PROXIES` | *(empty — proxy headers ignored)* | Comma-separated list of proxy IPs or CIDRs whose `X-Forwarded-*` headers are trusted. Set to your reverse proxy address for public hosting (see [nginx step-by-step](#nginx-step-by-step-local-network)). |
+| `RESPRO_WEB_IMPRESSUM_PATH` | *(empty — feature disabled)* | Absolute path to an HTML file served at `/legal` as a legal notice / Impressum. See [Legal notice / Impressum](#legal-notice-impressum-optional) for details. |
+
+### Rate limiting and batch sizes
+
+| Variable | Default | Description |
+|---|---|---|
+| `RESPRO_WEB_UPLOAD_RATE_LIMIT` | `25/minute` | slowapi rate-limit string for upload endpoints. Applied per client identity (token hash, or client IP when no token is configured). |
+| `RESPRO_WEB_MAX_BATCH_SIZE` | `25` | Maximum number of samples accepted in a single batch profiling request. Must be `> 0`. |
+
+### Redis and job queue
+
+| Variable | Default | Description |
+|---|---|---|
+| `REDIS_URL` | `redis://127.0.0.1:6379/0` | Redis connection URL used by the API, the RQ worker, and the rate limiter. **Set identically on `respro-web` and `respro-worker`.** |
+| `RESPRO_WEB_JOB_TIMEOUT` | `3600` (1 hour) | Maximum runtime in seconds for a single profiling job before RQ marks it failed. Must be `>= 0`. |
+| `RESPRO_WEB_JOB_RETRY_MAX` | `0` (no retries) | Maximum number of automatic retries for a failed job. Must be `>= 0`. |
+| `RESPRO_WEB_JOB_RETRY_INTERVALS` | `30` | Comma-separated delay in seconds between retries. Applied cyclically when `RESPRO_WEB_JOB_RETRY_MAX` is greater than the number of intervals. All values must be `> 0`. |
+
+!!! note "Worker reads queue settings too"
+    `REDIS_URL`, `RESPRO_WEB_JOB_TIMEOUT`, `RESPRO_WEB_JOB_RETRY_MAX`, and `RESPRO_WEB_JOB_RETRY_INTERVALS` must be set on the `respro-worker` service as well as `respro-web` so the worker and the API agree on timeouts and retries.
+
+### Maintained databases
+
+| Variable | Default | Description |
+|---|---|---|
+| `RESPRO_WEB_MAINTAINED_BOOTSTRAP` | `false` | When `true` (or `1`/`yes`/`on`), missing maintained databases are downloaded into `data/project_databases/` at startup, and a weekly background thread checks for updates. |
+| `RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS` | `604800` (7 days) | Interval between maintained-database update checks. Set to `0` to disable the weekly thread (a one-time check still runs at startup when bootstrap is enabled). Invalid values fall back to the default. |
+
+### Minimal `.env` example
+
+For local development you can usually leave everything at defaults. For a public deployment, start from:
+
+```bash
+# Binding
+RESPRO_WEB_HOST=0.0.0.0
+RESPRO_WEB_PORT=8000
+
+# Auth and security — required for public hosting
+RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
+RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
+RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
+
+# Redis (set on both respro-web and respro-worker)
+REDIS_URL=redis://redis:6379/0
+
+# Optional: legal notice
+# RESPRO_WEB_IMPRESSUM_PATH=/data/impressum.html
+
+# Optional: enable maintained database auto-download and weekly updates
+RESPRO_WEB_MAINTAINED_BOOTSTRAP=true
+```
+
 ## Public hosting setup
 
 For internet-facing deployment, keep `respro-web` reachable only through a reverse proxy and TLS.
