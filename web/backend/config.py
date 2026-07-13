@@ -25,6 +25,7 @@ class WebEnvKeys:
     maintained_bootstrap: str = 'RESPRO_WEB_MAINTAINED_BOOTSTRAP'
     maintained_db_update_interval: str = 'RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS'
     trusted_proxies: str = 'RESPRO_WEB_TRUSTED_PROXIES'
+    impressum_path: str = 'RESPRO_WEB_IMPRESSUM_PATH'
     max_batch_size: str = 'RESPRO_WEB_MAX_BATCH_SIZE'
 
 
@@ -100,6 +101,7 @@ def _load_web_backend_config() -> WebBackendConfig:
         maintained_bootstrap=str(env_payload['maintained_bootstrap']),
         maintained_db_update_interval=str(env_payload['maintained_db_update_interval']),
         trusted_proxies=str(env_payload['trusted_proxies']),
+        impressum_path=str(env_payload['impressum_path']),
     )
 
     defaults = WebDefaults(

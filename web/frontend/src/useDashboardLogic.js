@@ -19,6 +19,7 @@ export function useDashboardLogic() {
   const [databases, setDatabases] = useState([]);
   const [selectedDatabaseId, setSelectedDatabaseId] = useState('');
   const [statusError, setStatusError] = useState('');
+  const [legalEnabled, setLegalEnabled] = useState(false);
   const [activeMode, setActiveMode] = useState('analyze');
   const [activeProfileMode, setActiveProfileMode] = useState('vcf');
   const [analyzeSubMode, setAnalyzeSubMode] = useState('single');
@@ -72,6 +73,8 @@ export function useDashboardLogic() {
         if (Number.isFinite(uiConfig.sample_limit_per_minute) && uiConfig.sample_limit_per_minute > 0) {
           batch.setSampleLimitPerMinute(uiConfig.sample_limit_per_minute);
         }
+        const legalPayload = await apiGet('/api/ui/legal').catch(() => null);
+        setLegalEnabled(Boolean(legalPayload?.data?.enabled));
         const payload = await apiGet('/api/databases');
         const items = payload.data.items || [];
         setDatabases(items);
@@ -167,6 +170,7 @@ export function useDashboardLogic() {
     selectedDatabaseId,
     setSelectedDatabaseId,
     statusError,
+    legalEnabled,
     selectedProfileReportPath: session.selectedProfileReportPath,
     setSelectedProfileReportPath: session.setSelectedProfileReportPath,
     mutationFilter: mutations.mutationFilter,

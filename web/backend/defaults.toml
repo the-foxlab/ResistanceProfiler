@@ -14,6 +14,7 @@ job_retry_intervals = 'RESPRO_WEB_JOB_RETRY_INTERVALS'
 maintained_bootstrap = 'RESPRO_WEB_MAINTAINED_BOOTSTRAP'
 maintained_db_update_interval = 'RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS'
 trusted_proxies = 'RESPRO_WEB_TRUSTED_PROXIES'
+impressum_path = 'RESPRO_WEB_IMPRESSUM_PATH'
 
 [defaults]
 web_host = '127.0.0.1'

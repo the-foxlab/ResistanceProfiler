@@ -62,6 +62,56 @@ For internet-facing deployment, keep `respro-web` reachable only through a rever
 3. Set a strong `RESPRO_WEB_API_TOKEN`.
 4. Set explicit `RESPRO_WEB_CORS_ORIGINS` for your frontend domain(s).
 5. Configure `RESPRO_WEB_TRUSTED_PROXIES` only for known proxy IPs/CIDRs.
+6. Optionally enable a legal notice (Impressum) — see below.
+
+### Legal notice / Impressum (optional)
+
+For public hosting in jurisdictions that require a legal notice (e.g. a DSGVO/§5 TMG
+Impressum in Germany), ResistanceProfiler can serve a deployment-specific HTML page at
+`/legal` and surface a "Legal notice" link in the app footer.
+
+The feature is **off by default**. The repo ships with no impressum content — each hoster
+provides their own and keeps it out of version control.
+
+Enable it by pointing `RESPRO_WEB_IMPRESSUM_PATH` at an HTML file and mounting it into the
+container:
+
+```yaml
+services:
+  respro-web:
+    environment:
+      - RESPRO_WEB_IMPRESSUM_PATH=/data/impressum.html
+    volumes:
+      - ./data:/data:rw
+      - ./impressum.html:/data/impressum.html:ro
+```
+
+Then create `impressum.html` on the host next to your `docker-compose.web.yml`:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Legal notice</title>
+</head>
+<body>
+    <h1>Legal notice / Impressum</h1>
+    <!-- Add the content required by your jurisdiction here, e.g. provider
+         name, address, contact, and responsible person per §18 MStV. -->
+</body>
+</html>
+```
+
+Behaviour notes:
+
+- The `/legal` route is **public** (no API token required). This is intentional: a legal
+  notice must be reachable without barriers for DSGVO compliance.
+- The file is read once at startup. Editing it requires a container restart.
+- If `RESPRO_WEB_IMPRESSUM_PATH` is set but the file is missing or unreadable, startup
+  fails fast with a clear error. Leaving the variable unset silently disables the feature.
+- The "Legal notice" link in the footer only appears when an impressum is configured.
 
 ### Caddy example
 

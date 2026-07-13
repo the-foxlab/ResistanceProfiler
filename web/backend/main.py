@@ -44,7 +44,7 @@ from web.backend.models import (
 )
 from web.backend.routes.artifacts import build_artifacts_router
 from web.backend.routes.catalog import build_catalog_router
-from web.backend.routes.health import build_health_router
+from web.backend.routes.health import build_health_router, build_legal_router
 from web.backend.routes.jobs import build_jobs_router
 from web.backend.routes.profile import build_profile_router
 from web.backend.routes.regenerate import build_regenerate_router
@@ -197,6 +197,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             resolve_regenerate_project_db_path=resolve_regenerate_project_db_path,
         )
     )
+
+    app.include_router(build_legal_router(impressum_html=config.impressum_html))
 
     frontend_dist = Path(__file__).resolve().parents[1] / 'frontend' / 'dist'
     if frontend_dist.is_dir():

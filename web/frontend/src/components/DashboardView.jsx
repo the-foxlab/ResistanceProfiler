@@ -37,6 +37,7 @@ export function DashboardView({
   selectedDatabaseId,
   setSelectedDatabaseId,
   statusError,
+  legalEnabled,
   selectedProfileReportPath,
   setSelectedProfileReportPath,
   mutationFilter,
@@ -304,6 +305,11 @@ export function DashboardView({
             />
           )}
         </section>
+        {legalEnabled && (
+          <footer className="app-footer">
+            <a href={`${API_BASE}/legal`} target="_blank" rel="noreferrer">Legal notice</a>
+          </footer>
+        )}
       </div>
     </main>
   );

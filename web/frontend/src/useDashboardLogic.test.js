@@ -248,10 +248,15 @@ describe('useDashboardLogic - Job Polling Flow', () => {
   });
 
   it('should poll job until completion with succeeded status', async () => {
-    // Setup: ui/config is fetched before databases on init
+    // Setup: ui/config and ui/legal are fetched before databases on init
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: {} }),
+    });
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false } }),
     });
 
     // Setup: Initialize with a database
@@ -353,6 +358,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
       json: () => Promise.resolve({ data: {} }),
     });
 
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false } }),
+    });
+
     // Setup: Initialize with a database
     global.fetch.mockResolvedValueOnce({
       ok: true,
@@ -423,6 +433,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: {} }),
+    });
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false } }),
     });
 
     global.fetch.mockResolvedValueOnce({
@@ -507,6 +522,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: {} }),
+    });
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false } }),
     });
 
     global.fetch.mockResolvedValueOnce({

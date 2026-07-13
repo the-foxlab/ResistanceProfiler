@@ -327,4 +327,17 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   bioconda-recipes; Bioconda is the standard distribution channel for bioinformatics CLI tools
   and avoids requiring users to have a working pip/Python setup; dependency on pysam makes
   Bioconda the natural distribution path once pysam is a requirement
-- 🟡 Established wet-lab protocols
+- 🟡 Established wet-lab protocols — protocols tab in the web app linking to sequencing
+  protocols on protocols.io; protocols are decoupled from project databases (no metadata.json
+  or SQLite changes) and fetched from a separate `protocols.json` in the respro-db companion
+  repo at startup; the JSON is keyed by display name (not pathogen) and each entry carries
+  `display_name`, `pathogen`, `targets` (gene/region list), `description`, and a
+  `protocols_io_uri` outbound link; iframe embedding is blocked by protocols.io
+  (`X-Frame-Options: SAMEORIGIN`), so the initial implementation renders metadata cards with
+  outbound links; a later enhancement can use the protocols.io v4 API
+  (`GET /api/v4/protocols/{id}?content_format=html`, requires a free client access token,
+  100 req/min limit) to fetch rendered protocol content server-side; backend adds a
+  `fetch_protocols()` call in startup (fail-soft, like maintained-DB bootstrap) and a
+  `GET /api/protocols` endpoint; frontend adds a new `ProtocolsTab.jsx` with a display-name
+  dropdown and metadata cards, wired as a new entry in the `MODES` sidebar; no CLI surface,
+  no `respro/` core changes

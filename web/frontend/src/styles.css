@@ -2437,3 +2437,19 @@ th.sortable-col {
   min-width: 2rem;
   text-align: center;
 }
+
+.app-footer {
+  padding: 0.75rem 1rem;
+  text-align: center;
+  border-top: 1px solid var(--color-border, #e0e0e0);
+}
+
+.app-footer a {
+  color: var(--color-text-secondary, #666);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.app-footer a:hover {
+  text-decoration: underline;
+}

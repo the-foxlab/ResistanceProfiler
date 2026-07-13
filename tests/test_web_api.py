@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 import textwrap
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import Mock
 from uuid import uuid4
@@ -26,6 +27,7 @@ from web.backend.startup_config import (
     StartupConfig,
     _validate_startup_policy,
     build_project_db_uuid_index,
+    load_startup_config,
 )
 
 
@@ -1935,4 +1937,57 @@ class TestBatchProfileEndpoints:
         assert response.status_code == 404
         assert redis_urls
         assert redis_urls[-1] == WEB_BACKEND_CONFIG.defaults.redis_url
+
+
+class TestLegalRoute:
+    """Legal notice / impressum route across the three configuration states."""
+
+    def test_legal_route_disabled_when_impressum_unset(self, client: TestClient) -> None:
+        """No impressum configured: /legal returns 404, indicator reports disabled."""
+        legal_response = client.get('/legal')
+        assert legal_response.status_code == 404
+
+        indicator_response = client.get('/api/ui/legal')
+        assert indicator_response.status_code == 200
+        assert indicator_response.json()['data']['enabled'] is False
+
+    def test_legal_route_serves_html_when_impressum_configured(
+        self,
+        startup_config: StartupConfig,
+        sync_queue: Queue,
+        tmp_path: Path,
+    ) -> None:
+        """Valid impressum HTML: /legal serves it, indicator reports enabled."""
+        impressum_content = '<!DOCTYPE html><html><body><h1>Impressum</h1></body></html>'
+        impressum_path = tmp_path / 'impressum.html'
+        impressum_path.write_text(impressum_content, encoding='utf-8')
+
+        enabled_config = replace(
+            startup_config,
+            impressum_html=impressum_content,
+        )
+        app = create_app(startup_config=enabled_config)
+        app.dependency_overrides[get_queue] = lambda: sync_queue
+        app.dependency_overrides[get_batch_queue] = lambda: sync_queue
+        legal_client = TestClient(app)
+
+        legal_response = legal_client.get('/legal')
+        assert legal_response.status_code == 200
+        assert 'text/html' in legal_response.headers['content-type']
+        assert legal_response.text == impressum_content
+
+        indicator_response = legal_client.get('/api/ui/legal')
+        assert indicator_response.status_code == 200
+        assert indicator_response.json()['data']['enabled'] is True
+
+    def test_startup_fails_fast_when_impressum_path_points_to_missing_file(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Env var set but file missing: load_startup_config raises (fail-fast)."""
+        missing_path = tmp_path / 'does-not-exist.html'
+        monkeypatch.setenv('RESPRO_WEB_IMPRESSUM_PATH', str(missing_path))
+        with pytest.raises(FileNotFoundError, match='RESPRO_WEB_IMPRESSUM_PATH'):
+            load_startup_config()
 
