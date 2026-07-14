@@ -4,6 +4,7 @@ site_description: Pathogen-agnostic antiviral resistance profiling — documenta
 site_url: https://jonas-fuchs.github.io/ResistanceProfiler/
 repo_url: https://github.com/jonas-fuchs/ResistanceProfiler
 repo_name: GitHub
+copyright: '© 2026 Jonas Fuchs, University Medical Center Freiburg — Licensed under AGPL-3.0'
 
 theme:
   name: material

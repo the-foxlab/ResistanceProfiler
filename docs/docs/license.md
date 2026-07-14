@@ -7,7 +7,7 @@ description: Licensing information for ResistanceProfiler
 
 ## Source code
 
-ResistanceProfiler source code is released under the [MIT License](https://opensource.org/licenses/MIT).
+ResistanceProfiler source code is released under the [GNU Affero General Public License v3.0](https://www.gnu.org/licenses/agpl-3.0).
 
 ## External data
 

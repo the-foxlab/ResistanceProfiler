@@ -284,6 +284,12 @@ Mark items done and update priorities after each completed milestone.
 
 ---
 
+## Active
+
+- 🔍 Switch software license from MIT to AGPL-3.0-only — added `LICENSE` (canonical AGPL-3.0 + copyright header for Jonas Fuchs, University Medical Center Freiburg, 2026); updated `pyproject.toml` (`license` field + trove classifier), `README.md` badge, `docs/docs/license.md` source-code section, `web/frontend/src/components/tabs/AboutTab.jsx` license bullet, and `docs/mkdocs.yml` copyright footer; per-dataset `metadata_license` field and third-party icon assets left untouched; ready for Scientific Review
+
+---
+
 ## Next
 
 Items are grouped by theme and ordered by priority within each group.
