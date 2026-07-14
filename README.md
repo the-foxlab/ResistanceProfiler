@@ -60,4 +60,4 @@ Open at `http://127.0.0.1:8000/`
 
 ## License
 
-MIT — source code only. External databases and references may carry separate licenses.
+AGPL v3.0 — source code only. External databases and references may carry separate licenses.
