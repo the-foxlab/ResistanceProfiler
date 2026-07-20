@@ -19,7 +19,10 @@ export function useDashboardLogic() {
   const [databases, setDatabases] = useState([]);
   const [selectedDatabaseId, setSelectedDatabaseId] = useState('');
   const [statusError, setStatusError] = useState('');
-  const [legalEnabled, setLegalEnabled] = useState(false);
+  // ``legalLink`` is null when the imprint feature is disabled; otherwise it is the
+  // href the footer "Legal notice" link should point at — an external URL when the
+  // backend reports ``kind:'url'``, or the self-hosted ``/legal`` route for path mode.
+  const [legalLink, setLegalLink] = useState(null);
   const [activeMode, setActiveMode] = useState('analyze');
   const [activeProfileMode, setActiveProfileMode] = useState('vcf');
   const [analyzeSubMode, setAnalyzeSubMode] = useState('single');
@@ -74,7 +77,7 @@ export function useDashboardLogic() {
           batch.setSampleLimitPerMinute(uiConfig.sample_limit_per_minute);
         }
         const legalPayload = await apiGet('/api/ui/legal').catch(() => null);
-        setLegalEnabled(Boolean(legalPayload?.data?.enabled));
+        setLegalLink(_resolveLegalLink(legalPayload?.data));
         const payload = await apiGet('/api/databases');
         const items = payload.data.items || [];
         setDatabases(items);
@@ -170,7 +173,7 @@ export function useDashboardLogic() {
     selectedDatabaseId,
     setSelectedDatabaseId,
     statusError,
-    legalEnabled,
+    legalLink,
     selectedProfileReportPath: session.selectedProfileReportPath,
     setSelectedProfileReportPath: session.setSelectedProfileReportPath,
     mutationFilter: mutations.mutationFilter,
@@ -263,5 +266,23 @@ export function useDashboardLogic() {
     downloadSelectedArtifacts: () => session.downloadSelectedArtifacts(setStatusError),
     clearComparison: comparison.clearComparison,
   };
+}
+
+/**
+ * Resolve the footer "Legal notice" href from the ``/api/ui/legal`` payload.
+ *
+ * Returns ``null`` when the imprint feature is disabled. For ``kind:'url'`` the
+ * external URL is returned so the footer links straight to the hosted imprint. For
+ * ``kind:'path'`` (or a stale backend that omits ``kind``) the self-hosted ``/legal``
+ * route is returned. A disabled payload without ``kind`` is treated as path mode.
+ */
+export function _resolveLegalLink(legalData) {
+  if (!legalData || !legalData.enabled) {
+    return null;
+  }
+  if (legalData.kind === 'url' && legalData.url) {
+    return legalData.url;
+  }
+  return `${API_BASE}/legal`;
 }
 

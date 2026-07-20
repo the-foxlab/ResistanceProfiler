@@ -8,6 +8,8 @@ import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlparse
 
 from respro.db.schema import open_project_db
 from web.backend.config import WEB_BACKEND_CONFIG, WEB_ENV
@@ -20,6 +22,19 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class ImprintConfig:
+    """Validated imprint configuration.
+
+    ``kind='path'`` — self-hosted HTML read once at startup into ``html``.
+    ``kind='url'`` — direct link to an already-hosted imprint page in ``url``.
+    """
+
+    kind: Literal['path', 'url']
+    html: str | None = None
+    url: str | None = None
+
+
+@dataclass(frozen=True)
 class StartupConfig:
     """Validated startup configuration shared by API routes and workers."""
 
@@ -29,7 +44,7 @@ class StartupConfig:
     data_dir: Path
     allowed_roots: tuple[Path, ...]
     api_token: str
-    impressum_html: str | None = None
+    imprint: ImprintConfig | None = None
     project_db_uuid_index: dict[str, Path] = field(default_factory=dict)
 
 
@@ -49,7 +64,7 @@ def load_startup_config() -> StartupConfig:
     results_dir = (data_dir / 'results').resolve()
     api_token = os.getenv(WEB_ENV.api_token, '').strip()
     maintained_bootstrap = _resolve_maintained_bootstrap_enabled()
-    impressum_html = _resolve_impressum_html()
+    imprint = _resolve_imprint()
 
     allowed_roots_env = os.getenv(WEB_ENV.allowed_roots, '')
     allowed_roots = _parse_allowed_roots(
@@ -82,7 +97,7 @@ def load_startup_config() -> StartupConfig:
         data_dir=data_dir,
         allowed_roots=allowed_roots,
         api_token=api_token,
-        impressum_html=impressum_html,
+        imprint=imprint,
         project_db_uuid_index=project_db_uuid_index,
     )
 
@@ -166,17 +181,48 @@ def _parse_allowed_roots(default_roots: tuple[Path, ...], env_value: str) -> tup
     return tuple(Path(value).expanduser().resolve() for value in parsed)
 
 
-def _resolve_impressum_html() -> str | None:
-    """Read optional impressum HTML file configured via env var (fail-fast)."""
-    path_env = os.getenv(WEB_ENV.impressum_path, '').strip()
-    if not path_env:
+def _resolve_imprint() -> ImprintConfig | None:
+    """Resolve optional imprint config from the ``RESPRO_WEB_IMPRINT`` env var.
+
+    Detection rule — the trimmed value is either:
+
+    * an absolute ``http://`` / ``https://`` URL → ``ImprintConfig(kind='url', url=...)``
+      (direct link to an already-hosted imprint; the footer links straight there and
+      ``/legal`` 302-redirects to it);
+    * any other non-empty value → treated as a local file path →
+      ``ImprintConfig(kind='path', html=...)`` (self-hosted HTML read at startup);
+    * unset / empty → ``None`` (feature disabled).
+
+    Non-``http(s)`` URL schemes (``ftp://``, ``file://``, …) fail fast at startup.
+    A path that points at a missing or unreadable file fails fast at startup.
+    """
+    raw = os.getenv(WEB_ENV.imprint, '').strip()
+    if not raw:
         return None
-    path = Path(path_env).expanduser().resolve()
+
+    if _looks_like_url(raw):
+        scheme = urlparse(raw).scheme.lower()
+        if scheme not in ('http', 'https'):
+            raise ValueError(
+                f'RESPRO_WEB_IMPRINT URL must use http or https scheme, got {scheme!r}: {raw}'
+            )
+        return ImprintConfig(kind='url', url=raw)
+
+    path = Path(raw).expanduser().resolve()
     if not path.is_file():
         raise FileNotFoundError(
-            f'Impressum file configured via RESPRO_WEB_IMPRESSUM_PATH not found or unreadable: {path}'
+            f'Imprint file configured via RESPRO_WEB_IMPRINT not found or unreadable: {path}'
         )
-    return path.read_text(encoding='utf-8')
+    return ImprintConfig(kind='path', html=path.read_text(encoding='utf-8'))
+
+
+def _looks_like_url(value: str) -> bool:
+    """True when ``value`` carries a ``scheme://`` prefix (e.g. ``http://``, ``ftp://``).
+
+    Any scheme is detected so that non-``http(s)`` URLs are rejected with a clear scheme
+    error by :func:`_resolve_imprint` rather than being misread as a local file path.
+    """
+    return '://' in value and bool(urlparse(value).scheme)
 
 
 def _validate_data_dir(data_dir: Path) -> None:

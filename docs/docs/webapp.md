@@ -82,7 +82,7 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 | `RESPRO_WEB_API_TOKEN` | *(empty — auth disabled)* | Bearer token required for all protected API endpoints. Leave empty for local-only deployments; **set a strong random secret for any non-local deployment**. |
 | `RESPRO_WEB_CORS_ORIGINS` | `http://127.0.0.1:5173`, `http://localhost:5173` | Comma-separated list of allowed origins for cross-origin requests. Must be set explicitly when `RESPRO_WEB_API_TOKEN` is set. For public hosting, list your exact frontend origin(s), e.g. `https://respro.example.com`. |
 | `RESPRO_WEB_TRUSTED_PROXIES` | *(empty — proxy headers ignored)* | Comma-separated list of proxy IPs or CIDRs whose `X-Forwarded-*` headers are trusted. Set to your reverse proxy address for public hosting (see [nginx step-by-step](#nginx-step-by-step-local-network)). |
-| `RESPRO_WEB_IMPRESSUM_PATH` | *(empty — feature disabled)* | Absolute path to an HTML file served at `/legal` as a legal notice / Impressum. See [Legal notice / Impressum](#legal-notice-impressum-optional) for details. |
+| `RESPRO_WEB_IMPRINT` | *(empty — feature disabled)* | Imprint / legal notice. Accepts either an absolute `http://` / `https://` URL pointing at an already-hosted imprint page (the footer links straight to it) **or** an absolute path to a local HTML file served at `/legal`. See [Legal notice / imprint](#legal-notice-imprint-optional) for details. |
 
 ### Rate limiting and batch sizes
 
@@ -127,8 +127,11 @@ RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
 # Redis (set on both respro-web and respro-worker)
 REDIS_URL=redis://redis:6379/0
 
-# Optional: legal notice
-# RESPRO_WEB_IMPRESSUM_PATH=/data/impressum.html
+# Optional: legal notice / imprint
+# Either an absolute URL to an already-hosted imprint page:
+# RESPRO_WEB_IMPRINT=https://example.org/impressum
+# …or an absolute path to a local HTML file served at /legal:
+# RESPRO_WEB_IMPRINT=/data/imprint.html
 
 # Optional: enable maintained database auto-download and weekly updates
 RESPRO_WEB_MAINTAINED_BOOTSTRAP=true
@@ -143,31 +146,52 @@ For internet-facing deployment, keep `respro-web` reachable only through a rever
 3. Set a strong `RESPRO_WEB_API_TOKEN`.
 4. Set explicit `RESPRO_WEB_CORS_ORIGINS` for your frontend domain(s).
 5. Configure `RESPRO_WEB_TRUSTED_PROXIES` only for known proxy IPs/CIDRs.
-6. Optionally enable a legal notice (Impressum) — see below.
+6. Optionally enable a legal notice / imprint — see below.
 
-### Legal notice / Impressum (optional)
+### Legal notice / imprint (optional)
 
 For public hosting in jurisdictions that require a legal notice (e.g. a DSGVO/§5 TMG
-Impressum in Germany), ResistanceProfiler can serve a deployment-specific HTML page at
-`/legal` and surface a "Legal notice" link in the app footer.
+Impressum in Germany), ResistanceProfiler surfaces a "Legal notice" link in the app
+footer. The feature supports two modes, selected automatically by the value of
+`RESPRO_WEB_IMPRINT`:
 
-The feature is **off by default**. The repo ships with no impressum content — each hoster
+| Value shape | Mode | Behaviour |
+|---|---|---|
+| absolute `http://` / `https://` URL | **URL mode** | The footer link points **directly** at the external imprint page (opens in a new tab). The `/legal` route 302-redirects to the same URL, so a bookmarked `/legal` link still lands on the hosted page. |
+| any other non-empty value | **path mode** | The value is treated as a local file path. The HTML is read once at startup and served at `/legal`; the footer links to `/legal`. |
+| unset / empty | disabled | No footer link; `/legal` returns 404. |
+
+The feature is **off by default**. The repo ships with no imprint content — each hoster
 provides their own and keeps it out of version control.
 
-Enable it by pointing `RESPRO_WEB_IMPRESSUM_PATH` at an HTML file and mounting it into the
-container:
+#### URL mode — link to an already-hosted imprint
+
+If your imprint already lives on another site (e.g. your institution's central legal page),
+point `RESPRO_WEB_IMPRINT` at its URL. No file needs to be mounted:
 
 ```yaml
 services:
   respro-web:
     environment:
-      - RESPRO_WEB_IMPRESSUM_PATH=/data/impressum.html
-    volumes:
-      - ./data:/data:rw
-      - ./impressum.html:/data/impressum.html:ro
+      - RESPRO_WEB_IMPRINT=https://www.example.org/impressum
 ```
 
-Then create `impressum.html` on the host next to your `docker-compose.web.yml`:
+#### Path mode — self-hosted HTML
+
+To host the imprint HTML from the app itself, point `RESPRO_WEB_IMPRINT` at a local file
+and mount it into the container:
+
+```yaml
+services:
+  respro-web:
+    environment:
+      - RESPRO_WEB_IMPRINT=/data/imprint.html
+    volumes:
+      - ./data:/data:rw
+      - ./imprint.html:/data/imprint.html:ro
+```
+
+Then create `imprint.html` on the host next to your `docker-compose.web.yml`:
 
 ```html
 <!DOCTYPE html>
@@ -178,7 +202,7 @@ Then create `impressum.html` on the host next to your `docker-compose.web.yml`:
     <title>Legal notice</title>
 </head>
 <body>
-    <h1>Legal notice / Impressum</h1>
+    <h1>Legal notice / imprint</h1>
     <!-- Add the content required by your jurisdiction here, e.g. provider
          name, address, contact, and responsible person per §18 MStV. -->
 </body>
@@ -189,10 +213,11 @@ Behaviour notes:
 
 - The `/legal` route is **public** (no API token required). This is intentional: a legal
   notice must be reachable without barriers for DSGVO compliance.
-- The file is read once at startup. Editing it requires a container restart.
-- If `RESPRO_WEB_IMPRESSUM_PATH` is set but the file is missing or unreadable, startup
-  fails fast with a clear error. Leaving the variable unset silently disables the feature.
-- The "Legal notice" link in the footer only appears when an impressum is configured.
+- In path mode the file is read once at startup. Editing it requires a container restart.
+- If `RESPRO_WEB_IMPRINT` is set to a path that is missing or unreadable, startup fails
+  fast with a clear error. A URL with a non-`http(s)` scheme (e.g. `ftp://`) also fails
+  fast. Leaving the variable unset silently disables the feature.
+- The "Legal notice" link in the footer only appears when an imprint is configured.
 
 ### Caddy example
 

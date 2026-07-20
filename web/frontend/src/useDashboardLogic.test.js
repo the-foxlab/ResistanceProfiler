@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useDashboardLogic } from './useDashboardLogic';
+import { useDashboardLogic, _resolveLegalLink } from './useDashboardLogic';
 
 // Mock XMLHttpRequest for file upload tests
 class MockXHR {
@@ -858,5 +858,41 @@ describe('useDashboardLogic - Report Display Flow', () => {
 
     expect(result.current.reportOptions[0].label).toContain('sample2');
     expect(result.current.reportOptions[1].label).toContain('sample1');
+  });
+});
+
+describe('_resolveLegalLink', () => {
+  // The footer "Legal notice" href is derived from the /api/ui/legal payload.
+  // Disabled → null (no footer). URL mode → external link. Path mode → /legal route.
+  // The test setup mocks apiBase to 'http://localhost:8000', so the self-hosted
+  // route resolves to 'http://localhost:8000/legal'.
+  const SELF_HOSTED_LEGAL = 'http://localhost:8000/legal';
+
+  it('returns null when the imprint feature is disabled', () => {
+    expect(_resolveLegalLink({ enabled: false })).toBeNull();
+  });
+
+  it('returns null when the payload is missing', () => {
+    expect(_resolveLegalLink(null)).toBeNull();
+    expect(_resolveLegalLink(undefined)).toBeNull();
+  });
+
+  it('returns the external URL for url mode', () => {
+    const externalUrl = 'https://example.org/impressum';
+    expect(_resolveLegalLink({ enabled: true, kind: 'url', url: externalUrl })).toBe(externalUrl);
+  });
+
+  it('falls back to the self-hosted /legal route for path mode', () => {
+    expect(_resolveLegalLink({ enabled: true, kind: 'path' })).toBe(SELF_HOSTED_LEGAL);
+  });
+
+  it('falls back to /legal for a stale backend that omits kind', () => {
+    // Backward compatibility: an older backend returning only {enabled: true}.
+    expect(_resolveLegalLink({ enabled: true })).toBe(SELF_HOSTED_LEGAL);
+  });
+
+  it('falls back to /legal when url mode lacks a url value', () => {
+    expect(_resolveLegalLink({ enabled: true, kind: 'url', url: null })).toBe(SELF_HOSTED_LEGAL);
+    expect(_resolveLegalLink({ enabled: true, kind: 'url', url: '' })).toBe(SELF_HOSTED_LEGAL);
   });
 });

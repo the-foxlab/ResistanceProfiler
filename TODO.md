@@ -282,6 +282,12 @@ Mark items done and update priorities after each completed milestone.
 
 - [X] Frontend chart library consolidation — migrated all recharts components (pie charts, IC50 scatter/bar, position stacked bars) to Plotly.js; removed recharts dependency; all charts now use a single rendering library
 
+### Web — Legal notice / imprint
+
+- [X] Support external imprint link + rename env var — renamed `RESPRO_WEB_IMPRESSUM_PATH` → `RESPRO_WEB_IMPRINT`; new `ImprintConfig(kind='path'|'url', html|url)` replaces `impressum_html`; `_resolve_imprint()` detects `scheme://` URLs (http/https only, others fail fast) vs local file paths (missing file fails fast); `build_legal_router` serves HTML (path) or 302-redirects (url); `/api/ui/legal` returns `{enabled, kind, url?}`; updated `web/backend/{config,defaults.toml,startup_config,main,routes/health}.py`. Backend tests: 6 cases (unset/path/url/missing-file/bad-scheme/env-resolve) pass. Scientific Review: APPROVED.
+- [X] Frontend renders external imprint as a direct link — `useDashboardLogic.js` exposes `legalLink` (null | external URL | `${API_BASE}/legal`) via `_resolveLegalLink` helper (backward-compatible with stale backends); `DashboardView.jsx` footer `<a href={legalLink}>` opens in new tab; removed now-unused `API_BASE` prop; 6 new `_resolveLegalLink` unit tests pass. Scientific Review: APPROVED.
+- [X] Document external-imprint option and env-var rename — `docs/docs/webapp.md` env table row, `.env` example, and "Legal notice / imprint" section rewritten with a URL-vs-path mode table and copy-pasteable examples for both modes; `docker-compose.web.yml` comments show both an external-URL and a mounted-HTML variant; `.gitignore` `impressum.html` → `imprint.html`. Scientific Review: APPROVED.
+
 ---
 
 ## Active
@@ -289,6 +295,8 @@ Mark items done and update priorities after each completed milestone.
 - 🔍 Switch software license from MIT to AGPL-3.0-only — added `LICENSE` (canonical AGPL-3.0 + copyright header for Jonas Fuchs, University Medical Center Freiburg, 2026); updated `pyproject.toml` (`license` field + trove classifier), `README.md` badge, `docs/docs/license.md` source-code section, `web/frontend/src/components/tabs/AboutTab.jsx` license bullet, and `docs/mkdocs.yml` copyright footer; per-dataset `metadata_license` field and third-party icon assets left untouched; ready for Scientific Review
 
 ---
+
+## Ready
 
 ## Next
 

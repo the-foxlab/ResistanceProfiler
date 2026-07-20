@@ -17,7 +17,11 @@ services:
       - RESPRO_WEB_PORT=8000
       - RESPRO_WEB_MAINTAINED_BOOTSTRAP=true
       - REDIS_URL=redis://redis:6379/0
-      # - RESPRO_WEB_IMPRESSUM_PATH=/data/impressum.html
+      # Optional legal notice / imprint. Either an absolute URL to an already-hosted
+      # imprint page (footer links directly to it)…
+      # - RESPRO_WEB_IMPRINT=https://example.org/impressum
+      # …or an absolute path to a local HTML file served at /legal (mount it below):
+      # - RESPRO_WEB_IMPRINT=/data/imprint.html
     depends_on:
       - redis
 
@@ -26,7 +30,8 @@ services:
     command: rq worker --url redis://redis:6379/0 profiling
     volumes:
       - ./data:/data:rw
-      # - ./impressum.html:/data/impressum.html:ro
+      # Only needed for path-mode imprint (self-hosted HTML):
+      # - ./imprint.html:/data/imprint.html:ro
     environment:
       - REDIS_URL=redis://redis:6379/0
     depends_on:

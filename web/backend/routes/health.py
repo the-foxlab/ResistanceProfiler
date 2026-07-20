@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from web.backend.config import WEB_BACKEND_CONFIG
 from web.backend.models import ApiEnvelope
-from web.backend.startup_config import StartupConfig
+from web.backend.startup_config import ImprintConfig, StartupConfig
 
 
 def build_health_router(
@@ -50,18 +50,32 @@ def build_health_router(
     return router
 
 
-def build_legal_router(*, impressum_html: str | None) -> APIRouter:
-    """Build public legal-notice routes (no API token — DSGVO requires reachability)."""
+def build_legal_router(*, imprint: ImprintConfig | None) -> APIRouter:
+    """Build public legal-notice routes (no API token — DSGVO requires reachability).
+
+    Path mode serves the stored HTML at ``/legal``; URL mode 302-redirects ``/legal``
+    to the external imprint so a bookmarked link still lands on the hosted page. The
+    ``/api/ui/legal`` indicator carries ``kind`` and ``url`` so the frontend can render
+    a direct external link instead of routing through ``/legal``.
+    """
     router = APIRouter()
 
-    @router.get('/legal', response_class=HTMLResponse)
-    def legal() -> HTMLResponse:
-        if impressum_html is None:
+    @router.get('/legal', response_class=HTMLResponse, response_model=None)
+    def legal() -> HTMLResponse | RedirectResponse:
+        if imprint is None:
             raise HTTPException(status_code=404)
-        return HTMLResponse(content=impressum_html)
+        if imprint.kind == 'url':
+            # ``imprint.url`` is guaranteed non-None for kind='url' by ImprintConfig construction.
+            return RedirectResponse(url=imprint.url, status_code=302)
+        # Path mode — ``imprint.html`` is guaranteed non-None for kind='path'.
+        return HTMLResponse(content=imprint.html)
 
     @router.get('/api/ui/legal', response_model=ApiEnvelope)
     def legal_indicator() -> ApiEnvelope:
-        return ApiEnvelope(data={'enabled': impressum_html is not None}, status='ok')
+        if imprint is None:
+            return ApiEnvelope(data={'enabled': False, 'kind': 'path'}, status='ok')
+        if imprint.kind == 'url':
+            return ApiEnvelope(data={'enabled': True, 'kind': 'url', 'url': imprint.url}, status='ok')
+        return ApiEnvelope(data={'enabled': True, 'kind': 'path'}, status='ok')
 
     return router

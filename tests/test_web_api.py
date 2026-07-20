@@ -24,7 +24,9 @@ from web.backend.config import WEB_BACKEND_CONFIG
 from web.backend.main import _resolve_proxy_settings, create_app
 from web.backend.queue import get_batch_queue, get_queue
 from web.backend.startup_config import (
+    ImprintConfig,
     StartupConfig,
+    _resolve_imprint,
     _validate_startup_policy,
     build_project_db_uuid_index,
     load_startup_config,
@@ -1940,31 +1942,38 @@ class TestBatchProfileEndpoints:
 
 
 class TestLegalRoute:
-    """Legal notice / impressum route across the three configuration states."""
+    """Legal notice / imprint route across the four configuration states.
 
-    def test_legal_route_disabled_when_impressum_unset(self, client: TestClient) -> None:
-        """No impressum configured: /legal returns 404, indicator reports disabled."""
+    The env var ``RESPRO_WEB_IMPRINT`` accepts either an absolute ``http(s)://`` URL
+    (link to an already-hosted imprint) or a local file path (self-hosted HTML).
+    """
+
+    def test_legal_route_disabled_when_imprint_unset(self, client: TestClient) -> None:
+        """No imprint configured: /legal returns 404, indicator reports disabled."""
         legal_response = client.get('/legal')
         assert legal_response.status_code == 404
 
         indicator_response = client.get('/api/ui/legal')
         assert indicator_response.status_code == 200
-        assert indicator_response.json()['data']['enabled'] is False
+        payload = indicator_response.json()['data']
+        assert payload['enabled'] is False
+        assert payload['kind'] == 'path'
+        assert 'url' not in payload
 
-    def test_legal_route_serves_html_when_impressum_configured(
+    def test_legal_route_serves_html_when_imprint_points_at_local_file(
         self,
         startup_config: StartupConfig,
         sync_queue: Queue,
         tmp_path: Path,
     ) -> None:
-        """Valid impressum HTML: /legal serves it, indicator reports enabled."""
-        impressum_content = '<!DOCTYPE html><html><body><h1>Impressum</h1></body></html>'
-        impressum_path = tmp_path / 'impressum.html'
-        impressum_path.write_text(impressum_content, encoding='utf-8')
+        """Path mode: /legal serves the stored HTML, indicator reports kind='path'."""
+        imprint_content = '<!DOCTYPE html><html><body><h1>Impressum</h1></body></html>'
+        imprint_path = tmp_path / 'imprint.html'
+        imprint_path.write_text(imprint_content, encoding='utf-8')
 
         enabled_config = replace(
             startup_config,
-            impressum_html=impressum_content,
+            imprint=ImprintConfig(kind='path', html=imprint_content),
         )
         app = create_app(startup_config=enabled_config)
         app.dependency_overrides[get_queue] = lambda: sync_queue
@@ -1974,20 +1983,70 @@ class TestLegalRoute:
         legal_response = legal_client.get('/legal')
         assert legal_response.status_code == 200
         assert 'text/html' in legal_response.headers['content-type']
-        assert legal_response.text == impressum_content
+        assert legal_response.text == imprint_content
 
         indicator_response = legal_client.get('/api/ui/legal')
         assert indicator_response.status_code == 200
-        assert indicator_response.json()['data']['enabled'] is True
+        payload = indicator_response.json()['data']
+        assert payload['enabled'] is True
+        assert payload['kind'] == 'path'
+        assert 'url' not in payload
 
-    def test_startup_fails_fast_when_impressum_path_points_to_missing_file(
+    def test_legal_route_redirects_to_external_url_when_imprint_is_url(
+        self,
+        startup_config: StartupConfig,
+        sync_queue: Queue,
+    ) -> None:
+        """URL mode: /legal 302-redirects to the external URL; footer link is direct."""
+        external_url = 'https://example.org/impressum'
+        enabled_config = replace(
+            startup_config,
+            imprint=ImprintConfig(kind='url', url=external_url),
+        )
+        app = create_app(startup_config=enabled_config)
+        app.dependency_overrides[get_queue] = lambda: sync_queue
+        app.dependency_overrides[get_batch_queue] = lambda: sync_queue
+        legal_client = TestClient(app)
+
+        legal_response = legal_client.get('/legal', follow_redirects=False)
+        assert legal_response.status_code == 302
+        assert legal_response.headers['location'] == external_url
+
+        indicator_response = legal_client.get('/api/ui/legal')
+        assert indicator_response.status_code == 200
+        payload = indicator_response.json()['data']
+        assert payload['enabled'] is True
+        assert payload['kind'] == 'url'
+        assert payload['url'] == external_url
+
+    def test_startup_fails_fast_when_imprint_path_points_to_missing_file(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """Env var set but file missing: load_startup_config raises (fail-fast)."""
+        """Path mode with missing file: load_startup_config raises (fail-fast)."""
         missing_path = tmp_path / 'does-not-exist.html'
-        monkeypatch.setenv('RESPRO_WEB_IMPRESSUM_PATH', str(missing_path))
-        with pytest.raises(FileNotFoundError, match='RESPRO_WEB_IMPRESSUM_PATH'):
+        monkeypatch.setenv('RESPRO_WEB_IMPRINT', str(missing_path))
+        with pytest.raises(FileNotFoundError, match='RESPRO_WEB_IMPRINT'):
             load_startup_config()
+
+    def test_startup_fails_fast_when_imprint_url_has_unsupported_scheme(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """URL mode with non-http(s) scheme: load_startup_config raises (fail-fast)."""
+        monkeypatch.setenv('RESPRO_WEB_IMPRINT', 'ftp://example.org/impressum')
+        with pytest.raises(ValueError, match='RESPRO_WEB_IMPRINT'):
+            load_startup_config()
+
+    def test_startup_resolves_external_url_imprint(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        startup_config: StartupConfig,
+    ) -> None:
+        """URL mode env var resolves to ImprintConfig(kind='url', url=...)."""
+        external_url = 'https://example.org/impressum'
+        monkeypatch.setenv('RESPRO_WEB_IMPRINT', external_url)
+        resolved = _resolve_imprint()
+        assert resolved == ImprintConfig(kind='url', url=external_url)
 
