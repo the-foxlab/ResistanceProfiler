@@ -18,10 +18,10 @@ from __future__ import annotations
 import json
 import logging
 import re
-import time
 import urllib.error
 import urllib.parse
-import urllib.request
+from time import sleep
+from urllib.request import urlopen
 
 from respro.config.cli_settings import CLI_CONFIG
 
@@ -50,7 +50,7 @@ def fetch_pubmed_metadata(pmid: str, timeout: int = CLI_CONFIG.timeouts.pubmed) 
     url = CLI_CONFIG.urls.ncbi_pubmed_esummary.format(pmid=urllib.parse.quote(pmid))
     for attempt in range(_PUBMED_RATE_LIMIT_RETRIES + 1):
         try:
-            with urllib.request.urlopen(url, timeout=timeout) as resp:
+            with urlopen(url, timeout=timeout) as resp:
                 data = json.loads(resp.read())
             if not isinstance(data, dict):
                 logger.debug('NCBI PMID lookup malformed payload for %r: root is %s', pmid, type(data).__name__)
@@ -89,7 +89,7 @@ def fetch_pubmed_metadata(pmid: str, timeout: int = CLI_CONFIG.timeouts.pubmed) 
                     pmid,
                     delay,
                 )
-                time.sleep(delay)
+                sleep(delay)
                 continue
             logger.warning('NCBI PMID lookup failed for %r: HTTP %s', pmid, exc.code)
             return None
@@ -122,7 +122,7 @@ def fetch_pubmed_id_for_doi(doi: str, timeout: int = CLI_CONFIG.timeouts.pubmed)
     url = CLI_CONFIG.urls.ncbi_pmc_idconv.format(identifier=encoded)
     for attempt in range(_DOI_RATE_LIMIT_RETRIES + 1):
         try:
-            with urllib.request.urlopen(url, timeout=timeout) as resp:
+            with urlopen(url, timeout=timeout) as resp:
                 data = json.loads(resp.read())
             if not isinstance(data, dict):
                 logger.debug(
@@ -163,7 +163,7 @@ def fetch_pubmed_id_for_doi(doi: str, timeout: int = CLI_CONFIG.timeouts.pubmed)
                     normalized_doi,
                     delay,
                 )
-                time.sleep(delay)
+                sleep(delay)
                 continue
             if exc.code in (400, 404):
                 logger.debug('NCBI DOI->PMID lookup returned HTTP %s for %r', exc.code, normalized_doi)
@@ -199,7 +199,7 @@ def fetch_publication_metadata(doi: str, timeout: int = CLI_CONFIG.timeouts.cros
     url = CLI_CONFIG.urls.crossref_works.format(doi=encoded)
     for attempt in range(_DOI_RATE_LIMIT_RETRIES + 1):
         try:
-            with urllib.request.urlopen(url, timeout=timeout) as resp:
+            with urlopen(url, timeout=timeout) as resp:
                 data = json.loads(resp.read())
             if not isinstance(data, dict):
                 logger.debug('CrossRef lookup malformed payload for DOI %r: root is %s', normalized_doi, type(data).__name__)
@@ -228,7 +228,7 @@ def fetch_publication_metadata(doi: str, timeout: int = CLI_CONFIG.timeouts.cros
                     normalized_doi,
                     delay,
                 )
-                time.sleep(delay)
+                sleep(delay)
                 continue
             if exc.code == 404:
                 logger.debug('CrossRef: no record found for DOI %r', normalized_doi)

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { FRONTEND_CONFIG } from '../config';
 import { apiGet, apiDelete, apiPost, apiUpload, formatUserError, formatResultTimestamp, buildApiUrl, formatPathStem } from '../api';
 
@@ -38,6 +38,7 @@ export function useProfileSubmit({
   const [activeJobId, setActiveJobId] = useState('');
   const [activeJobStatus, setActiveJobStatus] = useState('');
   const [isCancelingJob, setIsCancelingJob] = useState(false);
+  const isCancellationRequested = useRef(false);
 
   const selectedDatabase = databases.find((item) => item.id === selectedDatabaseId) || null;
 
@@ -54,7 +55,9 @@ export function useProfileSubmit({
     for (;;) {
       await new Promise((resolve) => setTimeout(resolve, FRONTEND_CONFIG.profile.jobPollIntervalMs));
       const payload = await apiGet(`/api/jobs/${jobId}`);
-      setActiveJobStatus(payload.status);
+      if (!isCancellationRequested.current) {
+        setActiveJobStatus(payload.status);
+      }
       if (payload.status === 'succeeded') return payload.result;
       if (payload.status === 'failed') throw new Error(formatUserError(payload.error || 'Job failed'));
     }
@@ -72,6 +75,7 @@ export function useProfileSubmit({
         threads: FRONTEND_CONFIG.profile.threads,
       };
       const submitResponse = await apiPost('/api/profile/fasta', fastaPayload);
+      isCancellationRequested.current = false;
       setActiveJobId(submitResponse.job_id);
       setActiveJobStatus('queued');
       const result = await pollJob(submitResponse.job_id);
@@ -110,6 +114,7 @@ export function useProfileSubmit({
         threads: FRONTEND_CONFIG.profile.threads,
       };
       const submitResponse = await apiPost('/api/profile/vcf', vcfPayload);
+      isCancellationRequested.current = false;
       setActiveJobId(submitResponse.job_id);
       setActiveJobStatus('queued');
       const result = await pollJob(submitResponse.job_id);
@@ -134,6 +139,7 @@ export function useProfileSubmit({
     }
 
     setIsCancelingJob(true);
+  isCancellationRequested.current = true;
     try {
       await apiDelete(`/api/jobs/${activeJobId}`);
       setActiveJobStatus('canceling');
@@ -210,6 +216,7 @@ export function useProfileSubmit({
       const submitResponse = await apiPost('/api/regenerate/json', {
         json_path: jsonInputPath,
       });
+      isCancellationRequested.current = false;
       setActiveJobId(submitResponse.job_id);
       setActiveJobStatus('queued');
       const result = await pollJob(submitResponse.job_id);
