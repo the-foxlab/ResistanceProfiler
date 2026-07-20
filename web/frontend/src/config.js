@@ -17,7 +17,7 @@ export const FRONTEND_CONFIG = {
     jobPollIntervalMs: 2000,
   },
   defaults: {
-    sampleName: 'sample',
+    sampleName: '',
   },
   ui: {
     explorerUrl: 'http://127.0.0.1:8000',

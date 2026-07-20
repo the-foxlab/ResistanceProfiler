@@ -24,7 +24,6 @@ const MODES = [
 
 
 export function DashboardView({
-  API_BASE,
   PROFILE_MODES,
   vcfInput,
   setVcfInput,
@@ -37,6 +36,7 @@ export function DashboardView({
   selectedDatabaseId,
   setSelectedDatabaseId,
   statusError,
+  legalLink,
   selectedProfileReportPath,
   setSelectedProfileReportPath,
   mutationFilter,
@@ -304,6 +304,11 @@ export function DashboardView({
             />
           )}
         </section>
+        {legalLink && (
+          <footer className="app-footer">
+            <a href={legalLink} target="_blank" rel="noreferrer">Legal notice</a>
+          </footer>
+        )}
       </div>
     </main>
   );

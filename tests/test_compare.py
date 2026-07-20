@@ -1322,3 +1322,195 @@ class TestBuildComparisonMatrixDbHitsOnly:
         assert result.db_hit_map == []
         assert result.features == []
         assert result.feature_map == []
+
+
+class TestBuildComparisonMatrixSampleDisambiguation:
+    """Test sample label disambiguation when names collide."""
+
+    def test_no_collision_different_names(
+        self,
+        results_dir: Path,
+        path_validators,
+    ) -> None:
+        """Two samples with different sample_name values keep their names unchanged."""
+        is_within, is_allowed = path_validators
+
+        p1 = _make_result_json(
+            results_dir / 'alpha.20260601000000000001.results.json',
+            sample_name='alpha',
+        )
+        p2 = _make_result_json(
+            results_dir / 'beta.20260602000000000002.results.json',
+            sample_name='beta',
+        )
+
+        result = build_comparison_matrix([p1, p2], results_dir, is_within, is_allowed)
+        assert result.samples == ['alpha', 'beta']
+
+    def test_collision_same_sample_name(
+        self,
+        results_dir: Path,
+        path_validators,
+    ) -> None:
+        """Two samples with same sample_name get disambiguated with filename."""
+        is_within, is_allowed = path_validators
+
+        p1 = _make_result_json(
+            results_dir / 'file_a.20260601000000000001.results.json',
+            sample_name='sample',
+        )
+        p2 = _make_result_json(
+            results_dir / 'file_b.20260602000000000002.results.json',
+            sample_name='sample',
+        )
+
+        result = build_comparison_matrix([p1, p2], results_dir, is_within, is_allowed)
+        assert result.samples == ['sample (file_a)', 'sample (file_b)']
+
+    def test_three_way_collision(
+        self,
+        results_dir: Path,
+        path_validators,
+    ) -> None:
+        """Three samples with same sample_name all get disambiguated."""
+        is_within, is_allowed = path_validators
+
+        p1 = _make_result_json(
+            results_dir / 'run1.20260601000000000001.results.json',
+            sample_name='mysample',
+        )
+        p2 = _make_result_json(
+            results_dir / 'run2.20260602000000000002.results.json',
+            sample_name='mysample',
+        )
+        p3 = _make_result_json(
+            results_dir / 'run3.20260603000000000003.results.json',
+            sample_name='mysample',
+        )
+
+        result = build_comparison_matrix([p1, p2, p3], results_dir, is_within, is_allowed)
+        assert result.samples == [
+            'mysample (run1)',
+            'mysample (run2)',
+            'mysample (run3)',
+        ]
+
+    def test_empty_sample_name_fallback(
+        self,
+        results_dir: Path,
+        path_validators,
+    ) -> None:
+        """Empty sample_name falls back to derived filename; collision still disambiguates."""
+        is_within, is_allowed = path_validators
+
+        # Single sample with empty sample_name -> uses derived name
+        p1 = _make_result_json(
+            results_dir / 'isolated.20260601000000000001.results.json',
+            sample_name='',
+        )
+        result = build_comparison_matrix([p1], results_dir, is_within, is_allowed)
+        assert result.samples == ['isolated']
+
+    def test_empty_sample_name_collision_with_matching_derived(
+        self,
+        results_dir: Path,
+        path_validators,
+    ) -> None:
+        """Two samples: one with explicit name matching the other's derived name."""
+        is_within, is_allowed = path_validators
+
+        # Both resolve to 'alpha': one via sample_name, one via fallback
+        p1 = _make_result_json(
+            results_dir / 'alpha.20260601000000000001.results.json',
+            sample_name='alpha',
+        )
+        p2 = _make_result_json(
+            results_dir / 'alpha.20260602000000000002.results.json',
+            sample_name='',
+        )
+
+        result = build_comparison_matrix([p1, p2], results_dir, is_within, is_allowed)
+        # Both have name='alpha', so disambiguation kicks in
+        assert result.samples == ['alpha (alpha)', 'alpha (alpha)']
+
+    def test_mixed_collision_and_unique(
+        self,
+        results_dir: Path,
+        path_validators,
+    ) -> None:
+        """Mixed: two collide, one is unique — only colliding pair is disambiguated."""
+        is_within, is_allowed = path_validators
+
+        p1 = _make_result_json(
+            results_dir / 'dup_a.20260601000000000001.results.json',
+            sample_name='dup',
+        )
+        p2 = _make_result_json(
+            results_dir / 'dup_b.20260602000000000002.results.json',
+            sample_name='dup',
+        )
+        p3 = _make_result_json(
+            results_dir / 'unique.20260603000000000003.results.json',
+            sample_name='unique',
+        )
+
+        result = build_comparison_matrix([p1, p2, p3], results_dir, is_within, is_allowed)
+        assert result.samples == ['dup (dup_a)', 'dup (dup_b)', 'unique']
+
+    def test_deduplication_same_path_passed_twice(
+        self,
+        results_dir: Path,
+        path_validators,
+    ) -> None:
+        """Same result file passed twice should only appear once."""
+        is_within, is_allowed = path_validators
+
+        p1 = _make_result_json(
+            results_dir / 'mysample.20260601000000000001.results.json',
+            sample_name='mysample',
+        )
+
+        result = build_comparison_matrix([p1, p1], results_dir, is_within, is_allowed)
+        assert result.samples == ['mysample']
+        assert result.sample_disambiguation_note != ''
+        assert 'merged' in result.sample_disambiguation_note.lower()
+
+    def test_no_note_when_no_collision_or_dedup(
+        self,
+        results_dir: Path,
+        path_validators,
+    ) -> None:
+        """No disambiguation note when all samples have unique names and no duplicates."""
+        is_within, is_allowed = path_validators
+
+        p1 = _make_result_json(
+            results_dir / 'alpha.20260601000000000001.results.json',
+            sample_name='alpha',
+        )
+        p2 = _make_result_json(
+            results_dir / 'beta.20260602000000000002.results.json',
+            sample_name='beta',
+        )
+
+        result = build_comparison_matrix([p1, p2], results_dir, is_within, is_allowed)
+        assert result.sample_disambiguation_note == ''
+
+    def test_note_mentions_collision_when_names_collide(
+        self,
+        results_dir: Path,
+        path_validators,
+    ) -> None:
+        """Disambiguation note mentions collisions when sample names collide."""
+        is_within, is_allowed = path_validators
+
+        p1 = _make_result_json(
+            results_dir / 'file_a.20260601000000000001.results.json',
+            sample_name='sample',
+        )
+        p2 = _make_result_json(
+            results_dir / 'file_b.20260602000000000002.results.json',
+            sample_name='sample',
+        )
+
+        result = build_comparison_matrix([p1, p2], results_dir, is_within, is_allowed)
+        assert 'filename' in result.sample_disambiguation_note.lower()

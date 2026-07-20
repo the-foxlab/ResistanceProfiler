@@ -61,7 +61,19 @@ def build_comparison_matrix(
     """
     _validate_paths(result_json_paths, results_dir, is_path_within_allowed_roots, is_allowed_artifact_path)
 
-    sample_data = _load_all_samples(result_json_paths)
+    # Deduplicate result paths (keep first occurrence)
+    seen_paths: set[Path] = set()
+    deduped_paths: list[Path] = []
+    deduplicated = False
+    for p in result_json_paths:
+        resolved = p.expanduser().resolve()
+        if resolved not in seen_paths:
+            seen_paths.add(resolved)
+            deduped_paths.append(p)
+        else:
+            deduplicated = True
+
+    sample_data = _load_all_samples(deduped_paths)
     _validate_same_database(sample_data)
     _validate_same_reference(sample_data)
 
@@ -74,17 +86,49 @@ def build_comparison_matrix(
     reference_name = first_run_payload.get('reference_name', '')
     feature_display_names = _build_feature_display_names(project_db_path, reference_name)
 
+    # Collect (sample_name_or_fallback, derived_filename) pairs
+    name_pairs: list[tuple[str, str]] = []
+    for path, _payload, run_payload in sample_data:
+        name = run_payload.get('sample_name') or _derive_sample_name(path)
+        derived = _derive_sample_name(path)
+        name_pairs.append((name, derived))
+
+    # Count how many times each name appears
+    name_counts: dict[str, int] = {}
+    for name, _derived in name_pairs:
+        name_counts[name] = name_counts.get(name, 0) + 1
+
+    # Build disambiguated display labels — add filename in parens only when name collides
+    disambiguated = any(count > 1 for count in name_counts.values())
+    display_labels: list[str] = []
+    for name, derived in name_pairs:
+        if name_counts[name] > 1:
+            display_labels.append(f'{name} ({derived})')
+        else:
+            display_labels.append(name)
+
+    # Determine disambiguation note
+    disambiguation_note = ''
+    if deduplicated or disambiguated:
+        note_parts = []
+        if deduplicated:
+            note_parts.append('Duplicate result files were merged.')
+        if disambiguated:
+            note_parts.append(
+                'Sample names with collisions show the source filename in parentheses.'
+            )
+        disambiguation_note = ' '.join(note_parts)
+
     samples: list[str] = []
     references: list[str] = []
     matrix: list[list[CompareCell]] = []
-    for path, payload, run_payload in sample_data:
-        sample_name = run_payload.get('sample_name') or _derive_sample_name(path)
+    for idx, (path, payload, run_payload) in enumerate(sample_data):
         ref_name = run_payload.get('reference_name', '')
         variant_lookup = _build_variant_lookup(payload)
         db_hit_keys = _collect_db_hit_keys(payload)
         coverage_gaps = _parse_coverage_gaps(payload)
 
-        samples.append(sample_name)
+        samples.append(display_labels[idx])
         references.append(ref_name)
         row = _build_matrix_row(all_mutations, variant_lookup, db_hit_keys, coverage_gaps)
         matrix.append(row)
@@ -139,6 +183,7 @@ def build_comparison_matrix(
         feature_display_names=feature_display_names,
         consequences=consequences,
         db_hit_map=db_hit_map,
+        sample_disambiguation_note=disambiguation_note,
         matrix=matrix,
     )
 

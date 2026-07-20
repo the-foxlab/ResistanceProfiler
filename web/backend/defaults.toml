@@ -12,7 +12,9 @@ job_timeout = 'RESPRO_WEB_JOB_TIMEOUT'
 job_retry_max = 'RESPRO_WEB_JOB_RETRY_MAX'
 job_retry_intervals = 'RESPRO_WEB_JOB_RETRY_INTERVALS'
 maintained_bootstrap = 'RESPRO_WEB_MAINTAINED_BOOTSTRAP'
+maintained_db_update_interval = 'RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS'
 trusted_proxies = 'RESPRO_WEB_TRUSTED_PROXIES'
+imprint = 'RESPRO_WEB_IMPRINT'
 
 [defaults]
 web_host = '127.0.0.1'
@@ -30,6 +32,7 @@ profile_queue_name = 'profiling'
 frontend_base_path = '/'
 service_name = 'respro-web-api'
 maintained_bootstrap = false
+maintained_db_update_interval_seconds = 604800
 
 [defaults.profile]
 sample_name = 'sample'

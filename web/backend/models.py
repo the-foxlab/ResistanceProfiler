@@ -165,4 +165,5 @@ class CompareResponse(BaseModel):
     feature_display_names: dict[str, str]  # feature_name -> display_name mapping
     consequences: list[str]  # consequence type per mutation column
     db_hit_map: list[bool]  # True if any sample has a db_hit for that mutation column
+    sample_disambiguation_note: str = ''
     matrix: list[list[CompareCell]]

@@ -282,7 +282,17 @@ Mark items done and update priorities after each completed milestone.
 
 - [X] Frontend chart library consolidation — migrated all recharts components (pie charts, IC50 scatter/bar, position stacked bars) to Plotly.js; removed recharts dependency; all charts now use a single rendering library
 
+### Web — Legal notice / imprint
+
+- [X] Support external imprint link + rename env var — renamed `RESPRO_WEB_IMPRESSUM_PATH` → `RESPRO_WEB_IMPRINT`; new `ImprintConfig(kind='path'|'url', html|url)` replaces `impressum_html`; `_resolve_imprint()` detects `scheme://` URLs (http/https only, others fail fast) vs local file paths (missing file fails fast); `build_legal_router` serves HTML (path) or 302-redirects (url); `/api/ui/legal` returns `{enabled, kind, url?}`; updated `web/backend/{config,defaults.toml,startup_config,main,routes/health}.py`. Backend tests: 6 cases (unset/path/url/missing-file/bad-scheme/env-resolve) pass. Scientific Review: APPROVED.
+- [X] Frontend renders external imprint as a direct link — `useDashboardLogic.js` exposes `legalLink` (null | external URL | `${API_BASE}/legal`) via `_resolveLegalLink` helper (backward-compatible with stale backends); `DashboardView.jsx` footer `<a href={legalLink}>` opens in new tab; removed now-unused `API_BASE` prop; 6 new `_resolveLegalLink` unit tests pass. Scientific Review: APPROVED.
+- [X] Document external-imprint option and env-var rename — `docs/docs/webapp.md` env table row, `.env` example, and "Legal notice / imprint" section rewritten with a URL-vs-path mode table and copy-pasteable examples for both modes; `docker-compose.web.yml` comments show both an external-URL and a mounted-HTML variant; `.gitignore` `impressum.html` → `imprint.html`. Scientific Review: APPROVED.
+- [X] Switch software license from MIT to AGPL-3.0-only 
+
+
 ---
+
+## Ready
 
 ## Next
 
@@ -327,4 +337,17 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
   bioconda-recipes; Bioconda is the standard distribution channel for bioinformatics CLI tools
   and avoids requiring users to have a working pip/Python setup; dependency on pysam makes
   Bioconda the natural distribution path once pysam is a requirement
-- 🟡 Established wet-lab protocols
+- 🟡 Established wet-lab protocols — protocols tab in the web app linking to sequencing
+  protocols on protocols.io; protocols are decoupled from project databases (no metadata.json
+  or SQLite changes) and fetched from a separate `protocols.json` in the respro-db companion
+  repo at startup; the JSON is keyed by display name (not pathogen) and each entry carries
+  `display_name`, `pathogen`, `targets` (gene/region list), `description`, and a
+  `protocols_io_uri` outbound link; iframe embedding is blocked by protocols.io
+  (`X-Frame-Options: SAMEORIGIN`), so the initial implementation renders metadata cards with
+  outbound links; a later enhancement can use the protocols.io v4 API
+  (`GET /api/v4/protocols/{id}?content_format=html`, requires a free client access token,
+  100 req/min limit) to fetch rendered protocol content server-side; backend adds a
+  `fetch_protocols()` call in startup (fail-soft, like maintained-DB bootstrap) and a
+  `GET /api/protocols` endpoint; frontend adds a new `ProtocolsTab.jsx` with a display-name
+  dropdown and metadata cards, wired as a new entry in the `MODES` sidebar; no CLI surface,
+  no `respro/` core changes

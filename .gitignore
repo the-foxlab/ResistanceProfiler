@@ -36,5 +36,7 @@ sample.report.html
 .env
 .vscode/
 docker-compose.web_2.yml
+imprint.html
 # MkDocs build output
 site/
+graphify-out

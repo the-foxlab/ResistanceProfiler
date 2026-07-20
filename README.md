@@ -1,6 +1,6 @@
 ![ResistanceProfiler](docs/docs/assets/logo.svg)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-2f6db3)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-2f6db3)
 
 Pathogen-agnostic antiviral resistance profiling from consensus sequences or VCF-derived variants.  
 
@@ -60,4 +60,4 @@ Open at `http://127.0.0.1:8000/`
 
 ## License
 
-MIT — source code only. External databases and references may carry separate licenses.
+AGPL v3.0 — source code only. External databases and references may carry separate licenses.

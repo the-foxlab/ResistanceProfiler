@@ -377,7 +377,7 @@ export function AboutTab({ setActiveMode }) {
             <h3>Licensing</h3>
           </div>
           <ul>
-            <li>ResistanceProfiler source code is released under the MIT License.</li>
+            <li>ResistanceProfiler source code is released under the GNU Affero General Public License v3.0.</li>
             <li>External references, rules, and publication-linked datasets may have separate licenses or citation requirements.</li>
             <li>Users are responsible for compliant use of third-party data in their own environments.</li>
           </ul>

@@ -23,7 +23,9 @@ class WebEnvKeys:
     job_retry_max: str = 'RESPRO_WEB_JOB_RETRY_MAX'
     job_retry_intervals: str = 'RESPRO_WEB_JOB_RETRY_INTERVALS'
     maintained_bootstrap: str = 'RESPRO_WEB_MAINTAINED_BOOTSTRAP'
+    maintained_db_update_interval: str = 'RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS'
     trusted_proxies: str = 'RESPRO_WEB_TRUSTED_PROXIES'
+    imprint: str = 'RESPRO_WEB_IMPRINT'
     max_batch_size: str = 'RESPRO_WEB_MAX_BATCH_SIZE'
 
 
@@ -46,6 +48,7 @@ class WebDefaults:
     frontend_base_path: str
     service_name: str
     maintained_bootstrap: bool
+    maintained_db_update_interval_seconds: int
     # Profile defaults
     profile_sample_name: str
     profile_threads: int
@@ -96,7 +99,9 @@ def _load_web_backend_config() -> WebBackendConfig:
         job_retry_max=str(env_payload['job_retry_max']),
         job_retry_intervals=str(env_payload['job_retry_intervals']),
         maintained_bootstrap=str(env_payload['maintained_bootstrap']),
+        maintained_db_update_interval=str(env_payload['maintained_db_update_interval']),
         trusted_proxies=str(env_payload['trusted_proxies']),
+        imprint=str(env_payload['imprint']),
     )
 
     defaults = WebDefaults(
@@ -117,6 +122,9 @@ def _load_web_backend_config() -> WebBackendConfig:
         frontend_base_path=str(defaults_payload['frontend_base_path']),
         service_name=str(defaults_payload['service_name']),
         maintained_bootstrap=bool(defaults_payload['maintained_bootstrap']),
+        maintained_db_update_interval_seconds=int(
+            defaults_payload['maintained_db_update_interval_seconds']
+        ),
         profile_sample_name=str(profile_payload['sample_name']),
         profile_threads=int(profile_payload['threads']),
         profile_min_af=float(profile_payload['min_af']),

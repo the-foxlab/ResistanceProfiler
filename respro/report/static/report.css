@@ -1663,7 +1663,8 @@ a.db-hit-pub-link:hover {
 /* Mini inline gene coverage bar — height matches the feature badge */
 .feature-coverage-bar {
   height: 1rem;
-  background: #e4a24c;
+  background: #4d4d4d;
+  border: 0.5px solid #4d4d4d;
   border-radius: 2px;
   overflow: hidden;
   align-self: center;
@@ -1671,7 +1672,8 @@ a.db-hit-pub-link:hover {
 
 .feature-coverage-bar__fill {
   height: 100%;
-  background: var(--sensitive-text);
+  background: #ffffff;
+  border: 0.5px solid #4d4d4d;
   border-radius: 2px;
 }
 

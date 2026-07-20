@@ -15,6 +15,7 @@ from jinja2 import BaseLoader, Environment
 from markupsafe import Markup, escape
 
 from respro import __version__
+from respro.config.cli_settings import CLI_CONFIG
 from respro.core.annotation import CONSEQUENCE_LABELS, HIGH_IMPACT_CONSEQUENCES, classify_similarity
 from respro.db.models import (
     FeatureRecord,
@@ -54,11 +55,11 @@ def _load_svg_data_url(asset_name: str) -> str:
 
 def build_report_context(
     result: ProfilingResult,
+    similarity_high: int = CLI_CONFIG.similarity.high,
+    similarity_moderate: int = CLI_CONFIG.similarity.moderate,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
     features: list[FeatureRecord] | None = None,
-    similarity_high: int = 1,
-    similarity_moderate: int = 0,
     af_high_pct_source_threshold: float = 0.75,
     af_intermediate_pct_source_threshold: float = 0.25,
     af_low_min_pct_source_threshold: float = 0.01,
@@ -127,13 +128,13 @@ def build_report_context(
     )
     similarity_entries = _build_potential_effects_rows(
         result,
-        rules or [],
-        display_names,
-        metric_thresholds,
-        drug_class_map,
-        drug_alias_map,
         similarity_high=similarity_high,
         similarity_moderate=similarity_moderate,
+        rules=rules or [],
+        display_names=display_names,
+        metric_thresholds=metric_thresholds,
+        drug_class_map=drug_class_map,
+        drug_alias_map=drug_alias_map,
     )
 
     summary_context = _build_summary_context(
@@ -227,12 +228,12 @@ def build_report_context(
 
 def render_html(
     result: ProfilingResult,
+    similarity_high: int = CLI_CONFIG.similarity.high,
+    similarity_moderate: int = CLI_CONFIG.similarity.moderate,
     plot_svg_data: bytes | None = None,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
     features: list[FeatureRecord] | None = None,
-    similarity_high: int = 1,
-    similarity_moderate: int = 0,
     af_high_pct_source_threshold: float = 0.75,
     af_intermediate_pct_source_threshold: float = 0.25,
     af_low_min_pct_source_threshold: float = 0.01,
@@ -288,12 +289,12 @@ def render_html(
 def write_html(
     result: ProfilingResult,
     output_path: Path,
+    similarity_high: int = CLI_CONFIG.similarity.high,
+    similarity_moderate: int = CLI_CONFIG.similarity.moderate,
     features: list[FeatureRecord] | None = None,
     plot_svg_data: bytes | None = None,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
-    similarity_high: int = 1,
-    similarity_moderate: int = 0,
     af_high_pct_source_threshold: float = 0.75,
     af_intermediate_pct_source_threshold: float = 0.25,
     af_low_min_pct_source_threshold: float = 0.01,
@@ -1031,13 +1032,13 @@ def _build_feature_cards(
 
 def _build_potential_effects_rows(
     result: ProfilingResult,
+    similarity_high: int = CLI_CONFIG.similarity.high,
+    similarity_moderate: int = CLI_CONFIG.similarity.moderate,
     rules: list[ResistanceRule] | None = None,
     display_names: dict[str, str] | None = None,
     metric_thresholds: dict[str, tuple[float, float] | None] | None = None,
     drug_class_map: dict[str, str] | None = None,
     drug_alias_map: dict[str, str] | None = None,
-    similarity_high: int = 1,
-    similarity_moderate: int = 0,
 ) -> dict:
     """
     Build the Similarity to Database Entries context.

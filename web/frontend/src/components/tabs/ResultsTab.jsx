@@ -1,5 +1,6 @@
 import { useState } from 'react';
 
+import infoIconSrc from '../../assets/info.svg';
 import { Spinner } from '../Spinner';
 import { ComparisonHeatmap } from '../ComparisonHeatmap';
 
@@ -179,7 +180,18 @@ export function ResultsTab({
           <section className="comparison-section">
             <div className="workspace-output-header section-header">
               <div>
-                <h3>Comparison heatmap</h3>
+                <h3>Comparison heatmap
+                  {comparisonData.sample_disambiguation_note && (
+                    <button
+                      type="button"
+                      className="input-info-btn"
+                      aria-label="Sample naming info"
+                      title={comparisonData.sample_disambiguation_note}
+                    >
+                      <img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" />
+                    </button>
+                  )}
+                </h3>
                 <p>
                   {comparisonData.samples.length} samples × {comparisonData.mutations.length} mutations
                   {comparisonData.references.length > 0 && ` — Reference: ${comparisonData.references[0]}`}

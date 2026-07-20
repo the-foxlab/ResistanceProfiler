@@ -13,6 +13,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from respro.config.cli_settings import CLI_CONFIG
 from respro.db.features import load_features_for_reference
 from respro.db.models import ProfilingResult
 from respro.db.results import (
@@ -193,6 +194,8 @@ def regenerate(
                 rules=rules,
                 extra_export_formats=extra_export_formats,
                 output_html_path=html_output_path,
+                similarity_high=CLI_CONFIG.similarity.high,
+                similarity_moderate=CLI_CONFIG.similarity.moderate,
             )
 
         console.print(Panel(

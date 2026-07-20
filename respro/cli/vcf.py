@@ -21,6 +21,7 @@ from respro.cli.profile_helpers import (
     _ProfilingRunContext,
     _resolve_reference,
 )
+from respro.config.cli_settings import CLI_CONFIG
 from respro.core.annotation import annotate_variants
 from respro.core.query import resolve_fasta_query
 from respro.core.vcf_coverage import compute_coverage_gaps_from_bam
@@ -177,7 +178,7 @@ def _profile_vcf_command(
             coverage_gaps=coverage_gaps or [],
             query_sequence=query_seq,
             feature_matches=fasta_matches or [],
-            af_bins=None,
+            af_bins=CLI_CONFIG.af_bins.as_dict(),
         )
         result, outputs = _finalize_and_export(
             ctx=ctx,

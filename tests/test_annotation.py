@@ -466,16 +466,22 @@ def _make_ann(af: float) -> AnnotatedVariant:
 class TestAssignAfBins:
     """Tests for VCF-mode and FASTA-mode AF binning."""
 
+    _VCF_BINS = {
+        'high': (0.75, 1.0),
+        'intermediate': (0.25, 0.7499),
+        'low': (0.01, 0.2499),
+    }
+
     def test_vcf_high(self) -> None:
-        anns = assign_af_bins([_make_ann(1.0)])
+        anns = assign_af_bins([_make_ann(1.0)], bins=self._VCF_BINS)
         assert anns[0].af_bin == 'high'
 
     def test_vcf_intermediate(self) -> None:
-        anns = assign_af_bins([_make_ann(0.5)])
+        anns = assign_af_bins([_make_ann(0.5)], bins=self._VCF_BINS)
         assert anns[0].af_bin == 'intermediate'
 
     def test_vcf_low(self) -> None:
-        anns = assign_af_bins([_make_ann(0.05)])
+        anns = assign_af_bins([_make_ann(0.05)], bins=self._VCF_BINS)
         assert anns[0].af_bin == 'low'
 
     # FASTA-mode bins: high=1.0, intermediate=0.5, low=0.33/0.25

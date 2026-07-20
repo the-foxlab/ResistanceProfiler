@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from rq import Queue
 
 from respro.db.results import load_run_from_json
@@ -31,6 +31,7 @@ def build_regenerate_router(
     @router.post('/api/regenerate/json', response_model=JobSubmitResponse)
     def regenerate_json_route(
         payload: RegenerateJsonPayload,
+        request: Request,
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
@@ -42,8 +43,13 @@ def build_regenerate_router(
 
         try:
             run_dict, _, _, _, _ = load_run_from_json(json_path)
+            # Read the mutable UUID index from app state so a weekly maintained-DB
+            # refresh (which assigns a new UUID) stays observable without mutating the
+            # frozen StartupConfig.
+            project_db_uuid_index = request.app.state.project_db_uuid_index
             project_db = resolve_regenerate_project_db_path(
-                config,
+                config.project_databases_dir,
+                project_db_uuid_index,
                 project_fingerprint=str(run_dict.get('project_fingerprint', '') or ''),
                 fallback_database_id=payload.database_id,
             )

@@ -30,7 +30,6 @@ class CliUrlConfig:
     crossref_works: str
     ncbi_protein_page: str
     ncbi_nuccore_efetch: str
-    github_respro_db_api: str
     github_respro_db_raw: str
 
 
@@ -139,7 +138,6 @@ def _load_cli_config() -> CliConfig:
             crossref_works=str(urls['crossref_works']),
             ncbi_protein_page=str(urls['ncbi_protein_page']),
             ncbi_nuccore_efetch=str(urls['ncbi_nuccore_efetch']),
-            github_respro_db_api=str(urls['github_respro_db_api']),
             github_respro_db_raw=str(urls['github_respro_db_raw']),
         ),
         parsing=CliParsingConfig(
