@@ -51,6 +51,7 @@ respro vcf --project my_folder/herpesdrg.db --vcf sample.vcf --ref-fasta ref.fas
 ## Web app
 
 ```bash
+git clone https://github.com/jonas-fuchs/ResistanceProfiler
 docker compose -f docker-compose.web.yml up --build
 ```
 

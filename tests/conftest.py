@@ -16,12 +16,48 @@ from Bio.Seq import Seq
 from Bio.SeqFeature import FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
 
-from respro.db.models import FeatureRecord
+from respro.db.models import FeatureMatch, FeatureRecord, ProfilingResult, ReferenceGroup
 from respro.db.schema import create_schema
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+
+def make_profiling_result(
+    *,
+    reference_name: str = '',
+    reference_length_nt: int = 0,
+    query_sequence: str = '',
+    feature_matches: list[FeatureMatch] | None = None,
+    organism: str = '',
+    reference_id: int = 1,
+    **kwargs,
+) -> ProfilingResult:
+    """Build a single-reference ProfilingResult from legacy scalar kwargs.
+
+    Wraps the scalar reference fields into a one-element ``references`` list
+    (a single :class:`ReferenceGroup`). Tests that previously constructed
+    ``ProfilingResult(reference_name=..., query_sequence=..., feature_matches=...)``
+    should call this helper instead, since the scalar fields were removed in
+    the multi-vcf-support feature.
+
+    Any additional ``kwargs`` (project_name, sample_name, annotations, etc.)
+    are forwarded to :class:`ProfilingResult`.
+    """
+    references: list[ReferenceGroup] = []
+    if reference_name or query_sequence or feature_matches or reference_length_nt:
+        references.append(ReferenceGroup(
+            reference_name=reference_name,
+            reference_id=reference_id,
+            organism=organism,
+            reference_length_nt=reference_length_nt,
+            query_name=reference_name,
+            query_sequence=query_sequence,
+            feature_matches=feature_matches or [],
+        ))
+    kwargs.setdefault('organism', organism)
+    return ProfilingResult(references=references, **kwargs)
 
 
 

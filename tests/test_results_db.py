@@ -15,6 +15,7 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
+from conftest import make_profiling_result
 
 from respro.cli.init import init_project
 from respro.db.features import load_features_for_reference
@@ -503,7 +504,7 @@ class TestResultsPersistence:
             ]
             formula_hits = [FormulaRuleHit(rule_set=rule_set, matched_variants=[ann])]
 
-        return ProfilingResult(
+        return make_profiling_result(
             project_name='Test Project',
             reference_name='ref1',
             sample_name='sample01',
@@ -696,7 +697,7 @@ class TestResultsPersistence:
                 results_conn,
                 project_db.resolve(),
                 project_conn,
-                ProfilingResult(
+                make_profiling_result(
                     project_name='split-test',
                     organism=ref_row['organism'] or '',
                     reference_name='tiny_ref',
@@ -714,7 +715,7 @@ class TestResultsPersistence:
             annotations = reconstruct_annotations(variant_rows)
             features = load_features_for_reference(project_conn, int(ref_row['id']))
             outputs = export_results(
-                ProfilingResult(
+                make_profiling_result(
                     project_name=run_dict['project_name'],
                     organism=ref_row['organism'] or '',
                     reference_name=run_dict['reference_name'],
@@ -778,7 +779,7 @@ class TestCoverageGapPersistence:
     def _make_result_with_gaps(self) -> ProfilingResult:
         v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=1.0, depth=0)
         ann = AnnotatedVariant(variant=v, feature_name='gag', codon_pos=1, consequence='missense', is_fasta_mode=True)
-        return ProfilingResult(
+        return make_profiling_result(
             project_name='Test',
             reference_name='ref1',
             vcf_name='sample.fasta',
@@ -814,7 +815,7 @@ class TestCoverageGapPersistence:
 
     def test_load_coverage_gaps_empty_for_run_without_gaps(self, results_conn, minimal_project_conn, tmp_path) -> None:
         v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='Test',
             reference_name='ref1',
             vcf_name='sample.vcf',

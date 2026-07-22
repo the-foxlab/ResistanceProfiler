@@ -15,7 +15,7 @@ from rich.panel import Panel
 
 from respro.config.cli_settings import CLI_CONFIG
 from respro.db.features import load_features_for_reference
-from respro.db.models import ProfilingResult
+from respro.db.models import ProfilingResult, ReferenceGroup
 from respro.db.results import (
     load_classifications,
     load_coverage_gaps,
@@ -142,25 +142,81 @@ def regenerate(
         else:
             logger.warning('%s has no stored fingerprint — skipping project validation.', run_label)
 
-        ref_row = project_conn.execute(
-            'SELECT id, organism, length FROM reference WHERE name = ?',
-            (run_dict['reference_name'],),
-        ).fetchone()
-        organism = ''
-        reference_length_nt = 0
-        ref_id = None
-        if ref_row is not None:
-            ref_id = int(ref_row['id'])
-            organism = ref_row['organism'] or ''
-            reference_length_nt = int(ref_row['length'] or 0)
-
         annotations = reconstruct_annotations(variant_rows)
         formula_hits = reconstruct_formula_rule_hits(formula_rows, annotations)
+
+        # Determine the distinct reference names stored for this run. Multi-reference
+        # runs persist one reference_name per variant_result row (results DB schema v2)
+        # or a top-level `references` list (JSON export). Single-reference and legacy
+        # runs fall back to run_dict['reference_name'].
+        reference_names: list[str] = []
+        seen: set[str] = set()
+        json_references = run_dict.get('references') or []
+        if json_references:
+            for ref in json_references:
+                name = ref.get('reference_name', '')
+                if name and name not in seen:
+                    seen.add(name)
+                    reference_names.append(name)
+        else:
+            for row in variant_rows:
+                name = row.get('reference_name', '') or run_dict.get('reference_name', '')
+                if name and name not in seen:
+                    seen.add(name)
+                    reference_names.append(name)
+        if not reference_names:
+            reference_names = [run_dict.get('reference_name', '')]
+
+        # Build one ReferenceGroup per distinct reference, accumulating the union of
+        # features/rules/rule_feature_names for export_results (matches the live
+        # multi-reference assembly path in profile_helpers._finalize_and_export_multi).
+        references: list[ReferenceGroup] = []
+        all_features: list = []
+        all_rules: list = []
+        all_rule_feature_names: set[str] = set()
+        primary_organism = ''
+        for ref_name in reference_names:
+            ref_row = project_conn.execute(
+                'SELECT id, organism, length FROM reference WHERE name = ?',
+                (ref_name,),
+            ).fetchone()
+            organism = ''
+            reference_length_nt = 0
+            ref_id = None
+            if ref_row is not None:
+                ref_id = int(ref_row['id'])
+                organism = ref_row['organism'] or ''
+                reference_length_nt = int(ref_row['length'] or 0)
+            if not primary_organism:
+                primary_organism = organism
+
+            ref_features: list = []
+            ref_rules: list = []
+            ref_rule_feature_names: set[str] = set()
+            if ref_id is not None:
+                ref_features = load_features_for_reference(project_conn, ref_id)
+                ref_rules = load_rules(project_conn, ref_id)
+                ref_rule_feature_names = {rule.feature_name for rule in ref_rules}
+            all_features.extend(ref_features)
+            all_rules.extend(ref_rules)
+            all_rule_feature_names |= ref_rule_feature_names
+
+            references.append(ReferenceGroup(
+                reference_name=ref_name,
+                reference_id=ref_id if ref_id is not None else 0,
+                organism=organism,
+                reference_length_nt=reference_length_nt,
+                query_name=ref_name,
+                query_sequence='',
+                feature_matches=[],
+                features=ref_features,
+                rules=ref_rules,
+                rule_feature_names=ref_rule_feature_names,
+            ))
+
         result = ProfilingResult(
             project_name=run_dict['project_name'],
-            organism=organism,
-            reference_name=run_dict['reference_name'],
-            reference_length_nt=reference_length_nt,
+            organism=primary_organism,
             sample_name=run_dict.get('sample_name', ''),
             vcf_name=run_dict['vcf_path'],
             run_timestamp=run_dict.get('created_at', ''),
@@ -171,15 +227,8 @@ def regenerate(
             formula_hits=formula_hits,
             coverage_gaps=coverage_gaps,
             sample_classifications=sample_classifications,
+            references=references,
         )
-
-        features = []
-        rules = []
-        rule_feature_names: set[str] = set()
-        if ref_id is not None:
-            features = load_features_for_reference(project_conn, ref_id)
-            rules = load_rules(project_conn, ref_id)
-            rule_feature_names = {rule.feature_name for rule in rules}
 
         default_stem = Path(run_dict['vcf_path']).stem.strip() or 'profile'
         html_output_path = resolve_output_file(out, f'{default_stem}.report.html')
@@ -188,10 +237,10 @@ def regenerate(
             outputs = export_results(
                 result,
                 html_output_path.parent,
-                features=features,
-                rule_feature_names=rule_feature_names,
+                features=all_features,
+                rule_feature_names=all_rule_feature_names,
                 project_conn=project_conn,
-                rules=rules,
+                rules=all_rules,
                 extra_export_formats=extra_export_formats,
                 output_html_path=html_output_path,
                 similarity_high=CLI_CONFIG.similarity.high,

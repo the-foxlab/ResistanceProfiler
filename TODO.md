@@ -294,6 +294,259 @@ Mark items done and update priorities after each completed milestone.
 
 ## Ready
 
+### Feature: multi-species-reporting
+
+Reporting redesign for multi-reference runs, driven by the user decision (2026-07): **always assume
+references are derived from one species; reject only when distinct species share a gene name.** Same
+species + different genes → no per-reference labelling. Different species + different genes →
+reference id column in tables, multi-reference header, per-reference feature attribution. Different
+species + same gene → hard reject. One genome overview per **internal reference** (collapse
+ReferenceGroups that share a `reference_id`), then the related feature panels. Remove the
+multi-species warning banner and the profiled-references section introduced in `multi-vcf-support` —
+proper handling makes them redundant. Drug interpretation stays one report. VCF mode only; FASTA
+mode unchanged. `RESULTS_SCHEMA_VERSION` stays at 1 (no migration).
+
+- [x] ✅ Validation gate: reject cross-species gene-name collisions — in
+  `respro/cli/profile_helpers.py::assemble_multi_reference_result`, after the `ReferenceGroup`s are
+  built, compute `organism_by_ref_id = {g.reference_id: g.organism for g in groups}` and the
+  matched feature names per group; if any feature name appears on groups belonging to **more than
+  one distinct organism**, raise `click.ClickException` with a message naming the colliding gene(s)
+  and the organisms (e.g. "gene 'UL23' matched references from multiple species
+  (Human alphaherpesvirus 1, Human alphaherpesvirus 2) — ambiguous cross-species hit; refusing to
+  report"). Same-species runs always pass regardless of shared gene names. The gate runs before any
+  plot/report generation so a rejected run produces no report. Affected modules:
+  `respro/cli/profile_helpers.py`. Acceptance: `example/multi-test-2` (HSV-1 UL23 + HSV-2 UL23) is
+  rejected with a `click.ClickException` naming UL23 and both organisms; `example/multi-test-1`
+  (two HSV-1 chroms) passes; a single-reference run is unaffected; a two-reference same-species run
+  with a shared gene name passes; Feature: multi-species-reporting (2026-07)
+- [x] ✅ Plots: one genome overview per internal reference — in
+  `respro/report/plots.py::_build_multi_reference_lollipop_figure`, iterate over **distinct
+  `reference_id`** values (collapsing ReferenceGroups that share a `reference_id`, e.g. the
+  targeted-sequencing case in `multi-test-1` where two chroms map to one HSV-1 reference) instead of
+  over `result.references`; for each distinct reference draw exactly one genome overview followed by
+  the feature panels whose features belong to that reference; scope feature-panel lookup by
+  `(reference_id, feature_name)` rather than by `feature_name` alone so panels never cross-contaminate
+  across references. The single-reference path (`_build_lollipop_figure` when
+  `len(result.references) == 1`) stays byte-identical. Affected modules: `respro/report/plots.py`.
+  Acceptance: `multi-test-1` produces a figure with exactly one genome overview (not two) and the
+  UL23 + UL30 panels once each; a two-distinct-reference run produces one overview per reference with
+  each reference's panels grouped under it; a single-reference run produces a figure identical to
+  today; Feature: multi-species-reporting (2026-07)
+- [x] ✅ Report header: state multiple references when multi-species — in
+  `respro/report/html.py::build_report_context`, replace the single `organism`/`reference` header
+  fields with logic that, when `len({g.organism for g in result.references}) > 1`, builds a header
+  stating multiple references/organisms (e.g. "Multiple references: Human alphaherpesvirus 1,
+  Human alphaherpesvirus 2"); when single-species (including same-species multi-reference), keep the
+  existing single-organism/single-reference header. Thread an `is_multi_species` flag
+  (`len({g.organism for g in result.references}) > 1`) into the context for downstream conditional
+  rendering. Affected modules: `respro/report/html.py`, `respro/report/templates/report.html.j2`.
+  Acceptance: a multi-species run renders a header naming multiple organisms; a same-species
+  multi-reference run renders the single-organism header (no "multiple references" text); a
+  single-reference run is byte-identical to today; Feature: multi-species-reporting (2026-07)
+- [x] ✅ Report: remove multi-species warning banner and profiled-references section — delete
+  `_multi_species_warning` and `_references_summary` from `respro/report/html.py` and remove the
+  `multi_species_warning` banner block and the `references_summary` "Profiled references" section
+  from `respro/report/templates/report.html.j2`; remove the corresponding keys from
+  `build_report_context`'s returned dict. Affected modules: `respro/report/html.py`,
+  `respro/report/templates/report.html.j2`. Acceptance: no warning banner and no profiled-references
+  section appear in any report (single-species, same-species multi-reference, or multi-species);
+  existing tests referencing `multi_species_warning` / `references_summary` are removed/updated;
+  Feature: multi-species-reporting (2026-07)
+- [x] ✅ Report: reference id column in Database Hits / All Mutations / Sequence Feature
+  Information tables — add a "Reference" column to the Database Hits, All Mutations, and Sequence
+  Feature Information tables in `respro/report/templates/report.html.j2` and the corresponding
+  row builders in `respro/report/html.py`; the column shows the `reference_name` (or `reference_id`)
+  for each row and is **rendered only when `context.is_multi_species` is true** (same-species runs,
+  including same-species multi-reference, show no such column to keep reports unchanged). Affected
+  modules: `respro/report/html.py`, `respro/report/templates/report.html.j2`. Acceptance: a
+  multi-species run shows the Reference column in all three tables with the correct per-row
+  reference; a same-species multi-reference run shows no Reference column; a single-reference run is
+  byte-identical to today; Feature: multi-species-reporting (2026-07)
+- [x] ✅ Report: affected sequence features per-reference attribution — in
+  `respro/report/html.py::_build_mutation_profile`, when `is_multi_species` is true, group mutations
+  by `(reference_id, feature_name)` instead of by `feature_name` alone and include the reference id
+  in each entry's badge/label so features from different species are visually distinguished; when
+  single-species, keep the existing feature-name-only grouping. Affected modules:
+  `respro/report/html.py`, `respro/report/templates/report.html.j2`. Acceptance: a multi-species run
+  renders affected features with per-reference attribution (no conflation of same-named genes across
+  species); a same-species run renders affected features exactly as today; Feature: multi-species-reporting (2026-07)
+- [x] ✅ Report: interpretation summary multi-species handling — in
+  `respro/report/html.py::_build_summary_narrative`, replace the single
+  `organism_name = escape(result.organism)` attribution with logic that, when `is_multi_species`,
+  attributes resistance-relevant features per organism/reference (the drug interpretation table
+  remains one combined report); when single-species, keep the existing narrative. Affected modules:
+  `respro/report/html.py`. Acceptance: a multi-species run produces a narrative that attributes
+  features to the correct organism/reference without implying a single species; a single-species run
+  produces a narrative byte-identical to today; Feature: multi-species-reporting (2026-07)
+- [x] ✅ Tests and validation: multi-species reporting regression suite — extend
+  `tests/test_profile_multi_vcf.py` (and fixtures in `tests/conftest.py`) to cover: (a)
+  `multi-test-1` (two HSV-1 chroms, one reference_id) → passes, one genome overview, no Reference
+  column, single-organism header; (b) `multi-test-2` (HSV-1 UL23 + HSV-2 UL23) → rejected by the
+  validation gate with a `click.ClickException` naming UL23 and both organisms; (c) a constructed
+  multi-species run with **non-colliding** gene names (e.g. HSV-1 UL23 + HSV-2 UL54, or two
+  synthetic organisms with disjoint feature names) → passes, shows the Reference column in all three
+  tables, multi-reference header, per-reference feature attribution, one genome overview per
+  reference; (d) a same-species two-reference run with a shared gene name → passes, no Reference
+  column, single-organism header; (e) single-reference regression unchanged. Affected modules:
+  `tests/test_profile_multi_vcf.py`, `tests/conftest.py`, `tests/test_report_outputs.py`. Acceptance:
+  all new tests pass; the full existing suite still passes; `ruff check .` is clean; Feature:
+  multi-species-reporting (2026-07)
+
+### Feature: multi-vcf-support
+
+VCF-mode only — accept a multi-chrom VCF plus a multi-record reference FASTA where each CHROM
+matches exactly one FASTA record by header. Two matching regimes are supported: multiple FASTA
+records aligning to the same internal reference (targeted sequencing of one pathogen's genes),
+and records aligning to different internal references (segmented viruses). FASTA mode is
+unchanged. Annotation pipeline (`annotate_variants`) is not touched. One HTML report is always
+produced, with per-reference subplots and sections; a warning (not an error) is issued when the
+matched references span different species. Survives `results.db` storage and `respro regenerate`.
+
+- [x] ✅ Foundation: multi-record query resolution and per-CHROM matching — relax
+  `respro/core/query.py::resolve_fasta_query` to accept a multi-record FASTA and return
+  `list[QueryRecord]` (one per FASTA record) where each `QueryRecord` carries
+  `(query_name, query_sequence, feature_matches)`; keep the existing single-record path as a
+  one-element list; reuse `pick_best_reference_id` + `select_matches_for_reference` per record so
+  multi-match-to-one-reference is handled as today; cache semantics preserved (one
+  `query_reference` row per FASTA record). Affected modules: `respro/core/query.py`,
+  `respro/core/alignment.py`, `respro/db/cache.py`. Acceptance: a 2-record FASTA where both
+  records align to one internal reference returns 2 `QueryRecord`s both pointing at the same
+  `reference_id`; a 2-record FASTA where records align to two different references returns 2
+  `QueryRecord`s with distinct `reference_id`s; the single-record regression path still passes
+  all existing `tests/test_profile_*.py` tests; Feature: multi-vcf-support — completed 2026-07
+- [x] ✅ Foundation: per-CHROM variant routing and remap — in `respro/cli/vcf.py`, group parsed
+  variants by `variant.chrom` and pair each group with the `QueryRecord` whose `query_name`
+  matches that CHROM; variants whose CHROM has no matching FASTA record are logged as a warning
+  and dropped; if **no** CHROM matches any FASTA record, raise a hard error
+  (`click.ClickException`) listing the unmatched CHROMs and FASTA headers; call
+  `remap_variants(variants_for_chrom, matches_for_chrom, query_sequence_for_chrom)` per CHROM and
+  concatenate the remapped variants; `annotate_variants` is then called once on the concatenated
+  list with the union of features across matched references (do NOT modify
+  `annotate_variants`). Affected modules: `respro/cli/vcf.py`, `respro/core/vcf_remap.py`
+  (only its caller, not the function). Acceptance: a multi-chrom VCF with 2 CHROMs each matching
+  a different FASTA record yields remapped variants on both internal references in one
+  `annotate_variants` call; a VCF with one unmatched CHROM produces a `logger.warning` and
+  continues; a VCF with all CHROMs unmatched raises `click.ClickException`; Feature: multi-vcf-support — completed 2026-07
+- [x] ✅ Foundation: multi-reference data structure — extend `respro/db/models.py::ProfilingResult`
+  to carry multiple matched references by adding a `references: list[ReferenceGroup]` field where
+  `ReferenceGroup` is a new frozen dataclass holding `(reference_name, reference_id, organism,
+  reference_length_nt, query_name, query_sequence, feature_matches, features, rules,
+  formula_rules, rule_feature_names)`; **remove** the existing single-reference scalar fields
+  (`reference_name`, `reference_length_nt`, `query_sequence`, `feature_matches`) from
+  `ProfilingResult` — no backward-compatibility shim is needed (per user decision 2026-07-21),
+  so all readers are migrated to `result.references[i].<field>` in the same feature; `annotations`,
+  `coverage_gaps`, and `formula_hits` remain flat lists on `ProfilingResult` (each
+  `AnnotatedVariant` already carries `feature_name`, and features are unique per reference, so
+  per-reference grouping is derivable). Affected modules: `respro/db/models.py`, plus every
+  reader of the removed scalar fields (report layer, results DB, regenerate, JSON export — all
+  migrated in their own tickets within this feature). Acceptance: `ProfilingResult` exposes only
+  `references: list[ReferenceGroup]` for per-reference data (no `reference_name` /
+  `reference_length_nt` / `query_sequence` / `feature_matches` scalars); a single-reference run
+  constructs a one-element `references` list; a two-reference run constructs two `ReferenceGroup`s
+  with disjoint `feature_matches`; `tests/test_results_db.py` and `tests/test_report_outputs.py`
+  are updated in this ticket to read from `result.references[0]` and pass; Feature: multi-vcf-support — completed 2026-07
+- [x] ✅ Core: multi-reference rule matching and result assembly — in
+  `respro/cli/profile_helpers.py`, replace the single-`ref_id` flow in `_resolve_reference` and
+  `_load_reference_data` with a per-`QueryRecord` loop that builds one `ReferenceGroup` per
+  matched internal reference (loading features/rules/formula_rules per `reference_id`); run
+  `match_rules` and `match_formula_rules` per reference against the annotations whose
+  `feature_name` belongs to that reference's features; assemble a single `ProfilingResult`
+  populated **only** with the `references: list[ReferenceGroup]` (no scalar reference fields —
+  see ticket 3) plus the flat `annotations`/`formula_hits`/`coverage_gaps` lists; require
+  at least one `QueryRecord` to have aligned to an internal reference that has rules loaded
+  (`rule_feature_names` non-empty) — otherwise raise `click.ClickException` ("no matched
+  reference has resistance rules in the project database"); orphaned references (aligned to a
+  reference with no rules, or no alignment) are kept and reported with a warning, not an error.
+  Affected modules: `respro/cli/profile_helpers.py`, `respro/cli/vcf.py`. Acceptance: a 2-record
+  submission where only one reference has rules completes successfully and the other reference's
+  features appear in the report without rule hits; a submission where no matched reference has
+  rules raises `click.ClickException`; a single-record submission behaves identically to today;
+  Feature: multi-vcf-support — completed 2026-07
+- [x] ✅ Core: multi-reference BAM coverage — extend
+  `respro/core/vcf_coverage.py::compute_coverage_gaps_from_bam` to accept a per-CHROM mapping
+  (`dict[str, tuple[str, str, list[FeatureMatch]]]` of chrom → `(query_name, query_sequence,
+  matches)`) and loop over each CHROM, using `_resolve_bam_contig` per CHROM (pysam exposes
+  per-contig `fetch`); concatenate the resulting `CoverageGap` lists; keep the existing
+  single-CHROM signature as a thin wrapper that builds a one-entry dict so existing callers and
+  tests are unchanged. Affected modules: `respro/core/vcf_coverage.py`, `respro/cli/vcf.py`.
+  Acceptance: a 2-CHROM BAM + 2-record FASTA yields `CoverageGap`s on features of both
+  references; a single-CHROM BAM still produces identical output to today (existing
+  `tests/test_vcf_coverage.py` passes); a BAM whose contig name has no matching FASTA record
+  logs a warning and skips that contig; Feature: multi-vcf-support — completed 2026-07
+- [x] ✅ Reporting: per-reference subplots and report sections — extend
+  `respro/report/plots.py::_build_lollipop_figure` to draw one genome-overview + feature-panel
+  group per `ReferenceGroup` in `result.references`, stacked vertically with a per-reference
+  title (reference name + organism); the single-reference path produces a figure visually
+  identical to today; extend `respro/report/html.py::build_report_context` so the Summary,
+  Database Hits, All Mutations, and Sequence Feature Information tabs render one section per
+  reference (collapsible headers labelled with reference name and organism), sharing the existing
+  per-section rendering helpers; when `result.references` spans more than one distinct
+  `organism`, emit a visible warning banner in the report header ("matched references span
+  multiple species — results are reported per reference") — this is a warning only, the single
+  HTML is always produced. Affected modules: `respro/report/plots.py`, `respro/report/html.py`,
+  `respro/report/templates/`. Acceptance: a 2-reference run produces one HTML file with two
+  genome-overview sections and two feature-panel groups in the lollipop figure, and per-reference
+  sections in each tab; a single-reference run produces a report byte-identical (modulo
+  timestamp) to today; the multi-species warning banner is present iff `len({g.organism for g in
+  result.references}) > 1`; Feature: multi-vcf-support — completed 2026-07
+- [x] ✅ Persistence: results DB schema and save/load for multi-reference runs — bump
+  `RESULTS_SCHEMA_VERSION` to 2 in `respro/db/schema.py` and add a nullable `reference_name`
+  column to `variant_result`, `coverage_gap`, and `formula_rule_hit` (auto-migrated on open via
+  the existing `_RESULTS_OPTIONAL_TABLES_SQL` / column-add path); in
+  `respro/db/results.py::save_run`, write each `ReferenceGroup`'s `reference_name` (resolved
+  via `ProfilingResult.references` — there is no scalar `result.reference_name` anymore, see
+  ticket 3) into the new column for every row belonging to that group, by joining on
+  `feature_name → ReferenceGroup.features`; in `load_run` / `load_coverage_gaps` /
+  `load_formula_rule_hits`, return the new column in each row dict; the `run` table keeps a single
+  `reference_name` populated with the primary reference (first `ReferenceGroup`) for `list_runs`
+  display continuity only. Affected modules: `respro/db/schema.py`, `respro/db/results.py`.
+  Acceptance: a 2-reference run saves and reloads with each `variant_result` row carrying the
+  correct `reference_name`; opening an existing v1 results DB auto-migrates to v2 without data
+  loss (existing `tests/test_results_db.py` migration tests extended and passing); a
+  single-reference run round-trips with `variant_result.reference_name` equal to
+  `result.references[0].reference_name`; Feature: multi-vcf-support — completed 2026-07
+- [x] ✅ Regeneration: multi-reference regenerate — update `respro/cli/regenerate.py` to read the
+  distinct `reference_name` values from the stored `variant_result` rows, look up each in the
+  `reference` table, and load `features`/`rules`/`formula_rules` per reference; reconstruct one
+  `ReferenceGroup` per distinct reference and populate `ProfilingResult.references` (the only
+  per-reference carrier — no scalar fields, per ticket 3); pass the full reference list into
+  `export_results` so the regenerated HTML/JSON/PDF match the original multi-reference report;
+  apply the same path to `regenerate --json` by extending `load_run_from_json` and `write_json`
+  to serialise the `references` list and per-variant `reference_name`. Affected modules:
+  `respro/cli/regenerate.py`, `respro/db/results.py`, `respro/report/non_html_exports.py`.
+  Acceptance: a stored 2-reference run regenerated from `results.db` produces a report with the
+  same per-reference sections and subplots as the original; `regenerate --json` on a
+  multi-reference `*.results.json` round-trips the `references` list; a stored single-reference
+  run regenerates to a report with one `ReferenceGroup` and per-reference sections equivalent to
+  today (no scalar-field fallback path exercised); Feature: multi-vcf-support — completed 2026-07
+- [x] ✅ Webapp: surface multi-chrom VCF support — update the VCF and Reference FASTA tooltip
+  text in `web/frontend/src/components/tabs/AnalyzeTab.jsx` to state that the VCF may be
+  multi-chrom and the reference FASTA may be multi-record with one record per CHROM; update the
+  `respro vcf` example in `web/frontend/src/components/tabs/AboutTab.jsx` and the
+  `docs/docs/cli-reference.md` / `docs/docs/quickstart.md` to mention multi-chrom support; no
+  backend route, payload, or job-function changes (the existing `ProfileVcfPayload` already
+  passes one VCF + one reference FASTA through to `respro vcf`); the upload validator in
+  `web/backend/services/upload.py` already accepts multi-record FASTA and multi-chrom VCF, so no
+  validation change is needed. Affected modules: `web/frontend/src/components/tabs/AnalyzeTab.jsx`,
+  `web/frontend/src/components/tabs/AboutTab.jsx`, `docs/docs/cli-reference.md`,
+  `docs/docs/quickstart.md`. Acceptance: the Analyze tab tooltip and About tab example mention
+  multi-chrom VCF + multi-record reference FASTA; a manual end-to-end submission of a 2-chrom
+  VCF + 2-record FASTA through the webapp produces the multi-reference HTML report; Feature:
+  multi-vcf-support — completed 2026-07
+- [x] ✅ Tests and validation: multi-vcf regression suite — add a `tests/test_profile_multi_vcf.py`
+  covering: (a) 2 FASTA records aligning to one internal reference (targeted-sequencing case);
+  (b) 2 FASTA records aligning to two different internal references (segmented-virus case);
+  (c) VCF with one unmatched CHROM → warning + continued run; (d) VCF with all CHROMs unmatched
+  → `click.ClickException`; (e) no matched reference has rules → `click.ClickException`; (f)
+  2-CHROM BAM coverage projection; (g) `save_run` → `load_run` → `regenerate` round-trip for a
+  2-reference run; (h) multi-species warning banner present iff organisms differ; (i) JSON
+  export → `regenerate --json` round-trip preserves the `references` list; (j) single-record
+  regression (existing tests unchanged). Build the multi-reference project DB in a fixture by
+  reusing the existing `write_genbank` helper from `tests/conftest.py` with two GenBank records
+  whose features carry rules. Affected modules: `tests/test_profile_multi_vcf.py`,
+  `tests/conftest.py`. Acceptance: all new tests pass; the full existing suite still passes;
+  Feature: multi-vcf-support — completed 2026-07
+
 ## Next
 
 Items are grouped by theme and ordered by priority within each group.
@@ -301,15 +554,6 @@ Priority: 🔴 high · 🟡 medium · 🟢 low
 
 ### Usability and workflow
 
-- 🟡 Multi-chrom VCF and multi-record query FASTA support — a single VCF may carry variants
-  across multiple CHROM identifiers (e.g. segmented viruses, amplicon panels spanning disjoint
-  regions); the `--ref-fasta` supplied to `profile-vcf` must then be a multi-record FASTA with
-  one sequence per CHROM; `parse_vcf` already stores the CHROM field per variant; the alignment
-  step in `resolve_fasta_query` must be extended to accept a multi-record FASTA and return one
-  set of CIGAR mappings per record; `remap_variants` routes each variant to the CIGAR map whose
-  query name matches the variant's CHROM; all remapped variants from all chroms are then fed into
-  the existing `annotate_variants` + rule-matching pipeline unchanged and aggregated into a single
-  `ProfilingResult`; the report should note the number of distinct chroms processed
 - 🟢 Sanger AB1 input — add `respro profile-ab1` that reads an AB1 trace file via
   `SeqIO.read(..., 'abi')` and derives a quality-aware consensus sequence that feeds directly into
   the existing FASTA profiling pipeline; the quality model uses raw trace peak data

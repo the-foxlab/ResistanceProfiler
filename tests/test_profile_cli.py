@@ -8,7 +8,7 @@ from io import StringIO
 from pathlib import Path
 
 import pysam
-from conftest import TINY_REF_SEQ, write_genbank
+from conftest import TINY_REF_SEQ, make_profiling_result, write_genbank
 from rich.console import Console
 from typer.testing import CliRunner
 
@@ -17,7 +17,6 @@ from respro.cli.profile_helpers import _print_completion_panel
 from respro.db.models import (
     AnnotatedVariant,
     FormulaRuleHit,
-    ProfilingResult,
     ResistanceRule,
     ResistanceRuleSet,
     VariantCall,
@@ -89,6 +88,7 @@ class TestProfileCli:
             'coverage_gap',
             'formula_rule_hit',
             'sample_classification',
+            'references',
         }
         assert 'id' not in payload['run']
         assert all('run_id' not in row for row in payload['variant_result'])
@@ -204,7 +204,7 @@ class TestProfileCli:
             phenotype='resistant',
             group_name='formula_1',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='Test Project',
             reference_name='tiny_ref',
             sample_name='sample01',
@@ -370,7 +370,7 @@ class TestProfileCli:
             FormulaRuleHit(rule_set=formula_rule_set_c, matched_variants=[ann_d]),
         ]
 
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='Test Project',
             reference_name='ref',
             sample_name='sample01',

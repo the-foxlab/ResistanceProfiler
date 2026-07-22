@@ -13,7 +13,13 @@ import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 
-from respro.db.models import AnnotatedVariant, CoverageGap, FeatureRecord, ProfilingResult
+from respro.db.models import (
+    AnnotatedVariant,
+    CoverageGap,
+    FeatureRecord,
+    ProfilingResult,
+    ReferenceGroup,
+)
 from respro.report.palette import (
     CDS_HIGHLIGHTED_COLOUR,
     FEATURE_BASELINE_COLOUR,
@@ -85,12 +91,261 @@ def render_lollipop_plot_bytes(
     return buf.getvalue()
 
 
+def _build_multi_reference_lollipop_figure(
+    result: ProfilingResult,
+    features: list[FeatureRecord],
+    rule_feature_names: set[str] | None = None,
+):
+    """
+    Build a lollipop figure with one genome-overview + feature-panel group per reference.
+
+    Each :class:`ReferenceGroup` in ``result.references`` is rendered as a vertically
+    stacked group: a per-reference genome overview (titled with reference name + organism)
+    followed by that reference's feature tracks and lollipop panels. The single-reference
+    path is handled by :func:`_build_lollipop_figure` and is unchanged.
+
+    :param result: profiling result with >1 ReferenceGroup
+    :param features: union of feature records across all references
+    :param rule_feature_names: optional rule-backed feature names to focus feature panels
+    :return: matplotlib Figure, or None when nothing can be plotted
+    """
+    features_by_ref: dict[int, list[FeatureRecord]] = {}
+    for feature in features:
+        features_by_ref.setdefault(feature.reference_id, []).append(feature)
+
+    all_cds = result.cds_annotations
+    coverage_gaps_by_feature = _group_coverage_gaps_by_feature(result.coverage_gaps)
+    database_hit_annotation_ids = {id(ann) for ann in result.database_hit_annotations}
+
+    # Build per-reference row plans. Iterate over DISTINCT reference_id values, not over
+    # ReferenceGroups: in the targeted-sequencing case two chroms map to one internal
+    # reference and produce two ReferenceGroups sharing one reference_id. Collapsing by
+    # reference_id draws exactly one genome overview per internal reference (not one per
+    # chrom) and merges both chroms' annotations into that reference's feature panels.
+    # Use the first ReferenceGroup for each reference_id as the representative (all groups
+    # sharing a reference_id carry the same reference_name/organism/length/features).
+    representative_by_ref_id: dict[int, ReferenceGroup] = {}
+    for rg in result.references:
+        representative_by_ref_id.setdefault(rg.reference_id, rg)
+
+    per_ref_plan: list[tuple[ReferenceGroup, list[dict], list[FeatureRecord]]] = []
+    for ref_id, rg in representative_by_ref_id.items():
+        ref_features = features_by_ref.get(ref_id, [])
+        ref_feature_names = {f.name for f in ref_features}
+        # Collect CDS annotations from ALL chroms belonging to this reference_id. In the
+        # targeted case annotations span multiple chroms (ReferenceGroups) that share this
+        # reference_id; scoping by feature_name (unique per reference) gathers them all.
+        ref_cds = [a for a in all_cds if a.feature_name in ref_feature_names]
+        ref_coverage = {
+            fname: gaps for fname, gaps in coverage_gaps_by_feature.items()
+            if fname in ref_feature_names
+        }
+        if not ref_cds and not ref_coverage:
+            continue
+        plot_features = _select_plot_features(
+            ref_features,
+            ref_cds,
+            rule_feature_names,
+            coverage_feature_names=set(ref_coverage),
+        )
+        if not plot_features:
+            continue
+        rows = _plan_reference_rows(ref_cds, ref_coverage, plot_features, ref_features)
+        if rows:
+            per_ref_plan.append((rg, rows, plot_features))
+
+    if not per_ref_plan:
+        logger.warning('No reference groups produced plottable features')
+        return None
+
+    subplot_rows: list[dict] = []
+    for rg, rows, _ in per_ref_plan:
+        for row in reversed(rows):
+            subplot_rows.append({**row, 'reference_group': rg})
+    height_ratios = [2.0 if row['kind'] == 'lollipop' else 0.5 for row in subplot_rows]
+    fig_height = 2 + 1.7 * (len(height_ratios) - 1)
+    fig, axes = plt.subplots(
+        len(height_ratios), 1,
+        figsize=(16, fig_height),
+        height_ratios=height_ratios,
+    )
+    axes_list = list(axes if isinstance(axes, (list, tuple)) else axes.flat)
+    row_axes = list(zip(subplot_rows, axes_list))
+
+    # Draw each row, scoped to its reference group.
+    # Key lollipop rows by (reference_id, feature_name) — not feature_name alone — so that
+    # same-named features on distinct references (e.g. two same-species references both
+    # carrying UL23) never cross-link each other's track/lollipop xlim. The reference_group
+    # attached to each row carries the reference_id.
+    lollipop_rows_by_ref_and_feature: dict[tuple[int, str], list[tuple[dict, object]]] = {}
+    for row, ax in row_axes:
+        if row['kind'] != 'lollipop':
+            continue
+        rg = row['reference_group']
+        key = (rg.reference_id, row['feature'].name)
+        lollipop_rows_by_ref_and_feature.setdefault(key, []).append((row, ax))
+
+    shared_track_ax_by_row_id: dict[int, object] = {}
+    for row, ax in row_axes:
+        if row['kind'] != 'track':
+            continue
+        rg = row['reference_group']
+        key = (rg.reference_id, row['feature'].name)
+        candidates = lollipop_rows_by_ref_and_feature.get(key, [])
+        if candidates:
+            shared_track_ax_by_row_id[id(row)] = candidates[0][1]
+
+    first_lollipop_ax = None
+    for row, ax in row_axes:
+        row_kind = row['kind']
+        rg = row['reference_group']
+        if row_kind == 'genome':
+            ref_features = features_by_ref.get(rg.reference_id, [])
+            cds_highlighted = row.get('cds_highlighted', set())
+            _draw_genome_overview(
+                ax, ref_features, cds_highlighted,
+                reference_length_nt=rg.reference_length_nt,
+            )
+            title = rg.reference_name
+            if rg.organism:
+                title = f'{rg.reference_name} ({rg.organism})'
+            ax.set_title(title, fontsize=10, loc='left', pad=6)
+            continue
+
+        feature = row['feature']
+        if row_kind == 'track':
+            mat_peptides = row.get('mat_peptides')
+            panel_name = 'Mature Peptide' if feature.feature_type == 'mat_peptide' else 'CDS'
+            _draw_feature_track(
+                ax, feature,
+                mat_peptide_overlays=mat_peptides,
+                parent_feature=row.get('parent_feature'),
+                rule_feature_names=rule_feature_names,
+                panel_name=panel_name,
+            )
+            shared_lollipop_ax = shared_track_ax_by_row_id.get(id(row))
+            if shared_lollipop_ax is not None:
+                ax.set_xlim(shared_lollipop_ax.get_xlim())
+            continue
+
+        if first_lollipop_ax is None:
+            first_lollipop_ax = ax
+        _draw_feature_panel(
+            ax,
+            feature,
+            row.get('annotations', []),
+            coverage_gaps=row.get('coverage_gaps', []),
+            database_hit_annotation_ids=database_hit_annotation_ids,
+            shared_track_ax=None,
+        )
+
+    # Legend on the first lollipop axis.
+    legend_handles = [
+        plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='white',
+                   markeredgecolor='black', markersize=8, label='Database hit'),
+    ]
+    effects_for_legend = {ann.consequence for ann in all_cds}
+    has_coverage_overlay = any(
+        coverage_gaps_by_feature.get(row['feature'].name)
+        for row in subplot_rows if row['kind'] == 'lollipop'
+    )
+    has_introns = any(_feature_intron_gaps(f) for _, _, plot_features in per_ref_plan for f in plot_features)
+    if has_coverage_overlay:
+        legend_handles.append(mpatches.Patch(facecolor=NON_COVERED_COLOUR, alpha=0.12, edgecolor='none', label='non covered'))
+    if has_introns:
+        legend_handles.append(mpatches.Patch(facecolor=FEATURE_INTRON_COLOUR, label='Intron (non-coding)'))
+    legend_handles.extend(mutation_legend_patches(effects_for_legend))
+    if first_lollipop_ax is not None:
+        first_lollipop_ax.legend(
+            handles=legend_handles, loc='upper right', fontsize=7,
+            ncol=len(legend_handles), frameon=False,
+            bbox_to_anchor=(1, 1.25), borderaxespad=0.0,
+        )
+    plt.tight_layout()
+    return fig
+
+
+def _plan_reference_rows(
+    cds: list,
+    coverage_gaps_by_feature: dict,
+    plot_features: list[FeatureRecord],
+    all_ref_features: list[FeatureRecord],
+) -> list[dict]:
+    """Build the row plan (genome + tracks + lollipops) for one reference group."""
+    selected_feature_names = {feature.name for feature in plot_features}
+    cds = [ann for ann in cds if ann.feature_name in selected_feature_names]
+    coverage_gaps_by_feature = {
+        fname: gaps for fname, gaps in coverage_gaps_by_feature.items()
+        if fname in selected_feature_names
+    }
+    if not cds and not coverage_gaps_by_feature:
+        return []
+
+    feature_annotations = _group_annotations_by_feature(cds, plot_features)
+    feature_by_name = {feature.name: feature for feature in all_ref_features}
+
+    mat_peptides_by_parent: dict[str, list[FeatureRecord]] = {}
+    for feature in plot_features:
+        if feature.feature_type == 'mat_peptide' and feature.parent_feature_name:
+            mat_peptides_by_parent.setdefault(feature.parent_feature_name, []).append(feature)
+
+    main_features_by_name: dict[str, FeatureRecord] = {
+        feature.name: feature
+        for feature in plot_features
+        if feature.feature_type != 'mat_peptide'
+    }
+    for parent_name in mat_peptides_by_parent:
+        parent_feature = feature_by_name.get(parent_name)
+        if parent_feature is not None:
+            main_features_by_name[parent_name] = parent_feature
+
+    main_features = sorted(
+        main_features_by_name.values(),
+        key=lambda feature: (feature.start, feature.end, feature.name),
+    )
+    if not main_features:
+        return []
+
+    cds_highlighted: set[str] = set()
+    for feature_name in feature_annotations:
+        feature = feature_by_name.get(feature_name)
+        if feature and feature.feature_type == 'mat_peptide' and feature.parent_feature_name:
+            cds_highlighted.add(feature.parent_feature_name)
+        else:
+            cds_highlighted.add(feature_name)
+
+    rows: list[dict] = [{'kind': 'genome', 'cds_highlighted': cds_highlighted}]
+    for feature in main_features:
+        mat_peptides = sorted(
+            mat_peptides_by_parent.get(feature.name, []),
+            key=lambda mp: (mp.start, mp.end, mp.name),
+        )
+        rows.append({'kind': 'track', 'feature': feature, 'mat_peptides': mat_peptides, 'parent_feature': None})
+        if mat_peptides:
+            for mat_peptide in mat_peptides:
+                rows.append({'kind': 'track', 'feature': mat_peptide, 'parent_feature': feature})
+                rows.append({
+                    'kind': 'lollipop', 'feature': mat_peptide,
+                    'annotations': feature_annotations.get(mat_peptide.name, []),
+                    'coverage_gaps': coverage_gaps_by_feature.get(mat_peptide.name, []),
+                })
+        else:
+            rows.append({
+                'kind': 'lollipop', 'feature': feature,
+                'annotations': feature_annotations.get(feature.name, []),
+                'coverage_gaps': coverage_gaps_by_feature.get(feature.name, []),
+            })
+    return rows
+
+
 def _build_lollipop_figure(
     result: ProfilingResult,
     features: list[FeatureRecord],
     rule_feature_names: set[str] | None = None,
 ):
     """Build the matplotlib figure used by the HTML and PDF reports."""
+    if len(result.references) > 1:
+        return _build_multi_reference_lollipop_figure(result, features, rule_feature_names)
     cds = result.cds_annotations
     coverage_gaps_by_feature = _group_coverage_gaps_by_feature(result.coverage_gaps)
     if not cds and not coverage_gaps_by_feature:

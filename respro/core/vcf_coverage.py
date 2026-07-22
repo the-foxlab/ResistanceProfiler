@@ -25,9 +25,8 @@ def compute_coverage_gaps_from_bam(
     """
     Compute non-covered codon stretches by projecting BAM depth to internal CDS coordinates.
 
-    Codons are marked non-covered when any codon nucleotide is either:
-    - not projectable from internal CDS to query coordinates (alignment gap), or
-    - covered below ``min_depth`` in the BAM.
+    Thin single-CHROM wrapper over :func:`compute_coverage_gaps_from_bam_multi`. Existing
+    single-reference callers and tests are unchanged.
 
     :param bam_path: aligned BAM against the query reference used for VCF calling
     :param query_name: query reference name/header used during sequence matching
@@ -36,15 +35,60 @@ def compute_coverage_gaps_from_bam(
     :param min_depth: per-base minimum depth threshold
     :return: merged non-covered codon stretches
     """
-    query_len = len(query_sequence)
-    if query_len == 0 or not matches:
+    return compute_coverage_gaps_from_bam_multi(
+        bam_path=bam_path,
+        per_chrom={query_name: (query_name, query_sequence, matches)},
+        min_depth=min_depth,
+    )
+
+
+def compute_coverage_gaps_from_bam_multi(
+    bam_path: Path,
+    per_chrom: dict[str, tuple[str, str, list[FeatureMatch]]],
+    min_depth: int,
+) -> list[CoverageGap]:
+    """
+    Compute non-covered codon stretches across multiple CHROMs in one BAM.
+
+    For each entry in ``per_chrom`` (keyed by CHROM, value a
+    ``(query_name, query_sequence, matches)`` tuple), the BAM depth for that contig is
+    projected to internal CDS coordinates and non-covered codon stretches computed.
+    Results are concatenated. A BAM contig whose name has no matching FASTA record is
+    simply absent from ``per_chrom`` and therefore skipped (the caller decides which
+    CHROMs to include; unmatched CHROMs are dropped at routing time).
+
+    :param bam_path: aligned BAM against the query reference(s) used for VCF calling
+    :param per_chrom: mapping of CHROM → ``(query_name, query_sequence, matches)``;
+        one entry per matched FASTA record
+    :param min_depth: per-base minimum depth threshold
+    :return: concatenated merged non-covered codon stretches across all CHROMs
+    """
+    if not per_chrom:
         return []
 
     _ensure_bam_index(bam_path)
+    all_gaps: list[CoverageGap] = []
     with pysam.AlignmentFile(str(bam_path), 'rb') as bam:
-        contig = _resolve_bam_contig(bam, query_name)
-        depths = _depth_array_from_bam(bam, contig, query_len)
-    return compute_coverage_gaps_from_depth(depths, matches, min_depth=min_depth, query_len=query_len)
+        bam_references = set(bam.references)
+        for chrom, (query_name, query_sequence, matches) in per_chrom.items():
+            query_len = len(query_sequence)
+            if query_len == 0 or not matches:
+                continue
+            if chrom not in bam_references:
+                logger.warning(
+                    'BAM has no contig %r; skipping coverage for this CHROM', chrom,
+                )
+                continue
+            contig = _resolve_bam_contig(bam, query_name)
+            depths = _depth_array_from_bam(bam, contig, query_len)
+            all_gaps.extend(
+                compute_coverage_gaps_from_depth(
+                    depths, matches, min_depth=min_depth, query_len=query_len, chrom=chrom,
+                )
+            )
+
+    all_gaps.sort(key=lambda gap: (gap.feature_name, gap.codon_start))
+    return all_gaps
 
 
 def _ensure_bam_index(bam_path: Path) -> None:
@@ -66,6 +110,7 @@ def compute_coverage_gaps_from_depth(
     matches: list[FeatureMatch],
     min_depth: int,
     query_len: int,
+    chrom: str = '',
 ) -> list[CoverageGap]:
     """
     Compute non-covered codon stretches from precomputed query depth values.
@@ -74,6 +119,9 @@ def compute_coverage_gaps_from_depth(
     :param matches: selected feature matches for the resolved internal reference
     :param min_depth: per-base minimum depth threshold
     :param query_len: total query sequence length
+    :param chrom: query contig name (== ReferenceGroup.query_name) to stamp onto each gap
+        so per-row reference_name can be resolved by chrom in multi-reference runs; '' for
+        legacy single-reference callers
     :return: merged non-covered codon stretches
     """
     gaps: list[CoverageGap] = []
@@ -96,7 +144,7 @@ def compute_coverage_gaps_from_depth(
             if _codon_is_non_covered(codon_nt_start, cds_to_query, query_depths, min_depth):
                 non_covered.append(codon_idx)
 
-        gaps.extend(_merge_codon_gaps(feature.name, non_covered))
+        gaps.extend(_merge_codon_gaps(feature.name, non_covered, chrom=chrom))
 
     gaps.sort(key=lambda gap: (gap.feature_name, gap.codon_start))
     total_non_covered = sum(gap.codon_end - gap.codon_start + 1 for gap in gaps)
@@ -156,7 +204,7 @@ def _codon_is_non_covered(
     return False
 
 
-def _merge_codon_gaps(feature_name: str, codon_indices: list[int]) -> list[CoverageGap]:
+def _merge_codon_gaps(feature_name: str, codon_indices: list[int], *, chrom: str = '') -> list[CoverageGap]:
     """Merge non-covered codon indices into contiguous stretches."""
     if not codon_indices:
         return []
@@ -169,8 +217,8 @@ def _merge_codon_gaps(feature_name: str, codon_indices: list[int]) -> list[Cover
         if pos == end + 1:
             end = pos
             continue
-        gaps.append(CoverageGap(feature_name=feature_name, codon_start=start, codon_end=end))
+        gaps.append(CoverageGap(feature_name=feature_name, codon_start=start, codon_end=end, chrom=chrom))
         start = pos
         end = pos
-    gaps.append(CoverageGap(feature_name=feature_name, codon_start=start, codon_end=end))
+    gaps.append(CoverageGap(feature_name=feature_name, codon_start=start, codon_end=end, chrom=chrom))
     return gaps

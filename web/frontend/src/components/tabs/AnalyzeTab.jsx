@@ -193,7 +193,7 @@ export function AnalyzeTab({
             {activeProfileMode === 'vcf' ? (
               <div className="profile-upload-row profile-upload-row-vcf">
                 <label>
-                  <span className="input-label-row">VCF file <button type="button" className="input-info-btn" aria-label="VCF help" title="Upload one VCF (.vcf or .vcf.gz) with standard headers."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                  <span className="input-label-row">VCF file <button type="button" className="input-info-btn" aria-label="VCF help" title="Upload one VCF (.vcf or .vcf.gz) with standard headers. The VCF may be multi-chrom; each CHROM must match one record in the reference FASTA by header name."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                   <input
                     type="file"
                     accept=".vcf,.vcf.gz"
@@ -206,7 +206,7 @@ export function AnalyzeTab({
                   />
                 </label>
                 <label>
-                  <span className="input-label-row">Reference FASTA <button type="button" className="input-info-btn" aria-label="Reference FASTA help" title="Reference FASTA must match the VCF coordinate system."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                  <span className="input-label-row">Reference FASTA <button type="button" className="input-info-btn" aria-label="Reference FASTA help" title="Reference FASTA must match the VCF coordinate system. May be multi-record (one FASTA record per VCF CHROM); each record header must match a CHROM name."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                   <input
                     type="file"
                     accept=".fasta,.fa,.fna"
@@ -683,7 +683,7 @@ export function AnalyzeTab({
             title="ResistanceProfiler report"
             src={buildReportUrl(inlineReportPath)}
             className="workspace-frame"
-            sandbox="allow-scripts allow-same-origin"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
             style={{ height: `${reportFrameHeight}px` }}
             onLoad={(event) => {
               try {

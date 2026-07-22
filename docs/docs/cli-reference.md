@@ -106,6 +106,12 @@ respro vcf \
   --export pdf
 ```
 
+The VCF may be **multi-chrom** and the reference FASTA **multi-record**: each VCF
+`CHROM` is matched to one FASTA record by header name. This supports targeted
+sequencing (multiple queries aligning to one internal reference) and segmented
+viruses (multiple queries aligning to different internal references) in a single
+run.
+
 ## Inspect project metadata and curated rules
 
 Project metadata:

@@ -69,4 +69,7 @@ respro vcf \
     --export json
 ```
 
+The VCF may be multi-chrom and the reference FASTA multi-record (one record per
+`CHROM`), allowing segmented viruses or multiple targets to be profiled in one run.
+
 See [CLI Reference](cli-reference.md) for all commands and flags, and [Output Interpretation](output.md) for reading results.

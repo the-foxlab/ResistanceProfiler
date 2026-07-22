@@ -40,6 +40,18 @@ def save_run(
     fingerprint = project_fingerprint(project_conn)
     updated_at = project_updated_at(project_conn)
 
+    # Map each chrom (== ReferenceGroup.query_name, unique per ReferenceGroup) to its
+    # reference_name so per-row reference_name can be persisted (results DB schema v2).
+    # Keying by chrom (not feature_name) is unambiguous even when two references in the same
+    # project DB share a feature name (e.g. both pathogens have a "pol" CDS): each ReferenceGroup
+    # has a distinct query_name, so the lookup cannot collapse colliding features.
+    reference_name_by_chrom: dict[str, str] = {
+        rg.query_name: rg.reference_name for rg in result.references
+    }
+
+    def _reference_name_for_chrom(chrom: str) -> str:
+        return reference_name_by_chrom.get(chrom, '')
+
     cursor = results_conn.execute(
         'INSERT INTO run '
         '(project_name, project_db_path, project_fingerprint, project_updated_at, reference_name, '
@@ -68,10 +80,10 @@ def save_run(
         results_conn.execute(
             'INSERT INTO variant_result '
             '(run_id, chrom, pos, ref, alt, allele_freq, depth, '
-            'feature_name, codon_pos, ref_codon, alt_codon, ref_aa, alt_aa, '
+            'feature_name, reference_name, codon_pos, ref_codon, alt_codon, ref_aa, alt_aa, '
             'consequence, af_bin, rule_match, drug_hits, '
             'is_combined_codon_event, combined_member_count) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 run_id,
                 v.chrom,
@@ -81,6 +93,7 @@ def save_run(
                 v.allele_freq,
                 v.depth,
                 ann.feature_name,
+                _reference_name_for_chrom(v.chrom),
                 ann.codon_pos,
                 ann.ref_codon,
                 ann.alt_codon,
@@ -97,14 +110,19 @@ def save_run(
 
     for gap in result.coverage_gaps:
         results_conn.execute(
-            'INSERT INTO coverage_gap (run_id, feature_name, codon_start, codon_end) VALUES (?, ?, ?, ?)',
-            (run_id, gap.feature_name, gap.codon_start, gap.codon_end),
+            'INSERT INTO coverage_gap (run_id, feature_name, reference_name, chrom, codon_start, codon_end) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (run_id, gap.feature_name, _reference_name_for_chrom(gap.chrom),
+             gap.chrom, gap.codon_start, gap.codon_end),
         )
 
     for formula_hit in result.formula_hits:
+        hit_chrom = ''
+        if formula_hit.matched_variants:
+            hit_chrom = formula_hit.matched_variants[0].variant.chrom
         results_conn.execute(
-            'INSERT INTO formula_rule_hit (run_id, hit_json) VALUES (?, ?)',
-            (run_id, json.dumps(formula_hit.to_dict())),
+            'INSERT INTO formula_rule_hit (run_id, reference_name, hit_json) VALUES (?, ?, ?)',
+            (run_id, _reference_name_for_chrom(hit_chrom), json.dumps(formula_hit.to_dict())),
         )
 
     results_conn.commit()
@@ -229,12 +247,17 @@ def load_coverage_gaps(
         return []
 
     rows = results_conn.execute(
-        'SELECT feature_name, codon_start, codon_end FROM coverage_gap '
+        'SELECT feature_name, reference_name, chrom, codon_start, codon_end FROM coverage_gap '
         'WHERE run_id = ? ORDER BY feature_name, codon_start',
         (run_id,),
     ).fetchall()
     return [
-        CoverageGap(feature_name=row['feature_name'], codon_start=row['codon_start'], codon_end=row['codon_end'])
+        CoverageGap(
+            feature_name=row['feature_name'],
+            codon_start=row['codon_start'],
+            codon_end=row['codon_end'],
+            chrom=row['chrom'] if 'chrom' in row.keys() else '',
+        )
         for row in rows
     ]
 
@@ -257,7 +280,7 @@ def load_formula_rule_hits(results_conn: sqlite3.Connection, run_id: int) -> lis
         return []
 
     rows = results_conn.execute(
-        'SELECT id, run_id, hit_json FROM formula_rule_hit WHERE run_id = ? ORDER BY id',
+        'SELECT id, run_id, reference_name, hit_json FROM formula_rule_hit WHERE run_id = ? ORDER BY id',
         (run_id,),
     ).fetchall()
     return [dict(row) for row in rows]
@@ -592,6 +615,9 @@ def load_run_from_json(
     run_dict.setdefault('project_fingerprint', '')
     run_dict.setdefault('formula_hits', len(formula_rows))
     run_dict.setdefault('status', 'complete')
+    # Optional references list (multi-reference JSON exports). Single-reference and
+    # legacy JSON exports omit it; regenerate falls back to run_dict['reference_name'].
+    run_dict['references'] = payload.get('references', [])
 
     coverage_gaps: list[CoverageGap] = []
     for idx, row in enumerate(coverage_rows, start=1):
@@ -603,6 +629,7 @@ def load_run_from_json(
                 feature_name=str(row.get('feature_name', '')),
                 codon_start=int(row.get('codon_start', 0)),
                 codon_end=int(row.get('codon_end', 0)),
+                chrom=str(row.get('chrom', '')),
             )
         )
 

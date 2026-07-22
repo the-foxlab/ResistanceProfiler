@@ -33,6 +33,7 @@ class CoverageGap:
     feature_name: str
     codon_start: int  # 0-based codon index, inclusive
     codon_end: int    # 0-based codon index, inclusive
+    chrom: str = ''   # query contig (== ReferenceGroup.query_name); '' when single-reference/legacy
 
 
 @dataclass
@@ -371,14 +372,44 @@ class FeatureMatch:
     cds_start: int = 0  # first aligned CDS position (0-based); used to reconstruct gapped strings
 
 
+@dataclass(frozen=True)
+class ReferenceGroup:
+    """One matched internal reference within a (possibly multi-reference) profiling run.
+
+    Carries the per-reference query identity, alignment matches, and the ruled
+    features/rules loaded for that internal reference. A single-reference run
+    produces one ``ReferenceGroup``; a multi-chrom VCF run produces one per
+    matched FASTA record. Flat lists on :class:`ProfilingResult` (annotations,
+    formula_hits, coverage_gaps) carry ``feature_name`` so per-reference grouping
+    is derivable from this list.
+    """
+
+    reference_name: str
+    reference_id: int
+    organism: str
+    reference_length_nt: int
+    query_name: str
+    query_sequence: str
+    feature_matches: list[FeatureMatch] = field(default_factory=list)
+    features: list[FeatureRecord] = field(default_factory=list)
+    rules: list[ResistanceRule] = field(default_factory=list)
+    formula_rules: list[FormulaRuleRuntime] = field(default_factory=list)
+    rule_feature_names: set[str] = field(default_factory=set)
+
+
 @dataclass
 class ProfilingResult:
-    """Complete result of a single profiling run. HTML exports are derived from this object."""
+    """Complete result of a single profiling run. HTML exports are derived from this object.
+
+    Per-reference data lives in ``references`` (one :class:`ReferenceGroup` per
+    matched internal reference). Read-only convenience properties
+    (:attr:`reference_name`, :attr:`reference_length_nt`, :attr:`query_sequence`,
+    :attr:`feature_matches`) delegate to ``references[0]`` to support incremental
+    migration of legacy single-reference readers; they are NOT stored fields.
+    """
 
     project_name: str = ''
     organism: str = ''
-    reference_name: str = ''
-    reference_length_nt: int = 0
     sample_name: str = ''
     vcf_name: str = ''
     run_timestamp: str = field(
@@ -391,8 +422,27 @@ class ProfilingResult:
     formula_hits: list[FormulaRuleHit] = field(default_factory=list)
     coverage_gaps: list[CoverageGap] = field(default_factory=list)
     sample_classifications: list[dict] = field(default_factory=list)
-    query_sequence: str = ''
-    feature_matches: list[FeatureMatch] = field(default_factory=list)
+    references: list[ReferenceGroup] = field(default_factory=list)
+
+    @property
+    def reference_name(self) -> str:
+        """Primary reference name (first matched reference); '' when no references."""
+        return self.references[0].reference_name if self.references else ''
+
+    @property
+    def reference_length_nt(self) -> int:
+        """Primary reference length in nucleotides; 0 when no references."""
+        return self.references[0].reference_length_nt if self.references else 0
+
+    @property
+    def query_sequence(self) -> str:
+        """Primary reference query sequence; '' when no references."""
+        return self.references[0].query_sequence if self.references else ''
+
+    @property
+    def feature_matches(self) -> list[FeatureMatch]:
+        """Primary reference feature matches; empty list when no references."""
+        return self.references[0].feature_matches if self.references else []
 
     @property
     def cds_annotations(self) -> list[AnnotatedVariant]:
