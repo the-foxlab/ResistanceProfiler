@@ -1777,3 +1777,12 @@ a.db-hit-pub-link:hover {
 .drug-table-count {
   text-align: center;
 }
+
+/* Drug name badge — colours the drug name by its final assessment so the
+   interpretation is visible at a glance next to the drug. */
+.drug-name-badge {
+  display: inline-block;
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  font-weight: 600;
+}

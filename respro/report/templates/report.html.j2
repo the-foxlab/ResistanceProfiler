@@ -233,7 +233,7 @@
                       {% endif %}
                       {% for drug in drugs %}
                         <tr>
-                          <td>{{ drug.name }}</td>
+                          <td><span class="drug-name-badge {{ drug.assessment_badge_class }}">{{ drug.name }}</span></td>
                           <td class="drug-table-count">{{ drug.hit_count }}</td>
                           {% if context.summary.drug_table.has_phenotypes %}
                             <td class="drug-table-count">{{ drug.resistant_count }}</td>
@@ -273,7 +273,7 @@
                   {% else %}
                     {% for drug in context.summary.drug_table.rows %}
                       <tr>
-                        <td>{{ drug.name }}</td>
+                        <td><span class="drug-name-badge {{ drug.assessment_badge_class }}">{{ drug.name }}</span></td>
                         <td class="drug-table-count">{{ drug.hit_count }}</td>
                         {% if context.summary.drug_table.has_phenotypes %}
                           <td class="drug-table-count">{{ drug.resistant_count }}</td>
