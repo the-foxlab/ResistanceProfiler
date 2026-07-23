@@ -58,17 +58,31 @@ def match_query_to_features(
     return matches
 
 
-def load_features_with_rules(
+def load_features(
     conn: sqlite3.Connection,
     reference_id: int | None = None,
+    *,
+    with_rules: bool = False,
 ) -> list[FeatureRecord]:
     """
-    Load only features that have at least one resistance rule.
+    Load annotated CDS features, optionally restricted to those carrying resistance rules.
+
+    When ``with_rules`` is False (the default) all annotated CDS features are returned,
+    including those without resistance rules. This is used by multi-record VCF query
+    resolution so that FASTA records aligning to a reference whose features carry no
+    rules are still detected (orphan case) and reported, rather than silently dropped.
+
+    When ``with_rules`` is True, only features that have at least one resistance rule
+    are returned, via a ``JOIN resistance_rule`` clause (``SELECT DISTINCT`` deduplicates
+    features that have multiple rules). This is the FASTA-mode semantics where ruleless
+    features are irrelevant.
 
     :param conn: project database connection
     :param reference_id: optional internal reference id filter
-    :return: list of FeatureRecord objects
+    :param with_rules: when True, load only features that have at least one resistance rule
+    :return: list of FeatureRecord objects (ruled and, by default, ruleless)
     """
+    rule_join = 'JOIN resistance_rule rr ON rr.feature_id = g.id ' if with_rules else ''
     if reference_id is None:
         rows = conn.execute(
             'SELECT DISTINCT g.id, g.reference_id, g.name, g.protein, '
@@ -76,7 +90,7 @@ def load_features_with_rules(
             'r.accession AS reference_accession '
             'FROM feature g '
             'JOIN reference r ON r.id = g.reference_id '
-            'JOIN resistance_rule rr ON rr.feature_id = g.id '
+            f'{rule_join}'
             'ORDER BY g.reference_id, g.start',
         ).fetchall()
     else:
@@ -86,63 +100,7 @@ def load_features_with_rules(
             'r.accession AS reference_accession '
             'FROM feature g '
             'JOIN reference r ON r.id = g.reference_id '
-            'JOIN resistance_rule rr ON rr.feature_id = g.id '
-            'WHERE g.reference_id = ? '
-            'ORDER BY g.start',
-            (reference_id,),
-        ).fetchall()
-    feature_ids = [int(row['id']) for row in rows]
-    segments_by_feature = load_feature_segments_by_feature_id(conn, feature_ids)
-    return [
-        FeatureRecord(
-            id=r['id'],
-            reference_id=r['reference_id'],
-            name=r['name'],
-            protein=r['protein'] or '',
-            start=r['start'],
-            end=r['end'],
-            strand=r['strand'],
-            codon_start=r['codon_start'],
-            nt_sequence=r['nt_sequence'] or '',
-            aa_sequence=r['aa_sequence'] or '',
-            reference_accession=r['reference_accession'] or '',
-            segments=segments_by_feature.get(int(r['id']), tuple()),
-        )
-        for r in rows
-    ]
-
-
-def load_all_features(
-    conn: sqlite3.Connection,
-    reference_id: int | None = None,
-) -> list[FeatureRecord]:
-    """
-    Load ALL annotated CDS features, including those without resistance rules.
-
-    Used by multi-record VCF query resolution so that FASTA records aligning to a
-    reference whose features carry no rules are still detected (orphan case) and
-    reported, rather than silently dropped.
-
-    :param conn: project database connection
-    :param reference_id: optional internal reference id filter
-    :return: list of FeatureRecord objects (ruled and ruleless)
-    """
-    if reference_id is None:
-        rows = conn.execute(
-            'SELECT DISTINCT g.id, g.reference_id, g.name, g.protein, '
-            'g.start, g.end, g.strand, g.codon_start, g.nt_sequence, g.aa_sequence, '
-            'r.accession AS reference_accession '
-            'FROM feature g '
-            'JOIN reference r ON r.id = g.reference_id '
-            'ORDER BY g.reference_id, g.start',
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            'SELECT DISTINCT g.id, g.reference_id, g.name, g.protein, '
-            'g.start, g.end, g.strand, g.codon_start, g.nt_sequence, g.aa_sequence, '
-            'r.accession AS reference_accession '
-            'FROM feature g '
-            'JOIN reference r ON r.id = g.reference_id '
+            f'{rule_join}'
             'WHERE g.reference_id = ? '
             'ORDER BY g.start',
             (reference_id,),

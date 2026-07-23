@@ -11,8 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from respro.core.alignment import (
-    load_all_features,
-    load_features_with_rules,
+    load_features,
     match_query_to_features,
 )
 from respro.db.cache import load_cached_mappings, sequence_checksum, store_mappings
@@ -83,7 +82,7 @@ def resolve_fasta_query_multi(
                 f'Selected={sorted(selected)}.'
             )
 
-    features = load_features_with_rules(conn) if with_rules_only else load_all_features(conn)
+    features = load_features(conn, with_rules=with_rules_only)
     if not features:
         raise ValueError('No features with resistance rules in project database')
 

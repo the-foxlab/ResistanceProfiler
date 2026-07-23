@@ -14,7 +14,7 @@ from respro.core.alignment import (
     _reverse_cigar_operations,
     _swap_cigar_indels,
     cigar_to_coordinate_map,
-    load_features_with_rules,
+    load_features,
     match_query_to_features,
     parse_cigar,
 )
@@ -130,14 +130,14 @@ class TestCigarToCoordinateMap:
 # ──────────────────────────────────────────────────────────────────────
 
 # ──────────────────────────────────────────────────────────────────────
-# DB: load_features_with_rules
+# DB: load_features (with_rules filter)
 # ──────────────────────────────────────────────────────────────────────
 
 class TestLoadFeaturesWithRules:
     def test_returns_only_features_with_rules(self, project_db: Path) -> None:
         from respro.db.schema import open_project_db
         conn = open_project_db(project_db)
-        features = load_features_with_rules(conn, reference_id=1)
+        features = load_features(conn, reference_id=1, with_rules=True)
         conn.close()
         names = {g.name for g in features}
         assert 'gag' in names
@@ -146,7 +146,7 @@ class TestLoadFeaturesWithRules:
     def test_without_reference_filter_loads_all_rule_features(self, project_db: Path) -> None:
         from respro.db.schema import open_project_db
         conn = open_project_db(project_db)
-        features = load_features_with_rules(conn)
+        features = load_features(conn, with_rules=True)
         conn.close()
         names = {g.name for g in features}
         assert names == {'gag', 'rt'}

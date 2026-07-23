@@ -18,7 +18,7 @@ from Bio.SeqRecord import SeqRecord
 from conftest import TINY_REF_SEQ, write_genbank
 
 from respro.cli.init import init_project
-from respro.core.alignment import load_features_with_rules
+from respro.core.alignment import load_features
 from respro.db.algorithms import load_interpretation_algorithms
 from respro.db.cache import load_cached_mappings, sequence_checksum
 from respro.db.features import _is_ncbi_protein_accession, load_features_for_reference
@@ -1536,7 +1536,7 @@ class TestGenbankAliasFallbacks:
         assert len(by_reference) == 1
         assert len(by_reference[0].segments) == 2
 
-        with_rules = load_features_with_rules(conn, ref_id)
+        with_rules = load_features(conn, ref_id, with_rules=True)
         assert len(with_rules) == 1
         assert len(with_rules[0].segments) == 2
 

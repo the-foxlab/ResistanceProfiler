@@ -149,8 +149,21 @@ def regenerate(
         # runs persist one reference_name per variant_result row (results DB schema v2)
         # or a top-level `references` list (JSON export). Single-reference and legacy
         # runs fall back to run_dict['reference_name'].
+        #
+        # Also recover each reference's query_name (the original VCF CHROM / FASTA header).
+        # The live VCF path sets ReferenceGroup.query_name to the CHROM, and the report
+        # attributes per-row reference_name and scopes the multi-reference lollipop plot
+        # by mapping annotation.variant.chrom -> reference_name via query_name. Regenerate
+        # must restore the same query_name, otherwise the multi-species Reference column
+        # renders '—' for every row and the multi-reference lollipop plot is dropped
+        # (its chrom scoping finds no annotations). The stored query_name comes from the
+        # JSON `references` payload; for the results-DB path it is derived from the chrom
+        # stored on each variant_result row, grouped by reference_name. Legacy runs without
+        # a stored chrom fall back to the reference_name (single-reference reports do not
+        # render the Reference column or use chrom scoping, so the fallback is safe).
         reference_names: list[str] = []
         seen: set[str] = set()
+        query_name_by_reference_name: dict[str, str] = {}
         json_references = run_dict.get('references') or []
         if json_references:
             for ref in json_references:
@@ -158,14 +171,21 @@ def regenerate(
                 if name and name not in seen:
                     seen.add(name)
                     reference_names.append(name)
+                    query_name_by_reference_name[name] = ref.get('query_name', '') or name
         else:
             for row in variant_rows:
                 name = row.get('reference_name', '') or run_dict.get('reference_name', '')
+                chrom = row.get('chrom', '') or ''
                 if name and name not in seen:
                     seen.add(name)
                     reference_names.append(name)
+                    query_name_by_reference_name[name] = chrom or name
+                elif name and chrom and not query_name_by_reference_name.get(name):
+                    query_name_by_reference_name[name] = chrom
         if not reference_names:
-            reference_names = [run_dict.get('reference_name', '')]
+            fallback = run_dict.get('reference_name', '')
+            reference_names = [fallback]
+            query_name_by_reference_name[fallback] = fallback
 
         # Build one ReferenceGroup per distinct reference, accumulating the union of
         # features/rules/rule_feature_names for export_results (matches the live
@@ -206,7 +226,7 @@ def regenerate(
                 reference_id=ref_id if ref_id is not None else 0,
                 organism=organism,
                 reference_length_nt=reference_length_nt,
-                query_name=ref_name,
+                query_name=query_name_by_reference_name.get(ref_name, ref_name),
                 query_sequence='',
                 feature_matches=[],
                 features=ref_features,

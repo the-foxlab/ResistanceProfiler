@@ -5,6 +5,7 @@ Multi-chrom VCF + multi-record reference FASTA support.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from pathlib import Path
@@ -2295,6 +2296,72 @@ class TestMultiReferenceRegenerate:
         # Single-reference report has no multi-species banner and no per-reference summary list.
         assert 'multiple species' not in html.lower()
         assert 'Profiled references' not in html
+
+    @staticmethod
+    def _reference_cells(html: str) -> list[str]:
+        """Extract the Database Hits Reference column cell values (multi-species reports)."""
+        return [c.strip() for c in re.findall(r'class="db-hit-reference-cell">(.*?)</td>', html, re.S)]
+
+    @staticmethod
+    def _has_lollipop_plot(html: str) -> bool:
+        """True when an embedded lollipop/genome-overview SVG plot is present."""
+        return bool(re.search(r'data:image/svg\+xml;base64,[A-Za-z0-9+/=]{100,}', html))
+
+    def test_regenerate_from_results_db_attributes_reference_column_and_plot(
+        self, multi_ref_db: Path, tmp_path: Path,
+    ) -> None:
+        """Regenerated multi-species report shows per-row Reference names and the lollipop plot.
+
+        Regression guard for AUD-001: regenerate previously set ReferenceGroup.query_name to the
+        internal reference_name, but annotations carry the original VCF CHROM as variant.chrom.
+        The report maps chrom -> reference_name via query_name, so the mismatch made the
+        Database Hits / All Mutations Reference column render '—' for every row and dropped the
+        multi-reference lollipop plot entirely. The fix restores query_name from the stored chrom.
+        """
+        results_db, _json_path, out_live = _run_two_ref_profile_with_results(multi_ref_db, tmp_path)
+        live_html = list(out_live.glob('*.report.html'))[0].read_text()
+        live_cells = self._reference_cells(live_html)
+        # Sanity: the live multi-species report attributes both references.
+        assert live_cells == ['refA', 'refB']
+
+        regen_dir = tmp_path / 'regenerated'
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(multi_ref_db),
+            '--output', str(regen_dir),
+        ])
+        assert result.exit_code == 0, result.output
+        regen_html = list(regen_dir.glob('*.html'))[0].read_text()
+
+        # The Reference column must attribute rows to the correct reference (not '—').
+        assert self._reference_cells(regen_html) == ['refA', 'refB']
+        # The multi-reference lollipop/genome-overview plot must be present.
+        assert self._has_lollipop_plot(regen_html), 'regenerated report is missing the lollipop plot'
+        # Both reference genome titles appear in the regenerated plot.
+        assert 'refA' in regen_html and 'refB' in regen_html
+
+    def test_regenerate_from_json_attributes_reference_column_and_plot(
+        self, multi_ref_db: Path, tmp_path: Path,
+    ) -> None:
+        """regenerate --json on a multi-species JSON restores the Reference column and plot."""
+        _results_db, json_path, out_live = _run_two_ref_profile_with_results(multi_ref_db, tmp_path)
+        live_html = list(out_live.glob('*.report.html'))[0].read_text()
+        assert self._reference_cells(live_html) == ['refA', 'refB']
+
+        regen_dir = tmp_path / 'regenerated_json'
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--json', str(json_path),
+            '--project', str(multi_ref_db),
+            '--output', str(regen_dir),
+        ])
+        assert result.exit_code == 0, result.output
+        regen_html = list(regen_dir.glob('*.html'))[0].read_text()
+
+        assert self._reference_cells(regen_html) == ['refA', 'refB']
+        assert self._has_lollipop_plot(regen_html), 'regenerated report is missing the lollipop plot'
 
 
 class TestMultiVcfRegressionSuite:
