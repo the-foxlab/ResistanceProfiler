@@ -112,6 +112,25 @@ sequencing (multiple queries aligning to one internal reference) and segmented
 viruses (multiple queries aligning to different internal references) in a single
 run.
 
+### VCF reference
+
+- Every `CHROM` observed in the VCF variant records must have a matching record
+  header in the reference FASTA. If a VCF `CHROM` has no matching FASTA record,
+  profiling fails with a clear error (this usually means the wrong reference file
+  was provided).
+- Extra FASTA records that are not named by any VCF `CHROM` are ignored — they are
+  not aligned, cached, or reported. You may safely supply a multi-record FASTA that
+  contains references for more than one species; only the records named by VCF
+  `CHROM`s contribute to the report.
+- A VCF-matched FASTA record that does not align to any internal feature is skipped
+  with a warning; profiling continues as long as at least one other record maps
+  successfully.
+- Multi-species runs are allowed as long as the genes the query actually matches do
+  not overlap across species. If the same gene is matched on two distinct species
+  (e.g. HSV-1 `UL23` and HSV-2 `UL23`), profiling fails because resistance-relevant
+  mutations cannot be attributed to a single species unambiguously. Same-species
+  shared gene names are always allowed.
+
 ## Inspect project metadata and curated rules
 
 Project metadata:

@@ -43,6 +43,7 @@ def resolve_fasta_query_multi(
     use_cache: bool = True,
     threads: int = 1,
     with_rules_only: bool = False,
+    selected_query_names: set[str] | None = None,
 ) -> list[QueryRecord]:
     """
     Read a (possibly multi-record) user FASTA and align each record to internal CDS.
@@ -59,12 +60,28 @@ def resolve_fasta_query_multi(
         rules (FASTA-mode semantics, where ruleless features are irrelevant); if False,
         align against ALL annotated features so references whose features have no rules
         are still detected as orphans (multi-VCF semantics). Default False.
+    :param selected_query_names: when provided (VCF mode), only FASTA records whose
+        header matches one of these names are aligned/returned; other records are
+        ignored entirely (never aligned, cached, or turned into report groups). This
+        keeps extra supplied references from introducing irrelevant species/gene
+        collisions. ``None`` (default) aligns every record — used by FASTA mode and
+        direct callers. The caller is responsible for guaranteeing that every selected
+        name is present in the FASTA (the VCF CLI validates this beforehand).
     :return: one ``QueryRecord`` per aligning FASTA record, in input order
     :raises ValueError: if the FASTA is empty or no record aligns to any feature
     """
     seqs = read_fasta(fasta_path)
     if not seqs:
         raise ValueError(f'No sequences found in {fasta_path}')
+
+    if selected_query_names is not None:
+        selected = {name.strip() for name in selected_query_names}
+        seqs = {name: seq for name, seq in seqs.items() if name in selected}
+        if not seqs:
+            raise ValueError(
+                f'None of the selected FASTA record names are present in {fasta_path}. '
+                f'Selected={sorted(selected)}.'
+            )
 
     features = load_features_with_rules(conn) if with_rules_only else load_all_features(conn)
     if not features:

@@ -128,17 +128,32 @@ def _build_multi_reference_lollipop_figure(
     for rg in result.references:
         representative_by_ref_id.setdefault(rg.reference_id, rg)
 
+    # Map each internal reference_id to the set of chroms (== ReferenceGroup.query_name)
+    # that map to it. Annotations and coverage gaps are scoped by chrom, not by feature
+    # name alone: in a cross-species run two distinct references can carry same-named
+    # features (e.g. HSV-1 UL23 and HSV-2 UL23), and scoping by name would let each
+    # reference pick up the other species' annotations. The chrom is unique per
+    # ReferenceGroup and unambiguously attributes every annotation/coverage gap to one
+    # internal reference.
+    chroms_by_reference_id: dict[int, set[str]] = {}
+    for rg in result.references:
+        chroms_by_reference_id.setdefault(rg.reference_id, set()).add(rg.query_name)
+
     per_ref_plan: list[tuple[ReferenceGroup, list[dict], list[FeatureRecord]]] = []
     for ref_id, rg in representative_by_ref_id.items():
         ref_features = features_by_ref.get(ref_id, [])
         ref_feature_names = {f.name for f in ref_features}
+        ref_chroms = chroms_by_reference_id.get(ref_id, set())
         # Collect CDS annotations from ALL chroms belonging to this reference_id. In the
         # targeted case annotations span multiple chroms (ReferenceGroups) that share this
-        # reference_id; scoping by feature_name (unique per reference) gathers them all.
-        ref_cds = [a for a in all_cds if a.feature_name in ref_feature_names]
+        # reference_id; scoping by chrom gathers them all while excluding same-named
+        # features on a different reference (different chroms).
+        ref_cds = [a for a in all_cds if a.variant.chrom in ref_chroms]
         ref_coverage = {
-            fname: gaps for fname, gaps in coverage_gaps_by_feature.items()
+            fname: gaps
+            for fname, gaps in coverage_gaps_by_feature.items()
             if fname in ref_feature_names
+            and all(gap.chrom in ref_chroms for gap in gaps)
         }
         if not ref_cds and not ref_coverage:
             continue

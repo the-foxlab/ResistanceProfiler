@@ -869,7 +869,11 @@ class TestWebApi:
         assert status.status_code == 200
         payload = status.json()
         assert payload['status'] == 'failed'
-        assert payload['error'] == 'VCF and reference FASTA do not match. Use files derived from the same reference sequence.'
+        assert payload['error'] == (
+            'VCF CHROM(s) have no matching reference FASTA record: other_ref. '
+            'VCF CHROMs=[\'other_ref\'], FASTA records=[\'tiny_ref\']. '
+            'Provide a reference FASTA whose record headers cover every VCF CHROM.'
+        )
 
     def test_cancel_job_returns_404_for_unknown_id(
         self,

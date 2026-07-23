@@ -319,7 +319,13 @@ class TestRouteAndRemapVariants:
     def test_unmatched_chrom_warned_and_dropped(
         self, multi_ref_db: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """A VCF CHROM with no matching FASTA record is warned and dropped."""
+        """A VCF CHROM with no usable query record is warned and dropped at the routing layer.
+
+        With the VCF CLI's FASTA-header preflight, a CHROM absent from the supplied FASTA
+        never reaches routing. At the ``route_and_remap_variants`` level a missing record
+        means the supplied reference had no usable internal feature mapping; its variants
+        are skipped and the CHROM is recorded in ``dropped_chroms``.
+        """
         # Arrange
         fasta_path = tmp_path / 'refs.fasta'
         fasta_path.write_text(f'>chrom_a\n{_REF_A_SEQ}\n')
@@ -355,7 +361,7 @@ class TestRouteAndRemapVariants:
         ]
 
         # Act / Assert
-        with pytest.raises(ValueError, match='No VCF CHROM matched'):
+        with pytest.raises(ValueError, match='No VCF CHROM could be remapped'):
             route_and_remap_variants(variants, records)
 
     def test_variants_outside_cds_are_dropped_silently_by_remap(
@@ -982,10 +988,12 @@ class TestCrossSpeciesGeneNameCollisionGate:
                     total_variants=len(remapped),
                 )
             message = str(exc_info.value)
-            # The message must name the colliding gene and both organisms.
+            # The message must name the colliding gene and both organisms, and state
+            # that no HTML report can be created (not the old "refusing to report").
             assert 'UL23' in message
             assert 'Human alphaherpesvirus 1' in message
             assert 'Human alphaherpesvirus 2' in message
+            assert 'Cannot create an HTML report' in message
         finally:
             conn.close()
 
@@ -1116,6 +1124,243 @@ class TestCrossSpeciesGeneNameCollisionGate:
                 )
         finally:
             conn.close()
+
+
+def _make_two_species_db_with_extra_feature(
+    db_path: Path, *,
+    organism_a: str, organism_b: str,
+    feature_a: str, feature_b: str,
+    extra_feature_b: str,
+) -> Path:
+    """
+    Build a two-species project DB where refB carries an extra CDS that will NOT be aligned to.
+
+    Mirrors the HSV-1/HSV-2 + RL1 scenario: refA (species A) has ``feature_a``; refB
+    (species B) has ``feature_b`` plus an additional ``extra_feature_b``. A query that only
+    aligns to ``feature_a`` and ``feature_b`` must not trigger a cross-species collision on
+    ``extra_feature_b`` even though refB carries it, because the gate inspects actual
+    feature matches, not the full reference feature list.
+    """
+    refa_motif = 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC'  # codon 1 = K (AAA at nt 3..5)
+    refb_motif = 'ATGAAACCCGGGAAATTTCCCGGGAAATTT'  # codon 1 = K (AAA at nt 3..5), distinct elsewhere
+    refa_seq = (refa_motif * 20)[:600]
+    refb_seq = (refb_motif * 20)[:600]
+    # Extra feature on refB: a distinct sequence placed after feature_b on the same reference.
+    extra_motif = 'ATGTGTGTGTGTGTGTGTGTGTGTGTGTGT'  # codon 1 = C (TGT), unrelated to refA
+    extra_seq = (extra_motif * 20)[:600]
+
+    conn = create_schema(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute('INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+                 ('TwoSpeciesExtra', 1, str(uuid.uuid4())))
+    conn.execute('INSERT INTO reference (project_id, name, length, organism) VALUES (?, ?, ?, ?)',
+                 (1, 'refA', len(refa_seq), organism_a))
+    conn.execute('INSERT INTO reference (project_id, name, length, organism) VALUES (?, ?, ?, ?)',
+                 (1, 'refB', len(refb_seq) + len(extra_seq), organism_b))
+    conn.execute('INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
+                 'VALUES (?, ?, ?, ?, ?, ?, ?)', (1, feature_a, 'ProtA', 0, len(refa_seq), '+', refa_seq))
+    conn.execute('INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
+                 'VALUES (?, ?, ?, ?, ?, ?, ?)', (2, feature_b, 'ProtB', 0, len(refb_seq), '+', refb_seq))
+    conn.execute('INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
+                 'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                 (2, extra_feature_b, 'ProtExtra', len(refb_seq), len(refb_seq) + len(extra_seq), '+', extra_seq))
+    conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'testdrug'))
+    # refA rule on feature_a codon 1 K2E; refB rule on feature_b codon 1 K2E.
+    conn.execute('INSERT INTO resistance_rule '
+                 '(feature_id, drug_id, position, reference, mutation, phenotype) '
+                 'VALUES (?, ?, ?, ?, ?, ?)', (1, 1, 1, 'K', 'E', 'resistant'))
+    conn.execute('INSERT INTO resistance_rule '
+                 '(feature_id, drug_id, position, reference, mutation, phenotype) '
+                 'VALUES (?, ?, ?, ?, ?, ?)', (2, 1, 1, 'K', 'E', 'resistant'))
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+class TestVcfModeReferenceEligibility:
+    """VCF mode restricts reference resolution to FASTA records named by observed VCF CHROMs.
+
+    Covers the multi-test-1 scenario: a multi-record FASTA may contain extra reference
+    records (e.g. HSV-2) that are not named by any VCF CHROM. Those records must be ignored
+    entirely — never aligned, cached, or turned into report groups — so they cannot introduce
+    irrelevant species or false cross-species gene collisions.
+    """
+
+    def test_extra_unused_fasta_record_is_excluded_from_result(
+        self, single_ref_db: Path, tmp_path: Path,
+    ) -> None:
+        """An extra FASTA record not named by any VCF CHROM is excluded from the report.
+
+        FASTA has chrom_a (aligns to refA) plus an extra HSV-2-like record. The VCF only has
+        chrom_a. The extra record must not produce a ReferenceGroup or appear in the report.
+        """
+        # Reuse the colliding FASTA (two records) but only submit a single-CHROM VCF.
+        fasta_path = _colliding_fasta(tmp_path)
+        vcf_path = tmp_path / 'single_chrom.vcf'
+        vcf_path.write_text(
+            '##fileformat=VCFv4.2\n'
+            '##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">\n'
+            '##INFO=<ID=DP,Number=1,Type=Integer,Description="Read Depth">\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'chrom_a\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
+        )
+        output_dir = tmp_path / 'out'
+        runner = CliRunner()
+        result = runner.invoke(app, [
+            'vcf', '--project', str(single_ref_db), '--vcf', str(vcf_path),
+            '--ref-fasta', str(fasta_path), '--output', str(output_dir),
+            '--min-af', '0.01', '--min-depth', '0', '--no-cache',
+        ])
+        assert result.exit_code == 0, result.output
+        html = list(output_dir.glob('*.report.html'))[0].read_text()
+        # Only refA's feature (gagA) appears; the extra record's organism/reference does not.
+        assert 'gagA' in html
+        # single_ref_db only has refA, so the extra record simply does not align to anything
+        # in this DB — but the key assertion is that the run succeeds (no false collision).
+
+    def test_extra_record_does_not_trigger_false_cross_species_collision(
+        self, tmp_path: Path,
+    ) -> None:
+        """An unmatched extra feature on a selected reference does not cause a false collision.
+
+        Two species share a feature name on a CDS the query did NOT align to (extra_feature_b).
+        The query aligns only to disjoint matched genes (feature_a on species A, feature_b on
+        species B). The collision gate inspects actual feature_matches, so the unmatched
+        extra_feature_b must not trigger a cross-species rejection. This is the RL1 scenario.
+        """
+        db_path = _make_two_species_db_with_extra_feature(
+            tmp_path / 'two_species_extra.db',
+            organism_a='Human alphaherpesvirus 1',
+            organism_b='Human alphaherpesvirus 2',
+            feature_a='UL23',  # species A matched gene
+            feature_b='UL30',  # species B matched gene (disjoint from UL23)
+            extra_feature_b='RL1',  # extra CDS on refB that the query will NOT align to
+        )
+        # FASTA: chrom_a aligns to refA's UL23; chrom_b aligns to refB's UL30 (not RL1).
+        refa_motif = 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC'
+        refb_motif = 'ATGAAACCCGGGAAATTTCCCGGGAAATTT'
+        refa_seq = (refa_motif * 20)[:600]
+        refb_seq = (refb_motif * 20)[:600]
+        fasta_path = tmp_path / 'refs.fasta'
+        fasta_path.write_text(f'>chrom_a\n{refa_seq}\n>chrom_b\n{refb_seq}\n')
+        vcf_path = tmp_path / 'multi.vcf'
+        vcf_path.write_text(_MULTI_CHROM_VCF)
+        output_dir = tmp_path / 'out'
+        runner = CliRunner()
+        result = runner.invoke(app, [
+            'vcf', '--project', str(db_path), '--vcf', str(vcf_path),
+            '--ref-fasta', str(fasta_path), '--output', str(output_dir),
+            '--min-af', '0.01', '--min-depth', '0', '--no-cache',
+        ])
+        # Must succeed — no false RL1 collision — and produce a multi-species report.
+        assert result.exit_code == 0, result.output
+        html = list(output_dir.glob('*.report.html'))[0].read_text()
+        assert 'UL23' in html
+        assert 'UL30' in html
+        assert 'RL1' not in html  # the unmatched extra feature is not in the report
+
+    def test_genuine_cross_species_matched_gene_collision_is_rejected(
+        self, tmp_path: Path,
+    ) -> None:
+        """When the query actually aligns to the same gene on two species, it is rejected.
+
+        Both chroms align to a CDS named 'UL23' on species A and species B respectively.
+        This is a genuine matched-gene collision (not an unmatched extra feature) and must
+        fail with the new 'Cannot create an HTML report' wording.
+        """
+        db_path = _make_colliding_db(
+            tmp_path / 'genuine_collide.db',
+            organism_a='Human alphaherpesvirus 1',
+            organism_b='Human alphaherpesvirus 2',
+            shared_feature_name='UL23',
+        )
+        fasta_path = _colliding_fasta(tmp_path)
+        vcf_path = tmp_path / 'collide.vcf'
+        vcf_path.write_text(
+            '##fileformat=VCFv4.2\n'
+            '##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">\n'
+            '##INFO=<ID=DP,Number=1,Type=Integer,Description="Read Depth">\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'chrom_a\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
+            'chrom_b\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
+        )
+        output_dir = tmp_path / 'out'
+        runner = CliRunner()
+        result = runner.invoke(app, [
+            'vcf', '--project', str(db_path), '--vcf', str(vcf_path),
+            '--ref-fasta', str(fasta_path), '--output', str(output_dir),
+            '--min-af', '0.01', '--min-depth', '0', '--no-cache',
+        ])
+        assert result.exit_code == 1, result.output
+        combined = result.output + str(result.exception or '')
+        assert 'UL23' in combined
+        assert 'Cannot create an HTML report' in combined
+
+    def test_missing_fasta_header_for_vcf_chrom_is_hard_failure(
+        self, multi_ref_db: Path, tmp_path: Path,
+    ) -> None:
+        """A VCF CHROM with no matching FASTA record header is a hard failure (preflight)."""
+        fasta_path = tmp_path / 'refs.fasta'
+        fasta_path.write_text(f'>chrom_a\n{_REF_A_SEQ}\n')  # no chrom_b record
+        vcf_path = tmp_path / 'multi.vcf'
+        vcf_path.write_text(_MULTI_CHROM_VCF)  # has chrom_a and chrom_b
+        output_dir = tmp_path / 'out'
+        runner = CliRunner()
+        result = runner.invoke(app, [
+            'vcf', '--project', str(multi_ref_db), '--vcf', str(vcf_path),
+            '--ref-fasta', str(fasta_path), '--output', str(output_dir),
+            '--min-af', '0.01', '--min-depth', '0', '--no-cache',
+        ])
+        assert result.exit_code != 0
+        combined = result.output + str(result.exception or '')
+        assert 'no matching reference FASTA record' in combined
+        assert 'chrom_b' in combined
+
+    def test_valid_plus_unmapped_record_still_produces_report(
+        self, multi_ref_db: Path, tmp_path: Path,
+    ) -> None:
+        """A VCF-matched FASTA record with no database feature mapping is skipped; another valid
+        record still produces a report.
+
+        chrom_a aligns to refA (valid); chrom_b's supplied sequence does not align to any
+        internal CDS (unmapped). The run succeeds with only refA's content.
+        """
+        unrelated = 'GATTACA' * 100  # 700 nt, unlikely to align to refB
+        fasta_path = tmp_path / 'refs.fasta'
+        fasta_path.write_text(f'>chrom_a\n{_REF_A_SEQ}\n>chrom_b\n{unrelated}\n')
+        vcf_path = tmp_path / 'multi.vcf'
+        vcf_path.write_text(_MULTI_CHROM_VCF)
+        output_dir = tmp_path / 'out'
+        runner = CliRunner()
+        result = runner.invoke(app, [
+            'vcf', '--project', str(multi_ref_db), '--vcf', str(vcf_path),
+            '--ref-fasta', str(fasta_path), '--output', str(output_dir),
+            '--min-af', '0.01', '--min-depth', '0', '--no-cache',
+        ])
+        assert result.exit_code == 0, result.output
+        html = list(output_dir.glob('*.report.html'))[0].read_text()
+        assert 'gagA' in html  # refA's feature
+        assert 'gagB' not in html  # chrom_b did not map to refB
+
+    def test_no_selected_record_maps_is_error(
+        self, multi_ref_db: Path, tmp_path: Path,
+    ) -> None:
+        """When no VCF-matched FASTA record aligns to an internal feature, profiling fails."""
+        unrelated = 'GATTACA' * 100
+        fasta_path = tmp_path / 'refs.fasta'
+        fasta_path.write_text(f'>chrom_a\n{unrelated}\n>chrom_b\n{unrelated}\n')
+        vcf_path = tmp_path / 'multi.vcf'
+        vcf_path.write_text(_MULTI_CHROM_VCF)
+        output_dir = tmp_path / 'out'
+        runner = CliRunner()
+        result = runner.invoke(app, [
+            'vcf', '--project', str(multi_ref_db), '--vcf', str(vcf_path),
+            '--ref-fasta', str(fasta_path), '--output', str(output_dir),
+            '--min-af', '0.01', '--min-depth', '0', '--no-cache',
+        ])
+        assert result.exit_code != 0
+        combined = result.output + str(result.exception or '')
+        assert 'no cds matches found' in combined.lower() or 'no fasta record aligned' in combined.lower()
 
 
 _MULTI_CHROM_VCF = (

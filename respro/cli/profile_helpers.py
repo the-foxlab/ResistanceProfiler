@@ -166,38 +166,45 @@ def _load_reference_data(
 
 def _reject_cross_species_gene_name_collisions(references: list[ReferenceGroup]) -> None:
     """
-    Raise :class:`click.ClickException` if a feature name appears on matched references
-    belonging to more than one distinct organism.
+    Raise :class:`click.ClickException` if a matched feature name appears on selected
+    references belonging to more than one distinct organism.
 
-    A cross-species gene-name collision (e.g. HSV-1 UL23 and HSV-2 UL23) is an ambiguous
-    hit: the report cannot attribute resistance-relevant mutations to a single species
-    unambiguously, so we refuse to report rather than produce a misleading result.
-    Same-species shared gene names are allowed — the per-reference scoping in the
-    rule/annotation loops disambiguates them.
+    The collision is evaluated over each group's narrowed ``feature_matches`` — the CDS
+    features the query actually aligned to on that record — not over the full internal
+    reference feature list. This prevents a false collision from an unmatched gene (e.g.
+    an HSV-2 ``RL1`` that never aligned) when the query only matched ``UL23`` on HSV-1.
+    A genuine cross-species matched-gene collision (e.g. HSV-1 UL23 and HSV-2 UL23 both
+    aligned) is ambiguous: the report cannot attribute resistance-relevant mutations to a
+    single species, so no HTML report is produced rather than a misleading one. Same-species
+    shared gene names are allowed — the per-reference scoping in the rule/annotation loops
+    disambiguates them.
 
     :param references: assembled :class:`ReferenceGroup` list
     :raises click.ClickException: naming the first colliding gene and the organisms involved
     """
-    # Map each feature name to the set of distinct organisms whose matched references
-    # carry that feature. A reference's matched features are its CDS features that the
-    # query aligned to (rg.features is the full CDS list; rg.rule_feature_names is the
-    # rule-covered subset). We use rg.features so the gate also catches ruleless CDS
-    # collisions — a collision is ambiguous regardless of whether rules are attached.
+    # Map each matched feature name to the set of distinct organisms whose selected
+    # references actually aligned to that feature. rg.feature_matches is the narrowed set
+    # produced by pick_best_reference_id + select_matches_for_reference during assembly,
+    # so it reflects only the CDS the query covered on this record — not every CDS on the
+    # internal reference.
     organisms_by_feature_name: dict[str, set[str]] = {}
     reference_names_by_feature_name: dict[str, set[str]] = {}
     for rg in references:
-        for feature in rg.features:
-            organisms_by_feature_name.setdefault(feature.name, set()).add(rg.organism)
-            reference_names_by_feature_name.setdefault(feature.name, set()).add(rg.reference_name)
+        for match in rg.feature_matches:
+            feature_name = match.feature.name
+            organisms_by_feature_name.setdefault(feature_name, set()).add(rg.organism)
+            reference_names_by_feature_name.setdefault(feature_name, set()).add(rg.reference_name)
 
     for feature_name, organisms in sorted(organisms_by_feature_name.items()):
         if len(organisms) > 1:
             organisms_str = ', '.join(sorted(organisms))
             ref_names_str = ', '.join(sorted(reference_names_by_feature_name[feature_name]))
             raise click.ClickException(
-                f'gene {feature_name!r} matched references from multiple species '
-                f'({organisms_str}; references: {ref_names_str}) — ambiguous cross-species '
-                f'hit; refusing to report'
+                f"Cannot create an HTML report: matched gene {feature_name!r} occurs in "
+                f'multiple species ({organisms_str}; references: {ref_names_str}). '
+                'Resistance-relevant mutations cannot be attributed to a single species '
+                'unambiguously. Restrict the reference FASTA to one species or remove the '
+                'overlapping gene.'
             )
 
 
@@ -275,12 +282,14 @@ def assemble_multi_reference_result(
             rule_feature_names=rule_feature_names,
         ))
 
-    # Validate: reject cross-species gene-name collisions. A feature name that appears
-    # on matched references belonging to more than one distinct organism is an ambiguous
-    # cross-species hit (e.g. HSV-1 UL23 and HSV-2 UL23): the report cannot attribute
-    # resistance-relevant mutations to a single species unambiguously, so we refuse to
-    # report rather than produce a misleading result. Same-species shared gene names are
-    # allowed (the per-reference scoping in the rule/annotation loops disambiguates them).
+    # Validate: reject cross-species matched-gene collisions. A feature name that the
+    # query actually aligned to on more than one distinct organism is an ambiguous
+    # cross-species hit (e.g. HSV-1 UL23 and HSV-2 UL23 both matched): the report cannot
+    # attribute resistance-relevant mutations to a single species, so no HTML report is
+    # produced. Same-species shared gene names are allowed (the per-reference scoping in
+    # the rule/annotation loops disambiguates them). The gate inspects narrowed
+    # feature_matches (only the CDS the query covered), not the full internal feature
+    # list, so an unmatched gene on a selected reference cannot trigger a false collision.
     # The gate runs before any annotation or rule matching so a rejected run produces no
     # partial report.
     _reject_cross_species_gene_name_collisions(references)

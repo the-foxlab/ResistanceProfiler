@@ -28,7 +28,8 @@ from respro.core.query import (
 from respro.core.vcf_coverage import compute_coverage_gaps_from_bam_multi
 from respro.core.vcf_remap import route_and_remap_variants
 from respro.db.schema import open_project_db
-from respro.io.vcf import parse_vcf
+from respro.io.reference import read_fasta
+from respro.io.vcf import collect_vcf_chroms, parse_vcf
 from respro.utils.logging import err_console
 
 
@@ -122,9 +123,26 @@ def _profile_vcf_command(
             str(results_db) if results_db else None, project_conn, logger,
         )
 
+        # Preflight: every VCF CHROM observed in variant records must have an exact
+        # FASTA record header. Extra FASTA records are allowed (ignored in VCF mode),
+        # but a VCF CHROM without a supplied reference cannot be remapped and indicates
+        # the wrong reference file was provided — a hard failure rather than a silent drop.
+        observed_chroms = collect_vcf_chroms(vcf)
+        fasta_headers = set(read_fasta(ref_fasta).keys())
+        missing = sorted(observed_chroms - fasta_headers)
+        if missing:
+            raise click.ClickException(
+                'VCF CHROM(s) have no matching reference FASTA record: '
+                f'{", ".join(missing)}. '
+                f'VCF CHROMs={sorted(observed_chroms)}, '
+                f'FASTA records={sorted(fasta_headers)}. '
+                'Provide a reference FASTA whose record headers cover every VCF CHROM.'
+            )
+
         with err_console.status('[dim]Aligning reference to internal references…[/dim]'):
             query_records = resolve_fasta_query_multi(
                 project_conn, ref_fasta, use_cache=use_cache, threads=threads,
+                selected_query_names=observed_chroms,
             )
 
         # Parse all CHROMs (expected_query_name=None) so multi-chrom VCFs are retained;
@@ -141,7 +159,11 @@ def _profile_vcf_command(
         for warning in remap_warnings:
             logger.warning(warning)
         for chrom in dropped_chroms:
-            logger.warning('Dropped VCF CHROM %r with no matching FASTA record', chrom)
+            logger.warning(
+                'Dropped VCF CHROM %r: its reference FASTA record has no usable internal '
+                'feature mapping; variants were not remapped',
+                chrom,
+            )
         logger.info('%d variant(s) after FASTA remapping', len(variants))
 
         coverage_gaps = []

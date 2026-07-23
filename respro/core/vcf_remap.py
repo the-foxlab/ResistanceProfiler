@@ -164,17 +164,19 @@ def route_and_remap_variants(
     equals that CHROM and remapped independently via :func:`remap_variants`.
     Remapped variants are concatenated in input order.
 
-    Variants whose CHROM has no matching FASTA record are logged as a warning and
-    dropped (their CHROM is recorded in ``dropped_chroms``). If no CHROM matches
-    any FASTA record, :class:`ValueError` is raised — this is a hard error because
-    it means the VCF and reference FASTA describe different genomes.
+    A CHROM whose ``query_name`` is absent from ``query_records`` is recorded in
+    ``dropped_chroms``. With the VCF CLI's FASTA-header preflight, an absent record
+    means the supplied reference FASTA record had no usable internal feature mapping
+    (the header exists but did not align to any database CDS) — its variants cannot be
+    remapped and are skipped. If no CHROM has a usable mapping, :class:`ValueError`
+    is raised — a hard error because no variant can be annotated.
 
     :param variants: parsed VCF variants (0-based on user reference coordinates)
-    :param query_records: one per FASTA record, each carrying its feature matches
+    :param query_records: one per aligning FASTA record, each carrying its feature matches
     :return: ``(remapped, warnings, dropped_chroms)`` where ``warnings`` are
         per-variant remap warnings (e.g. REF mismatch) and ``dropped_chroms`` lists
-        the CHROMs that had no matching FASTA record.
-    :raises ValueError: if no variant's CHROM matches any query record's name
+        the CHROMs whose supplied reference had no usable feature mapping.
+    :raises ValueError: if no variant's CHROM has a usable query record mapping
     """
     records_by_name = {rec.query_name: rec for rec in query_records}
 
@@ -192,7 +194,7 @@ def route_and_remap_variants(
         record = records_by_name.get(chrom)
         if record is None:
             logger.warning(
-                'VCF CHROM %r has no matching FASTA record; dropping %d variant(s)',
+                'VCF CHROM %r has no usable internal feature mapping; dropping %d variant(s)',
                 chrom, len(group),
             )
             dropped_chroms.append(chrom)
@@ -215,11 +217,10 @@ def route_and_remap_variants(
 
     if variants and not any_chrom_matched:
         raise ValueError(
-            'VCF contig names do not match the uploaded reference FASTA. '
-            f'No VCF CHROM matched any FASTA record name; '
+            'No VCF CHROM could be remapped to an internal reference. '
             f'VCF CHROMs={sorted(grouped)} '
-            f'FASTA records={sorted(records_by_name)}. '
-            'Use files derived from the same reference sequence.'
+            f'resolved FASTA records={sorted(records_by_name)}. '
+            'Ensure the reference FASTA records align to features in the project database.'
         )
 
     logger.info(

@@ -129,10 +129,7 @@
                 <div class="feature-mutation-list{% if context.summary.has_coverage %} feature-mutation-list--with-coverage{% endif %}">
                   {% for entry in context.summary.mutation_profile %}
                     <div class="feature-mutation-row">
-                      <span class="feature-mutation-badge">{{ entry.feature }}</span>
-                      {% if context.is_multi_species and entry.reference_name %}
-                        <span class="feature-mutation-reference">{{ entry.reference_name }}</span>
-                      {% endif %}
+                      <span class="feature-mutation-badge">{{ entry.feature }}{% if context.is_multi_species and entry.reference_name %} <span class="feature-mutation-reference">({{ entry.reference_name }})</span>{% endif %}</span>
                       {% if context.summary.has_coverage %}
                         <div class="feature-coverage-bar">
                           <div class="feature-coverage-bar__fill" style="width: {{ entry.covered_pct }}%"></div>
@@ -776,19 +773,21 @@
                     <dd>{{ card.database_hits }}</dd>
                   </div>
                 </dl>
-                {% if context.sequence_features.is_multi_species and card.reference_name %}
+                {% set has_protein_meta = card.protein or card.note or card.protein_id or card.locus_tag %}
+                {% set show_reference = context.sequence_features.is_multi_species and card.reference_name %}
+                {% if has_protein_meta %}
                   <div class="info-card-meta">
-                    <p><strong>Reference:</strong> {{ card.reference_name }}</p>
-                  </div>
-                {% endif %}
-                {% if card.protein or card.note or card.protein_id or card.locus_tag %}
-                  <div class="info-card-meta">
+                    {% if show_reference %}<p><strong>Reference:</strong> {{ card.reference_name }}</p>{% endif %}
                     {% if card.protein %}<p><strong>Protein:</strong> {{ card.protein }}</p>{% endif %}
                     {% if card.protein_id %}
                       <p><strong>Protein ID:</strong> {{ card.protein_id }}</p>
                     {% endif %}
                     {% if card.locus_tag %}<p><strong>Locus:</strong> {{ card.locus_tag }}</p>{% endif %}
                     {% if card.note %}<p>{{ card.note }}</p>{% endif %}
+                  </div>
+                {% elif show_reference %}
+                  <div class="info-card-meta">
+                    <p><strong>Reference:</strong> {{ card.reference_name }}</p>
                   </div>
                 {% endif %}
               </article>

@@ -413,7 +413,7 @@ class TestProfileCli:
         sample_ref_fasta: Path,
         tmp_path: Path,
     ):
-        """A CHROM mismatch must not be remapped against the active query reference."""
+        """A VCF CHROM with no matching FASTA record header is a hard failure (preflight)."""
         vcf_path = tmp_path / 'wrong_chrom.vcf'
         vcf_path.write_text(
             '##fileformat=VCFv4.2\n'
@@ -434,7 +434,7 @@ class TestProfileCli:
         ])
 
         assert result.exit_code != 0
-        assert 'VCF contig names do not match the uploaded reference FASTA' in (result.output + str(result.exception or ''))
+        assert 'no matching reference FASTA record' in (result.output + str(result.exception or ''))
 
     def test_profile_with_results_db_creates_new_db(
         self,
@@ -522,8 +522,10 @@ class TestProfileCli:
         sample_vcf: Path,
         tmp_path: Path,
     ):
+        # The FASTA record header must match the VCF CHROM (tiny_ref) to pass the preflight;
+        # the unrelated sequence then aligns to no internal CDS, so no record maps.
         bad_fasta = tmp_path / 'bad_ref.fasta'
-        bad_fasta.write_text('>unrelated\nGATTACAGATTACAGATTACAGATTACA\n')
+        bad_fasta.write_text('>tiny_ref\nGATTACAGATTACAGATTACAGATTACA\n')
 
         result = CliRunner().invoke(app, [
             'vcf',

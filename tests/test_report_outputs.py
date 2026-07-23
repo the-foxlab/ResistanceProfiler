@@ -3,6 +3,7 @@ Tests for report output generation.
 """
 
 import json
+import re
 import sqlite3
 
 import matplotlib.pyplot as plt
@@ -4090,4 +4091,275 @@ class TestPdfDrugRows:
         assert badge_classes['by_ic50'] == 'is-intermediate'
         # Final assessment badge class should also be present and normalized
         assert row['assessment_badge_class'] == 'is-resistant'
+
+
+class TestMultiReferencePlotScoping:
+    """Per-reference annotation scoping in the multi-reference lollipop figure.
+
+    Regression guard: when two distinct references carry same-named features (e.g.
+    HSV-1 UL23 and HSV-2 UL23), each reference's genome overview and feature panels
+    must show only that reference's own annotations. The previous implementation
+    scoped annotations by feature name alone, so each reference picked up the other
+    species' same-named annotations.
+    """
+
+    @staticmethod
+    def _make_cross_species_same_feature_result() -> ProfilingResult:
+        """Two references (different organisms) each carrying a same-named UL23 feature.
+
+        refA (Organism A, chrom_a) has a UL23 feature with an A1B annotation.
+        refB (Organism B, chrom_b) has a UL23 feature with a C2D annotation.
+        Both features are named 'UL23' so name-only scoping would conflate them.
+        """
+        from respro.db.models import ReferenceGroup
+
+        feat_a = FeatureRecord(
+            id=1, reference_id=1, name='UL23', protein='TK', start=0, end=12, strand='+',
+            codon_start=0, nt_sequence='ATGAAAGCTTAA',
+        )
+        feat_b = FeatureRecord(
+            id=2, reference_id=2, name='UL23', protein='TK', start=0, end=12, strand='+',
+            codon_start=0, nt_sequence='ATGAAAGCTTAA',
+        )
+        # Rule hits so the annotations count as database hits and their labels render.
+        rule_a = ResistanceRule(
+            id=1, feature_name='UL23', feature_id=1, drug_name='DrugA', drug_id=1,
+            reference_identifier='refA', position=2, reference='A', mutation='B',
+            phenotype='resistant',
+        )
+        rule_b = ResistanceRule(
+            id=2, feature_name='UL23', feature_id=2, drug_name='DrugB', drug_id=2,
+            reference_identifier='refB', position=3, reference='C', mutation='D',
+            phenotype='resistant',
+        )
+        ann_a = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_a', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
+            feature_name='UL23', codon_pos=1, ref_codon='AAA', alt_codon='GAA',
+            ref_aa='A', alt_aa='B', consequence='missense', af_bin='high',
+            rule_matches=[rule_a],
+        )
+        ann_b = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_b', pos=6, ref='C', alt='T', allele_freq=0.95, depth=500),
+            feature_name='UL23', codon_pos=2, ref_codon='CCC', alt_codon='CAC',
+            ref_aa='C', alt_aa='D', consequence='missense', af_bin='high',
+            rule_matches=[rule_b],
+        )
+        references = [
+            ReferenceGroup(
+                reference_name='refA', reference_id=1, organism='Organism A',
+                reference_length_nt=1000, query_name='chrom_a', query_sequence='ATGAAAGCTTAA',
+                features=[feat_a], rule_feature_names={'UL23'},
+                feature_matches=[
+                    FeatureMatch(
+                        feature=feat_a, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                        query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+                    ),
+                ],
+            ),
+            ReferenceGroup(
+                reference_name='refB', reference_id=2, organism='Organism B',
+                reference_length_nt=1000, query_name='chrom_b', query_sequence='ATGAAAGCTTAA',
+                features=[feat_b], rule_feature_names={'UL23'},
+                feature_matches=[
+                    FeatureMatch(
+                        feature=feat_b, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                        query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+                    ),
+                ],
+            ),
+        ]
+        return ProfilingResult(
+            project_name='Cross', organism='Organism A',
+            sample_name='samp', vcf_name='in.vcf',
+            total_variants=2, variants_in_cds=2, resistance_hits=2,
+            annotations=[ann_a, ann_b],
+            references=references,
+        )
+
+    def test_each_reference_genome_shows_only_its_own_annotations(self) -> None:
+        """Each reference's lollipop panel shows only its own variant, not the other's."""
+        from respro.report.plots import render_lollipop_plot_bytes
+
+        result = self._make_cross_species_same_feature_result()
+        features = [f for rg in result.references for f in rg.features]
+        svg_bytes = render_lollipop_plot_bytes(result, features, fmt='svg')
+        assert svg_bytes is not None
+        svg = svg_bytes.decode('utf-8', errors='replace')
+        # Both reference genome titles must be present (one genome overview per reference).
+        assert 'refA' in svg
+        assert 'refB' in svg
+        # Each reference's annotation label must appear exactly once. The label is
+        # ref_aa + (codon_pos+1) + alt_aa, so codon_pos=1 -> 'A2B' and codon_pos=2 ->
+        # 'C3D'. With name-only scoping both labels would appear under each reference
+        # (2x each); with correct chrom scoping each appears exactly once total.
+        assert svg.count('A2B') == 1, 'refA annotation leaked into refB panel'
+        assert svg.count('C3D') == 1, 'refB annotation leaked into refA panel'
+
+    def test_targeted_sequencing_merges_chroms_sharing_reference_id(self) -> None:
+        """Two chroms mapping to one reference_id still merge into one genome overview."""
+        from respro.db.models import ReferenceGroup
+        from respro.report.plots import render_lollipop_plot_bytes
+
+        feat = FeatureRecord(
+            id=1, reference_id=1, name='gag', protein='Gag', start=0, end=12, strand='+',
+            codon_start=0, nt_sequence='ATGAAAGCTTAA',
+        )
+        # Rule hits so the annotations count as database hits and their labels render.
+        rule_a = ResistanceRule(
+            id=1, feature_name='gag', feature_id=1, drug_name='DrugA', drug_id=1,
+            reference_identifier='refA', position=2, reference='A', mutation='B',
+            phenotype='resistant',
+        )
+        rule_b = ResistanceRule(
+            id=2, feature_name='gag', feature_id=1, drug_name='DrugB', drug_id=2,
+            reference_identifier='refA', position=3, reference='C', mutation='D',
+            phenotype='resistant',
+        )
+        ann_a = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_a', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
+            feature_name='gag', codon_pos=1, ref_codon='AAA', alt_codon='GAA',
+            ref_aa='A', alt_aa='B', consequence='missense', af_bin='high',
+            rule_matches=[rule_a],
+        )
+        ann_b = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_b', pos=6, ref='C', alt='T', allele_freq=0.95, depth=500),
+            feature_name='gag', codon_pos=2, ref_codon='CCC', alt_codon='CAC',
+            ref_aa='C', alt_aa='D', consequence='missense', af_bin='high',
+            rule_matches=[rule_b],
+        )
+        # Two ReferenceGroups sharing reference_id=1 (targeted sequencing case).
+        references = [
+            ReferenceGroup(
+                reference_name='refA', reference_id=1, organism='Organism A',
+                reference_length_nt=1000, query_name='chrom_a', query_sequence='ATGAAAGCTTAA',
+                features=[feat], rule_feature_names={'gag'},
+                feature_matches=[
+                    FeatureMatch(
+                        feature=feat, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                        query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+                    ),
+                ],
+            ),
+            ReferenceGroup(
+                reference_name='refA', reference_id=1, organism='Organism A',
+                reference_length_nt=1000, query_name='chrom_b', query_sequence='ATGAAAGCTTAA',
+                features=[feat], rule_feature_names={'gag'},
+                feature_matches=[
+                    FeatureMatch(
+                        feature=feat, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                        query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+                    ),
+                ],
+            ),
+        ]
+        result = ProfilingResult(
+            project_name='Targeted', organism='Organism A',
+            sample_name='samp', vcf_name='in.vcf',
+            total_variants=2, variants_in_cds=2, resistance_hits=2,
+            annotations=[ann_a, ann_b],
+            references=references,
+        )
+        svg_bytes = render_lollipop_plot_bytes(result, [feat], fmt='svg')
+        assert svg_bytes is not None
+        svg = svg_bytes.decode('utf-8', errors='replace')
+        # Exactly one genome overview (both chroms share reference_id=1).
+        assert svg.count('refA') == 1
+        # Both chroms' annotations merged into the single reference's panel.
+        # Labels: codon_pos=1 -> 'A2B', codon_pos=2 -> 'C3D'.
+        assert 'A2B' in svg
+        assert 'C3D' in svg
+
+
+class TestMultiSpeciesAffectedFeaturesBadge:
+    """Issue 2: the reference is rendered inside the gene badge in brackets."""
+
+    def test_affected_features_badge_contains_reference_in_brackets(self) -> None:
+        """Multi-species affected-features badges render 'GENE (REF)' inside one badge span."""
+        result = _make_multi_species_result_with_hits()
+        html = render_html(result, similarity_high=1, similarity_moderate=0,
+                           features=[f for rg in result.references for f in rg.features])
+        # The badge must contain the reference in brackets inside the same span.
+        assert 'gagA <span class="feature-mutation-reference">(refA)</span>' in html
+        assert 'polB <span class="feature-mutation-reference">(refB)</span>' in html
+        # The old standalone reference cell must no longer appear as a separate grid cell
+        # immediately after the badge (regression guard for the skewed layout).
+        assert 'feature-mutation-badge">gagA</span>\n                      <span class="feature-mutation-reference">refA' not in html
+
+    def test_single_species_badge_has_no_reference(self) -> None:
+        """Single-species affected-features badges must not carry a reference (byte-identical)."""
+        r = _make_result()
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        # The CSS class definition is always present in <style>; check the rendered body
+        # markup (after </style>) does not instantiate the reference span in a badge.
+        body = html[html.find('</style>'):]
+        assert 'feature-mutation-reference' not in body
+
+
+class TestMultiSpeciesSequenceFeatureCardReferencePlacement:
+    """Issue 3: the reference is shown above the protein in the same meta block."""
+
+    def test_reference_appear_above_protein_in_same_meta_block(self) -> None:
+        """The Reference line precedes the Protein line within one info-card-meta block."""
+        result = _make_multi_species_result_with_hits()
+        # Provide a project DB with feature metadata so the Protein line renders.
+        # load_feature_cards filters by the first reference name (result.reference_name),
+        # so populate refA/gagA metadata (refA is the first reference).
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE reference (id INTEGER, name TEXT)')
+        conn.execute(
+            'CREATE TABLE feature ('
+            'name TEXT, protein TEXT, protein_id TEXT, ncbi_protein_url TEXT, '
+            'locus_tag TEXT, note TEXT, nt_sequence TEXT, aa_sequence TEXT, start INTEGER, reference_id INTEGER'
+            ')'
+        )
+        conn.execute('INSERT INTO reference (id, name) VALUES (?, ?)', (1, 'refA'))
+        conn.execute(
+            'INSERT INTO feature (name, protein, protein_id, ncbi_protein_url, locus_tag, note, '
+            'nt_sequence, aa_sequence, start, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            ('gagA', 'Capsid protein GagA', 'YP_001', 'https://example.org/YP_001',
+             'LOC_A', 'note A', 'ATGAAAGCTTAA', 'MKAFGP', 0, 1),
+        )
+        conn.commit()
+        html = render_html(result, similarity_high=1, similarity_moderate=0,
+                           features=[f for rg in result.references for f in rg.features],
+                           project_conn=conn)
+        # Find the first sequence-feature card and check Reference precedes Protein in the
+        # same info-card-meta block (no separate Reference-only meta block before it).
+        idx = html.find('id="tab-sequence-feature-information"')
+        assert idx != -1
+        card_start = html.find('info-card-title">gagA', idx)
+        assert card_start != -1, 'gagA card not found'
+        card_end = html.find('</article>', card_start)
+        card = html[card_start:card_end]
+        ref_pos = card.find('<strong>Reference:</strong>')
+        protein_pos = card.find('<strong>Protein:</strong>')
+        assert ref_pos != -1, 'Reference line missing from multi-species card'
+        assert protein_pos != -1, 'Protein line missing from card'
+        assert ref_pos < protein_pos, 'Reference must appear above Protein'
+        # Exactly one info-card-meta block must contain both Reference and Protein
+        # (not two separate blocks).
+        meta_blocks = [
+            m.group(0) for m in re.finditer(
+                r'<div class="info-card-meta">.*?</div>', card, re.S
+            )
+        ]
+        assert len(meta_blocks) >= 1
+        combined = next((b for b in meta_blocks if 'Reference:' in b and 'Protein:' in b), None)
+        assert combined is not None, 'Reference and Protein must share one info-card-meta block'
+        # No standalone Reference-only meta block precedes the combined block.
+        ref_only_blocks = [b for b in meta_blocks if 'Reference:' in b and 'Protein:' not in b]
+        assert not ref_only_blocks, 'Reference must not be a separate meta block'
+
+    def test_single_species_card_has_no_reference_line(self) -> None:
+        """Single-species sequence feature cards must not show a Reference line."""
+        r = _make_result()
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        idx = html.find('id="tab-sequence-feature-information"')
+        if idx == -1:
+            return
+        card_start = html.find('info-card-title', idx)
+        card_end = html.find('</article>', card_start)
+        card = html[card_start:card_end]
+        assert '<strong>Reference:</strong>' not in card
 
