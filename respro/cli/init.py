@@ -10,10 +10,10 @@ import uuid
 from pathlib import Path
 from typing import Annotated
 
-import click
 import typer
 from rich.console import Console
 
+from respro.utils.cli_errors import cli_error
 from respro.core.rules import import_rules_with_summary, validate_rules_tsv
 from respro.db.algorithms import (
     apply_drug_alias_mappings,
@@ -311,7 +311,7 @@ def _init_command(
     Initialise a project database from one or more GenBank reference records and resistance rules provided in TSV.
     """
     if not genbank_paths:
-        raise click.UsageError('At least one --genbank file is required.')
+        cli_error('At least one --genbank file is required.')
 
     output_path = resolve_output_file(output, 'project.db')
 
@@ -329,7 +329,7 @@ def _init_command(
                 additional_info=additional_info,
             )
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        cli_error(str(exc))
 
     console.print(f'[green]✓[/green] Project initialised: [cyan]{db_path}[/cyan]')
 
@@ -375,7 +375,7 @@ def _init_add_command(
                 validate_only=validate,
             )
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        cli_error(str(exc))
 
     if validate:
         console.print(f'[green]✓[/green] Rules validation passed: [cyan]{db_path}[/cyan]')

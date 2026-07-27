@@ -12,6 +12,7 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 
+from respro.utils.cli_errors import cli_error
 from respro.cli.profile_helpers import (
     _finalize_and_export,
     _load_reference_data,
@@ -91,7 +92,7 @@ def sync_results_database(
         ))
 
     except (FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        cli_error(str(exc))
     finally:
         if results_conn is not None:
             results_conn.close()

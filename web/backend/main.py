@@ -536,7 +536,7 @@ def _user_facing_error_message(raw_message: str | None) -> str:
         return 'The operation failed on the server.'
 
     message = _extract_primary_error_message(raw_message)
-    for prefix in ('ValueError: ', 'RuntimeError: ', 'Exception: ', 'OSError: '):
+    for prefix in ('Error: ', 'ValueError: ', 'RuntimeError: ', 'Exception: ', 'OSError: '):
         if message.startswith(prefix):
             message = message[len(prefix):]
             break

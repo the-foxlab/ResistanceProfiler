@@ -12,6 +12,7 @@ import click
 import typer
 from rich.console import Console
 
+from respro.utils.cli_errors import cli_error, render_click_exception
 from respro.cli.profile_helpers import (
     _finalize_and_export,
     _init_results_db_connection,
@@ -92,7 +93,7 @@ def _profile_fasta_command(
         project_conn = open_project_db(project)
         project_row = project_conn.execute('SELECT name FROM project LIMIT 1').fetchone()
         if project_row is None:
-            raise click.ClickException('No project found in the database')
+            cli_error('No project found in the database')
 
         results_conn = _init_results_db_connection(
             str(results_db) if results_db else None, project_conn, logger,
@@ -153,8 +154,10 @@ def _profile_fasta_command(
 
         _print_completion_panel(console, '✓ Profiling complete', result, outputs)
 
+    except click.ClickException as exc:
+        render_click_exception(exc)
     except (FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        cli_error(str(exc))
     finally:
         if project_conn is not None:
             project_conn.close()

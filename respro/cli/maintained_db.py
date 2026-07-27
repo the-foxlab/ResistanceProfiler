@@ -8,12 +8,12 @@ import tempfile
 from pathlib import Path
 from typing import Annotated
 
-import click
 import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+from respro.utils.cli_errors import cli_error
 from respro.cli.init import init_project
 from respro.io.maintained_db import (
     download_database_files,
@@ -62,9 +62,9 @@ def _maintained_db_command(
     These databases are stored in a companion repository and are monthly checked for maintainer updates and formatted to be respro compatible.
     """
     if list_mode and download:
-        raise click.ClickException('Use either --list or --download, not both.')
+        cli_error('Use either --list or --download, not both.')
     if not list_mode and not download:
-        raise click.ClickException('Provide either --list or --download NAME.')
+        cli_error('Provide either --list or --download NAME.')
 
     if list_mode:
         _list_command()
@@ -85,7 +85,7 @@ def _list_command() -> None:
         with err_console.status('[dim]Fetching database listing…[/dim]'):
             db_names = list_maintained_databases()
     except RuntimeError as exc:
-        raise click.ClickException(str(exc)) from exc
+        cli_error(str(exc))
 
     if not db_names:
         console.print('[yellow]No databases found in companion repository.[/yellow]')
@@ -96,7 +96,7 @@ def _list_command() -> None:
             with err_console.status(f'[dim]Fetching metadata for {db_name}…[/dim]'):
                 meta = fetch_database_metadata(db_name)
         except RuntimeError as exc:
-            raise click.ClickException(str(exc)) from exc
+            cli_error(str(exc))
 
         lines = Text()
         lines.append('database_name: ', style='bold cyan')
@@ -147,11 +147,11 @@ def _download_command(
             with err_console.status(f'[dim]Downloading {database_name}…[/dim]'):
                 files = download_database_files(database_name, tmp_dir)
         except RuntimeError as exc:
-            raise click.ClickException(str(exc)) from exc
+            cli_error(str(exc))
 
         genbank_paths: list[Path] = files['genbank']  # type: ignore[assignment]
         if not genbank_paths:
-            raise click.ClickException(
+            cli_error(
                 f'No GenBank records could be fetched for database {database_name!r}. '
                 'Check that the rules.tsv contains valid reference_identifier values.'
             )
@@ -171,7 +171,7 @@ def _download_command(
                     additional_info=additional_info,
                 )
         except (FileNotFoundError, ValueError) as exc:
-            raise click.ClickException(str(exc)) from exc
+            cli_error(str(exc))
 
     console.print(f'[green]✓[/green] Database initialised: [cyan]{db_path}[/cyan]')
 

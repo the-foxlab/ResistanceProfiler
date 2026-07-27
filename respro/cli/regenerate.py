@@ -8,11 +8,11 @@ import logging
 from pathlib import Path
 from typing import Annotated
 
-import click
 import typer
 from rich.console import Console
 from rich.panel import Panel
 
+from respro.utils.cli_errors import cli_error
 from respro.config.cli_settings import CLI_CONFIG
 from respro.db.features import load_features_for_reference
 from respro.db.models import ProfilingResult, ReferenceGroup
@@ -97,18 +97,18 @@ def regenerate(
         for raw_export in export or []:
             export_value = raw_export.strip().lower()
             if export_value not in ('json', 'pdf'):
-                raise click.ClickException(
+                cli_error(
                     'Invalid --export value. Choose one of: json, pdf.'
                 )
             extra_export_formats.add(export_value)
 
         if json_input is not None and (result_db is not None or run_id is not None):
-            raise click.ClickException(
+            cli_error(
                 'Use either --json OR (--results-db with --run-id), not both modes together.'
             )
 
         if json_input is None and (result_db is None or run_id is None):
-            raise click.ClickException(
+            cli_error(
                 'Missing input mode. Use --json or provide both --results-db and --run-id.'
             )
 
@@ -276,7 +276,7 @@ def regenerate(
             console.print(f'  [dim]{fmt}[/dim]   {path}')
 
     except (FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        cli_error(str(exc))
     finally:
         if results_conn is not None:
             results_conn.close()

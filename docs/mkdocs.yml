@@ -51,6 +51,7 @@ nav:
   - Interpretation algorithms: algorithms.md
   - CLI reference: cli-reference.md
   - Output interpretation: output.md
+  - Laboratory tool questionnaire: laboratory-tool-questionnaire.md
   - Web app: webapp.md
   - Contributing: contributing.md
   - License: license.md

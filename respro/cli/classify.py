@@ -7,10 +7,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated
 
-import click
 import typer
 from rich.console import Console
 
+from respro.utils.cli_errors import cli_error
 from respro.db.results import (
     load_run,
     save_classification,
@@ -93,7 +93,7 @@ def classify(
     shown in the report html.
     """
     if not any([phenotype, clinical_phenotype, ic50, fold_ic50]):
-        raise click.UsageError(
+        cli_error(
             'At least one of --phenotype, --clinical-phenotype, --ic50, or --fold-ic50 must be provided.'
         )
 
@@ -118,7 +118,7 @@ def classify(
             f'[green]✓[/green] Classification saved for run #{run_id}.'
         )
     except (FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        cli_error(str(exc))
     finally:
         if results_conn is not None:
             results_conn.close()
