@@ -18,6 +18,7 @@ def build_health_router(
     sample_limit_per_minute: int,
     require_api_token: Callable[..., None],
     build_readiness_payload: Callable[[StartupConfig], ApiEnvelope],
+    version: str,
 ) -> APIRouter:
     """Build health, readiness, and UI config routes."""
     router = APIRouter()
@@ -44,6 +45,7 @@ def build_health_router(
             data={
                 'batch_max_samples': sample_limit_per_minute,
                 'sample_limit_per_minute': sample_limit_per_minute,
+                'version': version,
             }
         )
 

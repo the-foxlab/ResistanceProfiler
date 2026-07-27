@@ -135,6 +135,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             sample_limit_per_minute=sample_limit_per_minute,
             require_api_token=require_api_token,
             build_readiness_payload=_build_readiness_payload,
+            version=version,
         )
     )
     app.include_router(

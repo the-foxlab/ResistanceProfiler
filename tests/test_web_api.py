@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import io
 import json
 import shutil
@@ -1526,6 +1527,23 @@ class TestWebApi:
         response = client.get('/api/ui/config')
 
         assert response.status_code == 401
+
+    def test_ui_config_reports_respro_version(
+        self,
+        startup_config: StartupConfig,
+        sync_queue: Queue,
+        auth_headers: dict[str, str],
+    ) -> None:
+        app = create_app(startup_config=startup_config)
+        app.dependency_overrides[get_queue] = lambda: sync_queue
+        app.dependency_overrides[get_batch_queue] = lambda: sync_queue
+        client = TestClient(app)
+
+        response = client.get('/api/ui/config', headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()['data']
+        assert payload['version'] == importlib.metadata.version('respro')
 
     def test_open_report_rejects_paths_outside_results_dir(
         self,

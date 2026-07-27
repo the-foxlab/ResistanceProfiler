@@ -23,6 +23,7 @@ export function useDashboardLogic() {
   // href the footer "Legal notice" link should point at — an external URL when the
   // backend reports ``kind:'url'``, or the self-hosted ``/legal`` route for path mode.
   const [legalLink, setLegalLink] = useState(null);
+  const [resproVersion, setResproVersion] = useState(null);
   const [activeMode, setActiveMode] = useState('analyze');
   const [activeProfileMode, setActiveProfileMode] = useState('vcf');
   const [analyzeSubMode, setAnalyzeSubMode] = useState('single');
@@ -75,6 +76,9 @@ export function useDashboardLogic() {
         }
         if (Number.isFinite(uiConfig.sample_limit_per_minute) && uiConfig.sample_limit_per_minute > 0) {
           batch.setSampleLimitPerMinute(uiConfig.sample_limit_per_minute);
+        }
+        if (uiConfig.version) {
+          setResproVersion(uiConfig.version);
         }
         const legalPayload = await apiGet('/api/ui/legal').catch(() => null);
         setLegalLink(_resolveLegalLink(legalPayload?.data));
@@ -174,6 +178,7 @@ export function useDashboardLogic() {
     setSelectedDatabaseId,
     statusError,
     legalLink,
+    resproVersion,
     selectedProfileReportPath: session.selectedProfileReportPath,
     setSelectedProfileReportPath: session.setSelectedProfileReportPath,
     mutationFilter: mutations.mutationFilter,

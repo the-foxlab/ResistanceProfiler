@@ -37,6 +37,7 @@ export function DashboardView({
   setSelectedDatabaseId,
   statusError,
   legalLink,
+  resproVersion,
   selectedProfileReportPath,
   setSelectedProfileReportPath,
   mutationFilter,
@@ -304,11 +305,17 @@ export function DashboardView({
             />
           )}
         </section>
-        {legalLink && (
-          <footer className="app-footer">
+        <footer className="app-footer">
+          {legalLink && (
             <a href={legalLink} target="_blank" rel="noreferrer">Legal notice</a>
-          </footer>
-        )}
+          )}
+          {legalLink && resproVersion && (
+            <span className="app-footer-sep" aria-hidden="true">·</span>
+          )}
+          {resproVersion && (
+            <span className="app-footer-version">ResistanceProfiler v{resproVersion}</span>
+          )}
+        </footer>
       </div>
     </main>
   );
