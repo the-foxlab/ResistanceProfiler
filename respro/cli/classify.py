@@ -10,12 +10,12 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from respro.utils.cli_errors import cli_error
 from respro.db.results import (
     load_run,
     save_classification,
 )
 from respro.db.schema import open_results_db
+from respro.utils.cli_errors import cli_error
 
 
 def classify(

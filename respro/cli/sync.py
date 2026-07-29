@@ -12,7 +12,6 @@ import click
 from rich.console import Console
 from rich.panel import Panel
 
-from respro.utils.cli_errors import cli_error
 from respro.cli.profile_helpers import (
     _finalize_and_export,
     _load_reference_data,
@@ -29,6 +28,7 @@ from respro.db.results import (
 )
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.schema import open_project_db, open_results_db
+from respro.utils.cli_errors import cli_error
 from respro.utils.logging import err_console
 
 logger = logging.getLogger(__name__)

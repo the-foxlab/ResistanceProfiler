@@ -13,7 +13,6 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from respro.utils.cli_errors import cli_error
 from respro.core.rules import import_rules_with_summary, validate_rules_tsv
 from respro.db.algorithms import (
     apply_drug_alias_mappings,
@@ -26,6 +25,7 @@ from respro.db.features import _load_genbank_records
 from respro.db.project_metadata import load_metadata_json, store_project_metadata
 from respro.db.schema import PROJECT_SCHEMA_VERSION, create_schema, open_project_db
 from respro.io.genbank import ParsedGenBankReference, parse_genbank_sources
+from respro.utils.cli_errors import cli_error
 from respro.utils.files import require_file, resolve_output_file
 from respro.utils.logging import err_console
 

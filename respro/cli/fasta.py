@@ -12,7 +12,6 @@ import click
 import typer
 from rich.console import Console
 
-from respro.utils.cli_errors import cli_error, render_click_exception
 from respro.cli.profile_helpers import (
     _finalize_and_export,
     _init_results_db_connection,
@@ -27,6 +26,7 @@ from respro.core.annotation import annotate_variants
 from respro.core.fasta_to_vcf import fasta_to_vcf
 from respro.core.query import resolve_fasta_query
 from respro.db.schema import open_project_db
+from respro.utils.cli_errors import cli_error, render_click_exception
 from respro.utils.logging import err_console
 
 

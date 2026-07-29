@@ -13,13 +13,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from respro.utils.cli_errors import cli_error
 from respro.cli.init import init_project
 from respro.io.maintained_db import (
     download_database_files,
     fetch_database_metadata,
     list_maintained_databases,
 )
+from respro.utils.cli_errors import cli_error
 from respro.utils.files import resolve_output_file
 from respro.utils.logging import err_console
 

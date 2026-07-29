@@ -12,7 +12,6 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from respro.utils.cli_errors import cli_error
 from respro.config.cli_settings import CLI_CONFIG
 from respro.db.features import load_features_for_reference
 from respro.db.models import ProfilingResult, ReferenceGroup
@@ -30,6 +29,7 @@ from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.rules_queries import load_rules
 from respro.db.schema import open_project_db, open_results_db
 from respro.report.non_html_exports import export_results
+from respro.utils.cli_errors import cli_error
 from respro.utils.files import resolve_output_file
 from respro.utils.logging import err_console
 
