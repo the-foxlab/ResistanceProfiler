@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from conftest import make_profiling_result
+
 from respro.db.models import (
     AnnotatedVariant,
     FeatureRecord,
@@ -63,7 +65,7 @@ def _make_formula_only_result() -> tuple[ProfilingResult, list[FeatureRecord]]:
         phenotype='resistant',
         group_name='formula_1',
     )
-    result = ProfilingResult(
+    result = make_profiling_result(
         project_name='Test Project',
         reference_name='tiny_ref',
         sample_name='sample01',

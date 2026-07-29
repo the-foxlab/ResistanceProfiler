@@ -15,6 +15,25 @@ from respro.db.models import VariantCall
 logger = logging.getLogger(__name__)
 
 
+def collect_vcf_chroms(vcf_path: Path) -> set[str]:
+    """
+    Return the set of distinct CHROM names observed in VCF variant records.
+
+    Only CHROMs that appear in parsed variant records are returned; contigs declared
+    only in the VCF header (with no variant rows) are ignored. Used by the VCF CLI to
+    preflight FASTA header coverage before reference resolution.
+
+    :param vcf_path: path to VCF file
+    :return: set of observed CHROM names
+    """
+    vcf_path = Path(vcf_path)
+    chroms: set[str] = set()
+    with pysam.VariantFile(str(vcf_path)) as vcf:
+        for record in vcf.fetch():
+            chroms.add(record.contig)
+    return chroms
+
+
 def parse_vcf(
     vcf_path: Path,
     expected_query_name: str | None = None,

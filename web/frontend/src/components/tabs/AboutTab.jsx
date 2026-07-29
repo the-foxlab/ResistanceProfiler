@@ -33,7 +33,7 @@ const ABOUT_DOCKER_COMMAND = 'docker compose -f docker-compose.web.yml up --buil
 const ABOUT_WORKFLOW_STEPS = [
   {
     title: 'Input',
-    text: 'Consensus FASTA or VCF plus matching reference FASTA; optional BAM for coverage.',
+    text: 'Consensus FASTA or VCF plus matching reference FASTA; optional BAM for coverage. The VCF may be multi-chrom and the reference FASTA multi-record (one record per CHROM) to profile segmented viruses or multiple targets in one run.',
     iconSrc: uploadIconSrc,
   },
   {

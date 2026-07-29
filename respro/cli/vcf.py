@@ -13,21 +13,24 @@ import typer
 from rich.console import Console
 
 from respro.cli.profile_helpers import (
-    _finalize_and_export,
+    _finalize_and_export_multi,
     _init_results_db_connection,
-    _load_reference_data,
     _parse_export_formats,
     _print_completion_panel,
-    _ProfilingRunContext,
-    _resolve_reference,
+    assemble_multi_reference_result,
 )
 from respro.config.cli_settings import CLI_CONFIG
-from respro.core.annotation import annotate_variants
-from respro.core.query import resolve_fasta_query
-from respro.core.vcf_coverage import compute_coverage_gaps_from_bam
-from respro.core.vcf_remap import remap_variants
+from respro.core.query import (
+    pick_best_reference_id,
+    resolve_fasta_query_multi,
+    select_matches_for_reference,
+)
+from respro.core.vcf_coverage import compute_coverage_gaps_from_bam_multi
+from respro.core.vcf_remap import route_and_remap_variants
 from respro.db.schema import open_project_db
-from respro.io.vcf import parse_vcf
+from respro.io.reference import read_fasta
+from respro.io.vcf import collect_vcf_chroms, parse_vcf
+from respro.utils.cli_errors import cli_error, render_click_exception
 from respro.utils.logging import err_console
 
 
@@ -108,30 +111,44 @@ def _profile_vcf_command(
 
     try:
         if ref_fasta is None:
-            raise click.ClickException('Missing option --ref-fasta.')
+            cli_error('Missing option --ref-fasta.')
 
         export_formats = _parse_export_formats(export)
 
         project_conn = open_project_db(project)
         project_row = project_conn.execute('SELECT name FROM project LIMIT 1').fetchone()
         if project_row is None:
-            raise click.ClickException('No project found in the database')
+            cli_error('No project found in the database')
 
         results_conn = _init_results_db_connection(
             str(results_db) if results_db else None, project_conn, logger,
         )
 
-        with err_console.status('[dim]Aligning reference to internal references…[/dim]'):
-            query_name, query_seq, fasta_matches = resolve_fasta_query(
-                project_conn, ref_fasta, use_cache=use_cache, threads=threads,
+        # Preflight: every VCF CHROM observed in variant records must have an exact
+        # FASTA record header. Extra FASTA records are allowed (ignored in VCF mode),
+        # but a VCF CHROM without a supplied reference cannot be remapped and indicates
+        # the wrong reference file was provided — a hard failure rather than a silent drop.
+        observed_chroms = collect_vcf_chroms(vcf)
+        fasta_headers = set(read_fasta(ref_fasta).keys())
+        missing = sorted(observed_chroms - fasta_headers)
+        if missing:
+            cli_error(
+                'VCF CHROM(s) have no matching reference FASTA record: '
+                f'{", ".join(missing)}. '
+                f'VCF CHROMs={sorted(observed_chroms)}, '
+                f'FASTA records={sorted(fasta_headers)}. '
+                'Provide a reference FASTA whose record headers cover every VCF CHROM.'
             )
 
-        ref_id, ref_name, fasta_matches = _resolve_reference(
-            project_conn, fasta_matches, query_name, logger,
-        )
-        features, rules, formula_rules, rule_feature_names = _load_reference_data(project_conn, ref_id)
+        with err_console.status('[dim]Aligning reference to internal references…[/dim]'):
+            query_records = resolve_fasta_query_multi(
+                project_conn, ref_fasta, use_cache=use_cache, threads=threads,
+                selected_query_names=observed_chroms,
+            )
 
-        variants = parse_vcf(vcf, expected_query_name=query_name)
+        # Parse all CHROMs (expected_query_name=None) so multi-chrom VCFs are retained;
+        # route_and_remap_variants pairs each CHROM with its matching QueryRecord.
+        variants = parse_vcf(vcf, expected_query_name=None)
         logger.info('Parsed %d variant(s)', len(variants))
         variants = [
             v for v in variants
@@ -139,19 +156,31 @@ def _profile_vcf_command(
         ]
         logger.info('%d variant(s) after AF/depth filtering', len(variants))
 
-        variants, remap_warnings = remap_variants(variants, fasta_matches, query_seq)
+        variants, remap_warnings, dropped_chroms = route_and_remap_variants(variants, query_records)
         for warning in remap_warnings:
             logger.warning(warning)
+        for chrom in dropped_chroms:
+            logger.warning(
+                'Dropped VCF CHROM %r: its reference FASTA record has no usable internal '
+                'feature mapping; variants were not remapped',
+                chrom,
+            )
         logger.info('%d variant(s) after FASTA remapping', len(variants))
 
         coverage_gaps = []
         if bam is not None:
             with err_console.status('[dim]Projecting BAM depth to internal CDS coordinates…[/dim]'):
-                coverage_gaps = compute_coverage_gaps_from_bam(
+                # Narrow each query record's matches to its best reference (same narrowing
+                # applied in route_and_remap_variants) so coverage is projected onto only
+                # the selected reference's features, avoiding cross-reference duplication.
+                per_chrom = {}
+                for rec in query_records:
+                    ref_id = pick_best_reference_id(rec.feature_matches)
+                    narrowed = select_matches_for_reference(rec.feature_matches, ref_id)
+                    per_chrom[rec.query_name] = (rec.query_name, rec.query_sequence, narrowed)
+                coverage_gaps = compute_coverage_gaps_from_bam_multi(
                     bam_path=bam,
-                    query_name=query_name,
-                    query_sequence=query_seq,
-                    matches=fasta_matches,
+                    per_chrom=per_chrom,
                     min_depth=min_depth,
                 )
             if coverage_gaps:
@@ -163,29 +192,22 @@ def _profile_vcf_command(
                     len(coverage_gaps),
                     min_depth,
                 )
-        annotations = annotate_variants(variants, features)
-        total_variants = len(variants)
-        variants_in_cds = sum(1 for a in annotations if a.feature_name)
 
-        ctx = _ProfilingRunContext(
-            annotations=annotations,
-            formula_rules=formula_rules,
-            features=features,
-            rule_feature_names=rule_feature_names,
-            rules=rules,
-            total_variants=total_variants,
-            variants_in_cds=variants_in_cds,
+        result = assemble_multi_reference_result(
+            project_conn=project_conn,
+            query_records=query_records,
+            remapped_variants=variants,
             coverage_gaps=coverage_gaps or [],
-            query_sequence=query_seq,
-            feature_matches=fasta_matches or [],
+            project_name=project_row['name'],
+            sample=sample,
+            vcf_name=input_display_name or vcf.name,
+            total_variants=len(variants),
             af_bins=CLI_CONFIG.af_bins.as_dict(),
         )
-        result, outputs = _finalize_and_export(
-            ctx=ctx,
+
+        result, outputs = _finalize_and_export_multi(
+            result=result,
             project_conn=project_conn,
-            ref_id=ref_id,
-            project_name=project_row['name'],
-            ref_name=ref_name,
             sample=sample,
             input_basename=input_display_name or vcf.name,
             output_target=output,
@@ -197,8 +219,10 @@ def _profile_vcf_command(
 
         _print_completion_panel(console, '✓ Profiling complete', result, outputs)
 
+    except click.ClickException as exc:
+        render_click_exception(exc)
     except (FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        cli_error(str(exc))
     finally:
         if project_conn is not None:
             project_conn.close()

@@ -9,6 +9,7 @@ import logging
 from Bio.Seq import Seq
 
 from respro.core.alignment import cigar_to_coordinate_map
+from respro.core.query import QueryRecord, pick_best_reference_id, select_matches_for_reference
 from respro.db.models import FeatureMatch, FeatureRecord, VariantCall
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,84 @@ def remap_variants(
         len(remapped), len(remap_input_variants), len(warnings),
     )
     return remapped, warnings
+
+
+def route_and_remap_variants(
+    variants: list[VariantCall],
+    query_records: list[QueryRecord],
+) -> tuple[list[VariantCall], list[str], list[str]]:
+    """
+    Group variants by CHROM, pair each group with its matching query record, and remap.
+
+    For multi-chrom VCF inputs, variants are partitioned by their ``chrom`` field.
+    Each partition is paired with the :class:`QueryRecord` whose ``query_name``
+    equals that CHROM and remapped independently via :func:`remap_variants`.
+    Remapped variants are concatenated in input order.
+
+    A CHROM whose ``query_name`` is absent from ``query_records`` is recorded in
+    ``dropped_chroms``. With the VCF CLI's FASTA-header preflight, an absent record
+    means the supplied reference FASTA record had no usable internal feature mapping
+    (the header exists but did not align to any database CDS) — its variants cannot be
+    remapped and are skipped. If no CHROM has a usable mapping, :class:`ValueError`
+    is raised — a hard error because no variant can be annotated.
+
+    :param variants: parsed VCF variants (0-based on user reference coordinates)
+    :param query_records: one per aligning FASTA record, each carrying its feature matches
+    :return: ``(remapped, warnings, dropped_chroms)`` where ``warnings`` are
+        per-variant remap warnings (e.g. REF mismatch) and ``dropped_chroms`` lists
+        the CHROMs whose supplied reference had no usable feature mapping.
+    :raises ValueError: if no variant's CHROM has a usable query record mapping
+    """
+    records_by_name = {rec.query_name: rec for rec in query_records}
+
+    # Partition variants by CHROM, preserving input order within each group.
+    grouped: dict[str, list[VariantCall]] = {}
+    for var in variants:
+        grouped.setdefault(var.chrom, []).append(var)
+
+    dropped_chroms: list[str] = []
+    remapped_all: list[VariantCall] = []
+    warnings_all: list[str] = []
+
+    any_chrom_matched = False
+    for chrom, group in grouped.items():
+        record = records_by_name.get(chrom)
+        if record is None:
+            logger.warning(
+                'VCF CHROM %r has no usable internal feature mapping; dropping %d variant(s)',
+                chrom, len(group),
+            )
+            dropped_chroms.append(chrom)
+            continue
+        any_chrom_matched = True
+        # Narrow this query record's feature matches to its single best internal
+        # reference before remap. A query may align to features on multiple internal
+        # references (e.g. shared conserved genes); without narrowing, remap_variants
+        # would emit one remapped variant per matching feature, producing duplicates
+        # with different internal genomic positions and cross-reference contamination.
+        # This mirrors the original single-reference flow, which narrowed via
+        # pick_best_reference_id + select_matches_for_reference before remap.
+        ref_id = pick_best_reference_id(record.feature_matches)
+        narrowed_matches = select_matches_for_reference(record.feature_matches, ref_id)
+        remapped, warnings = remap_variants(
+            group, narrowed_matches, record.query_sequence,
+        )
+        remapped_all.extend(remapped)
+        warnings_all.extend(warnings)
+
+    if variants and not any_chrom_matched:
+        raise ValueError(
+            'No VCF CHROM could be remapped to an internal reference. '
+            f'VCF CHROMs={sorted(grouped)} '
+            f'resolved FASTA records={sorted(records_by_name)}. '
+            'Ensure the reference FASTA records align to features in the project database.'
+        )
+
+    logger.info(
+        'Routed %d variant(s) across %d CHROM(s); %d remapped, %d CHROM(s) dropped',
+        len(variants), len(grouped), len(remapped_all), len(dropped_chroms),
+    )
+    return remapped_all, warnings_all, dropped_chroms
 
 
 def _expand_anchor_changed_indels(

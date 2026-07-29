@@ -8,7 +8,7 @@ from io import StringIO
 from pathlib import Path
 
 import pysam
-from conftest import TINY_REF_SEQ, write_genbank
+from conftest import TINY_REF_SEQ, make_profiling_result, write_genbank
 from rich.console import Console
 from typer.testing import CliRunner
 
@@ -17,7 +17,6 @@ from respro.cli.profile_helpers import _print_completion_panel
 from respro.db.models import (
     AnnotatedVariant,
     FormulaRuleHit,
-    ProfilingResult,
     ResistanceRule,
     ResistanceRuleSet,
     VariantCall,
@@ -89,6 +88,7 @@ class TestProfileCli:
             'coverage_gap',
             'formula_rule_hit',
             'sample_classification',
+            'references',
         }
         assert 'id' not in payload['run']
         assert all('run_id' not in row for row in payload['variant_result'])
@@ -204,7 +204,7 @@ class TestProfileCli:
             phenotype='resistant',
             group_name='formula_1',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='Test Project',
             reference_name='tiny_ref',
             sample_name='sample01',
@@ -370,7 +370,7 @@ class TestProfileCli:
             FormulaRuleHit(rule_set=formula_rule_set_c, matched_variants=[ann_d]),
         ]
 
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='Test Project',
             reference_name='ref',
             sample_name='sample01',
@@ -413,7 +413,7 @@ class TestProfileCli:
         sample_ref_fasta: Path,
         tmp_path: Path,
     ):
-        """A CHROM mismatch must not be remapped against the active query reference."""
+        """A VCF CHROM with no matching FASTA record header is a hard failure (preflight)."""
         vcf_path = tmp_path / 'wrong_chrom.vcf'
         vcf_path.write_text(
             '##fileformat=VCFv4.2\n'
@@ -434,7 +434,7 @@ class TestProfileCli:
         ])
 
         assert result.exit_code != 0
-        assert 'VCF contig names do not match the uploaded reference FASTA' in (result.output + str(result.exception or ''))
+        assert 'no matching reference FASTA record' in (result.output + str(result.exception or ''))
 
     def test_profile_with_results_db_creates_new_db(
         self,
@@ -522,8 +522,10 @@ class TestProfileCli:
         sample_vcf: Path,
         tmp_path: Path,
     ):
+        # The FASTA record header must match the VCF CHROM (tiny_ref) to pass the preflight;
+        # the unrelated sequence then aligns to no internal CDS, so no record maps.
         bad_fasta = tmp_path / 'bad_ref.fasta'
-        bad_fasta.write_text('>unrelated\nGATTACAGATTACAGATTACAGATTACA\n')
+        bad_fasta.write_text('>tiny_ref\nGATTACAGATTACAGATTACAGATTACA\n')
 
         result = CliRunner().invoke(app, [
             'vcf',

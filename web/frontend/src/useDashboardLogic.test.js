@@ -896,3 +896,59 @@ describe('_resolveLegalLink', () => {
     expect(_resolveLegalLink({ enabled: true, kind: 'url', url: '' })).toBe(SELF_HOSTED_LEGAL);
   });
 });
+
+describe('resproVersion', () => {
+  // The footer always renders; the version string is sourced from
+  // /api/ui/config so it reflects the running backend, not the build.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.fetch.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('exposes the version reported by /api/ui/config', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { version: '1.2.3' } }),
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false } }),
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { items: [] } }),
+    });
+
+    const { result } = renderHook(() => useDashboardLogic());
+
+    await waitFor(() => {
+      expect(result.current.resproVersion).toBe('1.2.3');
+    });
+  });
+
+  it('stays null when the backend omits the version', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: {} }),
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false } }),
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { items: [] } }),
+    });
+
+    const { result } = renderHook(() => useDashboardLogic());
+
+    await waitFor(() => {
+      expect(result.current.databases.length).toBe(0);
+    });
+    expect(result.current.resproVersion).toBeNull();
+  });
+});

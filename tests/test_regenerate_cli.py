@@ -14,7 +14,7 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
-from conftest import TINY_REF_SEQ, write_genbank
+from conftest import TINY_REF_SEQ, make_profiling_result, write_genbank
 from typer.testing import CliRunner
 
 from respro.cli.init import init_project
@@ -23,7 +23,6 @@ from respro.db.features import load_features_for_reference
 from respro.db.models import (
     AnnotatedVariant,
     FormulaRuleHit,
-    ProfilingResult,
     ResistanceRuleSet,
     ResistanceRuleSetMember,
     VariantCall,
@@ -494,7 +493,7 @@ class TestRegenerate:
                 mutation='V',
             ),
         ]
-        result_obj = ProfilingResult(
+        result_obj = make_profiling_result(
             project_name='Test Project',
             reference_name='tiny_ref',
             sample_name='sample_combo',
@@ -572,7 +571,7 @@ class TestRegenerate:
                 results_conn,
                 project_db.resolve(),
                 project_conn,
-                ProfilingResult(
+                make_profiling_result(
                     project_name='split-test',
                     reference_name='tiny_ref',
                     reference_length_nt=int(ref_row['length'] or 0),
@@ -640,7 +639,7 @@ class TestRegenerate:
 
         annotations = reconstruct_annotations(variant_rows)
         formula_hits = reconstruct_formula_rule_hits(combo_rows, annotations)
-        profiling_result = ProfilingResult(
+        profiling_result = make_profiling_result(
             project_name=run_dict['project_name'],
             organism=ref_row['organism'] or '',
             reference_name=run_dict['reference_name'],

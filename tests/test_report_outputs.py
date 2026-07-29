@@ -3,10 +3,12 @@ Tests for report output generation.
 """
 
 import json
+import re
 import sqlite3
 
 import matplotlib.pyplot as plt
 from Bio.Seq import Seq
+from conftest import make_profiling_result
 
 from respro.db.models import (
     AnnotatedVariant,
@@ -77,7 +79,7 @@ def _make_result() -> ProfilingResult:
         codon_start=0,
         nt_sequence='ATGAAAGCTTAA',
     )
-    return ProfilingResult(
+    return make_profiling_result(
         project_name='Test', organism='test',
         reference_name='ref', reference_length_nt=12000, sample_name='S1',
         vcf_name='test.vcf',
@@ -128,7 +130,7 @@ class TestBuildReportContext:
             consequence='missense', af_bin='high',
             rule_matches=[rule_a, rule_b],
         )
-        r = ProfilingResult(
+        r = make_profiling_result(
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=1,
             annotations=[ann],
@@ -177,7 +179,7 @@ class TestBuildReportContext:
             ref_aa='K', alt_aa='E', consequence='missense', af_bin='high',
             rule_matches=[rule],
         )
-        r = ProfilingResult(
+        r = make_profiling_result(
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=1, annotations=[ann],
         )
@@ -206,7 +208,7 @@ class TestBuildReportContext:
             ref_aa='K', alt_aa='E', consequence='missense', af_bin='high',
             rule_matches=[rule],
         )
-        r = ProfilingResult(
+        r = make_profiling_result(
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=1, annotations=[ann],
         )
@@ -241,7 +243,7 @@ class TestBuildReportContext:
             phenotype='unknown',
             ic50='12.0',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -314,7 +316,7 @@ class TestBuildReportContext:
             phenotype='unknown',
             fold_ic50='6.5',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -388,7 +390,7 @@ class TestBuildReportContext:
             phenotype='unknown',
             ic50='12.0',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -463,7 +465,7 @@ class TestBuildReportContext:
             mutation='E',
             phenotype='resistant',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -521,7 +523,7 @@ class TestBuildReportContext:
             phenotype='unknown',
             fold_ic50='6.5',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -588,7 +590,7 @@ class TestBuildReportContext:
             ic50='8.0',
             fold_ic50='6.0',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -670,7 +672,7 @@ class TestBuildReportContext:
             mutation='E',
             phenotype='sensitive',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -751,7 +753,7 @@ class TestBuildReportContext:
         assert 'DRA' in ctx['summary']['narrative']
 
     def test_effect_as_resistant_adds_metadata_hit_row(self) -> None:
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='NC_001806',
             reference_length_nt=1000,
@@ -820,7 +822,7 @@ class TestBuildReportContext:
         assert aciclovir_row['assessment'] == ''
 
     def test_effect_as_resistant_matches_reference_accession_without_version(self) -> None:
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='NC_001806.2',
             reference_length_nt=1000,
@@ -885,7 +887,7 @@ class TestBuildReportContext:
         )
 
     def test_effect_as_resistant_shows_nothing_without_known_phenotypes(self) -> None:
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='NC_001806',
             reference_length_nt=1000,
@@ -935,7 +937,7 @@ class TestBuildReportContext:
         assert not any(row['source'] == 'Metadata algorithm' for row in ctx['database_hits']['rows'])
 
     def test_effect_as_resistant_does_not_fire_for_non_matching_consequence(self) -> None:
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='NC_001806',
             reference_length_nt=1000,
@@ -989,7 +991,7 @@ class TestBuildReportContext:
         assert not any(row['source'] == 'Metadata algorithm' for row in ctx['database_hits']['rows'])
 
     def test_effect_as_resistant_does_not_fire_for_reference_mismatch(self) -> None:
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='NC_001999',
             reference_length_nt=1000,
@@ -1043,7 +1045,7 @@ class TestBuildReportContext:
         assert not any(row['source'] == 'Metadata algorithm' for row in ctx['database_hits']['rows'])
 
     def test_effect_as_resistant_matches_stop_gained(self) -> None:
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='NC_001806',
             reference_length_nt=1000,
@@ -1108,7 +1110,7 @@ class TestBuildReportContext:
         )
 
     def test_effect_as_resistant_does_not_match_missense(self) -> None:
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='NC_001806',
             reference_length_nt=1000,
@@ -1162,7 +1164,7 @@ class TestBuildReportContext:
         assert not any(row['source'] == 'Metadata algorithm' for row in ctx['database_hits']['rows'])
 
     def test_effect_as_resistant_multiple_effects_match(self) -> None:
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='NC_001806',
             reference_length_nt=1000,
@@ -1244,7 +1246,7 @@ class TestBuildReportContext:
             drug_name='DrugB', drug_id=2, reference_identifier='ref',
             position=5, reference='L', mutation='I', phenotype='intermediate',
         )
-        r = ProfilingResult(
+        r = make_profiling_result(
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
         )
@@ -1268,7 +1270,7 @@ class TestBuildReportContext:
             position=5, reference='L', mutation='I',
             phenotype='resistant', clinical_phenotype='intermediate',
         )
-        r = ProfilingResult(
+        r = make_profiling_result(
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
         )
@@ -1294,7 +1296,7 @@ class TestBuildReportContext:
             position=5, reference='L', mutation='I',
             phenotype='unknown', clinical_phenotype='resistant',
         )
-        r = ProfilingResult(
+        r = make_profiling_result(
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
         )
@@ -1317,7 +1319,7 @@ class TestBuildReportContext:
             position=5, reference='L', mutation='I',
             phenotype='unknown',  # clinical_phenotype defaults to 'unknown'
         )
-        r = ProfilingResult(
+        r = make_profiling_result(
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=0, annotations=[ann],
         )
@@ -1326,6 +1328,280 @@ class TestBuildReportContext:
         assert context['similarity_entries']['has_phenotype_metrics'] is False
         assert context['similarity_entries']['has_clinical_phenotype_metrics'] is False
         assert 'Phenotype / Clinical phenotype' not in html
+
+
+class TestMultiSpeciesReportHeader:
+    """Header states multiple references when multi-species."""
+
+    def _make_multi_ref_result(self, *, organisms: list[str], ref_names: list[str]) -> ProfilingResult:
+        """Build a ProfilingResult with one ReferenceGroup per (organism, ref_name) pair."""
+        from respro.db.models import ReferenceGroup
+        references = []
+        for idx, (org, ref_name) in enumerate(zip(organisms, ref_names), start=1):
+            references.append(ReferenceGroup(
+                reference_name=ref_name,
+                reference_id=idx,
+                organism=org,
+                reference_length_nt=1000,
+                query_name=f'chrom_{idx}',
+                query_sequence='ACGT',
+            ))
+        return ProfilingResult(
+            project_name='Multi', organism=organisms[0] if organisms else '',
+            sample_name='samp', vcf_name='in.vcf',
+            references=references,
+        )
+
+    def test_multi_species_header_states_multiple_organisms(self) -> None:
+        """When references span >1 organism, header meta_primary states multiple references."""
+        result = self._make_multi_ref_result(
+            organisms=['Human alphaherpesvirus 1', 'Human alphaherpesvirus 2'],
+            ref_names=['NC_001806.2', 'NC_001798.2'],
+        )
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0)
+        # The is_multi_species flag must be True.
+        assert ctx['is_multi_species'] is True
+        meta_primary = ctx['header']['meta_primary']
+        # The header must mention BOTH organisms (multi-reference statement).
+        assert 'Human alphaherpesvirus 1' in meta_primary
+        assert 'Human alphaherpesvirus 2' in meta_primary
+
+    def test_same_species_multi_reference_header_is_single_organism(self) -> None:
+        """A same-species multi-reference run keeps the single-organism header (no 'multiple')."""
+        result = self._make_multi_ref_result(
+            organisms=['Human alphaherpesvirus 1', 'Human alphaherpesvirus 1'],
+            ref_names=['NC_001806.2', 'NC_001806_backup'],
+        )
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0)
+        # Same species -> not multi-species.
+        assert ctx['is_multi_species'] is False
+        meta_primary = ctx['header']['meta_primary']
+        # Single organism stated once; no "multiple references" phrasing.
+        assert 'Human alphaherpesvirus 1' in meta_primary
+        assert 'multiple' not in meta_primary.lower()
+
+    def test_single_reference_header_unchanged(self) -> None:
+        """A single-reference run produces the existing single-organism/single-reference header."""
+        result = self._make_multi_ref_result(
+            organisms=['Human alphaherpesvirus 1'],
+            ref_names=['NC_001806.2'],
+        )
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0)
+        assert ctx['is_multi_species'] is False
+        meta_primary = ctx['header']['meta_primary']
+        assert 'Human alphaherpesvirus 1' in meta_primary
+        assert 'NC_001806.2' in meta_primary
+        assert 'multiple' not in meta_primary.lower()
+
+
+def _make_multi_species_result_with_hits() -> ProfilingResult:
+    """Build a 2-species ProfilingResult with one annotation+rule hit per reference.
+
+    refA (Organism A, chrom_a) has a gagA feature with a K2E rule hit.
+    refB (Organism B, chrom_b) has a polB feature with a K2E rule hit.
+    Both annotations carry their chrom so the report can attribute them to a reference.
+    """
+    from respro.db.models import ReferenceGroup
+
+    rule_a = ResistanceRule(
+        id=1, feature_name='gagA', feature_id=1, drug_name='DrugA', drug_id=1,
+        reference_identifier='refA', position=2, reference='K', mutation='E',
+        phenotype='resistant',
+    )
+    rule_b = ResistanceRule(
+        id=2, feature_name='polB', feature_id=2, drug_name='DrugB', drug_id=2,
+        reference_identifier='refB', position=2, reference='K', mutation='E',
+        phenotype='resistant',
+    )
+    ann_a = AnnotatedVariant(
+        variant=VariantCall(chrom='chrom_a', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
+        feature_name='gagA', codon_pos=2, ref_codon='AAA', alt_codon='GAA',
+        ref_aa='K', alt_aa='E', consequence='missense', af_bin='high',
+        rule_matches=[rule_a],
+    )
+    ann_b = AnnotatedVariant(
+        variant=VariantCall(chrom='chrom_b', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
+        feature_name='polB', codon_pos=2, ref_codon='AAA', alt_codon='GAA',
+        ref_aa='K', alt_aa='E', consequence='missense', af_bin='high',
+        rule_matches=[rule_b],
+    )
+    feat_a = FeatureRecord(
+        id=1, reference_id=1, name='gagA', protein='GagA', start=0, end=12, strand='+',
+        codon_start=0, nt_sequence='ATGAAAGCTTAA',
+    )
+    feat_b = FeatureRecord(
+        id=2, reference_id=2, name='polB', protein='PolB', start=0, end=12, strand='+',
+        codon_start=0, nt_sequence='ATGAAAGCTTAA',
+    )
+    references = [
+        ReferenceGroup(
+            reference_name='refA', reference_id=1, organism='Organism A',
+            reference_length_nt=1000, query_name='chrom_a', query_sequence='ATGAAAGCTTAA',
+            features=[feat_a], rule_feature_names={'gagA'},
+            feature_matches=[
+                FeatureMatch(
+                    feature=feat_a, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                    query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+                ),
+            ],
+        ),
+        ReferenceGroup(
+            reference_name='refB', reference_id=2, organism='Organism B',
+            reference_length_nt=1000, query_name='chrom_b', query_sequence='ATGAAAGCTTAA',
+            features=[feat_b], rule_feature_names={'polB'},
+            feature_matches=[
+                FeatureMatch(
+                    feature=feat_b, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                    query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+                ),
+            ],
+        ),
+    ]
+    return ProfilingResult(
+        project_name='Multi', organism='Organism A',
+        sample_name='samp', vcf_name='in.vcf',
+        total_variants=2, variants_in_cds=2, resistance_hits=2,
+        annotations=[ann_a, ann_b],
+        references=references,
+    )
+
+
+class TestMultiSpeciesReferenceColumn:
+    """Reference column in 3 tables, only when multi-species."""
+
+    def test_all_mutations_rows_carry_reference_name_when_multi_species(self) -> None:
+        """All Mutations rows carry the correct reference_name when multi-species."""
+        result = _make_multi_species_result_with_hits()
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0,
+                                   features=[f for rg in result.references for f in rg.features])
+        assert ctx['is_multi_species'] is True
+        rows = ctx['all_mutations']['rows']
+        assert len(rows) == 2
+        by_feature = {r['feature']: r['reference_name'] for r in rows}
+        assert by_feature['gagA'] == 'refA'
+        assert by_feature['polB'] == 'refB'
+
+    def test_database_hits_rows_carry_reference_name_when_multi_species(self) -> None:
+        """Database Hits rows carry the correct reference_name when multi-species."""
+        result = _make_multi_species_result_with_hits()
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0,
+                                   features=[f for rg in result.references for f in rg.features])
+        rows = ctx['database_hits']['rows']
+        assert len(rows) == 2
+        # Each row's reference_name must match the feature's reference.
+        ref_names = {r['reference_name'] for r in rows}
+        assert ref_names == {'refA', 'refB'}
+
+    def test_sequence_feature_cards_carry_reference_name_when_multi_species(self) -> None:
+        """Sequence Feature Information cards carry the correct reference_name when multi-species."""
+        result = _make_multi_species_result_with_hits()
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0,
+                                   features=[f for rg in result.references for f in rg.features])
+        cards = ctx['sequence_features']['cards']
+        by_name = {c['name']: c.get('reference_name') for c in cards}
+        assert by_name.get('gagA') == 'refA'
+        assert by_name.get('polB') == 'refB'
+
+    def test_reference_column_absent_in_html_when_single_species(self) -> None:
+        """A single-species report HTML must NOT contain a Reference column in the tables."""
+        r = _make_result()  # single reference, single organism
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        # The Reference column header must not appear in single-species reports.
+        assert '<th>Reference</th>' not in html
+        assert 'Reference</th>' not in html
+
+    def test_reference_column_present_in_html_when_multi_species(self) -> None:
+        """A multi-species report HTML contains a Reference column in all three tables."""
+        result = _make_multi_species_result_with_hits()
+        html = render_html(result, similarity_high=1, similarity_moderate=0,
+                           features=[f for rg in result.references for f in rg.features])
+        # The Reference column header must appear (in Database Hits, All Mutations tables).
+        assert 'Reference</th>' in html
+        # The reference names must appear in the rendered table cells.
+        assert 'refA' in html
+        assert 'refB' in html
+
+
+class TestMultiSpeciesAffectedFeaturesAttribution:
+    """Affected sequence features attributed per-reference."""
+
+    def test_mutation_profile_entries_carry_reference_name_when_multi_species(self) -> None:
+        """The Summary mutation_profile groups by (reference, feature) and tags each entry."""
+        result = _make_multi_species_result_with_hits()
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0,
+                                   features=[f for rg in result.references for f in rg.features])
+        assert ctx['is_multi_species'] is True
+        profile = ctx['summary']['mutation_profile']
+        # Two distinct (reference, feature) groups.
+        assert len(profile) == 2
+        by_ref_feature = {(e['reference_name'], e['feature']) for e in profile}
+        assert by_ref_feature == {('refA', 'gagA'), ('refB', 'polB')}
+
+    def test_mutation_profile_single_species_has_no_reference_name(self) -> None:
+        """Single-species mutation_profile entries must NOT carry reference_name (byte-identical)."""
+        r = _make_result()
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        assert ctx['is_multi_species'] is False
+        profile = ctx['summary']['mutation_profile']
+        assert profile, 'expected at least one mutation_profile entry'
+        for entry in profile:
+            assert 'reference_name' not in entry
+
+    def test_affected_features_section_shows_reference_when_multi_species(self) -> None:
+        """The rendered Summary HTML shows the reference name next to each affected feature."""
+        result = _make_multi_species_result_with_hits()
+        html = render_html(result, similarity_high=1, similarity_moderate=0,
+                           features=[f for rg in result.references for f in rg.features])
+        # The affected features section must mention both references.
+        assert 'refA' in html
+        assert 'refB' in html
+
+
+class TestMultiSpeciesInterpretationSummary:
+    """Interpretation summary attributes per organism."""
+
+    @staticmethod
+    def _make_algorithm_conn() -> sqlite3.Connection:
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            'CREATE TABLE interpretation_algorithm '
+            '(id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)'
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            ('drug_interpretation', json.dumps({'name': 'drug_interpretation'})),
+        )
+        conn.commit()
+        return conn
+
+    def test_multi_species_narrative_names_both_organisms(self) -> None:
+        """A multi-species narrative must name both organisms (not a single organism)."""
+        result = _make_multi_species_result_with_hits()
+        conn = self._make_algorithm_conn()
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0,
+            project_conn=conn,
+            features=[f for rg in result.references for f in rg.features],
+        )
+        assert ctx['is_multi_species'] is True
+        text = ctx['summary']['narrative']
+        # Both organisms must be named (per-organism attribution), not collapsed to one.
+        assert 'Organism A' in text
+        assert 'Organism B' in text
+        # Must not imply a single species via result.organism alone.
+        assert 'Organism A of <strong>Organism A</strong>' not in text
+
+    def test_single_species_narrative_unchanged(self) -> None:
+        """A single-species narrative must remain byte-identical to the existing form."""
+        r = _make_result()
+        conn = self._make_algorithm_conn()
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0,
+                                   project_conn=conn)
+        assert ctx['is_multi_species'] is False
+        text = ctx['summary']['narrative']
+        # Single-organism attribution preserved (organism from _make_result is 'test').
+        assert 'test' in text
 
 
 class TestPdfExports:
@@ -1356,7 +1632,7 @@ class TestPdfExports:
             variant=var_sim, feature_name='gag', codon_pos=5,
             ref_aa='L', alt_aa='V', consequence='missense', af_bin='high',
         )
-        r = ProfilingResult(
+        r = make_profiling_result(
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=2, variants_in_cds=2, resistance_hits=1,
             annotations=[ann_hit, ann_sim],
@@ -1378,7 +1654,7 @@ class TestPdfExports:
             alt_aa='KG',
             consequence='insertion',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='Test',
             organism='test',
             reference_name='ref',
@@ -1419,7 +1695,7 @@ class TestPdfExports:
             alt_aa='KG',
             consequence='insertion',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='Test',
             organism='test',
             reference_name='ref',
@@ -1571,7 +1847,7 @@ class TestPdfExports:
             af_bin='high',
             is_fasta_mode=False,
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -1657,7 +1933,7 @@ class TestPdfExports:
             ic50='5',
         )
 
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -1817,7 +2093,7 @@ class TestPdfExports:
             ic50='5-10 uM',
         )
 
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -1846,7 +2122,7 @@ class TestPdfExports:
             consequence='missense',
             af_bin='high',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -1909,7 +2185,7 @@ class TestPdfExports:
             consequence='insertion',
             af_bin='high',
         )
-        r = ProfilingResult(
+        r = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -1942,7 +2218,7 @@ class TestPdfExports:
             consequence='frameshift',
             af_bin='high',
         )
-        r = ProfilingResult(
+        r = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -1967,7 +2243,7 @@ class TestPdfExports:
             af_bin='high',
             is_fasta_mode=True,
         )
-        r = ProfilingResult(
+        r = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=100000,
@@ -3056,7 +3332,7 @@ class TestMatPeptidePlotLogic:
             ref_codon='AAA', alt_codon='GAA', ref_aa='K', alt_aa='E',
             consequence='missense', af_bin='high', rule_matches=[rule],
         )
-        return ProfilingResult(
+        return make_profiling_result(
             project_name='Test', organism='test',
             reference_name='ref', reference_length_nt=5000,
             sample_name='S1', vcf_name='test.vcf',
@@ -3102,7 +3378,7 @@ class TestMatPeptidePlotLogic:
                 )
             )
 
-        return ProfilingResult(
+        return make_profiling_result(
             project_name='Test',
             organism='test',
             reference_name='ref',
@@ -3342,7 +3618,7 @@ class TestMatPeptideDisplayName:
             ref_codon='AAA', alt_codon='GAA', ref_aa='K', alt_aa='E',
             consequence='missense', af_bin='high', rule_matches=[rule],
         )
-        return ProfilingResult(
+        return make_profiling_result(
             project_name='T', reference_name='ref', reference_length_nt=1000,
             total_variants=1, variants_in_cds=1, resistance_hits=1,
             annotations=[ann],
@@ -3426,12 +3702,14 @@ class TestReportHardening:
             'coverage_gap',
             'formula_rule_hit',
             'sample_classification',
+            'references',
         }
         assert isinstance(payload['run'], dict)
         assert isinstance(payload['variant_result'], list)
         assert isinstance(payload['coverage_gap'], list)
         assert isinstance(payload['formula_rule_hit'], list)
         assert isinstance(payload['sample_classification'], list)
+        assert isinstance(payload['references'], list)
 
     def test_report_consistency_across_exports(self, tmp_path) -> None:
         result = _make_result()
@@ -3453,7 +3731,7 @@ class TestReportHardening:
         assert str(len(payload['variant_result'])) in html
 
     def test_report_handles_empty_results(self) -> None:
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='Test',
             reference_name='ref',
             reference_length_nt=1000,
@@ -3522,7 +3800,7 @@ class TestReportHardening:
                 af_bin='high',
                 rule_matches=[rule],
             )
-            return ProfilingResult(
+            return make_profiling_result(
                 project_name='T',
                 reference_name='ref',
                 reference_length_nt=1000,
@@ -3575,7 +3853,7 @@ class TestPdfDrugRows:
             mutation='E',
             phenotype='resistant',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -3663,7 +3941,7 @@ class TestPdfDrugRows:
             phenotype='unknown',
             ic50='12.0',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -3745,7 +4023,7 @@ class TestPdfDrugRows:
             ic50='8.0',
             fold_ic50='6.0',
         )
-        result = ProfilingResult(
+        result = make_profiling_result(
             project_name='T',
             reference_name='ref',
             reference_length_nt=1000,
@@ -3813,4 +4091,275 @@ class TestPdfDrugRows:
         assert badge_classes['by_ic50'] == 'is-intermediate'
         # Final assessment badge class should also be present and normalized
         assert row['assessment_badge_class'] == 'is-resistant'
+
+
+class TestMultiReferencePlotScoping:
+    """Per-reference annotation scoping in the multi-reference lollipop figure.
+
+    Regression guard: when two distinct references carry same-named features (e.g.
+    HSV-1 UL23 and HSV-2 UL23), each reference's genome overview and feature panels
+    must show only that reference's own annotations. The previous implementation
+    scoped annotations by feature name alone, so each reference picked up the other
+    species' same-named annotations.
+    """
+
+    @staticmethod
+    def _make_cross_species_same_feature_result() -> ProfilingResult:
+        """Two references (different organisms) each carrying a same-named UL23 feature.
+
+        refA (Organism A, chrom_a) has a UL23 feature with an A1B annotation.
+        refB (Organism B, chrom_b) has a UL23 feature with a C2D annotation.
+        Both features are named 'UL23' so name-only scoping would conflate them.
+        """
+        from respro.db.models import ReferenceGroup
+
+        feat_a = FeatureRecord(
+            id=1, reference_id=1, name='UL23', protein='TK', start=0, end=12, strand='+',
+            codon_start=0, nt_sequence='ATGAAAGCTTAA',
+        )
+        feat_b = FeatureRecord(
+            id=2, reference_id=2, name='UL23', protein='TK', start=0, end=12, strand='+',
+            codon_start=0, nt_sequence='ATGAAAGCTTAA',
+        )
+        # Rule hits so the annotations count as database hits and their labels render.
+        rule_a = ResistanceRule(
+            id=1, feature_name='UL23', feature_id=1, drug_name='DrugA', drug_id=1,
+            reference_identifier='refA', position=2, reference='A', mutation='B',
+            phenotype='resistant',
+        )
+        rule_b = ResistanceRule(
+            id=2, feature_name='UL23', feature_id=2, drug_name='DrugB', drug_id=2,
+            reference_identifier='refB', position=3, reference='C', mutation='D',
+            phenotype='resistant',
+        )
+        ann_a = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_a', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
+            feature_name='UL23', codon_pos=1, ref_codon='AAA', alt_codon='GAA',
+            ref_aa='A', alt_aa='B', consequence='missense', af_bin='high',
+            rule_matches=[rule_a],
+        )
+        ann_b = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_b', pos=6, ref='C', alt='T', allele_freq=0.95, depth=500),
+            feature_name='UL23', codon_pos=2, ref_codon='CCC', alt_codon='CAC',
+            ref_aa='C', alt_aa='D', consequence='missense', af_bin='high',
+            rule_matches=[rule_b],
+        )
+        references = [
+            ReferenceGroup(
+                reference_name='refA', reference_id=1, organism='Organism A',
+                reference_length_nt=1000, query_name='chrom_a', query_sequence='ATGAAAGCTTAA',
+                features=[feat_a], rule_feature_names={'UL23'},
+                feature_matches=[
+                    FeatureMatch(
+                        feature=feat_a, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                        query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+                    ),
+                ],
+            ),
+            ReferenceGroup(
+                reference_name='refB', reference_id=2, organism='Organism B',
+                reference_length_nt=1000, query_name='chrom_b', query_sequence='ATGAAAGCTTAA',
+                features=[feat_b], rule_feature_names={'UL23'},
+                feature_matches=[
+                    FeatureMatch(
+                        feature=feat_b, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                        query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+                    ),
+                ],
+            ),
+        ]
+        return ProfilingResult(
+            project_name='Cross', organism='Organism A',
+            sample_name='samp', vcf_name='in.vcf',
+            total_variants=2, variants_in_cds=2, resistance_hits=2,
+            annotations=[ann_a, ann_b],
+            references=references,
+        )
+
+    def test_each_reference_genome_shows_only_its_own_annotations(self) -> None:
+        """Each reference's lollipop panel shows only its own variant, not the other's."""
+        from respro.report.plots import render_lollipop_plot_bytes
+
+        result = self._make_cross_species_same_feature_result()
+        features = [f for rg in result.references for f in rg.features]
+        svg_bytes = render_lollipop_plot_bytes(result, features, fmt='svg')
+        assert svg_bytes is not None
+        svg = svg_bytes.decode('utf-8', errors='replace')
+        # Both reference genome titles must be present (one genome overview per reference).
+        assert 'refA' in svg
+        assert 'refB' in svg
+        # Each reference's annotation label must appear exactly once. The label is
+        # ref_aa + (codon_pos+1) + alt_aa, so codon_pos=1 -> 'A2B' and codon_pos=2 ->
+        # 'C3D'. With name-only scoping both labels would appear under each reference
+        # (2x each); with correct chrom scoping each appears exactly once total.
+        assert svg.count('A2B') == 1, 'refA annotation leaked into refB panel'
+        assert svg.count('C3D') == 1, 'refB annotation leaked into refA panel'
+
+    def test_targeted_sequencing_merges_chroms_sharing_reference_id(self) -> None:
+        """Two chroms mapping to one reference_id still merge into one genome overview."""
+        from respro.db.models import ReferenceGroup
+        from respro.report.plots import render_lollipop_plot_bytes
+
+        feat = FeatureRecord(
+            id=1, reference_id=1, name='gag', protein='Gag', start=0, end=12, strand='+',
+            codon_start=0, nt_sequence='ATGAAAGCTTAA',
+        )
+        # Rule hits so the annotations count as database hits and their labels render.
+        rule_a = ResistanceRule(
+            id=1, feature_name='gag', feature_id=1, drug_name='DrugA', drug_id=1,
+            reference_identifier='refA', position=2, reference='A', mutation='B',
+            phenotype='resistant',
+        )
+        rule_b = ResistanceRule(
+            id=2, feature_name='gag', feature_id=1, drug_name='DrugB', drug_id=2,
+            reference_identifier='refA', position=3, reference='C', mutation='D',
+            phenotype='resistant',
+        )
+        ann_a = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_a', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
+            feature_name='gag', codon_pos=1, ref_codon='AAA', alt_codon='GAA',
+            ref_aa='A', alt_aa='B', consequence='missense', af_bin='high',
+            rule_matches=[rule_a],
+        )
+        ann_b = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_b', pos=6, ref='C', alt='T', allele_freq=0.95, depth=500),
+            feature_name='gag', codon_pos=2, ref_codon='CCC', alt_codon='CAC',
+            ref_aa='C', alt_aa='D', consequence='missense', af_bin='high',
+            rule_matches=[rule_b],
+        )
+        # Two ReferenceGroups sharing reference_id=1 (targeted sequencing case).
+        references = [
+            ReferenceGroup(
+                reference_name='refA', reference_id=1, organism='Organism A',
+                reference_length_nt=1000, query_name='chrom_a', query_sequence='ATGAAAGCTTAA',
+                features=[feat], rule_feature_names={'gag'},
+                feature_matches=[
+                    FeatureMatch(
+                        feature=feat, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                        query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+                    ),
+                ],
+            ),
+            ReferenceGroup(
+                reference_name='refA', reference_id=1, organism='Organism A',
+                reference_length_nt=1000, query_name='chrom_b', query_sequence='ATGAAAGCTTAA',
+                features=[feat], rule_feature_names={'gag'},
+                feature_matches=[
+                    FeatureMatch(
+                        feature=feat, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                        query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+                    ),
+                ],
+            ),
+        ]
+        result = ProfilingResult(
+            project_name='Targeted', organism='Organism A',
+            sample_name='samp', vcf_name='in.vcf',
+            total_variants=2, variants_in_cds=2, resistance_hits=2,
+            annotations=[ann_a, ann_b],
+            references=references,
+        )
+        svg_bytes = render_lollipop_plot_bytes(result, [feat], fmt='svg')
+        assert svg_bytes is not None
+        svg = svg_bytes.decode('utf-8', errors='replace')
+        # Exactly one genome overview (both chroms share reference_id=1).
+        assert svg.count('refA') == 1
+        # Both chroms' annotations merged into the single reference's panel.
+        # Labels: codon_pos=1 -> 'A2B', codon_pos=2 -> 'C3D'.
+        assert 'A2B' in svg
+        assert 'C3D' in svg
+
+
+class TestMultiSpeciesAffectedFeaturesBadge:
+    """Issue 2: the reference is rendered inside the gene badge in brackets."""
+
+    def test_affected_features_badge_contains_reference_in_brackets(self) -> None:
+        """Multi-species affected-features badges render 'GENE (REF)' inside one badge span."""
+        result = _make_multi_species_result_with_hits()
+        html = render_html(result, similarity_high=1, similarity_moderate=0,
+                           features=[f for rg in result.references for f in rg.features])
+        # The badge must contain the reference in brackets inside the same span.
+        assert 'gagA <span class="feature-mutation-reference">(refA)</span>' in html
+        assert 'polB <span class="feature-mutation-reference">(refB)</span>' in html
+        # The old standalone reference cell must no longer appear as a separate grid cell
+        # immediately after the badge (regression guard for the skewed layout).
+        assert 'feature-mutation-badge">gagA</span>\n                      <span class="feature-mutation-reference">refA' not in html
+
+    def test_single_species_badge_has_no_reference(self) -> None:
+        """Single-species affected-features badges must not carry a reference (byte-identical)."""
+        r = _make_result()
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        # The CSS class definition is always present in <style>; check the rendered body
+        # markup (after </style>) does not instantiate the reference span in a badge.
+        body = html[html.find('</style>'):]
+        assert 'feature-mutation-reference' not in body
+
+
+class TestMultiSpeciesSequenceFeatureCardReferencePlacement:
+    """Issue 3: the reference is shown above the protein in the same meta block."""
+
+    def test_reference_appear_above_protein_in_same_meta_block(self) -> None:
+        """The Reference line precedes the Protein line within one info-card-meta block."""
+        result = _make_multi_species_result_with_hits()
+        # Provide a project DB with feature metadata so the Protein line renders.
+        # load_feature_cards filters by the first reference name (result.reference_name),
+        # so populate refA/gagA metadata (refA is the first reference).
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE reference (id INTEGER, name TEXT)')
+        conn.execute(
+            'CREATE TABLE feature ('
+            'name TEXT, protein TEXT, protein_id TEXT, ncbi_protein_url TEXT, '
+            'locus_tag TEXT, note TEXT, nt_sequence TEXT, aa_sequence TEXT, start INTEGER, reference_id INTEGER'
+            ')'
+        )
+        conn.execute('INSERT INTO reference (id, name) VALUES (?, ?)', (1, 'refA'))
+        conn.execute(
+            'INSERT INTO feature (name, protein, protein_id, ncbi_protein_url, locus_tag, note, '
+            'nt_sequence, aa_sequence, start, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            ('gagA', 'Capsid protein GagA', 'YP_001', 'https://example.org/YP_001',
+             'LOC_A', 'note A', 'ATGAAAGCTTAA', 'MKAFGP', 0, 1),
+        )
+        conn.commit()
+        html = render_html(result, similarity_high=1, similarity_moderate=0,
+                           features=[f for rg in result.references for f in rg.features],
+                           project_conn=conn)
+        # Find the first sequence-feature card and check Reference precedes Protein in the
+        # same info-card-meta block (no separate Reference-only meta block before it).
+        idx = html.find('id="tab-sequence-feature-information"')
+        assert idx != -1
+        card_start = html.find('info-card-title">gagA', idx)
+        assert card_start != -1, 'gagA card not found'
+        card_end = html.find('</article>', card_start)
+        card = html[card_start:card_end]
+        ref_pos = card.find('<strong>Reference:</strong>')
+        protein_pos = card.find('<strong>Protein:</strong>')
+        assert ref_pos != -1, 'Reference line missing from multi-species card'
+        assert protein_pos != -1, 'Protein line missing from card'
+        assert ref_pos < protein_pos, 'Reference must appear above Protein'
+        # Exactly one info-card-meta block must contain both Reference and Protein
+        # (not two separate blocks).
+        meta_blocks = [
+            m.group(0) for m in re.finditer(
+                r'<div class="info-card-meta">.*?</div>', card, re.S
+            )
+        ]
+        assert len(meta_blocks) >= 1
+        combined = next((b for b in meta_blocks if 'Reference:' in b and 'Protein:' in b), None)
+        assert combined is not None, 'Reference and Protein must share one info-card-meta block'
+        # No standalone Reference-only meta block precedes the combined block.
+        ref_only_blocks = [b for b in meta_blocks if 'Reference:' in b and 'Protein:' not in b]
+        assert not ref_only_blocks, 'Reference must not be a separate meta block'
+
+    def test_single_species_card_has_no_reference_line(self) -> None:
+        """Single-species sequence feature cards must not show a Reference line."""
+        r = _make_result()
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        idx = html.find('id="tab-sequence-feature-information"')
+        if idx == -1:
+            return
+        card_start = html.find('info-card-title', idx)
+        card_end = html.find('</article>', card_start)
+        card = html[card_start:card_end]
+        assert '<strong>Reference:</strong>' not in card
 

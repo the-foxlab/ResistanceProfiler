@@ -86,11 +86,45 @@ def build_report_context(
 
     title_source = sample or vcf or reference or project_name or 'Resistance profile'
 
-    primary_parts = [
-        organism,
-        f'Reference: {reference}' if reference else '',
-        f'Database: {project_name}' if project_name else '',
-    ]
+    # Multi-species detection: the report header states multiple references/organisms only
+    # when the matched references span more than one distinct organism. Same-species
+    # multi-reference runs (e.g. two HSV-1 references) keep the single-organism header so
+    # the report is byte-identical to a single-reference run. The flag is also threaded
+    # into the context for downstream conditional rendering (reference-id columns, etc.).
+    distinct_organisms = {rg.organism for rg in result.references if rg.organism}
+    is_multi_species = len(distinct_organisms) > 1
+
+    # Map each annotation's chrom (== ReferenceGroup.query_name) to its reference_name so
+    # the Database Hits / All Mutations / Sequence Feature tables can attribute rows to a
+    # reference. Used only for the conditional Reference column shown in multi-species reports.
+    reference_name_by_chrom: dict[str, str] = {
+        rg.query_name: rg.reference_name for rg in result.references
+    }
+    # Map feature reference_id -> reference_name for sequence-feature cards (keyed by feature).
+    reference_name_by_ref_id: dict[int, str] = {
+        rg.reference_id: rg.reference_name for rg in result.references
+    }
+
+    if is_multi_species:
+        # State multiple references: list the distinct organisms (and their references).
+        # Group reference names by organism so each organism line names its references.
+        ref_names_by_organism: dict[str, list[str]] = {}
+        for rg in result.references:
+            ref_names_by_organism.setdefault(rg.organism, []).append(rg.reference_name)
+        organism_lines = []
+        for org in sorted(ref_names_by_organism):
+            ref_list = ', '.join(sorted(set(ref_names_by_organism[org])))
+            organism_lines.append(f'{org} ({ref_list})')
+        primary_parts = [
+            f'Multiple references: {"; ".join(organism_lines)}',
+            f'Database: {project_name}' if project_name else '',
+        ]
+    else:
+        primary_parts = [
+            organism,
+            f'Reference: {reference}' if reference else '',
+            f'Database: {project_name}' if project_name else '',
+        ]
     secondary_parts = [
         f'File: {vcf}' if vcf else '',
         f'Generated {timestamp}' if timestamp else '',
@@ -114,6 +148,7 @@ def build_report_context(
         feature_alignments,
         formula_hit_annotation_ids,
         display_names,
+        reference_name_by_chrom=reference_name_by_chrom,
     )
     metric_thresholds = load_numeric_metric_thresholds(project_conn)
     drug_class_map = load_drug_class_map(project_conn)
@@ -125,6 +160,7 @@ def build_report_context(
         metric_thresholds,
         drug_class_map,
         drug_alias_map,
+        reference_name_by_chrom=reference_name_by_chrom,
     )
     similarity_entries = _build_potential_effects_rows(
         result,
@@ -145,6 +181,8 @@ def build_report_context(
         project_conn=project_conn,
         drug_alias_map=drug_alias_map,
         formula_hit_annotation_ids=formula_hit_annotation_ids,
+        is_multi_species=is_multi_species,
+        reference_name_by_chrom=reference_name_by_chrom,
     )
 
     db_drug_cards = load_drug_cards(project_conn, detected_drug_names)
@@ -171,11 +209,13 @@ def build_report_context(
         db_feature_cards_by_name,
         display_names,
         feature_lookup,
+        reference_name_by_ref_id=reference_name_by_ref_id,
     )
 
     return {
         'title': f'Report: {title_source} resistance profile',
         'favicon': _load_svg_data_url('favicon.svg'),
+        'is_multi_species': is_multi_species,
         'header': {
             'title': f'Report: {title_source} resistance profile',
             'version': __version__,
@@ -201,19 +241,21 @@ def build_report_context(
             'af_low_min_pct': int(af_low_min_pct_source_threshold * 100),
             'combination_member_af_pct': int(combination_member_af_pct_source_threshold * 100),
         },
-        'database_hits': database_hits,
+        'database_hits': {**database_hits, 'is_multi_species': is_multi_species},
         'similarity_entries': similarity_entries,
         'summary': summary_context,
         'all_mutations': {
             'rows': all_mutations_rows,
             'count': len(all_mutations_rows),
             'has_database_hits': any(r['is_database_hit'] for r in all_mutations_rows),
+            'is_multi_species': is_multi_species,
             'search_icon': _load_svg_data_url('search.svg'),
             'reset_icon': _load_svg_data_url('reset_filter.svg'),
         },
         'sequence_features': {
             'cards': feature_cards,
             'count': len(feature_cards),
+            'is_multi_species': is_multi_species,
             'sequence_icon': _load_svg_data_url('dna.svg'),
             'link_icon': _load_svg_data_url('link.svg'),
         },
@@ -335,6 +377,7 @@ def _build_all_mutations_rows(
     feature_alignments: dict[str, FeatureAlignment],
     formula_hit_annotation_ids: set[int],
     display_names: dict[str, str] | None = None,
+    reference_name_by_chrom: dict[str, str] | None = None,
 ) -> list[dict]:
     """
     Build one row per CDS annotation for the All Mutations tab.
@@ -348,6 +391,8 @@ def _build_all_mutations_rows(
     :param feature_alignments: gapped alignments keyed by feature name
     :param formula_hit_annotation_ids: annotation IDs participating in formula hits
     :param display_names: optional feature display-name overrides
+    :param reference_name_by_chrom: optional chrom -> reference_name map for the
+        conditional Reference column (multi-species reports)
     :return: list of row dicts for the template
     """
     rows: list[dict] = []
@@ -384,6 +429,7 @@ def _build_all_mutations_rows(
             'is_database_hit': is_single_hit or is_formula_hit,
             'alignment_html': str(alignment_html) if alignment_html is not None else '',
             'has_alignment': alignment_html is not None,
+            'reference_name': (reference_name_by_chrom or {}).get(ann.variant.chrom, ''),
         })
     return rows
 
@@ -436,6 +482,7 @@ def _build_database_hits_rows(
     metric_thresholds: dict[str, tuple[float, float] | None] | None = None,
     drug_class_map: dict[str, str] | None = None,
     drug_alias_map: dict[str, str] | None = None,
+    reference_name_by_chrom: dict[str, str] | None = None,
 ) -> dict:
     """
     Build one row per database hit for the Database Hits table.
@@ -450,8 +497,11 @@ def _build_database_hits_rows(
     :param metric_thresholds: optional mean/std per numeric field for tier-badge coloring
     :param drug_class_map: optional mapping of normalized drug name to drug class/group name
     :param drug_alias_map: optional mapping of normalized drug name to alias
+    :param reference_name_by_chrom: optional chrom -> reference_name map for the
+        conditional Reference column (multi-species reports)
     :return: dict with 'rows', 'count', 'has_publications', 'has_drug_class', and 'bibliography'
     """
+    ref_by_chrom = reference_name_by_chrom or {}
     rows: list[dict] = []
     for ann in result.cds_annotations:
         for rule in ann.non_formula_component_rule_matches:
@@ -478,12 +528,16 @@ def _build_database_hits_rows(
                 'af_bin': ann.af_bin,
                 'source': rule.source,
                 'comment': rule.comment,
+                'reference_name': ref_by_chrom.get(ann.variant.chrom, ''),
                 '_raw_pubs': list(rule.publications),
             })
 
     for formula_hit in result.formula_hits:
         rs = formula_hit.rule_set
         feature_to_muts: dict[str, list[str]] = {}
+        # A formula hit may span multiple references; attribute the row to the first
+        # matched variant's chrom (formula hits are reported as one combined row).
+        first_chrom = formula_hit.matched_variants[0].variant.chrom if formula_hit.matched_variants else ''
         for ann in formula_hit.matched_variants:
             feature = (display_names or {}).get(ann.feature_name, ann.feature_name)
             aa_change = (
@@ -506,6 +560,7 @@ def _build_database_hits_rows(
             'af_bin': 'high',  # formula rules only fire at allele_freq > 0.75
             'source': rs.source,
             'comment': rs.comment,
+            'reference_name': ref_by_chrom.get(first_chrom, ''),
             '_raw_pubs': list(rs.publications),
         })
 
@@ -517,6 +572,7 @@ def _build_database_hits_rows(
             metric_thresholds,
             drug_class_map,
             drug_alias_map,
+            reference_name_by_chrom=reference_name_by_chrom,
         )
     )
 
@@ -644,6 +700,7 @@ def _build_effect_as_resistant_rows(
     metric_thresholds: dict[str, tuple[float, float] | None] | None = None,
     drug_class_map: dict[str, str] | None = None,
     drug_alias_map: dict[str, str] | None = None,
+    reference_name_by_chrom: dict[str, str] | None = None,
 ) -> list[dict]:
     """Build metadata-only DB-hit rows for configured effect annotations."""
     if project_conn is None:
@@ -716,6 +773,7 @@ def _build_effect_as_resistant_rows(
                 'af_bin': ann.af_bin,
                 'source': 'Metadata algorithm',
                 'comment': comment,
+                'reference_name': (reference_name_by_chrom or {}).get(ann.variant.chrom, ''),
                 '_raw_pubs': [],
             })
     return rows
@@ -989,8 +1047,10 @@ def _build_feature_cards(
     db_feature_cards_by_name: dict[str, dict],
     display_names: dict[str, str],
     feature_lookup: dict[str, FeatureRecord],
+    reference_name_by_ref_id: dict[int, str] | None = None,
 ) -> list[dict]:
     """Merge detected-feature stats with optional DB metadata into card payloads."""
+    ref_by_id = reference_name_by_ref_id or {}
     cards: list[dict] = []
     for feature_name in sorted(feature_stats, key=lambda item: display_names.get(item, item).lower()):
         stats = dict(feature_stats[feature_name])
@@ -1002,6 +1062,9 @@ def _build_feature_cards(
         if feature is not None:
             nt_sequence = feature.nt_sequence or ''
             aa_sequence = feature.aa_sequence or ''
+            stats['reference_name'] = ref_by_id.get(feature.reference_id, '')
+        else:
+            stats['reference_name'] = ''
         if metadata:
             stats.update({
                 'protein': metadata.get('protein', ''),
@@ -1240,6 +1303,8 @@ def _build_summary_context(
     project_conn: sqlite3.Connection | None,
     drug_alias_map: dict[str, str] | None = None,
     formula_hit_annotation_ids: set[int] | None = None,
+    is_multi_species: bool = False,
+    reference_name_by_chrom: dict[str, str] | None = None,
 ) -> dict:
     """
     Build the complete context dict for the Summary tab.
@@ -1250,6 +1315,8 @@ def _build_summary_context(
     :param similarity_entries: context dict from _build_potential_effects_rows
     :param project_conn: optional project DB connection for algorithm lookup
     :param formula_hit_annotation_ids: annotation IDs participating in formula hits
+    :param is_multi_species: whether references span more than one organism
+    :param reference_name_by_chrom: chrom → reference name map (multi-species attribution)
     :return: summary context dict
     """
     formula_ids = formula_hit_annotation_ids or set()
@@ -1260,6 +1327,8 @@ def _build_summary_context(
         display_names,
         gene_coverage,
         formula_ids,
+        is_multi_species=is_multi_species,
+        reference_name_by_chrom=reference_name_by_chrom or {},
     )
     has_narrative = has_interpretation_algorithm(project_conn)
     drug_table = _build_drug_interpretation_table(
@@ -1273,6 +1342,8 @@ def _build_summary_context(
         display_names,
         drug_table,
         formula_ids,
+        is_multi_species=is_multi_species,
+        reference_name_by_chrom=reference_name_by_chrom or {},
     )
     single_rule_hit_count = sum(
         len(ann.non_formula_component_rule_matches) for ann in result.cds_annotations
@@ -1379,28 +1450,40 @@ def _build_mutation_profile(
     display_names: dict[str, str],
     gene_coverage: dict[str, int] | None,
     formula_hit_annotation_ids: set[int],
+    is_multi_species: bool = False,
+    reference_name_by_chrom: dict[str, str] | None = None,
 ) -> list[dict]:
     """
     Group amino acid changes by feature with per-mutation styling flags.
 
+    When ``is_multi_species`` is true, annotations are grouped by
+    ``(reference_name, feature)`` so that same-named features from different
+    references are not conflated, and each returned entry carries a
+    ``reference_name``. When false, grouping is by feature only and no
+    ``reference_name`` is added, keeping single-species output byte-identical.
+
     :param result: profiling result
     :param display_names: feature display-name overrides
     :param formula_hit_annotation_ids: annotation IDs participating in formula hits
-    :return: list of {feature, mutations: list[{label, is_db_hit, is_high_impact}]} ordered by feature
+    :param is_multi_species: whether references span more than one organism
+    :param reference_name_by_chrom: chrom → reference name map (multi-species attribution)
+    :return: list of {feature, mutations: list[{label, is_db_hit, is_high_impact}} ordered by feature
     """
-    # Key: (feature, codon_pos, label) → merged style flags. Multiple NT variants
+    ref_by_chrom = reference_name_by_chrom or {}
+    # Key: (reference, feature, codon_pos, label) → merged style flags. Multiple NT variants
     # in the same codon can produce the same AA label; deduplicate and OR the flags.
-    seen: dict[tuple[str, int, str], dict] = {}
+    seen: dict[tuple[str | None, str, int, str], dict] = {}
     for ann in result.cds_annotations:
         if ann.consequence in _SYNONYMOUS_CONSEQUENCES:
             continue
         feature = display_names.get(ann.feature_name, ann.feature_name)
+        ref_name = ref_by_chrom.get(ann.variant.chrom) if is_multi_species else None
         label = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             if ann.ref_aa and ann.alt_aa
             else ann.consequence
         )
-        key = (feature, ann.codon_pos, label)
+        key = (ref_name, feature, ann.codon_pos, label)
         if key in seen:
             seen[key]['is_db_hit'] = (
                 seen[key]['is_db_hit']
@@ -1415,18 +1498,23 @@ def _build_mutation_profile(
                 'is_high_impact': ann.consequence in HIGH_IMPACT_CONSEQUENCES,
             }
 
-    feature_mutations: dict[str, list[tuple[int, dict]]] = {}
-    for (feature, codon_pos, _label), entry in seen.items():
-        feature_mutations.setdefault(feature, []).append((codon_pos, entry))
+    feature_mutations: dict[tuple[str | None, str], list[tuple[int, dict]]] = {}
+    for (ref_name, feature, codon_pos, _label), entry in seen.items():
+        feature_mutations.setdefault((ref_name, feature), []).append((codon_pos, entry))
 
-    return [
-        {
+    rows: list[dict] = []
+    for (ref_name, feature), entries in sorted(
+        feature_mutations.items(), key=lambda kv: (kv[0][1], kv[0][0] or '')
+    ):
+        row = {
             'feature': feature,
             'mutations': [m for _, m in sorted(entries, key=lambda x: x[0])],
             'covered_pct': gene_coverage.get(feature) if gene_coverage is not None else None,
         }
-        for feature, entries in sorted(feature_mutations.items())
-    ]
+        if is_multi_species:
+            row['reference_name'] = ref_name
+        rows.append(row)
+    return rows
 
 
 def _build_summary_narrative(
@@ -1434,6 +1522,8 @@ def _build_summary_narrative(
     display_names: dict[str, str],
     drug_table: dict,
     formula_hit_annotation_ids: set[int],
+    is_multi_species: bool = False,
+    reference_name_by_chrom: dict[str, str] | None = None,
 ) -> Markup:
     """
     Build a concise clinician-facing narrative for the interpretation summary tile.
@@ -1441,10 +1531,17 @@ def _build_summary_narrative(
     Focuses on final drug assessments (ideally grouped by drug class), plus mandatory
     caveats on uncovered codon positions and high-impact variants lacking database evidence.
 
+    When ``is_multi_species`` is true, the lead sentence attributes the profiled features
+    per organism/reference instead of using a single ``result.organism``; the drug
+    interpretation list remains one combined report. When false, the narrative is
+    byte-identical to the single-species form.
+
     :param result: profiling result
     :param display_names: feature display-name overrides
     :param drug_table: context dict from _build_drug_interpretation_table
     :param formula_hit_annotation_ids: annotation IDs participating in formula hits
+    :param is_multi_species: whether references span more than one organism
+    :param reference_name_by_chrom: chrom → reference name map (multi-species attribution)
     :return: HTML Markup narrative string
     """
     paragraphs: list[str] = []
@@ -1472,38 +1569,90 @@ def _build_summary_narrative(
         if (row.get('assessment') or '').strip().lower() == 'sensitive'
     ], key=lambda name: name.lower())
 
+    # When multi-species, ProfilingResult.feature_matches only exposes the primary
+    # reference's matches (it delegates to references[0]); aggregate across all
+    # references so every organism's profiled features are attributed. The
+    # single-species path keeps result.feature_matches for byte-identical output.
+    if is_multi_species:
+        all_feature_matches = [
+            match for rg in result.references for match in rg.feature_matches
+        ]
+    else:
+        all_feature_matches = result.feature_matches
     profiled_features = sorted({
         display_names.get(match.feature.name, match.feature.name)
-        for match in result.feature_matches
+        for match in all_feature_matches
     })
     was_were = 'were' if len(profiled_features) != 1 else 'was'
-    if profiled_features:
+
+    # Multi-species attribution: group profiled features by organism so the lead
+    # sentence names each organism alongside its features, instead of collapsing to
+    # a single result.organism. The drug interpretation list below stays combined.
+    organism_by_ref_id: dict[int, str] = {
+        rg.reference_id: rg.organism for rg in result.references if rg.organism
+    }
+    ref_id_by_feature_name: dict[str, int] = {
+        match.feature.name: match.feature.reference_id
+        for match in all_feature_matches
+    }
+
+    def _organism_for_feature(feature_name: str) -> str:
+        ref_id = ref_id_by_feature_name.get(feature_name)
+        if ref_id is not None:
+            org = organism_by_ref_id.get(ref_id)
+            if org:
+                return org
+        return result.organism or 'Unknown organism'
+
+    if is_multi_species and profiled_features:
+        # Group features by organism, preserving sorted feature order within each.
+        features_by_organism: dict[str, list[str]] = {}
+        for feature in profiled_features:
+            org = _organism_for_feature(feature)
+            features_by_organism.setdefault(org, []).append(feature)
+        per_organism_clauses = []
+        for org in features_by_organism:
+            feats = features_by_organism[org]
+            feat_list = _join_english_list([escape(f) for f in feats])
+            seq_word = 'sequence' if len(feats) == 1 else 'sequences'
+            per_organism_clauses.append(
+                f'the {seq_word} of {feat_list} of <strong>{escape(org)}</strong>'
+            )
+        feature_clause = 'The ' + _join_english_list(per_organism_clauses)
+        was_were = 'were'
+        # Each per-organism clause above already names its organism; do not append
+        # the (single) primary organism again or it duplicates in the sentence.
+        feature_organism_clause = feature_clause
+    elif profiled_features:
         feature_list = _join_english_list([
             escape(feature) for feature in profiled_features
         ])
         feature_clause = f"The sequence{'s' if len(profiled_features) != 1 else ''} of {feature_list}"
+        organism_name = escape(result.organism) if result.organism else 'Unknown organism'
+        feature_organism_clause = f'{feature_clause} of <strong>{organism_name}</strong>'
     else:
         feature_clause = 'The input sequence'
+        organism_name = escape(result.organism) if result.organism else 'Unknown organism'
+        feature_organism_clause = f'{feature_clause} of <strong>{organism_name}</strong>'
 
-    organism_name = escape(result.organism) if result.organism else 'Unknown organism'
     n_drugs = len(assessed_rows) if assessed_rows else len(drug_rows)
     if has_assessment and n_drugs:
         drug_word = 'drug' if n_drugs == 1 else 'drugs'
         if len(resistant_drugs) == 0 and len(intermediate_drugs) == 0:
             lead = (
-                f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
+                f'{feature_organism_clause} {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
                 'The assessment found no evidence for antiviral resistance for any drug.'
             )
         elif len(sensitive_drugs) == 0 and len(intermediate_drugs) == 0:
             lead = (
-                f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
+                f'{feature_organism_clause} {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
                 'The assessment found evidence for antiviral resistance for all analysed drugs.'
             )
         else:
             lead = (
-                f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
+                f'{feature_organism_clause} {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
                 f'The assessment found evidence for antiviral resistance against '
                 f"{len(resistant_drugs)} {'drug' if len(resistant_drugs) == 1 else 'drugs'}, "
@@ -1512,13 +1661,13 @@ def _build_summary_narrative(
             )
     elif drug_rows:
         lead = (
-            f'{feature_clause} of <strong>{organism_name}</strong> {was_were} evaluated against '
+            f'{feature_organism_clause} {was_were} evaluated against '
             f'known resistance-associated mutations, but no final drug interpretation '
             'algorithm is configured.'
         )
     else:
         lead = (
-            f'{feature_clause} of <strong>{organism_name}</strong> were evaluated, '
+            f'{feature_organism_clause} were evaluated, '
             'but no in-scope drugs were available for interpretation.'
         )
     paragraphs.append(lead)

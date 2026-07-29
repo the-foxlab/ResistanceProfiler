@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import io
 import json
 import shutil
@@ -869,7 +870,11 @@ class TestWebApi:
         assert status.status_code == 200
         payload = status.json()
         assert payload['status'] == 'failed'
-        assert payload['error'] == 'VCF and reference FASTA do not match. Use files derived from the same reference sequence.'
+        assert payload['error'] == (
+            'VCF CHROM(s) have no matching reference FASTA record: other_ref. '
+            'VCF CHROMs=[\'other_ref\'], FASTA records=[\'tiny_ref\']. '
+            'Provide a reference FASTA whose record headers cover every VCF CHROM.'
+        )
 
     def test_cancel_job_returns_404_for_unknown_id(
         self,
@@ -1522,6 +1527,23 @@ class TestWebApi:
         response = client.get('/api/ui/config')
 
         assert response.status_code == 401
+
+    def test_ui_config_reports_respro_version(
+        self,
+        startup_config: StartupConfig,
+        sync_queue: Queue,
+        auth_headers: dict[str, str],
+    ) -> None:
+        app = create_app(startup_config=startup_config)
+        app.dependency_overrides[get_queue] = lambda: sync_queue
+        app.dependency_overrides[get_batch_queue] = lambda: sync_queue
+        client = TestClient(app)
+
+        response = client.get('/api/ui/config', headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()['data']
+        assert payload['version'] == importlib.metadata.version('respro')
 
     def test_open_report_rejects_paths_outside_results_dir(
         self,

@@ -129,7 +129,7 @@
                 <div class="feature-mutation-list{% if context.summary.has_coverage %} feature-mutation-list--with-coverage{% endif %}">
                   {% for entry in context.summary.mutation_profile %}
                     <div class="feature-mutation-row">
-                      <span class="feature-mutation-badge">{{ entry.feature }}</span>
+                      <span class="feature-mutation-badge">{{ entry.feature }}{% if context.is_multi_species and entry.reference_name %} <span class="feature-mutation-reference">({{ entry.reference_name }})</span>{% endif %}</span>
                       {% if context.summary.has_coverage %}
                         <div class="feature-coverage-bar">
                           <div class="feature-coverage-bar__fill" style="width: {{ entry.covered_pct }}%"></div>
@@ -233,7 +233,7 @@
                       {% endif %}
                       {% for drug in drugs %}
                         <tr>
-                          <td>{{ drug.name }}</td>
+                          <td><span class="drug-name-badge {{ drug.assessment_badge_class }}">{{ drug.name }}</span></td>
                           <td class="drug-table-count">{{ drug.hit_count }}</td>
                           {% if context.summary.drug_table.has_phenotypes %}
                             <td class="drug-table-count">{{ drug.resistant_count }}</td>
@@ -273,7 +273,7 @@
                   {% else %}
                     {% for drug in context.summary.drug_table.rows %}
                       <tr>
-                        <td>{{ drug.name }}</td>
+                        <td><span class="drug-name-badge {{ drug.assessment_badge_class }}">{{ drug.name }}</span></td>
                         <td class="drug-table-count">{{ drug.hit_count }}</td>
                         {% if context.summary.drug_table.has_phenotypes %}
                           <td class="drug-table-count">{{ drug.resistant_count }}</td>
@@ -358,6 +358,7 @@
                   {% if context.database_hits.has_drug_class %}<th class="db-hit-drug-class-th">Drug class</th>{% endif %}
                   <th>Drug</th>
                   <th>Mutations</th>
+                  {% if context.is_multi_species %}<th>Reference</th>{% endif %}
                   <th>
                     Drug sensitivity data
                     <span class="db-hit-freq-info">
@@ -386,7 +387,7 @@
                 </tr>
               </thead>
               <tbody>
-                {% set col_count = 5 + (1 if context.database_hits.has_drug_class else 0) + (1 if context.database_hits.has_publications else 0) %}
+                {% set col_count = 5 + (1 if context.database_hits.has_drug_class else 0) + (1 if context.database_hits.has_publications else 0) + (1 if context.is_multi_species else 0) %}
                 {% for row in context.database_hits.rows %}
                   <tr
                     class="db-hit-row{% if row.comment %} db-hit-row--expandable{% endif %}"
@@ -410,6 +411,7 @@
                         </div>
                       {% endfor %}
                     </td>
+                    {% if context.is_multi_species %}<td class="db-hit-reference-cell">{{ row.reference_name or '—' }}</td>{% endif %}
                     <td>
                       <div class="db-hit-cell-inner">
                         {% for metric in row.metrics %}
@@ -651,6 +653,7 @@
               <thead>
                 <tr>
                   <th>Feature</th>
+                  {% if context.is_multi_species %}<th>Reference</th>{% endif %}
                   <th>
                     <button
                       class="mutation-sort-button"
@@ -683,6 +686,7 @@
                     {% endif %}
                   >
                     <td>{{ r.feature }}</td>
+                    {% if context.is_multi_species %}<td class="mutation-reference-cell">{{ r.reference_name or '—' }}</td>{% endif %}
                     <td class="mutation-nt">{{ r.nt_change }}</td>
                     <td class="mutation-aa">{{ r.aa_change or '—' }}</td>
                     <td>
@@ -707,7 +711,7 @@
                   </tr>
                   {% if r.has_alignment %}
                     <tr id="mutation-align-{{ loop.index }}" class="mutation-alignment-row" hidden>
-                      <td colspan="{{ 5 + (1 if context.all_mutations.has_database_hits else 0) }}">
+                      <td colspan="{{ 5 + (1 if context.all_mutations.has_database_hits else 0) + (1 if context.is_multi_species else 0) }}">
                         <div class="mutation-alignment-body">
                           {{ r.alignment_html | safe }}
                         </div>
@@ -769,14 +773,21 @@
                     <dd>{{ card.database_hits }}</dd>
                   </div>
                 </dl>
-                {% if card.protein or card.note or card.protein_id or card.locus_tag %}
+                {% set has_protein_meta = card.protein or card.note or card.protein_id or card.locus_tag %}
+                {% set show_reference = context.sequence_features.is_multi_species and card.reference_name %}
+                {% if has_protein_meta %}
                   <div class="info-card-meta">
+                    {% if show_reference %}<p><strong>Reference:</strong> {{ card.reference_name }}</p>{% endif %}
                     {% if card.protein %}<p><strong>Protein:</strong> {{ card.protein }}</p>{% endif %}
                     {% if card.protein_id %}
                       <p><strong>Protein ID:</strong> {{ card.protein_id }}</p>
                     {% endif %}
                     {% if card.locus_tag %}<p><strong>Locus:</strong> {{ card.locus_tag }}</p>{% endif %}
                     {% if card.note %}<p>{{ card.note }}</p>{% endif %}
+                  </div>
+                {% elif show_reference %}
+                  <div class="info-card-meta">
+                    <p><strong>Reference:</strong> {{ card.reference_name }}</p>
                   </div>
                 {% endif %}
               </article>

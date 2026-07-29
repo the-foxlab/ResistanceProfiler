@@ -28,6 +28,7 @@ from respro.db.results import (
 )
 from respro.db.results import project_fingerprint as compute_project_fingerprint
 from respro.db.schema import open_project_db, open_results_db
+from respro.utils.cli_errors import cli_error
 from respro.utils.logging import err_console
 
 logger = logging.getLogger(__name__)
@@ -91,7 +92,7 @@ def sync_results_database(
         ))
 
     except (FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        cli_error(str(exc))
     finally:
         if results_conn is not None:
             results_conn.close()

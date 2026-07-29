@@ -7,12 +7,12 @@ from __future__ import annotations  # noqa: I001
 from pathlib import Path
 from typing import Annotated
 
-import click
 import typer
 from rich import box
 from rich.console import Console
 from rich.table import Table
 
+from respro.utils.cli_errors import cli_error
 from respro.cli.sync import sync_results_database
 from respro.db.results import delete_run, list_runs
 from respro.db.rules_queries import (
@@ -110,7 +110,7 @@ def manage_database(
     """Manage a project database via --rules or --info mode."""
     rules_mode = bool(rules or list_single or list_combi)
     if info == rules_mode:
-        raise click.UsageError('Specify either --info or --rules/--list-single/--list-combi.')
+        cli_error('Specify either --info or --rules/--list-single/--list-combi.')
 
     if rules_mode:
         if not list_single and not list_combi:
@@ -152,7 +152,7 @@ def manage_results(
         + int(sync_project_db is not None)
     )
     if selected_modes != 1:
-        raise click.UsageError('Specify exactly one of --list, --delete, or --sync.')
+        cli_error('Specify exactly one of --list, --delete, or --sync.')
 
     if list_mode:
         _explore_runs(results_db)
@@ -178,13 +178,13 @@ def manage_results(
         if not force:
             confirmed = typer.confirm(f'Delete run {label}?', default=False)
             if not confirmed:
-                raise click.ClickException('Deletion cancelled.')
+                cli_error('Deletion cancelled.')
 
         deleted = delete_run(results_conn, delete_run_id or '')
         sample_name = str(deleted['sample_name']) or 'n/a'
         typer.echo(f"Deleted run {deleted['id']} (sample: {sample_name})")
     except (FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        cli_error(str(exc))
     finally:
         if results_conn is not None:
             results_conn.close()
@@ -208,13 +208,13 @@ def _explore_rules(
             refs = list_references_for_display(project_conn)
             matches = [r for r in refs if reference.lower() in r['name'].lower()]
             if not matches:
-                raise click.ClickException(
+                cli_error(
                     f'No reference matching {reference!r} found in the project database.\n'
                     'Available references: ' + ', '.join(r['name'] for r in refs)
                 )
             if len(matches) > 1:
                 names = ', '.join(r['name'] for r in matches)
-                raise click.ClickException(
+                cli_error(
                     f'Ambiguous reference filter {reference!r} — matched: {names}.\n'
                     'Please be more specific.'
                 )
@@ -238,7 +238,7 @@ def _explore_rules(
             _render_rule_table(console, combi_rows, FORMULA_RULE_COLUMN_LABELS)
 
     except (FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        cli_error(str(exc))
     finally:
         if project_conn is not None:
             project_conn.close()
@@ -304,7 +304,7 @@ def _explore_runs(results_db: Path) -> None:
         console.print(table)
 
     except (FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        cli_error(str(exc))
     finally:
         if results_conn is not None:
             results_conn.close()
@@ -356,7 +356,7 @@ def _explore_info(project_db: Path) -> None:
         console.print(table)
 
     except (FileNotFoundError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
+        cli_error(str(exc))
     finally:
         if project_conn is not None:
             project_conn.close()

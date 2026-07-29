@@ -239,6 +239,7 @@ CREATE TABLE IF NOT EXISTS variant_result (
     allele_freq REAL,
     depth       INTEGER,
     feature_name   TEXT    DEFAULT '',
+    reference_name TEXT    DEFAULT '',
     codon_pos   INTEGER,
     ref_codon   TEXT    DEFAULT '',
     alt_codon   TEXT    DEFAULT '',
@@ -259,6 +260,8 @@ CREATE TABLE IF NOT EXISTS coverage_gap (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id      INTEGER NOT NULL REFERENCES run(id),
     feature_name   TEXT    NOT NULL,
+    reference_name TEXT    DEFAULT '',
+    chrom          TEXT    DEFAULT '',
     codon_start INTEGER NOT NULL,
     codon_end   INTEGER NOT NULL
 );
@@ -268,6 +271,7 @@ CREATE INDEX IF NOT EXISTS idx_cg_run ON coverage_gap(run_id);
 CREATE TABLE IF NOT EXISTS formula_rule_hit (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id      INTEGER NOT NULL REFERENCES run(id),
+    reference_name TEXT DEFAULT '',
     hit_json    TEXT    NOT NULL DEFAULT '{}'
 );
 
@@ -301,6 +305,8 @@ CREATE TABLE IF NOT EXISTS coverage_gap (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id      INTEGER NOT NULL REFERENCES run(id),
     feature_name   TEXT    NOT NULL,
+    reference_name TEXT    DEFAULT '',
+    chrom          TEXT    DEFAULT '',
     codon_start INTEGER NOT NULL,
     codon_end   INTEGER NOT NULL
 );
@@ -309,6 +315,7 @@ CREATE INDEX IF NOT EXISTS idx_cg_run ON coverage_gap(run_id);
 CREATE TABLE IF NOT EXISTS formula_rule_hit (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id      INTEGER NOT NULL REFERENCES run(id),
+    reference_name TEXT DEFAULT '',
     hit_json    TEXT    NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_frh_run ON formula_rule_hit(run_id);
@@ -345,6 +352,7 @@ _OPTIONAL_RESULTS_COLUMN_DEFS = {
         'allele_freq': 'REAL',
         'depth': 'INTEGER',
         'feature_name': "TEXT DEFAULT ''",
+        'reference_name': "TEXT DEFAULT ''",
         'codon_pos': 'INTEGER',
         'ref_codon': "TEXT DEFAULT ''",
         'alt_codon': "TEXT DEFAULT ''",
@@ -356,6 +364,13 @@ _OPTIONAL_RESULTS_COLUMN_DEFS = {
         'drug_hits': "TEXT DEFAULT '[]'",
         'is_combined_codon_event': 'INTEGER DEFAULT 0',
         'combined_member_count': 'INTEGER DEFAULT 1',
+    },
+    'coverage_gap': {
+        'reference_name': "TEXT DEFAULT ''",
+        'chrom': "TEXT DEFAULT ''",
+    },
+    'formula_rule_hit': {
+        'reference_name': "TEXT DEFAULT ''",
     },
 }
 

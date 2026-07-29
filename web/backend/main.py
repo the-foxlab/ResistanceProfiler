@@ -135,6 +135,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             sample_limit_per_minute=sample_limit_per_minute,
             require_api_token=require_api_token,
             build_readiness_payload=_build_readiness_payload,
+            version=version,
         )
     )
     app.include_router(
@@ -535,7 +536,7 @@ def _user_facing_error_message(raw_message: str | None) -> str:
         return 'The operation failed on the server.'
 
     message = _extract_primary_error_message(raw_message)
-    for prefix in ('ValueError: ', 'RuntimeError: ', 'Exception: ', 'OSError: '):
+    for prefix in ('Error: ', 'ValueError: ', 'RuntimeError: ', 'Exception: ', 'OSError: '):
         if message.startswith(prefix):
             message = message[len(prefix):]
             break

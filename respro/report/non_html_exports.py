@@ -131,6 +131,16 @@ def write_json(
     project_db_path: Path | None = None,
 ) -> Path:
     """Write one-run JSON with the same information model as results.db rows."""
+    # Map chrom (== ReferenceGroup.query_name, unique per ReferenceGroup) -> reference_name
+    # so per-row reference_name can be serialised (mirrors save_run). Keying by chrom (not
+    # feature_name) is unambiguous even when two references share a feature name.
+    reference_name_by_chrom: dict[str, str] = {
+        rg.query_name: rg.reference_name for rg in result.references
+    }
+
+    def _reference_name_for_chrom(chrom: str) -> str:
+        return reference_name_by_chrom.get(chrom, '')
+
     run_payload = {
         'project_name': result.project_name,
         'project_db_path': str(project_db_path) if project_db_path else '',
@@ -159,6 +169,7 @@ def write_json(
             'allele_freq': v.allele_freq,
             'depth': v.depth,
             'feature_name': ann.feature_name,
+            'reference_name': _reference_name_for_chrom(v.chrom),
             'codon_pos': ann.codon_pos,
             'ref_codon': ann.ref_codon,
             'alt_codon': ann.alt_codon,
@@ -176,19 +187,24 @@ def write_json(
         {
             'id': None,
             'feature_name': gap.feature_name,
+            'reference_name': _reference_name_for_chrom(gap.chrom),
+            'chrom': gap.chrom,
             'codon_start': gap.codon_start,
             'codon_end': gap.codon_end,
         }
         for gap in result.coverage_gaps
     ]
 
-    combo_rows = [
-        {
+    combo_rows = []
+    for hit in result.formula_hits:
+        hit_chrom = ''
+        if hit.matched_variants:
+            hit_chrom = hit.matched_variants[0].variant.chrom
+        combo_rows.append({
             'id': None,
+            'reference_name': _reference_name_for_chrom(hit_chrom),
             'hit_json': json.dumps(hit.to_dict()),
-        }
-        for hit in result.formula_hits
-    ]
+        })
 
     classification_rows = [
         {
@@ -205,12 +221,26 @@ def write_json(
         for row in result.sample_classifications
     ]
 
+    # Serialise the per-reference groups so regenerate --json can reconstruct
+    # multiple ReferenceGroups without re-querying the project DB for reference names.
+    references_payload = [
+        {
+            'reference_name': rg.reference_name,
+            'reference_id': rg.reference_id,
+            'organism': rg.organism,
+            'reference_length_nt': rg.reference_length_nt,
+            'query_name': rg.query_name,
+        }
+        for rg in result.references
+    ]
+
     payload = {
         'run': run_payload,
         'variant_result': variant_rows,
         'coverage_gap': coverage_rows,
         'formula_rule_hit': combo_rows,
         'sample_classification': classification_rows,
+        'references': references_payload,
     }
 
     output_path = Path(output_path)

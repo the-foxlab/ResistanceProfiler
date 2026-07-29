@@ -2445,8 +2445,11 @@ th.sortable-col {
 }
 
 .app-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
   padding: 0.75rem 1rem;
-  text-align: center;
   border-top: 1px solid var(--color-border, #e0e0e0);
   /* Keep the footer at its natural height so the panel-stack above can grow
      and push it to the bottom of the flex column. */
@@ -2461,4 +2464,10 @@ th.sortable-col {
 
 .app-footer a:hover {
   text-decoration: underline;
+}
+
+.app-footer-version,
+.app-footer-sep {
+  color: var(--color-text-secondary, #666);
+  font-size: 0.85rem;
 }
