@@ -22,7 +22,7 @@ from rq.exceptions import NoSuchJobError
 
 from tests.conftest import TINY_REF_NAME, TINY_REF_SEQ
 from web.backend.config import WEB_BACKEND_CONFIG
-from web.backend.main import _resolve_proxy_settings, create_app
+from web.backend.main import _SAMPLE_QUOTA_COUNTER, _resolve_proxy_settings, create_app
 from web.backend.queue import get_batch_queue, get_queue
 from web.backend.startup_config import (
     ImprintConfig,
@@ -1646,6 +1646,19 @@ class TestWebApi:
 
 
 class TestBatchProfileEndpoints:
+    @pytest.fixture(autouse=True)
+    def _reset_sample_quota(self):
+        """Clear the in-memory sample-quota counter before each batch test.
+
+        The quota is keyed by ``(identity, minute-window)`` and all batch tests share the same
+        token identity, so without a reset the counter accumulates across tests in the same
+        minute and later tests spuriously hit 429. Resetting here gives each batch test an
+        isolated quota.
+        """
+        _SAMPLE_QUOTA_COUNTER.clear()
+        yield
+        _SAMPLE_QUOTA_COUNTER.clear()
+
     def test_batch_vcf_submit_success(
         self,
         client: TestClient,
@@ -1961,6 +1974,248 @@ class TestBatchProfileEndpoints:
         assert response.status_code == 404
         assert redis_urls
         assert redis_urls[-1] == WEB_BACKEND_CONFIG.defaults.redis_url
+
+    # ── Batch VCF per-sample BAM (Feature: batch-bam-coverage) ──────────
+
+    def _default_db(self, startup_config: StartupConfig) -> str:
+        return sorted(startup_config.project_databases_dir.glob('*.db'))[0].name
+
+    def test_batch_vcf_with_bam_paths_enqueues_each_job_with_matching_bam(
+        self,
+        client: TestClient,
+        sync_queue: Queue,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A full-length bam_paths list wires each BAM to its sample's job."""
+        from tests.conftest import write_minimal_bam
+
+        vcf2 = startup_config.uploads_dir / 'sample2.vcf'
+        vcf2.write_text(web_sample_vcf.read_text())
+        bam1 = write_minimal_bam(startup_config.uploads_dir / 'sample.bam')
+        bam2 = write_minimal_bam(startup_config.uploads_dir / 'sample2.bam')
+
+        enqueued_bam_paths: list[str | None] = []
+        original_enqueue = sync_queue.enqueue
+
+        def capturing_enqueue(*args, **kwargs):
+            enqueued_bam_paths.append(kwargs.get('bam_path'))
+            return original_enqueue(*args, **kwargs)
+
+        monkeypatch.setattr(sync_queue, 'enqueue', capturing_enqueue)
+
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_paths': [str(web_sample_vcf), str(vcf2)],
+                'sample_names': ['sample-a', 'sample-b'],
+                'input_display_names': ['batch-a.vcf', 'batch-b.vcf'],
+                'reference_fasta_path': str(web_sample_ref_fasta),
+                'db_path': self._default_db(startup_config),
+                'bam_paths': [str(bam1), str(bam2)],
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        assert len(enqueued_bam_paths) == 2
+        assert enqueued_bam_paths[0] == str(bam1)
+        assert enqueued_bam_paths[1] == str(bam2)
+
+    def test_batch_vcf_bam_paths_mismatched_length_returns_422(
+        self,
+        client: TestClient,
+        sync_queue: Queue,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """bam_paths shorter than vcf_paths is rejected before any job is enqueued."""
+        enqueue_calls = 0
+        original_enqueue = sync_queue.enqueue
+
+        def counting_enqueue(*args, **kwargs):
+            nonlocal enqueue_calls
+            enqueue_calls += 1
+            return original_enqueue(*args, **kwargs)
+
+        monkeypatch.setattr(sync_queue, 'enqueue', counting_enqueue)
+
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_paths': [str(web_sample_vcf), str(web_sample_vcf)],
+                'sample_names': ['sample-a', 'sample-b'],
+                'reference_fasta_path': str(web_sample_ref_fasta),
+                'db_path': self._default_db(startup_config),
+                'bam_paths': [str(startup_config.uploads_dir / 'only.bam')],
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 422
+        assert 'bam_paths and vcf_paths must have the same length.' in response.json()['detail']
+        assert enqueue_calls == 0
+
+    def test_batch_vcf_bam_path_outside_allowed_roots_returns_400(
+        self,
+        client: TestClient,
+        sync_queue: Queue,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        tmp_path: Path,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An out-of-root BAM path is rejected with no partial jobs enqueued."""
+        from tests.conftest import write_minimal_bam
+
+        out_of_root_bam = write_minimal_bam(tmp_path / 'outside.bam')
+        enqueue_calls = 0
+        original_enqueue = sync_queue.enqueue
+
+        def counting_enqueue(*args, **kwargs):
+            nonlocal enqueue_calls
+            enqueue_calls += 1
+            return original_enqueue(*args, **kwargs)
+
+        monkeypatch.setattr(sync_queue, 'enqueue', counting_enqueue)
+
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_paths': [str(web_sample_vcf)],
+                'sample_names': ['sample-a'],
+                'reference_fasta_path': str(web_sample_ref_fasta),
+                'db_path': self._default_db(startup_config),
+                'bam_paths': [str(out_of_root_bam)],
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert 'BAM path is outside allowed upload directory.' in response.json()['detail']
+        assert enqueue_calls == 0
+
+    def test_batch_vcf_missing_bam_file_returns_404(
+        self,
+        client: TestClient,
+        sync_queue: Queue,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A non-existent in-root BAM path is rejected with no partial jobs enqueued."""
+        enqueue_calls = 0
+        original_enqueue = sync_queue.enqueue
+
+        def counting_enqueue(*args, **kwargs):
+            nonlocal enqueue_calls
+            enqueue_calls += 1
+            return original_enqueue(*args, **kwargs)
+
+        monkeypatch.setattr(sync_queue, 'enqueue', counting_enqueue)
+
+        missing_bam = startup_config.uploads_dir / 'does-not-exist.bam'
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_paths': [str(web_sample_vcf)],
+                'sample_names': ['sample-a'],
+                'reference_fasta_path': str(web_sample_ref_fasta),
+                'db_path': self._default_db(startup_config),
+                'bam_paths': [str(missing_bam)],
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 404
+        assert 'BAM file not found.' in response.json()['detail']
+        assert enqueue_calls == 0
+
+    def test_batch_vcf_mixed_none_and_valid_bam_entries_enqueue_selectively(
+        self,
+        client: TestClient,
+        sync_queue: Queue,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A None entry skips BAM for that sample; a path entry wires its BAM."""
+        from tests.conftest import write_minimal_bam
+
+        vcf2 = startup_config.uploads_dir / 'sample2.vcf'
+        vcf2.write_text(web_sample_vcf.read_text())
+        bam2 = write_minimal_bam(startup_config.uploads_dir / 'sample2.bam')
+
+        enqueued_bam_paths: list[str | None] = []
+        original_enqueue = sync_queue.enqueue
+
+        def capturing_enqueue(*args, **kwargs):
+            enqueued_bam_paths.append(kwargs.get('bam_path'))
+            return original_enqueue(*args, **kwargs)
+
+        monkeypatch.setattr(sync_queue, 'enqueue', capturing_enqueue)
+
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_paths': [str(web_sample_vcf), str(vcf2)],
+                'sample_names': ['sample-a', 'sample-b'],
+                'input_display_names': ['batch-a.vcf', 'batch-b.vcf'],
+                'reference_fasta_path': str(web_sample_ref_fasta),
+                'db_path': self._default_db(startup_config),
+                'bam_paths': [None, str(bam2)],
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        assert enqueued_bam_paths == [None, str(bam2)]
+
+    def test_batch_vcf_without_bam_paths_behaves_as_today(
+        self,
+        client: TestClient,
+        sync_queue: Queue,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Omitting bam_paths entirely enqueues every job with bam_path=None."""
+        enqueued_bam_paths: list[str | None] = []
+        original_enqueue = sync_queue.enqueue
+
+        def capturing_enqueue(*args, **kwargs):
+            enqueued_bam_paths.append(kwargs.get('bam_path'))
+            return original_enqueue(*args, **kwargs)
+
+        monkeypatch.setattr(sync_queue, 'enqueue', capturing_enqueue)
+
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_paths': [str(web_sample_vcf), str(web_sample_vcf)],
+                'sample_names': ['sample-a', 'sample-b'],
+                'reference_fasta_path': str(web_sample_ref_fasta),
+                'db_path': self._default_db(startup_config),
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        assert enqueued_bam_paths == [None, None]
 
 
 class TestLegalRoute:

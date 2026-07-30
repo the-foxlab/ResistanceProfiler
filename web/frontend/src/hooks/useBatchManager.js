@@ -43,12 +43,126 @@ export function useBatchManager({
           }));
         });
         setUploadProgress((prev) => ({ ...prev, percent: 100 }));
-        setBatchVcfFiles((prev) => [...prev, { path: response.file_path, name: file.name, size: file.size }]);
+        setBatchVcfFiles((prev) => [...prev, {
+          path: response.file_path,
+          name: file.name,
+          size: file.size,
+          bamPath: null,
+          bamName: null,
+          bamSize: null,
+        }]);
         addUploadedPath(response.file_path);
       } catch (error) {
         setBatchError(formatUserError(error.message));
       }
     }
+  };
+
+  // ── Per-sample BAM (Feature: batch-bam-coverage) ─────────────────────
+  // Multi-select BAM upload auto-pairs each BAM to the VCF row whose filename stem matches
+  // (case-insensitive). Unmatched BAMs and collisions (stem matches an already-paired row) are
+  // reported back to the caller rather than silently dropped or overwritten, so the UI can prompt
+  // the user to resolve them with the per-row attach control.
+
+  const addBatchBamFiles = async (files) => {
+    const toUpload = Array.from(files);
+    const paired = [];
+    const unmatched = [];
+    const collisions = [];
+    // Track VCF-row indices claimed during this call. We cannot read pairings back from
+    // ``batchVcfFiles`` here: the closure snapshot is not updated by the ``setBatchVcfFiles``
+    // calls made by earlier loop iterations within the same call, so a second BAM whose stem
+    // matches an already-paired row would otherwise miss the first pairing and silently
+    // overwrite it. This local set sees claims made earlier in the same call synchronously.
+    const claimedIndices = new Set();
+    for (const file of toUpload) {
+      try {
+        setUploadProgress({
+          percent: 0,
+          fileName: `BATCH BAM - ${file.name}`,
+        });
+        const response = await apiUpload('/api/upload/bam', file, (percent) => {
+          setUploadProgress((prev) => ({
+            ...prev,
+            percent,
+          }));
+        });
+        setUploadProgress((prev) => ({ ...prev, percent: 100 }));
+        addUploadedPath(response.file_path);
+
+        const bamStem = formatPathStem(file.name).toLowerCase();
+        const matchIndex = batchVcfFiles.findIndex(
+          (entry) => formatPathStem(entry.name).toLowerCase() === bamStem,
+        );
+        if (matchIndex === -1) {
+          unmatched.push(file.name);
+          continue;
+        }
+        // Collision = the row already has a BAM (from a prior call) OR was claimed earlier in
+        // this same multi-select call. Either way, do not overwrite the existing pairing.
+        if (batchVcfFiles[matchIndex].bamPath || claimedIndices.has(matchIndex)) {
+          collisions.push(file.name);
+          continue;
+        }
+        claimedIndices.add(matchIndex);
+        setBatchVcfFiles((prev) => prev.map((entry, i) => (
+          i === matchIndex
+            ? { ...entry, bamPath: response.file_path, bamName: file.name, bamSize: file.size }
+            : entry
+        )));
+        paired.push(file.name);
+      } catch (error) {
+        setBatchError(formatUserError(error.message));
+      }
+    }
+    // Report only the cases that need user action (unmatched / collisions). Successful pairings
+    // are visible in the per-row table, so we do not narrate them. This mirrors how upload
+    // errors are surfaced (batchError near the Analyze button) rather than inline next to the
+    // BAM input, keeping reporting consistent.
+    if (unmatched.length > 0 || collisions.length > 0) {
+      const parts = [];
+      if (unmatched.length > 0) {
+        parts.push(`${unmatched.length} BAM(s) matched no VCF row: ${unmatched.join(', ')}`);
+      }
+      if (collisions.length > 0) {
+        parts.push(`${collisions.length} BAM(s) already paired (kept existing): ${collisions.join(', ')}`);
+      }
+      setBatchError(`BAM pairing — ${parts.join('; ')}. Use the per-row BAM control to override.`);
+    }
+    return { paired, unmatched, collisions };
+  };
+
+  const attachBatchBam = async (vcfIndex, file) => {
+    try {
+      setUploadProgress({
+        percent: 0,
+        fileName: `BATCH BAM - ${file.name}`,
+      });
+      const response = await apiUpload('/api/upload/bam', file, (percent) => {
+        setUploadProgress((prev) => ({
+          ...prev,
+          percent,
+        }));
+      });
+      setUploadProgress((prev) => ({ ...prev, percent: 100 }));
+      addUploadedPath(response.file_path);
+      // Uploading a new BAM overwrites any existing BAM on this row — no separate remove step.
+      setBatchVcfFiles((prev) => prev.map((entry, i) => (
+        i === vcfIndex
+          ? { ...entry, bamPath: response.file_path, bamName: file.name, bamSize: file.size }
+          : entry
+      )));
+    } catch (error) {
+      setBatchError(formatUserError(error.message));
+    }
+  };
+
+  const removeBatchBam = (vcfIndex) => {
+    setBatchVcfFiles((prev) => prev.map((entry, i) => (
+      i === vcfIndex
+        ? { ...entry, bamPath: null, bamName: null }
+        : entry
+    )));
   };
 
   const addBatchFastaFiles = async (files) => {
@@ -188,6 +302,7 @@ export function useBatchManager({
           min_af: batchVcfCutoffs.min_af,
           min_depth: batchVcfCutoffs.min_depth,
           threads: FRONTEND_CONFIG.profile.threads,
+          bam_paths: batchVcfFiles.map((f) => f.bamPath ?? null),
         };
         const response = await apiPostRaw('/api/profile/batch/vcf', body);
         if (response.status === 429) {
@@ -289,6 +404,9 @@ export function useBatchManager({
     setBatchVcfCutoffs,
     addBatchVcfFiles,
     addBatchFastaFiles,
+    addBatchBamFiles,
+    attachBatchBam,
+    removeBatchBam,
     removeBatchFile,
     uploadBatchReferenceFasta,
     submitBatch,

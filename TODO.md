@@ -294,6 +294,116 @@ Mark items done and update priorities after each completed milestone.
 
 ## Ready
 
+### Feature: batch-bam-coverage
+
+VCF-mode batch upload currently accepts an optional BAM file only for single-VCF profiling. The batch
+route (`POST /api/profile/batch/vcf`) hardcodes `bam_path=None` for every sample, so per-sample
+coverage-gap analysis from BAM depth is unavailable in batch mode. This feature adds per-sample,
+**optional** BAM support to batch VCF upload. Association is carried **positionally in the request
+payload** (a `bam_paths` parallel array) rather than by filename: uploaded files are stored under
+anonymous `tmpXXXXXX.{ext}` names on disk, so name-based matching is impossible, and the existing
+batch contract already uses parallel arrays (`vcf_paths` ↔ `sample_names` ↔ `input_display_names`).
+A `None` entry means "no BAM for that sample", preserving the optional-per-sample behaviour of the
+single-VCF path. The job layer (`run_profile_vcf`, `_run_profile_vcf_subprocess`) already accepts and
+wires `bam_path` → CLI `--bam`, so this feature touches only the payload model, the batch route's
+per-sample validation/enqueue, the frontend batch manager + batch VCF UI, tests, and docs. FASTA
+batch mode is unchanged. The existing `db_path` (batch) vs `database_id` (single) inconsistency is
+out of scope.
+
+- [ ] 🔍 Add `bam_paths` field to batch VCF payload model — add
+  `bam_paths: list[str | None] | None = None` to `BatchProfileVcfPayload` in
+  `web/backend/models.py`. When provided, it must be the same length as `vcf_paths`; a `None` entry
+  means no BAM for that sample. Affected modules: `web/backend/models.py`. Acceptance: the field is
+  present, defaults to `None`, and a payload with `bam_paths` of a different length than `vcf_paths`
+  is rejected (handled in the route ticket); Feature: batch-bam-coverage
+- [ ] 🔍 Validate and wire per-sample BAM paths in the batch VCF route — in
+  `web/backend/routes/profile.py::profile_batch_vcf_route`, after resolving `vcf_paths`/`sample_names`
+  lengths, normalize `payload.bam_paths`: if `None`, treat as an all-`None` list of
+  `len(payload.vcf_paths)`; otherwise require `len(bam_paths) == len(vcf_paths)` and raise
+  `HTTPException(422, 'bam_paths and vcf_paths must have the same length.')` on mismatch. Add a
+  helper `_validate_batch_bam_paths(bam_paths, allowed_roots, is_path_within_allowed_roots)` that
+  resolves each non-`None` entry via `Path(...).expanduser().resolve()`, enforces
+  `is_path_within_allowed_roots` (400 'BAM path is outside allowed upload directory.') and
+  `.is_file()` (404 'BAM file not found.'), mirroring the single-VCF logic at `profile.py:91-99`.
+  In the enqueue loop, replace the hardcoded `bam_path=None` with the resolved per-index BAM path
+  (or `None`). Affected modules: `web/backend/routes/profile.py`. Acceptance: a batch request with a
+  full-length `bam_paths` list enqueues each `run_profile_vcf` job with the correct per-sample
+  `bam_path`; a request with mismatched lengths returns 422; an out-of-root or missing BAM returns
+  400/404 with no partial jobs enqueued; a request with `bam_paths=None` behaves exactly as today
+  (all `bam_path=None`); a request with mixed `None`/path entries enqueues jobs with BAM only where
+  provided; Feature: batch-bam-coverage
+- [ ] 🔍 Frontend: multi-select BAM upload with stem auto-pairing + per-row override in batch VCF
+  manager — in `web/frontend/src/hooks/useBatchManager.js`, extend each `batchVcfFiles` entry to
+  `{path, name, size, bamPath, bamName}` (default `bamPath: null`, `bamName: null`). Add a
+  `addBatchBamFiles(files)` action that accepts a **multi-select** BAM file list, uploads each via
+  the existing `/api/upload/bam` endpoint, and **auto-pairs** each uploaded BAM to the VCF row whose
+  filename stem (basename minus extension, via the existing `formatPathStem` helper in `api.js`)
+  equals the BAM's stem (e.g. `sample1.vcf` ↔ `sample1.bam`); store `bamPath`/`bamName` on the
+  matched entry and call `addUploadedPath` on the returned path. Pairing rules: matching is
+  case-insensitive on stems; a BAM whose stem matches no VCF row is reported back to the caller as
+  an **unmatched** result (do not silently drop it) so the UI can surface a message; a BAM whose
+  stem matches a VCF row that **already** has a BAM is reported as a **collision** (do not overwrite
+  the existing pairing silently) so the UI can ask the user to confirm or use per-row override; a
+  VCF row may also be paired by an explicit per-row attach (see `attachBatchBam`). Add
+  `attachBatchBam(vcfIndex, file)` (single-file per-row upload that overwrites whatever BAM is on
+  that row) and `removeBatchBam(vcfIndex)` (clears only the BAM fields on that row). Ensure
+  `removeBatchFile(index)` still drops the whole row including its BAM. In `submitBatch`'s VCF
+  branch, include `bam_paths: batchVcfFiles.map((f) => f.bamPath ?? null)` in the request body.
+  Affected modules: `web/frontend/src/hooks/useBatchManager.js`. Acceptance: multi-selecting N BAMs
+  whose stems match N of the uploaded VCF rows pairs each BAM to its row with no extra clicks; a BAM
+  with no matching VCF stem is returned as unmatched (not silently dropped); a BAM whose stem
+  matches an already-paired row is returned as a collision (existing pairing preserved); the
+  per-row `attachBatchBam` overwrites a row's BAM regardless of auto-pairing; `removeBatchBam`
+  clears only the BAM; removing a VCF row drops its BAM too; the submitted body contains a
+  `bam_paths` array of the same length as `vcf_paths` with `null` for rows without a BAM; Feature:
+  batch-bam-coverage
+- [ ] 🔍 Frontend: BAM controls in batch VCF UI — in
+  `web/frontend/src/components/tabs/AnalyzeTab.jsx`'s batch VCF section, add (1) a **multi-select**
+  BAM file input (`<input type="file" multiple accept=".bam">`) alongside the existing VCF files
+  input, wired to `addBatchBamFiles(event.target.files)`; after the auto-pairing call, surface a
+  short summary of results — counts of paired / unmatched / collision — and, when there are
+  unmatched or collision cases, list the affected filenames so the user can resolve them with the
+  per-row control; (2) in the `batch-uploaded-file-list` block, add a per-row BAM cell showing the
+  attached BAM name (or "No BAM"), a per-row `<input type="file" accept=".bam">` wired to
+  `attachBatchBam(index, file)` for explicit override, and a "Remove BAM" control wired to
+  `removeBatchBam(index)` (shown only when the row has a BAM). Disable all BAM controls while
+  `batchSubmitting`. Affected modules: `web/frontend/src/components/tabs/AnalyzeTab.jsx`.
+  Acceptance: multi-selecting BAMs auto-pairs them to matching VCF rows and shows a paired/
+  unmatched/collision summary; unmatched and collision filenames are listed; each VCF row shows its
+  BAM name (or "No BAM") and supports per-row attach (override) and remove; all BAM controls are
+  disabled during submission; rows without a BAM still submit successfully; Feature:
+  batch-bam-coverage
+- [ ] 🔍 Frontend tests: batch BAM auto-pairing and per-row override — extend the Vitest suite in
+  `web/frontend/` with unit tests for `useBatchManager`'s new BAM actions (mock `apiUpload`):
+  (a) multi-select of N BAMs whose stems match N VCF rows pairs each to the correct row; (b) a BAM
+  with no matching VCF stem is reported unmatched and no row is changed; (c) a BAM whose stem
+  matches an already-paired row is reported as a collision and the existing pairing is preserved;
+  (d) `attachBatchBam(index, file)` overwrites a row's BAM regardless of prior auto-pairing;
+  (e) `removeBatchBam(index)` clears only that row's BAM; (f) `removeBatchFile(index)` drops the
+  row and its BAM; (g) `submitBatch`'s VCF branch sends a `bam_paths` array equal in length to
+  `vcf_paths` with `null` for unpaired rows. Affected modules: `web/frontend/` (Vitest specs).
+  Acceptance: all new frontend tests pass; `npm test` is green; Feature: batch-bam-coverage
+- [ ] 🔍 Tests: batch BAM coverage end-to-end — extend `tests/test_web_api.py`
+  `TestBatchProfileEndpoints` with cases: (a) a batch request with a full-length `bam_paths` list
+  where each entry points to a valid in-root BAM asserts each enqueued `run_profile_vcf` job received
+  the matching `bam_path` (inspect the queued job args via the existing fakeredis/isolated-queue
+  fixtures); (b) a request with `bam_paths` shorter than `vcf_paths` returns 422 and enqueues no
+  jobs; (c) a request with an out-of-root BAM path returns 400 and enqueues no jobs; (d) a request
+  with a missing BAM file returns 404 and enqueues no jobs; (e) a request with mixed `None`/valid
+  BAM entries enqueues jobs with `bam_path` set only where provided; (f) a request with `bam_paths`
+  omitted entirely behaves as today (all `bam_path=None`). Add a reusable fixture/helper for a valid
+  in-root BAM (small BGZF file) if one does not already exist. (Frontend auto-pairing logic — stem
+  match, unmatched, collision — is covered by the Vitest suite in the frontend ticket, not here.)
+  Affected modules: `tests/test_web_api.py`, `tests/conftest.py`. Acceptance: all new tests pass;
+  the full existing suite still passes; `ruff check .` is clean; Feature: batch-bam-coverage
+- [ ] 🔍 Docs: BAM coverage in batch VCF upload — update `docs/docs/webapp.md` (batch section) and
+  `docs/docs/how-it-works.md` (VCF+BAM coverage section) to state that batch VCF upload supports an
+  optional per-sample BAM, paired positionally per uploaded VCF, and that rows without a BAM skip
+  coverage-gap analysis (same behaviour as single VCF without `--bam`). Note that matching is by
+  upload order/row, not by filename. Affected modules: `docs/docs/webapp.md`,
+  `docs/docs/how-it-works.md`. Acceptance: both docs describe per-sample optional BAM in batch VCF
+  mode and the positional (not filename) pairing; Feature: batch-bam-coverage
+
 ### Feature: multi-species-reporting
 
 Reporting redesign for multi-reference runs, driven by the user decision (2026-07): **always assume

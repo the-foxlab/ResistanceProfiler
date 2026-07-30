@@ -1617,27 +1617,6 @@ th {
   margin: 0;
 }
 
-.batch-uploaded-file-list {
-  list-style: none;
-  padding: 0;
-  margin: 0.4rem 0;
-  display: grid;
-  gap: 0.35rem;
-  width: 100%;
-}
-
-.batch-uploaded-file-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 84px 34px;
-  gap: 0.5rem;
-  align-items: center;
-  border: 1px solid #dce6ef;
-  border-radius: 8px;
-  background: #ffffff;
-  padding: 0.28rem 0.45rem;
-  width: 100%;
-}
-
 .profile-upload-row-batch-files {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -1673,16 +1652,53 @@ th {
   grid-column: 1 / -1;
 }
 
-.batch-uploaded-file-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Batch uploaded-files table (VCF mode: VCF file | size | BAM file | BAM size | upload BAM | remove;
+   FASTA mode: FASTA file | size | remove). Sits inside a .batch-uploaded-table-wrap scroller. */
+.batch-uploaded-table-wrap {
+  max-height: none;
+  margin-top: 0.4rem;
 }
 
-.batch-uploaded-file-size {
-  text-align: right;
+.batch-uploaded-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.batch-uploaded-table th,
+.batch-uploaded-table td {
+  padding: 0.32rem 0.5rem;
+  vertical-align: middle;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Give filenames room to truncate; sizes and the remove control stay narrow. */
+.batch-uploaded-table .batch-uploaded-cell-name {
+  min-width: 0;
+}
+.batch-uploaded-table .batch-uploaded-cell-size,
+.batch-uploaded-table .batch-uploaded-cell-bam-size {
+  width: 84px;
+  text-align: right;
+}
+.batch-uploaded-table .batch-uploaded-cell-bam-name {
+  min-width: 0;
+}
+.batch-uploaded-table .batch-uploaded-cell-bam-upload {
+  width: 160px;
+}
+.batch-uploaded-table .batch-uploaded-cell-remove {
+  width: 40px;
+  text-align: center;
+}
+
+.batch-uploaded-bam-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0;
+  min-width: 0;
 }
 
 .batch-remove-file-btn {
@@ -2090,10 +2106,6 @@ th.sortable-col {
 
   .profile-upload-row {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .batch-uploaded-file-row {
-    grid-template-columns: minmax(0, 1fr) 76px 34px;
   }
 
   .profile-mode-row {

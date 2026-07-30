@@ -60,6 +60,25 @@ def make_profiling_result(
     return ProfilingResult(references=references, **kwargs)
 
 
+# Minimal valid BGZF block header plus the standard BGZF EOF marker. This is the smallest payload
+# the web upload validator accepts as a BAM (it checks the BGZF magic + extra-field structure), so
+# it can be written directly into the uploads directory for path-confinement tests without going
+# through the upload endpoint.
+MINIMAL_BAM_BYTES = bytes.fromhex('1f8b08040000000000ff0600424302001b000300000000000000')
+
+
+def write_minimal_bam(path: Path) -> Path:
+    """Write a minimal valid-BGZF BAM placeholder into ``path`` and return it.
+
+    The bytes are the same minimal BGZF block used by ``test_upload_bam_success``. They are not a
+    real alignment file, but the batch route only validates path confinement + existence (content
+    matching is deferred to the CLI coverage step, exactly like the single-VCF path), so this is
+    sufficient for route-level batch BAM wiring tests.
+    """
+    path.write_bytes(MINIMAL_BAM_BYTES)
+    return path
+
+
 
 # ─── Paths ────────────────────────────────────────────────────────────
 

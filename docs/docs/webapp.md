@@ -91,6 +91,8 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 | `RESPRO_WEB_UPLOAD_RATE_LIMIT` | `25/minute` | slowapi rate-limit string for upload endpoints. Applied per client identity (token hash, or client IP when no token is configured). |
 | `RESPRO_WEB_MAX_BATCH_SIZE` | `25` | Maximum number of samples accepted in a single batch profiling request. Must be `> 0`. |
 
+In batch VCF mode, an optional BAM can be attached to each sample for per-sample coverage-gap analysis. BAMs are auto-paired to VCFs by filename stem on multi-select upload (e.g. `sample1.vcf` ↔ `sample1.bam`), and any pairing can be overridden per row. A sample without a BAM skips coverage analysis, matching single-VCF behaviour without `--bam`.
+
 ### Redis and job queue
 
 | Variable | Default | Description |

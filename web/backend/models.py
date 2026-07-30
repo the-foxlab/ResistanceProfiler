@@ -87,6 +87,10 @@ class BatchProfileVcfPayload(BaseModel):
     min_af: float = Field(default=0.01, ge=0.0, le=1.0)
     min_depth: int = Field(default=10, ge=0)
     threads: int = 1
+    # Optional per-sample BAM paths, positionally aligned with ``vcf_paths``. A ``None`` entry
+    # means "no BAM for that sample" (coverage-gap analysis is skipped for it), mirroring the
+    # single-VCF ``bam_path`` option. When omitted entirely, every sample runs without a BAM.
+    bam_paths: list[str | None] | None = None
 
 
 class BatchProfileFastaPayload(BaseModel):

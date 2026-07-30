@@ -58,6 +58,8 @@ export function AnalyzeTab({
   setBatchVcfCutoffs,
   addBatchVcfFiles,
   addBatchFastaFiles,
+  addBatchBamFiles,
+  attachBatchBam,
   removeBatchFile,
   uploadBatchReferenceFasta,
   submitBatch,
@@ -128,7 +130,7 @@ export function AnalyzeTab({
             <p>
               {analyzeSubMode === 'batch'
                 ? 'Submit multiple sequence file at once (max 25 per batch and minute).'
-                : 'Profile vcf files or consensus fasta sequence or regenerate a previous report'}
+                : 'Profile vcf files or consensus fasta sequence or regenerate a previous report. Bam files are optional and can be used for coverage analysis.'}
             </p>
           </div>
           <div className="analyze-submode-row" role="group" aria-label="Analysis workflow" ref={analyzeSubmodeRowRef}>
@@ -219,7 +221,7 @@ export function AnalyzeTab({
                   />
                 </label>
                 <label>
-                  <span className="label-text input-label-row">BAM file <span className="field-optional">(optional)</span> <button type="button" className="input-info-btn" aria-label="BAM help" title="Optional sorted BAM. A BAM index is generated automatically."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                  <span className="label-text input-label-row">BAM file <span className="field-optional">(optional)</span> <button type="button" className="input-info-btn" aria-label="BAM help" title="Optional sorted BAM. A BAM index is generated automatically. Used for coverage evaluation."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                   <input
                     type="file"
                     accept=".bam"
@@ -480,6 +482,22 @@ export function AnalyzeTab({
                     />
                   </label>
                   <label>
+                    <span className="input-label-row">BAM files <span className="field-optional">(optional)</span> <button type="button" className="input-info-btn" aria-label="Batch BAM help" title="Upload one or more BAM files. Each BAM is auto-paired to the VCF with the same filename stem (e.g. sample1.vcf ↔ sample1.bam). Unmatched or already-paired cases are reported near the Analyze button and can be fixed per row."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                    <input
+                      type="file"
+                      multiple
+                      accept=".bam"
+                      disabled={batchSubmitting}
+                      onChange={async (event) => {
+                        if (!event.target.files) {
+                          return;
+                        }
+                        await addBatchBamFiles(event.target.files);
+                        event.target.value = '';
+                      }}
+                    />
+                  </label>
+                  <label>
                     <span className="label-text input-label-row">Shared reference FASTA <span className="field-optional">(required)</span> <button type="button" className="input-info-btn" aria-label="Batch reference help" title="Shared reference FASTA for all uploaded VCF files."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                     <input
                       type="file"
@@ -558,23 +576,67 @@ export function AnalyzeTab({
                       <span style={{ color: 'var(--color-error, #c2410c)', marginLeft: '0.4em' }}>Limit reached</span>
                     ) : null}
                   </p>
-                  <ul className="batch-uploaded-file-list">
-                    {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).map((file, index) => (
-                      <li key={file.path} className="batch-uploaded-file-row">
-                        <span className="batch-uploaded-file-name" title={file.name}>{file.name}</span>
-                        <span className="batch-uploaded-file-size field-optional">{Math.round(file.size / 1024)} KB</span>
-                        <button
-                          type="button"
-                          className="button-link batch-remove-file-btn"
-                          onClick={() => removeBatchFile(index)}
-                          disabled={batchSubmitting}
-                          aria-label={`Remove ${file.name}`}
-                        >
-                          ✕
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
+                  <div className="table-wrap batch-uploaded-table-wrap">
+                    <table className="batch-uploaded-table">
+                      <thead>
+                        <tr>
+                          <th>{batchMode === 'vcf' ? 'VCF file' : 'FASTA file'}</th>
+                          <th>Size</th>
+                          {batchMode === 'vcf' ? <th>BAM file</th> : null}
+                          {batchMode === 'vcf' ? <th>BAM size</th> : null}
+                          {batchMode === 'vcf' ? <th>Upload BAM</th> : null}
+                          <th aria-label="Remove row" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).map((file, index) => (
+                          <tr key={file.path}>
+                            <td className="batch-uploaded-cell-name" title={file.name}>{file.name}</td>
+                            <td className="batch-uploaded-cell-size field-optional">{Math.round(file.size / 1024)} KB</td>
+                            {batchMode === 'vcf' ? (
+                              <td className="batch-uploaded-cell-bam-name" title={file.bamName || 'No BAM'}>
+                                {file.bamName || '—'}
+                              </td>
+                            ) : null}
+                            {batchMode === 'vcf' ? (
+                              <td className="batch-uploaded-cell-bam-size field-optional">
+                                {file.bamSize != null ? `${Math.round(file.bamSize / 1024)} KB` : '—'}
+                              </td>
+                            ) : null}
+                            {batchMode === 'vcf' ? (
+                              <td className="batch-uploaded-cell-bam-upload">
+                                <label className="batch-uploaded-bam-attach">
+                                  <input
+                                    type="file"
+                                    accept=".bam"
+                                    disabled={batchSubmitting}
+                                    aria-label={file.bamName ? `Replace BAM for ${file.name}` : `Attach BAM to ${file.name}`}
+                                    onChange={(event) => {
+                                      if (event.target.files && event.target.files[0]) {
+                                        attachBatchBam(index, event.target.files[0]);
+                                      }
+                                      event.target.value = '';
+                                    }}
+                                  />
+                                </label>
+                              </td>
+                            ) : null}
+                            <td className="batch-uploaded-cell-remove">
+                              <button
+                                type="button"
+                                className="button-link batch-remove-file-btn"
+                                onClick={() => removeBatchFile(index)}
+                                disabled={batchSubmitting}
+                                aria-label={`Remove ${file.name}`}
+                              >
+                                ✕
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               ) : null}
 

@@ -247,6 +247,8 @@ export function useDashboardLogic() {
     setBatchVcfCutoffs: batch.setBatchVcfCutoffs,
     addBatchVcfFiles: batch.addBatchVcfFiles,
     addBatchFastaFiles: batch.addBatchFastaFiles,
+    addBatchBamFiles: batch.addBatchBamFiles,
+    attachBatchBam: batch.attachBatchBam,
     removeBatchFile: batch.removeBatchFile,
     uploadBatchReferenceFasta: batch.uploadBatchReferenceFasta,
     submitBatch: batch.submitBatch,
