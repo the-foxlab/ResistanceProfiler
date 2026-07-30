@@ -482,7 +482,20 @@ export function AnalyzeTab({
                     />
                   </label>
                   <label>
-                    <span className="input-label-row">BAM files <span className="field-optional">(optional)</span> <button type="button" className="input-info-btn" aria-label="Batch BAM help" title="Upload one or more BAM files. Each BAM is auto-paired to the VCF with the same filename stem (e.g. sample1.vcf ↔ sample1.bam). Unmatched or already-paired cases are reported near the Analyze button and can be fixed per row."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                    <span className="label-text input-label-row">Shared reference FASTA <span className="field-optional">(required)</span> <button type="button" className="input-info-btn" aria-label="Batch reference help" title="Shared reference FASTA for all uploaded VCF files."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                    <input
+                      type="file"
+                      accept=".fasta,.fa,.fna"
+                      disabled={batchSubmitting}
+                      onChange={(event) => {
+                        if (event.target.files && event.target.files[0]) {
+                          uploadBatchReferenceFasta(event.target.files[0]);
+                        }
+                      }}
+                    />
+                  </label>
+                  <label>
+                    <span className="input-label-row">BAM files <span className="field-optional">(optional)</span> <button type="button" className="input-info-btn" aria-label="Batch BAM help" title="Upload one or more BAM files, used for per-sample coverage evaluation. Each BAM is auto-paired to the VCF with the same filename stem (e.g. sample1.vcf ↔ sample1.bam). Unmatched or already-paired cases are reported near the Analyze button and can be fixed per row."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                     <input
                       type="file"
                       multiple
@@ -494,19 +507,6 @@ export function AnalyzeTab({
                         }
                         await addBatchBamFiles(event.target.files);
                         event.target.value = '';
-                      }}
-                    />
-                  </label>
-                  <label>
-                    <span className="label-text input-label-row">Shared reference FASTA <span className="field-optional">(required)</span> <button type="button" className="input-info-btn" aria-label="Batch reference help" title="Shared reference FASTA for all uploaded VCF files."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
-                    <input
-                      type="file"
-                      accept=".fasta,.fa,.fna"
-                      disabled={batchSubmitting}
-                      onChange={(event) => {
-                        if (event.target.files && event.target.files[0]) {
-                          uploadBatchReferenceFasta(event.target.files[0]);
-                        }
                       }}
                     />
                   </label>
