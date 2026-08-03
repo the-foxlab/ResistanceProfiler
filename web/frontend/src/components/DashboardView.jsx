@@ -106,6 +106,8 @@ export function DashboardView({
   setBatchVcfCutoffs,
   addBatchVcfFiles,
   addBatchFastaFiles,
+  addBatchBamFiles,
+  attachBatchBam,
   removeBatchFile,
   uploadBatchReferenceFasta,
   submitBatch,
@@ -225,6 +227,8 @@ export function DashboardView({
               setBatchVcfCutoffs={setBatchVcfCutoffs}
               addBatchVcfFiles={addBatchVcfFiles}
               addBatchFastaFiles={addBatchFastaFiles}
+              addBatchBamFiles={addBatchBamFiles}
+              attachBatchBam={attachBatchBam}
               removeBatchFile={removeBatchFile}
               uploadBatchReferenceFasta={uploadBatchReferenceFasta}
               submitBatch={submitBatch}

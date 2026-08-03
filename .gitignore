@@ -40,3 +40,5 @@ imprint.html
 # MkDocs build output
 site/
 graphify-out
+.coverage
+coverage.xml

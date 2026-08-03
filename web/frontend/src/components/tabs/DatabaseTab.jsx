@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import infoIconSrc from '../../assets/info.svg';
-import { isPopulated } from '../../utils';
+import { isPopulated, groupDrugThresholds, formatAlgorithmThresholds } from '../../utils';
 import { buildDatabasePlots } from '../database-plots/buildDatabasePlots';
 import { DatabasePieSummaryRow } from '../database-plots/DatabasePieSummaryTile';
 import { DatabasePositionPlot } from '../database-plots/DatabasePositionPlot';
@@ -57,30 +57,6 @@ function _renderDatabaseMetaValue(entry) {
   return entry.value;
 }
 
-function _formatAlgorithmThresholds(thresholds) {
-  if (!thresholds || typeof thresholds !== 'object') {
-    return 'Not configured';
-  }
-
-  const keys = Object.keys(thresholds).sort((a, b) => a.localeCompare(b));
-  if (keys.length === 0) {
-    return 'Not configured';
-  }
-
-  const values = keys.map((key) => {
-    const value = thresholds[key];
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      const nestedKeys = Object.keys(value).sort((a, b) => a.localeCompare(b));
-      const nestedText = nestedKeys
-        .map((nestedKey) => `${nestedKey}=${value[nestedKey]}`)
-        .join(', ');
-      return `${key}: ${nestedText}`;
-    }
-    return `${key}=${value}`;
-  });
-  return values.join('; ');
-}
-
 function _groupEffectRules(rules) {
   if (!Array.isArray(rules) || rules.length === 0) {
     return [];
@@ -120,12 +96,45 @@ function _groupEffectRules(rules) {
     });
 }
 
+function _renderDrugThresholdsOverrides(drugThresholds, label) {
+  const grouped = groupDrugThresholds(drugThresholds);
+  if (grouped.length === 0) {
+    return null;
+  }
+  return (
+    <div className="database-meta-row database-meta-row-table">
+      <span className="database-meta-label">{label}</span>
+      <span className="database-meta-value">
+        <table className="database-algorithm-table">
+          <thead>
+            <tr>
+              <th>Reference</th>
+              <th>Drugs</th>
+              <th>Thresholds</th>
+            </tr>
+          </thead>
+          <tbody>
+            {grouped.map((row, idx) => (
+              <tr key={`${row.reference}-${row.drugs.join(',')}-${idx}`}>
+                <td>{row.reference}</td>
+                <td>{row.drugs.join(', ')}</td>
+                <td>{formatAlgorithmThresholds(row.thresholds)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </span>
+    </div>
+  );
+}
+
 function _renderDatabaseAlgorithms(algorithms) {
   if (!algorithms) return null;
   const effectAsResistant = algorithms.effect_as_resistant;
   const drugInterp = algorithms.drug_interpretation;
+  const ic50Thresholds = algorithms.ic50_thresholds;
   const groupedEffectRules = _groupEffectRules(effectAsResistant?.rules);
-  if (!effectAsResistant && !drugInterp) return null;
+  if (!effectAsResistant && !drugInterp && !ic50Thresholds) return null;
 
   return (
     <section className="database-meta-panel database-algorithms-panel" aria-label="Configured algorithms">
@@ -142,28 +151,62 @@ function _renderDatabaseAlgorithms(algorithms) {
           </button>
         </span>
       </div>
-      {drugInterp && drugInterp.length > 0 ? (
+      {ic50Thresholds ? (
         <div className="database-meta-row database-meta-row-table">
-          <span className="database-meta-label">drug_interpretation</span>
+          <span className="database-meta-label">ic50_thresholds</span>
           <span className="database-meta-value">
             <table className="database-algorithm-table">
               <thead>
                 <tr>
-                  <th>Method</th>
+                  <th>Use</th>
                   <th>Thresholds</th>
                 </tr>
               </thead>
               <tbody>
-                {drugInterp.map((entry, idx) => (
-                  <tr key={entry.method || idx}>
-                    <td>{String(entry.method || '').trim() || 'Not configured'}</td>
-                    <td>{_formatAlgorithmThresholds(entry.thresholds)}</td>
-                  </tr>
-                ))}
+                <tr>
+                  <td>{String(ic50Thresholds.use || '').trim() || 'Not configured'}</td>
+                  <td>{formatAlgorithmThresholds(ic50Thresholds.thresholds)}</td>
+                </tr>
               </tbody>
             </table>
           </span>
         </div>
+      ) : null}
+      {ic50Thresholds?.drug_thresholds
+        ? _renderDrugThresholdsOverrides(ic50Thresholds.drug_thresholds, 'ic50_thresholds overrides')
+        : null}
+      {drugInterp && drugInterp.length > 0 ? (
+        <>
+          <div className="database-meta-row database-meta-row-table">
+            <span className="database-meta-label">drug_interpretation</span>
+            <span className="database-meta-value">
+              <table className="database-algorithm-table">
+                <thead>
+                  <tr>
+                    <th>Method</th>
+                    <th>Thresholds</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {drugInterp.map((entry, idx) => (
+                    <tr key={entry.method || idx}>
+                      <td>{String(entry.method || '').trim() || 'Not configured'}</td>
+                      <td>{formatAlgorithmThresholds(entry.thresholds)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </span>
+          </div>
+          {drugInterp.map((entry, idx) =>
+            entry.drug_thresholds
+              ? _renderDrugThresholdsOverrides(
+                  entry.drug_thresholds,
+                  `drug_interpretation overrides (${String(entry.method || '').trim() || idx})`,
+                )
+              : null,
+          )}
+        </>
       ) : null}
       {groupedEffectRules.length > 0 ? (
         <div className="database-meta-row database-meta-row-table">

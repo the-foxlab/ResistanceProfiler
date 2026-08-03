@@ -134,6 +134,11 @@ def build_profile_router(
                 status_code=422,
                 detail='vcf_paths and sample_names must have the same length.',
             )
+        if payload.bam_paths is not None and len(payload.bam_paths) != len(payload.vcf_paths):
+            raise HTTPException(
+                status_code=422,
+                detail='bam_paths and vcf_paths must have the same length.',
+            )
         input_display_names = _resolve_batch_input_display_names(
             input_paths=payload.vcf_paths,
             input_display_names=payload.input_display_names,
@@ -165,6 +170,12 @@ def build_profile_router(
             path_kind='VCF',
             is_path_within_allowed_roots=is_path_within_allowed_roots,
         )
+        validated_bam_paths = _validate_batch_bam_paths(
+            bam_paths=payload.bam_paths,
+            sample_count=len(payload.vcf_paths),
+            allowed_roots=config.allowed_roots,
+            is_path_within_allowed_roots=is_path_within_allowed_roots,
+        )
 
         samples = []
         for index, (vcf_path, sample_name) in enumerate(validated_vcf_inputs):
@@ -178,7 +189,7 @@ def build_profile_router(
                 sample=sample_name,
                 min_af=payload.min_af,
                 min_depth=payload.min_depth,
-                bam_path=None,
+                bam_path=validated_bam_paths[index],
                 threads=payload.threads,
                 input_display_name=input_display_names[index],
                 artifact_base_name=artifact_base_names[index],
@@ -296,6 +307,37 @@ def _validate_batch_paths(
             raise HTTPException(status_code=404, detail=f'{path_kind} file not found for sample {sample_name!r}.')
         validated_inputs.append((input_path, sample_name))
     return validated_inputs
+
+
+def _validate_batch_bam_paths(
+    *,
+    bam_paths: list[str | None] | None,
+    sample_count: int,
+    allowed_roots: tuple[Path, ...],
+    is_path_within_allowed_roots: Callable[[Path, tuple[Path, ...]], bool],
+) -> list[str | None]:
+    """Resolve and validate per-sample optional BAM paths for the batch VCF route.
+
+    Returns one resolved BAM path string (or ``None``) per sample, positionally aligned with
+    ``vcf_paths``. A ``None`` entry means "no BAM for that sample" — coverage-gap analysis is
+    skipped for it, mirroring the single-VCF ``bam_path`` option. Content matching between the
+    BAM and the VCF/reference is intentionally not checked here: like the single-VCF path, that
+    is deferred to the CLI coverage step, which warns-and-skips unmatched contigs.
+    """
+    if bam_paths is None:
+        return [None] * sample_count
+    resolved: list[str | None] = []
+    for bam_path_str in bam_paths:
+        if bam_path_str is None:
+            resolved.append(None)
+            continue
+        resolved_bam = Path(bam_path_str).expanduser().resolve()
+        if not is_path_within_allowed_roots(resolved_bam, allowed_roots):
+            raise HTTPException(status_code=400, detail='BAM path is outside allowed upload directory.')
+        if not resolved_bam.is_file():
+            raise HTTPException(status_code=404, detail='BAM file not found.')
+        resolved.append(str(resolved_bam))
+    return resolved
 
 
 def _derive_unique_artifact_base_names(input_display_names: list[str]) -> list[str]:

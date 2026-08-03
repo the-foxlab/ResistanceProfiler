@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildApiUrl, formatUserError } from '../api';
-import { isPopulated, buildDrugAliasLookup } from '../utils';
+import { isPopulated, buildDrugAliasLookup, groupDrugThresholds, formatAlgorithmThresholds } from '../utils';
 
 describe('API Utility Functions', () => {
   describe('buildApiUrl', () => {
@@ -130,5 +130,86 @@ describe('buildDrugAliasLookup', () => {
     const plotMeta = { drug_aliases: { '': 'Alias', Drug: '' } };
     const lookup = buildDrugAliasLookup(plotMeta);
     expect(lookup.size).toBe(0);
+  });
+});
+
+describe('groupDrugThresholds', () => {
+  it('returns empty array for null input', () => {
+    expect(groupDrugThresholds(null)).toEqual([]);
+  });
+
+  it('returns empty array for empty array', () => {
+    expect(groupDrugThresholds([])).toEqual([]);
+  });
+
+  it('groups entries sharing the same reference and thresholds', () => {
+    const overrides = [
+      { reference: 'ref1', drug: 'ACV', thresholds: { resistant: 2, intermediate: 1 } },
+      { reference: 'ref1', drug: 'PCV', thresholds: { resistant: 2, intermediate: 1 } },
+    ];
+    const result = groupDrugThresholds(overrides);
+    expect(result).toHaveLength(1);
+    expect(result[0].reference).toBe('ref1');
+    expect(result[0].drugs).toEqual(['ACV', 'PCV']);
+    expect(result[0].thresholds).toEqual({ resistant: 2, intermediate: 1 });
+  });
+
+  it('separates groups with different thresholds', () => {
+    const overrides = [
+      { reference: 'ref1', drug: 'ACV', thresholds: { resistant: 2 } },
+      { reference: 'ref1', drug: 'PCV', thresholds: { resistant: 3 } },
+    ];
+    const result = groupDrugThresholds(overrides);
+    expect(result).toHaveLength(2);
+  });
+
+  it('separates groups with different references', () => {
+    const overrides = [
+      { reference: 'ref1', drug: 'ACV', thresholds: { resistant: 2 } },
+      { reference: 'ref2', drug: 'ACV', thresholds: { resistant: 2 } },
+    ];
+    const result = groupDrugThresholds(overrides);
+    expect(result).toHaveLength(2);
+    const refs = result.map((r) => r.reference).sort();
+    expect(refs).toEqual(['ref1', 'ref2']);
+  });
+
+  it('uses "(all)" for entries without a reference', () => {
+    const overrides = [
+      { drug: 'ACV', thresholds: { resistant: 2 } },
+      { drug: 'PCV', thresholds: { resistant: 2 } },
+    ];
+    const result = groupDrugThresholds(overrides);
+    expect(result).toHaveLength(1);
+    expect(result[0].reference).toBe('(all)');
+    expect(result[0].drugs).toEqual(['ACV', 'PCV']);
+  });
+
+  it('sorts drugs within a group', () => {
+    const overrides = [
+      { reference: 'ref1', drug: 'PCV', thresholds: { resistant: 2 } },
+      { reference: 'ref1', drug: 'ACV', thresholds: { resistant: 2 } },
+    ];
+    const result = groupDrugThresholds(overrides);
+    expect(result[0].drugs).toEqual(['ACV', 'PCV']);
+  });
+});
+
+describe('formatAlgorithmThresholds', () => {
+  it('returns "Not configured" for null', () => {
+    expect(formatAlgorithmThresholds(null)).toBe('Not configured');
+  });
+
+  it('returns "Not configured" for empty object', () => {
+    expect(formatAlgorithmThresholds({})).toBe('Not configured');
+  });
+
+  it('formats flat thresholds sorted by key', () => {
+    expect(formatAlgorithmThresholds({ resistant: 2, intermediate: 1 })).toBe('intermediate=1; resistant=2');
+  });
+
+  it('formats nested thresholds', () => {
+    const result = formatAlgorithmThresholds({ ACV: { intermediate: 3.0, resistant: 10.0 } });
+    expect(result).toBe('ACV: intermediate=3, resistant=10');
   });
 });

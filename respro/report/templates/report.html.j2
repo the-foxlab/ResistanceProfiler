@@ -256,6 +256,12 @@
                                 {% else %}
                                   <span class="db-hit-phenotype {{ ma[0].assessment_badge_class }}">{{ ma[0].assessment }}</span>
                                 {% endif %}
+                                {% if context.summary.drug_table.has_drug_thresholds and ma[0].resolved_thresholds is defined %}
+                                <span class="db-hit-freq-info">
+                                  <img class="db-hit-info-icon" src="{{ context.summary.info_icon }}" alt="info" width="13" height="13">
+                                  <div class="db-hit-info-panel">Thresholds applied: resistant={{ ma[0].resolved_thresholds.resistant }}{% if ma[0].resolved_thresholds.intermediate is not none %}, intermediate={{ ma[0].resolved_thresholds.intermediate }}{% endif %}. Source: {{ ma[0].threshold_source }}.</div>
+                                </span>
+                                {% endif %}
                               {% else %}—{% endif %}
                             </td>
                             {% endfor %}
@@ -295,6 +301,12 @@
                                 {{ ma[0].assessment }}
                               {% else %}
                                 <span class="db-hit-phenotype {{ ma[0].assessment_badge_class }}">{{ ma[0].assessment }}</span>
+                              {% endif %}
+                              {% if context.summary.drug_table.has_drug_thresholds and ma[0].resolved_thresholds is defined %}
+                              <span class="db-hit-freq-info">
+                                <img class="db-hit-info-icon" src="{{ context.summary.info_icon }}" alt="info" width="13" height="13">
+                                <div class="db-hit-info-panel">Thresholds applied: resistant={{ ma[0].resolved_thresholds.resistant }}{% if ma[0].resolved_thresholds.intermediate is not none %}, intermediate={{ ma[0].resolved_thresholds.intermediate }}{% endif %}. Source: {{ ma[0].threshold_source }}.</div>
+                              </span>
                               {% endif %}
                             {% else %}—{% endif %}
                           </td>

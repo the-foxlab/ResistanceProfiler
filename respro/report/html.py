@@ -1735,6 +1735,40 @@ def _build_summary_narrative(
     return Markup(narrative_text)
 
 
+def _threshold_source_label(
+    config: dict,
+    reference_name: str | None,
+    drug_name: str,
+    references_match,
+) -> str:
+    """Return a human-readable label for the resolution source of a drug's thresholds.
+
+    Mirrors the precedence in :func:`respro.db.algorithms.resolve_thresholds`:
+    ``(reference, drug)`` override > ``(drug)`` override > global ``thresholds``.
+
+    :param config: drug_interpretation config dict
+    :param reference_name: observed reference name, or ``None``
+    :param drug_name: drug name
+    :param references_match: accession-version tolerant reference matcher
+    :return: source label for the per-cell hover
+    """
+    drug_lower = drug_name.strip().lower()
+    for entry in (config.get('drug_thresholds') or []):
+        if entry.get('drug', '').strip().lower() != drug_lower:
+            continue
+        ref = entry.get('reference')
+        if ref is None:
+            continue
+        if reference_name is not None and references_match(ref, reference_name):
+            return 'override (reference, drug)'
+    for entry in (config.get('drug_thresholds') or []):
+        if entry.get('drug', '').strip().lower() != drug_lower:
+            continue
+        if entry.get('reference') is None:
+            return 'override (drug)'
+    return 'global default'
+
+
 def _build_drug_interpretation_table(
     result: ProfilingResult,
     database_hits: dict,
@@ -1768,6 +1802,7 @@ def _build_drug_interpretation_table(
             'ic50_values': [], 'fold_ic50_values': [],
             'assessment': '', 'assessment_badge_class': '',
             'method_assessments': [],
+            'reference_names': set(),
         }
 
     def _assessment_description(method: str, resistant_t, intermediate_t) -> str:
@@ -1842,6 +1877,9 @@ def _build_drug_interpretation_table(
     for row in hit_rows:
         drug = (row.get('drug_key') or row.get('drug') or 'Unknown').strip()
         by_drug[drug]['hit_count'] += 1
+        ref_name = (row.get('reference_name') or '').strip()
+        if ref_name:
+            by_drug[drug]['reference_names'].add(ref_name)
         metrics = row.get('metrics', [])
         pheno = ''
         for m in metrics:
@@ -1903,9 +1941,21 @@ def _build_drug_interpretation_table(
 
     has_assessment = len(drug_interp_configs) > 0
     has_final_assessment = len(drug_interp_configs) > 1
+    # True when any configured drug_interpretation method carries per-(reference, drug)
+    # overrides; gates the per-cell hover so the no-override path renders unchanged.
+    has_drug_thresholds = any(
+        bool(config.get('drug_thresholds')) for config in drug_interp_configs
+    )
     method_labels: list[dict] = []
     if has_assessment:
-        from respro.db.algorithms import _METHOD_LABEL, compute_drug_assessment
+        from respro.db.algorithms import (
+            _METHOD_LABEL,
+            compute_drug_assessment,
+            resolve_thresholds,
+        )
+        from respro.db.algorithms import (
+            _references_match as _algorithms_references_match,
+        )
         for config in drug_interp_configs:
             method = config.get('method', '')
             thresholds = config.get('thresholds', {})
@@ -1935,8 +1985,24 @@ def _build_drug_interpretation_table(
         )
 
         for drug_data in by_drug.values():
+            drug_name = next(
+                (k for k, v in by_drug.items() if v is drug_data), ''
+            )
+            # Resolve the reference name(s) observed for this drug's hits. When a
+            # drug has hits under multiple references, resolve against each and
+            # take the strongest-wins assessment (most resistant). Drugs without
+            # hits fall back to the profiled reference name.
+            ref_names = drug_data.get('reference_names') or set()
+            if not ref_names:
+                ref_names = {result.reference_name} if result.reference_name else set()
+            # Select the reference deterministically (sorted) so per-(reference,
+            # drug) override resolution is stable across process invocations
+            # (set iteration order depends on PYTHONHASHSEED).
+            selected_reference = sorted(ref_names)[0] if ref_names else None
             final_assessment, method_assessments = compute_drug_assessment(
                 drug_data, drug_interp_configs,
+                reference_name=selected_reference,
+                drug_name=drug_name or None,
             )
             drug_data['assessment'] = final_assessment
             drug_data['method_assessments'] = method_assessments
@@ -1945,6 +2011,26 @@ def _build_drug_interpretation_table(
                 ma['assessment_badge_class'] = _PHENOTYPE_BADGE_CLASS.get(
                     ma['assessment'].lower(), ''
                 )
+            # Attach resolved thresholds + source for the per-cell hover when
+            # overrides are configured. Source labels mirror the precedence in
+            # resolve_thresholds: (reference, drug) > (drug) > global.
+            if has_drug_thresholds and drug_name:
+                for ma in method_assessments:
+                    config = next(
+                        (c for c in drug_interp_configs if c.get('method') == ma['method']),
+                        {},
+                    )
+                    ref_for_resolution = selected_reference
+                    resistant_t, intermediate_t = resolve_thresholds(
+                        config, ref_for_resolution, drug_name,
+                    )
+                    ma['resolved_thresholds'] = {
+                        'resistant': resistant_t, 'intermediate': intermediate_t,
+                    }
+                    ma['threshold_source'] = _threshold_source_label(
+                        config, ref_for_resolution, drug_name,
+                        _algorithms_references_match,
+                    )
 
     for drug_data in by_drug.values():
         drug_data['assessment_badge_class'] = _PHENOTYPE_BADGE_CLASS.get(
@@ -1984,6 +2070,7 @@ def _build_drug_interpretation_table(
         'has_assessment': has_assessment,
         'has_method_assessments': has_assessment,
         'has_final_assessment': has_final_assessment,
+        'has_drug_thresholds': has_drug_thresholds,
         'method_labels': method_labels,
         'assessment_description': assessment_description,
         'col_count': col_count,

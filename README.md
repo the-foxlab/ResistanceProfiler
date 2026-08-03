@@ -1,6 +1,6 @@
 ![ResistanceProfiler](docs/docs/assets/logo.svg)
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-2f6db3)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-2f6db3) ![Coverage](docs/docs/assets/coverage.svg)
 
 Pathogen-agnostic antiviral resistance profiling from consensus sequences or VCF-derived variants.  
 
