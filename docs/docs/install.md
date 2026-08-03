@@ -21,7 +21,7 @@ pip install respro
 For development installs, clone the repository and install editable:
 
 ```bash
-git clone https://github.com/jonas-fuchs/ResistanceProfiler.git
+git clone https://github.com/the-foxlab/ResistanceProfiler.git
 cd ResistanceProfiler
 pip install -e ".[dev]"
 ```
@@ -62,13 +62,13 @@ pip install .
 The web app is published as a Docker image on GitHub Container Registry:
 
 ```
-ghcr.io/jonas-fuchs/resistanceprofiler
+ghcr.io/the-foxlab/resistanceprofiler
 ```
 
 Clone the repository and start the stack:
 
 ```bash
-git clone https://github.com/jonas-fuchs/ResistanceProfiler.git
+git clone https://github.com/the-foxlab/ResistanceProfiler.git
 cd ResistanceProfiler
 docker compose -f docker-compose.web.yml up --build
 ```
@@ -76,7 +76,7 @@ docker compose -f docker-compose.web.yml up --build
 Or pull the released image directly:
 
 ```bash
-docker pull ghcr.io/jonas-fuchs/resistanceprofiler:latest
+docker pull ghcr.io/the-foxlab/resistanceprofiler:latest
 ```
 
 The stack includes the FastAPI backend, an RQ worker, and Redis. Open the app at `http://127.0.0.1:8000/`.
@@ -88,7 +88,7 @@ For configuration options (authentication, CORS, rate limiting, data directories
 To run the web app without Docker, install the package and its web dependencies:
 
 ```bash
-git clone https://github.com/jonas-fuchs/ResistanceProfiler.git
+git clone https://github.com/the-foxlab/ResistanceProfiler.git
 cd ResistanceProfiler
 pip install -e ".[dev]"
 pip install -r web/backend/requirements.txt

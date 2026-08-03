@@ -16,7 +16,7 @@ Pathogen-agnostic antiviral resistance profiling from consensus sequences or VCF
     This software supports exploratory interpretation and does not replace accredited clinical diagnostics.
 
 !!! info "No database curation"
-    We do not maintain or curate resistance databases ourselves. We only provide up-to-date converted [versions](https://github.com/jonas-fuchs/respro-db) of openly available databases and are not responsible for their content or maintenance.
+    We do not maintain or curate resistance databases ourselves. We only provide up-to-date converted [versions](https://github.com/the-foxlab/respro-databases) of openly available databases and are not responsible for their content or maintenance.
 
 ## Why use ResPro?
 

@@ -1,8 +1,8 @@
 # yaml-language-server: $schema=https://squidfunk.github.io/mkdocs-material/schema.json
 site_name: ResistanceProfiler
 site_description: Pathogen-agnostic antiviral resistance profiling — documentation
-site_url: https://jonas-fuchs.github.io/ResistanceProfiler/
-repo_url: https://github.com/jonas-fuchs/ResistanceProfiler
+site_url: https://the-foxlab.github.io/ResistanceProfiler/
+repo_url: https://github.com/the-foxlab/ResistanceProfiler
 repo_name: GitHub
 copyright: '© 2026 Jonas Fuchs, University Medical Center Freiburg — Licensed under AGPL-3.0'
 

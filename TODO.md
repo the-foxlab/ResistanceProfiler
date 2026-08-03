@@ -256,7 +256,7 @@ Mark items done and update priorities after each completed milestone.
 
 ### Databases
 
-- [X] `respro maintained.db` CLI command — `maintained.db --list` prints available databases (with full metadata panel) from the companion repository at `https://github.com/jonas-fuchs/respro-db`; `maintained.db --download <name> --output <path>` fetches `rules.tsv`, `metadata.json`, and optional `formula-rules.tsv` from the repo, resolves unique `reference_identifier` accessions from the rules TSV, downloads the corresponding GenBank records from NCBI, and calls `respro init` with `--overwrite` to produce a ready-to-use `<name>.db` (directory paths use `<name>.db` by default); implemented in `respro/io/maintained_db.py` and `respro/cli/maintained_db.py` using stdlib `urllib.request`
+- [X] `respro maintained.db` CLI command — `maintained.db --list` prints available databases (with full metadata panel) from the companion repository at `https://github.com/the-foxlab/respro-databases`; `maintained.db --download <name> --output <path>` fetches `rules.tsv`, `metadata.json`, and optional `formula-rules.tsv` from the repo, resolves unique `reference_identifier` accessions from the rules TSV, downloads the corresponding GenBank records from NCBI, and calls `respro init` with `--overwrite` to produce a ready-to-use `<name>.db` (directory paths use `<name>.db` by default); implemented in `respro/io/maintained_db.py` and `respro/cli/maintained_db.py` using stdlib `urllib.request`
 
 ### Web — Batch analysis
 
