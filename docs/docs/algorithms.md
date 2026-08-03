@@ -121,8 +121,11 @@ Configuration keys:
 - for `by_phenotype` and `by_score`, threshold values must be positive integers
 - for `by_ic50` and `by_fold_ic50`, threshold values must be positive numbers; if `intermediate` is set, `resistant` must be strictly greater than `intermediate`
 - each method may appear at most once; two entries with the same `method` are rejected
+- `drug_thresholds` — optional list of per-drug overrides; see [Per-drug / per-reference overrides](#per-drug--per-reference-overrides) below
 
 When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final **Assessment** column. The final assessment uses strongest-wins resolution: `resistant` > `contradictory` > `intermediate` > `sensitive`. The most resistant result across all methods is taken as the final call.
+
+When `drug_thresholds` overrides are configured, each per-method assessment cell in the report shows an info icon on hover naming the resolved thresholds and their source (override `(reference, drug)`, override `(drug)`, or global default). The table layout, badge styling, and final Assessment column are unchanged; without overrides the report renders identically to the global-only case.
 
 Example:
 
@@ -143,6 +146,7 @@ Defines per-drug IC50 or fold-IC50 breakpoints. With this, each rule that has an
 
 - `use` — required; must be `"ic50"` or `"fold_ic50"`
 - `thresholds` — required non-empty object; each key is a drug name; each value must have `"intermediate"` and `"resistant"` keys with positive numbers; `"resistant"` must be strictly greater than `"intermediate"`
+- `drug_thresholds` — optional list of per-drug overrides; see [Per-drug / per-reference overrides](#per-drug--per-reference-overrides) below
 
 Example:
 
@@ -154,6 +158,54 @@ Example:
     "ACV": {"intermediate": 3.0, "resistant": 10.0},
     "PCV": {"intermediate": 3.0, "resistant": 10.0}
   }
+}
+```
+
+### Per-drug / per-reference overrides
+
+Both `drug_interpretation` and `ic50_thresholds` accept an optional `drug_thresholds` list that overrides the global `thresholds` for specific drugs, optionally scoped to a single reference. This is useful when a drug needs finer breakpoints than the database-wide default, or when the same drug has different breakpoints across references (e.g. different viral species).
+
+Each entry is an object with:
+
+- `reference` — optional non-empty string; when present, the override applies only to rules/drugs whose reference matches (accession-version tolerant, e.g. `NC_001345.1` matches `NC_001345`)
+- `drug` — required non-empty string; the drug name to override
+- `thresholds` — required object with the same shape and constraints as the parent algorithm's `thresholds`:
+  - for `drug_interpretation`: must include `resistant`; `intermediate` is optional; integer for `by_phenotype`/`by_score`, positive number for `by_ic50`/`by_fold_ic50` (with `resistant` > `intermediate` when `intermediate` is set)
+  - for `ic50_thresholds`: both `intermediate` and `resistant` are required, and `resistant` must be strictly greater than `intermediate`
+
+Resolution precedence (most specific wins):
+
+1. an override matching `(reference, drug)`
+2. an override matching `(drug)` only (no `reference`)
+3. the global `thresholds`
+
+Duplicate `(reference, drug)` or `(drug)`-only keys are rejected. Two overrides whose `reference` values differ only by accession version (e.g. `NC_001345` and `NC_001345.1`) are treated as the same key and rejected as duplicates. Overrides with no matching drug or reference fall back to the next precedence level. The Database Dashboard condenses overrides for display: entries sharing the same `reference` (shown as `(all)` when absent) and the same threshold values collapse into one row with a sorted drug set, mirroring the `effect_as_resistant` condensing.
+
+When a drug has hits under multiple references in a single report (e.g. a multi-species run), the reference used to resolve per-(reference, drug) overrides is selected deterministically as the alphabetically first reference name. This keeps the report output stable across process invocations (set iteration order is otherwise hash-seed dependent).
+
+Example — `drug_interpretation` with a per-reference override:
+
+```json
+{
+  "name": "drug_interpretation",
+  "method": "by_phenotype",
+  "thresholds": {"resistant": 1, "intermediate": 1},
+  "drug_thresholds": [
+    {"reference": "ref", "drug": "ACV", "thresholds": {"resistant": 1, "intermediate": 1}}
+  ]
+}
+```
+
+Example — `ic50_thresholds` with a per-reference override:
+
+```json
+{
+  "name": "ic50_thresholds",
+  "use": "fold_ic50",
+  "thresholds": {"ACV": {"intermediate": 3.0, "resistant": 10.0}},
+  "drug_thresholds": [
+    {"reference": "ref", "drug": "ACV", "thresholds": {"intermediate": 1.0, "resistant": 2.0}}
+  ]
 }
 ```
 

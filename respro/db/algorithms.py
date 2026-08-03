@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 
 from respro.core.annotation import HIGH_IMPACT_CONSEQUENCES
 from respro.db._rules_normalize import _append_contradictory_comment, _parse_ic50_value
 
 _ALLOWED_EFFECTS: frozenset[str] = HIGH_IMPACT_CONSEQUENCES
+
+# Accession identifier (base + optional version), mirroring the matcher in
+# respro/report/html.py so reference matching is consistent across DB and report.
+_ACCESSION_IDENTIFIER_RE = re.compile(
+    r'^(?P<base>(?:[A-Z]{1,6}_[A-Z0-9]*\d[A-Z0-9]*|[A-Z]{1,6}\d[A-Z0-9]*))(?:\.(?P<version>\d+))?$'
+)
 
 _KNOWN_ALGORITHM_NAMES = {
     'ic50_thresholds',
@@ -135,15 +142,21 @@ def apply_ic50_threshold_classification(
     fold-IC50 value is non-empty, updates the phenotype to ``resistant``,
     ``intermediate``, or ``sensitive`` according to the configured breakpoints.
 
+    Thresholds are resolved per rule via :func:`resolve_thresholds` with the
+    precedence ``(reference, drug)`` override > ``(drug)`` override > global
+    ``thresholds``. Drugs with neither an override nor a global ``thresholds``
+    entry are skipped.
+
     :param conn: project DB connection
     :param project_id: project id
     :param config: validated ic50_thresholds algorithm config dict
     :return: number of rules updated
     """
     use_column = config['use']
-    thresholds = config['thresholds']
+    global_thresholds = config['thresholds']
     q = (
-        f'SELECT r.id, d.name AS drug_name, r.{use_column} AS value, r.phenotype, r.comment '
+        f'SELECT r.id, d.name AS drug_name, ref.name AS reference_name, '
+        f'r.{use_column} AS value, r.phenotype, r.comment '
         'FROM resistance_rule r '
         'JOIN drug d ON d.id = r.drug_id '
         'JOIN feature f ON f.id = r.feature_id '
@@ -155,12 +168,31 @@ def apply_ic50_threshold_classification(
     updated = 0
     for row in rows:
         drug_name = row['drug_name']
-        if drug_name not in thresholds:
+        reference_name = row['reference_name']
+        # Determine whether ANY drug_thresholds override could apply to this rule.
+        # An override applies when its drug matches AND either it has no reference
+        # (drug-only override, applies to all references) or its reference matches
+        # the rule's reference (accession-version tolerant). This guards against
+        # the case where a drug has an override scoped to a different reference
+        # and no global thresholds entry — without this check the rule would fall
+        # through to resolve_thresholds' last-resort fallback (resistant=1,
+        # intermediate=None) and crash _classify_ic50.
+        has_override = any(
+            entry.get('drug', '').strip().lower() == drug_name.strip().lower()
+            and (
+                entry.get('reference') is None
+                or _references_match(entry['reference'], reference_name)
+            )
+            for entry in (config.get('drug_thresholds') or [])
+        )
+        if drug_name not in global_thresholds and not has_override:
             continue
         parsed = _parse_ic50_value(row['value'])
         if parsed is None:
             continue
-        new_phenotype = _classify_ic50(parsed, thresholds[drug_name])
+        resistant_t, intermediate_t = resolve_thresholds(config, reference_name, drug_name)
+        resolved_thresholds = {'resistant': resistant_t, 'intermediate': intermediate_t}
+        new_phenotype = _classify_ic50(parsed, resolved_thresholds)
         existing_phenotype = (row['phenotype'] or '').strip().lower()
         # If an existing non-trivial phenotype conflicts with the IC50-derived call,
         # flag as contradictory and append the standard comment rather than silently
@@ -211,7 +243,8 @@ def _classify_ic50(value: float, drug_thresholds: dict) -> str:
     """Return the canonical phenotype for a numeric IC50 value against breakpoints."""
     if value >= drug_thresholds['resistant']:
         return 'resistant'
-    if value >= drug_thresholds['intermediate']:
+    intermediate = drug_thresholds.get('intermediate')
+    if intermediate is not None and value >= intermediate:
         return 'intermediate'
     return 'sensitive'
 
@@ -249,6 +282,12 @@ def _validate_ic50_thresholds(config: dict) -> None:
                 f'ic50_thresholds: thresholds[{drug!r}] "resistant" ({limits["resistant"]}) '
                 f'must be strictly greater than "intermediate" ({limits["intermediate"]}).'
             )
+
+    # Optional per-(reference, drug) overrides; both intermediate and resistant required.
+    _validate_drug_thresholds_overrides(
+        config, is_numeric=True, require_intermediate=True,
+        prefix='ic50_thresholds: drug_thresholds',
+    )
 
 
 def _validate_drug_groups(config: dict) -> None:
@@ -293,18 +332,37 @@ def _validate_drug_interpretation(config: dict) -> None:
         raise ValueError('drug_interpretation: "thresholds" must include the "resistant" key.')
 
     numeric_methods = {'by_ic50', 'by_fold_ic50'}
-    if method in numeric_methods:
+    is_numeric = method in numeric_methods
+    _validate_threshold_values(
+        thresholds, is_numeric=is_numeric, prefix='drug_interpretation: thresholds',
+    )
+
+    _validate_drug_thresholds_overrides(
+        config, is_numeric=is_numeric, prefix='drug_interpretation: drug_thresholds',
+    )
+
+
+def _validate_threshold_values(
+    thresholds: dict, *, is_numeric: bool, prefix: str,
+) -> None:
+    """Validate a thresholds dict's values for one algorithm scope.
+
+    :param thresholds: thresholds dict (must already contain ``resistant``)
+    :param is_numeric: True for by_ic50/by_fold_ic50 (positive numbers, resistant > intermediate);
+        False for by_phenotype/by_score (positive integers)
+    :param prefix: descriptive prefix for error messages
+    """
+    if is_numeric:
         for key, val in thresholds.items():
             if not isinstance(val, (int, float)) or val <= 0:
                 raise ValueError(
-                    f'drug_interpretation: thresholds[{key!r}] must be a positive number, '
-                    f'got {val!r}.'
+                    f'{prefix}[{key!r}] must be a positive number, got {val!r}.'
                 )
         intermediate = thresholds.get('intermediate')
         resistant = thresholds.get('resistant')
         if intermediate is not None and resistant <= intermediate:
             raise ValueError(
-                'drug_interpretation: "resistant" threshold must be strictly greater than '
+                f'{prefix}: "resistant" threshold must be strictly greater than '
                 '"intermediate" for numeric methods.'
             )
         return
@@ -312,9 +370,82 @@ def _validate_drug_interpretation(config: dict) -> None:
     for key, val in thresholds.items():
         if not isinstance(val, int) or val <= 0:
             raise ValueError(
-                f'drug_interpretation: thresholds[{key!r}] must be a positive integer, '
-                f'got {val!r}.'
+                f'{prefix}[{key!r}] must be a positive integer, got {val!r}.'
             )
+
+
+def _validate_drug_thresholds_overrides(
+    config: dict, *, is_numeric: bool, prefix: str, require_intermediate: bool = False,
+) -> None:
+    """Validate the optional ``drug_thresholds`` override list on a config.
+
+    Each entry is ``{reference?, drug, thresholds: {resistant, intermediate?}}``.
+    For ``ic50_thresholds`` both ``intermediate`` and ``resistant`` are required
+    (``require_intermediate=True``); for ``drug_interpretation`` only ``resistant``
+    is required and ``intermediate`` is optional.
+
+    :param config: algorithm config dict
+    :param is_numeric: True when threshold values must be positive numbers (by_ic50/
+        by_fold_ic50, or ic50_thresholds); False for positive integers (by_phenotype/by_score)
+    :param prefix: descriptive prefix for error messages
+    :param require_intermediate: when True, both intermediate and resistant are required
+    """
+    drug_thresholds = config.get('drug_thresholds')
+    if drug_thresholds is None:
+        return
+    if not isinstance(drug_thresholds, list):
+        raise ValueError(f'{prefix}: "drug_thresholds" must be a list.')
+
+    seen_keys: set[tuple[str | None, str]] = set()
+    for i, entry in enumerate(drug_thresholds):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f'{prefix}[{i}] must be a dict, got {type(entry).__name__}.'
+            )
+
+        reference = entry.get('reference')
+        if reference is not None:
+            if not isinstance(reference, str) or not reference.strip():
+                raise ValueError(
+                    f'{prefix}[{i}][\'reference\'] must be a non-empty string.'
+                )
+            reference = reference.strip()
+            entry['reference'] = reference
+
+        drug = entry.get('drug')
+        if not isinstance(drug, str) or not drug.strip():
+            raise ValueError(
+                f'{prefix}[{i}][\'drug\'] must be a non-empty string.'
+            )
+        drug = drug.strip()
+        entry['drug'] = drug
+
+        override_thresholds = entry.get('thresholds')
+        if not isinstance(override_thresholds, dict):
+            raise ValueError(
+                f'{prefix}[{i}][\'thresholds\'] must be a dict.'
+            )
+        if 'resistant' not in override_thresholds:
+            raise ValueError(
+                f"{prefix}[{i}][\'thresholds\'] must include the \"resistant\" key."
+            )
+        if require_intermediate and 'intermediate' not in override_thresholds:
+            raise ValueError(
+                f"{prefix}[{i}][\'thresholds\'] must include the \"intermediate\" key."
+            )
+
+        _validate_threshold_values(
+            override_thresholds, is_numeric=is_numeric,
+            prefix=f'{prefix}[{i}][\'thresholds\']',
+        )
+
+        key = (_normalize_reference_for_dedup(reference), drug.lower())
+        if key in seen_keys:
+            raise ValueError(
+                f'{prefix}: duplicate override for '
+                f'(reference={reference!r}, drug={drug!r}).'
+            )
+        seen_keys.add(key)
 
 
 def _validate_drug_alias(config: dict) -> None:
@@ -415,9 +546,102 @@ _ASSESSMENT_RANK: dict[str, int] = {
 }
 
 
+def _references_match(configured_reference: str, observed_reference: str) -> bool:
+    """Return whether two references match exactly or by accession base plus version.
+
+    Mirrors ``respro.report.html._references_match_with_accession_version`` so that
+    drug_thresholds overrides resolve consistently between DB classification and
+    report rendering.
+    """
+    if configured_reference == observed_reference:
+        return True
+    configured_match = _ACCESSION_IDENTIFIER_RE.fullmatch(configured_reference)
+    observed_match = _ACCESSION_IDENTIFIER_RE.fullmatch(observed_reference)
+    if configured_match is None or observed_match is None:
+        return False
+    return configured_match.group('base') == observed_match.group('base')
+
+
+def _normalize_reference_for_dedup(reference: str | None) -> str | None:
+    """Normalize a reference string for duplicate-override detection.
+
+    Two overrides that differ only by accession version (e.g. ``NC_001345`` and
+    ``NC_001345.1``) resolve to the same accession base and would otherwise be
+    treated as distinct keys, allowing conflicting overrides through and making
+    resolution order-dependent. This collapses them to their accession base so
+    the duplicate check catches the conflict. Non-accession strings and ``None``
+    are returned unchanged.
+    """
+    if reference is None:
+        return None
+    m = _ACCESSION_IDENTIFIER_RE.fullmatch(reference)
+    if m is None:
+        return reference
+    return m.group('base')
+
+
+def resolve_thresholds(
+    config: dict,
+    reference_name: str | None,
+    drug_name: str,
+) -> tuple[float | int, float | int | None]:
+    """
+    Resolve the ``(resistant, intermediate)`` thresholds for one drug.
+
+    Precedence (most specific wins):
+
+    1. a ``drug_thresholds`` override matching ``(reference, drug)``
+    2. a ``drug_thresholds`` override matching ``(drug)`` (no reference)
+    3. the config's global ``thresholds``
+
+    Reference matching is exact on the full string; when both the configured and
+    observed references look like accession identifiers (e.g. ``NC_001345``) the
+    match is accession-version tolerant, so ``NC_001345.1`` matches ``NC_001345``
+    and vice versa. Drug name matching is case-insensitive.
+
+    :param config: validated algorithm config dict (``drug_interpretation`` or
+        ``ic50_thresholds``)
+    :param reference_name: observed reference name for the drug, or ``None`` when
+        reference scoping is unavailable (only ``(drug)`` and global apply)
+    :param drug_name: drug name to resolve
+    :return: ``(resistant, intermediate)``; ``intermediate`` is ``None`` when not
+        configured at the resolved level
+    """
+    drug_thresholds = config.get('drug_thresholds') or []
+    drug_lower = drug_name.strip().lower()
+
+    drug_only: dict | None = None
+    reference_specific: dict | None = None
+    for entry in drug_thresholds:
+        if entry.get('drug', '').strip().lower() != drug_lower:
+            continue
+        ref = entry.get('reference')
+        if ref is None:
+            drug_only = entry.get('thresholds')
+        elif reference_name is not None and _references_match(ref, reference_name):
+            reference_specific = entry.get('thresholds')
+
+    if reference_specific is not None:
+        return (reference_specific['resistant'], reference_specific.get('intermediate'))
+    if drug_only is not None:
+        return (drug_only['resistant'], drug_only.get('intermediate'))
+
+    global_thresholds = config.get('thresholds', {})
+    # ic50_thresholds keys thresholds by drug name; drug_interpretation uses flat keys.
+    if isinstance(global_thresholds.get('resistant'), (int, float)):
+        return (global_thresholds['resistant'], global_thresholds.get('intermediate'))
+    drug_entry = global_thresholds.get(drug_name) or global_thresholds.get(drug_name.strip())
+    if drug_entry is not None:
+        return (drug_entry['resistant'], drug_entry.get('intermediate'))
+    # Last-resort fallback for drug_interpretation's flat thresholds when drug absent.
+    return (global_thresholds.get('resistant', 1), global_thresholds.get('intermediate'))
+
+
 def compute_drug_assessment(
     drug_data: dict,
     configs: list[dict],
+    reference_name: str | None = None,
+    drug_name: str | None = None,
 ) -> tuple[str, list[dict]]:
     """
     Compute per-method assessments and a final merged assessment for one drug.
@@ -426,6 +650,11 @@ def compute_drug_assessment(
         ``sensitive_count``, ``contradictory_count``, ``score_total``,
         ``ic50_values``, ``fold_ic50_values``, ``hit_count``
     :param configs: list of validated ``drug_interpretation`` config dicts
+    :param reference_name: observed reference name for the drug; when provided together
+        with ``drug_name``, per-``(reference, drug)`` overrides take precedence over
+        the config's global ``thresholds``
+    :param drug_name: drug name to resolve overrides for; when ``None`` only the
+        global ``thresholds`` are used (backward-compatible behaviour)
     :return: ``(final_assessment, method_assessments)`` where
         ``final_assessment`` is the strongest-wins result and
         ``method_assessments`` is a list of
@@ -436,9 +665,14 @@ def compute_drug_assessment(
 
     for config in configs:
         method = config.get('method', '')
-        thresholds = config.get('thresholds', {})
-        resistant_threshold = thresholds.get('resistant', 1)
-        intermediate_threshold = thresholds.get('intermediate')
+        if drug_name is not None:
+            resistant_threshold, intermediate_threshold = resolve_thresholds(
+                config, reference_name, drug_name,
+            )
+        else:
+            thresholds = config.get('thresholds', {})
+            resistant_threshold = thresholds.get('resistant', 1)
+            intermediate_threshold = thresholds.get('intermediate')
 
         assessment = _compute_single_method(
             method, drug_data, resistant_threshold, intermediate_threshold,

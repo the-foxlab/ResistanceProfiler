@@ -94,6 +94,7 @@ Defines per-drug IC50 or fold-IC50 breakpoints. With this, each rule that has an
 
 - `use` — required; must be `"ic50"` or `"fold_ic50"`
 - `thresholds` — required non-empty object; each key is a drug name; each value must have `"intermediate"` and `"resistant"` keys with positive numbers; `"resistant"` must be strictly greater than `"intermediate"`
+- `drug_thresholds` — optional list of per-`(reference, drug)` overrides; each entry is `{reference?, drug, thresholds: {intermediate, resistant}}` (both keys required, `resistant` > `intermediate`); resolution precedence is `(reference, drug)` > `(drug)` > global `thresholds`; see [Interpretation Algorithms](algorithms.md) for details
 
 ### `drug_groups`
 
@@ -119,6 +120,7 @@ Keys:
 - for `by_phenotype` and `by_score`, threshold values must be positive integers
 - for `by_ic50` and `by_fold_ic50`, threshold values must be positive numbers; if `intermediate` is set, `resistant` must be strictly greater than `intermediate`
 - each method may appear at most once; two entries with the same `method` are rejected
+- `drug_thresholds` — optional list of per-`(reference, drug)` overrides; each entry is `{reference?, drug, thresholds: {resistant, intermediate?}}`; resolution precedence is `(reference, drug)` > `(drug)` > global `thresholds`; when configured, the report shows a per-cell hover on each method Assessment column naming the resolved thresholds and their source; see [Interpretation Algorithms](algorithms.md) for details
 
 When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final **Assessment** column. The final assessment uses strongest-wins resolution: `resistant` > `contradictory` > `intermediate` > `sensitive`. The most resistant result across all methods is taken as the final call.
 

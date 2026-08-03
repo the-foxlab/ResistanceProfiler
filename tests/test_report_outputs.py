@@ -724,6 +724,134 @@ class TestBuildReportContext:
         assert ma[0]['assessment'] == 'sensitive'
         assert ma[0]['assessment_badge_class'] == 'phenotype--sensitive'
 
+    def test_drug_thresholds_override_attaches_resolved_thresholds_and_source(self) -> None:
+        """When drug_thresholds overrides are configured, each method assessment carries
+        the resolved thresholds and the resolution source for the per-cell hover."""
+        rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+        result = make_profiling_result(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 2},
+                    'drug_thresholds': [
+                        {'reference': 'ref', 'drug': 'DrugA', 'thresholds': {'resistant': 1}},
+                    ],
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
+        drug_table = ctx['summary']['drug_table']
+        assert drug_table['has_drug_thresholds'] is True
+        ma = drug_table['rows'][0]['method_assessments']
+        assert len(ma) == 1
+        # Override sets resistant threshold to 1 → resistant
+        assert ma[0]['assessment'] == 'resistant'
+        assert ma[0]['resolved_thresholds'] == {'resistant': 1, 'intermediate': None}
+        assert ma[0]['threshold_source'] == 'override (reference, drug)'
+
+    def test_drug_thresholds_override_absent_has_no_resolved_fields(self) -> None:
+        """Without drug_thresholds, method assessments carry no resolved_thresholds/source
+        and has_drug_thresholds is False (byte-identical to prior behaviour)."""
+        rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+        result = make_profiling_result(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                ),
+            ],
+        )
+
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
+        drug_table = ctx['summary']['drug_table']
+        assert drug_table['has_drug_thresholds'] is False
+        ma = drug_table['rows'][0]['method_assessments']
+        assert 'resolved_thresholds' not in ma[0]
+        assert 'threshold_source' not in ma[0]
+
     def test_drug_alias_is_rendered_from_drug_table_alias_column(self) -> None:
         result = _make_result()
 
@@ -1999,6 +2127,218 @@ class TestPdfExports:
         r = _make_result()
         html = render_html(r, similarity_high=1, similarity_moderate=0)
         assert 'db-hit-pill--single' in html
+
+    def test_render_html_drug_thresholds_hover_present_with_overrides(self) -> None:
+        rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+        result = make_profiling_result(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                ),
+            ],
+        )
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 2},
+                    'drug_thresholds': [
+                        {'reference': 'ref', 'drug': 'DrugA', 'thresholds': {'resistant': 1}},
+                    ],
+                }),
+            ),
+        )
+        conn.commit()
+        html = render_html(result, similarity_high=1, similarity_moderate=0, project_conn=conn)
+        assert 'Thresholds applied: resistant=1' in html
+        assert 'override (reference, drug)' in html
+
+    def test_render_html_drug_thresholds_hover_absent_without_overrides(self) -> None:
+        rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+        result = make_profiling_result(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                ),
+            ],
+        )
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                }),
+            ),
+        )
+        conn.commit()
+        html = render_html(result, similarity_high=1, similarity_moderate=0, project_conn=conn)
+        assert 'Thresholds applied:' not in html
+        assert 'override (reference, drug)' not in html
+
+    def test_drug_thresholds_multi_reference_selection_is_deterministic(self) -> None:
+        """Regression: when a drug has hits under multiple references, the reference
+        used to resolve per-(reference, drug) overrides must be selected
+        deterministically (sorted), not via ``next(iter(set()))`` which depends on
+        PYTHONHASHSEED. Here the same drug hits both refB and refA; an override is
+        scoped to refA (alphabetically first). The resolved threshold source must
+        always be 'override (reference, drug)' regardless of hash seed."""
+        from respro.db.models import ReferenceGroup
+
+        rule_a = ResistanceRule(
+            id=1, feature_name='gagA', feature_id=1, drug_name='DrugA', drug_id=1,
+            reference_identifier='refA', position=2, reference='K', mutation='E',
+            phenotype='resistant',
+        )
+        rule_b = ResistanceRule(
+            id=2, feature_name='polB', feature_id=2, drug_name='DrugA', drug_id=1,
+            reference_identifier='refB', position=2, reference='K', mutation='E',
+            phenotype='resistant',
+        )
+        ann_a = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_a', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
+            feature_name='gagA', codon_pos=2, ref_codon='AAA', alt_codon='GAA',
+            ref_aa='K', alt_aa='E', consequence='missense', af_bin='high',
+            rule_matches=[rule_a],
+        )
+        ann_b = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_b', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
+            feature_name='polB', codon_pos=2, ref_codon='AAA', alt_codon='GAA',
+            ref_aa='K', alt_aa='E', consequence='missense', af_bin='high',
+            rule_matches=[rule_b],
+        )
+        feat_a = FeatureRecord(
+            id=1, reference_id=1, name='gagA', protein='GagA', start=0, end=12, strand='+',
+            codon_start=0, nt_sequence='ATGAAAGCTTAA',
+        )
+        feat_b = FeatureRecord(
+            id=2, reference_id=2, name='polB', protein='PolB', start=0, end=12, strand='+',
+            codon_start=0, nt_sequence='ATGAAAGCTTAA',
+        )
+        references = [
+            ReferenceGroup(
+                reference_name='refB', reference_id=2, organism='Organism B',
+                reference_length_nt=1000, query_name='chrom_b', query_sequence='ATGAAAGCTTAA',
+                features=[feat_b], rule_feature_names={'polB'},
+                feature_matches=[
+                    FeatureMatch(
+                        feature=feat_b, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                        query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+                    ),
+                ],
+            ),
+            ReferenceGroup(
+                reference_name='refA', reference_id=1, organism='Organism A',
+                reference_length_nt=1000, query_name='chrom_a', query_sequence='ATGAAAGCTTAA',
+                features=[feat_a], rule_feature_names={'gagA'},
+                feature_matches=[
+                    FeatureMatch(
+                        feature=feat_a, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                        query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+                    ),
+                ],
+            ),
+        ]
+        # Insert refB first in the references list to maximize the chance that a
+        # hash-seed-dependent set iteration would pick refB; the fix must still
+        # deterministically pick refA (sorted first) and apply its override.
+        result = ProfilingResult(
+            project_name='Multi', organism='Organism A',
+            sample_name='samp', vcf_name='in.vcf',
+            total_variants=2, variants_in_cds=2, resistance_hits=2,
+            annotations=[ann_b, ann_a],
+            references=references,
+        )
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 2},
+                    'drug_thresholds': [
+                        {'reference': 'refA', 'drug': 'DrugA', 'thresholds': {'resistant': 1}},
+                    ],
+                }),
+            ),
+        )
+        conn.commit()
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+            features=[f for rg in result.references for f in rg.features],
+        )
+        drug_table = ctx['summary']['drug_table']
+        # DrugA appears once with hits under both refA and refB.
+        drug_row = next(r for r in drug_table['rows'] if r['name'] == 'DrugA')
+        ma = drug_row['method_assessments']
+        assert len(ma) == 1
+        # refA sorts before refB → override (resistant=1) applies → resistant.
+        assert ma[0]['assessment'] == 'resistant'
+        assert ma[0]['threshold_source'] == 'override (reference, drug)'
+        assert ma[0]['resolved_thresholds'] == {'resistant': 1, 'intermediate': None}
 
     def test_render_html_includes_table_filter_controls_js(self) -> None:
         r = _make_result()

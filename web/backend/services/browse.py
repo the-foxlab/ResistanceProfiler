@@ -81,17 +81,30 @@ def _extract_display_algorithms(algorithms: list[dict]) -> dict:
     """Return only effect_as_resistant and drug_interpretation configs for display."""
     result: dict = {}
     drug_interp_list: list[dict] = []
+    ic50_thresholds_config: dict | None = None
     for config in algorithms:
         name = config.get('name')
         if name == 'effect_as_resistant':
             result['effect_as_resistant'] = {'rules': config.get('rules', [])}
         elif name == 'drug_interpretation':
-            drug_interp_list.append({
+            entry = {
                 'method': config.get('method', ''),
                 'thresholds': config.get('thresholds', {}),
-            })
+            }
+            if config.get('drug_thresholds'):
+                entry['drug_thresholds'] = config['drug_thresholds']
+            drug_interp_list.append(entry)
+        elif name == 'ic50_thresholds':
+            ic50_thresholds_config = {
+                'use': config.get('use', ''),
+                'thresholds': config.get('thresholds', {}),
+            }
+            if config.get('drug_thresholds'):
+                ic50_thresholds_config['drug_thresholds'] = config['drug_thresholds']
     if drug_interp_list:
         result['drug_interpretation'] = drug_interp_list
+    if ic50_thresholds_config is not None:
+        result['ic50_thresholds'] = ic50_thresholds_config
     return result
 
 

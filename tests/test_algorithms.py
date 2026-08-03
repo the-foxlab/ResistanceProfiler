@@ -15,6 +15,7 @@ from respro.db.algorithms import (
     apply_ic50_threshold_classification,
     compute_drug_assessment,
     load_interpretation_algorithms,
+    resolve_thresholds,
     store_interpretation_algorithms,
     validate_interpretation_algorithms,
 )
@@ -782,6 +783,384 @@ class TestComputeDrugAssessment:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# drug_thresholds override validation — drug_interpretation
+# ──────────────────────────────────────────────────────────────────────
+
+class TestValidateDrugInterpretationOverrides:
+
+    def test_valid_drug_thresholds_by_phenotype(self) -> None:
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_phenotype',
+                'thresholds': {'resistant': 1, 'intermediate': 1},
+                'drug_thresholds': [
+                    {'drug': 'ACV', 'thresholds': {'resistant': 2, 'intermediate': 1}},
+                ],
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result == algorithms
+
+    def test_valid_drug_thresholds_with_reference(self) -> None:
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_ic50',
+                'thresholds': {'resistant': 10.0, 'intermediate': 3.0},
+                'drug_thresholds': [
+                    {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'resistant': 5.0, 'intermediate': 2.0}},
+                ],
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result == algorithms
+
+    def test_drug_thresholds_without_resistant_key_rejected(self) -> None:
+        with pytest.raises(ValueError, match='must include the "resistant" key'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                    'drug_thresholds': [
+                        {'drug': 'ACV', 'thresholds': {'intermediate': 1}},
+                    ],
+                }
+            ])
+
+    def test_drug_thresholds_missing_drug_rejected(self) -> None:
+        with pytest.raises(ValueError, match='must be a non-empty string'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                    'drug_thresholds': [
+                        {'thresholds': {'resistant': 2}},
+                    ],
+                }
+            ])
+
+    def test_drug_thresholds_empty_drug_rejected(self) -> None:
+        with pytest.raises(ValueError, match='must be a non-empty string'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                    'drug_thresholds': [
+                        {'drug': '  ', 'thresholds': {'resistant': 2}},
+                    ],
+                }
+            ])
+
+    def test_drug_thresholds_non_integer_for_by_phenotype_rejected(self) -> None:
+        with pytest.raises(ValueError, match='must be a positive integer'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                    'drug_thresholds': [
+                        {'drug': 'ACV', 'thresholds': {'resistant': 1.5}},
+                    ],
+                }
+            ])
+
+    def test_drug_thresholds_non_number_for_by_ic50_rejected(self) -> None:
+        with pytest.raises(ValueError, match='must be a positive number'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_ic50',
+                    'thresholds': {'resistant': 10.0, 'intermediate': 3.0},
+                    'drug_thresholds': [
+                        {'drug': 'ACV', 'thresholds': {'resistant': 'high'}},
+                    ],
+                }
+            ])
+
+    def test_drug_thresholds_resistant_not_greater_than_intermediate_numeric_rejected(self) -> None:
+        with pytest.raises(ValueError, match='strictly greater than'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_ic50',
+                    'thresholds': {'resistant': 10.0, 'intermediate': 3.0},
+                    'drug_thresholds': [
+                        {'drug': 'ACV', 'thresholds': {'resistant': 2.0, 'intermediate': 3.0}},
+                    ],
+                }
+            ])
+
+    def test_drug_thresholds_duplicate_reference_drug_rejected(self) -> None:
+        with pytest.raises(ValueError, match='duplicate'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                    'drug_thresholds': [
+                        {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'resistant': 2}},
+                        {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'resistant': 3}},
+                    ],
+                }
+            ])
+
+    def test_drug_thresholds_duplicate_drug_only_rejected(self) -> None:
+        with pytest.raises(ValueError, match='duplicate'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                    'drug_thresholds': [
+                        {'drug': 'ACV', 'thresholds': {'resistant': 2}},
+                        {'drug': 'ACV', 'thresholds': {'resistant': 3}},
+                    ],
+                }
+            ])
+
+    def test_drug_thresholds_duplicate_accession_version_normalized_rejected(self) -> None:
+        """Regression: NC_001345 and NC_001345.1 are the same accession base, so two
+        overrides for the same drug under these two reference strings must be
+        detected as a duplicate (otherwise resolution becomes order-dependent)."""
+        with pytest.raises(ValueError, match='duplicate'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                    'drug_thresholds': [
+                        {'reference': 'NC_001345', 'drug': 'ACV', 'thresholds': {'resistant': 2}},
+                        {'reference': 'NC_001345.1', 'drug': 'ACV', 'thresholds': {'resistant': 3}},
+                    ],
+                }
+            ])
+
+    def test_drug_thresholds_must_be_list(self) -> None:
+        with pytest.raises(ValueError, match='must be a list'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                    'drug_thresholds': {'drug': 'ACV', 'thresholds': {'resistant': 2}},
+                }
+            ])
+
+    def test_drug_thresholds_entry_must_be_dict(self) -> None:
+        with pytest.raises(ValueError, match='must be a dict'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                    'drug_thresholds': ['ACV'],
+                }
+            ])
+
+    def test_drug_thresholds_empty_reference_rejected(self) -> None:
+        with pytest.raises(ValueError, match='must be a non-empty string'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'drug_interpretation',
+                    'method': 'by_phenotype',
+                    'thresholds': {'resistant': 1},
+                    'drug_thresholds': [
+                        {'reference': '', 'drug': 'ACV', 'thresholds': {'resistant': 2}},
+                    ],
+                }
+            ])
+
+
+# ──────────────────────────────────────────────────────────────────────
+# drug_thresholds override validation — ic50_thresholds
+# ──────────────────────────────────────────────────────────────────────
+
+class TestValidateIc50ThresholdsOverrides:
+
+    def test_valid_drug_thresholds(self) -> None:
+        algorithms = [
+            {
+                'name': 'ic50_thresholds',
+                'use': 'fold_ic50',
+                'thresholds': {'ACV': {'intermediate': 3.0, 'resistant': 10.0}},
+                'drug_thresholds': [
+                    {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'intermediate': 2.0, 'resistant': 5.0}},
+                ],
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result == algorithms
+
+    def test_ic50_drug_thresholds_missing_intermediate_rejected(self) -> None:
+        with pytest.raises(ValueError, match='must include the "intermediate" key'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'ic50_thresholds',
+                    'use': 'ic50',
+                    'thresholds': {'ACV': {'intermediate': 3.0, 'resistant': 10.0}},
+                    'drug_thresholds': [
+                        {'drug': 'ACV', 'thresholds': {'resistant': 5.0}},
+                    ],
+                }
+            ])
+
+    def test_ic50_drug_thresholds_resistant_not_greater_rejected(self) -> None:
+        with pytest.raises(ValueError, match='strictly greater than'):
+            validate_interpretation_algorithms([
+                {
+                    'name': 'ic50_thresholds',
+                    'use': 'ic50',
+                    'thresholds': {'ACV': {'intermediate': 3.0, 'resistant': 10.0}},
+                    'drug_thresholds': [
+                        {'drug': 'ACV', 'thresholds': {'intermediate': 5.0, 'resistant': 5.0}},
+                    ],
+                }
+            ])
+
+
+# ──────────────────────────────────────────────────────────────────────
+# resolve_thresholds precedence
+# ──────────────────────────────────────────────────────────────────────
+
+class TestResolveThresholds:
+
+    def test_global_fallback_when_no_overrides(self) -> None:
+        config = {'method': 'by_phenotype', 'thresholds': {'resistant': 1, 'intermediate': 1}}
+        assert resolve_thresholds(config, 'ref1', 'ACV') == (1, 1)
+
+    def test_drug_only_override_wins_over_global(self) -> None:
+        config = {
+            'method': 'by_phenotype',
+            'thresholds': {'resistant': 1, 'intermediate': 1},
+            'drug_thresholds': [
+                {'drug': 'ACV', 'thresholds': {'resistant': 2, 'intermediate': 1}},
+            ],
+        }
+        assert resolve_thresholds(config, 'ref1', 'ACV') == (2, 1)
+
+    def test_reference_drug_override_wins_over_drug_only(self) -> None:
+        config = {
+            'method': 'by_phenotype',
+            'thresholds': {'resistant': 1, 'intermediate': 1},
+            'drug_thresholds': [
+                {'drug': 'ACV', 'thresholds': {'resistant': 2, 'intermediate': 1}},
+                {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'resistant': 3, 'intermediate': 2}},
+            ],
+        }
+        assert resolve_thresholds(config, 'ref1', 'ACV') == (3, 2)
+
+    def test_reference_drug_override_skipped_when_reference_mismatch(self) -> None:
+        config = {
+            'method': 'by_phenotype',
+            'thresholds': {'resistant': 1, 'intermediate': 1},
+            'drug_thresholds': [
+                {'reference': 'ref2', 'drug': 'ACV', 'thresholds': {'resistant': 3, 'intermediate': 2}},
+            ],
+        }
+        # reference doesn't match → fall back to global
+        assert resolve_thresholds(config, 'ref1', 'ACV') == (1, 1)
+
+    def test_reference_drug_override_matches_accession_version(self) -> None:
+        config = {
+            'method': 'by_ic50',
+            'thresholds': {'resistant': 10.0, 'intermediate': 3.0},
+            'drug_thresholds': [
+                {'reference': 'NC_001345.1', 'drug': 'ACV', 'thresholds': {'resistant': 5.0, 'intermediate': 2.0}},
+            ],
+        }
+        # observed reference without version still matches accession base
+        assert resolve_thresholds(config, 'NC_001345', 'ACV') == (5.0, 2.0)
+
+    def test_no_intermediate_global_returns_none_for_intermediate(self) -> None:
+        config = {'method': 'by_score', 'thresholds': {'resistant': 5}}
+        assert resolve_thresholds(config, 'ref1', 'ACV') == (5, None)
+
+    def test_drug_only_override_without_intermediate(self) -> None:
+        config = {
+            'method': 'by_score',
+            'thresholds': {'resistant': 5, 'intermediate': 2},
+            'drug_thresholds': [
+                {'drug': 'ACV', 'thresholds': {'resistant': 8}},
+            ],
+        }
+        assert resolve_thresholds(config, 'ref1', 'ACV') == (8, None)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# compute_drug_assessment with drug_thresholds overrides
+# ──────────────────────────────────────────────────────────────────────
+
+class TestComputeDrugAssessmentWithOverrides:
+
+    def _drug(self, **overrides) -> dict:
+        base = {
+            'hit_count': 0,
+            'resistant_count': 0, 'intermediate_count': 0,
+            'sensitive_count': 0, 'contradictory_count': 0,
+            'score_total': 0.0,
+            'ic50_values': [], 'fold_ic50_values': [],
+        }
+        base.update(overrides)
+        return base
+
+    def test_reference_drug_override_applied_in_assessment(self) -> None:
+        # Global resistant threshold is 2; override sets it to 1 for (ref1, ACV).
+        drug = self._drug(hit_count=1, resistant_count=1)
+        configs = [
+            {
+                'method': 'by_phenotype',
+                'thresholds': {'resistant': 2},
+                'drug_thresholds': [
+                    {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'resistant': 1}},
+                ],
+            }
+        ]
+        final, methods = compute_drug_assessment(drug, configs, reference_name='ref1', drug_name='ACV')
+        assert final == 'resistant'
+        assert methods[0]['assessment'] == 'resistant'
+
+    def test_override_skipped_when_reference_mismatch(self) -> None:
+        # Override is for ref2; observed reference is ref1 → global threshold (2) applies.
+        drug = self._drug(hit_count=1, resistant_count=1)
+        configs = [
+            {
+                'method': 'by_phenotype',
+                'thresholds': {'resistant': 2},
+                'drug_thresholds': [
+                    {'reference': 'ref2', 'drug': 'ACV', 'thresholds': {'resistant': 1}},
+                ],
+            }
+        ]
+        final, methods = compute_drug_assessment(drug, configs, reference_name='ref1', drug_name='ACV')
+        assert final == 'sensitive'
+
+    def test_drug_only_override_applied(self) -> None:
+        drug = self._drug(hit_count=1, resistant_count=1)
+        configs = [
+            {
+                'method': 'by_phenotype',
+                'thresholds': {'resistant': 2},
+                'drug_thresholds': [
+                    {'drug': 'ACV', 'thresholds': {'resistant': 1}},
+                ],
+            }
+        ]
+        final, methods = compute_drug_assessment(drug, configs, reference_name='ref1', drug_name='ACV')
+        assert final == 'resistant'
+
+    def test_no_overrides_backward_compatible(self) -> None:
+        # No reference_name/drug_name passed → behaves exactly as before.
+        drug = self._drug(hit_count=2, resistant_count=1)
+        configs = [{'method': 'by_phenotype', 'thresholds': {'resistant': 1}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Integration tests with load_metadata_json
 # ──────────────────────────────────────────────────────────────────────
 
@@ -1026,6 +1405,182 @@ class TestApplyIc50ThresholdClassification:
         ).fetchone()
         assert row['phenotype'] == 'contradictory'
         assert 'contradictory' in row['comment'].lower()
+
+    def test_reference_drug_override_classifies_against_override(
+        self, db_with_rules: tuple[sqlite3.Connection, int]
+    ) -> None:
+        # Global: DrugA intermediate=3.0, resistant=10.0.
+        # Override for (ref1, DrugA): intermediate=1.0, resistant=2.0.
+        # ic50=5.0 is above override resistant (2.0) → resistant (not intermediate as globally).
+        conn, project_id = db_with_rules
+        config = {
+            'name': 'ic50_thresholds',
+            'use': 'ic50',
+            'thresholds': self._THRESHOLDS,
+            'drug_thresholds': [
+                {'reference': 'ref1', 'drug': 'DrugA', 'thresholds': {'intermediate': 1.0, 'resistant': 2.0}},
+            ],
+        }
+        apply_ic50_threshold_classification(conn, project_id, config)
+        conn.commit()
+        row = conn.execute(
+            "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
+            "WHERE d.name = 'DrugA' AND r.ic50 = '5.0'"
+        ).fetchone()
+        assert row['phenotype'] == 'resistant'
+
+    def test_drug_only_override_classifies_against_override(
+        self, db_with_rules: tuple[sqlite3.Connection, int]
+    ) -> None:
+        # Drug-only override (no reference): DrugA intermediate=1.0, resistant=2.0.
+        conn, project_id = db_with_rules
+        config = {
+            'name': 'ic50_thresholds',
+            'use': 'ic50',
+            'thresholds': self._THRESHOLDS,
+            'drug_thresholds': [
+                {'drug': 'DrugA', 'thresholds': {'intermediate': 1.0, 'resistant': 2.0}},
+            ],
+        }
+        apply_ic50_threshold_classification(conn, project_id, config)
+        conn.commit()
+        row = conn.execute(
+            "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
+            "WHERE d.name = 'DrugA' AND r.ic50 = '0.5'"
+        ).fetchone()
+        # 0.5 < intermediate (1.0) → sensitive
+        assert row['phenotype'] == 'sensitive'
+        row = conn.execute(
+            "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
+            "WHERE d.name = 'DrugA' AND r.ic50 = '5.0'"
+        ).fetchone()
+        # 5.0 >= resistant (2.0) → resistant
+        assert row['phenotype'] == 'resistant'
+
+    def test_override_skipped_when_reference_mismatch(
+        self, db_with_rules: tuple[sqlite3.Connection, int]
+    ) -> None:
+        # Override for ref2; rules are on ref1 → global thresholds apply.
+        conn, project_id = db_with_rules
+        config = {
+            'name': 'ic50_thresholds',
+            'use': 'ic50',
+            'thresholds': self._THRESHOLDS,
+            'drug_thresholds': [
+                {'reference': 'ref2', 'drug': 'DrugA', 'thresholds': {'intermediate': 1.0, 'resistant': 2.0}},
+            ],
+        }
+        apply_ic50_threshold_classification(conn, project_id, config)
+        conn.commit()
+        row = conn.execute(
+            "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
+            "WHERE d.name = 'DrugA' AND r.ic50 = '5.0'"
+        ).fetchone()
+        # global: 5.0 between 3.0 and 10.0 → intermediate
+        assert row['phenotype'] == 'intermediate'
+
+    def test_override_present_but_no_global_entry_and_reference_mismatch_skips_rule(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression: a drug listed in drug_thresholds (override for a different
+        reference) but absent from the global thresholds dict must be SKIPPED when
+        the rule's reference does not match any override — not crash with a
+        TypeError from comparing against a None intermediate breakpoint."""
+        db_path = tmp_path / 'mismatch.db'
+        conn = create_schema(db_path)
+        project_id = conn.execute(
+            "INSERT INTO project (name, schema_version, uuid) VALUES ('p', 1, 'uuid')"
+        ).lastrowid
+        ref_id = conn.execute(
+            "INSERT INTO reference (project_id, name, length) VALUES (?, 'ref1', 1000)",
+            (project_id,),
+        ).lastrowid
+        feat_id = conn.execute(
+            "INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, 'gene1', 0, 300, '+')",
+            (ref_id,),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO feature_segment (feature_id, segment_index, start, end) VALUES (?, 0, 0, 300)",
+            (feat_id,),
+        )
+        drug_id = conn.execute(
+            "INSERT INTO drug (project_id, name) VALUES (?, 'DrugX')", (project_id,)
+        ).lastrowid
+        # DrugX has an ic50 value but NO global thresholds entry, only an override
+        # scoped to ref2 (which does not match the rule's ref1).
+        conn.execute(
+            "INSERT INTO resistance_rule (feature_id, drug_id, position, mutation, ic50) "
+            "VALUES (?, ?, 1, 'E', '0.5')",
+            (feat_id, drug_id),
+        )
+        conn.commit()
+        config = {
+            'name': 'ic50_thresholds',
+            'use': 'ic50',
+            'thresholds': {'DrugA': {'intermediate': 3.0, 'resistant': 10.0}},
+            'drug_thresholds': [
+                {'reference': 'ref2', 'drug': 'DrugX', 'thresholds': {'intermediate': 1.0, 'resistant': 2.0}},
+            ],
+        }
+        updated = apply_ic50_threshold_classification(conn, project_id, config)
+        conn.commit()
+        # Rule must be skipped (no applicable threshold), not crash.
+        assert updated == 0
+        row = conn.execute(
+            "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
+            "WHERE d.name = 'DrugX'"
+        ).fetchone()
+        assert row['phenotype'] == 'unknown'
+
+    def test_override_only_drug_only_without_global_skips_rule(
+        self, tmp_path: Path
+    ) -> None:
+        """A drug-only override (no reference) still classifies even without a
+        global thresholds entry, because the drug-only override applies to all
+        references. This confirms the drug-only path is not skipped."""
+        db_path = tmp_path / 'drugonly.db'
+        conn = create_schema(db_path)
+        project_id = conn.execute(
+            "INSERT INTO project (name, schema_version, uuid) VALUES ('p', 1, 'uuid')"
+        ).lastrowid
+        ref_id = conn.execute(
+            "INSERT INTO reference (project_id, name, length) VALUES (?, 'ref1', 1000)",
+            (project_id,),
+        ).lastrowid
+        feat_id = conn.execute(
+            "INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, 'gene1', 0, 300, '+')",
+            (ref_id,),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO feature_segment (feature_id, segment_index, start, end) VALUES (?, 0, 0, 300)",
+            (feat_id,),
+        )
+        drug_id = conn.execute(
+            "INSERT INTO drug (project_id, name) VALUES (?, 'DrugX')", (project_id,)
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO resistance_rule (feature_id, drug_id, position, mutation, ic50) "
+            "VALUES (?, ?, 1, 'E', '5.0')",
+            (feat_id, drug_id),
+        )
+        conn.commit()
+        config = {
+            'name': 'ic50_thresholds',
+            'use': 'ic50',
+            'thresholds': {'DrugA': {'intermediate': 3.0, 'resistant': 10.0}},
+            'drug_thresholds': [
+                {'drug': 'DrugX', 'thresholds': {'intermediate': 1.0, 'resistant': 2.0}},
+            ],
+        }
+        updated = apply_ic50_threshold_classification(conn, project_id, config)
+        conn.commit()
+        # drug-only override applies → 5.0 >= 2.0 → resistant
+        assert updated == 1
+        row = conn.execute(
+            "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
+            "WHERE d.name = 'DrugX'"
+        ).fetchone()
+        assert row['phenotype'] == 'resistant'
 
 
 class TestApplyDrugAliasMappings:
