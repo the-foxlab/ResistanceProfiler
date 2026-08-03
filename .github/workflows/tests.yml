@@ -76,7 +76,7 @@ jobs:
 
       - name: Upload coverage report
         if: matrix.python-version == '3.11'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-xml
           path: coverage.xml
@@ -96,7 +96,7 @@ jobs:
           ref: master
 
       - name: Download coverage report
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-xml
 
@@ -113,7 +113,7 @@ jobs:
         run: genbadge coverage -i coverage.xml -o docs/docs/assets/coverage.svg
 
       - name: Commit badge
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: 'chore: update coverage badge [skip ci]'
           file_pattern: docs/docs/assets/coverage.svg
