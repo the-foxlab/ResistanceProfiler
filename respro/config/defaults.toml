@@ -14,7 +14,7 @@ ncbi_pmc_idconv = 'https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/?ids={iden
 crossref_works = 'https://api.crossref.org/works/{doi}'
 ncbi_protein_page = 'https://www.ncbi.nlm.nih.gov/protein/{protein_id}/'
 ncbi_nuccore_efetch = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&id={accession}&rettype=gb&retmode=text'
-github_respro_db_raw = 'https://raw.githubusercontent.com/jonas-fuchs/respro-db/main/databases'
+github_respro_db_raw = 'https://raw.githubusercontent.com/the-foxlab/respro-databases/main/databases'
 
 [parsing]
 doi_prefixes = ['https://doi.org/', 'http://doi.org/']

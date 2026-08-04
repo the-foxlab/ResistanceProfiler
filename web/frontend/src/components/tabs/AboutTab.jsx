@@ -90,13 +90,13 @@ export function AboutTab({ setActiveMode }) {
             <button type="button" onClick={() => setActiveMode('analyze')}>Start analysis</button>
             <a
               className="about-hero-link"
-              href="https://jonas-fuchs.github.io/ResistanceProfiler/"
+              href="https://the-foxlab.github.io/ResistanceProfiler/"
               target="_blank"
               rel="noreferrer"
             >
               View documentation
             </a>
-            <a className="about-hero-link about-hero-link-secondary" href="https://github.com/jonas-fuchs/ResistanceProfiler" target="_blank" rel="noreferrer">
+            <a className="about-hero-link about-hero-link-secondary" href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noreferrer">
               GitHub
             </a>
           </div>
@@ -126,7 +126,7 @@ export function AboutTab({ setActiveMode }) {
             <h3>No database curation</h3>
             <p>
               We do not maintain or curate resistance databases ourselves. We only provide up-to-date converted
-              <a href="https://github.com/jonas-fuchs/respro-db" target="_blank" rel="noreferrer"> versions</a> of openly available databases and are not responsible for their content or maintenance.
+              <a href="https://github.com/the-foxlab/respro-databases" target="_blank" rel="noreferrer"> versions</a> of openly available databases and are not responsible for their content or maintenance.
             </p>
           </div>
         </article>
@@ -355,7 +355,7 @@ export function AboutTab({ setActiveMode }) {
           <p>
             Contributions are very welcome, especially curated rule datasets, bug reports, reproducible test
             cases, and code improvements. Open an issue or submit a pull request on{' '}
-            <a href="https://github.com/jonas-fuchs/ResistanceProfiler" target="_blank" rel="noreferrer">GitHub</a>{' '}
+            <a href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noreferrer">GitHub</a>{' '}
             to get in touch. For direct contact, please{' '}
             <a href="mailto:jonas.fuchs@uniklinik-freiburg.de">email Jonas Fuchs</a>.
           </p>

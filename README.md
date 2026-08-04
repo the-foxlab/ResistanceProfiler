@@ -9,7 +9,7 @@ Pathogen-agnostic antiviral resistance profiling from consensus sequences or VCF
 
 One harmonized report that classifies mutations and assists diagnostic interpretation against curated project databases. Comes as a CLI or a WebApp. Everything is open-source. Contributions are welcome!
 
-### [Dokumentation](https://jonas-fuchs.github.io/ResistanceProfiler/cli-reference/) · [WebApp (live)](https://jonas-fuchs.github.io/ResistanceProfiler/cli-reference/) · [Installation](https://jonas-fuchs.github.io/ResistanceProfiler/install/) · [Databases](https://github.com/jonas-fuchs/respro-db)
+### [Dokumentation](https://the-foxlab.github.io/ResistanceProfiler/cli-reference/) · [WebApp (live)](resistanceprofiler.uniklinik-freiburg.de) · [Installation](https://the-foxlab.github.io/ResistanceProfiler/install/) · [Databases](https://github.com/the-foxlab/respro-databases)
 
 ## Highlights
 
@@ -22,15 +22,17 @@ One harmonized report that classifies mutations and assists diagnostic interpret
 
 ## Quick start
 
-Install:
+Install the CLI:
 
 ```bash
+git clone https://github.com/the-foxlab/ResistanceProfiler
 pip install -e ".[dev]"
 ```
 
-Download a maintained database:
+Download a maintained database (e.g. herpesDRG):
 
 ```bash
+respro databases --list
 respro databases --download herpesdrg --output my_folder/
 ```
 
@@ -46,18 +48,18 @@ or
 respro vcf --project my_folder/herpesdrg.db --vcf sample.vcf --ref-fasta ref.fasta --output results/
 ```
 
-→ **Full guide: [Installation](https://jonas-fuchs.github.io/ResistanceProfiler/install/) · [Quickstart](https://jonas-fuchs.github.io/ResistanceProfiler/quickstart/) · [CLI Reference](https://jonas-fuchs.github.io/ResistanceProfiler/cli-reference/)**
+→ **Full guide: [Installation](https://the-foxlab.github.io/ResistanceProfiler/install/) · [Quickstart](https://the-foxlab.github.io/ResistanceProfiler/quickstart/) · [CLI Reference](https://the-foxlab.github.io/ResistanceProfiler/cli-reference/)**
 
-## Web app
+## Web app (host the complete WebApp via docker)
 
 ```bash
-git clone https://github.com/jonas-fuchs/ResistanceProfiler
+git clone https://github.com/the-foxlab/ResistanceProfiler
 docker compose -f docker-compose.web.yml up --build
 ```
 
 Open at `http://127.0.0.1:8000/`
 
-→ **[Web app documentation](https://jonas-fuchs.github.io/ResistanceProfiler/webapp/)**
+→ **[Web app documentation](https://the-foxlab.github.io/ResistanceProfiler/webapp/)**
 
 ## License
 

@@ -9,7 +9,7 @@ Contributions are very welcome, especially curated rule datasets, bug reports, r
 
 ## Bug reports and feature requests
 
-Open an issue on [GitHub](https://github.com/jonas-fuchs/ResistanceProfiler) with:
+Open an issue on [GitHub](https://github.com/the-foxlab/ResistanceProfiler) with:
 
 - A clear description of the problem or feature
 - Steps to reproduce (for bugs)

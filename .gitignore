@@ -42,3 +42,4 @@ site/
 graphify-out
 .coverage
 coverage.xml
+bioconda/
