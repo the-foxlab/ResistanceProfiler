@@ -1,5 +1,5 @@
 """
-Client for the respro companion database repository (https://github.com/jonas-fuchs/respro-db).
+Client for the respro companion database repository (https://github.com/the-foxlab/respro-databases).
 
 Fetches database listings, metadata, and downloads rules/GenBank files for use with respro init.
 All public functions raise RuntimeError on any network or HTTP failure.
