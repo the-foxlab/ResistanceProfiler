@@ -390,31 +390,43 @@ def _start_maintained_db_update_thread(
     project_databases_dir: Path,
     interval_seconds: int,
     app_state,
-) -> None:
+    stop_event: threading.Event | None = None,
+) -> threading.Thread | None:
     """Start a daemon thread that periodically refreshes maintained databases.
 
     :param project_databases_dir: directory containing project ``.db`` files
     :param interval_seconds: seconds between update checks; ``0`` disables the thread
     :param app_state: FastAPI ``app.state`` holding the mutable ``project_db_uuid_index``
+    :param stop_event: optional ``threading.Event``; when set the loop exits cleanly.
+        Defaults to a never-set event so production behaviour is unchanged.
+    :return: the started daemon thread, or ``None`` if disabled.
     """
     if interval_seconds <= 0:
         logger.debug('Maintained database auto-update thread disabled (interval=0)')
-        return
+        return None
+    stop = stop_event if stop_event is not None else threading.Event()
     update_thread = threading.Thread(
         target=_maintained_db_update_loop,
-        args=(project_databases_dir, interval_seconds, app_state),
+        args=(project_databases_dir, interval_seconds, app_state, stop),
         daemon=True,
     )
     update_thread.start()
+    return update_thread
 
 
 def _maintained_db_update_loop(
     project_databases_dir: Path,
     interval_seconds: int,
     app_state,
+    stop_event: threading.Event | None = None,
 ) -> None:
-    """Periodically refresh maintained databases and rebuild the UUID index cache."""
-    while True:
+    """Periodically refresh maintained databases and rebuild the UUID index cache.
+
+    Exits cleanly when ``stop_event`` is set so tests and shutdown can stop the daemon
+    without leaving a background thread performing real network calls.
+    """
+    stop = stop_event if stop_event is not None else threading.Event()
+    while not stop.is_set():
         try:
             check_and_update_maintained_databases(project_databases_dir)
             new_index = refresh_project_db_uuid_index(project_databases_dir)
@@ -422,7 +434,7 @@ def _maintained_db_update_loop(
             app_state.project_db_uuid_index.update(new_index)
         except Exception:  # noqa: BLE001 — a failed update pass must not kill the daemon
             logger.exception('Maintained database weekly update pass failed')
-        time.sleep(interval_seconds)
+        stop.wait(interval_seconds)
 
 
 def _resolve_maintained_db_update_interval() -> int:

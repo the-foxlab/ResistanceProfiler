@@ -367,20 +367,24 @@ class TestMaintainedDbUpdateThread:
         app_state = MagicMock()
         app_state.project_db_uuid_index = {}
         called = threading.Event()
+        stop_event = threading.Event()
 
         def fake_check(_: Path) -> None:
             called.set()
 
-        with (
-            patch(
-                'web.backend.main.check_and_update_maintained_databases',
-                side_effect=fake_check,
-            ),
-            patch('web.backend.main.refresh_project_db_uuid_index', return_value={'u': tmp_path / 'x.db'}),
-        ):
-            _start_maintained_db_update_thread(tmp_path, 0.01, app_state)
-            assert called.wait(timeout=2)
-        assert app_state.project_db_uuid_index == {'u': tmp_path / 'x.db'}
+        try:
+            with (
+                patch(
+                    'web.backend.main.check_and_update_maintained_databases',
+                    side_effect=fake_check,
+                ),
+                patch('web.backend.main.refresh_project_db_uuid_index', return_value={'u': tmp_path / 'x.db'}),
+            ):
+                _start_maintained_db_update_thread(tmp_path, 0.01, app_state, stop_event=stop_event)
+                assert called.wait(timeout=2)
+            assert app_state.project_db_uuid_index == {'u': tmp_path / 'x.db'}
+        finally:
+            stop_event.set()
 
     def test_interval_resolver_reads_env_and_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from web.backend.main import _resolve_maintained_db_update_interval
@@ -415,20 +419,24 @@ class TestStaleUuidIndexRefresh:
         refreshed = {'new-uuid': tmp_path / 'new.db'}
 
         refreshed_event = threading.Event()
+        stop_event = threading.Event()
 
         def fake_refresh(_: Path) -> dict[str, Path]:
             refreshed_event.set()
             return refreshed
 
-        with (
-            patch(
-                'web.backend.main.check_and_update_maintained_databases'
-            ),
-            patch('web.backend.main.refresh_project_db_uuid_index', side_effect=fake_refresh),
-        ):
-            _start_maintained_db_update_thread(tmp_path, 0.01, app_state)
-            assert refreshed_event.wait(timeout=2)
+        try:
+            with (
+                patch(
+                    'web.backend.main.check_and_update_maintained_databases'
+                ),
+                patch('web.backend.main.refresh_project_db_uuid_index', side_effect=fake_refresh),
+            ):
+                _start_maintained_db_update_thread(tmp_path, 0.01, app_state, stop_event=stop_event)
+                assert refreshed_event.wait(timeout=2)
 
-        # The same dict object, now emptied and repopulated with the refreshed index.
-        assert app_state.project_db_uuid_index is stale
-        assert app_state.project_db_uuid_index == refreshed
+            # The same dict object, now emptied and repopulated with the refreshed index.
+            assert app_state.project_db_uuid_index is stale
+            assert app_state.project_db_uuid_index == refreshed
+        finally:
+            stop_event.set()

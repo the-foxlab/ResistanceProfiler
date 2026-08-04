@@ -258,7 +258,9 @@ class TestDownloadDatabaseFiles:
         def side_effect(*args, **kwargs):  # noqa: ANN001, ANN202
             idx = call_count[0]
             call_count[0] += 1
-            return responses[idx]
+            # Clamp to last response so a stray call from a leaked background thread
+            # (e.g. the maintained-db update daemon) cannot raise IndexError.
+            return responses[min(idx, len(responses) - 1)]
 
         return side_effect
 
@@ -311,7 +313,9 @@ class TestDownloadDatabaseFiles:
         def se(*args, **kwargs):  # noqa: ANN001, ANN202
             idx = call_count[0]
             call_count[0] += 1
-            return responses[idx]
+            # Clamp to last response so a stray call from a leaked background thread
+            # cannot raise IndexError.
+            return responses[min(idx, len(responses) - 1)]
 
         with patch('urllib.request.urlopen', side_effect=se):
             result = download_database_files('hsv_daehne_jaki', tmp_path)
