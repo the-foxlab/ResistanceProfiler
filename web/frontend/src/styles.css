@@ -1437,6 +1437,15 @@ th {
   margin: 0;
 }
 
+.analyze-shell-header h2 {
+  font-size: var(--font-size-xxl);
+}
+
+.analyze-shell-header p {
+  color: var(--muted);
+  font-size: var(--font-size-md);
+}
+
 .analyze-submode-row {
   display: inline-flex;
   gap: 0.35rem;
