@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from web.backend.config import WEB_BACKEND_CONFIG
+
 
 class ProfileFastaPayload(BaseModel):
     """Payload for FASTA profiling."""
@@ -114,7 +116,10 @@ class UploadResponse(BaseModel):
 class ArtifactBundlePayload(BaseModel):
     """Artifact paths requested for bundled download."""
 
-    paths: list[str] = Field(default_factory=list)
+    paths: list[str] = Field(
+        default_factory=list,
+        max_length=WEB_BACKEND_CONFIG.defaults.artifact_bundle_max_paths,
+    )
 
 
 class SessionCleanupPayload(BaseModel):

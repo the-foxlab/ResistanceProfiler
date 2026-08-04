@@ -16,6 +16,7 @@ class WebEnvKeys:
     allowed_roots: str = 'RESPRO_WEB_ALLOWED_ROOTS'
     cors_origins: str = 'RESPRO_WEB_CORS_ORIGINS'
     upload_rate_limit: str = 'RESPRO_WEB_UPLOAD_RATE_LIMIT'
+    api_rate_limit: str = 'RESPRO_WEB_API_RATE_LIMIT'
     host: str = 'RESPRO_WEB_HOST'
     port: str = 'RESPRO_WEB_PORT'
     redis_url: str = 'REDIS_URL'
@@ -41,7 +42,9 @@ class WebDefaults:
     job_retry_intervals_seconds: tuple[int, ...]
     sweep_frequency_seconds: int
     upload_rate_limit: str
+    api_rate_limit: str
     max_batch_size: int
+    artifact_bundle_max_paths: int
     batch_queue_name: str
     cors_local_origins: tuple[str, ...]
     profile_queue_name: str
@@ -91,6 +94,7 @@ def _load_web_backend_config() -> WebBackendConfig:
         allowed_roots=str(env_payload['allowed_roots']),
         cors_origins=str(env_payload['cors_origins']),
         upload_rate_limit=str(env_payload['upload_rate_limit']),
+        api_rate_limit=str(env_payload['api_rate_limit']),
         max_batch_size=str(env_payload['max_batch_size']),
         host=str(env_payload['host']),
         port=str(env_payload['port']),
@@ -115,7 +119,9 @@ def _load_web_backend_config() -> WebBackendConfig:
         ),
         sweep_frequency_seconds=int(defaults_payload['sweep_frequency_seconds']),
         upload_rate_limit=str(defaults_payload['upload_rate_limit']),
+        api_rate_limit=str(defaults_payload['api_rate_limit']),
         max_batch_size=int(defaults_payload['max_batch_size']),
+        artifact_bundle_max_paths=int(defaults_payload['artifact_bundle_max_paths']),
         batch_queue_name=str(defaults_payload['batch_queue_name']),
         cors_local_origins=tuple(str(item) for item in defaults_payload['cors_local_origins']),
         profile_queue_name=str(defaults_payload['profile_queue_name']),

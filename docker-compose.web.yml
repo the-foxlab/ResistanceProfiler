@@ -1,7 +1,25 @@
+# =============================================================================
+# ResistanceProfiler — web app stack (reference compose file)
+# =============================================================================
+# This file is the canonical reference. The active settings below are the
+# minimal zero-config set: `docker compose -f docker-compose.web.yml up --build`
+# works with no edits and serves the app on http://127.0.0.1:8000.
+#
+# Every optional and security-relevant setting is present but `#`-commented,
+# grouped by category. Uncomment and edit the ones you need for public hosting.
+# See docs/docs/webapp.md → "Production hosting checklist" before going live.
+# =============================================================================
+
 services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # ── Redis authentication  ──────────────────────────────────────
+    # Uncomment to require a password. Generate a strong secret, e.g.:
+    #   python -c "import secrets; print(secrets.token_urlsafe(32))"
+    # Then set the SAME password in REDIS_URL below (both respro-web and
+    # respro-worker). Unauthenticated connections are then rejected.
+    # command: ["redis-server", "--requirepass", "replace-with-a-strong-secret"]
 
   respro-web:
     build:
@@ -12,15 +30,38 @@ services:
       - '0.0.0.0:8000:8000'
     volumes:
       - ./data:/data:rw
+    #env_file:
+    #  - .env
     environment:
+      # ── Server and binding ─────────────────────────────────────────────────
       - RESPRO_WEB_HOST=0.0.0.0
       - RESPRO_WEB_PORT=8000
-      - RESPRO_WEB_MAINTAINED_BOOTSTRAP=true
+      # ── Data and filesystem ────────────────────────────────────────────────
+      # - RESPRO_WEB_DATA_DIR=/data
+      # - RESPRO_WEB_ALLOWED_ROOTS=/data/project_databases,/data/uploads,/data/results
+      # - RESPRO_WEB_RESULT_TTL=86400
+      # ── Authentication and security (REQUIRED for public hosting) ──────────
+      # - RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
+      # - RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
+      # - RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
+      # ── Rate limiting and batch sizes ──────────────────────────────────────
+      # - RESPRO_WEB_UPLOAD_RATE_LIMIT=25/minute
+      # - RESPRO_WEB_API_RATE_LIMIT=120/minute
+      # - RESPRO_WEB_MAX_BATCH_SIZE=25
+      # ── Redis and job queue (set identically on respro-worker) ─────────────
       - REDIS_URL=redis://redis:6379/0
-      # Optional legal notice / imprint. Either an absolute URL to an already-hosted
-      # imprint page (footer links directly to it)…
+      # With Redis requirepass set, use: redis://:<password>@redis:6379/0
+      # - REDIS_URL=redis://:replace-with-a-strong-secret@redis:6379/0
+      # - RESPRO_WEB_JOB_TIMEOUT=3600
+      # - RESPRO_WEB_JOB_RETRY_MAX=0
+      # - RESPRO_WEB_JOB_RETRY_INTERVALS=30
+      # ── Maintained databases ───────────────────────────────────────────────
+      - RESPRO_WEB_MAINTAINED_BOOTSTRAP=true
+      # - RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS=604800
+      # ── Optional legal notice / imprint ────────────────────────────────────
+      # Either an absolute URL to an already-hosted imprint page:
       # - RESPRO_WEB_IMPRINT=https://example.org/impressum
-      # …or an absolute path to a local HTML file served at /legal (mount it below):
+      # …or an absolute path to a local HTML file served at /legal:
       # - RESPRO_WEB_IMPRINT=/data/imprint.html
     depends_on:
       - redis
@@ -33,6 +74,12 @@ services:
       # Only needed for path-mode imprint (self-hosted HTML):
       # - ./imprint.html:/data/imprint.html:ro
     environment:
+      # ── Redis and job queue (must match respro-web) ────────────────────────
       - REDIS_URL=redis://redis:6379/0
+      # With Redis requirepass set, use: redis://:<password>@redis:6379/0
+      # - REDIS_URL=redis://:replace-with-a-strong-secret@redis:6379/0
+      # - RESPRO_WEB_JOB_TIMEOUT=3600
+      # - RESPRO_WEB_JOB_RETRY_MAX=0
+      # - RESPRO_WEB_JOB_RETRY_INTERVALS=30
     depends_on:
       - redis

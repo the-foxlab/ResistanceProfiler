@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from rq import Queue
 from rq.job import Job
+from slowapi import Limiter
 
 from web.backend.models import JobStatusResponse
 from web.backend.queue import get_queue
@@ -19,16 +20,21 @@ def build_jobs_router(
     user_facing_error_message: Callable[[str | None], str],
     job_class: type[Job],
     no_such_job_error: type[Exception],
+    limiter: Limiter,
+    api_rate_limit: str,
 ) -> APIRouter:
     """Build job inspection and cancellation routes."""
     router = APIRouter()
 
     @router.get('/api/jobs/{job_id}', response_model=JobStatusResponse)
+    @limiter.limit(api_rate_limit)
     def job_status(
+        request: Request,
         job_id: str,
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> JobStatusResponse:
+        del request
         try:
             job = job_class.fetch(job_id, connection=queue.connection)
         except no_such_job_error:
@@ -43,11 +49,14 @@ def build_jobs_router(
         return JobStatusResponse(job_id=job_id, status=status, result=result, error=error)
 
     @router.delete('/api/jobs/{job_id}', status_code=204)
+    @limiter.limit(api_rate_limit)
     def cancel_job(
+        request: Request,
         job_id: str,
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> Response:
+        del request
         try:
             job = job_class.fetch(job_id, connection=queue.connection)
         except no_such_job_error:

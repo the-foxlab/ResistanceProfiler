@@ -239,6 +239,34 @@ class TestFetchGenbankRecords:
         assert len(paths) == 2
         assert {p.name for p in paths} == {'X04770.gb', 'X04771.gb'}
 
+    def test_rejects_path_traversal_accession(self, tmp_path: Path) -> None:
+        """A traversal-style accession must be rejected, not written outside dest_dir (SEC-006)."""
+        escape_dir = tmp_path / 'escape'
+        escape_dir.mkdir()
+        dest_dir = tmp_path / 'genbank'
+        dest_dir.mkdir()
+        with patch('urllib.request.urlopen', return_value=_bytes_mock(_GENBANK_CONTENT)):
+            with pytest.raises(ValueError, match='accession'):
+                _fetch_genbank_records(['../../etc/x'], dest_dir)
+        # Nothing was written outside dest_dir.
+        assert not (escape_dir / 'x.gb').exists()
+        assert not (tmp_path / 'x.gb').exists()
+
+    def test_rejects_accession_with_path_separator(self, tmp_path: Path) -> None:
+        """Accessions containing path separators must be rejected (SEC-006)."""
+        dest_dir = tmp_path / 'genbank'
+        dest_dir.mkdir()
+        with patch('urllib.request.urlopen', return_value=_bytes_mock(_GENBANK_CONTENT)):
+            with pytest.raises(ValueError, match='accession'):
+                _fetch_genbank_records(['sub/dir/X04770'], dest_dir)
+
+    def test_accepts_valid_accession_with_version_suffix(self, tmp_path: Path) -> None:
+        """A valid accession with a version suffix (e.g. X04770.1) is accepted (SEC-006 boundary)."""
+        with patch('urllib.request.urlopen', return_value=_bytes_mock(_GENBANK_CONTENT)):
+            paths = _fetch_genbank_records(['X04770.1'], tmp_path)
+        assert len(paths) == 1
+        assert paths[0].name == 'X04770.1.gb'
+
 
 # ── download_database_files ───────────────────────────────────────────────────
 

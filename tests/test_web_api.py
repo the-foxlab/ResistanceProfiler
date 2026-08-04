@@ -516,10 +516,11 @@ class TestWebApi:
         result = payload['result']
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
         assert result['database_id'] == default_db.name
-        assert result['database_path'] == str(default_db.resolve())
+        assert 'database_path' not in result
         assert result['sample_name'] == 'web-fasta'
         assert result['run_id'] is None
-        assert result['input_path'] == str(web_sample_ref_fasta.resolve())
+        assert 'input_path' not in result
+        assert 'reference_fasta_path' not in result
         assert Path(result['report_html_path']).name.startswith('original-upload.')
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
@@ -577,9 +578,9 @@ class TestWebApi:
         assert result['sample_name'] == 'web-vcf'
         assert result['run_id'] is None
         assert result['database_id'] == default_db.name
-        assert result['database_path'] == str(default_db.resolve())
-        assert result['input_path'] == str(web_sample_vcf.resolve())
-        assert result['reference_fasta_path'] == str(web_sample_ref_fasta.resolve())
+        assert 'database_path' not in result
+        assert 'input_path' not in result
+        assert 'reference_fasta_path' not in result
         assert Path(result['report_html_path']).name.startswith('original-upload.')
         assert result['report_html_path'].endswith('.report.html')
         assert result['report_json_path'].endswith('.results.json')
@@ -835,9 +836,9 @@ class TestWebApi:
         assert payload['status'] == 'succeeded'
         result = payload['result']
         assert result['database_id'] == alternate_db.name
-        assert result['database_path'] == str(alternate_db.resolve())
-        assert result['input_path'] == str(web_sample_vcf.resolve())
-        assert result['reference_fasta_path'] == str(web_sample_ref_fasta.resolve())
+        assert 'database_path' not in result
+        assert 'input_path' not in result
+        assert 'reference_fasta_path' not in result
 
     def test_profile_vcf_reports_reference_mismatch_clearly(
         self,
@@ -1639,6 +1640,50 @@ class TestWebApi:
         assert not bam_path.exists()
         assert not bam_index_path.exists()
 
+    def test_session_cleanup_accepts_body_token_for_sendbeacon(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """Body token is intentionally retained: sendBeacon cannot set headers (SEC-007)."""
+        upload_response = client.post(
+            '/api/upload/fasta',
+            files={'file': ('sample.fasta', b'>seq\nATCG\n', 'text/plain')},
+            headers=auth_headers,
+        )
+        uploaded_path = Path(upload_response.json()['file_path'])
+        assert uploaded_path.exists()
+
+        # No Authorization header — token sent in the body, as sendBeacon does.
+        cleanup_response = client.post(
+            '/api/session/cleanup',
+            json={
+                'upload_paths': [str(uploaded_path)],
+                'report_paths': [],
+                'token': startup_config.api_token,
+            },
+        )
+        assert cleanup_response.status_code == 200
+        assert cleanup_response.json()['deleted_count'] == 1
+        assert not uploaded_path.exists()
+
+    def test_session_cleanup_rejects_wrong_body_token(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """A wrong body token must be rejected even if sendBeacon sends it (SEC-007)."""
+        cleanup_response = client.post(
+            '/api/session/cleanup',
+            json={
+                'upload_paths': [],
+                'report_paths': [],
+                'token': 'wrong-token',
+            },
+        )
+        assert cleanup_response.status_code == 401
+
 
 # ---------------------------------------------------------------------------
 # Batch profiling endpoint tests
@@ -2383,4 +2428,64 @@ class TestExtractDisplayAlgorithms:
 
         result = _extract_display_algorithms([])
         assert 'ic50_thresholds' not in result
+
+
+class TestApiRouteRateLimits:
+    """SEC-004: non-upload API routes must be rate-limited to resist brute-force/scraping."""
+
+    def test_job_status_route_returns_429_when_hammered(
+        self,
+        startup_config: StartupConfig,
+        sync_queue: Queue,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Hammering GET /api/jobs/{id} beyond the API rate limit returns 429."""
+        monkeypatch.setenv('RESPRO_WEB_API_RATE_LIMIT', '2/minute')
+        app = create_app(startup_config=startup_config)
+        app.dependency_overrides[get_queue] = lambda: sync_queue
+        app.dependency_overrides[get_batch_queue] = lambda: sync_queue
+        client = TestClient(app)
+        headers = {'Authorization': f'Bearer {startup_config.api_token}'}
+
+        statuses = [
+            client.get('/api/jobs/nonexistent-id', headers=headers).status_code
+            for _ in range(5)
+        ]
+
+        # First requests within the limit return 404 (job not found), not 429.
+        assert statuses[0] == 404
+        # At least one request beyond the limit must be throttled to 429.
+        assert 429 in statuses
+        throttled = [s for s in statuses if s == 429]
+        assert throttled, 'Expected at least one 429 when exceeding the API rate limit'
+
+    def test_artifact_bundle_rejects_more_than_50_paths(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """ArtifactBundlePayload.paths capped at 50 → 422 for 51 paths (SEC-004)."""
+        paths = [f'/tmp/results/sample{i}.report.html' for i in range(51)]
+        response = client.post(
+            '/api/artifact-bundle',
+            json={'paths': paths},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_artifact_bundle_accepts_50_paths(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """ArtifactBundlePayload.paths cap of 50 accepts exactly 50 paths (boundary)."""
+        paths = [f'/tmp/results/sample{i}.report.html' for i in range(50)]
+        response = client.post(
+            '/api/artifact-bundle',
+            json={'paths': paths},
+            headers=auth_headers,
+        )
+        # 50 paths is within the cap; it should not be a 422 validation error.
+        # (It may be 400 because paths are outside results_dir, but never 422.)
+        assert response.status_code != 422
 

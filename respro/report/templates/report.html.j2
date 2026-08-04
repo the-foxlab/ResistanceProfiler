@@ -6,7 +6,7 @@
   <title>{{ context.title }}</title>
   <link rel="icon" type="image/svg+xml" href="{{ context.favicon }}"/>
   <style>
-    {{ css }}
+    {{ css | safe }}
   </style>
 </head>
 <body>
@@ -925,7 +925,7 @@
   </div>
 
   <script>
-    {{ js }}
+    {{ js | safe }}
   </script>
 </body>
 </html>

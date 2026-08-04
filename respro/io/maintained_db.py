@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -20,6 +21,26 @@ from respro.config.cli_settings import CLI_CONFIG
 logger = logging.getLogger(__name__)
 
 _GENBANK_TIMEOUT = 30
+
+# NCBI nucleotide accession: letters/digits/underscore, optional ``.version`` suffix.
+# Rejects path separators, ``..``, whitespace, and other characters that could escape
+# ``dest_dir`` when interpolated into ``f'{accession}.gb'`` (SEC-006).
+_ACCESSION_RE = re.compile(r'^[A-Za-z0-9_]+(\.\d+)?$')
+
+
+def _validate_accession(accession: str) -> None:
+    """Reject accessions that could escape ``dest_dir`` via path traversal (SEC-006).
+
+    NCBI nucleotide accessions are alphanumeric (with underscores) optionally followed
+    by a ``.<version>`` suffix. Anything containing path separators, ``..``, or other
+    filesystem-significant characters is rejected before it is used to build a path.
+    """
+    if not accession or not _ACCESSION_RE.match(accession):
+        raise ValueError(
+            f'Invalid GenBank accession {accession!r}: accessions must be alphanumeric '
+            '(underscores allowed) with an optional .version suffix, and must not '
+            'contain path separators or traversal sequences.'
+        )
 
 
 def list_maintained_databases() -> list[str]:
@@ -275,6 +296,7 @@ def _fetch_genbank_records(accessions: list[str], dest_dir: Path) -> list[Path]:
     """
     paths: list[Path] = []
     for accession in accessions:
+        _validate_accession(accession)
         url = CLI_CONFIG.urls.ncbi_nuccore_efetch.format(accession=urllib.request.quote(accession))
         dest = dest_dir / f'{accession}.gb'
         try:
