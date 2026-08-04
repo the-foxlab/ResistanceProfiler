@@ -9,7 +9,7 @@ Pathogen-agnostic antiviral resistance profiling from consensus sequences or VCF
 
 One harmonized report that classifies mutations and assists diagnostic interpretation against curated project databases. Comes as a CLI or a WebApp. Everything is open-source. Contributions are welcome!
 
-### [Dokumentation](https://the-foxlab.github.io/ResistanceProfiler/cli-reference/) · [WebApp (live)](resistanceprofiler.uniklinik-freiburg.de) · [Installation](https://the-foxlab.github.io/ResistanceProfiler/install/) · [Databases](https://github.com/the-foxlab/respro-databases)
+### [Dokumentation](https://the-foxlab.github.io/ResistanceProfiler/cli-reference/) · [WebApp (live)](https://resistanceprofiler.uniklinik-freiburg.de) · [Installation](https://the-foxlab.github.io/ResistanceProfiler/install/) · [Databases](https://github.com/the-foxlab/respro-databases)
 
 ## Highlights
 
