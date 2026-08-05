@@ -89,6 +89,7 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 | Variable | Default | Description |
 |---|---|---|
 | `RESPRO_WEB_UPLOAD_RATE_LIMIT` | `25/minute` | slowapi rate-limit string for upload endpoints. Applied per client identity (token hash, or client IP when no token is configured). |
+| `RESPRO_WEB_API_RATE_LIMIT` | `120/minute` | slowapi rate-limit string for non-upload API routes (job status, profile, regenerate, artifact, catalog, session cleanup). Applied per client identity. Tighten for public hosting to resist brute-force/scraping. |
 | `RESPRO_WEB_MAX_BATCH_SIZE` | `25` | Maximum number of samples accepted in a single batch profiling request. Must be `> 0`. |
 
 In batch VCF mode, an optional BAM can be attached to each sample for per-sample coverage-gap analysis. BAMs are auto-paired to VCFs by filename stem on multi-select upload (e.g. `sample1.vcf` ↔ `sample1.bam`), and any pairing can be overridden per row. A sample without a BAM skips coverage analysis, matching single-VCF behaviour without `--bam`.
@@ -355,3 +356,61 @@ docker compose -f docker-compose.web.yml up -d
 ```
 
 7. **Validate end-to-end from another client on the same network.**
+
+## Production hosting checklist
+
+Before exposing the app to the internet, work through every item below. The
+annotated `docker-compose.web.yml` ships with all of these settings present but
+`#`-commented — uncomment and edit the ones that apply to your deployment.
+
+### Reverse proxy and TLS
+
+- [ ] The app is reachable **only** through a reverse proxy (Caddy/nginx/Traefik).
+      Bind `respro-web` to `127.0.0.1:8000` (or an internal interface) so clients
+      cannot bypass the proxy.
+- [ ] TLS is terminated at the proxy; HTTP redirects to HTTPS.
+- [ ] `RESPRO_WEB_TRUSTED_PROXIES` is set to the proxy's IP/CIDR so the backend
+      honours `X-Forwarded-*` headers only from the proxy.
+- [ ] `client_max_body_size` (nginx) or equivalent is raised for larger uploads.
+
+### Authentication
+
+- [ ] `RESPRO_WEB_API_TOKEN` is set to a strong random secret for the raw API.
+      The public UI is protected by the reverse proxy (e.g. HTTP basic auth or an
+      SSO gate); the token guards the raw API against unauthenticated scraping.
+- [ ] `RESPRO_WEB_CORS_ORIGINS` lists your exact frontend origin(s), e.g.
+      `https://respro.example.com`. This is **required** when the token is set.
+
+### Redis
+
+- [ ] Redis requires a password. Uncomment the `redis` `command:` line in
+      `docker-compose.web.yml` and set `--requirepass` to a strong secret.
+- [ ] `REDIS_URL` on **both** `respro-web` and `respro-worker` includes the
+      password: `redis://:<password>@redis:6379/0`.
+- [ ] Redis is not exposed on a public port (the compose file does not publish it).
+
+### Container hardening
+
+- [ ] The web and worker containers run as a **non-root** user. `Dockerfile.web`
+      creates a dedicated `respro` user (UID/GID 1001). The container still starts
+      as root via `docker/entrypoint.web.sh`, which `chown`s the bind-mounted
+      `/data` volume for the current host directory, then drops privileges to
+      `respro` via `gosu` before the application ever runs — a build-time `chown`
+      alone is not sufficient because a bind mount replaces the image's `/data`
+      directory with the host directory's own ownership at container start.
+- [ ] If you pin a different UID/GID, update the `Dockerfile.web` `useradd`/`groupadd`
+      lines; the entrypoint's `chown` picks up the new UID/GID automatically.
+
+### Rate limiting
+
+- [ ] `RESPRO_WEB_UPLOAD_RATE_LIMIT` and `RESPRO_WEB_API_RATE_LIMIT` are tuned for
+      your load. Defaults (`25/minute` uploads, `120/minute` other API routes) suit
+      a small team; tighten for larger or public deployments.
+- [ ] `RESPRO_WEB_MAX_BATCH_SIZE` matches your expected batch sizes.
+
+### Legal and operational
+
+- [ ] `RESPRO_WEB_IMPRINT` is set if your jurisdiction requires a legal notice.
+- [ ] `RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS` is reviewed (default 7 days).
+- [ ] Result TTL (`RESPRO_WEB_RESULT_TTL`) matches your data-retention policy.
+- [ ] Logs are shipped to a central collector and do not contain secrets.

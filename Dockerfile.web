@@ -54,6 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 	libffi8 \
 	shared-mime-info \
 	fonts-dejavu-core \
+	gosu \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY --from=python-build /opt/venv /opt/venv
@@ -61,5 +62,21 @@ COPY --from=python-build /app/web/__init__.py /app/web/__init__.py
 COPY --from=python-build /app/web/backend /app/web/backend
 COPY --from=frontend-build /app/web/frontend/dist /app/web/frontend/dist
 
+# ── Run as a non-root user ─────────────────────────────────────────
+# Create a dedicated unprivileged user. /app is owned by it at build time since
+# it is baked into the image, but /data is a host bind mount at runtime and is
+# NOT affected by this chown (a bind mount replaces the directory entirely, so
+# whatever ownership it has on the host is what the container sees). The
+# entrypoint below runs as root, fixes /data ownership for the current mount,
+# then drops to this user via gosu before the application ever executes.
+RUN groupadd --system --gid 1001 respro \
+    && useradd --system --uid 1001 --gid respro --home-dir /app --no-create-home respro \
+    && mkdir -p /data \
+    && chown -R respro:respro /app /data
+
+COPY docker/entrypoint.web.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 EXPOSE 8000
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "-m", "web.backend.main"]

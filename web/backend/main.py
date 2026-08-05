@@ -117,6 +117,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     app.add_exception_handler(RateLimitExceeded, _handle_rate_limit_exceeded)
 
     upload_rate_limit = _resolve_upload_rate_limit()
+    api_rate_limit = _resolve_api_rate_limit()
     sample_limit_per_minute = _resolve_max_batch_size()
 
     app.add_middleware(
@@ -152,6 +153,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         build_catalog_router(
             project_databases_dir=config.project_databases_dir,
             require_api_token=require_api_token,
+            limiter=limiter,
+            api_rate_limit=api_rate_limit,
         )
     )
     app.include_router(
@@ -162,6 +165,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             consume_sample_quota=_consume_sample_quota,
             is_path_within_allowed_roots=is_path_within_allowed_roots,
             resolve_project_db_path=resolve_project_db_path,
+            limiter=limiter,
+            api_rate_limit=api_rate_limit,
         )
     )
     app.include_router(
@@ -171,6 +176,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             user_facing_error_message=_user_facing_error_message,
             job_class=Job,
             no_such_job_error=NoSuchJobError,
+            limiter=limiter,
+            api_rate_limit=api_rate_limit,
         )
     )
     app.include_router(
@@ -180,6 +187,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             require_api_token=require_api_token,
             is_path_within_allowed_roots=is_path_within_allowed_roots,
             is_allowed_artifact_path=_is_allowed_artifact_path,
+            limiter=limiter,
+            api_rate_limit=api_rate_limit,
         )
     )
     app.include_router(
@@ -187,6 +196,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             uploads_dir=config.uploads_dir,
             results_dir=config.results_dir,
             require_api_token=require_api_token,
+            limiter=limiter,
+            api_rate_limit=api_rate_limit,
         )
     )
     app.include_router(
@@ -196,6 +207,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             user_facing_error_message=_user_facing_error_message,
             is_path_within_allowed_roots=is_path_within_allowed_roots,
             resolve_regenerate_project_db_path=resolve_regenerate_project_db_path,
+            limiter=limiter,
+            api_rate_limit=api_rate_limit,
         )
     )
 
@@ -652,6 +665,18 @@ def _resolve_upload_rate_limit() -> str:
     """Return the configured upload rate limit string."""
     default = WEB_BACKEND_CONFIG.defaults.upload_rate_limit
     return os.getenv(WEB_ENV.upload_rate_limit, default).strip() or default
+
+
+def _resolve_api_rate_limit() -> str:
+    """Return the configured non-upload API rate limit string (SEC-004).
+
+    Applies to job-status, profile, regenerate, artifact, and session routes to
+    resist brute-force/scraping. Defaults to a permissive 120/minute so the
+    zero-config local deployment is unaffected; operators can tighten it via
+    ``RESPRO_WEB_API_RATE_LIMIT``.
+    """
+    default = WEB_BACKEND_CONFIG.defaults.api_rate_limit
+    return os.getenv(WEB_ENV.api_rate_limit, default).strip() or default
 
 
 def _resolve_max_batch_size() -> int:

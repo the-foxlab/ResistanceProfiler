@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from fastapi import APIRouter, Header, HTTPException, Request
+from slowapi import Limiter
 
 from web.backend.models import SessionCleanupPayload, SessionCleanupResponse
 from web.backend.services.upload import cleanup_session_files
@@ -17,14 +18,17 @@ def build_session_router(
     uploads_dir: Path,
     results_dir: Path,
     require_api_token: Callable[..., None],
+    limiter: Limiter,
+    api_rate_limit: str,
 ) -> APIRouter:
     """Build session cleanup routes."""
     router = APIRouter()
 
     @router.post('/api/session/cleanup', response_model=SessionCleanupResponse)
+    @limiter.limit(api_rate_limit)
     async def cleanup_session_uploads(
-        payload: SessionCleanupPayload,
         request: Request,
+        payload: SessionCleanupPayload,
         authorization: str | None = Header(default=None),
     ) -> SessionCleanupResponse:
         # Authorize via header OR body token so sendBeacon (which cannot

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from rq import Queue
+from slowapi import Limiter
 
 from respro.db.results import load_run_from_json
 from web.backend.jobs import run_regenerate_json
@@ -24,11 +25,14 @@ def build_regenerate_router(
     user_facing_error_message: Callable[[str | None], str],
     is_path_within_allowed_roots: Callable[[Path, tuple[Path, ...]], bool],
     resolve_regenerate_project_db_path,
+    limiter: Limiter,
+    api_rate_limit: str,
 ) -> APIRouter:
     """Build regenerate-json route."""
     router = APIRouter()
 
     @router.post('/api/regenerate/json', response_model=JobSubmitResponse)
+    @limiter.limit(api_rate_limit)
     def regenerate_json_route(
         payload: RegenerateJsonPayload,
         request: Request,

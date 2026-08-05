@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from rq import Queue
+from slowapi import Limiter
 
 from web.backend.config import WEB_BACKEND_CONFIG
 from web.backend.jobs import run_profile_fasta, run_profile_vcf
@@ -35,11 +36,14 @@ def build_profile_router(
     consume_sample_quota: Callable[[Request, int, int], None],
     is_path_within_allowed_roots: Callable[[Path, tuple[Path, ...]], bool],
     resolve_project_db_path,
+    limiter: Limiter,
+    api_rate_limit: str,
 ) -> APIRouter:
     """Build profile submission routes."""
     router = APIRouter()
 
     @router.post('/api/profile/fasta', response_model=JobSubmitResponse)
+    @limiter.limit(api_rate_limit)
     def profile_fasta_route(
         request: Request,
         payload: ProfileFastaPayload,
@@ -73,6 +77,7 @@ def build_profile_router(
         return JobSubmitResponse(job_id=job.id)
 
     @router.post('/api/profile/vcf', response_model=JobSubmitResponse)
+    @limiter.limit(api_rate_limit)
     def profile_vcf_route(
         request: Request,
         payload: ProfileVcfPayload,
@@ -123,6 +128,7 @@ def build_profile_router(
         return JobSubmitResponse(job_id=job.id)
 
     @router.post('/api/profile/batch/vcf', response_model=BatchSubmitResponse)
+    @limiter.limit(api_rate_limit)
     def profile_batch_vcf_route(
         request: Request,
         payload: BatchProfileVcfPayload,
@@ -205,6 +211,7 @@ def build_profile_router(
         return BatchSubmitResponse(samples=samples, total=len(samples))
 
     @router.post('/api/profile/batch/fasta', response_model=BatchSubmitResponse)
+    @limiter.limit(api_rate_limit)
     def profile_batch_fasta_route(
         request: Request,
         payload: BatchProfileFastaPayload,

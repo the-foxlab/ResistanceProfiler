@@ -318,7 +318,13 @@ def render_html(
     css_text = (Path(__file__).parent / 'static' / 'report.css').read_text(encoding='utf-8')
     js_text = (Path(__file__).parent / 'static' / 'report.js').read_text(encoding='utf-8')
 
-    env = Environment(loader=BaseLoader())
+    # autoescape=True ensures every {{ variable }} is HTML-escaped by default. The
+    # | safe blocks below are all trusted server-bundled assets or pre-escaped markup:
+    #   - css/js are static files read from respro/report/static (not user data)
+    #   - context.summary.narrative and r.alignment_html are built with escape()
+    # User-controlled values (context.title, header.*, sample/filename, drug/mutation
+    # names) flow through plain {{ }} and are autoescaped, closing the stored-XSS vector.
+    env = Environment(loader=BaseLoader(), autoescape=True)
     template = env.from_string(template_text)
 
     return template.render(

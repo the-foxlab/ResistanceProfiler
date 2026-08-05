@@ -33,6 +33,8 @@ data/
 reports/
 example/
 sample.report.html
+bioconda/
+test.html
 .env
 .vscode/
 docker-compose.web_2.yml
@@ -42,4 +44,4 @@ site/
 graphify-out
 .coverage
 coverage.xml
-bioconda/
+TODO.md

@@ -4012,6 +4012,117 @@ class TestMatPeptideDisplayName:
 class TestReportHardening:
     """Critical report quality and data integrity tests."""
 
+    def test_user_controlled_sample_name_is_html_escaped_in_report(self) -> None:
+        """A sample name containing HTML must be escaped, not rendered as live markup.
+
+        Regression guard for stored XSS via the report title/header (SEC-002): the
+        Jinja2 environment must autoescape so ``{{ context.title }}`` and the header
+        title emit entity-encoded text rather than raw ``<script>``.
+        """
+        malicious_sample = '<script>alert(1)</script>'
+        result = make_profiling_result(
+            project_name='Test',
+            reference_name='ref',
+            reference_length_nt=1000,
+            sample_name=malicious_sample,
+            vcf_name='safe.vcf',
+            total_variants=0,
+            variants_in_cds=0,
+            resistance_hits=0,
+            annotations=[],
+        )
+
+        html = render_html(result, similarity_high=1, similarity_moderate=0)
+
+        assert '<script>alert(1)</script>' not in html
+        assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html
+
+    def test_user_controlled_vcf_name_is_html_escaped_in_report(self) -> None:
+        """The vcf filename flows into the header meta and must be escaped too."""
+        malicious_vcf = '"><img src=x onerror=alert(1)>'
+        result = make_profiling_result(
+            project_name='Test',
+            reference_name='ref',
+            reference_length_nt=1000,
+            sample_name='safe',
+            vcf_name=malicious_vcf,
+            total_variants=0,
+            variants_in_cds=0,
+            resistance_hits=0,
+            annotations=[],
+        )
+
+        html = render_html(result, similarity_high=1, similarity_moderate=0)
+
+        assert '<img src=x onerror=alert(1)>' not in html
+        assert '&lt;img src=x onerror=alert(1)&gt;' in html
+
+    def test_pdf_template_env_escapes_user_controlled_title(self) -> None:
+        """The PDF export environment must autoescape the title (SEC-002 PDF vector).
+
+        Builds a real report context (shared by HTML and PDF exports) with a malicious
+        sample name, renders the actual PDF template, and asserts the script tag is
+        entity-encoded rather than emitted as live markup.
+        """
+        from jinja2 import BaseLoader, Environment
+
+        from respro.report.html import build_report_context
+        from respro.report.non_html_exports import _load_pdf_template_text
+
+        malicious = '<script>alert(1)</script>'
+        result = make_profiling_result(
+            project_name='Test',
+            reference_name='ref',
+            reference_length_nt=1000,
+            sample_name=malicious,
+            vcf_name='safe.vcf',
+            total_variants=0,
+            variants_in_cds=0,
+            resistance_hits=0,
+            annotations=[],
+        )
+        report_context = build_report_context(result, similarity_high=1, similarity_moderate=0)
+
+        env = Environment(loader=BaseLoader(), autoescape=True)
+        template = env.from_string(_load_pdf_template_text())
+        rendered = template.render(context=report_context, print_css='')
+
+        assert '<script>alert(1)</script>' not in rendered
+        assert '&lt;script&gt;alert(1)&lt;/script&gt;' in rendered
+
+    def test_bundled_css_and_js_rendered_unescaped_under_autoescape(self) -> None:
+        """The trusted bundled CSS and JS must stay raw so the report still works.
+
+        Regression guard for SEC-002: enabling autoescape must not entity-encode the
+        server-bundled static assets (``{{ css | safe }}`` / ``{{ js | safe }}``),
+        or the report loses all styling and interactivity.
+        """
+        result = _make_result()
+        html = render_html(result, similarity_high=1, similarity_moderate=0)
+
+        # A CSS rule and a JS statement must appear verbatim, not entity-encoded.
+        assert '&lt;style&gt;' not in html
+        assert 'color:' in html or '.report-container' in html
+        assert 'function' in html or 'const ' in html or 'document.' in html
+        # The CSS/JS must not have been double-escaped into visible text.
+        assert '&amp;#10003;' not in html
+
+    def test_pdf_bundled_css_rendered_unescaped_under_autoescape(self) -> None:
+        """The trusted bundled PDF CSS must stay raw under autoescape (SEC-002)."""
+        from jinja2 import BaseLoader, Environment
+
+        from respro.report.html import build_report_context
+        from respro.report.non_html_exports import _load_pdf_template_text
+
+        result = _make_result()
+        report_context = build_report_context(result, similarity_high=1, similarity_moderate=0)
+        env = Environment(loader=BaseLoader(), autoescape=True)
+        template = env.from_string(_load_pdf_template_text())
+        rendered = template.render(context=report_context, print_css='.report-container { color: red; }')
+
+        assert '.report-container { color: red; }' in rendered
+        assert '&lt;style&gt;' not in rendered
+
     def test_html_report_structure_completeness(self) -> None:
         result = _make_result()
         html = render_html(result, similarity_high=1, similarity_moderate=0)

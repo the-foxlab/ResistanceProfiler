@@ -284,7 +284,9 @@ def write_pdf(
         similarity_high=similarity_high,
         similarity_moderate=similarity_moderate,
     )
-    env = Environment(loader=BaseLoader())
+    # autoescape=True: PDF HTML is also user-facing output built from user-controlled
+    # sample/filename values; the | safe block (context.summary.narrative) already escapes.
+    env = Environment(loader=BaseLoader(), autoescape=True)
     template = env.from_string(_load_pdf_template_text())
 
     pdf_html = template.render(

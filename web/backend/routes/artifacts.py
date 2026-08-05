@@ -9,8 +9,9 @@ import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
+from slowapi import Limiter
 
 from web.backend.models import ArtifactBundlePayload, ComparePayload, CompareResponse
 from web.backend.services.compare import build_comparison_matrix
@@ -27,15 +28,20 @@ def build_artifacts_router(
     require_api_token: Callable[..., None],
     is_path_within_allowed_roots: Callable[[Path, tuple[Path, ...]], bool],
     is_allowed_artifact_path: Callable[[Path], bool],
+    limiter: Limiter,
+    api_rate_limit: str,
 ) -> APIRouter:
     """Build artifact download and branding routes."""
     router = APIRouter()
 
     @router.get('/api/report')
+    @limiter.limit(api_rate_limit)
     def open_report(
+        request: Request,
         path: str = Query(...),
         _auth: None = Depends(require_api_token),
     ) -> FileResponse:
+        del request
         report_path = Path(path).expanduser().resolve()
         if not is_path_within_allowed_roots(report_path, (results_dir,)):
             raise HTTPException(status_code=400, detail='Report path is outside allowed output directory.')
@@ -46,10 +52,13 @@ def build_artifacts_router(
         return FileResponse(str(report_path), media_type='text/html')
 
     @router.get('/api/artifact')
+    @limiter.limit(api_rate_limit)
     def download_artifact(
+        request: Request,
         path: str = Query(...),
         _auth: None = Depends(require_api_token),
     ) -> FileResponse:
+        del request
         artifact_path = Path(path).expanduser().resolve()
         if not is_path_within_allowed_roots(artifact_path, (results_dir,)):
             raise HTTPException(status_code=400, detail='Artifact path is outside allowed results directory.')
@@ -69,10 +78,13 @@ def build_artifacts_router(
         )
 
     @router.post('/api/artifact-bundle')
+    @limiter.limit(api_rate_limit)
     def download_artifact_bundle(
+        request: Request,
         payload: ArtifactBundlePayload,
         _auth: None = Depends(require_api_token),
     ) -> Response:
+        del request
         if not payload.paths:
             raise HTTPException(status_code=400, detail='At least one artifact path is required.')
 
@@ -103,10 +115,13 @@ def build_artifacts_router(
         return FileResponse(str(favicon_path), media_type='image/svg+xml')
 
     @router.post('/api/compare')
+    @limiter.limit(api_rate_limit)
     def compare_samples(
+        request: Request,
         payload: ComparePayload,
         _auth: None = Depends(require_api_token),
     ) -> CompareResponse:
+        del request
         if not payload.paths:
             raise HTTPException(status_code=400, detail='At least one result path is required.')
 
