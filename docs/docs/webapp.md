@@ -56,6 +56,63 @@ The backend creates and uses these folders inside the mounted data root:
 
 If `RESPRO_WEB_MAINTAINED_BOOTSTRAP=true`, missing maintained databases are downloaded into `data/project_databases/` at startup. The flag also triggers a checksum-based update check: each existing maintained database is compared against the companion manifest's `tsv_checksum`, and a changed database is rebuilt into a temp file and atomically swapped in. A weekly background thread re-runs the same check. Set `RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS` to control the interval (default `604800` seconds = 7 days; `0` disables the weekly thread). Update failures are logged and never block startup.
 
+## Network access requirements
+
+The web app itself runs entirely offline once a project database is present —
+profiling, report generation, and result delivery need **no outbound network
+access**. External endpoints are only contacted during database build/bootstrap,
+never during a running analysis. The report HTML contains `https://` links to
+PubChem, PubMed, and DOI resolvers, but those are rendered as clickable links
+in the user's browser, not fetched server-side.
+
+### Endpoints contacted at build/bootstrap time only
+
+These are reached by `respro init` / `respro maintained` / the
+`RESPRO_WEB_MAINTAINED_BOOTSTRAP=true` startup path. An offline server that
+ships pre-built `.db` files does **not** need access to any of them.
+
+| Phase | Host | Purpose |
+|---|---|---|
+| Maintained-DB bootstrap & updates | `raw.githubusercontent.com` | Fetch `manifest.json`, `rules.tsv`, `metadata.json`, `formula-rules.tsv` from `the-foxlab/respro-databases` |
+| Maintained-DB bootstrap | `eutils.ncbi.nlm.nih.gov` | Fetch GenBank reference records (`efetch.fcgi?db=nuccore`) referenced by a database's rules |
+| `respro init` enrichment | `pubchem.ncbi.nlm.nih.gov` | Resolve drug names to CIDs, descriptions, titles, structure images (PUG REST) |
+| `respro init` enrichment | `eutils.ncbi.nlm.nih.gov` | PubMed article summaries (`esummary.fcgi`), PMC ID conversion |
+| `respro init` enrichment | `api.crossref.org` | DOI → publication metadata |
+| `respro init` enrichment | `www.ncbi.nlm.nih.gov` | Protein page links (feature annotation) |
+
+### Endpoints the running app never contacts
+
+The web/worker containers do not make outbound calls during profiling or report
+generation. All drug metadata, publication data, and GenBank records are baked
+into the `.db` file at build time. The report HTML links out to these hosts in
+the **client browser** (the user's machine, not the server):
+
+- `pubchem.ncbi.nlm.nih.gov` — drug compound pages and 2D structure images
+- `pubmed.ncbi.nlm.nih.gov` — publication pages
+- `doi.org` — DOI resolution
+
+### Docker image retrieval
+
+The CI-published image lives at `ghcr.io/the-foxlab/resistanceprofiler`. To pull
+it directly on a server (skipping the build/scp workflow), the server needs
+egress to:
+
+| Host | Port | Purpose |
+|---|---|---|
+| `ghcr.io` | `443` | Pull the ResPro web/worker image |
+| `registry-1.docker.io` | `443` | Pull `redis:7-alpine` (or your chosen Redis image) |
+
+If the GHCR package is private, also allow authenticated pulls via
+`docker login ghcr.io` with a PAT that has `read:packages`.
+
+### Firewall summary for an online server
+
+A server that pulls images directly and runs `RESPRO_WEB_MAINTAINED_BOOTSTRAP=true`
+needs outbound HTTPS to: `ghcr.io`, `registry-1.docker.io`,
+`raw.githubusercontent.com`, `eutils.ncbi.nlm.nih.gov`, `pubchem.ncbi.nlm.nih.gov`,
+`www.ncbi.nlm.nih.gov`, `api.crossref.org`. A server that ships pre-built images
+and `.db` files needs **no** outbound access at all.
+
 ## Configuration reference
 
 All webapp settings are optional environment variables. Set them in a `.env` file next to your `docker-compose.web.yml`, or inline under `services.respro-web.environment` (and `services.respro-worker.environment` where noted). Defaults are tuned for local development — review every variable before public hosting.
