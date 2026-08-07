@@ -24,6 +24,11 @@ from web.backend.models import (
     ProfileVcfPayload,
 )
 from web.backend.queue import build_enqueue_job_options, get_batch_queue, get_queue
+from web.backend.services.session import (
+    Session,
+    record_job,
+    resolve_owned_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +43,7 @@ def build_profile_router(
     resolve_project_db_path,
     limiter: Limiter,
     api_rate_limit: str,
+    get_session: Callable[..., Session],
 ) -> APIRouter:
     """Build profile submission routes."""
     router = APIRouter()
@@ -50,11 +56,13 @@ def build_profile_router(
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
-        fasta_path = Path(payload.fasta_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(fasta_path, config.allowed_roots):
-            raise HTTPException(status_code=400, detail='FASTA path is outside allowed upload directory.')
-        if not fasta_path.is_file():
-            raise HTTPException(status_code=404, detail='FASTA file not found.')
+        session = get_session(request)
+        fasta_path = _resolve_upload_path(
+            payload.fasta_id,
+            session.session_hash,
+            config.allowed_roots,
+            label='FASTA',
+        )
         consume_sample_quota(
             request,
             sample_count=1,
@@ -73,6 +81,7 @@ def build_profile_router(
             input_display_name=payload.input_display_name,
             **enqueue_options,
         )
+        record_job(session_hash=session.session_hash, upload_ids=[payload.fasta_id], job_id=job.id)
         logger.info('Queue job enqueued: job_id=%s mode=fasta database_id=%s', job.id, project_db.name)
         return JobSubmitResponse(job_id=job.id)
 
@@ -84,24 +93,30 @@ def build_profile_router(
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
-        vcf_path = Path(payload.vcf_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(vcf_path, config.allowed_roots):
-            raise HTTPException(status_code=400, detail='VCF path is outside allowed upload directory.')
-        if not vcf_path.is_file():
-            raise HTTPException(status_code=404, detail='VCF file not found.')
-        ref_fasta_path = Path(payload.ref_fasta_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(ref_fasta_path, config.allowed_roots):
-            raise HTTPException(status_code=400, detail='Reference FASTA path is outside allowed upload directory.')
-        if not ref_fasta_path.is_file():
-            raise HTTPException(status_code=404, detail='Reference FASTA file not found.')
+        session = get_session(request)
+        vcf_path = _resolve_upload_path(
+            payload.vcf_id,
+            session.session_hash,
+            config.allowed_roots,
+            label='VCF',
+        )
+        ref_fasta_path = _resolve_upload_path(
+            payload.reference_id,
+            session.session_hash,
+            config.allowed_roots,
+            label='Reference FASTA',
+        )
         bam_path: str | None = None
-        if payload.bam_path:
-            resolved_bam = Path(payload.bam_path).expanduser().resolve()
-            if not is_path_within_allowed_roots(resolved_bam, config.allowed_roots):
-                raise HTTPException(status_code=400, detail='BAM path is outside allowed upload directory.')
-            if not resolved_bam.is_file():
-                raise HTTPException(status_code=404, detail='BAM file not found.')
+        bam_id: str | None = None
+        if payload.bam_id:
+            resolved_bam = _resolve_upload_path(
+                payload.bam_id,
+                session.session_hash,
+                config.allowed_roots,
+                label='BAM',
+            )
             bam_path = str(resolved_bam)
+            bam_id = payload.bam_id
         consume_sample_quota(
             request,
             sample_count=1,
@@ -124,6 +139,10 @@ def build_profile_router(
             input_display_name=payload.input_display_name,
             **enqueue_options,
         )
+        upload_ids = [payload.vcf_id, payload.reference_id]
+        if bam_id is not None:
+            upload_ids.append(bam_id)
+        record_job(session_hash=session.session_hash, upload_ids=upload_ids, job_id=job.id)
         logger.info('Queue job enqueued: job_id=%s mode=vcf database_id=%s', job.id, project_db.name)
         return JobSubmitResponse(job_id=job.id)
 
@@ -135,52 +154,54 @@ def build_profile_router(
         queue: Queue = Depends(get_batch_queue),
         _auth: None = Depends(require_api_token),
     ) -> BatchSubmitResponse:
-        if len(payload.vcf_paths) != len(payload.sample_names):
+        session = get_session(request)
+        if len(payload.vcf_ids) != len(payload.sample_names):
             raise HTTPException(
                 status_code=422,
-                detail='vcf_paths and sample_names must have the same length.',
+                detail='vcf_ids and sample_names must have the same length.',
             )
-        if payload.bam_paths is not None and len(payload.bam_paths) != len(payload.vcf_paths):
+        if payload.bam_ids is not None and len(payload.bam_ids) != len(payload.vcf_ids):
             raise HTTPException(
                 status_code=422,
-                detail='bam_paths and vcf_paths must have the same length.',
+                detail='bam_ids and vcf_ids must have the same length.',
             )
         input_display_names = _resolve_batch_input_display_names(
-            input_paths=payload.vcf_paths,
+            input_paths=payload.vcf_ids,
             input_display_names=payload.input_display_names,
-            path_label='vcf_paths',
+            path_label='vcf_ids',
         )
         artifact_base_names = _derive_unique_artifact_base_names(input_display_names)
         max_batch = sample_limit_per_minute
-        if len(payload.vcf_paths) > max_batch:
+        if len(payload.vcf_ids) > max_batch:
             raise HTTPException(
                 status_code=422,
-                detail=f'Batch size {len(payload.vcf_paths)} exceeds the maximum of {max_batch} samples per batch.',
+                detail=f'Batch size {len(payload.vcf_ids)} exceeds the maximum of {max_batch} samples per batch.',
             )
-        ref_fasta_path = Path(payload.reference_fasta_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(ref_fasta_path, config.allowed_roots):
-            raise HTTPException(status_code=400, detail='Reference FASTA path is outside allowed upload directory.')
-        if not ref_fasta_path.is_file():
-            raise HTTPException(status_code=404, detail='Reference FASTA file not found.')
+        ref_fasta_path = _resolve_upload_path(
+            payload.reference_id,
+            session.session_hash,
+            config.allowed_roots,
+            label='Reference FASTA',
+        )
         consume_sample_quota(
             request,
-            sample_count=len(payload.vcf_paths),
+            sample_count=len(payload.vcf_ids),
             sample_limit_per_minute=sample_limit_per_minute,
         )
         project_db = resolve_project_db_path(config.project_databases_dir, payload.db_path)
         enqueue_options = build_enqueue_job_options()
-        validated_vcf_inputs = _validate_batch_paths(
-            input_paths=payload.vcf_paths,
+        validated_vcf_inputs = _validate_batch_upload_ids(
+            upload_ids=payload.vcf_ids,
             sample_names=payload.sample_names,
+            session_hash=session.session_hash,
             allowed_roots=config.allowed_roots,
             path_kind='VCF',
-            is_path_within_allowed_roots=is_path_within_allowed_roots,
         )
-        validated_bam_paths = _validate_batch_bam_paths(
-            bam_paths=payload.bam_paths,
-            sample_count=len(payload.vcf_paths),
+        validated_bam_paths = _validate_batch_bam_ids(
+            bam_ids=payload.bam_ids,
+            sample_count=len(payload.vcf_ids),
+            session_hash=session.session_hash,
             allowed_roots=config.allowed_roots,
-            is_path_within_allowed_roots=is_path_within_allowed_roots,
         )
 
         samples = []
@@ -202,6 +223,7 @@ def build_profile_router(
                 job_id=job_id,
                 **enqueue_options,
             )
+            record_job(session_hash=session.session_hash, upload_ids=[payload.vcf_ids[index], payload.reference_id], job_id=job_id)
             samples.append(BatchSampleEntry(job_id=job_id, sample_name=sample_name))
         logger.info(
             'Batch VCF jobs enqueued: count=%d database_id=%s',
@@ -218,36 +240,37 @@ def build_profile_router(
         queue: Queue = Depends(get_batch_queue),
         _auth: None = Depends(require_api_token),
     ) -> BatchSubmitResponse:
-        if len(payload.fasta_paths) != len(payload.sample_names):
+        session = get_session(request)
+        if len(payload.fasta_ids) != len(payload.sample_names):
             raise HTTPException(
                 status_code=422,
-                detail='fasta_paths and sample_names must have the same length.',
+                detail='fasta_ids and sample_names must have the same length.',
             )
         input_display_names = _resolve_batch_input_display_names(
-            input_paths=payload.fasta_paths,
+            input_paths=payload.fasta_ids,
             input_display_names=payload.input_display_names,
-            path_label='fasta_paths',
+            path_label='fasta_ids',
         )
         artifact_base_names = _derive_unique_artifact_base_names(input_display_names)
         max_batch = sample_limit_per_minute
-        if len(payload.fasta_paths) > max_batch:
+        if len(payload.fasta_ids) > max_batch:
             raise HTTPException(
                 status_code=422,
-                detail=f'Batch size {len(payload.fasta_paths)} exceeds the maximum of {max_batch} samples per batch.',
+                detail=f'Batch size {len(payload.fasta_ids)} exceeds the maximum of {max_batch} samples per batch.',
             )
         consume_sample_quota(
             request,
-            sample_count=len(payload.fasta_paths),
+            sample_count=len(payload.fasta_ids),
             sample_limit_per_minute=sample_limit_per_minute,
         )
         project_db = resolve_project_db_path(config.project_databases_dir, payload.db_path)
         enqueue_options = build_enqueue_job_options()
-        validated_fasta_inputs = _validate_batch_paths(
-            input_paths=payload.fasta_paths,
+        validated_fasta_inputs = _validate_batch_upload_ids(
+            upload_ids=payload.fasta_ids,
             sample_names=payload.sample_names,
+            session_hash=session.session_hash,
             allowed_roots=config.allowed_roots,
             path_kind='FASTA',
-            is_path_within_allowed_roots=is_path_within_allowed_roots,
         )
 
         samples = []
@@ -265,6 +288,7 @@ def build_profile_router(
                 job_id=job_id,
                 **enqueue_options,
             )
+            record_job(session_hash=session.session_hash, upload_ids=[payload.fasta_ids[index]], job_id=job_id)
             samples.append(BatchSampleEntry(job_id=job_id, sample_name=sample_name))
         logger.info(
             'Batch FASTA jobs enqueued: count=%d database_id=%s',
@@ -274,6 +298,30 @@ def build_profile_router(
         return BatchSubmitResponse(samples=samples, total=len(samples))
 
     return router
+
+
+def _resolve_upload_path(
+    upload_id: str,
+    session_hash: str,
+    allowed_roots: tuple[Path, ...],
+    *,
+    label: str,
+) -> Path:
+    """Resolve an upload ID to a validated, owned, path-confined file."""
+    try:
+        path = resolve_owned_path(
+            prefix='upload',
+            record_id=upload_id,
+            session_hash=session_hash,
+            allowed_roots=allowed_roots,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=f'{label} file not found.') from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f'{label} file not found.')
+    return path
 
 
 def _resolve_batch_input_display_names(
@@ -293,57 +341,73 @@ def _resolve_batch_input_display_names(
     return [Path(name).name for name in input_display_names]
 
 
-def _validate_batch_paths(
+def _validate_batch_upload_ids(
     *,
-    input_paths: list[str],
+    upload_ids: list[str],
     sample_names: list[str],
+    session_hash: str,
     allowed_roots: tuple[Path, ...],
     path_kind: Literal['VCF', 'FASTA'],
-    is_path_within_allowed_roots: Callable[[Path, tuple[Path, ...]], bool],
 ) -> list[tuple[Path, str]]:
-    """Resolve and validate per-sample input paths for batch profiling routes."""
+    """Resolve and validate per-sample upload IDs for batch profiling routes."""
     validated_inputs: list[tuple[Path, str]] = []
-    for input_path_str, sample_name in zip(input_paths, sample_names):
-        input_path = Path(input_path_str).expanduser().resolve()
-        if not is_path_within_allowed_roots(input_path, allowed_roots):
-            raise HTTPException(
-                status_code=400,
-                detail=f'{path_kind} path for sample {sample_name!r} is outside allowed upload directory.',
+    for upload_id, sample_name in zip(upload_ids, sample_names):
+        try:
+            input_path = resolve_owned_path(
+                prefix='upload',
+                record_id=upload_id,
+                session_hash=session_hash,
+                allowed_roots=allowed_roots,
             )
+        except LookupError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f'{path_kind} file not found for sample {sample_name!r}.',
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not input_path.is_file():
             raise HTTPException(status_code=404, detail=f'{path_kind} file not found for sample {sample_name!r}.')
         validated_inputs.append((input_path, sample_name))
     return validated_inputs
 
 
-def _validate_batch_bam_paths(
+def _validate_batch_bam_ids(
     *,
-    bam_paths: list[str | None] | None,
+    bam_ids: list[str | None] | None,
     sample_count: int,
+    session_hash: str,
     allowed_roots: tuple[Path, ...],
-    is_path_within_allowed_roots: Callable[[Path, tuple[Path, ...]], bool],
 ) -> list[str | None]:
-    """Resolve and validate per-sample optional BAM paths for the batch VCF route.
+    """Resolve and validate per-sample optional BAM IDs for the batch VCF route.
 
     Returns one resolved BAM path string (or ``None``) per sample, positionally aligned with
-    ``vcf_paths``. A ``None`` entry means "no BAM for that sample" — coverage-gap analysis is
-    skipped for it, mirroring the single-VCF ``bam_path`` option. Content matching between the
+    ``vcf_ids``. A ``None`` entry means "no BAM for that sample" — coverage-gap analysis is
+    skipped for it, mirroring the single-VCF ``bam_id`` option. Content matching between the
     BAM and the VCF/reference is intentionally not checked here: like the single-VCF path, that
     is deferred to the CLI coverage step, which warns-and-skips unmatched contigs.
     """
-    if bam_paths is None:
+    if bam_ids is None:
         return [None] * sample_count
     resolved: list[str | None] = []
-    for bam_path_str in bam_paths:
-        if bam_path_str is None:
+    for bam_id in bam_ids:
+        if bam_id is None:
             resolved.append(None)
             continue
-        resolved_bam = Path(bam_path_str).expanduser().resolve()
-        if not is_path_within_allowed_roots(resolved_bam, allowed_roots):
-            raise HTTPException(status_code=400, detail='BAM path is outside allowed upload directory.')
-        if not resolved_bam.is_file():
+        try:
+            bam_path = resolve_owned_path(
+                prefix='upload',
+                record_id=bam_id,
+                session_hash=session_hash,
+                allowed_roots=allowed_roots,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail='BAM file not found.') from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if not bam_path.is_file():
             raise HTTPException(status_code=404, detail='BAM file not found.')
-        resolved.append(str(resolved_bam))
+        resolved.append(str(bam_path))
     return resolved
 
 

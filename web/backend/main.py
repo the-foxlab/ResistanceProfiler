@@ -53,6 +53,12 @@ from web.backend.routes.upload import build_upload_router
 from web.backend.services.maintained_bootstrap import (
     check_and_update_maintained_databases,
 )
+from web.backend.services.session import (
+    SESSION_COOKIE_NAME,
+    Session,
+    resolve_or_create_session,
+    set_session_cookie_header,
+)
 from web.backend.services.upload import save_upload_stream
 from web.backend.startup_config import (
     StartupConfig,
@@ -101,12 +107,18 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
 def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     """Create the FastAPI app instance."""
     version = importlib.metadata.version('respro')
+    config = startup_config or load_startup_config()
+    # Disable API docs (Swagger UI, ReDoc, OpenAPI schema) outside local mode so a
+    # publicly reachable deployment does not advertise its surface area.
+    docs_enabled = config.deployment_mode == 'local'
     app = FastAPI(
         title='ResistanceProfiler Web API',
         version=version,
         lifespan=lifespan,
+        docs_url='/docs' if docs_enabled else None,
+        redoc_url='/redoc' if docs_enabled else None,
+        openapi_url='/openapi.json' if docs_enabled else None,
     )
-    config = startup_config or load_startup_config()
     app.state.startup_config = config
     # Seed a mutable UUID->path cache refreshed by the weekly update thread; the frozen
     # StartupConfig stays authoritative for everything else.
@@ -128,6 +140,9 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         allow_headers=['*'],
     )
 
+    # Issue/refresh the opaque session cookie on every response.
+    _set_session_cookie_middleware(app, startup_config.deployment_mode)
+
     branding_dir = Path(__file__).resolve().parents[2] / 'respro' / 'report' / 'static'
 
     app.include_router(
@@ -147,6 +162,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             require_api_token=require_api_token,
             user_facing_error_message=_user_facing_error_message,
             save_upload_stream=save_upload_stream,
+            get_session=get_session,
         )
     )
     app.include_router(
@@ -167,6 +183,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             resolve_project_db_path=resolve_project_db_path,
             limiter=limiter,
             api_rate_limit=api_rate_limit,
+            get_session=get_session,
         )
     )
     app.include_router(
@@ -178,26 +195,31 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             no_such_job_error=NoSuchJobError,
             limiter=limiter,
             api_rate_limit=api_rate_limit,
+            get_session=get_session,
         )
     )
     app.include_router(
         build_artifacts_router(
             results_dir=config.results_dir,
             branding_dir=branding_dir,
+            allowed_roots=config.allowed_roots,
             require_api_token=require_api_token,
             is_path_within_allowed_roots=is_path_within_allowed_roots,
             is_allowed_artifact_path=_is_allowed_artifact_path,
             limiter=limiter,
             api_rate_limit=api_rate_limit,
+            get_session=get_session,
         )
     )
     app.include_router(
         build_session_router(
             uploads_dir=config.uploads_dir,
             results_dir=config.results_dir,
+            allowed_roots=config.allowed_roots,
             require_api_token=require_api_token,
             limiter=limiter,
             api_rate_limit=api_rate_limit,
+            get_session=get_session,
         )
     )
     app.include_router(
@@ -209,6 +231,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             resolve_regenerate_project_db_path=resolve_regenerate_project_db_path,
             limiter=limiter,
             api_rate_limit=api_rate_limit,
+            get_session=get_session,
         )
     )
 
@@ -392,7 +415,7 @@ def _ttl_sweep_loop(results_dir: Path, uploads_dir: Path, sweep_frequency_second
     """Continuously sweep expired upload and result files on a fixed interval."""
     while True:
         try:
-            ttl_seconds = int(os.getenv('RESPRO_WEB_RESULT_TTL', '86400'))
+            ttl_seconds = int(os.getenv(WEB_ENV.result_ttl, str(WEB_BACKEND_CONFIG.defaults.result_ttl_seconds)))
             _sweep_expired_files(results_dir, uploads_dir, ttl_seconds)
         except Exception as exc:
             logger.debug(f'Error in TTL sweep: {exc}')
@@ -811,6 +834,42 @@ def require_api_token(
     provided_token = _extract_bearer_token(authorization)
     if not provided_token or not hmac.compare_digest(config.api_token, provided_token):
         raise HTTPException(status_code=401, detail='Unauthorized')
+
+
+def get_session(request: Request) -> Session:
+    """Return the session resolved by the session middleware.
+
+    The middleware resolves/creates the session on every request and stashes it
+    on ``request.state.session``. This dependency exposes it to routes so they
+    can read the owner hash for ownership checks. Routes that need ownership
+    enforcement declare ``session: Session = Depends(get_session)``.
+    """
+    return request.state.session
+
+
+def _set_session_cookie_middleware(app: FastAPI, deployment_mode: str) -> None:
+    """Register middleware that resolves/creates a session and sets the cookie.
+
+    Resolving the session in middleware (rather than only via a route dependency)
+    guarantees every response — including static frontend assets and routes that
+    do not declare ``get_session`` — carries a session cookie, so a browser
+    navigating to the app receives one on the very first request regardless of
+    the entry route. The resolved session is stashed on ``request.state.session``
+    so routes can read the owner hash without re-resolving.
+
+    ``deployment_mode`` controls whether the ``Secure`` attribute is set on the
+    cookie: local mode (HTTP on loopback) omits it; trusted-proxy/public-session
+    modes set it (behind a TLS-terminating proxy).
+    """
+
+    @app.middleware('http')
+    async def _session_cookie(request: Request, call_next):  # type: ignore[no-untyped-def]
+        cookie_value = request.cookies.get(SESSION_COOKIE_NAME)
+        session = resolve_or_create_session(cookie_value)
+        request.state.session = session
+        response = await call_next(request)
+        response.headers['Set-Cookie'] = set_session_cookie_header(session, deployment_mode)
+        return response
 
 
 def run() -> None:

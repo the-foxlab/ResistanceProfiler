@@ -80,7 +80,7 @@ export function DashboardView({
   uploadReferenceFile,
   uploadBamFile,
   uploadJsonFile,
-  jsonInputPath,
+  jsonInputId,
   isRegenerateBusy,
   runRegenerateFromJson,
   downloadMutationsAsTsv,
@@ -185,7 +185,7 @@ export function DashboardView({
               setVcfInput={setVcfInput}
               fastaInput={fastaInput}
               setFastaInput={setFastaInput}
-              jsonInputPath={jsonInputPath}
+              jsonInputId={jsonInputId}
               isRegenerateBusy={isRegenerateBusy}
               runRegenerateFromJson={runRegenerateFromJson}
               uploadFastaFile={uploadFastaFile}

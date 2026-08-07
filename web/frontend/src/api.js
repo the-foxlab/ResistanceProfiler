@@ -197,11 +197,11 @@ export async function apiUpload(path, file, onProgress = null) {
   });
 }
 
-export async function downloadArtifactBundle(paths, downloadName) {
+export async function downloadArtifactBundle(artifactIds, downloadName) {
   const response = await fetch(`${API_BASE}/api/artifact-bundle`, {
     method: 'POST',
     headers: buildHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ paths }),
+    body: JSON.stringify({ artifact_ids: artifactIds }),
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));

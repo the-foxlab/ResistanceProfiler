@@ -14,6 +14,11 @@ from respro.db.results import load_run_from_json
 from web.backend.jobs import run_regenerate_json
 from web.backend.models import JobSubmitResponse, RegenerateJsonPayload
 from web.backend.queue import build_enqueue_job_options, get_queue
+from web.backend.services.session import (
+    Session,
+    record_job,
+    resolve_owned_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +32,7 @@ def build_regenerate_router(
     resolve_regenerate_project_db_path,
     limiter: Limiter,
     api_rate_limit: str,
+    get_session: Callable[..., Session],
 ) -> APIRouter:
     """Build regenerate-json route."""
     router = APIRouter()
@@ -39,9 +45,18 @@ def build_regenerate_router(
         queue: Queue = Depends(get_queue),
         _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
-        json_path = Path(payload.json_path).expanduser().resolve()
-        if not is_path_within_allowed_roots(json_path, config.allowed_roots):
-            raise HTTPException(status_code=400, detail='JSON path is outside allowed upload/output directory.')
+        session = get_session(request)
+        try:
+            json_path = resolve_owned_path(
+                prefix='upload',
+                record_id=payload.json_id,
+                session_hash=session.session_hash,
+                allowed_roots=config.allowed_roots,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail='JSON file not found.') from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not json_path.is_file():
             raise HTTPException(status_code=404, detail='JSON file not found.')
 
@@ -67,6 +82,7 @@ def build_regenerate_router(
             json_path=str(json_path),
             **build_enqueue_job_options(),
         )
+        record_job(session_hash=session.session_hash, upload_ids=[payload.json_id], job_id=job.id)
         logger.info(
             'Queue job enqueued: job_id=%s mode=regenerate-json database_id=%s',
             job.id,

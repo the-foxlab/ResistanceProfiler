@@ -118,12 +118,12 @@ describe('useDashboardLogic - File Upload Flow', () => {
       mockXHRInstance.triggerProgress(100, 100);
 
       // Trigger successful completion
-      mockXHRInstance.triggerSuccess({ file_path: '/data/uploads/test.fasta' });
+      mockXHRInstance.triggerSuccess({ upload_id: 'up-fastA-1' });
 
       await uploadPromise;
     });
 
-    expect(result.current.fastaInput.fasta_path).toBe('/data/uploads/test.fasta');
+    expect(result.current.fastaInput.fasta_id).toBe('up-fastA-1');
     expect(result.current.uploadProgress.percent).toBe(100);
     expect(result.current.uploadProgress.fileName).toContain('test.fasta');
   });
@@ -152,12 +152,12 @@ describe('useDashboardLogic - File Upload Flow', () => {
     await act(async () => {
       const uploadPromise = result.current.uploadVcfFile(file);
 
-      mockXHRInstance.triggerSuccess({ file_path: '/data/uploads/test.vcf' });
+      mockXHRInstance.triggerSuccess({ upload_id: 'up-vcf-1' });
 
       await uploadPromise;
     });
 
-    expect(result.current.vcfInput.vcf_path).toBe('/data/uploads/test.vcf');
+    expect(result.current.vcfInput.vcf_id).toBe('up-vcf-1');
   });
 
   it('should update upload progress state during file transfer', async () => {
@@ -195,7 +195,7 @@ describe('useDashboardLogic - File Upload Flow', () => {
         unsubscribe();
       }
 
-      mockXHRInstance.triggerSuccess({ file_path: '/data/uploads/large.fasta' });
+      mockXHRInstance.triggerSuccess({ upload_id: 'up-fastA-large' });
 
       await uploadPromise;
     });
@@ -740,7 +740,7 @@ describe('useDashboardLogic - Report Display Flow', () => {
     const reportUrl = result.current.buildReportUrl('/data/results/test.report.html');
 
     expect(reportUrl).toContain('/api/report');
-    expect(reportUrl).toContain('path=');
+    expect(reportUrl).toContain('artifact_id=');
     expect(decodeURIComponent(reportUrl)).toContain('/data/results/test.report.html');
   });
 

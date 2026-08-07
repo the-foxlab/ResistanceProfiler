@@ -46,6 +46,7 @@ class StartupConfig:
     api_token: str
     imprint: ImprintConfig | None = None
     project_db_uuid_index: dict[str, Path] = field(default_factory=dict)
+    deployment_mode: str = 'local'
 
 
 def load_startup_config() -> StartupConfig:
@@ -65,6 +66,7 @@ def load_startup_config() -> StartupConfig:
     api_token = os.getenv(WEB_ENV.api_token, '').strip()
     maintained_bootstrap = _resolve_maintained_bootstrap_enabled()
     imprint = _resolve_imprint()
+    deployment_mode = _resolve_deployment_mode()
 
     allowed_roots_env = os.getenv(WEB_ENV.allowed_roots, '')
     allowed_roots = _parse_allowed_roots(
@@ -88,7 +90,7 @@ def load_startup_config() -> StartupConfig:
             logger.exception('Maintained database update check failed — continuing with existing databases')
     _validate_at_least_one_project_db(project_databases_dir)
     project_db_uuid_index = build_project_db_uuid_index(project_databases_dir)
-    _validate_startup_policy(api_token)
+    _validate_startup_policy(api_token, deployment_mode)
 
     return StartupConfig(
         project_databases_dir=project_databases_dir,
@@ -99,6 +101,7 @@ def load_startup_config() -> StartupConfig:
         api_token=api_token,
         imprint=imprint,
         project_db_uuid_index=project_db_uuid_index,
+        deployment_mode=deployment_mode,
     )
 
 
@@ -319,20 +322,65 @@ def _resolve_maintained_bootstrap_enabled() -> bool:
     )
 
 
-def _validate_startup_policy(api_token: str) -> None:
-    """Enforce deployment safety rules based on host binding and token configuration."""
-    host = os.getenv(WEB_ENV.host, '').strip()
-    if host and host not in ('127.0.0.1', 'localhost', '0.0.0.0') and not api_token:
+def _validate_startup_policy(api_token: str, deployment_mode: str) -> None:
+    """Enforce deployment safety rules based on the explicit deployment mode.
+
+    Modes:
+
+    * ``local`` — default zero-config behaviour. No token required. The service is
+      expected to bind to loopback (the reference compose file does so). API docs
+      remain enabled for developer convenience.
+    * ``trusted-proxy`` — the service sits behind an authenticated reverse proxy.
+      Requires both ``RESPRO_WEB_API_TOKEN`` and ``RESPRO_WEB_TRUSTED_PROXIES`` to
+      be set so programmatic clients are authenticated and forwarded client IPs are
+      trusted only from known proxies. API docs are disabled.
+    * ``public-session`` — reserved for the future session-ownership model. Fails
+      fast with an actionable message until that feature is complete.
+    """
+    if deployment_mode == 'local':
+        return
+
+    if deployment_mode == 'public-session':
         raise RuntimeError(
-            'Public bind address detected but RESPRO_WEB_API_TOKEN is not set. '
-            'Set a strong API token before deploying publicly.'
+            "RESPRO_WEB_DEPLOYMENT_MODE='public-session' is reserved for the future "
+            'session-ownership model and is not yet supported. Use mode=local for '
+            'single-user zero-config startup, or mode=trusted-proxy behind an '
+            'authenticated reverse proxy.'
         )
-    cors_origins = os.getenv(WEB_ENV.cors_origins, '').strip()
-    if api_token and not cors_origins:
-        raise RuntimeError(
-            'RESPRO_WEB_API_TOKEN is set but RESPRO_WEB_CORS_ORIGINS is not configured. '
-            'Set explicit allowed origins for token-authenticated deployments.'
-        )
+
+    if deployment_mode == 'trusted-proxy':
+        if not api_token:
+            raise RuntimeError(
+                "RESPRO_WEB_DEPLOYMENT_MODE='trusted-proxy' requires RESPRO_WEB_API_TOKEN "
+                'to be set so programmatic API clients are authenticated.'
+            )
+        trusted_proxies = os.getenv(WEB_ENV.trusted_proxies, '').strip()
+        if not trusted_proxies:
+            raise RuntimeError(
+                "RESPRO_WEB_DEPLOYMENT_MODE='trusted-proxy' requires RESPRO_WEB_TRUSTED_PROXIES "
+                'to be set so forwarded client IPs are trusted only from known proxies.'
+            )
+        cors_origins = os.getenv(WEB_ENV.cors_origins, '').strip()
+        if not cors_origins:
+            raise RuntimeError(
+                "RESPRO_WEB_DEPLOYMENT_MODE='trusted-proxy' requires RESPRO_WEB_CORS_ORIGINS "
+                'to be set to explicit allowed origins.'
+            )
+        return
+
+    raise RuntimeError(
+        f"Unknown RESPRO_WEB_DEPLOYMENT_MODE={deployment_mode!r}. "
+        "Valid modes are 'local', 'trusted-proxy', 'public-session'."
+    )
+
+
+def _resolve_deployment_mode() -> str:
+    """Resolve the deployment trust mode from env with the config default."""
+    default = WEB_BACKEND_CONFIG.defaults.deployment_mode
+    raw_value = os.getenv(WEB_ENV.deployment_mode, default).strip()
+    if not raw_value:
+        return default
+    return raw_value
 
 
 def _validate_project_db(project_db: Path) -> None:

@@ -24,6 +24,12 @@ from tests.conftest import TINY_REF_NAME, TINY_REF_SEQ
 from web.backend.config import WEB_BACKEND_CONFIG
 from web.backend.main import _SAMPLE_QUOTA_COUNTER, _resolve_proxy_settings, create_app
 from web.backend.queue import get_batch_queue, get_queue
+from web.backend.services.session import (
+    SESSION_COOKIE_NAME,
+    hash_session_token,
+    record_job,
+    reset_memory_stores,
+)
 from web.backend.startup_config import (
     ImprintConfig,
     StartupConfig,
@@ -32,6 +38,72 @@ from web.backend.startup_config import (
     build_project_db_uuid_index,
     load_startup_config,
 )
+
+
+def _upload_file(
+    client: TestClient,
+    headers: dict[str, str],
+    file_path: Path,
+    file_type: str,
+    filename: str | None = None,
+) -> str:
+    """Upload a file and return its upload_id."""
+    name = filename or file_path.name
+    response = client.post(
+        f'/api/upload/{file_type}',
+        files={'file': (name, file_path.read_bytes(), 'application/octet-stream')},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    return response.json()['upload_id']
+
+
+def _upload_bytes(
+    client: TestClient,
+    headers: dict[str, str],
+    data: bytes,
+    file_type: str,
+    filename: str,
+) -> str:
+    """Upload raw bytes and return its upload_id."""
+    response = client.post(
+        f'/api/upload/{file_type}',
+        files={'file': (filename, data, 'application/octet-stream')},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    return response.json()['upload_id']
+
+
+def _poll_job(client: TestClient, headers: dict[str, str], job_id: str) -> dict:
+    """Poll job status until succeeded/failed, return the full payload dict."""
+    payload = None
+    for _ in range(20):
+        status = client.get(f'/api/jobs/{job_id}', headers=headers)
+        assert status.status_code == 200, status.text
+        payload = status.json()
+        if payload['status'] in ('succeeded', 'failed'):
+            break
+    assert payload is not None
+    return payload
+
+
+def _download_artifact_json(
+    client: TestClient,
+    headers: dict[str, str],
+    artifact_id: str,
+) -> dict:
+    """Download a .results.json artifact by ID and parse it."""
+    response = client.get('/api/artifact', params={'artifact_id': artifact_id}, headers=headers)
+    assert response.status_code == 200, response.text
+    return json.loads(response.content)
+
+
+def _establish_session(client: TestClient, headers: dict[str, str]) -> str:
+    """Issue any request to establish the session cookie, return the session hash."""
+    client.get('/api/ui/config', headers=headers)
+    cookie = client.cookies.get(SESSION_COOKIE_NAME)
+    return hash_session_token(cookie)
 
 
 def _write_project_uuid(project_db: Path, project_uuid: str) -> None:
@@ -117,24 +189,74 @@ def client(sync_queue: Queue, startup_config: StartupConfig):
 
 
 class TestWebApi:
-    def test_startup_policy_allows_docker_bind_without_token(
+    @pytest.fixture(autouse=True)
+    def _reset_session_stores(self):
+        """Clear the in-memory session/ownership stores before and after each test."""
+        reset_memory_stores()
+        yield
+        reset_memory_stores()
+
+    def test_startup_policy_local_mode_allows_zero_config(self) -> None:
+        # local mode (the default) requires no token, no proxy, no CORS.
+        _validate_startup_policy(api_token='', deployment_mode='local')
+
+    def test_startup_policy_trusted_proxy_requires_token(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setenv('RESPRO_WEB_HOST', '0.0.0.0')
-        monkeypatch.delenv('RESPRO_WEB_CORS_ORIGINS', raising=False)
-
-        _validate_startup_policy(api_token='')
-
-    def test_startup_policy_requires_token_for_non_local_bind_host(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setenv('RESPRO_WEB_HOST', '10.0.0.5')
-        monkeypatch.delenv('RESPRO_WEB_CORS_ORIGINS', raising=False)
-
+        monkeypatch.setenv('RESPRO_WEB_TRUSTED_PROXIES', '127.0.0.1')
+        monkeypatch.setenv('RESPRO_WEB_CORS_ORIGINS', 'https://respro.example.com')
+        monkeypatch.delenv('RESPRO_WEB_API_TOKEN', raising=False)
         with pytest.raises(RuntimeError, match='RESPRO_WEB_API_TOKEN'):
-            _validate_startup_policy(api_token='')
+            _validate_startup_policy(api_token='', deployment_mode='trusted-proxy')
+
+    def test_startup_policy_trusted_proxy_requires_trusted_proxies(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_CORS_ORIGINS', 'https://respro.example.com')
+        monkeypatch.delenv('RESPRO_WEB_TRUSTED_PROXIES', raising=False)
+        with pytest.raises(RuntimeError, match='RESPRO_WEB_TRUSTED_PROXIES'):
+            _validate_startup_policy(api_token='secret', deployment_mode='trusted-proxy')
+
+    def test_startup_policy_trusted_proxy_requires_cors_origins(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_TRUSTED_PROXIES', '127.0.0.1')
+        monkeypatch.delenv('RESPRO_WEB_CORS_ORIGINS', raising=False)
+        with pytest.raises(RuntimeError, match='RESPRO_WEB_CORS_ORIGINS'):
+            _validate_startup_policy(api_token='secret', deployment_mode='trusted-proxy')
+
+    def test_startup_policy_trusted_proxy_succeeds_when_fully_configured(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_TRUSTED_PROXIES', '127.0.0.1')
+        monkeypatch.setenv('RESPRO_WEB_CORS_ORIGINS', 'https://respro.example.com')
+        _validate_startup_policy(api_token='secret', deployment_mode='trusted-proxy')
+
+    def test_startup_policy_public_session_fails_fast(self) -> None:
+        with pytest.raises(RuntimeError, match='public-session'):
+            _validate_startup_policy(api_token='secret', deployment_mode='public-session')
+
+    def test_startup_policy_rejects_unknown_mode(self) -> None:
+        with pytest.raises(RuntimeError, match='Unknown RESPRO_WEB_DEPLOYMENT_MODE'):
+            _validate_startup_policy(api_token='', deployment_mode='bogus')
+
+    def test_docs_enabled_in_local_mode(self, startup_config: StartupConfig) -> None:
+        local_config = replace(startup_config, deployment_mode='local', api_token='')
+        client = TestClient(create_app(startup_config=local_config))
+        assert client.get('/docs').status_code != 404
+        assert client.get('/redoc').status_code != 404
+        assert client.get('/openapi.json').status_code != 404
+
+    def test_docs_disabled_in_trusted_proxy_mode(self, startup_config: StartupConfig) -> None:
+        proxy_config = replace(startup_config, deployment_mode='trusted-proxy', api_token='secret')
+        client = TestClient(create_app(startup_config=proxy_config))
+        assert client.get('/docs').status_code == 404
+        assert client.get('/redoc').status_code == 404
+        assert client.get('/openapi.json').status_code == 404
 
     def test_proxy_settings_default_to_disabled_without_trusted_proxies(
         self,
@@ -345,6 +467,9 @@ class TestWebApi:
         rq_status: str,
         expected_api_status: str,
     ) -> None:
+        session_hash = _establish_session(client, auth_headers)
+        record_job(session_hash=session_hash, upload_ids=[], job_id='test-job-id')
+
         job = Mock()
         job.get_status.return_value = rq_status
         job.return_value.return_value = {'report_html_path': '/tmp/example.report.html'}
@@ -358,7 +483,8 @@ class TestWebApi:
         assert payload['job_id'] == 'test-job-id'
         assert payload['status'] == expected_api_status
         if expected_api_status == 'succeeded':
-            assert payload['result'] == {'report_html_path': '/tmp/example.report.html'}
+            assert isinstance(payload['result'], dict)
+            assert payload['result']['report_html_path']  # opaque artifact ID, non-empty
         else:
             assert payload['result'] is None
 
@@ -368,6 +494,9 @@ class TestWebApi:
         auth_headers: dict[str, str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        session_hash = _establish_session(client, auth_headers)
+        record_job(session_hash=session_hash, upload_ids=[], job_id='test-job-id')
+
         job = Mock()
         job.get_status.return_value = 'failed'
         job.return_value.return_value = None
@@ -496,10 +625,11 @@ class TestWebApi:
         web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
+        fasta_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         submit = client.post(
             '/api/profile/fasta',
             json={
-                'fasta_path': str(web_sample_ref_fasta),
+                'fasta_id': fasta_id,
                 'input_display_name': 'original-upload.fasta',
                 'sample': 'web-fasta',
             },
@@ -509,9 +639,7 @@ class TestWebApi:
         job_id = submit.json()['job_id']
         assert job_id
 
-        status = client.get(f'/api/jobs/{job_id}', headers=auth_headers)
-        assert status.status_code == 200
-        payload = status.json()
+        payload = _poll_job(client, auth_headers, job_id)
         assert payload['status'] == 'succeeded'
         result = payload['result']
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
@@ -521,31 +649,31 @@ class TestWebApi:
         assert result['run_id'] is None
         assert 'input_path' not in result
         assert 'reference_fasta_path' not in result
-        assert Path(result['report_html_path']).name.startswith('original-upload.')
-        assert result['report_html_path'].endswith('.report.html')
-        assert result['report_json_path'].endswith('.results.json')
-        assert result['report_pdf_path'].endswith('.report.pdf')
-        assert Path(result['report_html_path']).is_file()
-        assert Path(result['report_json_path']).is_file()
-        assert Path(result['report_pdf_path']).is_file()
-        report_payload = json.loads(Path(result['report_json_path']).read_text(encoding='utf-8'))
+        html_id = result['report_html_path']
+        json_id = result['report_json_path']
+        pdf_id = result['report_pdf_path']
+        assert html_id
+        assert json_id
+        assert pdf_id
+        report_response = client.get('/api/report', params={'artifact_id': html_id}, headers=auth_headers)
+        assert report_response.status_code == 200
+        assert report_response.headers['content-type'].startswith('text/html')
+        assert report_response.content.lstrip()[:5].lower().startswith(b'<html') or b'<!doctype' in report_response.content.lower()
+        report_payload = _download_artifact_json(client, auth_headers, json_id)
         assert report_payload['run']['vcf_path'] == 'original-upload.fasta'
 
     def test_profile_fasta_path_outside_uploads_rejected(
         self,
         client: TestClient,
         auth_headers: dict[str, str],
-        tmp_path: Path,
     ) -> None:
-        outside_path = tmp_path / 'outside.fasta'
-        outside_path.write_text('>seq1\nATCG\n')
         response = client.post(
             '/api/profile/fasta',
-            json={'fasta_path': str(outside_path)},
+            json={'fasta_id': 'nonexistent-id'},
             headers=auth_headers,
         )
-        assert response.status_code == 400
-        assert 'outside allowed upload directory' in response.json()['detail']
+        assert response.status_code == 404
+        assert 'FASTA file not found' in response.json()['detail']
 
     def test_profile_vcf(
         self,
@@ -555,11 +683,13 @@ class TestWebApi:
         web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         submit = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(web_sample_vcf),
-                'ref_fasta_path': str(web_sample_ref_fasta),
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
                 'input_display_name': 'original-upload.vcf',
                 'sample': 'web-vcf',
             },
@@ -569,9 +699,7 @@ class TestWebApi:
         job_id = submit.json()['job_id']
         assert job_id
 
-        status = client.get(f'/api/jobs/{job_id}', headers=auth_headers)
-        assert status.status_code == 200
-        payload = status.json()
+        payload = _poll_job(client, auth_headers, job_id)
         assert payload['status'] == 'succeeded'
         result = payload['result']
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
@@ -581,14 +709,13 @@ class TestWebApi:
         assert 'database_path' not in result
         assert 'input_path' not in result
         assert 'reference_fasta_path' not in result
-        assert Path(result['report_html_path']).name.startswith('original-upload.')
-        assert result['report_html_path'].endswith('.report.html')
-        assert result['report_json_path'].endswith('.results.json')
-        assert result['report_pdf_path'].endswith('.report.pdf')
-        assert Path(result['report_html_path']).is_file()
-        assert Path(result['report_json_path']).is_file()
-        assert Path(result['report_pdf_path']).is_file()
-        report_payload = json.loads(Path(result['report_json_path']).read_text(encoding='utf-8'))
+        html_id = result['report_html_path']
+        json_id = result['report_json_path']
+        assert html_id
+        assert json_id
+        report_response = client.get('/api/report', params={'artifact_id': html_id}, headers=auth_headers)
+        assert report_response.status_code == 200
+        report_payload = _download_artifact_json(client, auth_headers, json_id)
         assert report_payload['run']['vcf_path'] == 'original-upload.vcf'
 
     def test_artifact_download_serves_pdf_from_results_dir(
@@ -598,11 +725,13 @@ class TestWebApi:
         web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         submit = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(web_sample_vcf),
-                'ref_fasta_path': str(web_sample_ref_fasta),
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
                 'input_display_name': 'download-name-check.vcf',
                 'sample': 'artifact-pdf',
             },
@@ -610,24 +739,15 @@ class TestWebApi:
         )
         assert submit.status_code == 200
 
-        job_id = submit.json()['job_id']
-        payload: dict[str, object] | None = None
-        for _ in range(10):
-            status = client.get(f'/api/jobs/{job_id}', headers=auth_headers)
-            assert status.status_code == 200
-            payload = status.json()
-            if payload['status'] in ('succeeded', 'failed'):
-                break
-
-        assert payload is not None
+        payload = _poll_job(client, auth_headers, submit.json()['job_id'])
         assert payload['status'] == 'succeeded'
         result = payload['result']
         assert isinstance(result, dict)
-        report_pdf_path = result['report_pdf_path']
+        pdf_id = result['report_pdf_path']
 
         artifact = client.get(
             '/api/artifact',
-            params={'path': report_pdf_path},
+            params={'artifact_id': pdf_id},
             headers=auth_headers,
         )
 
@@ -636,20 +756,19 @@ class TestWebApi:
         assert 'filename="download-name-check.pdf"' in artifact.headers['content-disposition']
         assert artifact.content.startswith(b'%PDF')
 
-    def test_artifact_download_rejects_uploads_dir_file(
+    def test_artifact_download_rejects_unknown_artifact_id(
         self,
         client: TestClient,
-        web_sample_vcf: Path,
         auth_headers: dict[str, str],
     ) -> None:
         response = client.get(
             '/api/artifact',
-            params={'path': str(web_sample_vcf)},
+            params={'artifact_id': 'nonexistent-artifact-id'},
             headers=auth_headers,
         )
 
-        assert response.status_code == 400
-        assert 'outside allowed results directory' in response.json()['detail']
+        assert response.status_code == 404
+        assert response.json()['detail'] == 'Artifact not found.'
 
     def test_artifact_bundle_download_packs_multiple_results_artifacts(
         self,
@@ -658,11 +777,13 @@ class TestWebApi:
         web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         submit = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(web_sample_vcf),
-                'ref_fasta_path': str(web_sample_ref_fasta),
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
                 'input_display_name': 'bundle-name-check.vcf',
                 'sample': 'artifact-bundle',
             },
@@ -670,16 +791,7 @@ class TestWebApi:
         )
         assert submit.status_code == 200
 
-        job_id = submit.json()['job_id']
-        payload: dict[str, object] | None = None
-        for _ in range(10):
-            status = client.get(f'/api/jobs/{job_id}', headers=auth_headers)
-            assert status.status_code == 200
-            payload = status.json()
-            if payload['status'] in ('succeeded', 'failed'):
-                break
-
-        assert payload is not None
+        payload = _poll_job(client, auth_headers, submit.json()['job_id'])
         assert payload['status'] == 'succeeded'
         result = payload['result']
         assert isinstance(result, dict)
@@ -687,7 +799,7 @@ class TestWebApi:
         bundle = client.post(
             '/api/artifact-bundle',
             json={
-                'paths': [
+                'artifact_ids': [
                     result['report_json_path'],
                     result['report_pdf_path'],
                 ],
@@ -706,64 +818,54 @@ class TestWebApi:
             report_payload = json.loads(archive.read('bundle-name-check.json').decode('utf-8'))
             assert report_payload['run']['sample_name'] == 'artifact-bundle'
 
-    def test_artifact_bundle_rejects_paths_outside_results_dir(
+    def test_artifact_bundle_rejects_unknown_artifact_id(
         self,
         client: TestClient,
-        web_sample_vcf: Path,
         auth_headers: dict[str, str],
     ) -> None:
         response = client.post(
             '/api/artifact-bundle',
-            json={'paths': [str(web_sample_vcf)]},
+            json={'artifact_ids': ['nonexistent-artifact-id']},
             headers=auth_headers,
         )
 
-        assert response.status_code == 400
-        assert 'outside allowed results directory' in response.json()['detail']
+        assert response.status_code == 404
+        assert response.json()['detail'] == 'Artifact not found.'
 
     def test_profile_vcf_path_outside_uploads_rejected(
         self,
         client: TestClient,
-        startup_config: StartupConfig,
-        web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
-        tmp_path: Path,
     ) -> None:
-        outside_vcf = tmp_path / 'outside.vcf'
-        outside_vcf.write_text(
-            '##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\n'
-        )
         response = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(outside_vcf),
-                'ref_fasta_path': str(web_sample_ref_fasta),
+                'vcf_id': 'nonexistent-id',
+                'reference_id': 'nonexistent-id',
             },
             headers=auth_headers,
         )
-        assert response.status_code == 400
-        assert 'outside allowed upload directory' in response.json()['detail']
+        assert response.status_code == 404
+        assert 'VCF file not found' in response.json()['detail']
 
     def test_profile_vcf_ref_fasta_outside_uploads_rejected(
         self,
         client: TestClient,
-        startup_config: StartupConfig,
         web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
-        tmp_path: Path,
     ) -> None:
-        outside_fasta = tmp_path / 'outside.fasta'
-        outside_fasta.write_text('>seq1\nATCG\n')
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
         response = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(web_sample_vcf),
-                'ref_fasta_path': str(outside_fasta),
+                'vcf_id': vcf_id,
+                'reference_id': 'nonexistent-id',
             },
             headers=auth_headers,
         )
-        assert response.status_code == 400
-        assert 'outside allowed upload directory' in response.json()['detail']
+        assert response.status_code == 404
+        assert 'Reference FASTA file not found' in response.json()['detail']
 
     def test_profile_vcf_repeated_runs_keep_distinct_report_artifacts(
         self,
@@ -772,39 +874,51 @@ class TestWebApi:
         web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         first_submit = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(web_sample_vcf),
-                'ref_fasta_path': str(web_sample_ref_fasta),
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
                 'sample': 'web-vcf-repeat',
             },
             headers=auth_headers,
         )
         assert first_submit.status_code == 200
-        first_payload = client.get(f"/api/jobs/{first_submit.json()['job_id']}", headers=auth_headers).json()
+        first_payload = _poll_job(client, auth_headers, first_submit.json()['job_id'])
         assert first_payload['status'] == 'succeeded'
         first_result = first_payload['result']
 
         second_submit = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(web_sample_vcf),
-                'ref_fasta_path': str(web_sample_ref_fasta),
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
                 'sample': 'web-vcf-repeat',
             },
             headers=auth_headers,
         )
         assert second_submit.status_code == 200
-        second_payload = client.get(f"/api/jobs/{second_submit.json()['job_id']}", headers=auth_headers).json()
+        second_payload = _poll_job(client, auth_headers, second_submit.json()['job_id'])
         assert second_payload['status'] == 'succeeded'
         second_result = second_payload['result']
 
         assert first_result['report_html_path'] != second_result['report_html_path']
         assert first_result['report_json_path'] != second_result['report_json_path']
         assert first_result['report_pdf_path'] != second_result['report_pdf_path']
-        assert Path(first_result['report_html_path']).is_file()
-        assert Path(second_result['report_html_path']).is_file()
+        first_report = client.get(
+            '/api/report',
+            params={'artifact_id': first_result['report_html_path']},
+            headers=auth_headers,
+        )
+        second_report = client.get(
+            '/api/report',
+            params={'artifact_id': second_result['report_html_path']},
+            headers=auth_headers,
+        )
+        assert first_report.status_code == 200
+        assert second_report.status_code == 200
 
     def test_profile_vcf_uses_requested_database_id(
         self,
@@ -818,11 +932,13 @@ class TestWebApi:
         alternate_db = startup_config.project_databases_dir / 'alternate.db'
         shutil.copy2(primary_db, alternate_db)
 
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         submit = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(web_sample_vcf),
-                'ref_fasta_path': str(web_sample_ref_fasta),
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
                 'database_id': alternate_db.name,
                 'sample': 'web-vcf-alt',
             },
@@ -830,9 +946,7 @@ class TestWebApi:
         )
         assert submit.status_code == 200
 
-        status = client.get(f"/api/jobs/{submit.json()['job_id']}", headers=auth_headers)
-        assert status.status_code == 200
-        payload = status.json()
+        payload = _poll_job(client, auth_headers, submit.json()['job_id'])
         assert payload['status'] == 'succeeded'
         result = payload['result']
         assert result['database_id'] == alternate_db.name
@@ -856,20 +970,20 @@ class TestWebApi:
             'other_ref\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500\n'
         )
 
+        vcf_id = _upload_file(client, auth_headers, mismatch_vcf, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         submit = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(mismatch_vcf),
-                'ref_fasta_path': str(web_sample_ref_fasta),
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
                 'sample': 'web-vcf-mismatch',
             },
             headers=auth_headers,
         )
         assert submit.status_code == 200
 
-        status = client.get(f"/api/jobs/{submit.json()['job_id']}", headers=auth_headers)
-        assert status.status_code == 200
-        payload = status.json()
+        payload = _poll_job(client, auth_headers, submit.json()['job_id'])
         assert payload['status'] == 'failed'
         assert payload['error'] == (
             'VCF CHROM(s) have no matching reference FASTA record: other_ref. '
@@ -892,6 +1006,9 @@ class TestWebApi:
         auth_headers: dict[str, str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        session_hash = _establish_session(client, auth_headers)
+        record_job(session_hash=session_hash, upload_ids=[], job_id='test-job-id')
+
         job = Mock()
         job.get_status.return_value = 'queued'
 
@@ -907,6 +1024,9 @@ class TestWebApi:
         auth_headers: dict[str, str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        session_hash = _establish_session(client, auth_headers)
+        record_job(session_hash=session_hash, upload_ids=[], job_id='test-job-id')
+
         job = Mock()
         job.get_status.return_value = 'started'
 
@@ -933,11 +1053,13 @@ class TestWebApi:
         app.dependency_overrides[get_batch_queue] = lambda: queue
         client = TestClient(app)
 
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         response = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(web_sample_vcf),
-                'ref_fasta_path': str(web_sample_ref_fasta),
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
                 'sample': 'queue-defaults',
             },
             headers=auth_headers,
@@ -971,12 +1093,10 @@ class TestWebApi:
         payload = response.json()
         assert payload['file_type'] == 'fasta'
         assert payload['size_bytes'] == len(fasta_data)
-        assert payload['file_path']
-        # Verify file is in upload directory
-        uploaded_path = Path(payload['file_path'])
-        assert uploaded_path.exists()
-        assert uploaded_path.parent == startup_config.uploads_dir
-        assert uploaded_path.read_bytes() == fasta_data
+        assert payload['upload_id']
+        # Verify a file matching the uploaded bytes now exists in the upload directory.
+        uploaded_files = list(startup_config.uploads_dir.iterdir())
+        assert any(f.read_bytes() == fasta_data for f in uploaded_files)
 
     def test_upload_vcf_success(
         self,
@@ -994,12 +1114,9 @@ class TestWebApi:
         payload = response.json()
         assert payload['file_type'] == 'vcf'
         assert payload['size_bytes'] == len(vcf_data)
-        assert payload['file_path']
-        # Verify file is in upload directory
-        uploaded_path = Path(payload['file_path'])
-        assert uploaded_path.exists()
-        assert uploaded_path.parent == startup_config.uploads_dir
-        assert uploaded_path.read_bytes() == vcf_data
+        assert payload['upload_id']
+        uploaded_files = list(startup_config.uploads_dir.iterdir())
+        assert any(f.read_bytes() == vcf_data for f in uploaded_files)
 
     def test_upload_bam_success(
         self,
@@ -1018,12 +1135,9 @@ class TestWebApi:
         payload = response.json()
         assert payload['file_type'] == 'bam'
         assert payload['size_bytes'] == len(bam_data)
-        assert payload['file_path']
-        # Verify file is in upload directory
-        uploaded_path = Path(payload['file_path'])
-        assert uploaded_path.exists()
-        assert uploaded_path.parent == startup_config.uploads_dir
-        assert uploaded_path.read_bytes() == bam_data
+        assert payload['upload_id']
+        uploaded_files = list(startup_config.uploads_dir.iterdir())
+        assert any(f.read_bytes() == bam_data for f in uploaded_files)
 
     def test_upload_json_success(
         self,
@@ -1061,9 +1175,9 @@ class TestWebApi:
         assert response.status_code == 200
         upload_payload = response.json()
         assert upload_payload['file_type'] == 'json'
-        uploaded_path = Path(upload_payload['file_path'])
-        assert uploaded_path.is_file()
-        assert uploaded_path.parent == startup_config.uploads_dir
+        assert upload_payload['upload_id']
+        uploaded_files = list(startup_config.uploads_dir.iterdir())
+        assert any(f.is_file() for f in uploaded_files)
 
     def test_upload_json_invalid_payload_rejected(
         self,
@@ -1093,11 +1207,13 @@ class TestWebApi:
         web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         submit_profile = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(web_sample_vcf),
-                'ref_fasta_path': str(web_sample_ref_fasta),
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
                 'sample': 'regen-web-vcf',
             },
             headers=auth_headers,
@@ -1105,32 +1221,43 @@ class TestWebApi:
         assert submit_profile.status_code == 200
         profile_job_id = submit_profile.json()['job_id']
 
-        profile_status = client.get(f'/api/jobs/{profile_job_id}', headers=auth_headers)
-        assert profile_status.status_code == 200
-        profile_payload = profile_status.json()
+        profile_payload = _poll_job(client, auth_headers, profile_job_id)
         assert profile_payload['status'] == 'succeeded'
-        json_path = profile_payload['result']['report_json_path']
+        json_artifact_id = profile_payload['result']['report_json_path']
+
+        # The regenerate route resolves a json_id as an *upload* record, so
+        # re-upload the results JSON artifact bytes via /api/upload/json.
+        json_bytes = client.get(
+            '/api/artifact',
+            params={'artifact_id': json_artifact_id},
+            headers=auth_headers,
+        ).content
+        json_id = _upload_bytes(client, auth_headers, json_bytes, 'json', 'sample.results.json')
 
         submit_regen = client.post(
             '/api/regenerate/json',
-            json={'json_path': json_path},
+            json={'json_id': json_id},
             headers=auth_headers,
         )
         assert submit_regen.status_code == 200
         regen_job_id = submit_regen.json()['job_id']
 
-        regen_status = client.get(f'/api/jobs/{regen_job_id}', headers=auth_headers)
-        assert regen_status.status_code == 200
-        regen_payload = regen_status.json()
+        regen_payload = _poll_job(client, auth_headers, regen_job_id)
         assert regen_payload['status'] == 'succeeded'
         result = regen_payload['result']
         assert result['mode'] == 'regenerate-json'
-        assert result['report_html_path'].endswith('.report.html')
-        assert result['report_json_path'].endswith('.results.json')
-        assert result['report_pdf_path'].endswith('.report.pdf')
-        assert Path(result['report_html_path']).is_file()
-        assert Path(result['report_json_path']).is_file()
-        assert Path(result['report_pdf_path']).is_file()
+        html_id = result['report_html_path']
+        json_id_out = result['report_json_path']
+        pdf_id = result['report_pdf_path']
+        assert html_id
+        assert json_id_out
+        assert pdf_id
+        report_response = client.get('/api/report', params={'artifact_id': html_id}, headers=auth_headers)
+        assert report_response.status_code == 200
+        json_response = client.get('/api/artifact', params={'artifact_id': json_id_out}, headers=auth_headers)
+        assert json_response.status_code == 200
+        pdf_response = client.get('/api/artifact', params={'artifact_id': pdf_id}, headers=auth_headers)
+        assert pdf_response.status_code == 200
 
     def test_regenerate_from_json_auto_selects_database_by_uuid(
         self,
@@ -1160,11 +1287,13 @@ class TestWebApi:
         test_app.dependency_overrides[get_batch_queue] = lambda: sync_queue
         test_client = TestClient(test_app)
 
+        vcf_id = _upload_file(test_client, auth_headers, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(test_client, auth_headers, web_sample_ref_fasta, 'fasta')
         submit_profile = test_client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(web_sample_vcf),
-                'ref_fasta_path': str(web_sample_ref_fasta),
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
                 'database_id': alternate_db.name,
                 'sample': 'regen-web-vcf-auto-select',
             },
@@ -1172,25 +1301,27 @@ class TestWebApi:
         )
         assert submit_profile.status_code == 200
         profile_job_id = submit_profile.json()['job_id']
-        profile_status = test_client.get(f'/api/jobs/{profile_job_id}', headers=auth_headers)
-        assert profile_status.status_code == 200
-        profile_payload = profile_status.json()
+        profile_payload = _poll_job(test_client, auth_headers, profile_job_id)
         assert profile_payload['status'] == 'succeeded'
 
-        json_path = profile_payload['result']['report_json_path']
+        json_artifact_id = profile_payload['result']['report_json_path']
+        json_bytes = test_client.get(
+            '/api/artifact',
+            params={'artifact_id': json_artifact_id},
+            headers=auth_headers,
+        ).content
+        json_id = _upload_bytes(test_client, auth_headers, json_bytes, 'json', 'sample.results.json')
         submit_regen = test_client.post(
             '/api/regenerate/json',
-            json={'json_path': json_path},
+            json={'json_id': json_id},
             headers=auth_headers,
         )
         assert submit_regen.status_code == 200
 
-        regen_status = test_client.get(f"/api/jobs/{submit_regen.json()['job_id']}", headers=auth_headers)
-        assert regen_status.status_code == 200
-        regen_payload = regen_status.json()
+        regen_payload = _poll_job(test_client, auth_headers, submit_regen.json()['job_id'])
         assert regen_payload['status'] == 'succeeded'
-        regenerated_payload = json.loads(
-            Path(regen_payload['result']['report_json_path']).read_text(encoding='utf-8')
+        regenerated_payload = _download_artifact_json(
+            test_client, auth_headers, regen_payload['result']['report_json_path']
         )
         assert regenerated_payload['run']['project_fingerprint'] == alternate_uuid
 
@@ -1222,38 +1353,43 @@ class TestWebApi:
         test_app.dependency_overrides[get_batch_queue] = lambda: sync_queue
         test_client = TestClient(test_app)
 
+        vcf_id = _upload_file(test_client, auth_headers, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(test_client, auth_headers, web_sample_ref_fasta, 'fasta')
         submit_profile = test_client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(web_sample_vcf),
-                'ref_fasta_path': str(web_sample_ref_fasta),
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
                 'database_id': alternate_db.name,
                 'sample': 'regen-web-vcf-prefer-json-uuid',
             },
             headers=auth_headers,
         )
         assert submit_profile.status_code == 200
-        profile_status = test_client.get(f"/api/jobs/{submit_profile.json()['job_id']}", headers=auth_headers)
-        assert profile_status.status_code == 200
-        profile_payload = profile_status.json()
+        profile_payload = _poll_job(test_client, auth_headers, submit_profile.json()['job_id'])
         assert profile_payload['status'] == 'succeeded'
 
+        json_artifact_id = profile_payload['result']['report_json_path']
+        json_bytes = test_client.get(
+            '/api/artifact',
+            params={'artifact_id': json_artifact_id},
+            headers=auth_headers,
+        ).content
+        json_id = _upload_bytes(test_client, auth_headers, json_bytes, 'json', 'sample.results.json')
         submit_regen = test_client.post(
             '/api/regenerate/json',
             json={
-                'json_path': profile_payload['result']['report_json_path'],
+                'json_id': json_id,
                 'database_id': primary_db.name,
             },
             headers=auth_headers,
         )
         assert submit_regen.status_code == 200
 
-        regen_status = test_client.get(f"/api/jobs/{submit_regen.json()['job_id']}", headers=auth_headers)
-        assert regen_status.status_code == 200
-        regen_payload = regen_status.json()
+        regen_payload = _poll_job(test_client, auth_headers, submit_regen.json()['job_id'])
         assert regen_payload['status'] == 'succeeded'
-        regenerated_payload = json.loads(
-            Path(regen_payload['result']['report_json_path']).read_text(encoding='utf-8')
+        regenerated_payload = _download_artifact_json(
+            test_client, auth_headers, regen_payload['result']['report_json_path']
         )
         assert regenerated_payload['run']['project_fingerprint'] == alternate_uuid
 
@@ -1265,38 +1401,42 @@ class TestWebApi:
         web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         submit_profile = client.post(
             '/api/profile/vcf',
             json={
-                'vcf_path': str(web_sample_vcf),
-                'ref_fasta_path': str(web_sample_ref_fasta),
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
                 'sample': 'regen-web-vcf-missing-uuid',
             },
             headers=auth_headers,
         )
         assert submit_profile.status_code == 200
         profile_job_id = submit_profile.json()['job_id']
-        profile_status = client.get(f'/api/jobs/{profile_job_id}', headers=auth_headers)
-        assert profile_status.status_code == 200
-        profile_payload = profile_status.json()
+        profile_payload = _poll_job(client, auth_headers, profile_job_id)
         assert profile_payload['status'] == 'succeeded'
 
-        source_json = Path(profile_payload['result']['report_json_path'])
-        tampered_json = startup_config.uploads_dir / 'tampered.results.json'
-        tampered_payload = json.loads(source_json.read_text(encoding='utf-8'))
+        source_json_bytes = client.get(
+            '/api/artifact',
+            params={'artifact_id': profile_payload['result']['report_json_path']},
+            headers=auth_headers,
+        ).content
+        tampered_payload = json.loads(source_json_bytes.decode('utf-8'))
         tampered_payload['run']['project_fingerprint'] = 'missing-uuid-in-startup-index'
-        tampered_json.write_text(json.dumps(tampered_payload), encoding='utf-8')
+        tampered_bytes = json.dumps(tampered_payload).encode('utf-8')
+        json_id = _upload_bytes(client, auth_headers, tampered_bytes, 'json', 'tampered.results.json')
 
         submit_regen = client.post(
             '/api/regenerate/json',
-            json={'json_path': str(tampered_json)},
+            json={'json_id': json_id},
             headers=auth_headers,
         )
         assert submit_regen.status_code == 400
         assert 'No project database found for JSON project_fingerprint' in submit_regen.json()['detail']
 
     def test_regenerate_json_requires_auth(self, client: TestClient) -> None:
-        response = client.post('/api/regenerate/json', json={'json_path': '/tmp/foo.results.json'})
+        response = client.post('/api/regenerate/json', json={'json_id': 'some-id'})
         assert response.status_code == 401
 
     def test_upload_fasta_with_empty_file_rejected(
@@ -1546,99 +1686,110 @@ class TestWebApi:
         payload = response.json()['data']
         assert payload['version'] == importlib.metadata.version('respro')
 
-    def test_open_report_rejects_paths_outside_results_dir(
+    def test_open_report_rejects_unknown_artifact_id(
         self,
         client: TestClient,
-        startup_config: StartupConfig,
         auth_headers: dict[str, str],
     ) -> None:
-        upload_path = startup_config.uploads_dir / 'not-a-report.report.html'
-        upload_path.write_text('<html><body>not allowed</body></html>')
+        response = client.get(
+            '/api/report',
+            params={'artifact_id': 'nonexistent-artifact-id'},
+            headers=auth_headers,
+        )
 
-        response = client.get('/api/report', params={'path': str(upload_path)}, headers=auth_headers)
-
-        assert response.status_code == 400
-        assert response.json()['detail'] == 'Report path is outside allowed output directory.'
-
-    def test_open_report_rejects_non_report_html_types(
-        self,
-        client: TestClient,
-        startup_config: StartupConfig,
-        auth_headers: dict[str, str],
-    ) -> None:
-        report_path = startup_config.results_dir / 'not-a-report.html'
-        report_path.write_text('<html><body>wrong suffix</body></html>')
-
-        response = client.get('/api/report', params={'path': str(report_path)}, headers=auth_headers)
-
-        assert response.status_code == 400
-        assert response.json()['detail'] == 'Unsupported report type. Allowed: .report.html.'
+        assert response.status_code == 404
+        assert response.json()['detail'] == 'Report not found.'
 
     def test_session_cleanup_deletes_uploaded_and_report_files(
         self,
         client: TestClient,
         startup_config: StartupConfig,
+        web_sample_ref_fasta: Path,
         auth_headers: dict[str, str],
     ) -> None:
-        upload_response = client.post(
-            '/api/upload/fasta',
-            files={'file': ('sample.fasta', b'>seq\nATCG\n', 'text/plain')},
+        # Upload a FASTA and run a profile job to produce a real owned artifact.
+        fasta_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
+        submit = client.post(
+            '/api/profile/fasta',
+            json={
+                'fasta_id': fasta_id,
+                'input_display_name': 'cleanup.fasta',
+                'sample': 'cleanup-fasta',
+            },
             headers=auth_headers,
         )
-        assert upload_response.status_code == 200
-        uploaded_path = Path(upload_response.json()['file_path'])
-        assert uploaded_path.exists()
+        assert submit.status_code == 200
+        payload = _poll_job(client, auth_headers, submit.json()['job_id'])
+        assert payload['status'] == 'succeeded'
+        artifact_id = payload['result']['report_html_path']
 
-        report_path = startup_config.results_dir / 'session-result.report.html'
-        report_path.write_text('<html><body>report</body></html>')
-        assert report_path.exists()
+        # Resolve the artifact's on-disk path so we can verify deletion afterwards.
+        report_response = client.get(
+            '/api/report',
+            params={'artifact_id': artifact_id},
+            headers=auth_headers,
+        )
+        assert report_response.status_code == 200
 
         cleanup_response = client.post(
             '/api/session/cleanup',
             json={
-                'upload_paths': [str(uploaded_path)],
-                'report_paths': [str(report_path)],
+                'upload_ids': [fasta_id],
+                'artifact_ids': [artifact_id],
             },
             headers=auth_headers,
         )
         assert cleanup_response.status_code == 200
         assert cleanup_response.json()['deleted_count'] == 2
-        assert not uploaded_path.exists()
-        assert not report_path.exists()
+        # The upload and the artifact should no longer be resolvable.
+        upload_check = client.post('/api/profile/fasta', json={'fasta_id': fasta_id}, headers=auth_headers)
+        assert upload_check.status_code == 404
+        report_check = client.get(
+            '/api/report',
+            params={'artifact_id': artifact_id},
+            headers=auth_headers,
+        )
+        assert report_check.status_code == 404
 
-    def test_session_cleanup_deletes_generated_bam_index_sidecar(
+    def test_session_cleanup_deletes_uploaded_bam(
         self,
         client: TestClient,
         startup_config: StartupConfig,
         auth_headers: dict[str, str],
     ) -> None:
         bam_data = bytes.fromhex('1f8b08040000000000ff0600424302001b000300000000000000')
-        upload_response = client.post(
-            '/api/upload/bam',
-            files={'file': ('sample.bam', bam_data, 'application/octet-stream')},
-            headers=auth_headers,
-        )
-        assert upload_response.status_code == 200
-        bam_path = Path(upload_response.json()['file_path'])
-        assert bam_path.exists()
-
-        bam_index_path = bam_path.with_suffix('.bam.bai')
-        bam_index_path.write_bytes(b'index')
-        assert bam_index_path.exists()
-        assert bam_index_path.parent == startup_config.uploads_dir
+        upload_id = _upload_bytes(client, auth_headers, bam_data, 'bam', 'sample.bam')
 
         cleanup_response = client.post(
             '/api/session/cleanup',
             json={
-                'upload_paths': [str(bam_path)],
-                'report_paths': [],
+                'upload_ids': [upload_id],
+                'artifact_ids': [],
             },
             headers=auth_headers,
         )
         assert cleanup_response.status_code == 200
-        assert cleanup_response.json()['deleted_count'] == 2
-        assert not bam_path.exists()
-        assert not bam_index_path.exists()
+        assert cleanup_response.json()['deleted_count'] == 1
+        # The BAM file is gone: resolving the upload id now returns 404.
+        vcf_id = _upload_bytes(client, auth_headers, b'##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\n', 'vcf', 'x.vcf')
+        ref_id = _upload_bytes(
+            client,
+            auth_headers,
+            b'>tiny_ref\nACGT\n',
+            'fasta',
+            'x.fasta',
+        )
+        response = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
+                'bam_id': upload_id,
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 404
+        assert 'BAM file not found' in response.json()['detail']
 
     def test_session_cleanup_accepts_body_token_for_sendbeacon(
         self,
@@ -1647,26 +1798,26 @@ class TestWebApi:
         auth_headers: dict[str, str],
     ) -> None:
         """Body token is intentionally retained: sendBeacon cannot set headers (SEC-007)."""
-        upload_response = client.post(
-            '/api/upload/fasta',
-            files={'file': ('sample.fasta', b'>seq\nATCG\n', 'text/plain')},
-            headers=auth_headers,
-        )
-        uploaded_path = Path(upload_response.json()['file_path'])
-        assert uploaded_path.exists()
+        upload_id = _upload_bytes(client, auth_headers, b'>seq\nATCG\n', 'fasta', 'sample.fasta')
 
         # No Authorization header — token sent in the body, as sendBeacon does.
         cleanup_response = client.post(
             '/api/session/cleanup',
             json={
-                'upload_paths': [str(uploaded_path)],
-                'report_paths': [],
+                'upload_ids': [upload_id],
+                'artifact_ids': [],
                 'token': startup_config.api_token,
             },
         )
         assert cleanup_response.status_code == 200
         assert cleanup_response.json()['deleted_count'] == 1
-        assert not uploaded_path.exists()
+        # The upload is gone: a profile attempt now 404s.
+        response = client.post(
+            '/api/profile/fasta',
+            json={'fasta_id': upload_id},
+            headers=auth_headers,
+        )
+        assert response.status_code == 404
 
     def test_session_cleanup_rejects_wrong_body_token(
         self,
@@ -1677,8 +1828,8 @@ class TestWebApi:
         cleanup_response = client.post(
             '/api/session/cleanup',
             json={
-                'upload_paths': [],
-                'report_paths': [],
+                'upload_ids': [],
+                'artifact_ids': [],
                 'token': 'wrong-token',
             },
         )
@@ -1701,8 +1852,10 @@ class TestBatchProfileEndpoints:
         isolated quota.
         """
         _SAMPLE_QUOTA_COUNTER.clear()
+        reset_memory_stores()
         yield
         _SAMPLE_QUOTA_COUNTER.clear()
+        reset_memory_stores()
 
     def test_batch_vcf_submit_success(
         self,
@@ -1717,13 +1870,17 @@ class TestBatchProfileEndpoints:
         vcf2.write_text(web_sample_vcf.read_text())
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
 
+        vcf_id_a = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        vcf_id_b = _upload_file(client, auth_headers, vcf2, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
+
         response = client.post(
             '/api/profile/batch/vcf',
             json={
-                'vcf_paths': [str(web_sample_vcf), str(vcf2)],
+                'vcf_ids': [vcf_id_a, vcf_id_b],
                 'sample_names': ['sample-a', 'sample-b'],
                 'input_display_names': ['batch-a.vcf', 'batch-b.vcf'],
-                'reference_fasta_path': str(web_sample_ref_fasta),
+                'reference_id': ref_id,
                 'db_path': default_db.name,
             },
             headers=auth_headers,
@@ -1748,10 +1905,13 @@ class TestBatchProfileEndpoints:
         fasta2.write_text(web_sample_ref_fasta.read_text())
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
 
+        fasta_id_a = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
+        fasta_id_b = _upload_file(client, auth_headers, fasta2, 'fasta')
+
         response = client.post(
             '/api/profile/batch/fasta',
             json={
-                'fasta_paths': [str(web_sample_ref_fasta), str(fasta2)],
+                'fasta_ids': [fasta_id_a, fasta_id_b],
                 'sample_names': ['fasta-a', 'fasta-b'],
                 'input_display_names': ['batch-a.fasta', 'batch-b.fasta'],
                 'db_path': default_db.name,
@@ -1778,13 +1938,17 @@ class TestBatchProfileEndpoints:
         vcf2.write_text(web_sample_vcf.read_text())
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
 
+        vcf_id_a = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        vcf_id_b = _upload_file(client, auth_headers, vcf2, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
+
         submit = client.post(
             '/api/profile/batch/vcf',
             json={
-                'vcf_paths': [str(web_sample_vcf), str(vcf2)],
+                'vcf_ids': [vcf_id_a, vcf_id_b],
                 'sample_names': ['sample-a', 'sample-b'],
                 'input_display_names': ['duplicate-name.vcf', 'duplicate-name.vcf'],
-                'reference_fasta_path': str(web_sample_ref_fasta),
+                'reference_id': ref_id,
                 'db_path': default_db.name,
             },
             headers=auth_headers,
@@ -1792,17 +1956,15 @@ class TestBatchProfileEndpoints:
         assert submit.status_code == 200
         submitted = submit.json()['samples']
 
-        result_paths: list[str] = []
+        artifact_ids: list[str] = []
         for sample in submitted:
-            status = client.get(f"/api/jobs/{sample['job_id']}", headers=auth_headers)
-            assert status.status_code == 200
-            payload = status.json()
+            payload = _poll_job(client, auth_headers, sample['job_id'])
             assert payload['status'] == 'succeeded'
-            result_paths.append(payload['result']['report_json_path'])
+            artifact_ids.append(payload['result']['report_json_path'])
 
         bundle = client.post(
             '/api/artifact-bundle',
-            json={'paths': result_paths},
+            json={'artifact_ids': artifact_ids},
             headers=auth_headers,
         )
         assert bundle.status_code == 200
@@ -1821,13 +1983,13 @@ class TestBatchProfileEndpoints:
         auth_headers: dict[str, str],
     ) -> None:
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
-        vcf_path = str(web_sample_vcf)
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
         response = client.post(
             '/api/profile/batch/vcf',
             json={
-                'vcf_paths': [vcf_path] * 26,
+                'vcf_ids': [vcf_id] * 26,
                 'sample_names': [f'sample-{i}' for i in range(26)],
-                'reference_fasta_path': str(web_sample_ref_fasta),
+                'reference_id': 'nonexistent-ref-id',
                 'db_path': default_db.name,
             },
             headers=auth_headers,
@@ -1845,12 +2007,13 @@ class TestBatchProfileEndpoints:
         auth_headers: dict[str, str],
     ) -> None:
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
         response = client.post(
             '/api/profile/batch/vcf',
             json={
-                'vcf_paths': [str(web_sample_vcf), str(web_sample_vcf)],
+                'vcf_ids': [vcf_id, vcf_id],
                 'sample_names': ['only-one'],
-                'reference_fasta_path': str(web_sample_ref_fasta),
+                'reference_id': 'nonexistent-ref-id',
                 'db_path': default_db.name,
             },
             headers=auth_headers,
@@ -1873,12 +2036,13 @@ class TestBatchProfileEndpoints:
         client = TestClient(app)
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
 
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
         response = client.post(
             '/api/profile/batch/vcf',
             json={
-                'vcf_paths': [str(web_sample_vcf), str(web_sample_vcf)],
+                'vcf_ids': [vcf_id, vcf_id],
                 'sample_names': ['sample-a', 'sample-b'],
-                'reference_fasta_path': str(web_sample_ref_fasta),
+                'reference_id': 'nonexistent-ref-id',
                 'db_path': default_db.name,
             },
             headers=auth_headers,
@@ -1895,11 +2059,11 @@ class TestBatchProfileEndpoints:
         auth_headers: dict[str, str],
     ) -> None:
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
-        fasta_path = str(web_sample_ref_fasta)
+        fasta_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         response = client.post(
             '/api/profile/batch/fasta',
             json={
-                'fasta_paths': [fasta_path] * 26,
+                'fasta_ids': [fasta_id] * 26,
                 'sample_names': [f'fasta-{i}' for i in range(26)],
                 'db_path': default_db.name,
             },
@@ -1920,7 +2084,8 @@ class TestBatchProfileEndpoints:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
-        missing_vcf = startup_config.uploads_dir / 'missing.vcf'
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         enqueue_calls = 0
         original_enqueue = sync_queue.enqueue
 
@@ -1934,9 +2099,9 @@ class TestBatchProfileEndpoints:
         response = client.post(
             '/api/profile/batch/vcf',
             json={
-                'vcf_paths': [str(web_sample_vcf), str(missing_vcf)],
+                'vcf_ids': [vcf_id, 'nonexistent-missing-vcf-id'],
                 'sample_names': ['sample-a', 'sample-b'],
-                'reference_fasta_path': str(web_sample_ref_fasta),
+                'reference_id': ref_id,
                 'db_path': default_db.name,
             },
             headers=auth_headers,
@@ -1956,7 +2121,7 @@ class TestBatchProfileEndpoints:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
-        missing_fasta = startup_config.uploads_dir / 'missing.fasta'
+        fasta_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         enqueue_calls = 0
         original_enqueue = sync_queue.enqueue
 
@@ -1970,7 +2135,7 @@ class TestBatchProfileEndpoints:
         response = client.post(
             '/api/profile/batch/fasta',
             json={
-                'fasta_paths': [str(web_sample_ref_fasta), str(missing_fasta)],
+                'fasta_ids': [fasta_id, 'nonexistent-missing-fasta-id'],
                 'sample_names': ['fasta-a', 'fasta-b'],
                 'db_path': default_db.name,
             },
@@ -1989,7 +2154,6 @@ class TestBatchProfileEndpoints:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         default_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
-        missing_fasta = startup_config.uploads_dir / 'missing.fasta'
         redis_urls: list[str] = []
 
         class FakeQuotaRedis:
@@ -2009,7 +2173,7 @@ class TestBatchProfileEndpoints:
         response = client.post(
             '/api/profile/batch/fasta',
             json={
-                'fasta_paths': [str(missing_fasta)],
+                'fasta_ids': ['nonexistent-fasta-id'],
                 'sample_names': ['fasta-a'],
                 'db_path': default_db.name,
             },
@@ -2020,7 +2184,7 @@ class TestBatchProfileEndpoints:
         assert redis_urls
         assert redis_urls[-1] == WEB_BACKEND_CONFIG.defaults.redis_url
 
-    # ── Batch VCF per-sample BAM (Feature: batch-bam-coverage) ──────────
+    # ── Batch VCF per-sample BAM ──────────────────────────────────────
 
     def _default_db(self, startup_config: StartupConfig) -> str:
         return sorted(startup_config.project_databases_dir.glob('*.db'))[0].name
@@ -2035,13 +2199,19 @@ class TestBatchProfileEndpoints:
         auth_headers: dict[str, str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A full-length bam_paths list wires each BAM to its sample's job."""
+        """A full-length bam_ids list wires each BAM to its sample's job."""
         from tests.conftest import write_minimal_bam
 
         vcf2 = startup_config.uploads_dir / 'sample2.vcf'
         vcf2.write_text(web_sample_vcf.read_text())
         bam1 = write_minimal_bam(startup_config.uploads_dir / 'sample.bam')
         bam2 = write_minimal_bam(startup_config.uploads_dir / 'sample2.bam')
+
+        vcf_id_a = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        vcf_id_b = _upload_file(client, auth_headers, vcf2, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
+        bam_id_a = _upload_file(client, auth_headers, bam1, 'bam')
+        bam_id_b = _upload_file(client, auth_headers, bam2, 'bam')
 
         enqueued_bam_paths: list[str | None] = []
         original_enqueue = sync_queue.enqueue
@@ -2055,20 +2225,24 @@ class TestBatchProfileEndpoints:
         response = client.post(
             '/api/profile/batch/vcf',
             json={
-                'vcf_paths': [str(web_sample_vcf), str(vcf2)],
+                'vcf_ids': [vcf_id_a, vcf_id_b],
                 'sample_names': ['sample-a', 'sample-b'],
                 'input_display_names': ['batch-a.vcf', 'batch-b.vcf'],
-                'reference_fasta_path': str(web_sample_ref_fasta),
+                'reference_id': ref_id,
                 'db_path': self._default_db(startup_config),
-                'bam_paths': [str(bam1), str(bam2)],
+                'bam_ids': [bam_id_a, bam_id_b],
             },
             headers=auth_headers,
         )
 
         assert response.status_code == 200
         assert len(enqueued_bam_paths) == 2
-        assert enqueued_bam_paths[0] == str(bam1)
-        assert enqueued_bam_paths[1] == str(bam2)
+        # Each BAM is resolved to its uploaded path within uploads_dir.
+        assert enqueued_bam_paths[0] is not None
+        assert enqueued_bam_paths[1] is not None
+        assert Path(enqueued_bam_paths[0]).parent == startup_config.uploads_dir
+        assert Path(enqueued_bam_paths[1]).parent == startup_config.uploads_dir
+        assert enqueued_bam_paths[0] != enqueued_bam_paths[1]
 
     def test_batch_vcf_bam_paths_mismatched_length_returns_422(
         self,
@@ -2080,7 +2254,7 @@ class TestBatchProfileEndpoints:
         auth_headers: dict[str, str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """bam_paths shorter than vcf_paths is rejected before any job is enqueued."""
+        """bam_ids shorter than vcf_ids is rejected before any job is enqueued."""
         enqueue_calls = 0
         original_enqueue = sync_queue.enqueue
 
@@ -2091,61 +2265,21 @@ class TestBatchProfileEndpoints:
 
         monkeypatch.setattr(sync_queue, 'enqueue', counting_enqueue)
 
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
         response = client.post(
             '/api/profile/batch/vcf',
             json={
-                'vcf_paths': [str(web_sample_vcf), str(web_sample_vcf)],
+                'vcf_ids': [vcf_id, vcf_id],
                 'sample_names': ['sample-a', 'sample-b'],
-                'reference_fasta_path': str(web_sample_ref_fasta),
+                'reference_id': 'nonexistent-ref-id',
                 'db_path': self._default_db(startup_config),
-                'bam_paths': [str(startup_config.uploads_dir / 'only.bam')],
+                'bam_ids': ['nonexistent-bam-id'],
             },
             headers=auth_headers,
         )
 
         assert response.status_code == 422
-        assert 'bam_paths and vcf_paths must have the same length.' in response.json()['detail']
-        assert enqueue_calls == 0
-
-    def test_batch_vcf_bam_path_outside_allowed_roots_returns_400(
-        self,
-        client: TestClient,
-        sync_queue: Queue,
-        startup_config: StartupConfig,
-        web_sample_vcf: Path,
-        web_sample_ref_fasta: Path,
-        tmp_path: Path,
-        auth_headers: dict[str, str],
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """An out-of-root BAM path is rejected with no partial jobs enqueued."""
-        from tests.conftest import write_minimal_bam
-
-        out_of_root_bam = write_minimal_bam(tmp_path / 'outside.bam')
-        enqueue_calls = 0
-        original_enqueue = sync_queue.enqueue
-
-        def counting_enqueue(*args, **kwargs):
-            nonlocal enqueue_calls
-            enqueue_calls += 1
-            return original_enqueue(*args, **kwargs)
-
-        monkeypatch.setattr(sync_queue, 'enqueue', counting_enqueue)
-
-        response = client.post(
-            '/api/profile/batch/vcf',
-            json={
-                'vcf_paths': [str(web_sample_vcf)],
-                'sample_names': ['sample-a'],
-                'reference_fasta_path': str(web_sample_ref_fasta),
-                'db_path': self._default_db(startup_config),
-                'bam_paths': [str(out_of_root_bam)],
-            },
-            headers=auth_headers,
-        )
-
-        assert response.status_code == 400
-        assert 'BAM path is outside allowed upload directory.' in response.json()['detail']
+        assert 'bam_ids and vcf_ids must have the same length.' in response.json()['detail']
         assert enqueue_calls == 0
 
     def test_batch_vcf_missing_bam_file_returns_404(
@@ -2158,7 +2292,7 @@ class TestBatchProfileEndpoints:
         auth_headers: dict[str, str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A non-existent in-root BAM path is rejected with no partial jobs enqueued."""
+        """A non-existent bam_id is rejected with no partial jobs enqueued."""
         enqueue_calls = 0
         original_enqueue = sync_queue.enqueue
 
@@ -2169,15 +2303,16 @@ class TestBatchProfileEndpoints:
 
         monkeypatch.setattr(sync_queue, 'enqueue', counting_enqueue)
 
-        missing_bam = startup_config.uploads_dir / 'does-not-exist.bam'
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         response = client.post(
             '/api/profile/batch/vcf',
             json={
-                'vcf_paths': [str(web_sample_vcf)],
+                'vcf_ids': [vcf_id],
                 'sample_names': ['sample-a'],
-                'reference_fasta_path': str(web_sample_ref_fasta),
+                'reference_id': ref_id,
                 'db_path': self._default_db(startup_config),
-                'bam_paths': [str(missing_bam)],
+                'bam_ids': ['nonexistent-bam-id'],
             },
             headers=auth_headers,
         )
@@ -2196,12 +2331,17 @@ class TestBatchProfileEndpoints:
         auth_headers: dict[str, str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A None entry skips BAM for that sample; a path entry wires its BAM."""
+        """A None entry skips BAM for that sample; a valid id wires its BAM."""
         from tests.conftest import write_minimal_bam
 
         vcf2 = startup_config.uploads_dir / 'sample2.vcf'
         vcf2.write_text(web_sample_vcf.read_text())
         bam2 = write_minimal_bam(startup_config.uploads_dir / 'sample2.bam')
+
+        vcf_id_a = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        vcf_id_b = _upload_file(client, auth_headers, vcf2, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
+        bam_id_b = _upload_file(client, auth_headers, bam2, 'bam')
 
         enqueued_bam_paths: list[str | None] = []
         original_enqueue = sync_queue.enqueue
@@ -2215,18 +2355,20 @@ class TestBatchProfileEndpoints:
         response = client.post(
             '/api/profile/batch/vcf',
             json={
-                'vcf_paths': [str(web_sample_vcf), str(vcf2)],
+                'vcf_ids': [vcf_id_a, vcf_id_b],
                 'sample_names': ['sample-a', 'sample-b'],
                 'input_display_names': ['batch-a.vcf', 'batch-b.vcf'],
-                'reference_fasta_path': str(web_sample_ref_fasta),
+                'reference_id': ref_id,
                 'db_path': self._default_db(startup_config),
-                'bam_paths': [None, str(bam2)],
+                'bam_ids': [None, bam_id_b],
             },
             headers=auth_headers,
         )
 
         assert response.status_code == 200
-        assert enqueued_bam_paths == [None, str(bam2)]
+        assert enqueued_bam_paths[0] is None
+        assert enqueued_bam_paths[1] is not None
+        assert Path(enqueued_bam_paths[1]).parent == startup_config.uploads_dir
 
     def test_batch_vcf_without_bam_paths_behaves_as_today(
         self,
@@ -2238,7 +2380,7 @@ class TestBatchProfileEndpoints:
         auth_headers: dict[str, str],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Omitting bam_paths entirely enqueues every job with bam_path=None."""
+        """Omitting bam_ids entirely enqueues every job with bam_path=None."""
         enqueued_bam_paths: list[str | None] = []
         original_enqueue = sync_queue.enqueue
 
@@ -2248,12 +2390,14 @@ class TestBatchProfileEndpoints:
 
         monkeypatch.setattr(sync_queue, 'enqueue', capturing_enqueue)
 
+        vcf_id = _upload_file(client, auth_headers, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
         response = client.post(
             '/api/profile/batch/vcf',
             json={
-                'vcf_paths': [str(web_sample_vcf), str(web_sample_vcf)],
+                'vcf_ids': [vcf_id, vcf_id],
                 'sample_names': ['sample-a', 'sample-b'],
-                'reference_fasta_path': str(web_sample_ref_fasta),
+                'reference_id': ref_id,
                 'db_path': self._default_db(startup_config),
             },
             headers=auth_headers,
@@ -2464,11 +2608,11 @@ class TestApiRouteRateLimits:
         client: TestClient,
         auth_headers: dict[str, str],
     ) -> None:
-        """ArtifactBundlePayload.paths capped at 50 → 422 for 51 paths (SEC-004)."""
-        paths = [f'/tmp/results/sample{i}.report.html' for i in range(51)]
+        """ArtifactBundlePayload.artifact_ids capped at 50 → 422 for 51 ids (SEC-004)."""
+        artifact_ids = [f'artifact-id-{i}' for i in range(51)]
         response = client.post(
             '/api/artifact-bundle',
-            json={'paths': paths},
+            json={'artifact_ids': artifact_ids},
             headers=auth_headers,
         )
         assert response.status_code == 422
@@ -2478,14 +2622,204 @@ class TestApiRouteRateLimits:
         client: TestClient,
         auth_headers: dict[str, str],
     ) -> None:
-        """ArtifactBundlePayload.paths cap of 50 accepts exactly 50 paths (boundary)."""
-        paths = [f'/tmp/results/sample{i}.report.html' for i in range(50)]
+        """ArtifactBundlePayload.artifact_ids cap of 50 accepts exactly 50 ids (boundary)."""
+        artifact_ids = [f'artifact-id-{i}' for i in range(50)]
         response = client.post(
             '/api/artifact-bundle',
-            json={'paths': paths},
+            json={'artifact_ids': artifact_ids},
             headers=auth_headers,
         )
-        # 50 paths is within the cap; it should not be a 422 validation error.
-        # (It may be 400 because paths are outside results_dir, but never 422.)
+        # 50 ids is within the cap; it should not be a 422 validation error.
+        # (It may be 404 because the ids do not resolve, but never 422.)
         assert response.status_code != 422
+
+
+class TestRequestFieldBounds:
+    """Threads and string/list fields on request models are bounded."""
+
+    def test_profile_fasta_rejects_threads_above_cap(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        cap = WEB_BACKEND_CONFIG.defaults.profile_max_threads
+        response = client.post(
+            '/api/profile/fasta',
+            json={'fasta_id': 'some-id', 'threads': cap + 1},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_profile_fasta_rejects_threads_below_one(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        response = client.post(
+            '/api/profile/fasta',
+            json={'fasta_id': 'some-id', 'threads': 0},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_profile_vcf_rejects_threads_above_cap(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        cap = WEB_BACKEND_CONFIG.defaults.profile_max_threads
+        response = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_id': 'some-id',
+                'reference_id': 'some-id',
+                'threads': cap + 1,
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_profile_fasta_rejects_oversized_sample_name(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        too_long = 'x' * (WEB_BACKEND_CONFIG.defaults.sample_name_max_length + 1)
+        response = client.post(
+            '/api/profile/fasta',
+            json={'fasta_id': 'some-id', 'sample': too_long},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_profile_fasta_rejects_oversized_display_name(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        too_long = 'x' * (WEB_BACKEND_CONFIG.defaults.display_name_max_length + 1)
+        response = client.post(
+            '/api/profile/fasta',
+            json={'fasta_id': 'some-id', 'input_display_name': too_long},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_batch_profile_vcf_rejects_oversized_path_list(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        cap = WEB_BACKEND_CONFIG.defaults.path_list_max_length
+        vcf_ids = [f'id-{i}' for i in range(cap + 1)]
+        sample_names = [f's{i}' for i in range(cap + 1)]
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_ids': vcf_ids,
+                'sample_names': sample_names,
+                'reference_id': 'some-id',
+                'db_path': 'x.db',
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_batch_profile_fasta_rejects_threads_above_cap(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        cap = WEB_BACKEND_CONFIG.defaults.profile_max_threads
+        response = client.post(
+            '/api/profile/batch/fasta',
+            json={
+                'fasta_ids': ['some-id'],
+                'sample_names': ['s'],
+                'db_path': 'x.db',
+                'threads': cap + 1,
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_compare_rejects_oversized_path_list(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        cap = WEB_BACKEND_CONFIG.defaults.path_list_max_length
+        artifact_ids = [f'id-{i}' for i in range(cap + 1)]
+        response = client.post(
+            '/api/compare',
+            json={'artifact_ids': artifact_ids},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_session_cleanup_rejects_oversized_path_list(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        cap = WEB_BACKEND_CONFIG.defaults.path_list_max_length
+        upload_ids = [f'id-{i}' for i in range(cap + 1)]
+        response = client.post(
+            '/api/session/cleanup',
+            json={'upload_ids': upload_ids},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_profile_fasta_rejects_oversized_opaque_id(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """An opaque upload ID longer than the configured cap returns 422."""
+        cap = WEB_BACKEND_CONFIG.defaults.opaque_id_max_length
+        response = client.post(
+            '/api/profile/fasta',
+            json={'fasta_id': 'x' * (cap + 1)},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_profile_vcf_rejects_oversized_min_depth(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """A min_depth above the configured cap returns 422."""
+        cap = WEB_BACKEND_CONFIG.defaults.min_depth_max
+        response = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_id': 'some-id',
+                'reference_id': 'some-ref',
+                'min_depth': cap + 1,
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 422
+
+    def test_profile_fasta_accepts_default_threads_omitted(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_ref_fasta: Path,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """Omitting threads entirely must remain valid (defaults applied later)."""
+        fasta_id = _upload_file(client, auth_headers, web_sample_ref_fasta, 'fasta')
+        submit = client.post(
+            '/api/profile/fasta',
+            json={
+                'fasta_id': fasta_id,
+                'input_display_name': 'orig.fasta',
+                'sample': 'web-fasta',
+            },
+            headers=auth_headers,
+        )
+        assert submit.status_code == 200
 

@@ -127,6 +127,14 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 !!! warning "Public bind requires a token"
     Binding to anything other than `127.0.0.1`, `localhost`, or `0.0.0.0` without setting `RESPRO_WEB_API_TOKEN` fails fast at startup. `0.0.0.0` is allowed without a token only because it is the standard Docker bind address — combine it with a reverse proxy and a token for public hosting.
 
+### Deployment modes
+
+| Variable | Default | Description |
+|---|---|---|
+| `RESPRO_WEB_DEPLOYMENT_MODE` | `local` | Controls the startup policy and security defaults. `local` (default): zero-config, no token required, API docs enabled, `Secure` omitted from the session cookie (HTTP on loopback). `trusted-proxy`: requires `RESPRO_WEB_API_TOKEN`, `RESPRO_WEB_TRUSTED_PROXIES`, and `RESPRO_WEB_CORS_ORIGINS`; API docs disabled; `Secure` set on the session cookie. `public-session`: reserved for the future multi-user session-ownership model; fails fast until that feature is fully rolled out. |
+
+Startup fails with a clear `RuntimeError` if the selected mode's requirements are not met. `/docs`, `/redoc`, and `/openapi.json` return 404 when mode is not `local`.
+
 ### Data and filesystem
 
 | Variable | Default | Description |
@@ -134,6 +142,7 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 | `RESPRO_WEB_DATA_DIR` | `/data` if it exists, otherwise `./data` | Root directory for `project_databases/`, `uploads/`, and `results/`. Created if missing. Must be writable. |
 | `RESPRO_WEB_ALLOWED_ROOTS` | the three subdirectories of `RESPRO_WEB_DATA_DIR` | Comma-separated list of absolute paths the API is allowed to read from and write to. Override only if you mount upload or result directories outside the data root. |
 | `RESPRO_WEB_RESULT_TTL` | `86400` (24 hours) | Time-to-live in seconds for files in `uploads/` and `results/`. A background sweep thread deletes files older than this value. |
+| `RESPRO_WEB_SESSION_TTL` | `604800` (7 days) | Time-to-live in seconds for session records in Redis and the session cookie `Max-Age`. |
 
 ### Authentication and security
 
@@ -143,6 +152,26 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 | `RESPRO_WEB_CORS_ORIGINS` | `http://127.0.0.1:5173`, `http://localhost:5173` | Comma-separated list of allowed origins for cross-origin requests. Must be set explicitly when `RESPRO_WEB_API_TOKEN` is set. For public hosting, list your exact frontend origin(s), e.g. `https://respro.example.com`. |
 | `RESPRO_WEB_TRUSTED_PROXIES` | *(empty — proxy headers ignored)* | Comma-separated list of proxy IPs or CIDRs whose `X-Forwarded-*` headers are trusted. Set to your reverse proxy address for public hosting (see [nginx step-by-step](#nginx-step-by-step-local-network)). |
 | `RESPRO_WEB_IMPRINT` | *(empty — feature disabled)* | Imprint / legal notice. Accepts either an absolute `http://` / `https://` URL pointing at an already-hosted imprint page (the footer links straight to it) **or** an absolute path to a local HTML file served at `/legal`. See [Legal notice / imprint](#legal-notice-imprint-optional) for details. |
+
+### Session-ownership model
+
+ResPro issues an opaque session cookie (`respro_session`) on the first request. The cookie is `HttpOnly` and `SameSite=Lax`; the `Secure` attribute is set only in non-local deployment modes (behind a TLS-terminating proxy). The raw cookie value carries ≥256 bits of randomness and is never stored server-side — only its SHA-256 hash is persisted in Redis (or an in-memory fallback when Redis is unavailable in local mode).
+
+Every upload, queued job, and output artifact is recorded against the owning session:
+
+- `upload:<id>` → owner session hash, canonical path, file type, expiry
+- `job:<id>` → owner session hash, input upload IDs, status, expiry
+- `artifact:<id>` → owner session hash, canonical path, media type, expiry
+
+API responses return opaque IDs (`upload_id`, `artifact_id`) instead of absolute filesystem paths. Profile, regenerate, compare, artifact, report, and cleanup routes resolve these IDs server-side to validated, path-confined files. Ownership is enforced on every access: a request from session B for a job/artifact created under session A returns **404** (not 403, to avoid confirming existence to non-owners).
+
+**Browser vs. API authentication.** `RESPRO_WEB_API_TOKEN` / `VITE_RESPRO_API_TOKEN` is a local-dev convenience for the raw API and a separate mechanism for programmatic API clients — it is **not** a browser-security boundary. Vite variables are bundled client-side and cannot be attached to `window.open`, `<a href>`, or iframe navigations. For institutional deployments, **whole-origin proxy authentication** (Nginx/SSO) remains the recommended browser-auth model. The session cookie protects per-user data isolation within a shared deployment; the API token protects the raw API endpoint surface.
+
+| Model | Use case | Mechanism |
+|---|---|---|
+| **Session cookie** | Multi-user browser access to a shared deployment | Opaque `respro_session` cookie, ownership-enforced ID resolution |
+| **API token** | Programmatic API clients, local dev | `Authorization: Bearer <token>` header |
+| **Proxy auth (Nginx/SSO)** | Institutional deployments | Whole-origin authentication at the reverse proxy |
 
 ### Rate limiting and batch sizes
 
@@ -158,10 +187,18 @@ In batch VCF mode, an optional BAM can be attached to each sample for per-sample
 
 | Variable | Default | Description |
 |---|---|---|
-| `REDIS_URL` | `redis://127.0.0.1:6379/0` | Redis connection URL used by the API, the RQ worker, and the rate limiter. **Set identically on `respro-web` and `respro-worker`.** |
+| `REDIS_URL` | `redis://127.0.0.1:6379/0` | Redis connection URL used by the API, the RQ worker, and the rate limiter. **Set identically on `respro-web` and `respro-worker`.** Include the password: `redis://:<password>@host:6379/0`. |
+| `RESPRO_REDIS_PASSWORD` | `change-me-local-only` | Password required by the Redis service (`--requirepass`). The reference compose file uses this in both the Redis `command` and the `REDIS_URL` on both app services. **Set a strong secret for any non-loopback deployment.** |
 | `RESPRO_WEB_JOB_TIMEOUT` | `3600` (1 hour) | Maximum runtime in seconds for a single profiling job before RQ marks it failed. Must be `>= 0`. |
 | `RESPRO_WEB_JOB_RETRY_MAX` | `0` (no retries) | Maximum number of automatic retries for a failed job. Must be `>= 0`. |
 | `RESPRO_WEB_JOB_RETRY_INTERVALS` | `30` | Comma-separated delay in seconds between retries. Applied cyclically when `RESPRO_WEB_JOB_RETRY_MAX` is greater than the number of intervals. All values must be `> 0`. |
+
+!!! warning "Redis is an execution trust boundary"
+    RQ's default serializer uses `pickle.dumps`/`pickle.loads`, so anything able to **write** to Redis can achieve worker code execution via a crafted pickle payload. The reference `docker-compose.web.yml` therefore requires a Redis password by default (`RESPRO_REDIS_PASSWORD`), and `web/backend/queue.py` uses `rq.serializers.JSONSerializer` instead of the pickle-based default — job arguments in this codebase are primitive strings/numbers/lists/dicts, which JSON round-trips losslessly. For off-host Redis, additionally:
+
+    - **ACL-based least privilege**: create a Redis ACL user with access limited to the keys RQ uses (`respro:*`, `rq:*`) rather than the default full-access user.
+    - **TLS**: enable Redis TLS (`--tls-port`, `--tls-cert-file`, `--tls-key-file`) and set `REDIS_URL` to `rediss://...` so the password and job payloads are encrypted in transit.
+    - **No public port**: Redis must never be published on a public interface (the compose file does not publish it).
 
 !!! note "Worker reads queue settings too"
     `REDIS_URL`, `RESPRO_WEB_JOB_TIMEOUT`, `RESPRO_WEB_JOB_RETRY_MAX`, and `RESPRO_WEB_JOB_RETRY_INTERVALS` must be set on the `respro-worker` service as well as `respro-web` so the worker and the API agree on timeouts and retries.
@@ -187,8 +224,9 @@ RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
 RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
 RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
 
-# Redis (set on both respro-web and respro-worker)
-REDIS_URL=redis://redis:6379/0
+# Redis (set on both respro-web and respro-worker; password must match the redis service)
+RESPRO_REDIS_PASSWORD=replace-with-a-long-random-secret
+REDIS_URL=redis://:${RESPRO_REDIS_PASSWORD}@redis:6379/0
 
 # Optional: legal notice / imprint
 # Either an absolute URL to an already-hosted imprint page:
@@ -370,9 +408,60 @@ server {
     listen 80;
     server_name respro.internal;
 
-    client_max_body_size 1024m;
-    proxy_read_timeout 3600s;
+    # ── Global timeouts and connection limits ───────────────────────────
+    # Bound how long nginx waits for client headers/bodies and for sending a
+    # response, and limit concurrent connections per client IP to resist slowloris
+    # style resource exhaustion.
+    client_body_timeout   60s;   # max time to receive the request body
+    client_header_timeout 30s;   # max time to receive the request headers
+    send_timeout          60s;   # max time between successive writes to the client
+    limit_conn            addr 10;  # max 10 concurrent connections per IP (see limit_conn_zone below)
 
+    # Define the per-IP connection-limiting zone (place at http{} level in
+    # /etc/nginx/nginx.conf, or here if your build allows server-level zones).
+    # limit_conn_zone $binary_remote_addr zone=addr:10m;
+
+    proxy_read_timeout 3600s;  # profiling jobs can run for a while
+
+    # ── Per-location body-size limits ───────────────────────────────────
+    # Small JSON API endpoints must not accept multi-hundred-MB bodies; only the
+    # BAM upload route needs a very large limit. This caps abuse surface area
+    # without breaking legitimate large uploads.
+
+    # BAM uploads can legitimately be ~1 GB.
+    location /api/upload/bam {
+        client_max_body_size 1024m;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+    }
+
+    # Other uploads (FASTA/VCF/JSON) are at most a few MB.
+    location /api/upload/ {
+        client_max_body_size 8m;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+    }
+
+    # All other API routes accept only small JSON payloads.
+    location /api/ {
+        client_max_body_size 2m;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+    }
+
+    # Frontend and everything else.
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
@@ -385,7 +474,7 @@ server {
 ```
 
 !!! note
-    Replace `respro.internal` with the hostname or IP that clients will use. `client_max_body_size` is important for larger uploads. `proxy_read_timeout` avoids premature timeouts for longer profiling requests.
+    Replace `respro.internal` with the hostname or IP that clients will use. The per-location `client_max_body_size` values are important: small JSON API endpoints should not accept multi-hundred-MB bodies, so only the BAM upload route allows up to `1024m`, other uploads are capped at `8m`, and all remaining API routes at `2m`. `proxy_read_timeout` avoids premature timeouts for longer profiling requests, while `client_body_timeout` / `client_header_timeout` / `send_timeout` / `limit_conn` harden against slow-client resource exhaustion.
 
 5. **Enable the site and reload nginx.**
 
@@ -440,14 +529,27 @@ annotated `docker-compose.web.yml` ships with all of these settings present but
       SSO gate); the token guards the raw API against unauthenticated scraping.
 - [ ] `RESPRO_WEB_CORS_ORIGINS` lists your exact frontend origin(s), e.g.
       `https://respro.example.com`. This is **required** when the token is set.
+- [ ] `RESPRO_WEB_DEPLOYMENT_MODE` is set to `trusted-proxy` for production
+      deployments behind a reverse proxy. This disables API docs and sets the
+      `Secure` flag on the session cookie.
+- [ ] For institutional multi-user deployments, whole-origin proxy authentication
+      (Nginx/SSO) is the recommended browser-auth model. The session cookie
+      provides per-user data isolation; the API token is a separate mechanism for
+      programmatic clients, not a browser-security boundary (Vite variables are
+      bundled client-side and cannot protect `window.open`/`<a href>`/iframe
+      navigations).
 
 ### Redis
 
-- [ ] Redis requires a password. Uncomment the `redis` `command:` line in
-      `docker-compose.web.yml` and set `--requirepass` to a strong secret.
+- [ ] Redis requires a password. `RESPRO_REDIS_PASSWORD` is set to a strong
+      random secret (the reference compose file requires it by default).
 - [ ] `REDIS_URL` on **both** `respro-web` and `respro-worker` includes the
       password: `redis://:<password>@redis:6379/0`.
 - [ ] Redis is not exposed on a public port (the compose file does not publish it).
+- [ ] For off-host Redis: ACL-based least-privilege access and TLS are configured
+      (see [Redis and job queue](#redis-and-job-queue)).
+- [ ] RQ uses `JSONSerializer` (the default in `web/backend/queue.py`) so Redis
+      cannot be used for pickle-based worker code execution.
 
 ### Container hardening
 
@@ -460,6 +562,13 @@ annotated `docker-compose.web.yml` ships with all of these settings present but
       directory with the host directory's own ownership at container start.
 - [ ] If you pin a different UID/GID, update the `Dockerfile.web` `useradd`/`groupadd`
       lines; the entrypoint's `chown` picks up the new UID/GID automatically.
+- [ ] The production compose file (`production/docker-compose.web.prod.yml`) sets
+      `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, `read_only: true`,
+      `tmpfs: [/tmp:noexec,nosuid]`, and `mem_limit` on every service.
+- [ ] The worker's `project_databases` directory is mounted read-only (the worker
+      only reads reference data). For the web service, enable the read-only
+      project_databases mount only when `RESPRO_WEB_MAINTAINED_BOOTSTRAP` is
+      disabled (the auto-update thread writes to that directory).
 
 ### Rate limiting
 

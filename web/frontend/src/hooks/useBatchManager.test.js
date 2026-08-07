@@ -72,25 +72,25 @@ function makeStubs() {
   };
 }
 
-// Upload a VCF file into the hook via addBatchVcfFiles, resolving the XHR with a server path.
-async function uploadVcf(result, fileName, serverPath) {
+// Upload a VCF file into the hook via addBatchVcfFiles, resolving the XHR with a server upload_id.
+async function uploadVcf(result, fileName, uploadId) {
   const file = new File(['##VCF'], fileName, { type: 'application/octet-stream' });
   let promise;
   await act(async () => {
     promise = result.current.addBatchVcfFiles([file]);
-    mockXHRInstance.triggerSuccess({ file_path: serverPath, file_type: 'vcf', size_bytes: 5 });
+    mockXHRInstance.triggerSuccess({ upload_id: uploadId, file_type: 'vcf', size_bytes: 5 });
     await promise;
   });
 }
 
-// Upload a BAM file into the hook via addBatchBamFiles, resolving the XHR with a server path.
-async function uploadBam(result, fileName, serverPath) {
+// Upload a BAM file into the hook via addBatchBamFiles, resolving the XHR with a server upload_id.
+async function uploadBam(result, fileName, uploadId) {
   const file = new File(['BAM'], fileName, { type: 'application/octet-stream' });
   let promise;
   let pairing;
   await act(async () => {
     promise = result.current.addBatchBamFiles([file]);
-    mockXHRInstance.triggerSuccess({ file_path: serverPath, file_type: 'bam', size_bytes: 3 });
+    mockXHRInstance.triggerSuccess({ upload_id: uploadId, file_type: 'bam', size_bytes: 3 });
     pairing = await promise;
   });
   return pairing;
@@ -118,14 +118,14 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
     const stubs = makeStubs();
     const { result } = renderHook(() => useBatchManager(stubs));
 
-    await uploadVcf(result, 'sample1.vcf', '/uploads/sample1.vcf');
+    await uploadVcf(result, 'sample1.vcf', 'up-vcf-1');
 
-    const pairing = await uploadBam(result, 'sample1.bam', '/uploads/sample1.bam');
+    const pairing = await uploadBam(result, 'sample1.bam', 'up-bam-1');
 
     expect(pairing.paired).toEqual(['sample1.bam']);
     expect(pairing.unmatched).toEqual([]);
     expect(pairing.collisions).toEqual([]);
-    expect(result.current.batchVcfFiles[0].bamPath).toBe('/uploads/sample1.bam');
+    expect(result.current.batchVcfFiles[0].bamId).toBe('up-bam-1');
     expect(result.current.batchVcfFiles[0].bamName).toBe('sample1.bam');
   });
 
@@ -133,29 +133,29 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
     const stubs = makeStubs();
     const { result } = renderHook(() => useBatchManager(stubs));
 
-    await uploadVcf(result, 'sample1.vcf', '/uploads/sample1.vcf');
+    await uploadVcf(result, 'sample1.vcf', 'up-vcf-1');
 
-    const pairing = await uploadBam(result, 'orphan.bam', '/uploads/orphan.bam');
+    const pairing = await uploadBam(result, 'orphan.bam', 'up-bam-orphan');
 
     expect(pairing.paired).toEqual([]);
     expect(pairing.unmatched).toEqual(['orphan.bam']);
     expect(pairing.collisions).toEqual([]);
-    expect(result.current.batchVcfFiles[0].bamPath).toBeNull();
+    expect(result.current.batchVcfFiles[0].bamId).toBeNull();
   });
 
   it('reports a collision when a BAM stem matches an already-paired row and preserves the existing pairing', async () => {
     const stubs = makeStubs();
     const { result } = renderHook(() => useBatchManager(stubs));
 
-    await uploadVcf(result, 'sample1.vcf', '/uploads/sample1.vcf');
-    await uploadBam(result, 'sample1.bam', '/uploads/sample1.bam');
+    await uploadVcf(result, 'sample1.vcf', 'up-vcf-1');
+    await uploadBam(result, 'sample1.bam', 'up-bam-1');
 
-    const pairing = await uploadBam(result, 'sample1.bam', '/uploads/sample1-dup.bam');
+    const pairing = await uploadBam(result, 'sample1.bam', 'up-bam-dup');
 
     expect(pairing.paired).toEqual([]);
     expect(pairing.unmatched).toEqual([]);
     expect(pairing.collisions).toEqual(['sample1.bam']);
-    expect(result.current.batchVcfFiles[0].bamPath).toBe('/uploads/sample1.bam');
+    expect(result.current.batchVcfFiles[0].bamId).toBe('up-bam-1');
     expect(result.current.batchVcfFiles[0].bamName).toBe('sample1.bam');
   });
 
@@ -166,7 +166,7 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
     const stubs = makeStubs();
     const { result } = renderHook(() => useBatchManager(stubs));
 
-    await uploadVcf(result, 'sample1.vcf', '/uploads/sample1.vcf');
+    await uploadVcf(result, 'sample1.vcf', 'up-vcf-1');
 
     const file1 = new File(['BAM'], 'sample1.bam', { type: 'application/octet-stream' });
     const file2 = new File(['BAM'], 'sample1.bam', { type: 'application/octet-stream' });
@@ -178,9 +178,9 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
       // the loop is parked on its onload. Resolve it, then flush again so the loop advances to
       // apiUpload for file2 (creating XHR #2) before resolving that too.
       await flushPromises();
-      mockXHRInstances[startCount].triggerSuccess({ file_path: '/uploads/sample1.bam', file_type: 'bam', size_bytes: 3 });
+      mockXHRInstances[startCount].triggerSuccess({ upload_id: 'up-bam-1', file_type: 'bam', size_bytes: 3 });
       await flushPromises();
-      mockXHRInstances[startCount + 1].triggerSuccess({ file_path: '/uploads/sample1-dup.bam', file_type: 'bam', size_bytes: 3 });
+      mockXHRInstances[startCount + 1].triggerSuccess({ upload_id: 'up-bam-dup', file_type: 'bam', size_bytes: 3 });
       pairing = await promise;
     });
 
@@ -188,7 +188,7 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
     expect(pairing.unmatched).toEqual([]);
     expect(pairing.collisions).toEqual(['sample1.bam']);
     // The first BAM's pairing is preserved; the second did not overwrite it.
-    expect(result.current.batchVcfFiles[0].bamPath).toBe('/uploads/sample1.bam');
+    expect(result.current.batchVcfFiles[0].bamId).toBe('up-bam-1');
     expect(result.current.batchVcfFiles[0].bamName).toBe('sample1.bam');
   });
 
@@ -196,8 +196,8 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
     const stubs = makeStubs();
     const { result } = renderHook(() => useBatchManager(stubs));
 
-    await uploadVcf(result, 'sample1.vcf', '/uploads/sample1.vcf');
-    await uploadBam(result, 'sample1.bam', '/uploads/sample1.bam');
+    await uploadVcf(result, 'sample1.vcf', 'up-vcf-1');
+    await uploadBam(result, 'sample1.bam', 'up-bam-1');
 
     expect(result.current.batchError).toBeNull();
   });
@@ -206,7 +206,7 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
     const stubs = makeStubs();
     const { result } = renderHook(() => useBatchManager(stubs));
 
-    await uploadVcf(result, 'sample1.vcf', '/uploads/sample1.vcf');
+    await uploadVcf(result, 'sample1.vcf', 'up-vcf-1');
     // orphan.bam matches no VCF row -> unmatched; sample1.bam pairs, then a second sample1.bam
     // in the same call collides. Both cases must be surfaced via batchError, not narrated inline.
     const orphan = new File(['BAM'], 'orphan.bam', { type: 'application/octet-stream' });
@@ -216,11 +216,11 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
     await act(async () => {
       const promise = result.current.addBatchBamFiles([orphan, first, second]);
       await flushPromises();
-      mockXHRInstances[startCount].triggerSuccess({ file_path: '/uploads/orphan.bam', file_type: 'bam', size_bytes: 3 });
+      mockXHRInstances[startCount].triggerSuccess({ upload_id: 'up-bam-orphan', file_type: 'bam', size_bytes: 3 });
       await flushPromises();
-      mockXHRInstances[startCount + 1].triggerSuccess({ file_path: '/uploads/sample1.bam', file_type: 'bam', size_bytes: 3 });
+      mockXHRInstances[startCount + 1].triggerSuccess({ upload_id: 'up-bam-1', file_type: 'bam', size_bytes: 3 });
       await flushPromises();
-      mockXHRInstances[startCount + 2].triggerSuccess({ file_path: '/uploads/sample1-dup.bam', file_type: 'bam', size_bytes: 3 });
+      mockXHRInstances[startCount + 2].triggerSuccess({ upload_id: 'up-bam-dup', file_type: 'bam', size_bytes: 3 });
       await promise;
     });
 
@@ -234,17 +234,17 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
     const stubs = makeStubs();
     const { result } = renderHook(() => useBatchManager(stubs));
 
-    await uploadVcf(result, 'sample1.vcf', '/uploads/sample1.vcf');
-    await uploadBam(result, 'sample1.bam', '/uploads/sample1.bam');
+    await uploadVcf(result, 'sample1.vcf', 'up-vcf-1');
+    await uploadBam(result, 'sample1.bam', 'up-bam-1');
 
     const override = new File(['BAM'], 'manual.bam', { type: 'application/octet-stream' });
     await act(async () => {
       const promise = result.current.attachBatchBam(0, override);
-      mockXHRInstance.triggerSuccess({ file_path: '/uploads/manual.bam', file_type: 'bam', size_bytes: 3 });
+      mockXHRInstance.triggerSuccess({ upload_id: 'up-bam-manual', file_type: 'bam', size_bytes: 3 });
       await promise;
     });
 
-    expect(result.current.batchVcfFiles[0].bamPath).toBe('/uploads/manual.bam');
+    expect(result.current.batchVcfFiles[0].bamId).toBe('up-bam-manual');
     expect(result.current.batchVcfFiles[0].bamName).toBe('manual.bam');
   });
 
@@ -252,18 +252,18 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
     const stubs = makeStubs();
     const { result } = renderHook(() => useBatchManager(stubs));
 
-    await uploadVcf(result, 'sample1.vcf', '/uploads/sample1.vcf');
-    await uploadVcf(result, 'sample2.vcf', '/uploads/sample2.vcf');
-    await uploadBam(result, 'sample1.bam', '/uploads/sample1.bam');
+    await uploadVcf(result, 'sample1.vcf', 'up-vcf-1');
+    await uploadVcf(result, 'sample2.vcf', 'up-vcf-2');
+    await uploadBam(result, 'sample1.bam', 'up-bam-1');
 
     act(() => {
       result.current.removeBatchBam(0);
     });
 
-    expect(result.current.batchVcfFiles[0].bamPath).toBeNull();
+    expect(result.current.batchVcfFiles[0].bamId).toBeNull();
     expect(result.current.batchVcfFiles[0].bamName).toBeNull();
     // Other row untouched.
-    expect(result.current.batchVcfFiles[1].bamPath).toBeNull();
+    expect(result.current.batchVcfFiles[1].bamId).toBeNull();
   });
 
   it('removeBatchFile drops the VCF row together with its BAM', async () => {
@@ -282,19 +282,19 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
     expect(result.current.batchVcfFiles[0].name).toBe('sample2.vcf');
   });
 
-  it('submitBatch VCF branch sends a bam_paths array aligned with vcf_paths', async () => {
+  it('submitBatch VCF branch sends a bam_ids array aligned with vcf_ids', async () => {
     const stubs = makeStubs();
     const { result } = renderHook(() => useBatchManager(stubs));
 
-    await uploadVcf(result, 'sample1.vcf', '/uploads/sample1.vcf');
-    await uploadVcf(result, 'sample2.vcf', '/uploads/sample2.vcf');
-    await uploadBam(result, 'sample2.bam', '/uploads/sample2.bam');
+    await uploadVcf(result, 'sample1.vcf', 'up-vcf-1');
+    await uploadVcf(result, 'sample2.vcf', 'up-vcf-2');
+    await uploadBam(result, 'sample2.bam', 'up-bam-2');
 
     // Upload the shared reference FASTA and wait for it to land in state before submitting.
     const refFile = new File(['>r\nACGT'], 'ref.fasta', { type: 'application/octet-stream' });
     await act(async () => {
       const refPromise = result.current.uploadBatchReferenceFasta(refFile);
-      mockXHRInstance.triggerSuccess({ file_path: '/uploads/ref.fasta', file_type: 'fasta', size_bytes: 8 });
+      mockXHRInstance.triggerSuccess({ upload_id: 'up-ref-1', file_type: 'fasta', size_bytes: 8 });
       await refPromise;
     });
     await waitFor(() => {
@@ -306,8 +306,8 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
       if (options && options.body) {
         const parsed = JSON.parse(options.body);
         // Assert the contract here against the actual submitted body.
-        expect(parsed.bam_paths).toEqual([null, '/uploads/sample2.bam']);
-        expect(parsed.bam_paths).toHaveLength(parsed.vcf_paths.length);
+        expect(parsed.bam_ids).toEqual([null, 'up-bam-2']);
+        expect(parsed.bam_ids).toHaveLength(parsed.vcf_ids.length);
       }
       return {
         ok: true,

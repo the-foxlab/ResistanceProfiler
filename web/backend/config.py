@@ -28,6 +28,9 @@ class WebEnvKeys:
     trusted_proxies: str = 'RESPRO_WEB_TRUSTED_PROXIES'
     imprint: str = 'RESPRO_WEB_IMPRINT'
     max_batch_size: str = 'RESPRO_WEB_MAX_BATCH_SIZE'
+    deployment_mode: str = 'RESPRO_WEB_DEPLOYMENT_MODE'
+    result_ttl: str = 'RESPRO_WEB_RESULT_TTL'
+    session_ttl: str = 'RESPRO_WEB_SESSION_TTL'
 
 
 @dataclass(frozen=True)
@@ -45,6 +48,12 @@ class WebDefaults:
     api_rate_limit: str
     max_batch_size: int
     artifact_bundle_max_paths: int
+    profile_max_threads: int
+    sample_name_max_length: int
+    display_name_max_length: int
+    path_list_max_length: int
+    opaque_id_max_length: int
+    min_depth_max: int
     batch_queue_name: str
     cors_local_origins: tuple[str, ...]
     profile_queue_name: str
@@ -52,6 +61,9 @@ class WebDefaults:
     service_name: str
     maintained_bootstrap: bool
     maintained_db_update_interval_seconds: int
+    deployment_mode: str
+    result_ttl_seconds: int
+    session_ttl_seconds: int
     # Profile defaults
     profile_sample_name: str
     profile_threads: int
@@ -106,6 +118,9 @@ def _load_web_backend_config() -> WebBackendConfig:
         maintained_db_update_interval=str(env_payload['maintained_db_update_interval']),
         trusted_proxies=str(env_payload['trusted_proxies']),
         imprint=str(env_payload['imprint']),
+        deployment_mode=str(env_payload['deployment_mode']),
+        result_ttl=str(env_payload['result_ttl']),
+        session_ttl=str(env_payload['session_ttl']),
     )
 
     defaults = WebDefaults(
@@ -122,6 +137,12 @@ def _load_web_backend_config() -> WebBackendConfig:
         api_rate_limit=str(defaults_payload['api_rate_limit']),
         max_batch_size=int(defaults_payload['max_batch_size']),
         artifact_bundle_max_paths=int(defaults_payload['artifact_bundle_max_paths']),
+        profile_max_threads=int(defaults_payload['profile_max_threads']),
+        sample_name_max_length=int(defaults_payload['sample_name_max_length']),
+        display_name_max_length=int(defaults_payload['display_name_max_length']),
+        path_list_max_length=int(defaults_payload['path_list_max_length']),
+        opaque_id_max_length=int(defaults_payload['opaque_id_max_length']),
+        min_depth_max=int(defaults_payload['min_depth_max']),
         batch_queue_name=str(defaults_payload['batch_queue_name']),
         cors_local_origins=tuple(str(item) for item in defaults_payload['cors_local_origins']),
         profile_queue_name=str(defaults_payload['profile_queue_name']),
@@ -131,6 +152,9 @@ def _load_web_backend_config() -> WebBackendConfig:
         maintained_db_update_interval_seconds=int(
             defaults_payload['maintained_db_update_interval_seconds']
         ),
+        deployment_mode=str(defaults_payload['deployment_mode']),
+        result_ttl_seconds=int(defaults_payload['result_ttl_seconds']),
+        session_ttl_seconds=int(defaults_payload['session_ttl_seconds']),
         profile_sample_name=str(profile_payload['sample_name']),
         profile_threads=int(profile_payload['threads']),
         profile_min_af=float(profile_payload['min_af']),

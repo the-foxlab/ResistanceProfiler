@@ -1406,7 +1406,7 @@ class TestMultiChromVcfCli:
         assert len(html_files) == 1, f'expected exactly one HTML report, got {html_files}'
         html = html_files[0].read_text()
         # Both references' rule hits are rendered (K2E on gagA, P2A on gagB).
-        # Per-reference section headers/subplots are refined in the report ticket.
+        # Per-reference section headers/subplots are refined in the report.
         assert 'gagA' in html
         assert 'gagB' in html
 

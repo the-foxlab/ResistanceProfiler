@@ -12,6 +12,12 @@ from rq import Queue
 
 from web.backend.models import CompareCell, CompareResponse
 from web.backend.services.compare import build_comparison_matrix
+from web.backend.services.session import (
+    SESSION_COOKIE_NAME,
+    hash_session_token,
+    record_artifact,
+    reset_memory_stores,
+)
 from web.backend.startup_config import (
     StartupConfig,
     build_project_db_uuid_index,
@@ -540,7 +546,25 @@ def auth_headers_for_compare(startup_config_with_results: StartupConfig) -> dict
 
 
 @pytest.fixture()
-def client_for_compare(startup_config_with_results: StartupConfig) -> TestClient:
+def fake_redis_for_compare(monkeypatch: pytest.MonkeyPatch) -> fakeredis.FakeStrictRedis:
+    """Patch the session service to use an in-memory fakeredis server."""
+    from web.backend.services import session as session_service
+
+    server = fakeredis.FakeServer()
+    client = fakeredis.FakeStrictRedis(server=server)
+
+    def _from_url(_url, **_kwargs):
+        return fakeredis.FakeStrictRedis(server=server)
+
+    monkeypatch.setattr(session_service, '_redis_connection', lambda: client)
+    return client
+
+
+@pytest.fixture()
+def client_for_compare(
+    startup_config_with_results: StartupConfig,
+    fake_redis_for_compare: fakeredis.FakeStrictRedis,
+) -> TestClient:
     from web.backend.main import create_app
     from web.backend.queue import get_batch_queue, get_queue
 
@@ -554,6 +578,38 @@ def client_for_compare(startup_config_with_results: StartupConfig) -> TestClient
 class TestCompareEndpoint:
     """Integration tests for POST /api/compare."""
 
+    @pytest.fixture(autouse=True)
+    def _reset_session_stores(self):
+        """Clear the in-memory session/ownership stores before and after each test."""
+        reset_memory_stores()
+        yield
+        reset_memory_stores()
+
+    @staticmethod
+    def _register_artifacts(
+        client: TestClient,
+        result_paths: list[Path],
+    ) -> list[str]:
+        """Register result JSON files as artifacts owned by the client's session.
+
+        Makes a warm-up request so the middleware issues a session cookie, then
+        records each path as an artifact under that session hash. Returns the
+        opaque artifact IDs to pass as ``artifact_ids`` to ``/api/compare``.
+        """
+        # Establish the session cookie via the health endpoint.
+        client.get('/api/health')
+        cookie_value = client.cookies.get(SESSION_COOKIE_NAME)
+        assert cookie_value, 'session cookie was not issued'
+        session_hash = hash_session_token(cookie_value)
+        return [
+            record_artifact(
+                session_hash=session_hash,
+                canonical_path=path,
+                media_type='application/json',
+            )
+            for path in result_paths
+        ]
+
     def test_compare_endpoint_basic(
         self,
         client_for_compare: TestClient,
@@ -562,7 +618,7 @@ class TestCompareEndpoint:
     ) -> None:
         results_dir = startup_config_with_results.results_dir
 
-        _make_result_json(
+        p1 = _make_result_json(
             results_dir / 's1.20260601.results.json',
             project_name='db',
             sample_name='s1',
@@ -571,7 +627,7 @@ class TestCompareEndpoint:
                 _variant(feature_name='gene_a', codon_pos=10, ref_aa='R', alt_aa='K', allele_freq=0.95, rule_match=1),
             ],
         )
-        _make_result_json(
+        p2 = _make_result_json(
             results_dir / 's2.20260602.results.json',
             project_name='db',
             sample_name='s2',
@@ -582,14 +638,10 @@ class TestCompareEndpoint:
             ],
         )
 
+        artifact_ids = self._register_artifacts(client_for_compare, [p1, p2])
         response = client_for_compare.post(
             '/api/compare',
-            json={
-                'paths': [
-                    str(results_dir / 's1.20260601.results.json'),
-                    str(results_dir / 's2.20260602.results.json'),
-                ],
-            },
+            json={'artifact_ids': artifact_ids},
             headers=auth_headers_for_compare,
         )
 
@@ -611,15 +663,15 @@ class TestCompareEndpoint:
         startup_config_with_results: StartupConfig,
         auth_headers_for_compare: dict[str, str],
     ) -> None:
+        # An artifact_id that does not resolve to an owned record → 404 (ownership
+        # check fails before any path validation; 404 not 403 to avoid confirming
+        # existence to non-owners).
         response = client_for_compare.post(
             '/api/compare',
-            json={
-                'paths': ['/etc/passwd'],
-            },
+            json={'artifact_ids': ['nonexistent-artifact-id']},
             headers=auth_headers_for_compare,
         )
-        # Path outside results dir -> 400
-        assert response.status_code == 400
+        assert response.status_code == 404
 
     def test_compare_endpoint_missing_file(
         self,
@@ -628,11 +680,12 @@ class TestCompareEndpoint:
         auth_headers_for_compare: dict[str, str],
     ) -> None:
         results_dir = startup_config_with_results.results_dir
-        missing = str(results_dir / 'nonexistent.20260601.results.json')
+        missing = results_dir / 'nonexistent.20260601.results.json'
 
+        artifact_ids = self._register_artifacts(client_for_compare, [missing])
         response = client_for_compare.post(
             '/api/compare',
-            json={'paths': [missing]},
+            json={'artifact_ids': artifact_ids},
             headers=auth_headers_for_compare,
         )
         assert response.status_code == 404
@@ -644,7 +697,7 @@ class TestCompareEndpoint:
     ) -> None:
         response = client_for_compare.post(
             '/api/compare',
-            json={'paths': []},
+            json={'artifact_ids': []},
             headers=auth_headers_for_compare,
         )
         assert response.status_code == 400
@@ -657,25 +710,21 @@ class TestCompareEndpoint:
     ) -> None:
         results_dir = startup_config_with_results.results_dir
 
-        _make_result_json(
+        p1 = _make_result_json(
             results_dir / 'hiv_s1.20260601.results.json',
             project_name='hiv-db',
             sample_name='hiv1',
         )
-        _make_result_json(
+        p2 = _make_result_json(
             results_dir / 'hsv_s2.20260602.results.json',
             project_name='hsv-db',
             sample_name='hsv1',
         )
 
+        artifact_ids = self._register_artifacts(client_for_compare, [p1, p2])
         response = client_for_compare.post(
             '/api/compare',
-            json={
-                'paths': [
-                    str(results_dir / 'hiv_s1.20260601.results.json'),
-                    str(results_dir / 'hsv_s2.20260602.results.json'),
-                ],
-            },
+            json={'artifact_ids': artifact_ids},
             headers=auth_headers_for_compare,
         )
         assert response.status_code == 400
@@ -689,27 +738,23 @@ class TestCompareEndpoint:
     ) -> None:
         results_dir = startup_config_with_results.results_dir
 
-        _make_result_json(
+        p1 = _make_result_json(
             results_dir / 'ref1_s1.20260601.results.json',
             project_name='db',
             sample_name='s1',
             reference_name='NC_001802.1',
         )
-        _make_result_json(
+        p2 = _make_result_json(
             results_dir / 'ref2_s2.20260602.results.json',
             project_name='db',
             sample_name='s2',
             reference_name='K03455.1',
         )
 
+        artifact_ids = self._register_artifacts(client_for_compare, [p1, p2])
         response = client_for_compare.post(
             '/api/compare',
-            json={
-                'paths': [
-                    str(results_dir / 'ref1_s1.20260601.results.json'),
-                    str(results_dir / 'ref2_s2.20260602.results.json'),
-                ],
-            },
+            json={'artifact_ids': artifact_ids},
             headers=auth_headers_for_compare,
         )
         assert response.status_code == 400
@@ -723,7 +768,7 @@ class TestCompareEndpoint:
     ) -> None:
         results_dir = startup_config_with_results.results_dir
 
-        _make_result_json(
+        p1 = _make_result_json(
             results_dir / 's1.20260601.results.json',
             project_name='db',
             sample_name='s1',
@@ -741,7 +786,7 @@ class TestCompareEndpoint:
                 },
             ],
         )
-        _make_result_json(
+        p2 = _make_result_json(
             results_dir / 's2.20260602.results.json',
             project_name='db',
             sample_name='s2',
@@ -755,15 +800,12 @@ class TestCompareEndpoint:
             ],
         )
 
+        artifact_ids = self._register_artifacts(client_for_compare, [p1, p2])
+
         # Without filter: 2 mutations
         response_all = client_for_compare.post(
             '/api/compare',
-            json={
-                'paths': [
-                    str(results_dir / 's1.20260601.results.json'),
-                    str(results_dir / 's2.20260602.results.json'),
-                ],
-            },
+            json={'artifact_ids': artifact_ids},
             headers=auth_headers_for_compare,
         )
         assert response_all.status_code == 200
@@ -773,10 +815,7 @@ class TestCompareEndpoint:
         response_filtered = client_for_compare.post(
             '/api/compare',
             json={
-                'paths': [
-                    str(results_dir / 's1.20260601.results.json'),
-                    str(results_dir / 's2.20260602.results.json'),
-                ],
+                'artifact_ids': artifact_ids,
                 'non_synonymous_only': True,
             },
             headers=auth_headers_for_compare,
@@ -796,7 +835,7 @@ class TestCompareEndpoint:
         """POST /api/compare with db_hits_only flag filters the matrix."""
         results_dir = startup_config_with_results.results_dir
 
-        _make_result_json(
+        p1 = _make_result_json(
             results_dir / 's1.20260601.results.json',
             project_name='db',
             sample_name='s1',
@@ -808,7 +847,7 @@ class TestCompareEndpoint:
                          allele_freq=1.0, rule_match=0),
             ],
         )
-        _make_result_json(
+        p2 = _make_result_json(
             results_dir / 's2.20260602.results.json',
             project_name='db',
             sample_name='s2',
@@ -819,15 +858,12 @@ class TestCompareEndpoint:
             ],
         )
 
+        artifact_ids = self._register_artifacts(client_for_compare, [p1, p2])
+
         # Without filter: 2 mutations
         response_all = client_for_compare.post(
             '/api/compare',
-            json={
-                'paths': [
-                    str(results_dir / 's1.20260601.results.json'),
-                    str(results_dir / 's2.20260602.results.json'),
-                ],
-            },
+            json={'artifact_ids': artifact_ids},
             headers=auth_headers_for_compare,
         )
         assert response_all.status_code == 200
@@ -837,10 +873,7 @@ class TestCompareEndpoint:
         response_filtered = client_for_compare.post(
             '/api/compare',
             json={
-                'paths': [
-                    str(results_dir / 's1.20260601.results.json'),
-                    str(results_dir / 's2.20260602.results.json'),
-                ],
+                'artifact_ids': artifact_ids,
                 'db_hits_only': True,
             },
             headers=auth_headers_for_compare,

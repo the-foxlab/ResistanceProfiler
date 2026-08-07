@@ -23,12 +23,25 @@ class QueueRuntimeSettings:
     timeout_seconds: int
     retry_max: int
     retry_intervals_seconds: tuple[int, ...]
+    result_ttl_seconds: int
 
 
 def build_enqueue_job_options() -> dict[str, int | Retry]:
-    """Return standard timeout/retry options for all profiling queue submissions."""
+    """Return standard timeout/retry/TTL options for all profiling queue submissions.
+
+    ``ttl`` / ``result_ttl`` / ``failure_ttl`` are set explicitly and aligned to
+    ``RESPRO_WEB_RESULT_TTL`` so RQ job metadata (which can contain sample names,
+    absolute paths, and exception output) does not outlive the documented result
+    TTL. Without these, RQ's installed defaults apply (``DEFAULT_FAILURE_TTL`` is
+    ~365 days), leaking job metadata long after the result files are swept.
+    """
     settings = resolve_queue_runtime_settings()
-    options: dict[str, int | Retry] = {'job_timeout': settings.timeout_seconds}
+    options: dict[str, int | Retry] = {
+        'job_timeout': settings.timeout_seconds,
+        'ttl': settings.result_ttl_seconds,
+        'result_ttl': settings.result_ttl_seconds,
+        'failure_ttl': settings.result_ttl_seconds,
+    }
     if settings.retry_max > 0:
         interval: int | list[int]
         if len(settings.retry_intervals_seconds) == 1:
@@ -50,7 +63,16 @@ def get_batch_queue() -> Queue:
 
 
 def _build_queue(queue_name: str) -> Queue:
-    """Create an RQ queue with shared runtime settings and Redis connection."""
+    """Create an RQ queue with shared runtime settings and Redis connection.
+
+    Uses ``rq.serializers.JSONSerializer`` instead of RQ's default ``pickle``-
+    based serializer so that anything able to write to Redis cannot achieve
+    worker code execution via a crafted pickle payload. Job arguments in this
+    codebase are primitive strings/numbers/lists/dicts, which JSON round-trips
+    losslessly.
+    """
+    from rq.serializers import JSONSerializer
+
     redis_url = os.getenv(WEB_ENV.redis_url, WEB_BACKEND_CONFIG.defaults.redis_url)
     runtime = resolve_queue_runtime_settings()
     connection = redis.Redis.from_url(redis_url)
@@ -58,6 +80,7 @@ def _build_queue(queue_name: str) -> Queue:
         queue_name,
         connection=connection,
         default_timeout=runtime.timeout_seconds,
+        serializer=JSONSerializer,
     )
 
 
@@ -78,10 +101,15 @@ def resolve_queue_runtime_settings() -> QueueRuntimeSettings:
             ','.join(str(value) for value in defaults.job_retry_intervals_seconds),
         )
     )
+    result_ttl_seconds = _parse_positive_int(
+        os.getenv(WEB_ENV.result_ttl, str(defaults.result_ttl_seconds)),
+        setting_name=WEB_ENV.result_ttl,
+    )
     return QueueRuntimeSettings(
         timeout_seconds=timeout_seconds,
         retry_max=retry_max,
         retry_intervals_seconds=retry_intervals_seconds,
+        result_ttl_seconds=result_ttl_seconds,
     )
 
 
@@ -93,6 +121,17 @@ def _parse_non_negative_int(raw_value: str, *, setting_name: str) -> int:
         raise ValueError(f'{setting_name} must be an integer value.') from exc
     if parsed < 0:
         raise ValueError(f'{setting_name} must be >= 0.')
+    return parsed
+
+
+def _parse_positive_int(raw_value: str, *, setting_name: str) -> int:
+    """Parse a strictly positive integer setting and fail fast on invalid values."""
+    try:
+        parsed = int(raw_value.strip())
+    except ValueError as exc:
+        raise ValueError(f'{setting_name} must be an integer value.') from exc
+    if parsed <= 0:
+        raise ValueError(f'{setting_name} must be > 0.')
     return parsed
 
 

@@ -123,8 +123,8 @@ export function useDashboardLogic() {
         return;
       }
       const payload = JSON.stringify({
-        upload_paths: session.uploadedPaths,
-        report_paths: session.reportPaths,
+        upload_ids: session.uploadedPaths,
+        artifact_ids: session.reportPaths,
         ...(API_TOKEN ? { token: API_TOKEN } : {}),
       });
       if (navigator.sendBeacon) {
@@ -222,7 +222,7 @@ export function useDashboardLogic() {
     uploadReferenceFile: profile.uploadReferenceFile,
     uploadBamFile: profile.uploadBamFile,
     uploadJsonFile: profile.uploadJsonFile,
-    jsonInputPath: profile.jsonInputPath,
+    jsonInputId: profile.jsonInputId,
     isRegenerateBusy: profile.isProcessingRegenerate,
     runRegenerateFromJson: profile.runRegenerateFromJson,
     downloadMutationsAsTsv: mutations.downloadMutationsAsTsv,

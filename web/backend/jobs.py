@@ -355,44 +355,47 @@ def _run_job_with_logging(
     sample: str,
     job_func: Callable[[], dict],
 ) -> dict:
-    """Run one queued task with explicit lifecycle logs for debugging and operations."""
+    """Run one queued task with explicit lifecycle logs for debugging and operations.
+
+    The ``sample`` argument is accepted so call sites keep a stable signature, but
+    it is intentionally NOT logged: sample names are sensitive metadata and RQ
+    lifecycle logs are not the right place to persist them. Only the job id,
+    mode, and database id are logged routinely.
+    """
+    del sample  # accepted for signature stability; not logged
     current_job = get_current_job()
     job_id = current_job.id if current_job is not None else 'unknown'
     logger.info(
-        'Queue job started: job_id=%s mode=%s database_id=%s sample=%s',
+        'Queue job started: job_id=%s mode=%s database_id=%s',
         job_id,
         mode,
         database_id,
-        sample,
     )
     try:
         result = job_func()
     except ValueError:
         _mark_current_job_non_retryable(current_job)
         logger.exception(
-            'Queue job failed: job_id=%s mode=%s database_id=%s sample=%s',
+            'Queue job failed: job_id=%s mode=%s database_id=%s',
             job_id,
             mode,
             database_id,
-            sample,
         )
         raise
     except Exception:
         logger.exception(
-            'Queue job failed: job_id=%s mode=%s database_id=%s sample=%s',
+            'Queue job failed: job_id=%s mode=%s database_id=%s',
             job_id,
             mode,
             database_id,
-            sample,
         )
         raise
 
     logger.info(
-        'Queue job finished: job_id=%s mode=%s database_id=%s sample=%s',
+        'Queue job finished: job_id=%s mode=%s database_id=%s',
         job_id,
         mode,
         database_id,
-        sample,
     )
     return result
 

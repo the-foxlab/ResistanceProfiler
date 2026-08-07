@@ -16,7 +16,7 @@ export function AnalyzeTab({
   setVcfInput,
   fastaInput,
   setFastaInput,
-  jsonInputPath,
+  jsonInputId,
   isRegenerateBusy,
   runRegenerateFromJson,
   uploadFastaFile,
@@ -337,10 +337,10 @@ export function AnalyzeTab({
                 }}
                 disabled={
                   activeProfileMode === 'regenerate' 
-                    ? (isRegenerateBusy || !jsonInputPath) 
+                    ? (isRegenerateBusy || !jsonInputId) 
                     : activeProfileMode === 'vcf'
-                      ? (isProfileBusy || !vcfInput.vcf_path || !vcfInput.ref_fasta_path)
-                      : (isProfileBusy || !fastaInput.fasta_path)
+                      ? (isProfileBusy || !vcfInput.vcf_id || !vcfInput.reference_id)
+                      : (isProfileBusy || !fastaInput.fasta_id)
                 }
               >
                 {(activeProfileMode === 'regenerate' ? isRegenerateBusy : isProfileBusy) ? (
@@ -590,7 +590,7 @@ export function AnalyzeTab({
                       </thead>
                       <tbody>
                         {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).map((file, index) => (
-                          <tr key={file.path}>
+                          <tr key={file.uploadId}>
                             <td className="batch-uploaded-cell-name" title={file.name}>{file.name}</td>
                             <td className="batch-uploaded-cell-size field-optional">{Math.round(file.size / 1024)} KB</td>
                             {batchMode === 'vcf' ? (
