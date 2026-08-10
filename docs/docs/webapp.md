@@ -567,7 +567,7 @@ annotated `docker-compose.web.yml` ships with all of these settings present but
       directory with the host directory's own ownership at container start.
 - [ ] If you pin a different UID/GID, update the `Dockerfile.web` `useradd`/`groupadd`
       lines; the entrypoint's `chown` picks up the new UID/GID automatically.
-- [ ] The production compose file (`production/docker-compose.web.prod.yml`) sets
+- [ ] The production compose file (`production/docker-compose.web.yml`) sets
       `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, `read_only: true`,
       `tmpfs: [/tmp:noexec,nosuid]`, and `mem_limit` on every service.
 - [ ] The worker's `project_databases` directory is mounted read-only (the worker
