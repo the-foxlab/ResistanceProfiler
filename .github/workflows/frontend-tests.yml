@@ -1,0 +1,44 @@
+name: Frontend Tests
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'web/**'
+  push:
+    branches:
+      - master
+    paths:
+      - 'web/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd web/frontend && npm ci
+
+      - name: Run frontend tests
+        run: |
+          cd web/frontend && npm test
