@@ -34,13 +34,13 @@ services:
       context: .
       dockerfile: Dockerfile.web
     image: respro-web:latest
-    # Bind to loopback only by default so the unauthenticated zero-config stack is
+    # Bind to loopback only by default so the zero-config stack is
     # not exposed to the LAN/public interface. Single-command local startup
     # (`docker compose -f docker-compose.web.yml up --build`) is unaffected because
     # loopback is reachable from the same host. For public hosting, place a
-    # reverse proxy (Nginx/SSO) in front and leave this binding as-is, or
-    # explicitly bind a public interface only after enabling RESPRO_WEB_API_TOKEN
-    # and RESPRO_WEB_CORS_ORIGINS (see docs/docs/webapp.md).
+    # reverse proxy (Nginx/SSO) in front and set RESPRO_WEB_DEPLOYMENT_MODE=online
+    # with RESPRO_WEB_TRUSTED_PROXIES and RESPRO_WEB_CORS_ORIGINS
+    # (see docs/docs/webapp.md).
     ports:
       - '127.0.0.1:8000:8000'
     volumes:
@@ -55,8 +55,8 @@ services:
       # - RESPRO_WEB_DATA_DIR=/data
       # - RESPRO_WEB_ALLOWED_ROOTS=/data/project_databases,/data/uploads,/data/results
       # - RESPRO_WEB_RESULT_TTL=86400
-      # ── Authentication and security (REQUIRED for public hosting) ──────────
-      # - RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
+      # ── Deployment mode and security (REQUIRED for public hosting) ─────
+      # - RESPRO_WEB_DEPLOYMENT_MODE=online
       # - RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
       # - RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
       # ── Rate limiting and batch sizes ──────────────────────────────────────
@@ -86,7 +86,7 @@ services:
 
   respro-worker:
     image: respro-web:latest
-    command: sh -c "exec rq worker --url \"redis://:${RESPRO_REDIS_PASSWORD:-change-me-local-only}@redis:6379/0\" profiling"
+    command: sh -c "exec python -m web.backend.worker"
     volumes:
       - ./data:/data:rw
       # Only needed for path-mode imprint (self-hosted HTML):

@@ -535,14 +535,8 @@ def startup_config_with_results(
         results_dir=results_dir.resolve(),
         data_dir=data_dir.resolve(),
         allowed_roots=(project_databases_dir.resolve(), uploads_dir.resolve(), results_dir.resolve()),
-        api_token='test-token',
         project_db_uuid_index=build_project_db_uuid_index(project_databases_dir.resolve()),
     )
-
-
-@pytest.fixture()
-def auth_headers_for_compare(startup_config_with_results: StartupConfig) -> dict[str, str]:
-    return {'Authorization': f'Bearer {startup_config_with_results.api_token}'}
 
 
 @pytest.fixture()
@@ -567,8 +561,9 @@ def client_for_compare(
 ) -> TestClient:
     from web.backend.main import create_app
     from web.backend.queue import get_batch_queue, get_queue
+    from rq.serializers import JSONSerializer
 
-    sync_queue = Queue('profiling', connection=fakeredis.FakeRedis(), is_async=False)
+    sync_queue = Queue('profiling', connection=fakeredis.FakeRedis(), is_async=False, serializer=JSONSerializer)
     app = create_app(startup_config=startup_config_with_results)
     app.dependency_overrides[get_queue] = lambda: sync_queue
     app.dependency_overrides[get_batch_queue] = lambda: sync_queue
@@ -614,7 +609,6 @@ class TestCompareEndpoint:
         self,
         client_for_compare: TestClient,
         startup_config_with_results: StartupConfig,
-        auth_headers_for_compare: dict[str, str],
     ) -> None:
         results_dir = startup_config_with_results.results_dir
 
@@ -642,7 +636,6 @@ class TestCompareEndpoint:
         response = client_for_compare.post(
             '/api/compare',
             json={'artifact_ids': artifact_ids},
-            headers=auth_headers_for_compare,
         )
 
         assert response.status_code == 200
@@ -661,7 +654,6 @@ class TestCompareEndpoint:
         self,
         client_for_compare: TestClient,
         startup_config_with_results: StartupConfig,
-        auth_headers_for_compare: dict[str, str],
     ) -> None:
         # An artifact_id that does not resolve to an owned record → 404 (ownership
         # check fails before any path validation; 404 not 403 to avoid confirming
@@ -669,7 +661,6 @@ class TestCompareEndpoint:
         response = client_for_compare.post(
             '/api/compare',
             json={'artifact_ids': ['nonexistent-artifact-id']},
-            headers=auth_headers_for_compare,
         )
         assert response.status_code == 404
 
@@ -677,7 +668,6 @@ class TestCompareEndpoint:
         self,
         client_for_compare: TestClient,
         startup_config_with_results: StartupConfig,
-        auth_headers_for_compare: dict[str, str],
     ) -> None:
         results_dir = startup_config_with_results.results_dir
         missing = results_dir / 'nonexistent.20260601.results.json'
@@ -686,19 +676,16 @@ class TestCompareEndpoint:
         response = client_for_compare.post(
             '/api/compare',
             json={'artifact_ids': artifact_ids},
-            headers=auth_headers_for_compare,
         )
         assert response.status_code == 404
 
     def test_compare_endpoint_empty_paths(
         self,
         client_for_compare: TestClient,
-        auth_headers_for_compare: dict[str, str],
     ) -> None:
         response = client_for_compare.post(
             '/api/compare',
             json={'artifact_ids': []},
-            headers=auth_headers_for_compare,
         )
         assert response.status_code == 400
 
@@ -706,7 +693,6 @@ class TestCompareEndpoint:
         self,
         client_for_compare: TestClient,
         startup_config_with_results: StartupConfig,
-        auth_headers_for_compare: dict[str, str],
     ) -> None:
         results_dir = startup_config_with_results.results_dir
 
@@ -725,7 +711,6 @@ class TestCompareEndpoint:
         response = client_for_compare.post(
             '/api/compare',
             json={'artifact_ids': artifact_ids},
-            headers=auth_headers_for_compare,
         )
         assert response.status_code == 400
         assert 'different databases' in response.json()['detail'].lower()
@@ -734,7 +719,6 @@ class TestCompareEndpoint:
         self,
         client_for_compare: TestClient,
         startup_config_with_results: StartupConfig,
-        auth_headers_for_compare: dict[str, str],
     ) -> None:
         results_dir = startup_config_with_results.results_dir
 
@@ -755,7 +739,6 @@ class TestCompareEndpoint:
         response = client_for_compare.post(
             '/api/compare',
             json={'artifact_ids': artifact_ids},
-            headers=auth_headers_for_compare,
         )
         assert response.status_code == 400
         assert 'different references' in response.json()['detail'].lower()
@@ -764,7 +747,6 @@ class TestCompareEndpoint:
         self,
         client_for_compare: TestClient,
         startup_config_with_results: StartupConfig,
-        auth_headers_for_compare: dict[str, str],
     ) -> None:
         results_dir = startup_config_with_results.results_dir
 
@@ -806,7 +788,6 @@ class TestCompareEndpoint:
         response_all = client_for_compare.post(
             '/api/compare',
             json={'artifact_ids': artifact_ids},
-            headers=auth_headers_for_compare,
         )
         assert response_all.status_code == 200
         assert len(response_all.json()['mutations']) == 2
@@ -818,7 +799,6 @@ class TestCompareEndpoint:
                 'artifact_ids': artifact_ids,
                 'non_synonymous_only': True,
             },
-            headers=auth_headers_for_compare,
         )
         assert response_filtered.status_code == 200
         data = response_filtered.json()
@@ -830,7 +810,6 @@ class TestCompareEndpoint:
         self,
         client_for_compare: TestClient,
         startup_config_with_results: StartupConfig,
-        auth_headers_for_compare: dict[str, str],
     ) -> None:
         """POST /api/compare with db_hits_only flag filters the matrix."""
         results_dir = startup_config_with_results.results_dir
@@ -864,7 +843,6 @@ class TestCompareEndpoint:
         response_all = client_for_compare.post(
             '/api/compare',
             json={'artifact_ids': artifact_ids},
-            headers=auth_headers_for_compare,
         )
         assert response_all.status_code == 200
         assert len(response_all.json()['mutations']) == 2
@@ -876,7 +854,6 @@ class TestCompareEndpoint:
                 'artifact_ids': artifact_ids,
                 'db_hits_only': True,
             },
-            headers=auth_headers_for_compare,
         )
         assert response_filtered.status_code == 200
         data = response_filtered.json()

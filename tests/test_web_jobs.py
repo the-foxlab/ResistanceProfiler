@@ -8,6 +8,7 @@ from unittest.mock import Mock
 import fakeredis
 import pytest
 from rq import Queue
+from rq.job import Job
 
 from web.backend.jobs import _run_job_with_logging
 
@@ -122,3 +123,52 @@ class TestJobTtlExpiry:
 
         with pytest.raises(NoSuchJobError):
             type(job).fetch(job.id, connection=connection)
+
+
+class TestJobResultSerializerAlignment:
+    """AUTH-003 follow-up: the job-status route must fetch results with JSONSerializer.
+
+    The app enqueues via ``get_queue()`` (JSONSerializer) and the worker stores
+    results as JSON. If the route fetches the job with the default pickle
+    serializer, ``job.return_value()`` raises ``_pickle.UnpicklingError:
+    invalid load key, '{'`` on every successful job. The route must use
+    ``JSONSerializer`` when fetching so the result round-trips.
+    """
+
+    def test_default_pickle_fetch_fails_on_json_result(self) -> None:
+        """Reproduce the production bug: pickle fetch cannot read a JSON result.
+
+        The app enqueues with JSONSerializer; a bare ``Job.fetch`` (no serializer)
+        defaults to pickle and raises ``UnpicklingError`` on ``return_value()``.
+        """
+        from rq.serializers import JSONSerializer
+
+        from web.backend.queue import build_enqueue_job_options
+
+        connection = fakeredis.FakeStrictRedis()
+        queue = Queue('profiling', connection=connection, serializer=JSONSerializer, is_async=False)
+        job = queue.enqueue(_succeeded_job_func, **build_enqueue_job_options())
+
+        # Bare fetch (no serializer) — mirrors the pre-fix route behaviour.
+        fetched = Job.fetch(job.id, connection=connection)
+        with pytest.raises(Exception):  # noqa: PT011 — _pickle.UnpicklingError
+            fetched.return_value()
+
+    def test_json_serializer_fetch_reads_result(self) -> None:
+        """Fetching with JSONSerializer round-trips the result without error."""
+        from rq.serializers import JSONSerializer
+
+        from web.backend.queue import build_enqueue_job_options
+
+        connection = fakeredis.FakeStrictRedis()
+        queue = Queue('profiling', connection=connection, serializer=JSONSerializer, is_async=False)
+        job = queue.enqueue(_succeeded_job_func, **build_enqueue_job_options())
+
+        fetched = Job.fetch(job.id, connection=connection, serializer=JSONSerializer)
+        assert fetched.get_status() == 'finished'
+        assert fetched.return_value() == {'ok': True}
+
+
+def _succeeded_job_func() -> dict:
+    """Module-level job function returning a JSON-serializable dict."""
+    return {'ok': True}

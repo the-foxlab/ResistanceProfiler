@@ -1,17 +1,9 @@
 import { FRONTEND_CONFIG } from './config';
 
 const API_BASE = FRONTEND_CONFIG.apiBase;
-const API_TOKEN = FRONTEND_CONFIG.apiToken;
 
 function buildHeaders(baseHeaders = {}) {
-  // Attach auth header only when a token exists; local dev can run without auth.
-  if (!API_TOKEN) {
-    return baseHeaders;
-  }
-  return {
-    ...baseHeaders,
-    Authorization: `Bearer ${API_TOKEN}`,
-  };
+  return baseHeaders;
 }
 
 export function buildApiUrl(path, params = {}) {
@@ -217,4 +209,4 @@ export async function downloadArtifactBundle(artifactIds, downloadName) {
   URL.revokeObjectURL(href);
 }
 
-export { API_BASE, API_TOKEN, buildHeaders };
+export { API_BASE, buildHeaders };

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from slowapi import Limiter
 
 from web.backend.models import UploadResponse
@@ -17,7 +17,6 @@ def build_upload_router(
     uploads_dir,
     limiter: Limiter,
     upload_rate_limit: str,
-    require_api_token: Callable[..., None],
     user_facing_error_message: Callable[[str | None], str],
     save_upload_stream: Callable[[UploadFile, Literal['fasta', 'vcf', 'bam', 'json'], object], Awaitable[tuple[object, int]]],
     get_session: Callable[..., Session],
@@ -56,7 +55,6 @@ def build_upload_router(
     async def upload_fasta(
         request: Request,
         file: UploadFile = File(...),
-        _auth: None = Depends(require_api_token),
     ) -> UploadResponse:
         return await _handle_upload(request=request, file=file, file_type='fasta')
 
@@ -65,7 +63,6 @@ def build_upload_router(
     async def upload_vcf(
         request: Request,
         file: UploadFile = File(...),
-        _auth: None = Depends(require_api_token),
     ) -> UploadResponse:
         return await _handle_upload(request=request, file=file, file_type='vcf')
 
@@ -74,7 +71,6 @@ def build_upload_router(
     async def upload_bam(
         request: Request,
         file: UploadFile = File(...),
-        _auth: None = Depends(require_api_token),
     ) -> UploadResponse:
         return await _handle_upload(request=request, file=file, file_type='bam')
 
@@ -83,7 +79,6 @@ def build_upload_router(
     async def upload_json(
         request: Request,
         file: UploadFile = File(...),
-        _auth: None = Depends(require_api_token),
     ) -> UploadResponse:
         return await _handle_upload(request=request, file=file, file_type='json')
 

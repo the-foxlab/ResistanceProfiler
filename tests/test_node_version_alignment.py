@@ -16,7 +16,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _PACKAGE_JSON = REPO_ROOT / 'web' / 'frontend' / 'package.json'
 _NPMRC = REPO_ROOT / 'web' / 'frontend' / '.npmrc'
-_WORKFLOW = REPO_ROOT / '.github' / 'workflows' / 'tests.yml'
+_WORKFLOW = REPO_ROOT / '.github' / 'workflows' / 'frontend-tests.yml'
 _DOCKERFILE = REPO_ROOT / 'Dockerfile.web'
 _README = REPO_ROOT / 'web' / 'README.md'
 

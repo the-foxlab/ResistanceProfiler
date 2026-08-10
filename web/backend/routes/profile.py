@@ -37,7 +37,6 @@ def build_profile_router(
     *,
     config,
     sample_limit_per_minute: int,
-    require_api_token: Callable[..., None],
     consume_sample_quota: Callable[[Request, int, int], None],
     is_path_within_allowed_roots: Callable[[Path, tuple[Path, ...]], bool],
     resolve_project_db_path,
@@ -54,7 +53,6 @@ def build_profile_router(
         request: Request,
         payload: ProfileFastaPayload,
         queue: Queue = Depends(get_queue),
-        _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
         session = get_session(request)
         fasta_path = _resolve_upload_path(
@@ -91,7 +89,6 @@ def build_profile_router(
         request: Request,
         payload: ProfileVcfPayload,
         queue: Queue = Depends(get_queue),
-        _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
         session = get_session(request)
         vcf_path = _resolve_upload_path(
@@ -152,7 +149,6 @@ def build_profile_router(
         request: Request,
         payload: BatchProfileVcfPayload,
         queue: Queue = Depends(get_batch_queue),
-        _auth: None = Depends(require_api_token),
     ) -> BatchSubmitResponse:
         session = get_session(request)
         if len(payload.vcf_ids) != len(payload.sample_names):
@@ -238,7 +234,6 @@ def build_profile_router(
         request: Request,
         payload: BatchProfileFastaPayload,
         queue: Queue = Depends(get_batch_queue),
-        _auth: None = Depends(require_api_token),
     ) -> BatchSubmitResponse:
         session = get_session(request)
         if len(payload.fasta_ids) != len(payload.sample_names):

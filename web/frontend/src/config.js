@@ -7,7 +7,6 @@ const defaultApiBase =
 
 export const FRONTEND_CONFIG = {
   apiBase: import.meta.env.VITE_RESPRO_API_BASE || defaultApiBase,
-  apiToken: (import.meta.env.VITE_RESPRO_API_TOKEN || '').trim(),
   profile: {
     threads: 1,
     vcf: {

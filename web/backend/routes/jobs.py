@@ -7,6 +7,8 @@ from collections.abc import Callable
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from rq import Queue
 from rq.job import Job
+from rq.results import Result
+from rq.serializers import JSONSerializer
 from slowapi import Limiter
 
 from web.backend.models import JobStatusResponse
@@ -21,7 +23,6 @@ from web.backend.services.session import (
 
 def build_jobs_router(
     *,
-    require_api_token: Callable[..., None],
     map_job_status: Callable[[str], str],
     user_facing_error_message: Callable[[str | None], str],
     job_class: type[Job],
@@ -43,25 +44,35 @@ def build_jobs_router(
         if not owner_matches(record, session_hash):
             raise HTTPException(status_code=404, detail='Job not found.')
 
+    def _job_exc_string(job: Job) -> str | None:
+        """Return the exception string from the job's latest result.
+
+        Replaces the deprecated ``job.exc_info`` property (RQ >=2.0). Returns
+        ``None`` when there is no result or the latest result is not a failure.
+        """
+        latest = job.latest_result()
+        if latest is not None and latest.type == Result.Type.FAILED:
+            return latest.exc_string
+        return None
+
     @router.get('/api/jobs/{job_id}', response_model=JobStatusResponse)
     @limiter.limit(api_rate_limit)
     def job_status(
         request: Request,
         job_id: str,
         queue: Queue = Depends(get_queue),
-        _auth: None = Depends(require_api_token),
     ) -> JobStatusResponse:
         session = get_session(request)
         _require_job_owner(job_id, session.session_hash)
         try:
-            job = job_class.fetch(job_id, connection=queue.connection)
+            job = job_class.fetch(job_id, connection=queue.connection, serializer=JSONSerializer)
         except no_such_job_error:
             raise HTTPException(status_code=404, detail='Job not found.')
 
         rq_status = job.get_status()
         status = map_job_status(rq_status)
         result = job.return_value() if status == 'succeeded' else None
-        error = user_facing_error_message(job.exc_info) if status == 'failed' else None
+        error = user_facing_error_message(_job_exc_string(job)) if status == 'failed' else None
         if status == 'failed' and rq_status in ('stopped', 'canceled'):
             error = 'Job canceled by user.'
         if result is not None:
@@ -74,12 +85,11 @@ def build_jobs_router(
         request: Request,
         job_id: str,
         queue: Queue = Depends(get_queue),
-        _auth: None = Depends(require_api_token),
     ) -> Response:
         session = get_session(request)
         _require_job_owner(job_id, session.session_hash)
         try:
-            job = job_class.fetch(job_id, connection=queue.connection)
+            job = job_class.fetch(job_id, connection=queue.connection, serializer=JSONSerializer)
         except no_such_job_error:
             raise HTTPException(status_code=404, detail='Job not found.')
 
@@ -95,7 +105,11 @@ def build_jobs_router(
                 return Response(status_code=204)
 
             # Fallback when worker-kill support is unavailable in the installed RQ version.
-            job.exc_info = 'Job canceled by user.'
+            Result.create_failure(
+                job,
+                ttl=job.failure_ttl or 0,
+                exc_string='Job canceled by user.',
+            )
             job.set_status('failed')
             job.save()
             return Response(status_code=204)

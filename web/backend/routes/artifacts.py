@@ -9,7 +9,7 @@ import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from slowapi import Limiter
 
@@ -30,7 +30,6 @@ def build_artifacts_router(
     results_dir: Path,
     branding_dir: Path,
     allowed_roots: tuple[Path, ...],
-    require_api_token: Callable[..., None],
     is_path_within_allowed_roots: Callable[[Path, tuple[Path, ...]], bool],
     is_allowed_artifact_path: Callable[[Path], bool],
     limiter: Limiter,
@@ -50,7 +49,6 @@ def build_artifacts_router(
     def open_report(
         request: Request,
         artifact_id: str = Query(...),
-        _auth: None = Depends(require_api_token),
     ) -> FileResponse:
         session = get_session(request)
         try:
@@ -75,7 +73,6 @@ def build_artifacts_router(
     def download_artifact(
         request: Request,
         artifact_id: str = Query(...),
-        _auth: None = Depends(require_api_token),
     ) -> FileResponse:
         session = get_session(request)
         try:
@@ -109,7 +106,6 @@ def build_artifacts_router(
     def download_artifact_bundle(
         request: Request,
         payload: ArtifactBundlePayload,
-        _auth: None = Depends(require_api_token),
     ) -> Response:
         session = get_session(request)
         if not payload.artifact_ids:
@@ -150,7 +146,6 @@ def build_artifacts_router(
     def compare_samples(
         request: Request,
         payload: ComparePayload,
-        _auth: None = Depends(require_api_token),
     ) -> CompareResponse:
         session = get_session(request)
         if not payload.artifact_ids:

@@ -12,7 +12,6 @@ class WebEnvKeys:
     """Environment variable keys used by the web backend."""
 
     data_dir: str = 'RESPRO_WEB_DATA_DIR'
-    api_token: str = 'RESPRO_WEB_API_TOKEN'
     allowed_roots: str = 'RESPRO_WEB_ALLOWED_ROOTS'
     cors_origins: str = 'RESPRO_WEB_CORS_ORIGINS'
     upload_rate_limit: str = 'RESPRO_WEB_UPLOAD_RATE_LIMIT'
@@ -102,7 +101,6 @@ def _load_web_backend_config() -> WebBackendConfig:
 
     env = WebEnvKeys(
         data_dir=str(env_payload['data_dir']),
-        api_token=str(env_payload['api_token']),
         allowed_roots=str(env_payload['allowed_roots']),
         cors_origins=str(env_payload['cors_origins']),
         upload_rate_limit=str(env_payload['upload_rate_limit']),

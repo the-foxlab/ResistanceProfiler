@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from slowapi import Limiter
 
 from web.backend.models import ApiEnvelope
@@ -15,7 +14,6 @@ from web.backend.services.browse import list_databases, list_rules
 def build_catalog_router(
     *,
     project_databases_dir: Path,
-    require_api_token: Callable[..., None],
     limiter: Limiter,
     api_rate_limit: str,
 ) -> APIRouter:
@@ -28,7 +26,6 @@ def build_catalog_router(
         request: Request,
         database_id: str | None = Query(default=None),
         reference: str | None = Query(default=None),
-        _auth: None = Depends(require_api_token),
     ) -> ApiEnvelope:
         del request
         try:
@@ -47,16 +44,14 @@ def build_catalog_router(
         request: Request,
         database_id: str | None = Query(default=None),
         reference: str | None = Query(default=None),
-        _auth: None = Depends(require_api_token),
     ) -> ApiEnvelope:
         # Alias for /api/rules - delegates to the same handler.
-        return rules(request=request, database_id=database_id, reference=reference, _auth=_auth)
+        return rules(request=request, database_id=database_id, reference=reference)
 
     @router.get('/api/databases', response_model=ApiEnvelope)
     @limiter.limit(api_rate_limit)
     def databases(
         request: Request,
-        _auth: None = Depends(require_api_token),
     ) -> ApiEnvelope:
         del request
         try:

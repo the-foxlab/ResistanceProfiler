@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 def build_regenerate_router(
     *,
     config,
-    require_api_token: Callable[..., None],
     user_facing_error_message: Callable[[str | None], str],
     is_path_within_allowed_roots: Callable[[Path, tuple[Path, ...]], bool],
     resolve_regenerate_project_db_path,
@@ -43,7 +42,6 @@ def build_regenerate_router(
         payload: RegenerateJsonPayload,
         request: Request,
         queue: Queue = Depends(get_queue),
-        _auth: None = Depends(require_api_token),
     ) -> JobSubmitResponse:
         session = get_session(request)
         try:

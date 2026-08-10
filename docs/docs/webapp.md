@@ -124,16 +124,13 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 | `RESPRO_WEB_HOST` | `127.0.0.1` | Network interface the API binds to. Use `0.0.0.0` to listen on all interfaces (required when behind a reverse proxy in Docker). |
 | `RESPRO_WEB_PORT` | `8000` | TCP port the API listens on. |
 
-!!! warning "Public bind requires a token"
-    Binding to anything other than `127.0.0.1`, `localhost`, or `0.0.0.0` without setting `RESPRO_WEB_API_TOKEN` fails fast at startup. `0.0.0.0` is allowed without a token only because it is the standard Docker bind address — combine it with a reverse proxy and a token for public hosting.
-
 ### Deployment modes
 
 | Variable | Default | Description |
 |---|---|---|
-| `RESPRO_WEB_DEPLOYMENT_MODE` | `local` | Controls the startup policy and security defaults. `local` (default): zero-config, no token required, API docs enabled, `Secure` omitted from the session cookie (HTTP on loopback). `trusted-proxy`: requires `RESPRO_WEB_API_TOKEN`, `RESPRO_WEB_TRUSTED_PROXIES`, and `RESPRO_WEB_CORS_ORIGINS`; API docs disabled; `Secure` set on the session cookie. `public-session`: reserved for the future multi-user session-ownership model; fails fast until that feature is fully rolled out. |
+| `RESPRO_WEB_DEPLOYMENT_MODE` | `local` | Controls the startup policy and security defaults. `local` (default): zero-config, no proxy required, API docs enabled, `Secure` omitted from the session cookie (HTTP on loopback). `online`: requires `RESPRO_WEB_TRUSTED_PROXIES`; API docs disabled; `Secure` set on the session cookie. Any other value fails fast at startup with a clear `RuntimeError`. |
 
-Startup fails with a clear `RuntimeError` if the selected mode's requirements are not met. `/docs`, `/redoc`, and `/openapi.json` return 404 when mode is not `local`.
+Startup fails with a clear `RuntimeError` if the selected mode's requirements are not met. `/docs`, `/redoc`, and `/openapi.json` return 404 in `online` mode.
 
 ### Data and filesystem
 
@@ -144,13 +141,12 @@ Startup fails with a clear `RuntimeError` if the selected mode's requirements ar
 | `RESPRO_WEB_RESULT_TTL` | `86400` (24 hours) | Time-to-live in seconds for files in `uploads/` and `results/`. A background sweep thread deletes files older than this value. |
 | `RESPRO_WEB_SESSION_TTL` | `604800` (7 days) | Time-to-live in seconds for session records in Redis and the session cookie `Max-Age`. |
 
-### Authentication and security
+### Security and browser origin
 
 | Variable | Default | Description |
 |---|---|---|
-| `RESPRO_WEB_API_TOKEN` | *(empty — auth disabled)* | Bearer token required for all protected API endpoints. Leave empty for local-only deployments; **set a strong random secret for any non-local deployment**. |
-| `RESPRO_WEB_CORS_ORIGINS` | `http://127.0.0.1:5173`, `http://localhost:5173` | Comma-separated list of allowed origins for cross-origin requests. Must be set explicitly when `RESPRO_WEB_API_TOKEN` is set. For public hosting, list your exact frontend origin(s), e.g. `https://respro.example.com`. |
-| `RESPRO_WEB_TRUSTED_PROXIES` | *(empty — proxy headers ignored)* | Comma-separated list of proxy IPs or CIDRs whose `X-Forwarded-*` headers are trusted. Set to your reverse proxy address for public hosting (see [nginx step-by-step](#nginx-step-by-step-local-network)). |
+| `RESPRO_WEB_CORS_ORIGINS` | `http://127.0.0.1:5173`, `http://localhost:5173` | Comma-separated list of allowed origins for cross-origin requests. For public hosting, list your exact frontend origin(s), e.g. `https://respro.example.com`. |
+| `RESPRO_WEB_TRUSTED_PROXIES` | *(empty — proxy headers ignored)* | Comma-separated list of proxy IPs or CIDRs whose `X-Forwarded-*` headers are trusted. **Required in `online` mode.** Set to your reverse proxy address for public hosting (see [nginx step-by-step](#nginx-step-by-step-local-network)). |
 | `RESPRO_WEB_IMPRINT` | *(empty — feature disabled)* | Imprint / legal notice. Accepts either an absolute `http://` / `https://` URL pointing at an already-hosted imprint page (the footer links straight to it) **or** an absolute path to a local HTML file served at `/legal`. See [Legal notice / imprint](#legal-notice-imprint-optional) for details. |
 
 ### Session-ownership model
@@ -165,20 +161,19 @@ Every upload, queued job, and output artifact is recorded against the owning ses
 
 API responses return opaque IDs (`upload_id`, `artifact_id`) instead of absolute filesystem paths. Profile, regenerate, compare, artifact, report, and cleanup routes resolve these IDs server-side to validated, path-confined files. Ownership is enforced on every access: a request from session B for a job/artifact created under session A returns **404** (not 403, to avoid confirming existence to non-owners).
 
-**Browser vs. API authentication.** `RESPRO_WEB_API_TOKEN` / `VITE_RESPRO_API_TOKEN` is a local-dev convenience for the raw API and a separate mechanism for programmatic API clients — it is **not** a browser-security boundary. Vite variables are bundled client-side and cannot be attached to `window.open`, `<a href>`, or iframe navigations. For institutional deployments, **whole-origin proxy authentication** (Nginx/SSO) remains the recommended browser-auth model. The session cookie protects per-user data isolation within a shared deployment; the API token protects the raw API endpoint surface.
+**Browser authentication.** ResPro does not ship its own login screen. For institutional deployments, **whole-origin proxy authentication** (Nginx `auth_basic` / SSO) is the browser-auth model — it is configured at the reverse proxy and can be added or removed with one line during alpha testing. The session cookie protects per-user data isolation within a shared deployment.
 
 | Model | Use case | Mechanism |
 |---|---|---|
 | **Session cookie** | Multi-user browser access to a shared deployment | Opaque `respro_session` cookie, ownership-enforced ID resolution |
-| **API token** | Programmatic API clients, local dev | `Authorization: Bearer <token>` header |
-| **Proxy auth (Nginx/SSO)** | Institutional deployments | Whole-origin authentication at the reverse proxy |
+| **Proxy auth (Nginx/SSO)** | Institutional deployments | Whole-origin authentication at the reverse proxy (optional, additive layer) |
 
 ### Rate limiting and batch sizes
 
 | Variable | Default | Description |
 |---|---|---|
-| `RESPRO_WEB_UPLOAD_RATE_LIMIT` | `25/minute` | slowapi rate-limit string for upload endpoints. Applied per client identity (token hash, or client IP when no token is configured). |
-| `RESPRO_WEB_API_RATE_LIMIT` | `120/minute` | slowapi rate-limit string for non-upload API routes (job status, profile, regenerate, artifact, catalog, session cleanup). Applied per client identity. Tighten for public hosting to resist brute-force/scraping. |
+| `RESPRO_WEB_UPLOAD_RATE_LIMIT` | `25/minute` | slowapi rate-limit string for upload endpoints. Applied per client IP. |
+| `RESPRO_WEB_API_RATE_LIMIT` | `120/minute` | slowapi rate-limit string for non-upload API routes (job status, profile, regenerate, artifact, catalog, session cleanup). Applied per client IP. Tighten for public hosting to resist brute-force/scraping. |
 | `RESPRO_WEB_MAX_BATCH_SIZE` | `25` | Maximum number of samples accepted in a single batch profiling request. Must be `> 0`. |
 
 In batch VCF mode, an optional BAM can be attached to each sample for per-sample coverage-gap analysis. BAMs are auto-paired to VCFs by filename stem on multi-select upload (e.g. `sample1.vcf` ↔ `sample1.bam`), and any pairing can be overridden per row. A sample without a BAM skips coverage analysis, matching single-VCF behaviour without `--bam`.
@@ -194,7 +189,7 @@ In batch VCF mode, an optional BAM can be attached to each sample for per-sample
 | `RESPRO_WEB_JOB_RETRY_INTERVALS` | `30` | Comma-separated delay in seconds between retries. Applied cyclically when `RESPRO_WEB_JOB_RETRY_MAX` is greater than the number of intervals. All values must be `> 0`. |
 
 !!! warning "Redis is an execution trust boundary"
-    RQ's default serializer uses `pickle.dumps`/`pickle.loads`, so anything able to **write** to Redis can achieve worker code execution via a crafted pickle payload. The reference `docker-compose.web.yml` therefore requires a Redis password by default (`RESPRO_REDIS_PASSWORD`), and `web/backend/queue.py` uses `rq.serializers.JSONSerializer` instead of the pickle-based default — job arguments in this codebase are primitive strings/numbers/lists/dicts, which JSON round-trips losslessly. For off-host Redis, additionally:
+    RQ's default serializer uses `pickle.dumps`/`pickle.loads`, so anything able to **write** to Redis can achieve worker code execution via a crafted pickle payload. The reference `docker-compose.web.yml` therefore requires a Redis password by default (`RESPRO_REDIS_PASSWORD`). Both the app (`web/backend/queue.py`) and the worker (`web/backend/worker.py`, started via `python -m web.backend.worker`) use `rq.serializers.JSONSerializer` instead of the pickle-based default — **both sides must agree on the serializer**, otherwise every job fails with `DeserializationError: invalid load key, '['`. Job arguments in this codebase are primitive strings/numbers/lists/dicts, which JSON round-trips losslessly. For off-host Redis, additionally:
 
     - **ACL-based least privilege**: create a Redis ACL user with access limited to the keys RQ uses (`respro:*`, `rq:*`) rather than the default full-access user.
     - **TLS**: enable Redis TLS (`--tls-port`, `--tls-cert-file`, `--tls-key-file`) and set `REDIS_URL` to `rediss://...` so the password and job payloads are encrypted in transit.
@@ -219,8 +214,8 @@ For local development you can usually leave everything at defaults. For a public
 RESPRO_WEB_HOST=0.0.0.0
 RESPRO_WEB_PORT=8000
 
-# Auth and security — required for public hosting
-RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
+# Deployment mode and browser origin — required for public hosting
+RESPRO_WEB_DEPLOYMENT_MODE=online
 RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
 RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
 
@@ -244,10 +239,22 @@ For internet-facing deployment, keep `respro-web` reachable only through a rever
 
 1. Keep the app behind a reverse proxy (Caddy/nginx/Traefik).
 2. Terminate TLS at the proxy (HTTPS required).
-3. Set a strong `RESPRO_WEB_API_TOKEN`.
+3. Set `RESPRO_WEB_DEPLOYMENT_MODE=online`.
 4. Set explicit `RESPRO_WEB_CORS_ORIGINS` for your frontend domain(s).
-5. Configure `RESPRO_WEB_TRUSTED_PROXIES` only for known proxy IPs/CIDRs.
-6. Optionally enable a legal notice / imprint — see below.
+5. Configure `RESPRO_WEB_TRUSTED_PROXIES` for your proxy IP/CIDR.
+6. Optionally enable browser auth at the proxy (nginx `auth_basic` / SSO) — an additive layer you can add or remove with one line.
+7. Optionally enable a legal notice / imprint — see below.
+
+### Additive security layers
+
+The two deployment routes (`local`, `online`) set the baseline. The layers below are **optional and additive** — each is independent, configured at the proxy or via an env var, and can be added or removed without touching the others.
+
+| Layer | What it does | When to set | How |
+|---|---|---|---|
+| **Browser auth** | Gates the whole origin behind a login prompt | Institutional / public hosting during alpha | nginx `auth_basic` / SSO at the reverse proxy (one `auth_basic` directive to add/remove) |
+| **CORS** | Restricts which origins may call the API from a browser | Only if frontend and API are on different origins | `RESPRO_WEB_CORS_ORIGINS=https://respro.example.com` |
+| **Rate limits** | Caps upload/API request frequency per client IP | Public hosting; tune for your load | `RESPRO_WEB_UPLOAD_RATE_LIMIT`, `RESPRO_WEB_API_RATE_LIMIT` |
+| **Imprint** | Shows a legal-notice link in the footer | Jurisdictions that require it (e.g. DSGVO/§5 TMG) | `RESPRO_WEB_IMPRINT=<url-or-path>` |
 
 ### Legal notice / imprint (optional)
 
@@ -491,7 +498,7 @@ If you use another firewall, allow inbound TCP traffic to the nginx port you sel
 Set in `.env`:
 
 ```bash
-RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
+RESPRO_WEB_DEPLOYMENT_MODE=online
 RESPRO_WEB_CORS_ORIGINS=http://respro.internal
 RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
 ```
@@ -524,20 +531,15 @@ annotated `docker-compose.web.yml` ships with all of these settings present but
 
 ### Authentication
 
-- [ ] `RESPRO_WEB_API_TOKEN` is set to a strong random secret for the raw API.
-      The public UI is protected by the reverse proxy (e.g. HTTP basic auth or an
-      SSO gate); the token guards the raw API against unauthenticated scraping.
-- [ ] `RESPRO_WEB_CORS_ORIGINS` lists your exact frontend origin(s), e.g.
-      `https://respro.example.com`. This is **required** when the token is set.
-- [ ] `RESPRO_WEB_DEPLOYMENT_MODE` is set to `trusted-proxy` for production
+- [ ] `RESPRO_WEB_DEPLOYMENT_MODE` is set to `online` for production
       deployments behind a reverse proxy. This disables API docs and sets the
       `Secure` flag on the session cookie.
+- [ ] `RESPRO_WEB_CORS_ORIGINS` lists your exact frontend origin(s), e.g.
+      `https://respro.example.com`.
 - [ ] For institutional multi-user deployments, whole-origin proxy authentication
-      (Nginx/SSO) is the recommended browser-auth model. The session cookie
-      provides per-user data isolation; the API token is a separate mechanism for
-      programmatic clients, not a browser-security boundary (Vite variables are
-      bundled client-side and cannot protect `window.open`/`<a href>`/iframe
-      navigations).
+      (Nginx `auth_basic` / SSO) is the recommended browser-auth model. It is an
+      additive layer configured at the reverse proxy; the session cookie provides
+      per-user data isolation.
 
 ### Redis
 
@@ -548,8 +550,11 @@ annotated `docker-compose.web.yml` ships with all of these settings present but
 - [ ] Redis is not exposed on a public port (the compose file does not publish it).
 - [ ] For off-host Redis: ACL-based least-privilege access and TLS are configured
       (see [Redis and job queue](#redis-and-job-queue)).
-- [ ] RQ uses `JSONSerializer` (the default in `web/backend/queue.py`) so Redis
-      cannot be used for pickle-based worker code execution.
+- [ ] RQ uses `JSONSerializer` on **both** the app (`web/backend/queue.py`) and
+      the worker (`web/backend/worker.py`, started via `python -m web.backend.worker`)
+      so Redis cannot be used for pickle-based worker code execution. The compose
+      files start the worker through this entrypoint — do not revert to the bare
+      `rq worker` CLI (it defaults to pickle and causes `DeserializationError`).
 
 ### Container hardening
 

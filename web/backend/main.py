@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import importlib.metadata
 import io
 import logging
@@ -20,9 +18,7 @@ from typing import Literal
 import redis
 import uvicorn
 from fastapi import (
-    Depends,
     FastAPI,
-    Header,
     HTTPException,
     Request,
 )
@@ -110,7 +106,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     config = startup_config or load_startup_config()
     # Disable API docs (Swagger UI, ReDoc, OpenAPI schema) outside local mode so a
     # publicly reachable deployment does not advertise its surface area.
-    docs_enabled = config.deployment_mode == 'local'
+    docs_enabled = config.deployment_mode != 'online'
     app = FastAPI(
         title='ResistanceProfiler Web API',
         version=version,
@@ -123,7 +119,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     # Seed a mutable UUID->path cache refreshed by the weekly update thread; the frozen
     # StartupConfig stays authoritative for everything else.
     app.state.project_db_uuid_index = dict(config.project_db_uuid_index)
-    cors_origins = _resolve_cors_origins(config.api_token)
+    cors_origins = _resolve_cors_origins()
     limiter = _create_rate_limiter()
     app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _handle_rate_limit_exceeded)
@@ -149,7 +145,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         build_health_router(
             config=config,
             sample_limit_per_minute=sample_limit_per_minute,
-            require_api_token=require_api_token,
             build_readiness_payload=_build_readiness_payload,
             version=version,
         )
@@ -159,7 +154,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             uploads_dir=config.uploads_dir,
             limiter=limiter,
             upload_rate_limit=upload_rate_limit,
-            require_api_token=require_api_token,
             user_facing_error_message=_user_facing_error_message,
             save_upload_stream=save_upload_stream,
             get_session=get_session,
@@ -168,7 +162,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     app.include_router(
         build_catalog_router(
             project_databases_dir=config.project_databases_dir,
-            require_api_token=require_api_token,
             limiter=limiter,
             api_rate_limit=api_rate_limit,
         )
@@ -177,7 +170,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         build_profile_router(
             config=config,
             sample_limit_per_minute=sample_limit_per_minute,
-            require_api_token=require_api_token,
             consume_sample_quota=_consume_sample_quota,
             is_path_within_allowed_roots=is_path_within_allowed_roots,
             resolve_project_db_path=resolve_project_db_path,
@@ -188,7 +180,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     )
     app.include_router(
         build_jobs_router(
-            require_api_token=require_api_token,
             map_job_status=_map_job_status,
             user_facing_error_message=_user_facing_error_message,
             job_class=Job,
@@ -203,7 +194,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             results_dir=config.results_dir,
             branding_dir=branding_dir,
             allowed_roots=config.allowed_roots,
-            require_api_token=require_api_token,
             is_path_within_allowed_roots=is_path_within_allowed_roots,
             is_allowed_artifact_path=_is_allowed_artifact_path,
             limiter=limiter,
@@ -216,7 +206,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             uploads_dir=config.uploads_dir,
             results_dir=config.results_dir,
             allowed_roots=config.allowed_roots,
-            require_api_token=require_api_token,
             limiter=limiter,
             api_rate_limit=api_rate_limit,
             get_session=get_session,
@@ -225,7 +214,6 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     app.include_router(
         build_regenerate_router(
             config=config,
-            require_api_token=require_api_token,
             user_facing_error_message=_user_facing_error_message,
             is_path_within_allowed_roots=is_path_within_allowed_roots,
             resolve_regenerate_project_db_path=resolve_regenerate_project_db_path,
@@ -668,19 +656,13 @@ def _extract_primary_error_message(raw_message: str) -> str:
     return raw_lines[-1].strip()
 
 
-def _resolve_cors_origins(api_token: str) -> list[str]:
+def _resolve_cors_origins() -> list[str]:
     """Resolve CORS origins from env with secure defaults for local development."""
     configured = os.getenv(WEB_ENV.cors_origins, '').strip()
     if configured:
         origins = [value.strip() for value in configured.split(',') if value.strip()]
         if origins:
             return origins
-
-    if api_token:
-        raise RuntimeError(
-            'RESPRO_WEB_API_TOKEN is set but RESPRO_WEB_CORS_ORIGINS is not configured. '
-            'Set explicit allowed origins for token-authenticated deployments.'
-        )
     return list(WEB_BACKEND_CONFIG.defaults.cors_local_origins)
 
 
@@ -715,16 +697,6 @@ def _resolve_max_batch_size() -> int:
     if parsed <= 0:
         raise RuntimeError(f'{WEB_ENV.max_batch_size} must be > 0.')
     return parsed
-
-
-def _extract_bearer_token(authorization: str | None) -> str:
-    """Extract the token value from a Bearer Authorization header."""
-    if not authorization:
-        return ''
-    scheme, _, token = authorization.strip().partition(' ')
-    if scheme.lower() != 'bearer' or not token:
-        return ''
-    return token.strip()
 
 
 def _current_window_minute() -> int:
@@ -779,28 +751,11 @@ def _consume_sample_quota(request: Request, sample_count: int, sample_limit_per_
 
 
 def _rate_limit_key(request: Request) -> str:
-    """Use a validated token identity when present, otherwise fall back to client IP."""
-    token_identity = _rate_limit_token_identity(request)
-    if token_identity:
-        return token_identity
+    """Use the client IP as the rate-limit identity."""
     client_host = request.client.host if request.client else ''
     if client_host:
         return f'ip:{client_host}'
     return f'ip:{get_remote_address(request)}'
-
-
-def _rate_limit_token_identity(request: Request) -> str:
-    """Return a hashed limiter identity only for valid configured bearer tokens."""
-    configured_token = request.app.state.startup_config.api_token
-    if not configured_token:
-        return ''
-    provided_token = _extract_bearer_token(request.headers.get('Authorization'))
-    if not provided_token:
-        return ''
-    if not hmac.compare_digest(configured_token, provided_token):
-        return ''
-    digest = hashlib.sha256(provided_token.encode('utf-8')).hexdigest()
-    return f'token:{digest}'
 
 
 def _create_rate_limiter() -> Limiter:
@@ -817,23 +772,6 @@ def _handle_rate_limit_exceeded(_: Request, __: RateLimitExceeded) -> JSONRespon
         status_code=429,
         content={'detail': 'Upload rate limit exceeded. Try again later.'},
     )
-
-
-def get_startup_config(request: Request) -> StartupConfig:
-    """Return startup config from FastAPI application state."""
-    return request.app.state.startup_config
-
-
-def require_api_token(
-    config: StartupConfig = Depends(get_startup_config),
-    authorization: str | None = Header(default=None),
-) -> None:
-    """Require bearer token auth when RESPRO_WEB_API_TOKEN is configured."""
-    if not config.api_token:
-        return
-    provided_token = _extract_bearer_token(authorization)
-    if not provided_token or not hmac.compare_digest(config.api_token, provided_token):
-        raise HTTPException(status_code=401, detail='Unauthorized')
 
 
 def get_session(request: Request) -> Session:
@@ -858,8 +796,8 @@ def _set_session_cookie_middleware(app: FastAPI, deployment_mode: str) -> None:
     so routes can read the owner hash without re-resolving.
 
     ``deployment_mode`` controls whether the ``Secure`` attribute is set on the
-    cookie: local mode (HTTP on loopback) omits it; trusted-proxy/public-session
-    modes set it (behind a TLS-terminating proxy).
+    cookie: local mode (HTTP on loopback) omits it; online mode sets it (behind
+    a TLS-terminating proxy).
     """
 
     @app.middleware('http')

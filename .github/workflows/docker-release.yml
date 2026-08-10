@@ -4,6 +4,14 @@ on:
   release:
     types:
       - published
+  push:
+    branches:
+      - master
+    paths:
+      - 'web/**'
+      - 'Dockerfile.web'
+      - 'docker-compose.web*.yml'
+      - 'docker/**'
 
 permissions:
   contents: read
@@ -41,6 +49,7 @@ jobs:
             latest=true
           tags: |
             type=ref,event=tag
+            type=ref,event=branch
             type=semver,pattern={{version}}
             type=sha
 

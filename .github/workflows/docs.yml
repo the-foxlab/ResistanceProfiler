@@ -1,9 +1,11 @@
 name: Deploy Documentation
 
 on:
-  release:
-    types:
-      - published
+  push:
+    branches:
+      - master
+    paths:
+      - 'docs/**'
 
 permissions:
   contents: write

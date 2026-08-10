@@ -46,7 +46,6 @@ def startup_config(project_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyP
         results_dir=results_dir.resolve(),
         data_dir=data_dir.resolve(),
         allowed_roots=(project_databases_dir.resolve(), uploads_dir.resolve(), results_dir.resolve()),
-        api_token='test-token',
         project_db_uuid_index=build_project_db_uuid_index(project_databases_dir.resolve()),
     )
 
@@ -67,10 +66,10 @@ def fake_redis(monkeypatch: pytest.MonkeyPatch) -> fakeredis.FakeStrictRedis:
 
 @pytest.fixture()
 def no_token_config(startup_config: StartupConfig) -> StartupConfig:
-    """A local-mode config with no API token (zero-config startup)."""
+    """A local-mode config (zero-config startup)."""
     from dataclasses import replace
 
-    return replace(startup_config, api_token='', deployment_mode='local')
+    return replace(startup_config, deployment_mode='local')
 
 
 class TestSessionIssuance:
@@ -89,7 +88,7 @@ class TestSessionIssuance:
         # actually sent by clients over plain HTTP.
         assert 'Secure' not in set_cookie
 
-    def test_fresh_request_receives_secure_cookie_in_trusted_proxy_mode(
+    def test_fresh_request_receives_secure_cookie_in_online_mode(
         self,
         fake_redis,
         startup_config,
@@ -98,9 +97,10 @@ class TestSessionIssuance:
         monkeypatch.setenv('RESPRO_WEB_TRUSTED_PROXIES', '127.0.0.1')
         monkeypatch.setenv('RESPRO_WEB_CORS_ORIGINS', 'https://respro.example.com')
         from web.backend.startup_config import _validate_startup_policy
-        _validate_startup_policy(api_token='secret', deployment_mode='trusted-proxy')
-        trusted_config = replace(startup_config, api_token='secret', deployment_mode='trusted-proxy')
-        client = TestClient(create_app(startup_config=trusted_config))
+        from dataclasses import replace
+        _validate_startup_policy(deployment_mode='online')
+        online_config = replace(startup_config, deployment_mode='online')
+        client = TestClient(create_app(startup_config=online_config))
         response = client.get('/api/health')
         set_cookie = response.headers.get('set-cookie', '')
         assert SESSION_COOKIE_NAME in set_cookie
@@ -225,21 +225,17 @@ class TestSessionIsolation:
 
         app = create_app(startup_config=startup_config)
         connection = fakeredis.FakeRedis()
-        sync_queue = Queue('profiling', connection=connection, is_async=False)
+        from rq.serializers import JSONSerializer
+        sync_queue = Queue('profiling', connection=connection, is_async=False, serializer=JSONSerializer)
         app.dependency_overrides[get_queue] = lambda: sync_queue
         app.dependency_overrides[get_batch_queue] = lambda: sync_queue
         client_a = TestClient(app)
         client_b = TestClient(app)
         return client_a, client_b
 
-    @pytest.fixture()
-    def auth_headers(self, startup_config: StartupConfig) -> dict[str, str]:
-        return {'Authorization': f'Bearer {startup_config.api_token}'}
-
     def _upload_and_profile_fasta(
         self,
         client: TestClient,
-        headers: dict[str, str],
         startup_config: StartupConfig,
     ) -> tuple[str, str]:
         """Upload a FASTA, profile it, return (job_id, report_artifact_id)."""
@@ -248,7 +244,6 @@ class TestSessionIsolation:
         upload_resp = client.post(
             '/api/upload/fasta',
             files={'file': ('isolation-test.fasta', fasta_path.read_bytes(), 'text/plain')},
-            headers=headers,
         )
         assert upload_resp.status_code == 200, upload_resp.text
         fasta_id = upload_resp.json()['upload_id']
@@ -256,7 +251,6 @@ class TestSessionIsolation:
         submit = client.post(
             '/api/profile/fasta',
             json={'fasta_id': fasta_id, 'sample': 'iso-test'},
-            headers=headers,
         )
         assert submit.status_code == 200, submit.text
         job_id = submit.json()['job_id']
@@ -264,7 +258,7 @@ class TestSessionIsolation:
         # Poll to succeeded.
         artifact_id = None
         for _ in range(20):
-            status = client.get(f'/api/jobs/{job_id}', headers=headers)
+            status = client.get(f'/api/jobs/{job_id}')
             assert status.status_code == 200, status.text
             payload = status.json()
             if payload['status'] in ('succeeded', 'failed'):
@@ -278,42 +272,38 @@ class TestSessionIsolation:
         self,
         two_clients: tuple[TestClient, TestClient],
         startup_config: StartupConfig,
-        auth_headers: dict[str, str],
     ) -> None:
         client_a, client_b = two_clients
-        job_id, _ = self._upload_and_profile_fasta(client_a, auth_headers, startup_config)
+        job_id, _ = self._upload_and_profile_fasta(client_a, startup_config)
 
         # Session B requests session A's job → 404.
-        response = client_b.get(f'/api/jobs/{job_id}', headers=auth_headers)
+        response = client_b.get(f'/api/jobs/{job_id}')
         assert response.status_code == 404
 
     def test_session_a_cannot_cancel_session_b_job(
         self,
         two_clients: tuple[TestClient, TestClient],
         startup_config: StartupConfig,
-        auth_headers: dict[str, str],
     ) -> None:
         client_a, client_b = two_clients
-        job_id, _ = self._upload_and_profile_fasta(client_a, auth_headers, startup_config)
+        job_id, _ = self._upload_and_profile_fasta(client_a, startup_config)
 
         # Session B tries to cancel session A's job → 404.
-        response = client_b.delete(f'/api/jobs/{job_id}', headers=auth_headers)
+        response = client_b.delete(f'/api/jobs/{job_id}')
         assert response.status_code == 404
 
     def test_session_a_cannot_download_session_b_artifact(
         self,
         two_clients: tuple[TestClient, TestClient],
         startup_config: StartupConfig,
-        auth_headers: dict[str, str],
     ) -> None:
         client_a, client_b = two_clients
-        _, artifact_id = self._upload_and_profile_fasta(client_a, auth_headers, startup_config)
+        _, artifact_id = self._upload_and_profile_fasta(client_a, startup_config)
 
         # Session B tries to download session A's report → 404.
         report_resp = client_b.get(
             '/api/report',
             params={'artifact_id': artifact_id},
-            headers=auth_headers,
         )
         assert report_resp.status_code == 404
 
@@ -321,7 +311,6 @@ class TestSessionIsolation:
         artifact_resp = client_b.get(
             '/api/artifact',
             params={'artifact_id': artifact_id},
-            headers=auth_headers,
         )
         assert artifact_resp.status_code == 404
 
@@ -329,17 +318,15 @@ class TestSessionIsolation:
         self,
         two_clients: tuple[TestClient, TestClient],
         startup_config: StartupConfig,
-        auth_headers: dict[str, str],
     ) -> None:
         client_a, client_b = two_clients
-        job_id, artifact_id = self._upload_and_profile_fasta(client_a, auth_headers, startup_config)
+        job_id, artifact_id = self._upload_and_profile_fasta(client_a, startup_config)
 
         # Session B tries to delete session A's artifact via cleanup.
         # The IDs are silently skipped (not owned by B), deleted_count == 0.
         cleanup_resp = client_b.post(
             '/api/session/cleanup',
             json={'upload_ids': [], 'artifact_ids': [artifact_id]},
-            headers=auth_headers,
         )
         assert cleanup_resp.status_code == 200
         assert cleanup_resp.json()['deleted_count'] == 0
@@ -348,7 +335,6 @@ class TestSessionIsolation:
         report_resp = client_a.get(
             '/api/report',
             params={'artifact_id': artifact_id},
-            headers=auth_headers,
         )
         assert report_resp.status_code == 200
 
@@ -356,16 +342,14 @@ class TestSessionIsolation:
         self,
         two_clients: tuple[TestClient, TestClient],
         startup_config: StartupConfig,
-        auth_headers: dict[str, str],
     ) -> None:
         client_a, client_b = two_clients
-        _, artifact_id = self._upload_and_profile_fasta(client_a, auth_headers, startup_config)
+        _, artifact_id = self._upload_and_profile_fasta(client_a, startup_config)
 
         # Session B tries to bundle session A's artifact → 404.
         bundle_resp = client_b.post(
             '/api/artifact-bundle',
             json={'artifact_ids': [artifact_id]},
-            headers=auth_headers,
         )
         assert bundle_resp.status_code == 404
 

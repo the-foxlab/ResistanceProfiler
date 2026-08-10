@@ -54,7 +54,6 @@ global.fetch = vi.fn();
 vi.mock('./config.js', () => ({
   FRONTEND_CONFIG: {
     apiBase: 'http://localhost:8000',
-    apiToken: 'test-token',
     profile: {
       threads: 1,
       vcf: {

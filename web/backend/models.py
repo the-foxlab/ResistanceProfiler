@@ -175,7 +175,6 @@ class SessionCleanupPayload(BaseModel):
         default_factory=list,
         max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length,
     )
-    token: str | None = Field(default=None, max_length=WEB_BACKEND_CONFIG.defaults.opaque_id_max_length)
 
 
 class SessionCleanupResponse(BaseModel):
