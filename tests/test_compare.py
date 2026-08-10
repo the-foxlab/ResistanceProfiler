@@ -559,9 +559,10 @@ def client_for_compare(
     startup_config_with_results: StartupConfig,
     fake_redis_for_compare: fakeredis.FakeStrictRedis,
 ) -> TestClient:
+    from rq.serializers import JSONSerializer
+
     from web.backend.main import create_app
     from web.backend.queue import get_batch_queue, get_queue
-    from rq.serializers import JSONSerializer
 
     sync_queue = Queue('profiling', connection=fakeredis.FakeRedis(), is_async=False, serializer=JSONSerializer)
     app = create_app(startup_config=startup_config_with_results)

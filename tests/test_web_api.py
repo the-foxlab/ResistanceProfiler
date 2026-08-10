@@ -2392,7 +2392,6 @@ class TestApiRouteRateLimits:
         app.dependency_overrides[get_queue] = lambda: sync_queue
         app.dependency_overrides[get_batch_queue] = lambda: sync_queue
         client = TestClient(app)
-        headers = {'Authorization': 'Bearer legacy-token'}
 
         statuses = [
             client.get('/api/jobs/nonexistent-id').status_code

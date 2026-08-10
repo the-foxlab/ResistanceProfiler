@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from slowapi import Limiter
 
 from web.backend.models import SessionCleanupPayload, SessionCleanupResponse

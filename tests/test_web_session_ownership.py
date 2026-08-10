@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import fakeredis
 import pytest
-from dataclasses import replace
 from fastapi.testclient import TestClient
 from rq import Queue
 
+from tests.conftest import TINY_REF_NAME, TINY_REF_SEQ
 from web.backend.main import create_app
 from web.backend.services import session as session_service
 from web.backend.services.session import (
@@ -22,7 +23,6 @@ from web.backend.services.session import (
     record_upload,
 )
 from web.backend.startup_config import StartupConfig, build_project_db_uuid_index
-from tests.conftest import TINY_REF_NAME, TINY_REF_SEQ
 
 
 @pytest.fixture()
@@ -67,7 +67,6 @@ def fake_redis(monkeypatch: pytest.MonkeyPatch) -> fakeredis.FakeStrictRedis:
 @pytest.fixture()
 def no_token_config(startup_config: StartupConfig) -> StartupConfig:
     """A local-mode config (zero-config startup)."""
-    from dataclasses import replace
 
     return replace(startup_config, deployment_mode='local')
 
@@ -97,7 +96,6 @@ class TestSessionIssuance:
         monkeypatch.setenv('RESPRO_WEB_TRUSTED_PROXIES', '127.0.0.1')
         monkeypatch.setenv('RESPRO_WEB_CORS_ORIGINS', 'https://respro.example.com')
         from web.backend.startup_config import _validate_startup_policy
-        from dataclasses import replace
         _validate_startup_policy(deployment_mode='online')
         online_config = replace(startup_config, deployment_mode='online')
         client = TestClient(create_app(startup_config=online_config))
@@ -219,7 +217,6 @@ class TestSessionIsolation:
         startup_config: StartupConfig,
     ) -> tuple[TestClient, TestClient]:
         """Return two TestClient instances with independent session cookies."""
-        from web.backend.config import WEB_BACKEND_CONFIG
         from web.backend.main import create_app
         from web.backend.queue import get_batch_queue, get_queue
 
@@ -369,7 +366,6 @@ class TestSessionIsolation:
         # The new session owns no records.
         cookie_value = client.cookies.get(SESSION_COOKIE_NAME)
         assert cookie_value is not None
-        session_hash = hash_session_token(cookie_value)
         # No owned records exist for this session.
         assert fetch_owned_record('upload', 'any-id') is None
 
