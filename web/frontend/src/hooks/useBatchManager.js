@@ -44,21 +44,21 @@ export function useBatchManager({
         });
         setUploadProgress((prev) => ({ ...prev, percent: 100 }));
         setBatchVcfFiles((prev) => [...prev, {
-          path: response.file_path,
+          uploadId: response.upload_id,
           name: file.name,
           size: file.size,
-          bamPath: null,
+          bamId: null,
           bamName: null,
           bamSize: null,
         }]);
-        addUploadedPath(response.file_path);
+        addUploadedPath(response.upload_id);
       } catch (error) {
         setBatchError(formatUserError(error.message));
       }
     }
   };
 
-  // ── Per-sample BAM (Feature: batch-bam-coverage) ─────────────────────
+  // ── Per-sample BAM ─────────────────────────────────────────────────
   // Multi-select BAM upload auto-pairs each BAM to the VCF row whose filename stem matches
   // (case-insensitive). Unmatched BAMs and collisions (stem matches an already-paired row) are
   // reported back to the caller rather than silently dropped or overwritten, so the UI can prompt
@@ -88,7 +88,7 @@ export function useBatchManager({
           }));
         });
         setUploadProgress((prev) => ({ ...prev, percent: 100 }));
-        addUploadedPath(response.file_path);
+        addUploadedPath(response.upload_id);
 
         const bamStem = formatPathStem(file.name).toLowerCase();
         const matchIndex = batchVcfFiles.findIndex(
@@ -100,14 +100,14 @@ export function useBatchManager({
         }
         // Collision = the row already has a BAM (from a prior call) OR was claimed earlier in
         // this same multi-select call. Either way, do not overwrite the existing pairing.
-        if (batchVcfFiles[matchIndex].bamPath || claimedIndices.has(matchIndex)) {
+        if (batchVcfFiles[matchIndex].bamId || claimedIndices.has(matchIndex)) {
           collisions.push(file.name);
           continue;
         }
         claimedIndices.add(matchIndex);
         setBatchVcfFiles((prev) => prev.map((entry, i) => (
           i === matchIndex
-            ? { ...entry, bamPath: response.file_path, bamName: file.name, bamSize: file.size }
+            ? { ...entry, bamId: response.upload_id, bamName: file.name, bamSize: file.size }
             : entry
         )));
         paired.push(file.name);
@@ -145,11 +145,11 @@ export function useBatchManager({
         }));
       });
       setUploadProgress((prev) => ({ ...prev, percent: 100 }));
-      addUploadedPath(response.file_path);
+      addUploadedPath(response.upload_id);
       // Uploading a new BAM overwrites any existing BAM on this row — no separate remove step.
       setBatchVcfFiles((prev) => prev.map((entry, i) => (
         i === vcfIndex
-          ? { ...entry, bamPath: response.file_path, bamName: file.name, bamSize: file.size }
+          ? { ...entry, bamId: response.upload_id, bamName: file.name, bamSize: file.size }
           : entry
       )));
     } catch (error) {
@@ -160,7 +160,7 @@ export function useBatchManager({
   const removeBatchBam = (vcfIndex) => {
     setBatchVcfFiles((prev) => prev.map((entry, i) => (
       i === vcfIndex
-        ? { ...entry, bamPath: null, bamName: null }
+        ? { ...entry, bamId: null, bamName: null }
         : entry
     )));
   };
@@ -180,8 +180,8 @@ export function useBatchManager({
           }));
         });
         setUploadProgress((prev) => ({ ...prev, percent: 100 }));
-        setBatchFastaFiles((prev) => [...prev, { path: response.file_path, name: file.name, size: file.size }]);
-        addUploadedPath(response.file_path);
+        setBatchFastaFiles((prev) => [...prev, { uploadId: response.upload_id, name: file.name, size: file.size }]);
+        addUploadedPath(response.upload_id);
       } catch (error) {
         setBatchError(formatUserError(error.message));
       }
@@ -209,8 +209,8 @@ export function useBatchManager({
         }));
       });
       setUploadProgress((prev) => ({ ...prev, percent: 100 }));
-      setBatchReferenceFastaState({ path: response.file_path, name: file.name });
-      addUploadedPath(response.file_path);
+      setBatchReferenceFastaState({ uploadId: response.upload_id, name: file.name });
+      addUploadedPath(response.upload_id);
     } catch (error) {
       setBatchError(formatUserError(error.message));
     }
@@ -294,15 +294,15 @@ export function useBatchManager({
           throw new Error('Coverage cutoff (min depth) must be an integer greater than or equal to 0.');
         }
         const body = {
-          vcf_paths: batchVcfFiles.map((f) => f.path),
+          vcf_ids: batchVcfFiles.map((f) => f.uploadId),
           sample_names: sampleNames,
           input_display_names: batchVcfFiles.map((f) => f.name),
-          reference_fasta_path: batchReferenceFasta.path,
+          reference_id: batchReferenceFasta.uploadId,
           db_path: selectedDatabaseId,
           min_af: batchVcfCutoffs.min_af,
           min_depth: batchVcfCutoffs.min_depth,
           threads: FRONTEND_CONFIG.profile.threads,
-          bam_paths: batchVcfFiles.map((f) => f.bamPath ?? null),
+          bam_ids: batchVcfFiles.map((f) => f.bamId ?? null),
         };
         const response = await apiPostRaw('/api/profile/batch/vcf', body);
         if (response.status === 429) {
@@ -318,7 +318,7 @@ export function useBatchManager({
       } else {
         const sampleNames = batchFastaFiles.map((file) => formatPathStem(file.name));
         const body = {
-          fasta_paths: batchFastaFiles.map((f) => f.path),
+          fasta_ids: batchFastaFiles.map((f) => f.uploadId),
           sample_names: sampleNames,
           input_display_names: batchFastaFiles.map((f) => f.name),
           db_path: selectedDatabaseId,

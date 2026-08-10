@@ -18,20 +18,20 @@ export function useProfileSubmit({
   setUploadProgress,
 }) {
   const [vcfInput, setVcfInput] = useState({
-    vcf_path: '',
+    vcf_id: '',
     input_display_name: '',
-    ref_fasta_path: '',
-    bam_path: null,
+    reference_id: '',
+    bam_id: null,
     sample: '',
     min_af: FRONTEND_CONFIG.profile.vcf.minAf,
     min_depth: FRONTEND_CONFIG.profile.vcf.minDepth,
   });
   const [fastaInput, setFastaInput] = useState({
-    fasta_path: '',
+    fasta_id: '',
     input_display_name: '',
     sample: '',
   });
-  const [jsonInputPath, setJsonInputPath] = useState('');
+  const [jsonInputId, setJsonInputId] = useState('');
   const [isProcessingFasta, setIsProcessingFasta] = useState(false);
   const [isProcessingVcf, setIsProcessingVcf] = useState(false);
   const [isProcessingRegenerate, setIsProcessingRegenerate] = useState(false);
@@ -42,12 +42,12 @@ export function useProfileSubmit({
 
   const selectedDatabase = databases.find((item) => item.id === selectedDatabaseId) || null;
 
-  const buildReportUrl = (reportPath) => {
-    return buildApiUrl('/api/report', { path: reportPath });
+  const buildReportUrl = (artifactId) => {
+    return buildApiUrl('/api/report', { artifact_id: artifactId });
   };
 
-  const buildArtifactUrl = (artifactPath) => {
-    return buildApiUrl('/api/artifact', { path: artifactPath });
+  const buildArtifactUrl = (artifactId) => {
+    return buildApiUrl('/api/artifact', { artifact_id: artifactId });
   };
 
   const pollJob = async (jobId) => {
@@ -69,7 +69,8 @@ export function useProfileSubmit({
     setStatusError('');
     try {
       const fastaPayload = {
-        ...fastaInput,
+        fasta_id: fastaInput.fasta_id,
+        input_display_name: fastaInput.input_display_name,
         sample: fastaInput.sample || formatPathStem(fastaInput.input_display_name),
         database_id: databaseId,
         threads: FRONTEND_CONFIG.profile.threads,
@@ -108,8 +109,13 @@ export function useProfileSubmit({
       }
 
       const vcfPayload = {
-        ...vcfInput,
+        vcf_id: vcfInput.vcf_id,
+        reference_id: vcfInput.reference_id,
+        bam_id: vcfInput.bam_id,
+        input_display_name: vcfInput.input_display_name,
         sample: vcfInput.sample || formatPathStem(vcfInput.input_display_name),
+        min_af: vcfInput.min_af,
+        min_depth: vcfInput.min_depth,
         database_id: databaseId,
         threads: FRONTEND_CONFIG.profile.threads,
       };
@@ -163,8 +169,8 @@ export function useProfileSubmit({
           percent,
         }));
       });
-      onSuccess(response.file_path);
-      addUploadedPath(response.file_path);
+      onSuccess(response.upload_id);
+      addUploadedPath(response.upload_id);
       setUploadProgress((prev) => ({
         ...prev,
         percent: 100,
@@ -175,37 +181,37 @@ export function useProfileSubmit({
   };
 
   const uploadFastaFile = async (file) => {
-    await uploadFile(file, 'fasta', (path) => {
-      setFastaInput((prev) => ({ ...prev, fasta_path: path, input_display_name: file.name }));
+    await uploadFile(file, 'fasta', (uploadId) => {
+      setFastaInput((prev) => ({ ...prev, fasta_id: uploadId, input_display_name: file.name }));
     });
   };
 
   const uploadVcfFile = async (file) => {
-    await uploadFile(file, 'vcf', (path) => {
-      setVcfInput((prev) => ({ ...prev, vcf_path: path, input_display_name: file.name }));
+    await uploadFile(file, 'vcf', (uploadId) => {
+      setVcfInput((prev) => ({ ...prev, vcf_id: uploadId, input_display_name: file.name }));
     });
   };
 
   const uploadReferenceFile = async (file) => {
-    await uploadFile(file, 'fasta', (path) => {
-      setVcfInput((prev) => ({ ...prev, ref_fasta_path: path }));
+    await uploadFile(file, 'fasta', (uploadId) => {
+      setVcfInput((prev) => ({ ...prev, reference_id: uploadId }));
     });
   };
 
   const uploadBamFile = async (file) => {
-    await uploadFile(file, 'bam', (path) => {
-      setVcfInput((prev) => ({ ...prev, bam_path: path }));
+    await uploadFile(file, 'bam', (uploadId) => {
+      setVcfInput((prev) => ({ ...prev, bam_id: uploadId }));
     });
   };
 
   const uploadJsonFile = async (file) => {
-    await uploadFile(file, 'json', (path) => {
-      setJsonInputPath(path);
+    await uploadFile(file, 'json', (uploadId) => {
+      setJsonInputId(uploadId);
     });
   };
 
   const runRegenerateFromJson = async () => {
-    if (!jsonInputPath) {
+    if (!jsonInputId) {
       setStatusError('Upload a valid results JSON file first.');
       return;
     }
@@ -214,7 +220,7 @@ export function useProfileSubmit({
     setStatusError('');
     try {
       const submitResponse = await apiPost('/api/regenerate/json', {
-        json_path: jsonInputPath,
+        json_id: jsonInputId,
       });
       isCancellationRequested.current = false;
       setActiveJobId(submitResponse.job_id);
@@ -257,8 +263,8 @@ export function useProfileSubmit({
     setVcfInput,
     fastaInput,
     setFastaInput,
-    jsonInputPath,
-    setJsonInputPath,
+    jsonInputId,
+    setJsonInputId,
     isProcessingFasta,
     isProcessingVcf,
     isProcessingRegenerate,

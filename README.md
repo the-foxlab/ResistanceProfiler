@@ -25,6 +25,10 @@ One harmonized report that classifies mutations and assists diagnostic interpret
 Install the CLI:
 
 ```bash
+# via conda (recommended)
+conda create -n resistanceprofiler
+conda install bioconda::respro
+# via pip
 git clone https://github.com/the-foxlab/ResistanceProfiler
 pip install -e ".[dev]"
 ```

@@ -43,9 +43,9 @@ class StartupConfig:
     results_dir: Path
     data_dir: Path
     allowed_roots: tuple[Path, ...]
-    api_token: str
     imprint: ImprintConfig | None = None
     project_db_uuid_index: dict[str, Path] = field(default_factory=dict)
+    deployment_mode: str = 'local'
 
 
 def load_startup_config() -> StartupConfig:
@@ -62,9 +62,9 @@ def load_startup_config() -> StartupConfig:
     project_databases_dir = (data_dir / 'project_databases').resolve()
     uploads_dir = (data_dir / 'uploads').resolve()
     results_dir = (data_dir / 'results').resolve()
-    api_token = os.getenv(WEB_ENV.api_token, '').strip()
     maintained_bootstrap = _resolve_maintained_bootstrap_enabled()
     imprint = _resolve_imprint()
+    deployment_mode = _resolve_deployment_mode()
 
     allowed_roots_env = os.getenv(WEB_ENV.allowed_roots, '')
     allowed_roots = _parse_allowed_roots(
@@ -88,7 +88,7 @@ def load_startup_config() -> StartupConfig:
             logger.exception('Maintained database update check failed — continuing with existing databases')
     _validate_at_least_one_project_db(project_databases_dir)
     project_db_uuid_index = build_project_db_uuid_index(project_databases_dir)
-    _validate_startup_policy(api_token)
+    _validate_startup_policy(deployment_mode)
 
     return StartupConfig(
         project_databases_dir=project_databases_dir,
@@ -96,9 +96,9 @@ def load_startup_config() -> StartupConfig:
         results_dir=results_dir,
         data_dir=data_dir,
         allowed_roots=allowed_roots,
-        api_token=api_token,
         imprint=imprint,
         project_db_uuid_index=project_db_uuid_index,
+        deployment_mode=deployment_mode,
     )
 
 
@@ -319,20 +319,46 @@ def _resolve_maintained_bootstrap_enabled() -> bool:
     )
 
 
-def _validate_startup_policy(api_token: str) -> None:
-    """Enforce deployment safety rules based on host binding and token configuration."""
-    host = os.getenv(WEB_ENV.host, '').strip()
-    if host and host not in ('127.0.0.1', 'localhost', '0.0.0.0') and not api_token:
-        raise RuntimeError(
-            'Public bind address detected but RESPRO_WEB_API_TOKEN is not set. '
-            'Set a strong API token before deploying publicly.'
-        )
-    cors_origins = os.getenv(WEB_ENV.cors_origins, '').strip()
-    if api_token and not cors_origins:
-        raise RuntimeError(
-            'RESPRO_WEB_API_TOKEN is set but RESPRO_WEB_CORS_ORIGINS is not configured. '
-            'Set explicit allowed origins for token-authenticated deployments.'
-        )
+def _validate_startup_policy(deployment_mode: str) -> None:
+    """Enforce deployment safety rules based on the explicit deployment mode.
+
+    Two modes:
+
+    * ``local`` — default zero-config behaviour. The service binds to loopback
+      (the reference compose file does so). No proxy trust, no CORS requirement.
+      API docs remain enabled for developer convenience.
+    * ``online`` — the service sits behind a reverse proxy (nginx/Caddy/SSO) that
+      terminates TLS and, optionally, authenticates browsers. Requires
+      ``RESPRO_WEB_TRUSTED_PROXIES`` so forwarded client IPs are trusted only from
+      known proxies. API docs are disabled. Browser authentication (Basic Auth /
+      SSO / IP allowlist) is configured at the proxy, not here; the session cookie
+      provides per-user data isolation within a shared deployment.
+    """
+    if deployment_mode == 'local':
+        return
+
+    if deployment_mode == 'online':
+        trusted_proxies = os.getenv(WEB_ENV.trusted_proxies, '').strip()
+        if not trusted_proxies:
+            raise RuntimeError(
+                "RESPRO_WEB_DEPLOYMENT_MODE='online' requires RESPRO_WEB_TRUSTED_PROXIES "
+                'to be set so forwarded client IPs are trusted only from known proxies.'
+            )
+        return
+
+    raise RuntimeError(
+        f"Unknown RESPRO_WEB_DEPLOYMENT_MODE={deployment_mode!r}. "
+        "Valid modes are 'local', 'online'."
+    )
+
+
+def _resolve_deployment_mode() -> str:
+    """Resolve the deployment trust mode from env with the config default."""
+    default = WEB_BACKEND_CONFIG.defaults.deployment_mode
+    raw_value = os.getenv(WEB_ENV.deployment_mode, default).strip()
+    if not raw_value:
+        return default
+    return raw_value
 
 
 def _validate_project_db(project_db: Path) -> None:

@@ -14,20 +14,35 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    # ── Redis authentication  ──────────────────────────────────────
-    # Uncomment to require a password. Generate a strong secret, e.g.:
+    # ── Redis authentication ───────────────────────────────────────────────
+    # Redis is an execution trust boundary: RQ's default serializer uses pickle,
+    # so anything able to write to Redis can achieve worker code execution. The
+    # reference stack therefore requires a password by default. Set
+    # RESPRO_REDIS_PASSWORD to a strong secret (generate one with, e.g.:
     #   python -c "import secrets; print(secrets.token_urlsafe(32))"
-    # Then set the SAME password in REDIS_URL below (both respro-web and
-    # respro-worker). Unauthenticated connections are then rejected.
-    # command: ["redis-server", "--requirepass", "replace-with-a-strong-secret"]
+    # For local zero-config startup on loopback only, set RESPRO_REDIS_PASSWORD
+    # to any non-empty value (even a simple one) — the goal is to prevent
+    # anonymous writes from other processes on the network.
+    command: ["sh", "-c", "exec redis-server --requirepass \"$${RESPRO_REDIS_PASSWORD:?RESPRO_REDIS_PASSWORD must be set — see docs/docs/webapp.md#redis-and-job-queue}\""]
+    environment:
+      # Set this in your .env file or environment. Uncomment the line below to
+      # use a fixed local-dev password for zero-config loopback startup:
+      - RESPRO_REDIS_PASSWORD=${RESPRO_REDIS_PASSWORD:-change-me-local-only}
 
   respro-web:
     build:
       context: .
       dockerfile: Dockerfile.web
     image: respro-web:latest
+    # Bind to loopback only by default so the zero-config stack is
+    # not exposed to the LAN/public interface. Single-command local startup
+    # (`docker compose -f docker-compose.web.yml up --build`) is unaffected because
+    # loopback is reachable from the same host. For public hosting, place a
+    # reverse proxy (Nginx/SSO) in front and set RESPRO_WEB_DEPLOYMENT_MODE=online
+    # with RESPRO_WEB_TRUSTED_PROXIES and RESPRO_WEB_CORS_ORIGINS
+    # (see docs/docs/webapp.md).
     ports:
-      - '0.0.0.0:8000:8000'
+      - '127.0.0.1:8000:8000'
     volumes:
       - ./data:/data:rw
     #env_file:
@@ -40,8 +55,8 @@ services:
       # - RESPRO_WEB_DATA_DIR=/data
       # - RESPRO_WEB_ALLOWED_ROOTS=/data/project_databases,/data/uploads,/data/results
       # - RESPRO_WEB_RESULT_TTL=86400
-      # ── Authentication and security (REQUIRED for public hosting) ──────────
-      # - RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
+      # ── Deployment mode and security (REQUIRED for public hosting) ─────
+      # - RESPRO_WEB_DEPLOYMENT_MODE=online
       # - RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
       # - RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
       # ── Rate limiting and batch sizes ──────────────────────────────────────
@@ -49,9 +64,12 @@ services:
       # - RESPRO_WEB_API_RATE_LIMIT=120/minute
       # - RESPRO_WEB_MAX_BATCH_SIZE=25
       # ── Redis and job queue (set identically on respro-worker) ─────────────
-      - REDIS_URL=redis://redis:6379/0
-      # With Redis requirepass set, use: redis://:<password>@redis:6379/0
-      # - REDIS_URL=redis://:replace-with-a-strong-secret@redis:6379/0
+      # REDIS_URL includes the Redis password (must match RESPRO_REDIS_PASSWORD
+      # on the redis service). The default below uses the same env var so the
+      # zero-config stack works out of the box on loopback.
+      - REDIS_URL=redis://:${RESPRO_REDIS_PASSWORD:-change-me-local-only}@redis:6379/0
+      # For a strong secret in production, set RESPRO_REDIS_PASSWORD in your env
+      # or .env file; the URL below picks it up automatically.
       # - RESPRO_WEB_JOB_TIMEOUT=3600
       # - RESPRO_WEB_JOB_RETRY_MAX=0
       # - RESPRO_WEB_JOB_RETRY_INTERVALS=30
@@ -68,16 +86,14 @@ services:
 
   respro-worker:
     image: respro-web:latest
-    command: rq worker --url redis://redis:6379/0 profiling
+    command: sh -c "exec python -m web.backend.worker"
     volumes:
       - ./data:/data:rw
       # Only needed for path-mode imprint (self-hosted HTML):
       # - ./imprint.html:/data/imprint.html:ro
     environment:
       # ── Redis and job queue (must match respro-web) ────────────────────────
-      - REDIS_URL=redis://redis:6379/0
-      # With Redis requirepass set, use: redis://:<password>@redis:6379/0
-      # - REDIS_URL=redis://:replace-with-a-strong-secret@redis:6379/0
+      - REDIS_URL=redis://:${RESPRO_REDIS_PASSWORD:-change-me-local-only}@redis:6379/0
       # - RESPRO_WEB_JOB_TIMEOUT=3600
       # - RESPRO_WEB_JOB_RETRY_MAX=0
       # - RESPRO_WEB_JOB_RETRY_INTERVALS=30

@@ -9,12 +9,16 @@ import zipfile
 from collections.abc import Callable
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from slowapi import Limiter
 
 from web.backend.models import ArtifactBundlePayload, ComparePayload, CompareResponse
 from web.backend.services.compare import build_comparison_matrix
+from web.backend.services.session import (
+    Session,
+    resolve_owned_path,
+)
 
 _WEB_TIMESTAMP_TOKEN = re.compile(
     r'\.(\d{20})(?=\.(?:report\.html|report\.pdf|results\.json)$)'
@@ -25,26 +29,39 @@ def build_artifacts_router(
     *,
     results_dir: Path,
     branding_dir: Path,
-    require_api_token: Callable[..., None],
+    allowed_roots: tuple[Path, ...],
     is_path_within_allowed_roots: Callable[[Path, tuple[Path, ...]], bool],
     is_allowed_artifact_path: Callable[[Path], bool],
     limiter: Limiter,
     api_rate_limit: str,
+    get_session: Callable[..., Session],
 ) -> APIRouter:
-    """Build artifact download and branding routes."""
+    """Build artifact download and branding routes.
+
+    All result artifacts (report HTML/PDF, results JSON) are referenced by opaque
+    ``artifact_id`` tokens resolved through the session-ownership store rather than
+    by absolute filesystem paths.
+    """
     router = APIRouter()
 
     @router.get('/api/report')
     @limiter.limit(api_rate_limit)
     def open_report(
         request: Request,
-        path: str = Query(...),
-        _auth: None = Depends(require_api_token),
+        artifact_id: str = Query(...),
     ) -> FileResponse:
-        del request
-        report_path = Path(path).expanduser().resolve()
-        if not is_path_within_allowed_roots(report_path, (results_dir,)):
-            raise HTTPException(status_code=400, detail='Report path is outside allowed output directory.')
+        session = get_session(request)
+        try:
+            report_path = resolve_owned_path(
+                prefix='artifact',
+                record_id=artifact_id,
+                session_hash=session.session_hash,
+                allowed_roots=allowed_roots,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail='Report not found.') from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not str(report_path).endswith('.report.html'):
             raise HTTPException(status_code=400, detail='Unsupported report type. Allowed: .report.html.')
         if not report_path.is_file():
@@ -55,13 +72,20 @@ def build_artifacts_router(
     @limiter.limit(api_rate_limit)
     def download_artifact(
         request: Request,
-        path: str = Query(...),
-        _auth: None = Depends(require_api_token),
+        artifact_id: str = Query(...),
     ) -> FileResponse:
-        del request
-        artifact_path = Path(path).expanduser().resolve()
-        if not is_path_within_allowed_roots(artifact_path, (results_dir,)):
-            raise HTTPException(status_code=400, detail='Artifact path is outside allowed results directory.')
+        session = get_session(request)
+        try:
+            artifact_path = resolve_owned_path(
+                prefix='artifact',
+                record_id=artifact_id,
+                session_hash=session.session_hash,
+                allowed_roots=allowed_roots,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail='Artifact not found.') from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if not is_allowed_artifact_path(artifact_path):
             raise HTTPException(
                 status_code=400,
@@ -82,16 +106,19 @@ def build_artifacts_router(
     def download_artifact_bundle(
         request: Request,
         payload: ArtifactBundlePayload,
-        _auth: None = Depends(require_api_token),
     ) -> Response:
-        del request
-        if not payload.paths:
-            raise HTTPException(status_code=400, detail='At least one artifact path is required.')
+        session = get_session(request)
+        if not payload.artifact_ids:
+            raise HTTPException(status_code=400, detail='At least one artifact id is required.')
 
+        resolved_paths = _resolve_artifact_ids(
+            payload.artifact_ids,
+            session.session_hash,
+            allowed_roots,
+        )
         bundle_bytes = _build_artifact_bundle(
-            payload.paths,
+            resolved_paths,
             results_dir,
-            is_path_within_allowed_roots,
             is_allowed_artifact_path,
         )
         return Response(
@@ -119,13 +146,16 @@ def build_artifacts_router(
     def compare_samples(
         request: Request,
         payload: ComparePayload,
-        _auth: None = Depends(require_api_token),
     ) -> CompareResponse:
-        del request
-        if not payload.paths:
-            raise HTTPException(status_code=400, detail='At least one result path is required.')
+        session = get_session(request)
+        if not payload.artifact_ids:
+            raise HTTPException(status_code=400, detail='At least one artifact id is required.')
 
-        resolved_paths = [Path(p).expanduser().resolve() for p in payload.paths]
+        resolved_paths = _resolve_artifact_ids(
+            payload.artifact_ids,
+            session.session_hash,
+            allowed_roots,
+        )
         try:
             return build_comparison_matrix(
                 result_json_paths=resolved_paths,
@@ -144,10 +174,32 @@ def build_artifacts_router(
     return router
 
 
+def _resolve_artifact_ids(
+    artifact_ids: list[str],
+    session_hash: str,
+    allowed_roots: tuple[Path, ...],
+) -> list[Path]:
+    """Resolve a list of artifact IDs to owned, path-confined result files."""
+    resolved: list[Path] = []
+    for artifact_id in artifact_ids:
+        try:
+            path = resolve_owned_path(
+                prefix='artifact',
+                record_id=artifact_id,
+                session_hash=session_hash,
+                allowed_roots=allowed_roots,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail='Artifact not found.') from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        resolved.append(path)
+    return resolved
+
+
 def _build_artifact_bundle(
-    artifact_paths: list[str],
+    artifact_paths: list[Path],
     results_dir: Path,
-    is_path_within_allowed_roots: Callable[[Path, tuple[Path, ...]], bool],
     is_allowed_artifact_path: Callable[[Path], bool],
 ) -> bytes:
     """Pack validated result artifacts into one zip archive."""
@@ -155,10 +207,7 @@ def _build_artifact_bundle(
     used_names: set[str] = set()
 
     with zipfile.ZipFile(buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as archive:
-        for raw_path in artifact_paths:
-            artifact_path = Path(raw_path).expanduser().resolve()
-            if not is_path_within_allowed_roots(artifact_path, (results_dir,)):
-                raise HTTPException(status_code=400, detail='Artifact path is outside allowed results directory.')
+        for artifact_path in artifact_paths:
             if not is_allowed_artifact_path(artifact_path):
                 raise HTTPException(
                     status_code=400,

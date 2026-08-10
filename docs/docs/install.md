@@ -35,26 +35,6 @@ conda activate respro
 
 Bioconda is the recommended install path if you already use conda/mamba — it handles the `mappy` native dependency automatically without a C compiler.
 
-### Troubleshooting: `mappy` fails to install during installation with pip
-
-On some systems, pip-based installs fail while building `mappy` (the minimap2 Python binding). Try these steps:
-
-1. Upgrade build tooling first:
-
-```bash
-python -m pip install --upgrade pip setuptools wheel
-```
-
-2. Ensure a working compiler/build environment is available (C/C++ toolchain and Python build headers), then rerun the install command.
-
-3. Fallback: preinstall `mappy` via conda/mamba, then install ResistanceProfiler with pip:
-
-```bash
-mamba create -n respro -c conda-forge -c bioconda python=3.12 mappy
-mamba activate respro
-pip install .
-```
-
 ## Web app
 
 ### Docker (recommended)

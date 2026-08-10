@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import faviconSrc from './assets/favicon.svg';
 import { FRONTEND_CONFIG } from './config';
-import { API_BASE, API_TOKEN, buildHeaders, apiGet } from './api';
+import { API_BASE, buildHeaders, apiGet } from './api';
 import { PROFILE_MODES } from './constants';
 import { useProfileSubmit } from './hooks/useProfileSubmit';
 import { useBatchManager } from './hooks/useBatchManager';
@@ -123,9 +123,8 @@ export function useDashboardLogic() {
         return;
       }
       const payload = JSON.stringify({
-        upload_paths: session.uploadedPaths,
-        report_paths: session.reportPaths,
-        ...(API_TOKEN ? { token: API_TOKEN } : {}),
+        upload_ids: session.uploadedPaths,
+        artifact_ids: session.reportPaths,
       });
       if (navigator.sendBeacon) {
         const blob = new Blob([payload], { type: 'application/json' });
@@ -222,7 +221,7 @@ export function useDashboardLogic() {
     uploadReferenceFile: profile.uploadReferenceFile,
     uploadBamFile: profile.uploadBamFile,
     uploadJsonFile: profile.uploadJsonFile,
-    jsonInputPath: profile.jsonInputPath,
+    jsonInputId: profile.jsonInputId,
     isRegenerateBusy: profile.isProcessingRegenerate,
     runRegenerateFromJson: profile.runRegenerateFromJson,
     downloadMutationsAsTsv: mutations.downloadMutationsAsTsv,

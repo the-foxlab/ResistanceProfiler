@@ -1,17 +1,9 @@
 import { FRONTEND_CONFIG } from './config';
 
 const API_BASE = FRONTEND_CONFIG.apiBase;
-const API_TOKEN = FRONTEND_CONFIG.apiToken;
 
 function buildHeaders(baseHeaders = {}) {
-  // Attach auth header only when a token exists; local dev can run without auth.
-  if (!API_TOKEN) {
-    return baseHeaders;
-  }
-  return {
-    ...baseHeaders,
-    Authorization: `Bearer ${API_TOKEN}`,
-  };
+  return baseHeaders;
 }
 
 export function buildApiUrl(path, params = {}) {
@@ -197,11 +189,11 @@ export async function apiUpload(path, file, onProgress = null) {
   });
 }
 
-export async function downloadArtifactBundle(paths, downloadName) {
+export async function downloadArtifactBundle(artifactIds, downloadName) {
   const response = await fetch(`${API_BASE}/api/artifact-bundle`, {
     method: 'POST',
     headers: buildHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ paths }),
+    body: JSON.stringify({ artifact_ids: artifactIds }),
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
@@ -217,4 +209,4 @@ export async function downloadArtifactBundle(paths, downloadName) {
   URL.revokeObjectURL(href);
 }
 
-export { API_BASE, API_TOKEN, buildHeaders };
+export { API_BASE, buildHeaders };

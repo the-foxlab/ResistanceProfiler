@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from web.backend.config import WEB_BACKEND_CONFIG
@@ -16,7 +16,6 @@ def build_health_router(
     *,
     config: StartupConfig,
     sample_limit_per_minute: int,
-    require_api_token: Callable[..., None],
     build_readiness_payload: Callable[[StartupConfig], ApiEnvelope],
     version: str,
 ) -> APIRouter:
@@ -40,7 +39,7 @@ def build_health_router(
         return JSONResponse(status_code=503, content=payload.model_dump())
 
     @router.get('/api/ui/config', response_model=ApiEnvelope)
-    def ui_config(_auth: None = Depends(require_api_token)) -> ApiEnvelope:
+    def ui_config() -> ApiEnvelope:
         return ApiEnvelope(
             data={
                 'batch_max_samples': sample_limit_per_minute,

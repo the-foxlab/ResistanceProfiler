@@ -9,7 +9,7 @@ The backend is intentionally thin and keeps CLI behavior untouched.
 
 ## Frontend runtime
 
-Node.js 20+ is required to run frontend tests and build the frontend bundle.
+Node.js 24+ is required to run frontend tests and build the frontend bundle.
 
 For local backend startup, install web backend dependencies separately:
 

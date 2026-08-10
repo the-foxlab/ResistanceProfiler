@@ -1,6 +1,5 @@
 [env]
 data_dir = 'RESPRO_WEB_DATA_DIR'
-api_token = 'RESPRO_WEB_API_TOKEN'
 allowed_roots = 'RESPRO_WEB_ALLOWED_ROOTS'
 cors_origins = 'RESPRO_WEB_CORS_ORIGINS'
 upload_rate_limit = 'RESPRO_WEB_UPLOAD_RATE_LIMIT'
@@ -16,6 +15,9 @@ maintained_bootstrap = 'RESPRO_WEB_MAINTAINED_BOOTSTRAP'
 maintained_db_update_interval = 'RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS'
 trusted_proxies = 'RESPRO_WEB_TRUSTED_PROXIES'
 imprint = 'RESPRO_WEB_IMPRINT'
+deployment_mode = 'RESPRO_WEB_DEPLOYMENT_MODE'
+result_ttl = 'RESPRO_WEB_RESULT_TTL'
+session_ttl = 'RESPRO_WEB_SESSION_TTL'
 
 [defaults]
 web_host = '127.0.0.1'
@@ -29,6 +31,18 @@ upload_rate_limit = '25/minute'
 api_rate_limit = '120/minute'
 max_batch_size = 25
 artifact_bundle_max_paths = 50
+# Upper bound for the --threads worker argument and max lengths for string/list
+# fields on API request models. These cap abuse surface area while staying well
+# above legitimate use.
+profile_max_threads = 4
+sample_name_max_length = 128
+display_name_max_length = 128
+path_list_max_length = 256
+# Upper bound for opaque upload/artifact/job IDs and database lookup strings on
+# API request models. Generated IDs are ~22 chars; this caps abuse surface area.
+opaque_id_max_length = 256
+# Upper bound for the min_depth coverage cutoff on VCF profiling requests.
+min_depth_max = 1000000
 batch_queue_name = 'profiling'
 cors_local_origins = ['http://127.0.0.1:5173', 'http://localhost:5173']
 profile_queue_name = 'profiling'
@@ -36,6 +50,20 @@ frontend_base_path = '/'
 service_name = 'respro-web-api'
 maintained_bootstrap = false
 maintained_db_update_interval_seconds = 604800
+# Deployment trust model: 'local' (default; zero-config, docs enabled, loopback),
+# 'online' (behind a reverse proxy; requires RESPRO_WEB_TRUSTED_PROXIES; docs
+# disabled). Browser auth is configured at the proxy, not here.
+deployment_mode = 'local'
+# Time-to-live in seconds for files in uploads/ and results/ AND for RQ job
+# metadata (ttl/result_ttl/failure_ttl). A background sweep thread deletes files
+# older than this value, and RQ job records (which can contain sample names,
+# absolute paths, and exception output) expire after the same duration.
+result_ttl_seconds = 86400
+# Time-to-live in seconds for anonymous session records in Redis. Sessions are
+# additive in local mode (no auth required) and become the ownership boundary
+# for uploads/jobs/artifacts in non-local modes. Defaults to 7 days so a user
+# who returns within a week keeps their session; records expire automatically.
+session_ttl_seconds = 604800
 
 [defaults.profile]
 sample_name = 'sample'

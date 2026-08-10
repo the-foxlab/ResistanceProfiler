@@ -52,16 +52,16 @@ export function useComparisonManager({
 
     if (selectedResults.length < 2) return;
 
-    const jsonPaths = selectedResults
+    const artifactIds = selectedResults
       .map((r) => r.report_json_path)
       .filter(Boolean);
 
-    if (jsonPaths.length < 2) return;
+    if (artifactIds.length < 2) return;
 
     setIsComparisonBusy(true);
     setComparisonData(null);
     try {
-      const response = await apiPost('/api/compare', { paths: jsonPaths, non_synonymous_only: effectiveNonSyn, db_hits_only: effectiveDbHits });
+      const response = await apiPost('/api/compare', { artifact_ids: artifactIds, non_synonymous_only: effectiveNonSyn, db_hits_only: effectiveDbHits });
       setComparisonData(response);
     } catch (error) {
       setStatusError(formatUserError(error.message));

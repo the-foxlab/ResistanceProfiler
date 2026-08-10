@@ -1,5 +1,5 @@
 #!/bin/sh
-# ── Non-root startup entrypoint (SEC-005) ────────────────────────────────────
+# ── Non-root startup entrypoint ────────────────────────────────────
 # The container starts as root so it can fix ownership of the bind-mounted
 # /data volume, which is created by the host and is *not* affected by the
 # `chown` baked into the image at build time (a bind mount replaces the
