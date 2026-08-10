@@ -258,6 +258,33 @@ class TestWebApi:
         assert client.get('/redoc').status_code == 404
         assert client.get('/openapi.json').status_code == 404
 
+    def test_create_app_without_explicit_config_uses_loaded_startup_config(
+        self,
+        startup_config: StartupConfig,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The real ``run()`` path calls ``create_app()`` with no argument.
+
+        Regression guard for the bug where the session-cookie middleware was
+        wired with ``startup_config.deployment_mode`` (the parameter, which is
+        ``None`` on this path) instead of the resolved ``config`` — raising
+        ``AttributeError: 'NoneType' object has no attribute 'deployment_mode'``
+        at startup. The test monkeypatches ``load_startup_config`` to return a
+        known local-mode config and asserts the app builds and serves a request
+        carrying the session cookie.
+        """
+        import web.backend.main as main_module
+
+        no_token_config = replace(startup_config, api_token='', deployment_mode='local')
+        monkeypatch.setattr(main_module, 'load_startup_config', lambda: no_token_config)
+        client = TestClient(create_app())
+        # /api/health is public in local mode; the response must carry a session
+        # cookie, proving the middleware was wired with the resolved config.
+        response = client.get('/api/health')
+        assert response.status_code == 200
+        set_cookie = response.headers.get('set-cookie', '')
+        assert SESSION_COOKIE_NAME in set_cookie
+
     def test_proxy_settings_default_to_disabled_without_trusted_proxies(
         self,
         monkeypatch: pytest.MonkeyPatch,

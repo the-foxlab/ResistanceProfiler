@@ -141,7 +141,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     )
 
     # Issue/refresh the opaque session cookie on every response.
-    _set_session_cookie_middleware(app, startup_config.deployment_mode)
+    _set_session_cookie_middleware(app, config.deployment_mode)
 
     branding_dir = Path(__file__).resolve().parents[2] / 'respro' / 'report' / 'static'
 
