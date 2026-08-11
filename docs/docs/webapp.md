@@ -568,8 +568,13 @@ annotated `docker-compose.web.yml` ships with all of these settings present but
 - [ ] If you pin a different UID/GID, update the `Dockerfile.web` `useradd`/`groupadd`
       lines; the entrypoint's `chown` picks up the new UID/GID automatically.
 - [ ] The production compose file (`production/docker-compose.web.yml`) sets
-      `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, `read_only: true`,
-      `tmpfs: [/tmp:noexec,nosuid]`, and `mem_limit` on every service.
+      `security_opt: [no-new-privileges:true]`, `read_only: true`,
+      `tmpfs: [/tmp:noexec,nosuid]`, and `mem_limit` on every service. It does
+      **not** set `cap_drop`: the entrypoint is the privilege boundary and needs
+      `CAP_CHOWN`/`CAP_DAC_OVERRIDE`/`CAP_FOWNER` to fix the bind-mounted `/data`
+      ownership as root before dropping to `respro`. After `gosu`, the app runs as
+      UID 1001 with no Linux capabilities (non-root users hold none unless granted
+      via file caps, which the image does not set).
 - [ ] The worker's `project_databases` directory is mounted read-only (the worker
       only reads reference data). For the web service, enable the read-only
       project_databases mount only when `RESPRO_WEB_MAINTAINED_BOOTSTRAP` is

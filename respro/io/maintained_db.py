@@ -8,9 +8,11 @@ All public functions raise RuntimeError on any network or HTTP failure.
 from __future__ import annotations
 
 import csv
+import http.client
 import json
 import logging
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,6 +23,12 @@ from respro.config.cli_settings import CLI_CONFIG
 logger = logging.getLogger(__name__)
 
 _GENBANK_TIMEOUT = 30
+# NCBI eutils is rate-limited and intermittently resets connections or returns
+# truncated chunked responses. Retry transient failures a few times with
+# exponential backoff before giving up. HTTPError is NOT retried — a 4xx/5xx
+# status is a permanent response, not a transport hiccup.
+_GENBANK_MAX_RETRIES = 3
+_GENBANK_BACKOFF_BASE = 1.0  # seconds; doubled each retry (1, 2, 4)
 
 # NCBI nucleotide accession: letters/digits/underscore, optional ``.version`` suffix.
 # Rejects path separators, ``..``, whitespace, and other characters that could escape
@@ -290,26 +298,52 @@ def _fetch_genbank_records(accessions: list[str], dest_dir: Path) -> list[Path]:
     """
     Fetch GenBank records for a list of NCBI accession IDs.
 
+    Transient transport failures (``ConnectionResetError``, ``IncompleteRead``,
+    and other ``OSError`` / ``http.client.HTTPException`` subclasses) are
+    retried up to ``_GENBANK_MAX_RETRIES`` times with exponential backoff.
+    A permanent ``HTTPError`` (4xx/5xx) is raised immediately without
+    retrying. NCBI eutils is rate-limited, so a short inter-request delay is
+    also applied between successful accessions.
+
     :param accessions: list of nucleotide accession strings
     :param dest_dir: directory where .gb files are written
     :return: list of paths to written GenBank files
+    :raises RuntimeError: on permanent HTTP failure or after exhausting retries
+    :raises ValueError: on an invalid accession (via ``_validate_accession``)
     """
     paths: list[Path] = []
     for accession in accessions:
         _validate_accession(accession)
         url = CLI_CONFIG.urls.ncbi_nuccore_efetch.format(accession=urllib.request.quote(accession))
         dest = dest_dir / f'{accession}.gb'
-        try:
-            with urllib.request.urlopen(url, timeout=_GENBANK_TIMEOUT) as resp:
-                content = resp.read()
-        except urllib.error.HTTPError as exc:
+
+        content: bytes | None = None
+        last_exc: Exception | None = None
+        for attempt in range(1, _GENBANK_MAX_RETRIES + 1):
+            try:
+                with urllib.request.urlopen(url, timeout=_GENBANK_TIMEOUT) as resp:
+                    content = resp.read()
+                break  # success
+            except urllib.error.HTTPError as exc:
+                # Permanent response — do not retry.
+                raise RuntimeError(
+                    f'Failed to fetch GenBank record for {accession!r}: HTTP {exc.code}'
+                ) from exc
+            except (OSError, http.client.HTTPException) as exc:
+                # Transient transport failure — retry with backoff.
+                last_exc = exc
+                logger.warning(
+                    'Transient error fetching GenBank record %r (attempt %d/%d): %s',
+                    accession, attempt, _GENBANK_MAX_RETRIES, exc,
+                )
+                if attempt < _GENBANK_MAX_RETRIES:
+                    time.sleep(_GENBANK_BACKOFF_BASE * (2 ** (attempt - 1)))
+
+        if content is None:
             raise RuntimeError(
-                f'Failed to fetch GenBank record for {accession!r}: HTTP {exc.code}'
-            ) from exc
-        except OSError as exc:
-            raise RuntimeError(
-                f'Network error fetching GenBank record for {accession!r}: {exc}'
-            ) from exc
+                f'Network error fetching GenBank record for {accession!r} '
+                f'after {_GENBANK_MAX_RETRIES} attempts: {last_exc}'
+            ) from last_exc
 
         if b'LOCUS' not in content:
             raise RuntimeError(
