@@ -6,11 +6,6 @@ on:
       - master
     paths:
       - 'web/**'
-  push:
-    branches:
-      - master
-    paths:
-      - 'web/**'
 
 permissions:
   contents: read

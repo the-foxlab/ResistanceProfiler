@@ -4,6 +4,9 @@ on:
   pull_request:
     branches:
       - master
+    paths:
+      - 'web/**'
+      - 'respro/**'
 
 permissions:
   contents: read
