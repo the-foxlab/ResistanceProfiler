@@ -1,11 +1,6 @@
 name: Publish Docker Image
 
 on:
-  workflow_dispatch:
-  
-  release:
-    types:
-      - published
   push:
     branches:
       - master
@@ -14,6 +9,7 @@ on:
       - 'Dockerfile.web'
       - 'docker-compose.web*.yml'
       - 'docker/**'
+  workflow_dispatch:
 
 permissions:
   contents: read

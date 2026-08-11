@@ -94,13 +94,16 @@ the **client browser** (the user's machine, not the server):
 ### Docker image retrieval
 
 The CI-published image lives at `ghcr.io/the-foxlab/resistanceprofiler`. To pull
-it directly on a server (skipping the build/scp workflow), the server needs
+it directly on a server, the server needs
 egress to:
 
 | Host | Port | Purpose |
 |---|---|---|
 | `ghcr.io` | `443` | Pull the ResPro web/worker image |
+| `*.pkg.github.com` | `443` | GitHub Packages download endpoint used by `docker pull` for GHCR images |
+| `pkg-containers.githubusercontent.com` | `443` | Serves the actual image layer blobs referenced by GHCR manifests |
 | `registry-1.docker.io` | `443` | Pull `redis:7-alpine` (or your chosen Redis image) |
+| `auth.docker.io` | `443` | Docker Hub token endpoint (`registry-1.docker.io` redirects here to mint anonymous/authenticated pull tokens) |
 
 If the GHCR package is private, also allow authenticated pulls via
 `docker login ghcr.io` with a PAT that has `read:packages`.
@@ -108,7 +111,8 @@ If the GHCR package is private, also allow authenticated pulls via
 ### Firewall summary for an online server
 
 A server that pulls images directly and runs `RESPRO_WEB_MAINTAINED_BOOTSTRAP=true`
-needs outbound HTTPS to: `ghcr.io`, `registry-1.docker.io`,
+needs outbound HTTPS to: `ghcr.io`, `*.pkg.github.com`,
+`pkg-containers.githubusercontent.com`, `registry-1.docker.io`, `auth.docker.io`,
 `raw.githubusercontent.com`, `eutils.ncbi.nlm.nih.gov`, `pubchem.ncbi.nlm.nih.gov`,
 `www.ncbi.nlm.nih.gov`, `api.crossref.org`. A server that ships pre-built images
 and `.db` files needs **no** outbound access at all.
@@ -128,9 +132,16 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 
 | Variable | Default | Description |
 |---|---|---|
-| `RESPRO_WEB_DEPLOYMENT_MODE` | `local` | Controls the startup policy and security defaults. `local` (default): zero-config, no proxy required, API docs enabled, `Secure` omitted from the session cookie (HTTP on loopback). `online`: requires `RESPRO_WEB_TRUSTED_PROXIES`; API docs disabled; `Secure` set on the session cookie. Any other value fails fast at startup with a clear `RuntimeError`. |
+| `RESPRO_WEB_DEPLOYMENT_MODE` | `local` | Selects the deployment posture. `local` (default): plain HTTP, no proxy required, API docs enabled, `Secure` omitted from the session cookie. `online`: HTTPS behind a TLS-terminating reverse proxy; requires `RESPRO_WEB_TRUSTED_PROXIES`; API docs disabled; `Secure` set on the session cookie. Any other value fails fast at startup with a clear `RuntimeError`. |
 
-Startup fails with a clear `RuntimeError` if the selected mode's requirements are not met. `/docs`, `/redoc`, and `/openapi.json` return 404 in `online` mode.
+The mode controls three things:
+
+1. **Session cookie `Secure` flag** — the primary reason the mode exists. `local` omits `Secure` so the cookie is accepted over plain HTTP; `online` sets `Secure` so the cookie is only sent over HTTPS. This cannot be derived from proxy settings alone: a deployment can sit behind a reverse proxy over plain HTTP (e.g. pre-TLS testing on a dev server with a real DNS name) where `Secure` must stay off, or serve HTTPS directly where `Secure` must be on.
+2. **API docs** — `/docs`, `/redoc`, and `/openapi.json` are served in `local` mode and return 404 in `online` mode so a public deployment does not advertise its API surface.
+3. **Trusted-proxies gate** — `online` mode requires `RESPRO_WEB_TRUSTED_PROXIES` to be non-empty (startup fails with `RuntimeError` otherwise). `local` mode does not require it, but setting it enables `X-Forwarded-*` header trust regardless of mode (see [Security and browser origin](#security-and-browser-origin)).
+
+!!! note "The `localhost` exception to the `Secure` cookie rule"
+    Browsers accept `Secure` cookies over plain `http://localhost` (and `127.0.0.1`/`::1`) because loopback is a trusted origin. This means SSH-tunnel tests to `http://localhost:8000` work even in `online` mode. The exception does **not** extend to real DNS names over plain HTTP — a `Secure` cookie served over `http://respro.dev.example.com` is silently dropped by the browser, breaking sessions entirely. Use `local` mode for any plain-HTTP deployment accessed via a real hostname.
 
 ### Data and filesystem
 
@@ -146,12 +157,12 @@ Startup fails with a clear `RuntimeError` if the selected mode's requirements ar
 | Variable | Default | Description |
 |---|---|---|
 | `RESPRO_WEB_CORS_ORIGINS` | `http://127.0.0.1:5173`, `http://localhost:5173` | Comma-separated list of allowed origins for cross-origin requests. For public hosting, list your exact frontend origin(s), e.g. `https://respro.example.com`. |
-| `RESPRO_WEB_TRUSTED_PROXIES` | *(empty — proxy headers ignored)* | Comma-separated list of proxy IPs or CIDRs whose `X-Forwarded-*` headers are trusted. **Required in `online` mode.** Set to your reverse proxy address for public hosting (see [nginx step-by-step](#nginx-step-by-step-local-network)). |
+| `RESPRO_WEB_TRUSTED_PROXIES` | *(empty — proxy headers ignored)* | Comma-separated list of proxy IPs or CIDRs whose `X-Forwarded-*` headers are trusted. When set, uvicorn honours `X-Forwarded-For`/`X-Forwarded-Proto` from these addresses only — **this works in both modes**. `online` mode additionally *requires* this variable to be non-empty (startup fails otherwise). Set to your reverse proxy address for public hosting (see [nginx step-by-step](#nginx-step-by-step-local-network)). |
 | `RESPRO_WEB_IMPRINT` | *(empty — feature disabled)* | Imprint / legal notice. Accepts either an absolute `http://` / `https://` URL pointing at an already-hosted imprint page (the footer links straight to it) **or** an absolute path to a local HTML file served at `/legal`. See [Legal notice / imprint](#legal-notice-imprint-optional) for details. |
 
 ### Session-ownership model
 
-ResPro issues an opaque session cookie (`respro_session`) on the first request. The cookie is `HttpOnly` and `SameSite=Lax`; the `Secure` attribute is set only in non-local deployment modes (behind a TLS-terminating proxy). The raw cookie value carries ≥256 bits of randomness and is never stored server-side — only its SHA-256 hash is persisted in Redis (or an in-memory fallback when Redis is unavailable in local mode).
+ResPro issues an opaque session cookie (`respro_session`) on the first request. The cookie is `HttpOnly` and `SameSite=Lax`; the `Secure` attribute is set in `online` mode only (where the app is served over HTTPS) and omitted in `local` mode (where the app is served over plain HTTP so the cookie is actually accepted by browsers). The raw cookie value carries ≥256 bits of randomness and is never stored server-side — only its SHA-256 hash is persisted in Redis (or an in-memory fallback when Redis is unavailable in local mode).
 
 Every upload, queued job, and output artifact is recorded against the owning session:
 
@@ -214,7 +225,8 @@ For local development you can usually leave everything at defaults. For a public
 RESPRO_WEB_HOST=0.0.0.0
 RESPRO_WEB_PORT=8000
 
-# Deployment mode and browser origin — required for public hosting
+# Deployment mode and browser origin — 'online' requires HTTPS (sets Secure
+# cookie flag, disables API docs). Use 'local' for plain-HTTP deployments.
 RESPRO_WEB_DEPLOYMENT_MODE=online
 RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
 RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
@@ -239,7 +251,7 @@ For internet-facing deployment, keep `respro-web` reachable only through a rever
 
 1. Keep the app behind a reverse proxy (Caddy/nginx/Traefik).
 2. Terminate TLS at the proxy (HTTPS required).
-3. Set `RESPRO_WEB_DEPLOYMENT_MODE=online`.
+3. Set `RESPRO_WEB_DEPLOYMENT_MODE=online` — this sets the `Secure` flag on the session cookie (required for HTTPS) and disables the API docs endpoints. Use `local` if you are testing over plain HTTP before TLS is configured.
 4. Set explicit `RESPRO_WEB_CORS_ORIGINS` for your frontend domain(s).
 5. Configure `RESPRO_WEB_TRUSTED_PROXIES` for your proxy IP/CIDR.
 6. Optionally enable browser auth at the proxy (nginx `auth_basic` / SSO) — an additive layer you can add or remove with one line.
@@ -374,7 +386,7 @@ Use this when your app is currently reachable directly on a LAN or intranet host
 
 1. **Keep `respro-web` private to the host.**
 
-In `docker-compose.web.yml`, bind the app to loopback only so clients cannot bypass nginx:
+The reference `docker-compose.web.yml` already binds the app to loopback only (`127.0.0.1:8000:8000`), so clients cannot bypass nginx. No change is needed unless you previously edited the `ports` mapping to `0.0.0.0`. If you did, restore the loopback bind:
 
 ```yaml
 services:
@@ -495,13 +507,17 @@ If you use another firewall, allow inbound TCP traffic to the nginx port you sel
 
 6. **Configure backend trust and auth settings.**
 
+This guide serves plain HTTP on the local network, so use `local` mode — `online` mode would set the `Secure` flag on the session cookie, and browsers silently drop `Secure` cookies over plain HTTP accessed via a real hostname (the `localhost` exception does not apply to `respro.internal` or `192.168.1.50`). Switch to `online` only once TLS is configured (see [Public hosting setup](#public-hosting-setup)).
+
 Set in `.env`:
 
 ```bash
-RESPRO_WEB_DEPLOYMENT_MODE=online
+RESPRO_WEB_DEPLOYMENT_MODE=local
 RESPRO_WEB_CORS_ORIGINS=http://respro.internal
 RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
 ```
+
+`RESPRO_WEB_TRUSTED_PROXIES` is set even in `local` mode so uvicorn honours `X-Forwarded-*` headers from nginx — this works in both modes.
 
 If clients will access the app by IP instead of hostname, set `RESPRO_WEB_CORS_ORIGINS` to that exact origin, for example `http://192.168.1.50`.
 
@@ -532,8 +548,9 @@ annotated `docker-compose.web.yml` ships with all of these settings present but
 ### Authentication
 
 - [ ] `RESPRO_WEB_DEPLOYMENT_MODE` is set to `online` for production
-      deployments behind a reverse proxy. This disables API docs and sets the
-      `Secure` flag on the session cookie.
+      deployments behind a **TLS-terminating** reverse proxy. This sets the
+      `Secure` flag on the session cookie (required for HTTPS) and disables
+      the API docs endpoints. Use `local` for any plain-HTTP deployment.
 - [ ] `RESPRO_WEB_CORS_ORIGINS` lists your exact frontend origin(s), e.g.
       `https://respro.example.com`.
 - [ ] For institutional multi-user deployments, whole-origin proxy authentication

@@ -1,0 +1,48 @@
+name: Docker Build (PR)
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - 'Dockerfile.web'
+      - 'docker/**'
+      - 'docker-compose.web*.yml'
+      - 'web/**'
+      - 'pyproject.toml'
+      - 'respro/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Docker image (no push)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.web
+          push: false
+          load: true
+          tags: respro:pr-validation
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test the image
+        run: |
+          docker run --rm respro:pr-validation sh -c 'command -v respro && respro --help'

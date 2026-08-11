@@ -4,6 +4,10 @@ on:
   pull_request:
     branches:
       - master
+    paths:
+      - 'web/**'
+      - 'respro/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -49,6 +53,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -66,9 +72,17 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            pytest --cov=respro --cov-report=term-missing
+            pytest --cov=respro --cov-branch --cov-report=xml --cov-report=term-missing
           else
             pytest
           fi
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          fail_ci_if_error: false
 
 

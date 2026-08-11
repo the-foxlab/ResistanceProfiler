@@ -1,6 +1,6 @@
 ![ResistanceProfiler](docs/docs/assets/logo.svg)
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-2f6db3) ![Coverage](docs/docs/assets/coverage.svg)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-2f6db3) [![codecov](https://codecov.io/gh/the-foxlab/ResistanceProfiler/branch/master/graph/badge.svg)](https://codecov.io/gh/the-foxlab/ResistanceProfiler) ![Conda Update](https://anaconda.org/bioconda/respro/badges/latest_release_date.svg) ![Conda version](https://anaconda.org/bioconda/respro/badges/version.svg) ![Conda downloads](https://anaconda.org/bioconda/respro/badges/downloads.svg)
 
 Pathogen-agnostic antiviral resistance profiling from consensus sequences or VCF-derived variants.  
 
@@ -22,13 +22,15 @@ One harmonized report that classifies mutations and assists diagnostic interpret
 
 ## Quick start
 
-Install the CLI:
+Install the CLI via conda (recommended):
 
 ```bash
-# via conda (recommended)
-conda create -n resistanceprofiler
+conda create -n respro
+conda activate respro
 conda install bioconda::respro
-# via pip
+```
+Install via pip:
+```bash
 git clone https://github.com/the-foxlab/ResistanceProfiler
 pip install -e ".[dev]"
 ```
@@ -62,6 +64,17 @@ docker compose -f docker-compose.web.yml up --build
 ```
 
 Open at `http://127.0.0.1:8000/`
+
+Prefer the prebuilt CI image (no local build)? It's published to GHCR on every
+push to `master`:
+
+```bash
+docker pull ghcr.io/the-foxlab/resistanceprofiler:latest
+```
+
+See the [webapp docs](https://the-foxlab.github.io/ResistanceProfiler/webapp/#docker-image-retrieval)
+for pulling a specific tag, authenticated pulls for private packages, and the
+egress requirements for a server that fetches images at runtime.
 
 → **[Web app documentation](https://the-foxlab.github.io/ResistanceProfiler/webapp/)**
 
