@@ -15,15 +15,10 @@ Choose the installation method that fits your use case:
 ### via pip
 
 ```bash
-pip install respro
-```
-
-For development installs, clone the repository and install editable:
-
-```bash
 git clone https://github.com/the-foxlab/ResistanceProfiler.git
 cd ResistanceProfiler
 pip install -e ".[dev]"
+respro --version
 ```
 
 ### via Bioconda
@@ -31,6 +26,7 @@ pip install -e ".[dev]"
 ```bash
 conda create -n respro -c conda-forge -c bioconda respro
 conda activate respro
+respro --version
 ```
 
 Bioconda is the recommended install path if you already use conda/mamba — it handles the `mappy` native dependency automatically without a C compiler.
@@ -38,12 +34,6 @@ Bioconda is the recommended install path if you already use conda/mamba — it h
 ## Web app
 
 ### Docker (recommended)
-
-The web app is published as a Docker image on GitHub Container Registry:
-
-```
-ghcr.io/the-foxlab/resistanceprofiler
-```
 
 Clone the repository and start the stack:
 
@@ -53,38 +43,14 @@ cd ResistanceProfiler
 docker compose -f docker-compose.web.yml up --build
 ```
 
-Or pull the released image directly:
+Or pull the released image directly. The image is published as a Docker image on GitHub Container Registry:
 
 ```bash
 docker pull ghcr.io/the-foxlab/resistanceprofiler:latest
 ```
 
 The stack includes the FastAPI backend, an RQ worker, and Redis. Open the app at `http://127.0.0.1:8000/`.
-
 For configuration options (authentication, CORS, rate limiting, data directories), see [Web app](webapp.md).
-
-### From source
-
-To run the web app without Docker, install the package and its web dependencies:
-
-```bash
-git clone https://github.com/the-foxlab/ResistanceProfiler.git
-cd ResistanceProfiler
-pip install -e ".[dev]"
-pip install -r web/backend/requirements.txt
-```
-
-Then start the backend and worker as described in [Web app](webapp.md).
-
-## Verify installation
-
-```bash
-respro --version
-```
-
-You should see a version string like `respro 0.1.0`.
-
-If the command is not found, verify that your virtual environment is active and rerun the install command.
 
 !!! tip "Next steps"
     After installation, continue to [Quickstart](quickstart.md) or [Database Preparation](database-preparation.md).
