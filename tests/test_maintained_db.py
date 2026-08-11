@@ -267,6 +267,62 @@ class TestFetchGenbankRecords:
         assert len(paths) == 1
         assert paths[0].name == 'X04770.1.gb'
 
+    def test_retries_on_connection_reset(self, tmp_path: Path) -> None:
+        """A transient ConnectionResetError on the first attempt is retried and succeeds."""
+        import http.client  # noqa: PLC0415
+        from unittest.mock import call  # noqa: PLC0415
+
+        se = [ConnectionResetError('Connection reset by peer'), _bytes_mock(_GENBANK_CONTENT)]
+        with patch('urllib.request.urlopen', side_effect=se) as mock_open, \
+             patch('time.sleep') as mock_sleep:
+            paths = _fetch_genbank_records(['X04770'], tmp_path)
+        assert len(paths) == 1
+        assert paths[0].read_bytes() == _GENBANK_CONTENT
+        assert mock_open.call_count == 2
+        assert mock_sleep.call_count == 1  # one backoff between the two attempts
+
+    def test_retries_on_incomplete_read(self, tmp_path: Path) -> None:
+        """An IncompleteRead mid-transfer is retried and succeeds on the next attempt."""
+        import http.client  # noqa: PLC0415
+
+        bad = MagicMock()
+        bad.__enter__ = MagicMock(return_value=MagicMock(
+            read=MagicMock(side_effect=http.client.IncompleteRead(b'partial')),
+        ))
+        bad.__exit__ = MagicMock(return_value=False)
+        se = [bad, _bytes_mock(_GENBANK_CONTENT)]
+        with patch('urllib.request.urlopen', side_effect=se), patch('time.sleep'):
+            paths = _fetch_genbank_records(['X04770'], tmp_path)
+        assert len(paths) == 1
+        assert paths[0].read_bytes() == _GENBANK_CONTENT
+
+    def test_raises_after_max_retries_on_connection_reset(self, tmp_path: Path) -> None:
+        """Exhausting all retries on repeated ConnectionResetError raises RuntimeError."""
+        with patch('urllib.request.urlopen',
+                   side_effect=ConnectionResetError('Connection reset by peer')), \
+             patch('time.sleep'):
+            with pytest.raises(RuntimeError, match='Network error fetching GenBank record'):
+                _fetch_genbank_records(['X04770'], tmp_path)
+
+    def test_http_error_is_not_retried(self, tmp_path: Path) -> None:
+        """A 4xx HTTPError is a permanent failure and must not trigger retries."""
+        with patch('urllib.request.urlopen', side_effect=urllib.error.HTTPError(
+            url='', code=404, msg='Not Found', hdrs=None, fp=None,  # type: ignore[arg-type]
+        )) as mock_open, patch('time.sleep') as mock_sleep:
+            with pytest.raises(RuntimeError, match='HTTP 404'):
+                _fetch_genbank_records(['BAD'], tmp_path)
+        assert mock_open.call_count == 1
+        assert mock_sleep.call_count == 0
+
+    def test_retries_then_http_error_raises_http_error(self, tmp_path: Path) -> None:
+        """A transient error followed by a permanent HTTPError surfaces the HTTP error."""
+        se = [ConnectionResetError('reset'), urllib.error.HTTPError(
+            url='', code=500, msg='Server Error', hdrs=None, fp=None,  # type: ignore[arg-type]
+        )]
+        with patch('urllib.request.urlopen', side_effect=se), patch('time.sleep'):
+            with pytest.raises(RuntimeError, match='HTTP 500'):
+                _fetch_genbank_records(['X04770'], tmp_path)
+
 
 # ── download_database_files ───────────────────────────────────────────────────
 
