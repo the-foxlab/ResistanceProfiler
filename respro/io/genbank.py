@@ -52,7 +52,7 @@ class ParsedGenBankReference:
 
 def parse_genbank_sources(genbank_paths: list[Path]) -> list[ParsedGenBankReference]:
     """
-    Parse and combine one or more GenBank files. 
+    Parse and combine one or more GenBank files.
 
     Each input file may itself contain one or more GenBank records. The
     returned list is validated globally so duplicate reference identifiers or
