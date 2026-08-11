@@ -94,13 +94,16 @@ the **client browser** (the user's machine, not the server):
 ### Docker image retrieval
 
 The CI-published image lives at `ghcr.io/the-foxlab/resistanceprofiler`. To pull
-it directly on a server (skipping the build/scp workflow), the server needs
+it directly on a server, the server needs
 egress to:
 
 | Host | Port | Purpose |
 |---|---|---|
 | `ghcr.io` | `443` | Pull the ResPro web/worker image |
+| `*.pkg.github.com` | `443` | GitHub Packages download endpoint used by `docker pull` for GHCR images |
+| `pkg-containers.githubusercontent.com` | `443` | Serves the actual image layer blobs referenced by GHCR manifests |
 | `registry-1.docker.io` | `443` | Pull `redis:7-alpine` (or your chosen Redis image) |
+| `auth.docker.io` | `443` | Docker Hub token endpoint (`registry-1.docker.io` redirects here to mint anonymous/authenticated pull tokens) |
 
 If the GHCR package is private, also allow authenticated pulls via
 `docker login ghcr.io` with a PAT that has `read:packages`.
@@ -108,7 +111,8 @@ If the GHCR package is private, also allow authenticated pulls via
 ### Firewall summary for an online server
 
 A server that pulls images directly and runs `RESPRO_WEB_MAINTAINED_BOOTSTRAP=true`
-needs outbound HTTPS to: `ghcr.io`, `registry-1.docker.io`,
+needs outbound HTTPS to: `ghcr.io`, `*.pkg.github.com`,
+`pkg-containers.githubusercontent.com`, `registry-1.docker.io`, `auth.docker.io`,
 `raw.githubusercontent.com`, `eutils.ncbi.nlm.nih.gov`, `pubchem.ncbi.nlm.nih.gov`,
 `www.ncbi.nlm.nih.gov`, `api.crossref.org`. A server that ships pre-built images
 and `.db` files needs **no** outbound access at all.
