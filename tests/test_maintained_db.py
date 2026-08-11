@@ -269,8 +269,6 @@ class TestFetchGenbankRecords:
 
     def test_retries_on_connection_reset(self, tmp_path: Path) -> None:
         """A transient ConnectionResetError on the first attempt is retried and succeeds."""
-        import http.client  # noqa: PLC0415
-        from unittest.mock import call  # noqa: PLC0415
 
         se = [ConnectionResetError('Connection reset by peer'), _bytes_mock(_GENBANK_CONTENT)]
         with patch('urllib.request.urlopen', side_effect=se) as mock_open, \
