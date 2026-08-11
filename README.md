@@ -1,6 +1,6 @@
 ![ResistanceProfiler](docs/docs/assets/logo.svg)
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-2f6db3) ![Coverage](docs/docs/assets/coverage.svg)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0) ![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-2f6db3) [![codecov](https://codecov.io/gh/the-foxlab/ResistanceProfiler/branch/master/graph/badge.svg)](https://codecov.io/gh/the-foxlab/ResistanceProfiler) ![Conda Update](https://anaconda.org/bioconda/respro/badges/latest_release_date.svg) ![Conda version](https://anaconda.org/bioconda/respro/badges/version.svg) ![Conda downloads](https://anaconda.org/bioconda/respro/badges/downloads.svg)
 
 Pathogen-agnostic antiviral resistance profiling from consensus sequences or VCF-derived variants.  
 

@@ -11,6 +11,7 @@ on:
       - 'web/**'
       - 'pyproject.toml'
       - 'respro/**'
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -10,6 +10,7 @@ on:
       - 'web/frontend/package.json'
       - 'web/frontend/package-lock.json'
       - 'bioconda/recipes/respro/meta.yaml'
+  workflow_dispatch:
 
 permissions:
   contents: read

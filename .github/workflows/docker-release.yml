@@ -9,6 +9,7 @@ on:
       - 'Dockerfile.web'
       - 'docker-compose.web*.yml'
       - 'docker/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
