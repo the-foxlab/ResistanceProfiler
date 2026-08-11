@@ -22,13 +22,15 @@ One harmonized report that classifies mutations and assists diagnostic interpret
 
 ## Quick start
 
-Install the CLI:
+Install the CLI via conda (recommended):
 
 ```bash
-# via conda (recommended)
-conda create -n resistanceprofiler
+conda create -n respro
+conda activate respro
 conda install bioconda::respro
-# via pip
+```
+Install via pip:
+```bash
 git clone https://github.com/the-foxlab/ResistanceProfiler
 pip install -e ".[dev]"
 ```
@@ -62,6 +64,17 @@ docker compose -f docker-compose.web.yml up --build
 ```
 
 Open at `http://127.0.0.1:8000/`
+
+Prefer the prebuilt CI image (no local build)? It's published to GHCR on every
+push to `master`:
+
+```bash
+docker pull ghcr.io/the-foxlab/resistanceprofiler:latest
+```
+
+See the [webapp docs](https://the-foxlab.github.io/ResistanceProfiler/webapp/#docker-image-retrieval)
+for pulling a specific tag, authenticated pulls for private packages, and the
+egress requirements for a server that fetches images at runtime.
 
 → **[Web app documentation](https://the-foxlab.github.io/ResistanceProfiler/webapp/)**
 
