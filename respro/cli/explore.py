@@ -5,7 +5,7 @@
 from __future__ import annotations  # noqa: I001
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import typer
 from rich import box
@@ -253,7 +253,7 @@ def _render_rule_table(
     table = Table(box=box.SIMPLE, header_style='bold cyan', show_edge=False)
     for column_key in columns:
         label = column_labels.get(column_key, column_key)
-        justify = 'right' if column_key in {'position', 'member_count'} else 'left'
+        justify: Literal['left', 'right'] = 'right' if column_key in {'position', 'member_count'} else 'left'
         table.add_column(label, justify=justify)
 
     for row in rows:

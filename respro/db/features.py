@@ -18,6 +18,13 @@ from respro.io.genbank import (
 
 logger = logging.getLogger(__name__)
 
+
+def _last_insert_rowid(conn: sqlite3.Connection) -> int:
+    """Return the rowid of the most recent INSERT, falling back to a scalar query."""
+    rowid = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+    return int(rowid)
+
+
 # Compiled patterns for NCBI protein accession detection.
 _RE_NCBI_PROTEIN_ACCESSION = re.compile(
     r'^(?:[A-Z]{3}[0-9]{5}'       # e.g. AAA12345.1
@@ -188,7 +195,7 @@ def _get_or_create_reference_id(
     ).fetchone()
 
     if existing is None:
-        cur = conn.execute(
+        conn.execute(
             'INSERT INTO reference '
             '(project_id, name, accession, organism, taxonomy, length) '
             'VALUES (?, ?, ?, ?, ?, ?)',
@@ -201,7 +208,7 @@ def _get_or_create_reference_id(
                 record.length,
             ),
         )
-        return int(cur.lastrowid), True
+        return _last_insert_rowid(conn), True
 
     if int(existing['length']) != record.length:
         raise ValueError(
@@ -237,7 +244,7 @@ def _get_or_create_feature(
     strand = validate_strand(feature.strand)
     ncbi_protein_url = _resolve_ncbi_protein_url(feature.protein_id, ncbi_protein_url_cache)
     if existing is None:
-        cur = conn.execute(
+        conn.execute(
             'INSERT INTO feature '
             '(reference_id, name, protein, protein_id, ncbi_protein_url, locus_tag, note, '
             'start, end, strand, codon_start, nt_sequence, aa_sequence, feature_type, parent_feature_name) '
@@ -260,7 +267,7 @@ def _get_or_create_feature(
                 feature.parent_feature_name,
             ),
         )
-        return int(cur.lastrowid), True
+        return _last_insert_rowid(conn), True
 
     same_feature = (
         int(existing['start']) == feature.start

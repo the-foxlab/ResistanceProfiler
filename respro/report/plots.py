@@ -5,6 +5,7 @@ Publication-ready plots for genome overview and feature-level mutation tracks.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from io import BytesIO
 from pathlib import Path
 
@@ -192,7 +193,7 @@ def _build_multi_reference_lollipop_figure(
     # same-named features on distinct references (e.g. two same-species references both
     # carrying UL23) never cross-link each other's track/lollipop xlim. The reference_group
     # attached to each row carries the reference_id.
-    lollipop_rows_by_ref_and_feature: dict[tuple[int, str], list[tuple[dict, object]]] = {}
+    lollipop_rows_by_ref_and_feature: dict[tuple[int, str], list[tuple[dict, matplotlib.axes.Axes]]] = {}
     for row, ax in row_axes:
         if row['kind'] != 'lollipop':
             continue
@@ -200,7 +201,7 @@ def _build_multi_reference_lollipop_figure(
         key = (rg.reference_id, row['feature'].name)
         lollipop_rows_by_ref_and_feature.setdefault(key, []).append((row, ax))
 
-    shared_track_ax_by_row_id: dict[int, object] = {}
+    shared_track_ax_by_row_id: dict[int, matplotlib.axes.Axes] = {}
     for row, ax in row_axes:
         if row['kind'] != 'track':
             continue
@@ -255,7 +256,7 @@ def _build_multi_reference_lollipop_figure(
         )
 
     # Legend on the first lollipop axis.
-    legend_handles = [
+    legend_handles: list[object] = [
         plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='white',
                    markeredgecolor='black', markersize=8, label='Database hit'),
     ]
@@ -323,9 +324,9 @@ def _plan_reference_rows(
 
     cds_highlighted: set[str] = set()
     for feature_name in feature_annotations:
-        feature = feature_by_name.get(feature_name)
-        if feature and feature.feature_type == 'mat_peptide' and feature.parent_feature_name:
-            cds_highlighted.add(feature.parent_feature_name)
+        highlight_feature = feature_by_name.get(feature_name)
+        if highlight_feature and highlight_feature.feature_type == 'mat_peptide' and highlight_feature.parent_feature_name:
+            cds_highlighted.add(highlight_feature.parent_feature_name)
         else:
             cds_highlighted.add(feature_name)
 
@@ -417,9 +418,9 @@ def _build_lollipop_figure(
     # Map mat_peptide variant feature names to parent CDS for genome overview highlighting.
     cds_highlighted: set[str] = set()
     for feature_name in feature_annotations:
-        feature = feature_by_name.get(feature_name)
-        if feature and feature.feature_type == 'mat_peptide' and feature.parent_feature_name:
-            cds_highlighted.add(feature.parent_feature_name)
+        highlight_feature = feature_by_name.get(feature_name)
+        if highlight_feature and highlight_feature.feature_type == 'mat_peptide' and highlight_feature.parent_feature_name:
+            cds_highlighted.add(highlight_feature.parent_feature_name)
         else:
             cds_highlighted.add(feature_name)
 
@@ -477,7 +478,7 @@ def _build_lollipop_figure(
     )
     has_introns = any(_feature_intron_gaps(f) for f in plot_features)
     database_hit_annotation_ids = {id(ann) for ann in result.database_hit_annotations}
-    handles = [
+    handles: list[object] = [
         plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='white',
                    markeredgecolor='black', markersize=8, label='Database hit'),
     ]
@@ -487,14 +488,14 @@ def _build_lollipop_figure(
         handles.append(mpatches.Patch(facecolor=FEATURE_INTRON_COLOUR, label='Intron (non-coding)'))
     handles.extend(mutation_legend_patches(effects_for_legend))
 
-    lollipop_rows_by_feature_name: dict[str, list[tuple[dict[str, object], object]]] = {}
+    lollipop_rows_by_feature_name: dict[str, list[tuple[dict[str, object], matplotlib.axes.Axes]]] = {}
     for row, ax in row_axes:
         if row['kind'] != 'lollipop':
             continue
         feature = row['feature']
         lollipop_rows_by_feature_name.setdefault(feature.name, []).append((row, ax))
 
-    shared_track_ax_by_row_id: dict[int, object] = {}
+    shared_track_ax_by_row_id: dict[int, matplotlib.axes.Axes] = {}
     for row, ax in row_axes:
         if row['kind'] != 'track':
             continue
@@ -512,13 +513,13 @@ def _build_lollipop_figure(
 
         feature = row['feature']
         if row_kind == 'track':
-            mat_peptides = row.get('mat_peptides')
+            mat_peptides_raw = row.get('mat_peptides')
             panel_name = 'Mature Peptide' if feature.feature_type == 'mat_peptide' else 'CDS'
-            if mat_peptides:
+            if mat_peptides_raw:
                 _draw_feature_track(
                     ax,
                     feature,
-                    mat_peptide_overlays=mat_peptides,
+                    mat_peptide_overlays=mat_peptides_raw,
                     rule_feature_names=rule_feature_names,
                     panel_name=panel_name,
                 )
@@ -1038,7 +1039,7 @@ def _coverage_gap_nt_bounds(feature: FeatureRecord, gap: CoverageGap) -> tuple[i
 
 
 def adjust_array_min_distance(
-    values: list[float],
+    values: Sequence[float],
     min_distance: float,
     max_iterations: int = 1000,
     tolerance: float = 1e-6,
@@ -1060,7 +1061,7 @@ def adjust_array_min_distance(
     if n == 0:
         return []
     if n == 1:
-        return values_arr.tolist()
+        return [float(v) for v in values_arr.tolist()]
 
     for _ in range(max_iterations):
         # Re-sort each iteration: value mutations from previous passes change the ordering.
@@ -1079,7 +1080,7 @@ def adjust_array_min_distance(
         if max_adjustment < tolerance:
             break
 
-    return values_arr.tolist()
+    return [float(v) for v in values_arr.tolist()]
 
 
 def _draw_bent_lollipop(ax, x_base: float, x_top: float, y_top: float, colour: str) -> None:

@@ -5,20 +5,20 @@ Feature lookup and coordinate detection for resistance rule imports.
 from __future__ import annotations
 
 import logging
-import sqlite3
+from typing import Any
 
 from respro.db._rules_normalize import _get_value
 
 logger = logging.getLogger(__name__)
 
 
-def _resolve_rule_feature_id(candidates: list[sqlite3.Row], reference_identifier: str) -> int | None:
+def _resolve_rule_feature_id(candidates: list[dict[str, Any]], reference_identifier: str) -> int | None:
     """Resolve a rule row to a unique feature_id using optional reference information."""
     narrowed = _narrow_feature_lookup_candidates(candidates)
     if not narrowed:
         return None
     if len(narrowed) == 1 and not reference_identifier:
-        return narrowed[0]['feature_id']
+        return int(narrowed[0]['feature_id'])
     if not reference_identifier:
         return None
 
@@ -27,13 +27,13 @@ def _resolve_rule_feature_id(candidates: list[sqlite3.Row], reference_identifier
         if reference_identifier in {c['reference_name'], c['reference_accession']}
     ]
     if len(matched) == 1:
-        return matched[0]['feature_id']
+        return int(matched[0]['feature_id'])
     return None
 
 
 def _detect_coordinate_base(
     rows: list[dict],
-    features_by_name: dict[str, list[sqlite3.Row]],
+    features_by_name: dict[str, list[dict[str, Any]]],
     allowed_reference_identifiers: set[str] | None = None,
 ) -> int:
     """
@@ -127,7 +127,7 @@ def _detect_coordinate_base(
 
 def _validate_reference_amino_acids(
     rows: list[dict],
-    features_by_name: dict[str, list[sqlite3.Row]],
+    features_by_name: dict[str, list[dict[str, Any]]],
     coord_base: int,
     allowed_reference_identifiers: set[str] | None = None,
 ) -> set[tuple[str, str, str, str]]:
@@ -217,7 +217,7 @@ def _validate_reference_amino_acids(
 
 
 def _get_feature_aa_sequence(
-    candidates: list[sqlite3.Row],
+    candidates: list[dict[str, Any]],
     reference_identifier: str,
 ) -> str:
     """
@@ -234,14 +234,14 @@ def _get_feature_aa_sequence(
     if reference_identifier:
         for c in narrowed:
             if reference_identifier in {c['reference_name'], c['reference_accession']}:
-                return c['aa_sequence'] or ''
+                return str(c['aa_sequence'] or '')
         return ''
     if len(narrowed) == 1:
-        return narrowed[0]['aa_sequence'] or ''
+        return str(narrowed[0]['aa_sequence'] or '')
     return ''
 
 
-def _narrow_feature_lookup_candidates(candidates: list[sqlite3.Row]) -> list[sqlite3.Row]:
+def _narrow_feature_lookup_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Prefer canonical feature-name matches before alias matches when both are present."""
     if not candidates:
         return []

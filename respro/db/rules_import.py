@@ -7,8 +7,10 @@ from __future__ import annotations
 import csv
 import logging
 import sqlite3
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from respro.db._rules_alleles import (
     _RE_ANCHORLESS_DEL,
@@ -206,7 +208,7 @@ class _AtomicRuleLoadState:
 def _validate_rules_header_and_collect_ids(
     conn: sqlite3.Connection,
     all_rows: list[dict[str, str]],
-    fieldnames: list[str] | None,
+    fieldnames: Sequence[str] | None,
 ) -> set[str]:
     """
     Validate header-level constraints and collect declared external rule IDs.
@@ -267,7 +269,7 @@ def _validate_rules_header_and_collect_ids(
 
 def _prepare_atomic_rule_rows(
     all_rows: list[dict[str, str]],
-    features_by_name: dict[str, list[sqlite3.Row]],
+    features_by_name: dict[str, list[dict[str, Any]]],
     known_reference_identifiers: set[str],
     require_external_ids: bool,
     state: _AtomicRuleLoadState,
@@ -719,7 +721,7 @@ def load_formula_rules(
             )
             continue
 
-        cur = conn.execute(
+        conn.execute(
             'INSERT INTO resistance_formula_rule '
             '('
             'drug_id, formula_id, label, normalized_expression, phenotype, '
@@ -739,7 +741,8 @@ def load_formula_rules(
                 comment_value,
             ),
         )
-        formula_rule_id = int(cur.lastrowid)
+        formula_rule_id = conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+        formula_rule_id = int(formula_rule_id)
 
         for ref_id in sorted(referenced_ids):
             conn.execute(

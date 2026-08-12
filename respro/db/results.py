@@ -74,6 +74,8 @@ def save_run(
         ),
     )
     run_id = cursor.lastrowid
+    if run_id is None:
+        run_id = results_conn.execute('SELECT last_insert_rowid()').fetchone()[0]
 
     for ann in result.annotations:
         v = ann.variant
@@ -142,7 +144,7 @@ def project_fingerprint(project_conn: sqlite3.Connection) -> str:
     row = project_conn.execute('SELECT uuid FROM project LIMIT 1').fetchone()
     if row is None:
         raise ValueError('No project found in the database')
-    return row['uuid']
+    return str(row['uuid'])
 
 
 def project_updated_at(project_conn: sqlite3.Connection) -> str:
@@ -440,17 +442,17 @@ def _match_formula_variants(
     """Match persisted formula-variant summaries back to reconstructed annotations."""
     by_key: dict[tuple, AnnotatedVariant] = {}
     by_key_weak: dict[tuple, AnnotatedVariant] = {}
-    for ann in annotations:
+    for source_ann in annotations:
         key = (
-            ann.feature_name,
-            ann.codon_pos + 1,
-            ann.ref_aa,
-            ann.alt_aa,
-            round(ann.variant.allele_freq, 6),
+            source_ann.feature_name,
+            source_ann.codon_pos + 1,
+            source_ann.ref_aa,
+            source_ann.alt_aa,
+            round(source_ann.variant.allele_freq, 6),
         )
-        weak_key = (ann.feature_name, ann.codon_pos + 1, ann.ref_aa, ann.alt_aa)
-        by_key.setdefault(key, ann)
-        by_key_weak.setdefault(weak_key, ann)
+        weak_key = (source_ann.feature_name, source_ann.codon_pos + 1, source_ann.ref_aa, source_ann.alt_aa)
+        by_key.setdefault(key, source_ann)
+        by_key_weak.setdefault(weak_key, source_ann)
 
     matched: list[AnnotatedVariant] = []
     for item in variant_payloads:
@@ -469,7 +471,7 @@ def _match_formula_variants(
             item.get('ref_aa', ''),
             item.get('alt_aa', ''),
         )
-        ann = by_key.get(key) or by_key_weak.get(weak_key)
+        ann: AnnotatedVariant | None = by_key.get(key) or by_key_weak.get(weak_key)
         if ann is not None:
             matched.append(ann)
             continue
@@ -528,7 +530,9 @@ def save_classification(
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             (run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source),
         )
-        row_id = cursor.lastrowid  # type: ignore[assignment]
+        row_id = cursor.lastrowid
+        if row_id is None:
+            row_id = results_conn.execute('SELECT last_insert_rowid()').fetchone()[0]
     else:
         row_id = int(existing['id'])
         results_conn.execute(

@@ -425,13 +425,14 @@ def _build_query_to_cds_map(
     :param cds_start: 0-based CDS offset where this alignment starts
     :return: mapping {forward_query_pos: cds_pos}
     """
+    cds_to_query: dict[int, int | None]
     if strand == '+':
         cds_to_query = cigar_to_coordinate_map(cigar, query_start)
     else:
         # Recover RC-space start from the stored forward-strand end
         rc_start = query_len - query_end
         cds_to_query_rc = cigar_to_coordinate_map(cigar, rc_start)
-        cds_to_query: dict[int, int | None] = {}
+        cds_to_query = {}
         for cds_pos, rc_pos in cds_to_query_rc.items():
             if rc_pos is not None:
                 cds_to_query[cds_pos] = query_len - 1 - rc_pos

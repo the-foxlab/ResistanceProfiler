@@ -1058,7 +1058,7 @@ def _build_feature_cards(
     """Merge detected-feature stats with optional DB metadata into card payloads."""
     ref_by_id = reference_name_by_ref_id or {}
     cards: list[dict] = []
-    for feature_name in sorted(feature_stats, key=lambda item: display_names.get(item, item).lower()):
+    for feature_name in sorted(feature_stats, key=lambda item: str(display_names.get(item, item)).lower()):
         stats = dict(feature_stats[feature_name])
         metadata = db_feature_cards_by_name.get(feature_name)
         feature = feature_lookup.get(feature_name)

@@ -269,7 +269,7 @@ def _formula_ast_to_string(node: tuple) -> str:
     """Serialize a canonical formula AST to a deterministic normalized expression."""
     node_type = node[0]
     if node_type == 'ATOM':
-        return node[1]
+        return str(node[1])
     if node_type == 'NOT':
         return f'(NOT {_formula_ast_to_string(node[1])})'
     joiner = f' {node_type} '

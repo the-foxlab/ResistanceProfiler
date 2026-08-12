@@ -60,8 +60,8 @@ def _get_or_create_drug_id(
         'SELECT id FROM drug WHERE project_id = ? AND LOWER(name) = ? ORDER BY id LIMIT 1',
         (project_id, normalized_name),
     ).fetchone()
-    drug_cache[normalized_name] = row[0]
-    return row[0]
+    drug_cache[normalized_name] = int(row[0])
+    return int(row[0])
 
 
 def _consolidate_drug_names_to_lowercase(conn: sqlite3.Connection, project_id: int) -> None:

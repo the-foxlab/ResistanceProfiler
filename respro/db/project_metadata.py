@@ -109,7 +109,7 @@ def store_project_metadata(
         return
 
     assignments = ', '.join(f'{column} = ?' for column in metadata)
-    values = [metadata[column] for column in metadata]
+    values: list[str | int] = [metadata[column] for column in metadata]
     values.append(project_id)
     conn.execute(
         f'UPDATE project SET {assignments}, updated_at = datetime(\'now\') WHERE id = ?',

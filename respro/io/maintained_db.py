@@ -84,7 +84,7 @@ def fetch_database_metadata(db_name: str) -> dict:
     :return: parsed metadata dict
     """
     entry = _find_manifest_database_entry(db_name)
-    return entry['metadata']
+    return dict(entry['metadata'])
 
 
 def download_database_files(db_name: str, dest_dir: Path) -> dict[str, object]:
@@ -223,7 +223,7 @@ def _find_manifest_database_entry(db_name: str) -> dict:
     manifest = _fetch_manifest()
     for entry in manifest['databases']:
         if entry['source_name'] == db_name:
-            return entry
+            return dict(entry)
     raise RuntimeError(f'Unknown maintained database {db_name!r}')
 
 
@@ -314,7 +314,7 @@ def _fetch_genbank_records(accessions: list[str], dest_dir: Path) -> list[Path]:
     paths: list[Path] = []
     for accession in accessions:
         _validate_accession(accession)
-        url = CLI_CONFIG.urls.ncbi_nuccore_efetch.format(accession=urllib.request.quote(accession))
+        url = CLI_CONFIG.urls.ncbi_nuccore_efetch.format(accession=urllib.parse.quote(accession))
         dest = dest_dir / f'{accession}.gb'
 
         content: bytes | None = None

@@ -155,18 +155,26 @@ def _normalize_phenotypes_from_row(
     phenotype_raw = _get_value(row, 'phenotype')
     clinical_raw = _get_value(row, 'clinical_phenotype')
 
-    phenotype_normalized = (
-        _normalize_phenotype_token(phenotype_raw) if phenotype_raw else missing_phenotype_default
-    )
-    if phenotype_raw and phenotype_normalized is None:
-        errors.append(f'{context}: invalid phenotype value {phenotype_raw!r}')
+    phenotype_normalized: str
+    if phenotype_raw:
+        token = _normalize_phenotype_token(phenotype_raw)
+        if token is None:
+            errors.append(f'{context}: invalid phenotype value {phenotype_raw!r}')
+            phenotype_normalized = missing_phenotype_default
+        else:
+            phenotype_normalized = token
+    else:
         phenotype_normalized = missing_phenotype_default
 
-    clinical_normalized = (
-        _normalize_phenotype_token(clinical_raw) if clinical_raw else missing_clinical_default
-    )
-    if clinical_raw and clinical_normalized is None:
-        errors.append(f'{context}: invalid clinical_phenotype value {clinical_raw!r}')
+    clinical_normalized: str
+    if clinical_raw:
+        token = _normalize_phenotype_token(clinical_raw)
+        if token is None:
+            errors.append(f'{context}: invalid clinical_phenotype value {clinical_raw!r}')
+            clinical_normalized = missing_clinical_default
+        else:
+            clinical_normalized = token
+    else:
         clinical_normalized = missing_clinical_default
 
     return phenotype_normalized, clinical_normalized

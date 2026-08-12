@@ -168,13 +168,15 @@ def _resolve_record_afs(
         if sample_ad is not None:
             ads = _normalize_to_int_sequence(sample_ad)
             if len(ads) >= 2:
-                total = sum(ads)
+                total = sum(d for d in ads if d is not None)
                 if total > 0:
                     ad_freqs: list[float | None] = [None] * n_alts
                     for alt_idx in range(n_alts):
                         depth_idx = alt_idx + 1  # AD is REF + per-ALT depths
                         if depth_idx < len(ads):
-                            ad_freqs[alt_idx] = ads[depth_idx] / total
+                            depth = ads[depth_idx]
+                            if depth is not None:
+                                ad_freqs[alt_idx] = depth / total
                     _fill_first_available(resolved, ad_freqs)
                     # AD is REF + per-ALT; a short AD array lacks depths for later ALTs.
                     if len(ads) - 1 < n_alts:
@@ -324,7 +326,7 @@ def _extract_depth(record: pysam.VariantRecord) -> int:
         if sample_ad is not None:
             ads = _normalize_to_int_sequence(sample_ad)
             if ads:
-                return sum(ads)
+                return sum(d for d in ads if d is not None)
 
     # Sentinel: no depth information found
     return -1
