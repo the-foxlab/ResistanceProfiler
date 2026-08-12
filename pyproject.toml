@@ -57,10 +57,11 @@ extend-ignore = ['E501']  # line length enforced by editor convention, not CI
 [tool.mypy]
 python_version = '3.11'
 files = ['respro']
-python_version = '3.11'
 pretty = true
 show_error_codes = true
 ignore_missing_imports = true
+warn_unused_ignores = true
+warn_return_any = true
 
 [tool.hatch.build]
 include = [

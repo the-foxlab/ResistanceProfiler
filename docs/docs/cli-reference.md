@@ -162,7 +162,8 @@ the last available value. Per VCF semantics the reference allele frequency is
   treated as "no AF for this allele". The residual `max(0, 1 - sum(known ALT AFs at
   this site))` is split **equally** among all missing alleles at that site and used
   as their AF.
-- A cardinality warning is logged when an array is shorter than the ALT list.
+- A cardinality warning is logged when an array is shorter than the ALT list, and a
+  missing-entry warning is logged when a present array contains a VCF `.` value.
 - This keeps the per-site AF total at exactly 1.0 (or 0.0 when the known alleles
   already sum to ≥ 1) and is more conservative for resistance calling than assuming
   a missing allele is fully present.

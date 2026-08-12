@@ -484,7 +484,7 @@ class TestAssignAfBins:
         anns = assign_af_bins([_make_ann(0.05)], bins=self._VCF_BINS)
         assert anns[0].af_bin == 'low'
 
-    # FASTA-mode bins: high=1.0, intermediate=0.5, low=0.33/0.25
+    # FASTA-mode bins: high=1.0, intermediate=0.5, low=0.25 (IUPAC N/A,C,G,T split)
     _FASTA_BINS = {
         'high': (0.75, 1.0),
         'intermediate': (0.35, 0.74),
@@ -499,13 +499,13 @@ class TestAssignAfBins:
         anns = assign_af_bins([_make_ann(0.5)], bins=self._FASTA_BINS)
         assert anns[0].af_bin == 'intermediate'
 
-    def test_fasta_bins_low_one_third(self) -> None:
-        """1/3 frequency (3-way IUPAC) maps to low."""
+    def test_fasta_bins_low_third(self) -> None:
+        """A 1/3 frequency still maps to low (boundary value, not IUPAC-derived)."""
         anns = assign_af_bins([_make_ann(round(1 / 3, 10))], bins=self._FASTA_BINS)
         assert anns[0].af_bin == 'low'
 
     def test_fasta_bins_low_one_quarter(self) -> None:
-        """1/4 frequency (4-way IUPAC) maps to low."""
+        """1/4 frequency (IUPAC N={A,C,G,T} vs ref: each mutation ALT) maps to low."""
         anns = assign_af_bins([_make_ann(0.25)], bins=self._FASTA_BINS)
         assert anns[0].af_bin == 'low'
 
