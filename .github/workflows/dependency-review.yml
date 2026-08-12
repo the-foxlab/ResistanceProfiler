@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Dependency Review
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5
         with:
           # Fail the PR when a new dependency introduces a known vulnerability
           # at or above moderate severity. License checks are left to the
