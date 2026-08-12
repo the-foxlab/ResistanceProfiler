@@ -56,16 +56,11 @@ extend-ignore = ['E501']  # line length enforced by editor convention, not CI
 
 [tool.mypy]
 python_version = '3.11'
-files = [
-    'respro/cli/main.py',
-    'respro/cli/maintained_db.py',
-    'respro/cli/vcf.py',
-    'respro/cli/fasta.py',
-]
+files = ['respro']
+python_version = '3.11'
 pretty = true
 show_error_codes = true
 ignore_missing_imports = true
-follow_imports = 'skip'
 
 [tool.hatch.build]
 include = [
