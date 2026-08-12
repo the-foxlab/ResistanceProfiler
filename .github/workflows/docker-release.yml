@@ -9,6 +9,7 @@ on:
       - 'Dockerfile.web'
       - 'docker-compose.web*.yml'
       - 'docker/**'
+      - 'respro/**'
   workflow_dispatch:
 
 permissions:
