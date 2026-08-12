@@ -285,7 +285,12 @@ def _apply_vcf_overlay(
         idx for idx, pos in enumerate(native_pos)
         if pos is not None and pos in replace_positions
     ]
-    replace_idxs.sort(key=lambda idx: native_pos[idx] if native_pos[idx] is not None else -1)
+
+    def _sort_key(idx: int) -> int:
+        pos = native_pos[idx]
+        return pos if pos is not None else -1
+
+    replace_idxs.sort(key=_sort_key)
     for offset, idx in enumerate(replace_idxs[:len(alt_allele)]):
         query_chars[idx] = alt_allele[offset]
 
@@ -416,7 +421,7 @@ def _affected_nt_positions(
 
     # Fallback for any edge case with both 3-letter codons but not combined.
     if len(ann.ref_codon) == 3 and len(ann.alt_codon) == 3:
-        affected: set[int] = set()
+        affected = set()
         for idx, (ref_nt, alt_nt) in enumerate(zip(ann.ref_codon, ann.alt_codon)):
             if ref_nt == alt_nt:
                 continue

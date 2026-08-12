@@ -793,8 +793,13 @@ class TestFastaToVcf:
         assert deletion.ref == 'GAAA'
         assert deletion.alt == 'G'
 
-    def test_iupac_snp_emits_fractional_variants(self, simple_feature: FeatureRecord) -> None:
-        """IUPAC bases should split into per-base alternatives with fractional AF."""
+    def test_iupac_two_way_ambiguity_splits_over_all_options(self, simple_feature: FeatureRecord) -> None:
+        """IUPAC R={A,G} vs ref=A: AF is split over ALL options (incl. the reference base),
+        so the single mutation ALT G gets 1/len(options)=0.5, not 1.0.
+
+        The reference base is one of the equally-likely possibilities (= no mutation), so the
+        denominator is the full option set size, not the non-reference alt count.
+        """
         aligned_ref = 'ATGAAAGCTTAA'
         aligned_query = 'ATGRAAGCTTAA'
 
@@ -811,7 +816,7 @@ class TestFastaToVcf:
         variant = variants[0]
         assert variant.ref == 'A'
         assert variant.alt == 'G'
-        assert variant.allele_freq == pytest.approx(1.0)
+        assert variant.allele_freq == pytest.approx(0.5)
         assert variant.query_ref_codon == 'RAA'
 
     def test_full_n_codon_is_coverage_gap_and_not_emitted_as_variants(
@@ -840,7 +845,11 @@ class TestFastaToVcf:
         self,
         simple_feature: FeatureRecord,
     ) -> None:
-        """Partial ambiguity (e.g. AAN) should stay assessable and emit IUPAC SNP variants."""
+        """Partial ambiguity (e.g. AAN) should stay assessable and emit IUPAC SNP variants.
+
+        N={A,C,G,T} vs ref=A: each mutation ALT (C,G,T) gets 1/len(options)=1/4, because the
+        reference base A is one of the four equally-likely possibilities.
+        """
         aligned_ref = 'ATGAAAGCTTAA'
         aligned_query = 'ATGAANGCTTAA'
 
@@ -856,7 +865,7 @@ class TestFastaToVcf:
         assert len(variants) == 3
         assert {variant.alt for variant in variants} == {'C', 'G', 'T'}
         assert all(variant.ref == 'A' for variant in variants)
-        assert all(variant.allele_freq == pytest.approx(1 / 3) for variant in variants)
+        assert all(variant.allele_freq == pytest.approx(1 / 4) for variant in variants)
         assert all(variant.query_ref_codon == 'AAN' for variant in variants)
 
     def test_minus_strand_insertion_keeps_anchor_first_in_genomic_orientation(self) -> None:

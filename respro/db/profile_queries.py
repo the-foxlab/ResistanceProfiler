@@ -17,7 +17,7 @@ def load_existing_run_project_fingerprint(results_conn: sqlite3.Connection) -> s
     ).fetchone()
     if row is None:
         return None
-    return row['project_fingerprint']
+    return str(row['project_fingerprint'])
 
 
 def load_reference_name(project_conn: sqlite3.Connection, reference_id: int) -> str | None:
@@ -34,7 +34,7 @@ def load_reference_name(project_conn: sqlite3.Connection, reference_id: int) -> 
     ).fetchone()
     if row is None:
         return None
-    return row['name']
+    return str(row['name'])
 
 
 def load_reference_metadata(project_conn: sqlite3.Connection, reference_id: int) -> tuple[str, int]:

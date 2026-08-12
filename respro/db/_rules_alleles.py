@@ -79,14 +79,15 @@ def _normalize_rule_alleles_for_storage(
         else:
             mutation = token_upper
     else:
-        mutation = normalize_mutation(
+        normalized = normalize_mutation(
             mutation_input,
             reference=reference,
             position_1based=position_0based + 1,
         )
-        if mutation is None:
+        if normalized is None:
             errors.append(f'{context}: unrecognised mutation {mutation_raw!r}')
             return None
+        mutation = normalized
 
     if mutation == 'fsX':
         mutation = f'{reference}fsX'

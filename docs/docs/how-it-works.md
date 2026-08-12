@@ -35,9 +35,10 @@ In both modes, input is converted into a common internal representation before r
 
 #### FASTA-mode specifics
 
-- **IUPAC ambiguity codes** in the consensus sequence are expanded into all possible alternative bases. Each alternative receives a fractional allele frequency derived from equal partitioning (e.g. `R` → A=0.5, G=0.5; `Y` → C=0.5, T=0.5; `N` → A/C/G/T=0.25 each). The reference base is excluded from expansion.
+- **IUPAC ambiguity codes** in the consensus sequence are expanded into all possible alternative bases. Each mutation ALT receives a fractional allele frequency of `1 / len(options)`, where `options` is the full IUPAC base set (the reference base is one of the equally-likely possibilities = no mutation, so it is included in the denominator but not emitted as an ALT). For example, `ref=A, query=R` (R={A,G}) → `G=0.5`; `ref=A, query=Y` (Y={C,T}) → `C=0.5, T=0.5`; `ref=A, query=N` (N={A,C,G,T}) → `C=0.25, G=0.25, T=0.25`.
 - **N-stretch coverage gaps** — full-NNN codons are treated as non-covered positions and reported as coverage gaps rather than variants. Partial-N codons (1–2 N bases) remain assessable and emit expanded IUPAC variants for the non-N positions.
 - **FASTA-mode AF bins** use adjusted thresholds for the discrete IUPAC-derived frequencies: **high** (0.75–1.0), **intermediate** (0.35–0.74), **low** (0.01–0.34).
+- **VCF-mode AF source** — for VCF input, per-allele allele frequency is resolved from a fixed INFO-then-FORMAT precedence (`INFO/AF` → `INFO/VAF` → `INFO/FREQ` → `FORMAT/AF` → `FORMAT/AD`-derived), reading only the first sample for FORMAT-level values. Missing entries and short allele-specific arrays use a **residual** fallback (`max(0, 1 - sum(known))` split equally among missing alleles) rather than assuming a missing allele is fully present. See [CLI Reference — Allele-frequency source](cli-reference.md#allele-frequency-source-vcf-mode) for the full contract.
 - **Insertions and deletions** in FASTA mode are detected from alignment gaps (CIGAR-based) between the aligned query and the reference CDS.
 
 ### Reference matching and coordinate mapping

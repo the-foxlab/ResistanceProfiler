@@ -70,12 +70,20 @@ def parse_vcf(
 
             filter_status = _extract_filter_status(record)
             depth = _extract_depth(record)
+            allele_freqs = _resolve_record_afs(record, len(alts))
             for alt_idx, alt_raw in enumerate(alts):
                 alt = (alt_raw or '').upper().replace('U', 'T')
                 if not alt or alt in {'.', '*', '<*>'}:
                     continue
+                if _is_non_nucleotide_alt(alt):
+                    logger.warning(
+                        'Skipping non-nucleotide ALT %r at %s:%d (symbolic/breakend alleles '
+                        'are not supported)',
+                        alt, record.contig, record.pos,
+                    )
+                    continue
 
-                af = _extract_af(record, alt_idx)
+                af = _apply_residual_fallback(allele_freqs, alt_idx)
                 variants.append(VariantCall(
                     chrom=record.contig,
                     pos=record.pos - 1,
@@ -104,56 +112,191 @@ def parse_vcf(
 
 
 def _extract_filter_status(record: pysam.VariantRecord) -> str:
-    """Return canonical filter status string for one VCF record."""
+    """Return canonical filter status string for one VCF record.
+
+    VCF distinguishes ``PASS`` (filters applied and passed) from ``.`` (filtering
+    not applied / unknown). pysam exposes an explicit ``PASS`` as a key in
+    ``record.filter.keys()`` and an unfiltered record (``FILTER=.``) as an empty
+    key set, so an empty key set is mapped to ``.`` rather than ``PASS`` to preserve
+    filter provenance.
+    """
     if not record.filter.keys():
-        return 'PASS'
+        return '.'
     return ';'.join(str(key) for key in record.filter.keys())
 
 
-def _extract_af(
+def _resolve_record_afs(
     record: pysam.VariantRecord,
-    alt_idx: int,
-) -> float:
+    n_alts: int,
+) -> list[float | None]:
     """
-    Best-effort extraction of allele frequency.
+    Resolve a per-ALT allele-frequency list for one record.
+
+    Returns one entry per ALT allele (indexed by ALT position); ``None`` marks an
+    allele whose AF could not be resolved from any source. Missing entries (VCF
+    ``.`` / pysam ``None``) and indices beyond the end of a short array are kept as
+    ``None`` — they are never silently clamped to the last available value. The
+    caller is responsible for applying the residual fallback to the ``None`` entries.
+
+    Precedence (first non-``None`` per allele wins):
+        INFO/AF → INFO/VAF → INFO/FREQ → FORMAT/AF (first sample) →
+        FORMAT/AD-derived (first sample)
 
     :param record: pysam variant record
-    :param alt_idx: zero-based index of ALT allele in this record
-    :return: allele frequency value
+    :param n_alts: number of ALT alleles in the record
+    :return: list of length ``n_alts`` with a float or ``None`` per ALT
     """
+    resolved: list[float | None] = [None] * n_alts
+
     for key in ('AF', 'VAF', 'FREQ'):
         value = _record_info_get(record, key)
         if value is None:
             continue
-
-        vals = _normalize_to_str_sequence(value)
-        if not vals:
-            continue
-        parsed = _to_float(vals[min(alt_idx, len(vals) - 1)])
-        if parsed is not None:
-            return parsed
+        vals = _normalize_to_float_sequence(value, n_alts)
+        _warn_allele_array_issue(record, key, vals, n_alts)
+        _fill_first_available(resolved, vals)
 
     sample = _first_sample(record)
     if sample is not None:
         sample_af = sample.get('AF')
         if sample_af is not None:
-            vals = _normalize_to_str_sequence(sample_af)
-            if vals:
-                parsed = _to_float(vals[min(alt_idx, len(vals) - 1)])
-                if parsed is not None:
-                    return parsed
+            vals = _normalize_to_float_sequence(sample_af, n_alts)
+            _warn_allele_array_issue(record, 'FORMAT/AF', vals, n_alts)
+            _fill_first_available(resolved, vals)
 
         sample_ad = sample.get('AD')
         if sample_ad is not None:
             ads = _normalize_to_int_sequence(sample_ad)
             if len(ads) >= 2:
-                total = sum(ads)
+                total = sum(d for d in ads if d is not None)
                 if total > 0:
-                    sample_alt_idx = min(alt_idx + 1, len(ads) - 1)
-                    return ads[sample_alt_idx] / total
+                    ad_freqs: list[float | None] = [None] * n_alts
+                    for alt_idx in range(n_alts):
+                        depth_idx = alt_idx + 1  # AD is REF + per-ALT depths
+                        if depth_idx < len(ads):
+                            depth = ads[depth_idx]
+                            if depth is not None:
+                                ad_freqs[alt_idx] = depth / total
+                    _fill_first_available(resolved, ad_freqs)
+                    # AD is REF + per-ALT; a short AD array lacks depths for later ALTs.
+                    if len(ads) - 1 < n_alts:
+                        logger.warning(
+                            'VCF %s:%s FORMAT/AD has %d allele-depth entries for %d ALTs; '
+                            'missing ALTs fall back to the residual AF.',
+                            record.contig if record.contig else '?',
+                            record.pos,
+                            len(ads) - 1,
+                            n_alts,
+                        )
 
-    # A called variant with no extractable AF is assumed fully present
-    return 1.0
+    return resolved
+
+
+def _warn_allele_array_issue(
+    record: pysam.VariantRecord,
+    source: str,
+    vals: list[float | None],
+    n_alts: int,
+) -> None:
+    """Log a warning when an allele-specific AF array is short or has missing entries.
+
+    A short array (fewer values than ALTs) or a present-but-missing entry (VCF ``.``,
+    normalised to ``None``) means the per-ALT AF for that slot is unknown and will be
+    filled by the residual fallback. This is a data-quality signal worth surfacing
+    rather than silently absorbing.
+
+    :param record: pysam variant record (used for the locus in the message)
+    :param source: human-readable source label, e.g. ``"INFO/AF"`` or ``"FORMAT/AF"``
+    :param vals: normalised per-ALT value list (``None`` = missing entry)
+    :param n_alts: number of ALT alleles in the record
+    """
+    n_present = sum(1 for v in vals if v is not None)
+    n_missing = len(vals) - n_present
+    locus = f'{record.contig if record.contig else "?"}:{record.pos}'
+    if len(vals) < n_alts:
+        logger.warning(
+            'VCF %s %s has %d value(s) for %d ALTs (cardinality mismatch); '
+            'uncovered ALTs fall back to the residual AF.',
+            locus,
+            source,
+            len(vals),
+            n_alts,
+        )
+    if n_missing > 0:
+        logger.warning(
+            'VCF %s %s has %d missing AF entr(y/es) (VCF "."); '
+            'those ALTs fall back to the residual AF.',
+            locus,
+            source,
+            n_missing,
+        )
+
+
+def _apply_residual_fallback(
+    resolved: list[float | None],
+    alt_idx: int,
+) -> float:
+    """
+    Return the AF for one ALT, applying the residual fallback for missing alleles.
+
+    Per VCF semantics the reference allele frequency is ``1 - sum(ALT AF)``. Alleles
+    whose AF is ``None`` (missing entry or short array) share the residual
+    ``max(0, 1 - sum(known AFs))`` equally, keeping the per-site AF total at exactly
+    1.0 (or 0.0 when the known alleles already sum to >= 1). A single missing
+    biallelic ALT therefore falls back to ``1.0`` (residual ``1 - 0``), preserving
+    the legacy "called variant assumed fully present" behaviour.
+
+    :param resolved: per-ALT resolved AFs (``None`` = missing)
+    :param alt_idx: zero-based index of the ALT to resolve
+    :return: allele frequency value
+    """
+    value = resolved[alt_idx]
+    if value is not None:
+        return value
+
+    # The residual is spread over every None slot in the resolved list, including
+    # symbolic/breakend ALTs that downstream code may skip for matching. This keeps
+    # the per-site AF total at 1.0 and avoids inflating nucleotide-ALT fractions.
+    known_sum = sum(v for v in resolved if v is not None)
+    n_missing = sum(1 for v in resolved if v is None)
+    residual = max(0.0, 1.0 - known_sum)
+    if n_missing <= 0:
+        return residual
+    return residual / n_missing
+
+
+def _fill_first_available(
+    resolved: list[float | None],
+    candidates: list[float | None],
+) -> None:
+    """Fill ``None`` slots in ``resolved`` from ``candidates`` (first source wins)."""
+    for i, cand in enumerate(candidates):
+        if i >= len(resolved):
+            break
+        if cand is None or resolved[i] is not None:
+            continue
+        resolved[i] = cand
+
+
+def _is_non_nucleotide_alt(alt: str) -> bool:
+    """Return True for symbolic, breakend, and other non-sequence ALT representations.
+
+    ResistanceProfiler annotates nucleotide-level consequences only; symbolic alleles
+    (``<DEL>``, ``<INS>``, ``<DUP>``, …), breakend syntax (``C[ref:100[``, ``]ref:100]A``),
+    and the spanning-deletion marker ``*`` are rejected at this boundary so they never
+    reach translation code with non-ACGTN characters.
+    """
+    if not alt:
+        return False
+    if alt in {'.', '*', '<*>'}:
+        # '.' and '*' are filtered upstream; kept here for completeness.
+        return True
+    if alt.startswith('<') and alt.endswith('>'):
+        return True
+    # Breakend alleles contain '[' or ']' anchoring a remote contig:position.
+    if '[' in alt or ']' in alt:
+        return True
+    return False
 
 
 def _extract_depth(record: pysam.VariantRecord) -> int:
@@ -183,7 +326,7 @@ def _extract_depth(record: pysam.VariantRecord) -> int:
         if sample_ad is not None:
             ads = _normalize_to_int_sequence(sample_ad)
             if ads:
-                return sum(ads)
+                return sum(d for d in ads if d is not None)
 
     # Sentinel: no depth information found
     return -1
@@ -205,22 +348,35 @@ def _record_info_get(record: pysam.VariantRecord, key: str) -> object | None:
         return None
 
 
-def _normalize_to_int_sequence(value: object) -> list[int]:
-    """Normalize scalar or tuple-like values to a list of ints where possible."""
-    values = _normalize_to_str_sequence(value)
-    parsed: list[int] = []
-    for token in values:
-        parsed_int = _to_int(token)
-        if parsed_int is not None:
-            parsed.append(parsed_int)
-    return parsed
+def _normalize_to_int_sequence(value: object) -> list[int | None]:
+    """Normalize scalar or tuple-like values to a list of ints, preserving None positions.
+
+    Missing entries (pysam ``None`` / VCF ``.``) are kept as ``None`` at their position
+    so downstream indexing against the ALT list is not shifted.
+    """
+    raw = _normalize_to_raw_sequence(value)
+    return [_to_int(item) for item in raw]
 
 
-def _normalize_to_str_sequence(value: object) -> list[str]:
-    """Normalize scalar or tuple-like values to a list of strings."""
+def _normalize_to_float_sequence(value: object, n_alts: int) -> list[float | None]:
+    """Normalize an allele-specific INFO/FORMAT value to a per-ALT float list.
+
+    Preserves ``None`` entries positionally (F3) and pads short arrays to ``n_alts``
+    with ``None`` rather than reusing the last value (F4). A scalar is broadcast to a
+    one-element list (biallelic case).
+    """
+    raw = _normalize_to_raw_sequence(value)
+    parsed = [_to_float(item) for item in raw]
+    if len(parsed) < n_alts:
+        parsed.extend([None] * (n_alts - len(parsed)))
+    return parsed[:n_alts]
+
+
+def _normalize_to_raw_sequence(value: object) -> list[object]:
+    """Normalize scalar or tuple-like values to a list, preserving None entries."""
     if isinstance(value, (tuple, list)):
-        return [str(v) for v in value if v is not None]
-    return [str(value)]
+        return list(value)
+    return [value]
 
 
 def _to_int(value: object) -> int | None:

@@ -77,8 +77,7 @@ def annotate_variants(
 
         for feature in matching_features:
             codon_idx = feature.codon_index(var.pos)
-            codon_key = (feature.id, codon_idx)
-            group = group_plan.get(codon_key)
+            group = group_plan.get((feature.id, codon_idx)) if codon_idx is not None else None
             if group is not None:
                 if var_idx == group[0]:
                     members = [variants[i] for i in group]

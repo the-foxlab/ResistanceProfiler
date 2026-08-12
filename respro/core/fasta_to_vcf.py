@@ -215,7 +215,15 @@ def _get_query_codon(coding: list[tuple[str, str, str]], coding_nt_idx: int) -> 
 
 
 def _iupac_alt_bases(ref_base: str, query_base: str) -> list[tuple[str, float]]:
-    """Expand an IUPAC query base into ALT alleles with fractional frequencies."""
+    """Expand an IUPAC query base into ALT alleles with fractional frequencies.
+
+    IUPAC ambiguity means "any of the listed bases equally likely". The reference base
+    is one of those possibilities (= no mutation), so the probability mass is split over
+    the **full option set** (``len(options)``), not just the non-reference ALTs. Each
+    mutation ALT therefore receives ``1 / len(options)``. For example ``ref=A, query=R``
+    (R={A,G}) yields ``G`` at AF 0.5, and ``ref=A, query=N`` (N={A,C,G,T}) yields
+    ``C``, ``G``, ``T`` each at AF 0.25.
+    """
     iupac_options = {
         'A': {'A'},
         'C': {'C'},
@@ -238,7 +246,9 @@ def _iupac_alt_bases(ref_base: str, query_base: str) -> list[tuple[str, float]]:
     non_ref_alts = sorted(base for base in options if base != ref_base_upper)
     if not non_ref_alts:
         return []
-    af_each = 1.0 / len(non_ref_alts)
+    # Denominator is the full option set: the reference base is one of the equally-likely
+    # possibilities, so each mutation ALT gets 1/len(options), not 1/len(non_ref_alts).
+    af_each = 1.0 / len(options)
     return [(alt, af_each) for alt in non_ref_alts]
 
 

@@ -321,7 +321,7 @@ def _init_command(
             db_path = init_project(
                 db_path=output_path,
                 name=name,
-                genbank_paths=list(genbank_paths),
+                genbank_paths=list(genbank_paths or []),
                 rules_tsv=rules,
                 formula_rules_tsv=formula_rules,
                 metadata_json=metadata,

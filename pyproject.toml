@@ -4,7 +4,7 @@ build-backend = 'hatchling.build'
 
 [project]
 name = 'respro'
-version = '0.1.0'
+version = '0.1.1'
 description = 'Pathogen-agnostic framework for genotypic antiviral resistance profiling from SANGER or NGS-derived variants.'
 readme = 'README.md'
 license = {text = 'AGPL-3.0-only'}
@@ -56,16 +56,12 @@ extend-ignore = ['E501']  # line length enforced by editor convention, not CI
 
 [tool.mypy]
 python_version = '3.11'
-files = [
-    'respro/cli/main.py',
-    'respro/cli/maintained_db.py',
-    'respro/cli/vcf.py',
-    'respro/cli/fasta.py',
-]
+files = ['respro']
 pretty = true
 show_error_codes = true
 ignore_missing_imports = true
-follow_imports = 'skip'
+warn_unused_ignores = true
+warn_return_any = true
 
 [tool.hatch.build]
 include = [

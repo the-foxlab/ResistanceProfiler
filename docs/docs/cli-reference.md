@@ -131,6 +131,56 @@ run.
   mutations cannot be attributed to a single species unambiguously. Same-species
   shared gene names are always allowed.
 
+### Allele-frequency source (VCF mode)
+
+ResistanceProfiler evaluates resistance rules against per-allele allele frequencies
+(AF). For each ALT allele of a record it resolves the AF from the first available
+source, in this fixed precedence:
+
+1. `INFO/AF` (allele frequency for the ALT, indexed by ALT position)
+2. `INFO/VAF`
+3. `INFO/FREQ`
+4. `FORMAT/AF` of the **first sample** (single-sample contract — see below)
+5. `FORMAT/AD`-derived AF of the first sample: `AD[alt_idx + 1] / sum(AD)`
+
+This precedence is intentional for **single-sample pathogen VCFs**, where `INFO/AF`
+typically already reports the per-allele frequency for the single sequenced sample.
+For multi-sample VCFs, `INFO/AF` may instead describe site- or population-level
+frequencies; in that case prefer a single-sample VCF or supply `FORMAT/AF`/`FORMAT/AD`
+explicitly, because ResistanceProfiler reads only the first sample for FORMAT-level
+values.
+
+#### Missing and malformed allele-specific arrays
+
+Allele-specific fields (`AF`, `VAF`, `FREQ`, `AD`) are read positionally against the
+ALT list. Missing entries (VCF `.`) and short arrays are never silently clamped to
+the last available value. Per VCF semantics the reference allele frequency is
+`1 - sum(ALT AF)`, so the frequency budget for alleles whose AF is unavailable is the
+**residual** of the known alleles:
+
+- A missing entry (`.` / `None`) or an index beyond the end of a short array is
+  treated as "no AF for this allele". The residual `max(0, 1 - sum(known ALT AFs at
+  this site))` is split **equally** among all missing alleles at that site and used
+  as their AF.
+- A cardinality warning is logged when an array is shorter than the ALT list, and a
+  missing-entry warning is logged when a present array contains a VCF `.` value.
+- This keeps the per-site AF total at exactly 1.0 (or 0.0 when the known alleles
+  already sum to ≥ 1) and is more conservative for resistance calling than assuming
+  a missing allele is fully present.
+
+Example: `ALT=C,G,T` with `AF=0.1,0.2` → `C=0.1`, `G=0.2`, `T=0.7` (residual
+`1 - 0.1 - 0.2` split over the one missing allele). `ALT=C,G,T` with `AF=0.1,.,0.3`
+→ `C=0.1`, `G=0.6` (residual `1 - 0.1 - 0.3`), `T=0.3`. A biallelic `ALT=C` with
+`AF=.` → `C=1.0` (residual `1 - 0`).
+
+#### Single-sample and multi-sample vcf files
+
+ResistanceProfiler is designed for single-sample VCF input. When FORMAT-level values
+are needed, the **first sample** in the VCF header is used unconditionally; sample
+selection is not configurable. Multi-sample VCFs are not rejected, but only the first
+sample contributes FORMAT/AF and FORMAT/AD values, which is rarely the intended
+semantics for multi-sample data.
+
 ## Inspect project metadata and curated rules
 
 Project metadata:

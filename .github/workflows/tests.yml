@@ -20,7 +20,6 @@ jobs:
   ruff:
     name: Ruff
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - name: Checkout repository

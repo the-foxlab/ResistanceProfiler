@@ -112,6 +112,7 @@ def _profile_vcf_command(
     try:
         if ref_fasta is None:
             cli_error('Missing option --ref-fasta.')
+        assert ref_fasta is not None  # cli_error raises typer.Exit above
 
         export_formats = _parse_export_formats(export)
 

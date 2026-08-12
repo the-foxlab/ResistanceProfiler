@@ -139,12 +139,13 @@ def _extract_accession(record: SeqRecord) -> str:
     :param record: BioPython SeqRecord object
     :return: accession string
     """
-    accessions = record.annotations.get('accessions', [])
+    raw_accessions: object = record.annotations.get('accessions', [])
+    accessions: list[str] = list(raw_accessions) if isinstance(raw_accessions, (list, tuple)) else []
     if accessions:
         accession = str(accessions[0]).strip()
         if accession:
             return accession
-    return record.id.strip() or record.name.strip()
+    return (record.id or '').strip() or (record.name or '').strip()
 
 
 def _extract_organism(record: SeqRecord) -> str:
@@ -174,7 +175,8 @@ def _extract_taxonomy(record: SeqRecord) -> str:
     :param record: BioPython SeqRecord object
     :return: taxonomy string or empty string
     """
-    taxonomy = record.annotations.get('taxonomy', [])
+    raw_taxonomy: object = record.annotations.get('taxonomy', [])
+    taxonomy: list[str] = list(raw_taxonomy) if isinstance(raw_taxonomy, (list, tuple)) else []
     if taxonomy:
         return '; '.join(str(item).strip() for item in taxonomy if str(item).strip())
     return ''
