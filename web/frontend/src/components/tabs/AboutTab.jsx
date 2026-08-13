@@ -90,7 +90,6 @@ export function AboutTab({ setActiveMode, onStartTour }) {
             <button type="button" onClick={() => setActiveMode('analyze')}>Start analysis</button>
             <button
               type="button"
-              className="about-hero-link"
               onClick={() => {
                 if (onStartTour) {
                   onStartTour();
@@ -107,7 +106,7 @@ export function AboutTab({ setActiveMode, onStartTour }) {
             >
               View documentation
             </a>
-            <a className="about-hero-link about-hero-link-secondary" href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noreferrer">
+            <a className="about-hero-link" href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noreferrer">
               GitHub
             </a>
           </div>

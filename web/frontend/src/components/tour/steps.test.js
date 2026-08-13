@@ -10,31 +10,35 @@ describe('buildTourSteps', () => {
       setAnalyzeSubMode: vi.fn(),
     });
     expect(Array.isArray(steps)).toBe(true);
-    expect(steps.length).toBeGreaterThanOrEqual(15);
+    expect(steps.length).toBe(17);
 
     // Spot-check the required step ids are present in order.
     const ids = steps.map((s) => s.id);
-    expect(ids).toContain('database-selector');
-    expect(ids).toContain('sidebar-rail');
-    expect(ids).toContain('analyze-submode');
-    expect(ids).toContain('vcf-mode');
-    expect(ids).toContain('fasta-mode');
-    expect(ids).toContain('regenerate-mode');
-    expect(ids).toContain('analyze-button');
-    expect(ids).toContain('previous-reports');
-    expect(ids).toContain('batch-mode');
-    expect(ids).toContain('reports-table');
-    expect(ids).toContain('comparison-heatmap');
-    expect(ids).toContain('database-dashboard');
-    expect(ids).toContain('browse-mutations');
-    expect(ids).toContain('about');
-    expect(ids).toContain('docs-handoff');
+    expect(ids).toEqual([
+      'database-selector',
+      'vcf-file',
+      'vcf-reference',
+      'vcf-bam',
+      'vcf-sample-name',
+      'vcf-frequency-cutoff',
+      'vcf-coverage-cutoff',
+      'fasta-mode',
+      'regenerate-mode',
+      'analyze-button',
+      'previous-reports',
+      'reports-table',
+      'comparison-heatmap',
+      'database-dashboard',
+      'browse-mutations',
+      'about',
+      'docs-handoff',
+    ]);
 
     // The docs-handoff step must be last.
     expect(ids[ids.length - 1]).toBe('docs-handoff');
   });
 
-  it('every step has a non-empty id, targetSelector, title, and body', () => {
+  it('every step has a non-empty id, title, and body; targetSelector is a string or null', () => {
     const steps = buildTourSteps({
       setActiveMode: vi.fn(),
       setActiveProfileMode: vi.fn(),
@@ -42,27 +46,30 @@ describe('buildTourSteps', () => {
     });
     for (const step of steps) {
       expect(step.id).toBeTruthy();
-      expect(step.targetSelector).toBeTruthy();
-      expect(typeof step.targetSelector).toBe('string');
+      expect(step.targetSelector === null || typeof step.targetSelector === 'string').toBe(true);
       expect(step.title).toBeTruthy();
       expect(step.body).toBeTruthy();
       expect(typeof step.body).toBe('string');
     }
   });
 
-  it('the VCF step body mentions BAM and coverage and the cutoffs', () => {
+  it('the vcf-bam step body mentions BAM and coverage', () => {
     const steps = buildTourSteps({ setActiveMode: vi.fn(), setActiveProfileMode: vi.fn(), setAnalyzeSubMode: vi.fn() });
-    const vcf = steps.find((s) => s.id === 'vcf-mode');
-    expect(vcf.body.toLowerCase()).toContain('bam');
-    expect(vcf.body.toLowerCase()).toContain('coverage');
-    expect(vcf.body.toLowerCase()).toContain('frequency cutoff');
-    expect(vcf.body.toLowerCase()).toContain('coverage cutoff');
+    const bam = steps.find((s) => s.id === 'vcf-bam');
+    expect(bam.body.toLowerCase()).toContain('bam');
+    expect(bam.body.toLowerCase()).toContain('coverage');
   });
 
-  it('the batch step body mentions the 25-per-batch-and-minute rate limit', () => {
+  it('the vcf-frequency-cutoff step body mentions allele frequency', () => {
     const steps = buildTourSteps({ setActiveMode: vi.fn(), setActiveProfileMode: vi.fn(), setAnalyzeSubMode: vi.fn() });
-    const batch = steps.find((s) => s.id === 'batch-mode');
-    expect(batch.body).toContain('25');
+    const freq = steps.find((s) => s.id === 'vcf-frequency-cutoff');
+    expect(freq.body.toLowerCase()).toContain('allele frequency');
+  });
+
+  it('the vcf-coverage-cutoff step body mentions read depth', () => {
+    const steps = buildTourSteps({ setActiveMode: vi.fn(), setActiveProfileMode: vi.fn(), setAnalyzeSubMode: vi.fn() });
+    const cov = steps.find((s) => s.id === 'vcf-coverage-cutoff');
+    expect(cov.body.toLowerCase()).toContain('read depth');
   });
 
   it('the comparison step body mentions Select all comparable, Compare selected, Non-synonymous only, DB hits only, and heatmap', () => {
@@ -91,12 +98,12 @@ describe('buildTourSteps', () => {
       expect(setActiveMode).toHaveBeenCalledWith('analyze');
     });
 
-    it('the vcf-mode step calls setActiveMode, setAnalyzeSubMode("single"), and setActiveProfileMode("vcf")', () => {
+    it('the vcf-file step calls setActiveMode, setAnalyzeSubMode("single"), and setActiveProfileMode("vcf")', () => {
       const setActiveMode = vi.fn();
       const setActiveProfileMode = vi.fn();
       const setAnalyzeSubMode = vi.fn();
       const steps = buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyzeSubMode });
-      steps.find((s) => s.id === 'vcf-mode').before();
+      steps.find((s) => s.id === 'vcf-file').before();
       expect(setActiveMode).toHaveBeenCalledWith('analyze');
       expect(setAnalyzeSubMode).toHaveBeenCalledWith('single');
       expect(setActiveProfileMode).toHaveBeenCalledWith('vcf');
@@ -114,13 +121,6 @@ describe('buildTourSteps', () => {
       const steps = buildTourSteps({ setActiveMode: vi.fn(), setActiveProfileMode, setAnalyzeSubMode: vi.fn() });
       steps.find((s) => s.id === 'regenerate-mode').before();
       expect(setActiveProfileMode).toHaveBeenCalledWith('regenerate');
-    });
-
-    it('the batch-mode step sets sub-mode to batch', () => {
-      const setAnalyzeSubMode = vi.fn();
-      const steps = buildTourSteps({ setActiveMode: vi.fn(), setActiveProfileMode: vi.fn(), setAnalyzeSubMode });
-      steps.find((s) => s.id === 'batch-mode').before();
-      expect(setAnalyzeSubMode).toHaveBeenCalledWith('batch');
     });
 
     it('the reports-table step calls setActiveMode("results")', () => {

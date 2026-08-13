@@ -164,31 +164,42 @@ export function TourOverlay({ steps: stepsProp }) {
 
   const isLast = stepIndex >= steps.length - 1;
 
-  // Spotlight position: follow the target if found, otherwise center the viewport.
+  // Spotlight padding: expand the target rect by a few px on each side so the
+  // highlight is comfortably larger than the element itself.
+  const SPOTLIGHT_PAD = 8;
+
+  // Spotlight position: follow the target (padded) if found, otherwise center.
   const spotlightStyle = rect
     ? {
-        left: `${rect.left}px`,
-        top: `${rect.top}px`,
-        width: `${rect.width}px`,
-        height: `${rect.height}px`,
+        left: `${rect.left - SPOTLIGHT_PAD}px`,
+        top: `${rect.top - SPOTLIGHT_PAD}px`,
+        width: `${rect.width + SPOTLIGHT_PAD * 2}px`,
+        height: `${rect.height + SPOTLIGHT_PAD * 2}px`,
       }
     : { left: '50%', top: '50%', width: 0, height: 0, transform: 'translate(-50%, -50%)' };
 
-  // Tooltip position: place below the target by default, fall back to viewport center.
-  const tooltipStyle = rect
-    ? { left: `${rect.left}px`, top: `${rect.bottom + 12}px` }
-    : { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' };
+  // Tooltip position: fixed at the bottom-center of the viewport so the popup stays
+  // put while the spotlight moves between targets — no jumping between steps.
+  const tooltipStyle = {
+    left: '50%',
+    bottom: '24px',
+    transform: 'translateX(-50%)',
+  };
 
   return (
     <div className="tour-overlay" role="dialog" aria-modal="true" aria-labelledby={tooltipId}>
-      {/* Dark backdrop with a transparent cutout around the target. */}
-      <div className="tour-backdrop" onClick={dismissTour} aria-hidden="true" />
-      <div
-        className="tour-spotlight"
-        style={spotlightStyle}
-        aria-describedby={tooltipId}
-        aria-hidden="true"
-      />
+      {/* Dark backdrop with a transparent cutout around the target. Clicking outside
+          the popup does NOT dismiss the active tour — the user must use Skip, Esc, or
+          Finish to exit. */}
+      <div className="tour-backdrop" aria-hidden="true" />
+      {currentStep.targetSelector ? (
+        <div
+          className="tour-spotlight"
+          style={spotlightStyle}
+          aria-describedby={tooltipId}
+          aria-hidden="true"
+        />
+      ) : null}
       <div
         ref={tooltipRef}
         id={tooltipId}

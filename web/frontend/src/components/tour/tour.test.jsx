@@ -12,19 +12,22 @@ function TourApp({ steps, setActiveMode, setActiveProfileMode, setAnalyzeSubMode
     <TourProvider steps={steps}>
       <div>
         <div className="topbar-db-bar" data-testid="target-db" />
-        <div className="sidebar-rail" data-testid="target-rail" />
-        <div className="analyze-submode-row" data-testid="target-submode" />
-        <div className="profile-upload-row-vcf" data-testid="target-vcf" />
+        <div data-tour-target="vcf-file" data-testid="target-vcf-file" />
+        <div data-tour-target="vcf-reference" data-testid="target-vcf-ref" />
+        <div data-tour-target="vcf-bam" data-testid="target-vcf-bam" />
+        <div data-tour-target="vcf-sample-name" data-testid="target-vcf-sample" />
+        <div data-tour-target="vcf-frequency-cutoff" data-testid="target-vcf-freq" />
+        <div data-tour-target="vcf-coverage-cutoff" data-testid="target-vcf-cov" />
         <div className="profile-upload-row-fasta" data-testid="target-fasta" />
         <div className="profile-upload-row-regenerate" data-testid="target-regen" />
         <div className="profile-input-card">
           <div className="profile-analyze-row" data-testid="target-analyze" />
         </div>
         <div className="analyze-report-actions" data-testid="target-reports" />
-        <div className="profile-upload-row-batch-vcf" data-testid="target-batch" />
-        <div className="table-wrap mutation-table-wrap" data-testid="target-results" />
-        <div className="comparison-section" data-testid="target-comparison" />
-        <div className="about-hero-actions" data-testid="target-about" />
+        <div data-tour-target="sidebar-results" data-testid="target-sidebar-results" />
+        <div data-tour-target="sidebar-database" data-testid="target-sidebar-database" />
+        <div data-tour-target="sidebar-mutations" data-testid="target-sidebar-mutations" />
+        <div data-tour-target="sidebar-about" data-testid="target-sidebar-about" />
       </div>
       <TourOverlay steps={steps} />
     </TourProvider>
@@ -96,11 +99,14 @@ describe('guided tour integration', () => {
       expect(localStorage.getItem(TOUR_STORAGE_KEY)).toBe(TOUR_VERSION);
     });
 
-    it('backdrop click persists dismissal', () => {
+    it('backdrop click does NOT dismiss the active tour (must use Skip/Esc/Finish)', () => {
       const { container } = render(<TourApp steps={STEPS} />);
       fireEvent.click(screen.getByRole('button', { name: /start tour/i }));
       fireEvent.click(container.querySelector('.tour-backdrop'));
-      expect(localStorage.getItem(TOUR_STORAGE_KEY)).toBe(TOUR_VERSION);
+      // Tour is still active — no token written, overlay still present.
+      expect(localStorage.getItem(TOUR_STORAGE_KEY)).toBeNull();
+      expect(container.querySelector('.tour-overlay')).not.toBeNull();
+      expect(screen.getByText(STEPS[0].title)).toBeInTheDocument();
     });
 
     it('Finish on the last step persists dismissal', () => {

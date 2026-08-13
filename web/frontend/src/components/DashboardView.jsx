@@ -147,6 +147,7 @@ export function DashboardView({
               className={`sidebar-rail-link ${activeMode === mode.id ? 'active' : ''} ${mode.id === 'about' ? 'about-tab' : ''}`}
               onClick={() => setActiveMode(mode.id)}
               aria-label={mode.label}
+              data-tour-target={`sidebar-${mode.id}`}
             >
               <span className="sidebar-icon-mask" style={{ '--icon-src': `url(${mode.iconSrc})` }} aria-hidden="true" />
               <span className="sidebar-rail-text">{mode.label}</span>

@@ -305,15 +305,6 @@ th {
   background: var(--accent-tint);
 }
 
-.about-hero-link-secondary {
-  border-color: var(--line);
-  color: var(--muted-strong);
-}
-
-.about-hero-link-secondary:hover {
-  background: var(--paper-soft);
-}
-
 .about-hero-visual {
   min-height: 0;
   aspect-ratio: 2 / 1;
@@ -2572,14 +2563,28 @@ th.sortable-col {
 .tour-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 32, 0.45);
+  background: rgba(15, 23, 32, 0.28);
   pointer-events: auto;
+}
+
+/* Start prompt: centered in the viewport. Inline left/top/transform center it; this
+   rule supplies the fixed positioning those offsets require. */
+.tour-prompt {
+  position: fixed;
+  max-width: 360px;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 32, 0.18);
+  padding: 1rem 1.1rem 0.9rem;
+  pointer-events: auto;
+  outline: none;
 }
 
 .tour-spotlight {
   position: fixed;
-  border-radius: 8px;
-  box-shadow: 0 0 0 9999px rgba(15, 23, 32, 0.45);
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 32, 0.28);
   border: 2px solid var(--accent);
   transition: all 0.15s ease-out;
   pointer-events: none;
