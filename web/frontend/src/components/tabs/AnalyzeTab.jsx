@@ -194,7 +194,7 @@ export function AnalyzeTab({
 
             {activeProfileMode === 'vcf' ? (
               <div className="profile-upload-row profile-upload-row-vcf">
-                <label>
+                <label data-tour-target="vcf-file">
                   <span className="input-label-row">VCF file <button type="button" className="input-info-btn" aria-label="VCF help" title="Upload one VCF (.vcf or .vcf.gz) with standard headers. The VCF may be multi-chrom; each CHROM must match one record in the reference FASTA by header name."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                   <input
                     type="file"
@@ -207,7 +207,7 @@ export function AnalyzeTab({
                     }}
                   />
                 </label>
-                <label>
+                <label data-tour-target="vcf-reference">
                   <span className="input-label-row">Reference FASTA <button type="button" className="input-info-btn" aria-label="Reference FASTA help" title="Reference FASTA must match the VCF coordinate system. May be multi-record (one FASTA record per VCF CHROM); each record header must match a CHROM name."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                   <input
                     type="file"
@@ -220,7 +220,7 @@ export function AnalyzeTab({
                     }}
                   />
                 </label>
-                <label>
+                <label data-tour-target="vcf-bam">
                   <span className="label-text input-label-row">BAM file <span className="field-optional">(optional)</span> <button type="button" className="input-info-btn" aria-label="BAM help" title="Optional sorted BAM. A BAM index is generated automatically. Used for coverage evaluation."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                   <input
                     type="file"
@@ -233,7 +233,7 @@ export function AnalyzeTab({
                     }}
                   />
                 </label>
-                <label>
+                <label data-tour-target="vcf-sample-name">
                   Sample name
                   <input
                     className="sample-name-input"
@@ -242,7 +242,7 @@ export function AnalyzeTab({
                     onChange={(event) => setVcfInput({ ...vcfInput, sample: event.target.value })}
                   />
                 </label>
-                <label>
+                <label data-tour-target="vcf-frequency-cutoff">
                   <span className="label-text input-label-row">Frequency cutoff <button type="button" className="input-info-btn" aria-label="Frequency cutoff help" title="Minimum allele frequency from 0 to 1. Variants below this value are ignored."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                   <input
                     type="number"
@@ -260,7 +260,7 @@ export function AnalyzeTab({
                     }}
                   />
                 </label>
-                <label>
+                <label data-tour-target="vcf-coverage-cutoff">
                   <span className="label-text input-label-row">Coverage cutoff <button type="button" className="input-info-btn" aria-label="Coverage cutoff help" title="Minimum read depth required for including a position."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
                   <input
                     type="number"

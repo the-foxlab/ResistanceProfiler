@@ -12,6 +12,8 @@ import { ResultsTab } from './tabs/ResultsTab';
 import { MutationsTab } from './tabs/MutationsTab';
 import { DatabaseTab } from './tabs/DatabaseTab';
 import { AboutTab } from './tabs/AboutTab';
+import { useTour } from './tour/TourContext';
+import { TourOverlay } from './tour/TourOverlay';
 
 const MODES = [
   { id: 'analyze', label: 'Analysis', iconSrc: homeIconSrc },
@@ -131,6 +133,7 @@ export function DashboardView({
   resetBatch,
 }) {
   const isAnalyzeScopeLocked = isProfileBusy || isRegenerateBusy || batchSubmitting;
+  const { startTour } = useTour();
 
   return (
     <main className="dashboard-shell">
@@ -144,6 +147,7 @@ export function DashboardView({
               className={`sidebar-rail-link ${activeMode === mode.id ? 'active' : ''} ${mode.id === 'about' ? 'about-tab' : ''}`}
               onClick={() => setActiveMode(mode.id)}
               aria-label={mode.label}
+              data-tour-target={`sidebar-${mode.id}`}
             >
               <span className="sidebar-icon-mask" style={{ '--icon-src': `url(${mode.iconSrc})` }} aria-hidden="true" />
               <span className="sidebar-rail-text">{mode.label}</span>
@@ -306,6 +310,7 @@ export function DashboardView({
           {activeMode === 'about' && (
             <AboutTab
               setActiveMode={setActiveMode}
+              onStartTour={startTour}
             />
           )}
         </section>
@@ -321,6 +326,7 @@ export function DashboardView({
           )}
         </footer>
       </div>
+      <TourOverlay />
     </main>
   );
 }
