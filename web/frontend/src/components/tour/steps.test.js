@@ -10,7 +10,7 @@ describe('buildTourSteps', () => {
       setAnalyzeSubMode: vi.fn(),
     });
     expect(Array.isArray(steps)).toBe(true);
-    expect(steps.length).toBe(17);
+    expect(steps.length).toBe(18);
 
     // Spot-check the required step ids are present in order.
     const ids = steps.map((s) => s.id);
@@ -26,6 +26,7 @@ describe('buildTourSteps', () => {
       'regenerate-mode',
       'analyze-button',
       'previous-reports',
+      'analyze-submode',
       'reports-table',
       'comparison-heatmap',
       'database-dashboard',

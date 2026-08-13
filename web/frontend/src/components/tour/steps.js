@@ -144,7 +144,18 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
         setActiveProfileMode('vcf');
       },
     },
-    // 12. Reports — highlight the Reports tile in the sidebar.
+    // 12. Sub-mode toggle — switch from One Sample to Multiple Samples.
+    {
+      id: 'analyze-submode',
+      targetSelector: '.analyze-submode-row',
+      title: 'One sample or many',
+      body: 'Use this toggle to switch between "One Sample" (what you just saw) and "Multiple Samples". The batch mode lets you submit up to 25 VCF or FASTA files at once with a shared reference, per-sample BAMs, and a single set of cutoffs — ideal when you have a plate or folder of samples to profile together.',
+      before: () => {
+        setActiveMode('analyze');
+        setAnalyzeSubMode('single');
+      },
+    },
+    // 13. Reports — highlight the Reports tile in the sidebar.
     {
       id: 'reports-table',
       targetSelector: '[data-tour-target="sidebar-results"]',
@@ -152,7 +163,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       body: 'Every analysis from this session is listed in the Reports tab (results are cleared on page reload). Each row links to its HTML report and offers PDF and JSON downloads. Use "Download all" or select rows and "Download selected" for a bundle.',
       before: () => setActiveMode('results'),
     },
-    // 13. Comparison — highlight the Reports tile (same tab, comparison lives below the table).
+    // 14. Comparison — highlight the Reports tile (same tab, comparison lives below the table).
     {
       id: 'comparison-heatmap',
       targetSelector: '[data-tour-target="sidebar-results"]',
@@ -160,7 +171,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       body: 'As soon as you have results, you can select two or more comparable results (same database and reference), then "Compare selected" to build a mutation heatmap. Use "Select all comparable" to pick everything that matches, toggle "Non-synonymous only" or "DB hits only" to filter, and "Clear comparison" to start over. This view lives below the results table.',
       before: () => setActiveMode('results'),
     },
-    // 14. Database Dashboard — highlight the Database tile in the sidebar.
+    // 15. Database Dashboard — highlight the Database tile in the sidebar.
     {
       id: 'database-dashboard',
       targetSelector: '[data-tour-target="sidebar-database"]',
@@ -168,7 +179,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       body: 'The Database Dashboard tab summarises the rules and mutations in the selected database with interactive plots.',
       before: () => setActiveMode('database'),
     },
-    // 15. Browse Mutations — highlight the Mutations tile in the sidebar.
+    // 16. Browse Mutations — highlight the Mutations tile in the sidebar.
     {
       id: 'browse-mutations',
       targetSelector: '[data-tour-target="sidebar-mutations"]',
@@ -176,7 +187,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       body: 'The Browse Mutations tab lets you search and filter the single and combination rules in the selected database, and export them as TSV.',
       before: () => setActiveMode('mutations'),
     },
-    // 16. About — highlight the About tile in the sidebar.
+    // 17. About — highlight the About tile in the sidebar.
     {
       id: 'about',
       targetSelector: '[data-tour-target="sidebar-about"]',
@@ -184,12 +195,12 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       body: 'The About tab explains how ResistanceProfiler works, the rule nomenclature, and how to run it from the CLI.',
       before: () => setActiveMode('about'),
     },
-    // 17. Final step — highlight nothing; link to official GitHub docs for full detail.
+    // 18. Final step — highlight nothing; link to official GitHub docs for full detail.
     {
       id: 'docs-handoff',
       targetSelector: null,
       title: 'Want the full detail?',
-      body: 'This tour covers the essentials. For in-depth explanations of every output, the results table, report downloads, and the comparison heatmap, read the ',
+      body: 'This tour covers the essentials. For in-depth explanations read the ',
       before: () => setActiveMode('about'),
       link: { label: 'official documentation.', href: TOUR_DOCS_OUTPUT_URL },
     },

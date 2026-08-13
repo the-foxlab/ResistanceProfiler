@@ -2584,7 +2584,9 @@ th.sortable-col {
 .tour-spotlight {
   position: fixed;
   border-radius: 10px;
-  box-shadow: 0 0 0 9999px rgba(15, 23, 32, 0.28);
+  box-shadow:
+    0 0 0 9999px rgba(15, 23, 32, 0.28),
+    inset 0 0 0 9999px rgba(255, 255, 255, 0.12);
   border: 2px solid var(--accent);
   transition: all 0.15s ease-out;
   pointer-events: none;

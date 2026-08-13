@@ -24,6 +24,7 @@ function TourApp({ steps, setActiveMode, setActiveProfileMode, setAnalyzeSubMode
           <div className="profile-analyze-row" data-testid="target-analyze" />
         </div>
         <div className="analyze-report-actions" data-testid="target-reports" />
+        <div className="analyze-submode-row" data-testid="target-submode" />
         <div data-tour-target="sidebar-results" data-testid="target-sidebar-results" />
         <div data-tour-target="sidebar-database" data-testid="target-sidebar-database" />
         <div data-tour-target="sidebar-mutations" data-testid="target-sidebar-mutations" />
