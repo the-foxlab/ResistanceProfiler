@@ -58,7 +58,7 @@ const ABOUT_WORKFLOW_STEPS = [
   },
 ];
 
-export function AboutTab({ setActiveMode }) {
+export function AboutTab({ setActiveMode, onStartTour }) {
   const [copiedCommandKey, setCopiedCommandKey] = useState('');
 
   const copyAboutCommand = async (content, key) => {
@@ -88,6 +88,17 @@ export function AboutTab({ setActiveMode }) {
           </p>
           <div className="about-hero-actions">
             <button type="button" onClick={() => setActiveMode('analyze')}>Start analysis</button>
+            <button
+              type="button"
+              className="about-hero-link"
+              onClick={() => {
+                if (onStartTour) {
+                  onStartTour();
+                }
+              }}
+            >
+              Take a tour
+            </button>
             <a
               className="about-hero-link"
               href="https://the-foxlab.github.io/ResistanceProfiler/"

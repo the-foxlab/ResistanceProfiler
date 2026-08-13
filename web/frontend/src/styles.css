@@ -2560,3 +2560,113 @@ th.sortable-col {
   color: var(--muted);
   font-size: 0.85rem;
 }
+
+/* ── Guided tour overlay ────────────────────────────────────────────────── */
+.tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.tour-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 32, 0.45);
+  pointer-events: auto;
+}
+
+.tour-spotlight {
+  position: fixed;
+  border-radius: 8px;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 32, 0.45);
+  border: 2px solid var(--accent);
+  transition: all 0.15s ease-out;
+  pointer-events: none;
+}
+
+.tour-tooltip {
+  position: fixed;
+  max-width: 360px;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 32, 0.18);
+  padding: 1rem 1.1rem 0.9rem;
+  pointer-events: auto;
+  outline: none;
+}
+
+.tour-tooltip-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.tour-tooltip-title {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.tour-tooltip-counter {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tour-tooltip-body {
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--muted-strong);
+  margin-bottom: 0.85rem;
+}
+
+.tour-tooltip-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.tour-tooltip-nav {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.tour-btn {
+  font: inherit;
+  font-size: 0.85rem;
+  border-radius: 6px;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.tour-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tour-btn-skip {
+  color: var(--muted);
+  border-color: transparent;
+  background: transparent;
+}
+
+.tour-btn-next,
+.tour-btn-finish {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.tour-btn-next:hover:not(:disabled),
+.tour-btn-finish:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}

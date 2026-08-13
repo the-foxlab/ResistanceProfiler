@@ -12,8 +12,6 @@ ResistanceProfiler produces one required output and optional structured exports.
 
 ## HTML report (`*.report.html`)
 
-Primary human-readable result artifact.
-
 What to inspect first:
 
 - sample and project identity
@@ -26,6 +24,25 @@ Best use:
 
 - review by analysts and clinicians
 - sharing a portable report artifact
+
+### Detailed examples of important report tabs
+
+<figure markdown>
+![Summary tab](../assets/1_summary.png){: loading=lazy}
+<figcaption>Primary summary that condenses findings.</figcaption>
+</figure>
+
+<figure markdown>
+![Database tab](../assets/2_database_hits.png){: loading=lazy}
+<figcaption>Detailed overview over all mutations that have rule hits in the selected database.</figcaption>
+</figure>
+
+<figure markdown>
+![Mutation tab](../assets/3_all_mutations.png){: loading=lazy}
+<figcaption>Detailed overview over all mutations independent on whether they have database hits.</figcaption>
+</figure>
+
+
 
 ## JSON export (`*.results.json`)
 
