@@ -75,7 +75,7 @@ def parse_genbank_sources(genbank_paths: list[Path]) -> list[ParsedGenBankRefere
 
 def parse_genbank_records(genbank_path: Path) -> list[ParsedGenBankReference]:
     """
-    Parse one or more GenBank records from a file.
+    Parse one or more GenBank records from a .gb file.
 
     The project stores one internal reference per GenBank record and one feature per
     CDS feature. Feature identifiers are extracted from the GenBank qualifiers and are
