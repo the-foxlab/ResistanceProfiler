@@ -37,7 +37,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ['pytest>=7.4', 'pytest-cov>=4.1', 'ruff>=0.1', 'httpx>=0.27', 'fakeredis>=2.0', 'mypy>=1.10']
-docs = ['mkdocs>=1.6', 'mkdocs-material>=9.5', 'mkdocs-mermaid2-plugin>=1.1']
+docs = ['mkdocs>=1.6', 'mkdocs-material>=9.5', 'mkdocs-mermaid2-plugin>=1.1', 'mkdocs-glightbox>=0.4']
 
 [project.scripts]
 respro = 'respro.cli.main:app'
