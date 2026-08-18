@@ -53,7 +53,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       id: 'vcf-bam',
       targetSelector: '[data-tour-target="vcf-bam"]',
       title: 'VCF mode — BAM (optional)',
-      body: 'An optional sorted BAM file for coverage evaluation. A BAM index is generated automatically. This is only needed when you want coverage-based filtering.',
+      body: 'An optional sorted BAM file for coverage evaluation. A BAM index is generated automatically. This is only needed when you want coverage-annotation and filtering.',
       before: () => {
         setActiveMode('analyze');
         setAnalyzeSubMode('single');
@@ -89,7 +89,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       id: 'vcf-coverage-cutoff',
       targetSelector: '[data-tour-target="vcf-coverage-cutoff"]',
       title: 'VCF mode — coverage cutoff',
-      body: 'Set the minimum read depth required to include a position. Positions below this depth are excluded from variant calling.',
+      body: 'Set the minimum read depth required to include a position. Variants below this threshold are ignored and will not appear in the report..',
       before: () => {
         setActiveMode('analyze');
         setAnalyzeSubMode('single');
@@ -149,7 +149,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       id: 'analyze-submode',
       targetSelector: '.analyze-submode-row',
       title: 'One sample or many',
-      body: 'Use this toggle to switch between "One Sample" (what you just saw) and "Multiple Samples". The batch mode lets you submit up to 25 VCF or FASTA files at once with a shared reference, per-sample BAMs, and a single set of cutoffs — ideal when you have a plate or folder of samples to profile together.',
+      body: 'Use this toggle to switch between "One Sample" (what you just saw) and "Multiple Samples". The batch mode lets you submit multiple VCF or FASTA files at once with a shared reference, per-sample BAMs, and a single set of cutoffs — ideal when you have a plate or folder of samples to profile together.',
       before: () => {
         setActiveMode('analyze');
         setAnalyzeSubMode('single');
