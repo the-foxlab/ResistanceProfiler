@@ -96,6 +96,41 @@ export function useProfileSubmit({
     }
   };
 
+  const runExampleProfile = async () => {
+    // Profile the per-database example consensus FASTA stored in the selected database.
+    const database = databases.find((item) => item.id === selectedDatabaseId) || null;
+    const sampleName = database
+      ? `${database.display_name || database.id} example`
+      : 'example';
+    setIsProcessingFasta(true);
+    setStatusError('');
+    try {
+      const payload = {
+        use_example: true,
+        sample: sampleName,
+        database_id: selectedDatabaseId,
+        threads: FRONTEND_CONFIG.profile.threads,
+      };
+      const submitResponse = await apiPost('/api/profile/fasta', payload);
+      isCancellationRequested.current = false;
+      setActiveJobId(submitResponse.job_id);
+      setActiveJobStatus('queued');
+      const result = await pollJob(submitResponse.job_id);
+      setSessionResults((prev) => [...prev, result]);
+      addResultArtifactPaths(result);
+      setSelectedProfileReportPath(result.report_html_path);
+      setInlineReportPath(result.report_html_path);
+      setInlineReportLabel(`${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`);
+    } catch (error) {
+      setStatusError(formatUserError(error.message));
+    } finally {
+      setIsProcessingFasta(false);
+      setIsCancelingJob(false);
+      setActiveJobId('');
+      setActiveJobStatus('');
+    }
+  };
+
   const submitVcf = async () => {
     const databaseId = selectedDatabaseId;
     setIsProcessingVcf(true);
@@ -275,6 +310,7 @@ export function useProfileSubmit({
     buildArtifactUrl,
     cancelActiveJob,
     runSelectedProfile,
+    runExampleProfile,
     uploadFastaFile,
     uploadVcfFile,
     uploadReferenceFile,

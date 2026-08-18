@@ -34,6 +34,7 @@ export function AnalyzeTab({
   isCancelingJob,
   cancelActiveJob,
   runSelectedProfile,
+  runExampleProfile,
   statusError,
   selectedProfileReportPath,
   setSelectedProfileReportPath,
@@ -159,6 +160,21 @@ export function AnalyzeTab({
                 {subMode.label}
               </button>
             ))}
+            {selectedDatabase?.has_example ? (
+              <button
+                type="button"
+                className="analyze-submode-btn example-btn"
+                onClick={() => {
+                  setActiveProfileMode('fasta');
+                  setAnalyzeSubMode('single');
+                  runExampleProfile();
+                }}
+                disabled={isProfileBusy}
+                title="Load and profile the example consensus FASTA shipped with this database"
+              >
+                Example
+              </button>
+            ) : null}
           </div>
         </div>
 

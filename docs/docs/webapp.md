@@ -73,7 +73,7 @@ ships pre-built `.db` files does **not** need access to any of them.
 
 | Phase | Host | Purpose |
 |---|---|---|
-| Maintained-DB bootstrap & updates | `raw.githubusercontent.com` | Fetch `manifest.json`, `rules.tsv`, `metadata.json`, `formula-rules.tsv` from `the-foxlab/respro-databases` |
+| Maintained-DB bootstrap & updates | `raw.githubusercontent.com` | Fetch `manifest.json`, `rules.tsv`, `metadata.json`, `formula-rules.tsv`, and (when declared) `example.fasta` from `the-foxlab/respro-databases` |
 | Maintained-DB bootstrap | `eutils.ncbi.nlm.nih.gov` | Fetch GenBank reference records (`efetch.fcgi?db=nuccore`) referenced by a database's rules |
 | `respro init` enrichment | `pubchem.ncbi.nlm.nih.gov` | Resolve drug names to CIDs, descriptions, titles, structure images (PUG REST) |
 | `respro init` enrichment | `eutils.ncbi.nlm.nih.gov` | PubMed article summaries (`esummary.fcgi`), PMC ID conversion |
@@ -215,6 +215,15 @@ In batch VCF mode, an optional BAM can be attached to each sample for per-sample
 |---|---|---|
 | `RESPRO_WEB_MAINTAINED_BOOTSTRAP` | `false` | When `true` (or `1`/`yes`/`on`), missing maintained databases are downloaded into `data/project_databases/` at startup, and a weekly background thread checks for updates. |
 | `RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS` | `604800` (7 days) | Interval between maintained-database update checks. Set to `0` to disable the weekly thread (a one-time check still runs at startup when bootstrap is enabled). Invalid values fall back to the default. |
+
+A maintained database may declare an optional `example_fasta_path` field in its
+`manifest.json` entry. When present, the referenced single-record consensus
+FASTA is downloaded as `example.fasta` alongside the rules and stored in the
+project database. The webapp then shows an **Example** button next to the
+"One sample" / "Multiple samples" choice in the Analyze tab for that database;
+clicking it switches to FASTA mode and profiles the stored example in one step,
+without requiring any user-supplied input file. The button is only shown for
+databases that actually ship an example.
 
 ### Minimal `.env` example
 

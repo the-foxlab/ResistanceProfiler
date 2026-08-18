@@ -25,16 +25,17 @@ def run_profile_fasta(
     *,
     project_db: str,
     output_dir: str,
-    fasta_path: str,
+    fasta_path: str | None,
     sample: str,
     threads: int,
     input_display_name: str | None = None,
     artifact_base_name: str | None = None,
+    use_example: bool = False,
 ) -> dict:
     """RQ job wrapper for FASTA profiling."""
     output_html_path = _build_web_output_html_path(
         output_dir=Path(output_dir),
-        input_name=artifact_base_name or input_display_name or Path(fasta_path).name,
+        input_name=artifact_base_name or input_display_name or (Path(fasta_path).name if fasta_path else 'example'),
     )
     return _run_job_with_logging(
         mode='fasta',
@@ -43,10 +44,11 @@ def run_profile_fasta(
         job_func=lambda: _run_profile_fasta_subprocess(
             project_db=Path(project_db),
             output_html_path=output_html_path,
-            fasta_path=Path(fasta_path),
+            fasta_path=Path(fasta_path) if fasta_path else None,
             sample=sample,
             threads=threads,
             input_display_name=input_display_name,
+            use_example=use_example,
         ),
     )
 
@@ -116,10 +118,11 @@ def _run_profile_fasta_subprocess(
     *,
     project_db: Path,
     output_html_path: Path,
-    fasta_path: Path,
+    fasta_path: Path | None,
     sample: str,
     threads: int,
     input_display_name: str | None,
+    use_example: bool = False,
 ) -> dict:
     """Execute FASTA profiling through the respro CLI and return the web API payload."""
     command = [
@@ -127,8 +130,12 @@ def _run_profile_fasta_subprocess(
         'fasta',
         '--project',
         str(project_db),
-        '--fasta',
-        str(fasta_path),
+    ]
+    if use_example:
+        command.append('--example')
+    else:
+        command.extend(['--fasta', str(fasta_path)])
+    command.extend([
         '--sample',
         sample,
         '--output',
@@ -140,7 +147,7 @@ def _run_profile_fasta_subprocess(
         'json',
         '--export',
         'pdf',
-    ]
+    ])
     if input_display_name:
         command.extend(['--input-display-name', input_display_name])
 
@@ -154,7 +161,7 @@ def _run_profile_fasta_subprocess(
         'sample_name': run_payload.get('sample_name', sample),
         'created_at': run_payload.get('created_at', ''),
         'reference_name': run_payload.get('reference_name', ''),
-        'query_name': _read_first_fasta_name(fasta_path),
+        'query_name': _read_first_fasta_name(fasta_path) if fasta_path else 'example',
         'report_html_path': str(artifacts['html']),
         'report_json_path': str(artifacts['json']),
         'report_pdf_path': str(artifacts['pdf']),

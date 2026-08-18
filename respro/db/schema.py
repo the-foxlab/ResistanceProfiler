@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS project (
     metadata_maintainer_update TEXT NOT NULL DEFAULT '',
     metadata_license TEXT NOT NULL DEFAULT '',
     metadata_tsv_checksum TEXT NOT NULL DEFAULT '',
+    example_fasta TEXT NOT NULL DEFAULT '',  -- optional per-database example consensus FASTA (single record)
     schema_version INTEGER NOT NULL DEFAULT 1
 );
 
@@ -404,6 +405,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'metadata_maintainer_update': "TEXT NOT NULL DEFAULT ''",
         'metadata_license': "TEXT NOT NULL DEFAULT ''",
         'metadata_tsv_checksum': "TEXT NOT NULL DEFAULT ''",
+        'example_fasta': "TEXT NOT NULL DEFAULT ''",
     },
     'reference': {
         'accession': "TEXT DEFAULT ''",

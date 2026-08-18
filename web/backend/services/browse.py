@@ -67,6 +67,7 @@ def list_databases(project_databases_dir: Path) -> dict:
                     'schema_version': project_row['schema_version'],
                     'supported_organisms': organisms,
                     'mutation_count': mutation_count,
+                    'has_example': bool(project_row.get('example_fasta')),
                     'metadata': metadata,
                     'algorithms': algorithms,
                 }

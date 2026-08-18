@@ -33,6 +33,7 @@ Notes:
 - `--genbank` can be repeated for multiple files.
 - `--no-additional-info` skips network lookups for extra metadata.
 - `--metadata` accepts a JSON file with curated project metadata. See the section below for the supported keys and value rules.
+- `--example` optionally stores a single-record consensus FASTA shipped with the database. Users can then profile it via `respro fasta --example` or via the webapp "Example" button. Use `respro add --example` to overwrite and `respro add --no-example` to clear it.
 - After initialization, later profiling runs use this database as the internal coordinate and rule source.
 
 After this command succeeds, the file `myrespro.db` should exist.

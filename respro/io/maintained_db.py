@@ -122,6 +122,14 @@ def download_database_files(db_name: str, dest_dir: Path) -> dict[str, object]:
             f'{db_name}/formula-rules.tsv',
         )
 
+    example_path: Path | None = None
+    if 'example.fasta' in file_map:
+        example_path = _download_file(
+            file_map['example.fasta'],
+            dest_dir / 'example.fasta',
+            f'{db_name}/example.fasta',
+        )
+
     accessions = _parse_reference_identifiers(rules_path)
     genbank_paths = _fetch_genbank_records(accessions, dest_dir)
 
@@ -129,6 +137,7 @@ def download_database_files(db_name: str, dest_dir: Path) -> dict[str, object]:
         'rules': rules_path,
         'metadata': metadata_path,
         'formula_rules': formula_rules_path,
+        'example': example_path,
         'genbank': genbank_paths,
     }
 
@@ -158,6 +167,15 @@ def list_output_files(db_name: str) -> list[dict]:
             {
                 'name': 'formula-rules.tsv',
                 'download_url': _resolve_manifest_path_to_download_url(formula_rules_path),
+            }
+        )
+
+    example_fasta_path = entry.get('example_fasta_path', '')
+    if example_fasta_path:
+        output_files.append(
+            {
+                'name': 'example.fasta',
+                'download_url': _resolve_manifest_path_to_download_url(example_fasta_path),
             }
         )
 
@@ -212,6 +230,10 @@ def _validate_manifest_entry(entry: object, idx: int) -> None:
     formula_rules_path = entry.get('formula_rules_path')
     if not isinstance(formula_rules_path, str):
         raise RuntimeError(f'Malformed manifest: databases[{idx}].formula_rules_path must be a string')
+
+    example_fasta_path = entry.get('example_fasta_path', '')
+    if not isinstance(example_fasta_path, str):
+        raise RuntimeError(f'Malformed manifest: databases[{idx}].example_fasta_path must be a string')
 
     metadata = entry.get('metadata')
     if not isinstance(metadata, dict):

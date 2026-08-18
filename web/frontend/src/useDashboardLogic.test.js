@@ -860,6 +860,100 @@ describe('useDashboardLogic - Report Display Flow', () => {
   });
 });
 
+describe('useDashboardLogic - Example FASTA profile', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.fetch.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('runExampleProfile posts use_example:true to /api/profile/fasta and stores the result', async () => {
+    global.fetch.mockImplementation((url, options = {}) => {
+      const requestUrl = String(url);
+
+      if (requestUrl.includes('/api/ui/config')) {
+        return Promise.resolve({ ok: true, json: async () => ({ data: {} }) });
+      }
+
+      if (requestUrl.includes('/api/ui/legal')) {
+        return Promise.resolve({ ok: true, json: async () => ({ data: { enabled: false } }) });
+      }
+
+      if (requestUrl.includes('/api/databases')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            data: {
+              items: [{
+                id: 'db1',
+                display_name: 'HIVdb',
+                has_example: true,
+              }],
+            },
+          }),
+        });
+      }
+
+      if (requestUrl.includes('/api/mutations')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ data: { items: [], columns: [] } }),
+        });
+      }
+
+      if (requestUrl.includes('/api/profile/fasta') && options.method === 'POST') {
+        const body = JSON.parse(options.body || '{}');
+        expect(body.use_example).toBe(true);
+        expect(body.fasta_id).toBeUndefined();
+        return Promise.resolve({ ok: true, json: async () => ({ job_id: 'job-example' }) });
+      }
+
+      if (requestUrl.includes('/api/jobs/job-example')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            status: 'succeeded',
+            result: {
+              sample_name: 'HIVdb example',
+              reference_name: 'HIV',
+              database_id: 'db1',
+              report_html_path: '/data/results/example.report.html',
+              created_at: '2026-05-12T10:00:00',
+              resistance_hits: 3,
+              mode: 'fasta',
+            },
+          }),
+        });
+      }
+
+      return Promise.resolve({ ok: true, json: async () => ({}) });
+    });
+
+    const { result } = renderHook(() => useDashboardLogic());
+
+    await waitFor(() => {
+      expect(result.current.databases.length).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      result.current.setSelectedDatabaseId('db1');
+    });
+
+    await act(async () => {
+      await result.current.runExampleProfile();
+    });
+
+    await waitFor(() => {
+      expect(result.current.reportOptions.length).toBe(1);
+    });
+
+    expect(result.current.reportOptions[0].label).toContain('HIVdb example');
+  });
+});
+
 describe('_resolveLegalLink', () => {
   // The footer "Legal notice" href is derived from the /api/ui/legal payload.
   // Disabled → null (no footer). URL mode → external link. Path mode → /legal route.

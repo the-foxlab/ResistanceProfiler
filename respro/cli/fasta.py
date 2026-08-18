@@ -5,6 +5,8 @@ FASTA-based resistance profiling command — respro fasta.
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import Annotated
 
@@ -25,6 +27,7 @@ from respro.config.cli_settings import CLI_CONFIG
 from respro.core.annotation import annotate_variants
 from respro.core.fasta_to_vcf import fasta_to_vcf
 from respro.core.query import resolve_fasta_query
+from respro.db.rules_queries import get_project_example_fasta
 from respro.db.schema import open_project_db
 from respro.utils.cli_errors import cli_error, render_click_exception
 from respro.utils.logging import err_console
@@ -36,9 +39,16 @@ def _profile_fasta_command(
         typer.Option('--project', '-p', exists=True, help='Project database.')
     ],
     consensus_fasta: Annotated[
-        Path,
+        Path | None,
         typer.Option('--fasta', '-f', exists=True, help='Input consensus FASTA sequence.')
-    ],
+    ] = None,
+    use_example: Annotated[
+        bool,
+        typer.Option(
+            '--example',
+            help='Profile the example consensus FASTA stored in the project database.',
+        )
+    ] = False,
     sample: Annotated[
         str,
         typer.Option('--sample', '-s', help='Sample name for the report.')
@@ -87,6 +97,12 @@ def _profile_fasta_command(
     project_conn = None
     results_conn = None
 
+    if use_example and consensus_fasta is not None:
+        cli_error('Provide either --fasta or --example, not both.')
+    if not use_example and consensus_fasta is None:
+        cli_error('Provide --fasta or --example to specify the input consensus sequence.')
+
+    example_temp_path: Path | None = None
     try:
         export_formats = _parse_export_formats(export)
 
@@ -94,6 +110,21 @@ def _profile_fasta_command(
         project_row = project_conn.execute('SELECT name FROM project LIMIT 1').fetchone()
         if project_row is None:
             cli_error('No project found in the database')
+
+        # When --example is used, materialise the stored example FASTA text into a temp file so the
+        # existing read/align pipeline is reused unchanged.
+        if use_example:
+            example_text = get_project_example_fasta(project_conn)
+            if example_text is None:
+                cli_error(
+                    f'No example FASTA is stored in project database {project!s}. '
+                    'Add one with `respro init --example <fasta>`.'
+                )
+            temp_fd, temp_name = tempfile.mkstemp(prefix='respro_example_', suffix='.fasta')
+            example_temp_path = Path(temp_name)
+            os.close(temp_fd)
+            example_temp_path.write_text(example_text)
+            consensus_fasta = example_temp_path
 
         results_conn = _init_results_db_connection(
             str(results_db) if results_db else None, project_conn, logger,
@@ -163,6 +194,8 @@ def _profile_fasta_command(
             project_conn.close()
         if results_conn is not None:
             results_conn.close()
+        if example_temp_path is not None:
+            example_temp_path.unlink(missing_ok=True)
 
 
 def register(app: typer.Typer) -> None:
