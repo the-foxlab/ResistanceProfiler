@@ -73,6 +73,7 @@ def _rule(
     reference: str,
     mutation: str = 'E',
     reference_identifier: str = '',
+    antiviral: str = 'DrugX',
 ) -> dict[str, str]:
     """Build a minimal TSV row dict for a single resistance rule."""
     row = {
@@ -80,7 +81,7 @@ def _rule(
         'position': str(position),
         'reference': reference,
         'mutation': mutation,
-        'antiviral': 'DrugX',
+        'antiviral': antiviral,
     }
     if reference_identifier:
         row['reference_identifier'] = reference_identifier
@@ -252,6 +253,40 @@ class TestValidateReferenceAminoAcids:
             mismatch_keys = _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
         assert len(mismatch_keys) == 3
         assert any('3' in r.message and 'mismatch' in r.message.lower() for r in caplog.records)
+
+    def test_emits_each_mismatch_only_once_per_position(self, caplog) -> None:
+        import logging
+
+        # Same feature/position/ref_aa repeated across multiple antivirals —
+        # the mismatch should be logged exactly once and the key returned once.
+        rows = [
+            _rule('gX', position=1, reference='Z', antiviral='DrugA'),
+            _rule('gX', position=1, reference='Z', antiviral='DrugB'),
+            _rule('gX', position=1, reference='Z', antiviral='DrugC'),
+        ]
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+            mismatch_keys = _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
+        assert mismatch_keys == {('gX', '1', '', 'Z')}
+        mismatch_messages = [
+            r.message for r in caplog.records if 'mismatch' in r.message.lower()
+        ]
+        assert len(mismatch_messages) == 1
+        assert mismatch_messages[0].count("pos 1 (1-based)") == 1
+
+    def test_emits_out_of_range_only_once_per_position(self, caplog) -> None:
+        import logging
+
+        rows = [
+            _rule('gX', position=10, reference='M', antiviral='DrugA'),
+            _rule('gX', position=10, reference='M', antiviral='DrugB'),
+        ]
+        with caplog.at_level(logging.WARNING, logger='respro.db.rules_import'):
+            _validate_reference_amino_acids(rows, _features('gX', _AA_SEQ), coord_base=1)
+        out_of_range_messages = [
+            r.message for r in caplog.records if 'out of range' in r.message
+        ]
+        assert len(out_of_range_messages) == 1
+        assert out_of_range_messages[0].count("pos 10 (1-based)") == 1
 
     def test_skips_rows_without_ref_aa(self) -> None:
         # Row has no 'reference'/'ref_aa' key — must not raise
