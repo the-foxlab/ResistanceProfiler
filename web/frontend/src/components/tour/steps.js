@@ -89,7 +89,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       id: 'vcf-coverage-cutoff',
       targetSelector: '[data-tour-target="vcf-coverage-cutoff"]',
       title: 'VCF mode — coverage cutoff',
-      body: 'Set the minimum read depth required to include a position. Variants below this threshold are ignored and will not appear in the report..',
+      body: 'Set the minimum read depth required to include a position. Variants below this threshold are ignored and will not appear in the report.',
       before: () => {
         setActiveMode('analyze');
         setAnalyzeSubMode('single');
