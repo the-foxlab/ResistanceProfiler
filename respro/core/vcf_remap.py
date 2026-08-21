@@ -10,7 +10,7 @@ from Bio.Seq import Seq
 
 from respro.core.alignment import cigar_to_coordinate_map
 from respro.core.query import QueryRecord, pick_best_reference_id, select_matches_for_reference
-from respro.db.models import FeatureMatch, FeatureRecord, VariantCall
+from respro.db.models import FeatureMatch, FeatureRecord, IntronInterval, VariantCall
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ def remap_variants(
     for match in matches:
         q2c = _build_query_to_cds_map(
             match.cigar, match.query_start, match.query_end,
-            match.strand, query_len, match.cds_start,
+            match.strand, query_len, match.cds_start, match.intron_intervals,
         )
         c2q = {cds_pos: query_pos for query_pos, cds_pos in q2c.items()}
         match_maps.append((match, q2c, c2q))
@@ -410,6 +410,7 @@ def _build_query_to_cds_map(
     strand: str,
     query_len: int,
     cds_start: int = 0,
+    intron_intervals: tuple[IntronInterval, ...] = (),
 ) -> dict[int, int]:
     """
     Invert a CIGAR-based coordinate map to query-position → CDS-position.
@@ -417,21 +418,52 @@ def _build_query_to_cds_map(
     For '-' strand matches the CIGAR was built against the reverse-complement
     query, so positions are first converted back to forward-strand coordinates.
 
-    :param cigar: CIGAR string from alignment
+    For spliced features aligned against an unspliced query, ``cigar`` is the
+    exon-only CIGAR (intron ``I`` ops removed) and ``intron_intervals`` carries
+    the intron query spans. Because the exon-only CIGAR consumes query
+    positions sequentially with no intron gap, exon-2 (and later) CDS positions
+    would otherwise map into the intron query span. Each mapped query position
+    is therefore shifted past the cumulative length of all introns whose
+    coding-orientation start precedes it, and intron query positions themselves
+    are excluded from the inverted map.
+
+    :param cigar: exon-only CIGAR string from alignment
     :param query_start: 0-based forward-strand start (from FeatureMatch)
     :param query_end: 0-based forward-strand end (from FeatureMatch)
     :param strand: alignment strand ('+' or '-')
     :param query_len: total query sequence length
     :param cds_start: 0-based CDS offset where this alignment starts
+    :param intron_intervals: intron intervals (query_start relative to the
+        coding-orientation region start) carried on the FeatureMatch
     :return: mapping {forward_query_pos: cds_pos}
     """
-    cds_to_query: dict[int, int | None]
+    # Intron spans in the orientation cigar_to_coordinate_map produces.
+    # iv.query_start is relative to the CIGAR's coding-orientation region start.
+    # For '-' strand the CIGAR is in RC-orientation, so the shift must happen
+    # in RC space BEFORE converting to forward-strand coordinates — otherwise
+    # the RC-orientation intron spans would be matched against forward-strand
+    # query positions, silently dropping exon-1 variants and mis-remapping
+    # exon-2 variants.
     if strand == '+':
+        orient_start = query_start
+        intron_spans = [
+            (orient_start + iv.query_start, orient_start + iv.query_start + iv.length)
+            for iv in intron_intervals
+        ]
         cds_to_query = cigar_to_coordinate_map(cigar, query_start)
+        if intron_spans:
+            cds_to_query = _shift_past_introns(cds_to_query, intron_spans)
     else:
-        # Recover RC-space start from the stored forward-strand end
         rc_start = query_len - query_end
+        orient_start = rc_start
+        intron_spans = [
+            (orient_start + iv.query_start, orient_start + iv.query_start + iv.length)
+            for iv in intron_intervals
+        ]
         cds_to_query_rc = cigar_to_coordinate_map(cigar, rc_start)
+        if intron_spans:
+            cds_to_query_rc = _shift_past_introns(cds_to_query_rc, intron_spans)
+        # Convert RC-orientation positions to forward-strand AFTER the shift.
         cds_to_query = {}
         for cds_pos, rc_pos in cds_to_query_rc.items():
             if rc_pos is not None:
@@ -453,5 +485,47 @@ def _build_query_to_cds_map(
             query_to_cds[qpos] = cds_pos
 
     return query_to_cds
+
+
+def _shift_past_introns(
+    cds_to_query: dict[int, int | None],
+    intron_spans: list[tuple[int, int]],
+) -> dict[int, int | None]:
+    """
+    Shift each mapped query position past the cumulative length of preceding introns.
+
+    The exon-only CIGAR maps CDS positions to query offsets that ignore intron
+    query spans. For a CDS position whose raw mapped offset falls at or after
+    an intron's coding-orientation start, add the cumulative intron length so
+    the position lands in the correct exon in the full (unspliced) query.
+
+    Mapped positions that fall *inside* an intron span (should not happen for
+    true exon positions, but defensively) are set to None.
+
+    Operates in a single orientation space (the CIGAR's coding orientation:
+    forward for '+' strand, RC for '-' strand). The caller converts to
+    forward-strand coordinates afterward for '-' strand.
+
+    :param cds_to_query: CDS-position → raw orientation-absolute query position
+    :param intron_spans: intron spans in the same orientation as the raw positions
+    :return: CDS-position → corrected query position (same orientation as input)
+    """
+    if not intron_spans:
+        return cds_to_query
+    spans = sorted(intron_spans)
+    corrected: dict[int, int | None] = {}
+    for cds_pos, qpos in cds_to_query.items():
+        if qpos is None:
+            corrected[cds_pos] = None
+            continue
+        # Cumulative intron length for introns whose start is at or before qpos.
+        shift = sum(end - start for start, end in spans if start <= qpos)
+        new_pos = qpos + shift
+        # Exclude positions that land inside an intron span after shifting.
+        if any(start <= new_pos < end for start, end in spans):
+            corrected[cds_pos] = None
+            continue
+        corrected[cds_pos] = new_pos
+    return corrected
 
 

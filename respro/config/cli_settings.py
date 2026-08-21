@@ -86,6 +86,7 @@ class CliAlignmentConfig:
     gap_extension_penalty_1: int
     gap_open_penalty_2: int
     gap_extension_penalty_2: int
+    intron_junction_tolerance: int
 
 
 @dataclass(frozen=True)
@@ -163,6 +164,7 @@ def _load_cli_config() -> CliConfig:
             gap_extension_penalty_1=int(alignment['gap_extension_penalty_1']),
             gap_open_penalty_2=int(alignment['gap_open_penalty_2']),
             gap_extension_penalty_2=int(alignment['gap_extension_penalty_2']),
+            intron_junction_tolerance=int(alignment['intron_junction_tolerance']),
         ),
     )
 

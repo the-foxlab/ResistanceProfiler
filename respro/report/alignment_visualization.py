@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from markupsafe import Markup, escape
 
 from respro.core.annotation import reverse_complement
-from respro.core.fasta_to_vcf import _gapped_strings_from_cigar
+from respro.core.fasta_to_vcf import _gapped_strings_from_cigar, _strip_introns_from_region
 from respro.db.models import AnnotatedVariant, FeatureMatch
 
 
@@ -88,6 +88,13 @@ def build_feature_alignments(
         region = query_upper[match.query_start:match.query_end]
         if match.strand == '-':
             region = reverse_complement(region)
+
+        # Spliced features aligned against an unspliced query carry intron
+        # intervals (coding-orientation, relative to the region start). The
+        # exon-only CIGAR excludes intron I ops, so the region must drop the
+        # intron spans too — otherwise the CIGAR's M ops walk exon 1 into the
+        # intron bases and the snippet renders a giant intron gap row.
+        region = _strip_introns_from_region(region, match.intron_intervals)
 
         aligned_ref_coding, aligned_query_coding = _gapped_strings_from_cigar(
             feature.nt_sequence.upper(), region, match.cigar, match.cds_start,

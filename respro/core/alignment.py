@@ -16,11 +16,21 @@ import mappy
 
 from respro.config.cli_settings import CLI_CONFIG
 from respro.db.features import load_feature_segments_by_feature_id
-from respro.db.models import FeatureMatch, FeatureRecord
+from respro.db.models import FeatureMatch, FeatureRecord, FeatureSegment, IntronInterval
 
 logger = logging.getLogger(__name__)
 
 _RE_CIGAR = re.compile(r'(\d+)([MIDNSHP=X])')
+
+__all__ = [
+    'IntronInterval',
+    'classify_introns',
+    'exon_junction_cds_offsets',
+    'match_query_to_features',
+    'load_features',
+    'parse_cigar',
+    'cigar_to_coordinate_map',
+]
 
 # ──────────────────────────────────────────────────────────────────────
 # Public API
@@ -186,12 +196,24 @@ def _match_with_mappy(
             continue
 
         h = primary[0]
-        identity = h.mlen / h.blen if h.blen else 0.0
-        cds_coverage = (h.q_en - h.q_st) / len(cds)
-        query_coverage = (h.r_en - h.r_st) / len(query_upper)
-
         strand = '+' if h.strand == 1 else '-'
         cigar = _normalize_mappy_cigar(h.cigar_str, strand)
+
+        # Classify intron I-ops by exon-junction position for spliced features.
+        # Produces an exon-only CIGAR (intron I ops removed) plus intron
+        # intervals carried on the FeatureMatch. query_start in each interval is
+        # relative to the alignment's coding-orientation query region start
+        # (i.e. relative to the first base the CIGAR consumes in the query);
+        # downstream strand-aware consumers convert to forward-strand coords.
+        junctions = exon_junction_cds_offsets(feature)
+        intron_tolerance = cfg.intron_junction_tolerance
+        cigar, intron_intervals = classify_introns(cigar, junctions, intron_tolerance)
+        intron_lengths = [iv.length for iv in intron_intervals]
+
+        identity, cds_coverage = _recompute_exon_metrics(
+            h, cds, feature, intron_lengths, cigar,
+        )
+        query_coverage = (h.r_en - h.r_st) / len(query_upper)
 
         matches.append(FeatureMatch(
             feature=feature,
@@ -203,9 +225,51 @@ def _match_with_mappy(
             strand=strand,
             cigar=cigar,
             cds_start=h.q_st,
+            intron_intervals=tuple(intron_intervals),
         ))
 
     return matches
+
+
+def _recompute_exon_metrics(
+    h: mappy.Alignment,
+    cds: str,
+    feature: FeatureRecord,
+    intron_lengths: list[int],
+    exon_only_cigar: str,
+) -> tuple[float, float]:
+    """
+    Recompute identity and CDS coverage over exons only for spliced features.
+
+    When introns were classified, the intron ``D`` ops (deletions in the CDS
+    query = intron spans in the genome reference) would normally be counted in
+    ``h.blen`` and crash identity. However mappy reports ``h.blen`` as the
+    query (CDS) block length, which already excludes ``D`` ops, so the intron
+    does not inflate it. Identity is therefore computed as ``h.mlen`` over the
+    aligned exon span (sum of ``M`` and ``D`` ops in the exon-only CIGAR),
+    which equals the coding bases assessed. CDS coverage is the aligned exon
+    length over the sum of exon lengths (the true coding span), clamped to
+    [0.0, 1.0]. Using the exon-only CIGAR avoids mappy soft-clipping inflating
+    coverage above 1.0.
+
+    :param h: mappy primary alignment hit
+    :param cds: feature CDS sequence (spliced, coding orientation)
+    :param feature: feature record (for exon lengths)
+    :param intron_lengths: lengths of classified intron I ops
+    :param exon_only_cigar: exon-only CIGAR (intron I ops removed)
+    :return: ``(identity, cds_coverage)`` both in [0.0, 1.0]
+    """
+    aligned_cds = sum(int(n) for n, op in re.findall(r'(\d+)([MD])', exon_only_cigar))
+    if intron_lengths:
+        # Exon-only identity: matches over the assessed coding span. mlen
+        # already excludes intron D ops; aligned_cds is the exon M+D span.
+        identity = h.mlen / aligned_cds if aligned_cds > 0 else 0.0
+    else:
+        identity = h.mlen / h.blen if h.blen else 0.0
+
+    exon_span = sum(seg.end - seg.start for seg in feature._coding_segments) or len(cds)
+    cds_coverage = aligned_cds / exon_span if exon_span else 0.0
+    return identity, min(cds_coverage, 1.0)
 
 
 def _swap_cigar_indels(cigar: str) -> str:
@@ -268,6 +332,125 @@ def parse_cigar(cigar: str) -> list[tuple[int, str]]:
     :return: list of (length, operation) pairs
     """
     return [(int(m.group(1)), m.group(2)) for m in _RE_CIGAR.finditer(cigar)]
+
+
+def exon_junction_cds_offsets(feature: FeatureRecord) -> list[int]:
+    """
+    Return the 0-based CDS offsets at which each exon junction occurs.
+
+    A junction offset is the cumulative coding length up to the end of an exon;
+    it is the CDS position at which the next exon begins. For a single-segment
+    feature the list is empty.
+
+    Junctions are derived from :attr:`FeatureRecord.segments` in **genomic
+    5'->3' order** (segment_index order), not from ``_coding_segments``. This
+    matches the normalized CIGAR's walking order: for '+' strand the CIGAR
+    walks genomic order (== coding order), and for '-' strand
+    :func:`_normalize_mappy_cigar` reverses the CIGAR so it also walks genomic
+    5'->3' order. Using ``_coding_segments`` (which reverses for '-' strand)
+    would mismatch the CIGAR and misclassify introns.
+
+    :param feature: feature record with optional ``segments``
+    :return: ordered list of exon-junction CDS offsets (one per internal boundary)
+    """
+    segments = feature.segments if feature.segments else (
+        FeatureSegment(segment_index=0, start=feature.start, end=feature.end),
+    )
+    offsets: list[int] = []
+    cumulative = 0
+    for segment in segments[:-1]:
+        cumulative += segment.end - segment.start
+        offsets.append(cumulative)
+    return offsets
+
+
+def classify_introns(
+    cigar: str,
+    junction_offsets: list[int],
+    tolerance: int,
+) -> tuple[str, list[IntronInterval]]:
+    """
+    Classify CIGAR ``I`` ops as introns by exon-junction position.
+
+    Walks the normalized CIGAR (CDS=reference, genome=query) tracking the CDS
+    position consumed by ``M`` and ``D`` ops. An ``I`` op (insertion in the
+    query/genome) is classified as an intron iff **both** hold:
+
+    1. Its CDS position coincides with a known exon-junction offset within
+       ``tolerance`` nt (the primary classifier — no standalone length heuristic).
+    2. Its length is strictly greater than ``tolerance``.
+
+    The length guard is derived from ``tolerance`` rather than carried as a
+    separate knob: an insertion of length ≤ tolerance can never be
+    misclassified as an intron, regardless of where it lands relative to the
+    junction, while real introns (typically hundreds/thousands of nt, always
+    > tolerance) always satisfy the guard. Such intron ``I`` ops are removed
+    from the returned exon-only CIGAR and recorded as :class:`IntronInterval`
+    entries; real coding insertions (any ``I`` op not near a junction, or of
+    length ≤ tolerance) are kept.
+
+    Adjacent same-operation runs in the exon-only CIGAR are merged so downstream
+    consumers receive a clean CIGAR with no spurious length-1 adjacency.
+
+    :param cigar: normalized CIGAR string (CDS=reference, genome=query)
+    :param junction_offsets: exon-junction CDS offsets (from
+        :func:`exon_junction_cds_offsets`); empty for single-exon features
+    :param tolerance: maximum CDS-position distance for an ``I`` op to be
+        classified as an intron, and the strict lower bound on intron length
+        (from ``alignment.intron_junction_tolerance``)
+    :return: ``(exon_only_cigar, intron_intervals)`` where intron_intervals is
+        ordered by CDS junction position
+    """
+    if not junction_offsets:
+        return cigar, []
+
+    junctions = sorted(junction_offsets)
+    introns: list[IntronInterval] = []
+    exon_ops: list[tuple[int, str]] = []
+
+    cds_pos = 0
+    query_pos = 0  # tracked for IntronInterval.query_start (relative to cigar start)
+    for length, op in parse_cigar(cigar):
+        if op == 'I':
+            near_junction = any(
+                abs(cds_pos - j) <= tolerance for j in junctions
+            )
+            if near_junction and length > tolerance:
+                introns.append(IntronInterval(
+                    cds_junction_pos=cds_pos,
+                    query_start=query_pos,
+                    length=length,
+                ))
+            else:
+                exon_ops.append((length, op))
+                query_pos += length
+            continue
+
+        if op == 'D':
+            cds_pos += length
+        elif op == 'M':
+            cds_pos += length
+            query_pos += length
+
+        exon_ops.append((length, op))
+
+    merged = _merge_adjacent_ops(exon_ops)
+    exon_only_cigar = ''.join(f'{length}{op}' for length, op in merged)
+    return exon_only_cigar, introns
+
+
+def _merge_adjacent_ops(ops: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    """Merge adjacent CIGAR operations of the same type into single runs."""
+    if not ops:
+        return []
+    merged: list[tuple[int, str]] = [ops[0]]
+    for length, op in ops[1:]:
+        last_len, last_op = merged[-1]
+        if op == last_op:
+            merged[-1] = (last_len + length, op)
+        else:
+            merged.append((length, op))
+    return merged
 
 
 def cigar_to_coordinate_map(cigar: str, query_start: int) -> dict[int, int | None]:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from respro.utils.files import require_file
 
-PROJECT_SCHEMA_VERSION = 1
+PROJECT_SCHEMA_VERSION = 2
 RESULTS_SCHEMA_VERSION = 1
 
 PROJECT_SCHEMA_SQL = """\
@@ -194,6 +194,7 @@ CREATE TABLE IF NOT EXISTS query_feature_mapping (
     query_end       INTEGER NOT NULL,
     strand          TEXT    NOT NULL DEFAULT '+',
     cigar           TEXT    NOT NULL,
+    intron_intervals TEXT   NOT NULL DEFAULT '[]',
     UNIQUE(query_ref_id, feature_id)
 );
 
@@ -464,6 +465,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
     'query_feature_mapping': {
         'query_coverage': 'REAL NOT NULL DEFAULT 0',
         'cds_start': 'INTEGER NOT NULL DEFAULT 0',
+        'intron_intervals': "TEXT NOT NULL DEFAULT '[]'",
     },
 }
 

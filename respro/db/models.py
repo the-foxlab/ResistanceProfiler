@@ -147,6 +147,23 @@ class FeatureSegment:
     end: int
 
 
+@dataclass(frozen=True)
+class IntronInterval:
+    """One intron detected between two CDS exons in a spliced-feature alignment.
+
+    Carried on :class:`FeatureMatch` so downstream consumers (FASTA variant
+    emission, VCF remap, cache, visualization) can skip the intron without
+    re-deriving its position from the CIGAR.
+    """
+
+    cds_junction_pos: int  # 0-based CDS offset where the intron begins
+    query_start: int       # 0-based query offset relative to the alignment's
+                           # coding-orientation region start (RC-relative for
+                           # '-' strand); downstream consumers add the region's
+                           # absolute start to obtain strand-specific coordinates
+    length: int            # intron length in query nt
+
+
 @dataclass
 class ResistanceRule:
     """A single resistance rule loaded from the database."""
@@ -370,6 +387,7 @@ class FeatureMatch:
     strand: str
     cigar: str
     cds_start: int = 0  # first aligned CDS position (0-based); used to reconstruct gapped strings
+    intron_intervals: tuple[IntronInterval, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True)
