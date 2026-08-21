@@ -46,6 +46,7 @@ def _make_files(tmp_path: Path, *, tsv_checksum: str = _MANAGER_TSV_CHECKSUM) ->
         'rules': rules,
         'metadata': metadata,
         'formula_rules': None,
+        'example': None,
         'genbank': [gb],
     }
 
@@ -80,7 +81,7 @@ def _install_init_checksum_writer(remote_checksum: str) -> None:
     """
 
     def fake_init(*, db_path, name, genbank_paths, rules_tsv, formula_rules_tsv, metadata_json,
-                  overwrite=False, additional_info=True):
+                  overwrite=False, additional_info=True, example_fasta=None):
         # Build a minimal valid DB then stamp the remote checksum.
         from respro.db.schema import create_schema
 
@@ -262,7 +263,7 @@ class TestBootstrapMissingMaintainedDatabasesRefactorRegression:
         init_calls: list[Path] = []
 
         def init_side_effect(*, db_path, name, genbank_paths, rules_tsv, formula_rules_tsv,
-                             metadata_json, overwrite=False, additional_info=True):
+                             metadata_json, overwrite=False, additional_info=True, example_fasta=None):
             from respro.db.schema import create_schema
 
             conn = create_schema(db_path)
