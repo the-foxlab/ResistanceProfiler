@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import infoIconSrc from '../../assets/info.svg';
-import { isPopulated, groupDrugThresholds, formatAlgorithmThresholds } from '../../utils';
+import { isPopulated, groupDrugThresholds } from '../../utils';
 import { buildDatabasePlots } from '../database-plots/buildDatabasePlots';
 import { DatabasePieSummaryRow } from '../database-plots/DatabasePieSummaryTile';
 import { DatabasePositionPlot } from '../database-plots/DatabasePositionPlot';
@@ -96,6 +96,25 @@ function _groupEffectRules(rules) {
     });
 }
 
+/**
+ * Render a single threshold value (`intermediate` or `resistant`) as a table
+ * cell. Returns an empty string when the key is absent (e.g. `intermediate` is
+ * optional for `drug_interpretation`) so each threshold gets its own column
+ * instead of being joined with `;` in one cell.
+ */
+function _thresholdCell(thresholds, key) {
+  if (!thresholds || typeof thresholds !== 'object') {
+    return '';
+  }
+  const value = thresholds[key];
+  return value === undefined || value === null ? '' : String(value);
+}
+
+/**
+ * Render the per-drug override table shared by `ic50_thresholds` and
+ * `drug_interpretation`. Each row shows the reference, the collapsed drug set,
+ * and the `intermediate`/`resistant` thresholds in separate columns.
+ */
 function _renderDrugThresholdsOverrides(drugThresholds, label) {
   const grouped = groupDrugThresholds(drugThresholds);
   if (grouped.length === 0) {
@@ -110,7 +129,8 @@ function _renderDrugThresholdsOverrides(drugThresholds, label) {
             <tr>
               <th>Reference</th>
               <th>Drugs</th>
-              <th>Thresholds</th>
+              <th>Intermediate</th>
+              <th>Resistant</th>
             </tr>
           </thead>
           <tbody>
@@ -118,7 +138,8 @@ function _renderDrugThresholdsOverrides(drugThresholds, label) {
               <tr key={`${row.reference}-${row.drugs.join(',')}-${idx}`}>
                 <td>{row.reference}</td>
                 <td>{row.drugs.join(', ')}</td>
-                <td>{formatAlgorithmThresholds(row.thresholds)}</td>
+                <td>{_thresholdCell(row.thresholds, 'intermediate')}</td>
+                <td>{_thresholdCell(row.thresholds, 'resistant')}</td>
               </tr>
             ))}
           </tbody>
@@ -126,6 +147,51 @@ function _renderDrugThresholdsOverrides(drugThresholds, label) {
       </span>
     </div>
   );
+}
+
+/**
+ * Render one row per drug for the `ic50_thresholds` algorithm table.
+ *
+ * The algorithm stores thresholds as a dict keyed by drug name, each mapping
+ * to `{intermediate, resistant}`. Displaying each drug on its own row (instead
+ * of joining them with `;` in a single cell) keeps the table aligned with the
+ * actual input structure. The `use` value is shown on the first row only.
+ */
+function _renderIc50ThresholdRows(ic50Thresholds) {
+  const useValue = String(ic50Thresholds.use || '').trim() || 'Not configured';
+  const thresholds = ic50Thresholds.thresholds;
+  if (!thresholds || typeof thresholds !== 'object') {
+    return [
+      <tr key="empty">
+        <td>{useValue}</td>
+        <td>Not configured</td>
+        <td></td>
+        <td></td>
+      </tr>,
+    ];
+  }
+  const drugs = Object.keys(thresholds).sort((a, b) => a.localeCompare(b));
+  if (drugs.length === 0) {
+    return [
+      <tr key="empty">
+        <td>{useValue}</td>
+        <td>Not configured</td>
+        <td></td>
+        <td></td>
+      </tr>,
+    ];
+  }
+  return drugs.map((drug, idx) => {
+    const limits = thresholds[drug] || {};
+    return (
+      <tr key={drug}>
+        <td>{idx === 0 ? useValue : ''}</td>
+        <td>{drug}</td>
+        <td>{_thresholdCell(limits, 'intermediate')}</td>
+        <td>{_thresholdCell(limits, 'resistant')}</td>
+      </tr>
+    );
+  });
 }
 
 function _renderDatabaseAlgorithms(algorithms) {
@@ -159,14 +225,13 @@ function _renderDatabaseAlgorithms(algorithms) {
               <thead>
                 <tr>
                   <th>Use</th>
-                  <th>Thresholds</th>
+                  <th>Drug</th>
+                  <th>Intermediate</th>
+                  <th>Resistant</th>
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <td>{String(ic50Thresholds.use || '').trim() || 'Not configured'}</td>
-                  <td>{formatAlgorithmThresholds(ic50Thresholds.thresholds)}</td>
-                </tr>
+                {_renderIc50ThresholdRows(ic50Thresholds)}
               </tbody>
             </table>
           </span>
@@ -184,14 +249,16 @@ function _renderDatabaseAlgorithms(algorithms) {
                 <thead>
                   <tr>
                     <th>Method</th>
-                    <th>Thresholds</th>
+                    <th>Intermediate</th>
+                    <th>Resistant</th>
                   </tr>
                 </thead>
                 <tbody>
                   {drugInterp.map((entry, idx) => (
                     <tr key={entry.method || idx}>
                       <td>{String(entry.method || '').trim() || 'Not configured'}</td>
-                      <td>{formatAlgorithmThresholds(entry.thresholds)}</td>
+                      <td>{_thresholdCell(entry.thresholds, 'intermediate')}</td>
+                      <td>{_thresholdCell(entry.thresholds, 'resistant')}</td>
                     </tr>
                   ))}
                 </tbody>
