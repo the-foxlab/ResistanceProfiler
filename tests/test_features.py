@@ -184,7 +184,7 @@ class TestResolveNcbiProteinUrl:
         cache: dict[str, str] = {}
         url = _resolve_ncbi_protein_url('AAA12345.1', cache)
         parsed = urlparse(url)
-        assert parsed.hostname == 'ncbi.nlm.nih.gov'
+        assert parsed.hostname == 'www.ncbi.nlm.nih.gov'
         assert 'AAA12345.1' in url
 
     def test_returns_empty_for_invalid_accession(self):

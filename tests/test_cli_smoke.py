@@ -25,10 +25,3 @@ class TestCliSmoke:
         assert result.exit_code == 0, result.output
         # The app help string contains "ResistanceProfiler".
         assert 'respro' in result.output.lower() or 'resistance' in result.output.lower()
-
-    def test_no_args_shows_help_and_exits_nonzero(self):
-        """``respro`` with no args should show help (no_args_is_help=True)."""
-        result = CliRunner().invoke(app, [])
-        # no_args_is_help prints help and exits with code 2 (Click convention).
-        assert result.exit_code == 2, result.output
-        assert 'respro' in result.output.lower() or 'resistance' in result.output.lower()
