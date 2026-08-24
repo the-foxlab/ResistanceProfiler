@@ -14,8 +14,6 @@ Covers: respro/db/_rules_normalize.py
 
 from __future__ import annotations
 
-import pytest
-
 from respro.db._rules_normalize import (
     _CONTRADICTORY_COMMENT,
     _append_contradictory_comment,

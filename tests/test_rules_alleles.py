@@ -11,8 +11,6 @@ Covers: respro/db/_rules_alleles.py
 
 from __future__ import annotations
 
-import pytest
-
 from respro.db._rules_alleles import (
     _RE_ANCHORLESS_DEL,
     _RE_REWRITE_TOKEN,

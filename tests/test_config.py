@@ -9,20 +9,12 @@ Covers: respro/config/cli_settings.py
 
 from __future__ import annotations
 
-import pytest
 import tomllib
 from importlib.resources import files
 from urllib.parse import urlparse
 
 from respro.config.cli_settings import (
-    CliAfBinsConfig,
-    CliAlignmentConfig,
     CliConfig,
-    CliMatchingConfig,
-    CliParsingConfig,
-    CliSimilarityConfig,
-    CliTimeoutConfig,
-    CliUrlConfig,
     _load_cli_config,
 )
 
