@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 import tomllib
 from importlib.resources import files
+from urllib.parse import urlparse
 
 from respro.config.cli_settings import (
     CliAfBinsConfig,
@@ -111,7 +112,10 @@ class TestCliUrlConfig:
     def test_github_raw_url_present(self):
         """Should have GitHub raw URL."""
         config = _load_cli_config()
-        assert 'githubusercontent.com' in config.urls.github_respro_db_raw
+        parsed = urlparse(config.urls.github_respro_db_raw)
+        host = parsed.hostname
+        assert host is not None
+        assert host == 'githubusercontent.com' or host.endswith('.githubusercontent.com')
 
     def test_all_urls_are_strings(self):
         """Should all be string type."""
