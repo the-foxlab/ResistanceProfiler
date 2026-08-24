@@ -11,6 +11,7 @@ Covers: respro/db/features.py
 from __future__ import annotations
 
 import sqlite3
+from urllib.parse import urlparse
 
 import pytest
 
@@ -182,7 +183,8 @@ class TestResolveNcbiProteinUrl:
         """Should return URL for valid accession."""
         cache: dict[str, str] = {}
         url = _resolve_ncbi_protein_url('AAA12345.1', cache)
-        assert 'ncbi.nlm.nih.gov' in url
+        parsed = urlparse(url)
+        assert parsed.hostname == 'ncbi.nlm.nih.gov'
         assert 'AAA12345.1' in url
 
     def test_returns_empty_for_invalid_accession(self):
