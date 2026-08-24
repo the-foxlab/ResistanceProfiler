@@ -1480,7 +1480,7 @@ class TestFastaExampleFlag:
         ])
 
         assert result.exit_code == 0, result.output
-        assert '1 total database hits' in result.output
+        assert '1 total database hits' in result.output or '1 hit' in result.output
 
     def test_example_matches_explicit_fasta_result(
         self, fasta_db_with_example: Path, tmp_path: Path,

@@ -101,8 +101,6 @@ def _profile_fasta_command(
         cli_error('Provide either --fasta or --example, not both.')
     if not use_example and consensus_fasta is None:
         cli_error('Provide --fasta or --example to specify the input consensus sequence.')
-    # cli_error raises typer.Exit, but mypy cannot infer that; narrow explicitly.
-    assert consensus_fasta is not None
 
     example_temp_path: Path | None = None
     try:
@@ -128,6 +126,9 @@ def _profile_fasta_command(
             os.close(temp_fd)
             example_temp_path.write_text(example_text)
             consensus_fasta = example_temp_path
+
+        # cli_error raises typer.Exit, but mypy cannot infer that; narrow explicitly.
+        assert consensus_fasta is not None
 
         results_conn = _init_results_db_connection(
             str(results_db) if results_db else None, project_conn, logger,
