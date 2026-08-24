@@ -55,12 +55,22 @@ def build_profile_router(
         queue: Queue = Depends(get_queue),
     ) -> JobSubmitResponse:
         session = get_session(request)
-        fasta_path = _resolve_upload_path(
-            payload.fasta_id,
-            session.session_hash,
-            config.allowed_roots,
-            label='FASTA',
-        )
+        if payload.use_example:
+            fasta_path = None
+            fasta_id = None
+        else:
+            if not payload.fasta_id:
+                raise HTTPException(
+                    status_code=422,
+                    detail='fasta_id is required when use_example is false.',
+                )
+            fasta_path = _resolve_upload_path(
+                payload.fasta_id,
+                session.session_hash,
+                config.allowed_roots,
+                label='FASTA',
+            )
+            fasta_id = payload.fasta_id
         consume_sample_quota(
             request,
             sample_count=1,
@@ -73,13 +83,18 @@ def build_profile_router(
             run_profile_fasta,
             project_db=str(project_db),
             output_dir=str(config.results_dir),
-            fasta_path=str(fasta_path),
+            fasta_path=str(fasta_path) if fasta_path else None,
+            use_example=payload.use_example,
             sample=payload.sample or defaults.profile_sample_name,
             threads=payload.threads if payload.threads is not None else defaults.profile_threads,
             input_display_name=payload.input_display_name,
             **enqueue_options,
         )
-        record_job(session_hash=session.session_hash, upload_ids=[payload.fasta_id], job_id=job.id)
+        record_job(
+            session_hash=session.session_hash,
+            upload_ids=[fasta_id] if fasta_id else [],
+            job_id=job.id,
+        )
         logger.info('Queue job enqueued: job_id=%s mode=fasta database_id=%s', job.id, project_db.name)
         return JobSubmitResponse(job_id=job.id)
 

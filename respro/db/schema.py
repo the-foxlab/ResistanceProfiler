@@ -9,7 +9,7 @@ from pathlib import Path
 
 from respro.utils.files import require_file
 
-PROJECT_SCHEMA_VERSION = 1
+PROJECT_SCHEMA_VERSION = 2
 RESULTS_SCHEMA_VERSION = 1
 
 PROJECT_SCHEMA_SQL = """\
@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS project (
     metadata_maintainer_update TEXT NOT NULL DEFAULT '',
     metadata_license TEXT NOT NULL DEFAULT '',
     metadata_tsv_checksum TEXT NOT NULL DEFAULT '',
+    example_fasta TEXT NOT NULL DEFAULT '',  -- optional per-database example consensus FASTA (single record)
     schema_version INTEGER NOT NULL DEFAULT 1
 );
 
@@ -193,6 +194,7 @@ CREATE TABLE IF NOT EXISTS query_feature_mapping (
     query_end       INTEGER NOT NULL,
     strand          TEXT    NOT NULL DEFAULT '+',
     cigar           TEXT    NOT NULL,
+    intron_intervals TEXT   NOT NULL DEFAULT '[]',
     UNIQUE(query_ref_id, feature_id)
 );
 
@@ -404,6 +406,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'metadata_maintainer_update': "TEXT NOT NULL DEFAULT ''",
         'metadata_license': "TEXT NOT NULL DEFAULT ''",
         'metadata_tsv_checksum': "TEXT NOT NULL DEFAULT ''",
+        'example_fasta': "TEXT NOT NULL DEFAULT ''",
     },
     'reference': {
         'accession': "TEXT DEFAULT ''",
@@ -462,6 +465,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
     'query_feature_mapping': {
         'query_coverage': 'REAL NOT NULL DEFAULT 0',
         'cds_start': 'INTEGER NOT NULL DEFAULT 0',
+        'intron_intervals': "TEXT NOT NULL DEFAULT '[]'",
     },
 }
 

@@ -187,28 +187,33 @@ def _validate_reference_amino_acids(
         if 0 <= pos_0based and end_pos <= len(aa_seq):
             actual = aa_seq[pos_0based:end_pos].upper()
             if actual != ref_block:
-                mismatch_keys.add((feature_name, position_raw, reference_identifier, ref_aa))
-                mismatch_details.append(
-                    f'  {reference_identifier} feature {feature_name!r} pos {pos} ({coord_base}-based): '
-                    f'rule says {ref_aa!r}, feature sequence has {actual!r} — rule will be skipped'
-                )
+                key = (feature_name, position_raw, reference_identifier, ref_aa)
+                if key not in mismatch_keys:
+                    mismatch_details.append(
+                        f'  {reference_identifier} feature {feature_name!r} pos {pos} ({coord_base}-based): '
+                        f'rule says {ref_aa!r}, feature sequence has {actual!r} — rule will be skipped'
+                    )
+                mismatch_keys.add(key)
         else:
-            out_of_range.append(
-                f'  {reference_identifier} feature {feature_name!r} pos {pos} ({coord_base}-based): '
-                f'out of range (aa_sequence length = {len(aa_seq)}) — rule will be skipped'
-            )
+            out_of_range_key = (feature_name, position_raw, reference_identifier, ref_aa)
+            if out_of_range_key not in mismatch_keys:
+                out_of_range.append(
+                    f'  {reference_identifier} feature {feature_name!r} pos {pos} ({coord_base}-based): '
+                    f'out of range (aa_sequence length = {len(aa_seq)}) — rule will be skipped'
+                )
+            mismatch_keys.add(out_of_range_key)
 
     if out_of_range:
         logger.warning(
-            '%d rule(s) reference positions beyond the end of the annotated protein '
-            'and will be skipped:\n%s',
+            '%d position(s) with rules reference coordinates beyond the end of the '
+            'annotated protein and will be skipped:\n%s',
             len(out_of_range),
             '\n'.join(out_of_range),
         )
 
     if mismatch_details:
         logger.warning(
-            '%d rule(s) have reference AA mismatches and will be skipped:\n%s',
+            '%d position(s) with rules have reference AA mismatches and will be skipped:\n%s',
             len(mismatch_details),
             '\n'.join(mismatch_details),
         )

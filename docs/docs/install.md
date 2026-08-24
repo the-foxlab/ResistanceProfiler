@@ -31,6 +31,14 @@ respro --version
 
 Bioconda is the recommended install path if you already use conda/mamba — it handles the `mappy` native dependency automatically without a C compiler.
 
+### via BioContainers (Docker)
+
+```bash
+docker pull quay.io/biocontainers/respro
+```
+
+The BioContainers image provides a containerized CLI environment. Mount your data directories and run `respro` commands inside the container.
+
 ## Web app
 
 ### Docker (recommended)

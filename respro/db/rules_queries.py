@@ -671,10 +671,25 @@ def get_project_summary_for_display(conn: sqlite3.Connection) -> dict:
         'SELECT id, name, uuid, created_at, schema_version, '
         'metadata_maintainers, metadata_contact, metadata_publication_pmid, '
         'metadata_publication_doi, metadata_website, metadata_description, '
-        'metadata_maintainer_update, metadata_license, metadata_tsv_checksum '
+        'metadata_maintainer_update, metadata_license, metadata_tsv_checksum, '
+        'example_fasta '
         'FROM project ORDER BY id LIMIT 1'
     ).fetchone()
     if row is None:
         raise ValueError('Project DB contains no project metadata.')
 
     return dict(row)
+
+
+def get_project_example_fasta(conn: sqlite3.Connection) -> str | None:
+    """
+    Return the stored example consensus FASTA text, or ``None`` when none is stored.
+
+    :param conn: open project DB connection
+    :return: FASTA text (single record) or ``None`` if the ``example_fasta`` column is empty
+    """
+    row = conn.execute('SELECT example_fasta FROM project ORDER BY id LIMIT 1').fetchone()
+    if row is None:
+        raise ValueError('Project DB contains no project metadata.')
+    value = row['example_fasta']
+    return value if value else None

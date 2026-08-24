@@ -1451,3 +1451,102 @@ class TestMappyGapPenalty:
             f'3-nt deletion, got {len(deletions)}: '
             f'{[(a.codon_pos, a.ref_aa, a.alt_aa) for a in deletions]}'
         )
+
+
+class TestFastaExampleFlag:
+    """End-to-end CLI tests for ``respro fasta --example`` (Feature: db-example-fasta)."""
+
+    @pytest.fixture()
+    def fasta_db_with_example(self, fasta_db: Path) -> Path:
+        """Return a fasta_db that has a single-record example consensus FASTA stored."""
+        mutant = 'ATG' + 'GAA' + TINY_REF_SEQ[6:]  # K→E at codon 1 → resistance hit
+        example_text = f'>stored_example\n{mutant}\n'
+        conn = open_project_db(fasta_db)
+        conn.execute('UPDATE project SET example_fasta = ? WHERE id = 1', (example_text,))
+        conn.commit()
+        conn.close()
+        return fasta_db
+
+    def test_example_profiles_stored_fasta(
+        self, fasta_db_with_example: Path, tmp_path: Path,
+    ) -> None:
+        """``--example`` profiles the stored example and produces the same hit as ``--fasta``."""
+        output_dir = tmp_path / 'out'
+        result = CliRunner().invoke(app, [
+            'fasta',
+            '--project', str(fasta_db_with_example),
+            '--example',
+            '--output', str(output_dir),
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert '1 total database hits' in result.output or '1 hit' in result.output
+
+    def test_example_matches_explicit_fasta_result(
+        self, fasta_db_with_example: Path, tmp_path: Path,
+    ) -> None:
+        """``--example`` and ``--fasta`` with the same sequence yield identical hit counts."""
+        mutant = 'ATG' + 'GAA' + TINY_REF_SEQ[6:]
+        fasta_path = tmp_path / 'explicit.fasta'
+        fasta_path.write_text(f'>explicit\n{mutant}\n')
+
+        out_example = tmp_path / 'out_example'
+        out_explicit = tmp_path / 'out_explicit'
+        runner = CliRunner()
+        res_example = runner.invoke(app, [
+            'fasta', '--project', str(fasta_db_with_example),
+            '--example', '--output', str(out_example),
+        ])
+        res_explicit = runner.invoke(app, [
+            'fasta', '--project', str(fasta_db_with_example),
+            '--fasta', str(fasta_path), '--output', str(out_explicit),
+        ])
+
+        assert res_example.exit_code == 0, res_example.output
+        assert res_explicit.exit_code == 0, res_explicit.output
+        assert '1 total database hits' in res_example.output
+        assert '1 total database hits' in res_explicit.output
+
+    def test_example_errors_when_db_has_no_example(self, fasta_db: Path, tmp_path: Path) -> None:
+        """``--example`` on a DB without a stored example fails with a clear message."""
+        output_dir = tmp_path / 'out'
+        result = CliRunner().invoke(app, [
+            'fasta',
+            '--project', str(fasta_db),
+            '--example',
+            '--output', str(output_dir),
+        ])
+
+        assert result.exit_code != 0
+        clean = _strip_ansi(result.output)
+        assert 'example' in clean.lower()
+
+    def test_example_and_fasta_are_mutually_exclusive(
+        self, fasta_db_with_example: Path, tmp_path: Path,
+    ) -> None:
+        """Providing both ``--example`` and ``--fasta`` is an error."""
+        fasta_path = tmp_path / 'extra.fasta'
+        fasta_path.write_text(f'>x\n{TINY_REF_SEQ}\n')
+        output_dir = tmp_path / 'out'
+        result = CliRunner().invoke(app, [
+            'fasta',
+            '--project', str(fasta_db_with_example),
+            '--fasta', str(fasta_path),
+            '--example',
+            '--output', str(output_dir),
+        ])
+
+        assert result.exit_code != 0
+
+    def test_neither_example_nor_fasta_errors(
+        self, fasta_db_with_example: Path, tmp_path: Path,
+    ) -> None:
+        """Providing neither ``--example`` nor ``--fasta`` is an error."""
+        output_dir = tmp_path / 'out'
+        result = CliRunner().invoke(app, [
+            'fasta',
+            '--project', str(fasta_db_with_example),
+            '--output', str(output_dir),
+        ])
+
+        assert result.exit_code != 0

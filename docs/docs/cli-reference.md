@@ -56,6 +56,21 @@ respro init \
 
 If your dataset only contains atomic mutation rules, omit `--formula-rules`.
 
+Optionally ship a per-database example consensus FASTA that users can profile
+with a single command (see [Profile FASTA input](#profile-fasta-input)) and that
+the webapp exposes as an "Example" button. The example must be a single-record
+FASTA:
+
+```bash
+respro init \
+  --name "Docs Demo" \
+  --genbank some_reference.gb \
+  --rules rules.tsv \
+  --formula-rules combinatorial_rules.tsv \
+  --example example_consensus.fasta \
+  --output myrespro.db
+```
+
 For metadata and interpretation algorithm options, see [Database Preparation](database-preparation.md).
 
 ## Extend or validate rules in an existing project
@@ -79,6 +94,16 @@ respro add \
   --formula-rules combinatorial_rules.tsv
 ```
 
+Use `--example example_consensus.fasta` to store or overwrite a per-database
+example FASTA, or `--no-example` to clear a previously stored example:
+
+```bash
+respro add \
+  --project myrespro.db \
+  --rules rules.tsv \
+  --example example_consensus.fasta
+```
+
 ## Profile FASTA input
 
 ```bash
@@ -90,6 +115,19 @@ respro fasta \
   --export json \
   --export pdf
 ```
+
+To profile the example consensus FASTA stored in the project database (set via
+`respro init --example` or `respro add --example`), use `--example` instead of
+`--fasta`. The two options are mutually exclusive:
+
+```bash
+respro fasta \
+  --project myrespro.db \
+  --example \
+  --output my_output
+```
+
+If no example is stored, the command fails with a message.
 
 ## Profile VCF input
 

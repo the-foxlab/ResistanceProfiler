@@ -75,6 +75,7 @@ export function DashboardView({
   isCancelingJob,
   cancelActiveJob,
   runSelectedProfile,
+  runExampleProfile,
   buildReportUrl,
   buildArtifactUrl,
   uploadFastaFile,
@@ -207,6 +208,7 @@ export function DashboardView({
               isCancelingJob={isCancelingJob}
               cancelActiveJob={cancelActiveJob}
               runSelectedProfile={runSelectedProfile}
+              runExampleProfile={runExampleProfile}
               statusError={statusError}
               selectedProfileReportPath={selectedProfileReportPath}
               setSelectedProfileReportPath={setSelectedProfileReportPath}

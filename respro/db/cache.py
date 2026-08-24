@@ -5,11 +5,12 @@ Cache helpers for query-reference mappings stored in the project database.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import sqlite3
 
 from respro.db.features import load_feature_segments_by_feature_id
-from respro.db.models import FeatureMatch, FeatureRecord
+from respro.db.models import FeatureMatch, FeatureRecord, IntronInterval
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,42 @@ def sequence_checksum(sequence: str) -> str:
     :return: hex digest
     """
     return hashlib.sha256(sequence.upper().encode()).hexdigest()
+
+
+def _serialize_intron_intervals(intervals: tuple[IntronInterval, ...]) -> str:
+    """Serialize intron intervals to a compact JSON array string."""
+    return json.dumps(
+        [
+            {
+                'cds_junction_pos': iv.cds_junction_pos,
+                'query_start': iv.query_start,
+                'length': iv.length,
+            }
+            for iv in intervals
+        ]
+    )
+
+
+def _deserialize_intron_intervals(blob: str | None) -> tuple[IntronInterval, ...]:
+    """Deserialize intron intervals from a JSON array string.
+
+    Tolerates ``None`` or malformed blobs (legacy rows) by returning an empty
+    tuple so that unspliced-feature mappings load without intron spans.
+    """
+    if not blob:
+        return tuple()
+    try:
+        records = json.loads(blob)
+    except (json.JSONDecodeError, TypeError):
+        return tuple()
+    return tuple(
+        IntronInterval(
+            cds_junction_pos=int(rec['cds_junction_pos']),
+            query_start=int(rec['query_start']),
+            length=int(rec['length']),
+        )
+        for rec in records
+    )
 
 
 def load_cached_mappings(
@@ -45,6 +82,7 @@ def load_cached_mappings(
     rows = conn.execute(
         'SELECT qgm.feature_id, qgm.identity, qgm.cds_coverage, qgm.query_coverage, '
         'qgm.cds_start, qgm.query_start, qgm.query_end, qgm.strand, qgm.cigar, '
+        'qgm.intron_intervals, '
         'g.reference_id, g.name, g.protein, g.start, g.end, g.strand AS feature_strand, '
         'g.codon_start, g.nt_sequence, g.aa_sequence, '
         'r.accession AS reference_accession '
@@ -84,6 +122,7 @@ def load_cached_mappings(
             query_end=row['query_end'],
             strand=row['strand'],
             cigar=row['cigar'],
+            intron_intervals=_deserialize_intron_intervals(row['intron_intervals']),
         ))
 
     logger.info('Loaded %d cached mapping(s) for checksum %s…', len(matches), checksum[:12])
@@ -119,8 +158,8 @@ def store_mappings(
         conn.execute(
             'INSERT OR REPLACE INTO query_feature_mapping '
             '(query_ref_id, feature_id, identity, cds_coverage, query_coverage, '
-            'cds_start, query_start, query_end, strand, cigar) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'cds_start, query_start, query_end, strand, cigar, intron_intervals) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 qref_id,
                 match.feature.id,
@@ -132,6 +171,7 @@ def store_mappings(
                 match.query_end,
                 match.strand,
                 match.cigar,
+                _serialize_intron_intervals(match.intron_intervals),
             ),
         )
 

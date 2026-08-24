@@ -29,7 +29,15 @@ conda create -n respro
 conda activate respro
 conda install bioconda::respro
 ```
+
+Install via Docker (BioContainers):
+
+```bash
+docker pull quay.io/biocontainers/respro
+```
+
 Install via pip:
+
 ```bash
 git clone https://github.com/the-foxlab/ResistanceProfiler
 pip install -e ".[dev]"

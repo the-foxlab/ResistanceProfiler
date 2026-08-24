@@ -66,3 +66,10 @@ mismatch_penalty = 4
 gap_extension_penalty_1 = 2
 gap_open_penalty_2 = 24
 gap_extension_penalty_2 = 1
+# Maximum CDS-position distance (in nt) between a CIGAR `I` op and a known
+# exon-junction offset for the `I` op to be classified as an intron rather
+# than a coding insertion. Only applies to features with >1 segment (spliced
+# CDS). mappy may place the junction a few nt off the stored segment boundary,
+# so a small tolerance accommodates soft clipping near exon edges without
+# classifying real in-exon insertions as introns.
+intron_junction_tolerance = 5

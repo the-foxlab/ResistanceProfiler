@@ -719,12 +719,14 @@ def _draw_genome_overview(
                 label_x,
                 label_y,
                 feature.display_name,
-                ha='center',
-                va='bottom',
+                ha='left',
+                va='baseline',
                 fontsize=7,
                 fontweight='bold',
                 color=FEATURE_HIGHLIGHTED_EDGE,
                 zorder=200 + y,
+                rotation_mode='anchor',
+                rotation=25,
             )
 
     ax.set_title('Genome overview', fontsize=8, loc='left', fontweight='bold')

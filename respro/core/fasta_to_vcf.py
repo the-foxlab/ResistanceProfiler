@@ -23,7 +23,7 @@ import re
 from Bio.Seq import Seq
 
 from respro.core.vcf_coverage import _merge_codon_gaps
-from respro.db.models import CoverageGap, FeatureMatch, FeatureRecord, VariantCall
+from respro.db.models import CoverageGap, FeatureMatch, FeatureRecord, IntronInterval, VariantCall
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,13 @@ def _profile_feature_to_variants(
     if match.strand == '-':
         region = str(Seq(region).reverse_complement())
 
+    # Spliced features aligned against an unspliced query carry intron intervals
+    # (in coding-orientation, relative to the region start). The exon-only CIGAR
+    # already excludes the intron I ops, so the region must also drop the intron
+    # spans — otherwise the CIGAR's M ops would walk exon1 straight into the
+    # intron bases, misaligning exon 2 and emitting spurious variants.
+    region = _strip_introns_from_region(region, match.intron_intervals)
+
     aligned_cds_len = sum(int(n) for n, op in re.findall(r'(\d+)([MD])', match.cigar))
     covered_cds_start = match.cds_start
     covered_cds_end = match.cds_start + aligned_cds_len
@@ -89,6 +96,34 @@ def _profile_feature_to_variants(
         covered_cds_start=covered_cds_start,
         covered_cds_end=covered_cds_end,
     )
+
+
+def _strip_introns_from_region(
+    region: str,
+    intron_intervals: tuple[IntronInterval, ...],
+) -> str:
+    """
+    Remove intron spans from the coding-orientation query region.
+
+    ``IntronInterval.query_start`` is relative to the start of the
+    coding-orientation region (the first base the CIGAR consumes), and
+    ``length`` is the intron length in that orientation. This drops those
+    spans so the exon-only CIGAR's ``M`` ops walk exon 1 directly into exon 2
+    without crossing the intron.
+
+    :param region: coding-orientation query slice (already RC'd for '-' strand)
+    :param intron_intervals: intron intervals from the FeatureMatch
+    :return: region with intron spans removed
+    """
+    if not intron_intervals:
+        return region
+    # Sort by start and drop each [start, start+length) span. Build a keep-mask
+    # to avoid index shifts from repeated slicing.
+    drop = [False] * len(region)
+    for iv in intron_intervals:
+        for i in range(iv.query_start, min(iv.query_start + iv.length, len(region))):
+            drop[i] = True
+    return ''.join(base for base, d in zip(region, drop) if not d)
 
 
 def _variants_from_alignment(

@@ -130,6 +130,7 @@ def _rebuild_database_files(name: str, dest_db_path: Path) -> None:
                 rules_tsv=files['rules'],  # type: ignore[arg-type]
                 formula_rules_tsv=files['formula_rules'],  # type: ignore[arg-type]
                 metadata_json=files['metadata'],  # type: ignore[arg-type]
+                example_fasta=files['example'],  # type: ignore[arg-type]
                 overwrite=False,
                 additional_info=True,
             )

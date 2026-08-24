@@ -25,11 +25,37 @@ from respro.db.features import _load_genbank_records
 from respro.db.project_metadata import load_metadata_json, store_project_metadata
 from respro.db.schema import PROJECT_SCHEMA_VERSION, create_schema, open_project_db
 from respro.io.genbank import ParsedGenBankReference, parse_genbank_sources
+from respro.io.reference import read_fasta
 from respro.utils.cli_errors import cli_error
 from respro.utils.files import require_file, resolve_output_file
 from respro.utils.logging import err_console
 
 logger = logging.getLogger(__name__)
+
+
+def _read_example_fasta_text(example_fasta: Path) -> str:
+    """
+    Read and validate a per-database example consensus FASTA file.
+
+    The example must contain exactly one record. Returns the original file text so the stored
+    blob round-trips to the same file the curator provided.
+
+    :param example_fasta: path to the example FASTA file
+    :return: the raw file text
+    :raises ValueError: if the file is empty, unparseable, or contains more than one record
+    """
+    require_file(example_fasta, 'Example FASTA')
+    text = example_fasta.read_text()
+    try:
+        records = read_fasta(example_fasta)
+    except Exception as exc:  # Biopython raises various errors for malformed FASTA
+        raise ValueError(f'Example FASTA could not be parsed: {exc}') from exc
+    if len(records) != 1:
+        raise ValueError(
+            f'Example FASTA must contain a single record; got {len(records)}. '
+            'The example is profiled as a single consensus sequence.'
+        )
+    return text
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -46,6 +72,7 @@ def init_project(
     metadata_json: Path | None = None,
     overwrite: bool = False,
     additional_info: bool = True,
+    example_fasta: Path | None = None,
 ) -> Path:
     """
     Create and populate a new project database.
@@ -58,6 +85,7 @@ def init_project(
     :param overwrite: if True, delete an existing database at db_path before creating a fresh one
     :param additional_info: if True (default), query PubChem for drug metadata and resolve
         publication DOIs/titles via NCBI and CrossRef; failures are non-fatal
+    :param example_fasta: optional single-record consensus FASTA stored with the database as an example
     :return: path to the created database
     """
     if not genbank_paths:
@@ -68,6 +96,7 @@ def init_project(
     require_file(rules_tsv, 'Rules TSV')
     if formula_rules_tsv is not None:
         require_file(formula_rules_tsv, 'Formula rules TSV')
+    example_text = _read_example_fasta_text(example_fasta) if example_fasta else ''
     metadata_payload, algorithms = load_metadata_json(metadata_json) if metadata_json else ({}, [])
 
     genbank_records = parse_genbank_sources(genbank_paths)
@@ -90,6 +119,11 @@ def init_project(
             additional_info=additional_info,
         )
         store_project_metadata(conn, project_id, metadata_payload)
+        if example_text:
+            conn.execute(
+                'UPDATE project SET example_fasta = ? WHERE id = ?',
+                (example_text, project_id),
+            )
         if algorithms:
             algorithms = _sanitize_effect_as_resistant_algorithms(conn, project_id, algorithms)
             if algorithms:
@@ -121,6 +155,8 @@ def add_to_project(
     genbank_paths: list[Path] | None = None,
     additional_info: bool = True,
     validate_only: bool = False,
+    example_fasta: Path | None = None,
+    clear_example: bool = False,
 ) -> Path:
     """
     Add curated rules and optional GenBank annotations to an existing project.
@@ -130,12 +166,17 @@ def add_to_project(
     :param genbank_paths: optional GenBank files with additional references/features
     :param additional_info: if True, query PubChem for new drugs and resolve publication metadata
     :param validate_only: if True, run full rules validation/import path and roll back all DB changes
+    :param example_fasta: optional single-record consensus FASTA replacing the stored example
+    :param clear_example: if True, clear any stored example FASTA
     :return: path to the updated database
     """
     require_file(db_path, 'Project database')
     require_file(rules_tsv, 'Rules TSV')
     if formula_rules_tsv is not None:
         require_file(formula_rules_tsv, 'Formula rules TSV')
+    if example_fasta is not None and clear_example:
+        raise ValueError('Provide either --example or --no-example, not both.')
+    example_text = _read_example_fasta_text(example_fasta) if example_fasta else ''
 
     records: list[ParsedGenBankReference] = []
     for genbank_path in genbank_paths or []:
@@ -180,6 +221,13 @@ def add_to_project(
             apply_ic50_threshold_classification(conn, project_id, ic50_config)
         if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
+        if example_text:
+            conn.execute(
+                'UPDATE project SET example_fasta = ? WHERE id = ?',
+                (example_text, project_id),
+            )
+        elif clear_example:
+            conn.execute('UPDATE project SET example_fasta = ? WHERE id = ?', ('', project_id))
         conn.execute(
             "UPDATE project SET updated_at = datetime('now') WHERE id = ?",
             (project_id,),
@@ -306,6 +354,12 @@ def _init_command(
             help='Query PubChem for drug metadata and resolve publications via NCBI/CrossRef.',
         )
     ] = True,
+    example: Annotated[
+        Path | None, typer.Option(
+            '--example', '-ex', exists=True,
+            help='Optional single-record consensus FASTA stored with the database as an example.',
+        )
+    ] = None,
 ) -> None:
     """
     Initialise a project database from one or more GenBank reference records and resistance rules provided in TSV.
@@ -327,6 +381,7 @@ def _init_command(
                 metadata_json=metadata,
                 overwrite=overwrite,
                 additional_info=additional_info,
+                example_fasta=example,
             )
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
         cli_error(str(exc))
@@ -359,6 +414,15 @@ def _init_add_command(
     validate: Annotated[
         bool, typer.Option('--validate', '-v', help='Validate rules and exit without writing DB changes.')
     ] = False,
+    example: Annotated[
+        Path | None, typer.Option(
+            '--example', '-ex', exists=True,
+            help='Replace the stored example consensus FASTA with this single-record file.',
+        )
+    ] = None,
+    clear_example: Annotated[
+        bool, typer.Option('--no-example', help='Clear any stored example consensus FASTA.')
+    ] = False,
 ) -> None:
     """
     Add curated rules and optional GenBank annotations to an existing project database.
@@ -373,6 +437,8 @@ def _init_add_command(
                 formula_rules_tsv=formula_rules,
                 additional_info=additional_info,
                 validate_only=validate,
+                example_fasta=example,
+                clear_example=clear_example,
             )
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
         cli_error(str(exc))

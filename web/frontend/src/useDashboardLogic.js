@@ -214,6 +214,7 @@ export function useDashboardLogic() {
     isCancelingJob: profile.isCancelingJob,
     cancelActiveJob: profile.cancelActiveJob,
     runSelectedProfile: profile.runSelectedProfile,
+    runExampleProfile: profile.runExampleProfile,
     buildReportUrl: profile.buildReportUrl,
     buildArtifactUrl: profile.buildArtifactUrl,
     uploadFastaFile: profile.uploadFastaFile,

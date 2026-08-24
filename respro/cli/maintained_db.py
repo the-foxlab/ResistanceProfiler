@@ -167,6 +167,7 @@ def _download_command(
                     rules_tsv=files['rules'],  # type: ignore[arg-type]
                     formula_rules_tsv=files['formula_rules'],  # type: ignore[arg-type]
                     metadata_json=files['metadata'],  # type: ignore[arg-type]
+                    example_fasta=files['example'],  # type: ignore[arg-type]
                     overwrite=True,
                     additional_info=additional_info,
                 )

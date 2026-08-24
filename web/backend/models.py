@@ -15,7 +15,8 @@ class ProfileFastaPayload(BaseModel):
     ownership-checks them server-side.
     """
 
-    fasta_id: str = Field(max_length=WEB_BACKEND_CONFIG.defaults.opaque_id_max_length)
+    fasta_id: str | None = Field(default=None, max_length=WEB_BACKEND_CONFIG.defaults.opaque_id_max_length)
+    use_example: bool = False
     input_display_name: str | None = Field(default=None, max_length=WEB_BACKEND_CONFIG.defaults.display_name_max_length)
     database_id: str | None = Field(default=None, max_length=WEB_BACKEND_CONFIG.defaults.opaque_id_max_length)
     sample: str | None = Field(default=None, max_length=WEB_BACKEND_CONFIG.defaults.sample_name_max_length)

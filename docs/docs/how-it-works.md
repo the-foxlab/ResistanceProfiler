@@ -54,6 +54,19 @@ For VCF input, variants are defined in user-provided reference coordinates. ResP
 - For reverse-strand features, alleles are reverse-complemented to the internal forward strand.
 - Anchor-changed indels (where the VCF anchor base differs from the internal reference) are automatically split into a substitution plus a canonical indel before annotation.
 
+#### Spliced genes and unspliced queries
+
+When a project feature is a spliced CDS (more than one segment in `feature_segment`) and the user supplies an unspliced whole-genome query, minimap2 reports the inter-exon intron as a single large `I` (FASTA) or `D` (raw mappy) operation in the CIGAR. Without special handling this intron would be misinterpreted as a giant coding insertion (e.g. a multi-kilobase frameshift) and would crash per-exon identity.
+
+ResPro classifies such intron operations:
+
+- The exon-junction CDS offsets are derived from `feature.segments` in genomic 5'→3' order (matching the normalized CIGAR's walking order for both strands).
+- A CIGAR `I` op is classified as an intron when **both** hold: (1) its CDS position coincides with a known junction offset within `alignment.intron_junction_tolerance` (default 5 nt; configurable in `defaults.toml`), and (2) its length is strictly greater than that same tolerance. 
+- Classified intron `I` ops are removed from the CIGAR stored on the `FeatureMatch` (producing an exon-only CIGAR) and recorded as `IntronInterval`s (CDS junction position, query span, length).
+- Identity and CDS coverage are recomputed over exons only, so a perfect exons match reports ~99% identity rather than the genomic span including the intron.
+- In FASTA mode the intron query span is stripped from the region before codon walking, so no intron insertion variant is emitted. Real coding insertions (any `I` op not at a junction within tolerance, or of length ≤ tolerance) are still emitted.
+- In VCF mode the query-to-CDS coordinate map skips intron query positions and offsets exon-2 (and later) CDS positions past the intron span, so variants inside the intron are excluded and exon-2 variants remap to the correct CDS offset.
+
 ### Amino-acid consequence interpretation
 
 Per-feature nucleotide changes are translated into amino-acid consequences. Supported classes include:

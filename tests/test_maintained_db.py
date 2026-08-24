@@ -84,6 +84,16 @@ def _manifest_with_formula_rules_path(formula_rules_path: str) -> dict:
     manifest['databases'][0]['formula_rules_path'] = formula_rules_path
     return manifest
 
+
+def _manifest_with_example_fasta_path(example_fasta_path: str) -> dict:
+    """Return a manifest copy with a custom example_fasta_path for the hsv entry."""
+    manifest = json.loads(json.dumps(_MANIFEST))
+    manifest['databases'][0]['example_fasta_path'] = example_fasta_path
+    return manifest
+
+
+_EXAMPLE_FASTA_CONTENT = b'>example_sample\nATGAAAGCTTTTGGCCCC\n'
+
 _RULES_TSV_CONTENT = (
     'feature\tposition\tref_aa\tmut_aa\tphenotype\treference_identifier\n'
     'UL23\t168\tA\tT\tresistant\tX04770\n'
@@ -187,6 +197,54 @@ class TestListOutputFiles:
         )):
             with pytest.raises(RuntimeError, match='HTTP 500'):
                 list_output_files('hsv_daehne_jaki')
+
+
+# ── list_output_files: example_fasta_path ─────────────────────────────────────
+
+class TestListOutputFilesExampleFasta:
+    def test_includes_example_fasta_when_path_present(self) -> None:
+        manifest = _manifest_with_example_fasta_path(
+            'databases/hsv_daehne_jaki/output/example.fasta'
+        )
+        with patch('urllib.request.urlopen', return_value=_json_mock(manifest)):
+            result = list_output_files('hsv_daehne_jaki')
+        names = {entry['name'] for entry in result}
+        assert 'example.fasta' in names
+
+    def test_omits_example_fasta_when_path_absent(self) -> None:
+        with patch('urllib.request.urlopen', return_value=_json_mock(_MANIFEST)):
+            result = list_output_files('hsv_daehne_jaki')
+        names = {entry['name'] for entry in result}
+        assert 'example.fasta' not in names
+
+    def test_omits_example_fasta_when_path_empty(self) -> None:
+        manifest = _manifest_with_example_fasta_path('')
+        with patch('urllib.request.urlopen', return_value=_json_mock(manifest)):
+            result = list_output_files('hsv_daehne_jaki')
+        names = {entry['name'] for entry in result}
+        assert 'example.fasta' not in names
+
+
+# ── _validate_manifest_entry: example_fasta_path ──────────────────────────────
+
+class TestValidateManifestEntryExampleFasta:
+    def test_accepts_absent_example_fasta_path(self) -> None:
+        # The default _MANIFEST has no example_fasta_path; listing must not raise.
+        with patch('urllib.request.urlopen', return_value=_json_mock(_MANIFEST)):
+            result = list_maintained_databases()
+        assert 'hsv_daehne_jaki' in result
+
+    def test_accepts_empty_example_fasta_path(self) -> None:
+        manifest = _manifest_with_example_fasta_path('')
+        with patch('urllib.request.urlopen', return_value=_json_mock(manifest)):
+            result = list_maintained_databases()
+        assert 'hsv_daehne_jaki' in result
+
+    def test_rejects_non_string_example_fasta_path(self) -> None:
+        manifest = _manifest_with_example_fasta_path(123)  # type: ignore[arg-type]
+        with patch('urllib.request.urlopen', return_value=_json_mock(manifest)):
+            with pytest.raises(RuntimeError, match='example_fasta_path must be a string'):
+                list_maintained_databases()
 
 
 # ── _parse_reference_identifiers ─────────────────────────────────────────────
@@ -404,6 +462,45 @@ class TestDownloadDatabaseFiles:
 
         assert result['formula_rules'] is None
 
+    def test_downloads_example_fasta_when_path_present(self, tmp_path: Path) -> None:
+        rules_bytes = _RULES_TSV_CONTENT.encode()
+        meta_bytes = json.dumps(_METADATA).encode()
+        manifest = _manifest_with_example_fasta_path(
+            'databases/hsv_daehne_jaki/output/example.fasta'
+        )
+
+        responses = [
+            _json_mock(manifest),                    # manifest fetch
+            _bytes_mock(rules_bytes),                # rules.tsv
+            _bytes_mock(meta_bytes),                 # metadata.json
+            _bytes_mock(b'feature\tformula\n'),       # formula-rules.tsv
+            _bytes_mock(_EXAMPLE_FASTA_CONTENT),     # example.fasta
+            _bytes_mock(_GENBANK_CONTENT),           # X04770.gb
+            _bytes_mock(_GENBANK_CONTENT),           # X04771.gb
+        ]
+        call_count = [0]
+
+        def se(*args, **kwargs):  # noqa: ANN001, ANN202
+            idx = call_count[0]
+            call_count[0] += 1
+            return responses[min(idx, len(responses) - 1)]
+
+        with patch('urllib.request.urlopen', side_effect=se):
+            result = download_database_files('hsv_daehne_jaki', tmp_path)
+
+        assert isinstance(result['example'], Path)
+        assert result['example'].read_bytes() == _EXAMPLE_FASTA_CONTENT
+
+    def test_example_is_none_when_path_absent(self, tmp_path: Path) -> None:
+        rules_bytes = _RULES_TSV_CONTENT.encode()
+        meta_bytes = json.dumps(_METADATA).encode()
+
+        se = self._make_download_side_effect(rules_bytes, meta_bytes)
+        with patch('urllib.request.urlopen', side_effect=se):
+            result = download_database_files('hsv_daehne_jaki', tmp_path)
+
+        assert result['example'] is None
+
 
 # ── CLI: databases --list ────────────────────────────────────────────────
 
@@ -466,6 +563,7 @@ class TestMaintainedDbDownloadCommand:
             'rules': tmp_path / 'rules.tsv',
             'metadata': tmp_path / 'metadata.json',
             'formula_rules': None,
+            'example': None,
             'genbank': [fake_gb],
         }
 
@@ -493,6 +591,7 @@ class TestMaintainedDbDownloadCommand:
             'rules': tmp_path / 'rules.tsv',
             'metadata': tmp_path / 'metadata.json',
             'formula_rules': None,
+            'example': None,
             'genbank': [],
         }
         with patch('respro.cli.maintained_db.download_database_files', return_value=fake_files):
@@ -524,6 +623,7 @@ class TestMaintainedDbDownloadCommand:
             'rules': tmp_path / 'rules.tsv',
             'metadata': tmp_path / 'metadata.json',
             'formula_rules': None,
+            'example': None,
             'genbank': [fake_gb],
         }
         with (
@@ -545,6 +645,7 @@ class TestMaintainedDbDownloadCommand:
             'rules': tmp_path / 'rules.tsv',
             'metadata': tmp_path / 'metadata.json',
             'formula_rules': None,
+            'example': None,
             'genbank': [fake_gb],
         }
 
@@ -568,6 +669,7 @@ class TestMaintainedDbDownloadCommand:
             'rules': tmp_path / 'rules.tsv',
             'metadata': tmp_path / 'metadata.json',
             'formula_rules': None,
+            'example': None,
             'genbank': [fake_gb],
         }
 
@@ -592,6 +694,7 @@ class TestMaintainedDbDownloadCommand:
             'rules': tmp_path / 'rules.tsv',
             'metadata': tmp_path / 'metadata.json',
             'formula_rules': None,
+            'example': None,
             'genbank': [fake_gb],
         }
 

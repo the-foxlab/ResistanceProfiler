@@ -623,6 +623,31 @@ class TestWebApi:
         assert database['metadata']['contact'] == 'team@example.org'
         assert database['metadata']['license'] == 'MIT'
 
+    def test_databases_endpoint_has_example_false_by_default(self, client: TestClient) -> None:
+        response = client.get('/api/databases')
+        assert response.status_code == 200
+        database = response.json()['data']['items'][0]
+        assert database['has_example'] is False
+
+    def test_databases_endpoint_has_example_true_when_stored(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+    ) -> None:
+        project_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        conn = sqlite3.connect(project_db)
+        conn.execute(
+            "UPDATE project SET example_fasta = ? WHERE id = 1",
+            ('>example\nATGAAAGCT\n',),
+        )
+        conn.commit()
+        conn.close()
+
+        response = client.get('/api/databases')
+        assert response.status_code == 200
+        database = response.json()['data']['items'][0]
+        assert database['has_example'] is True
+
     def test_mutations_endpoint_alias(self, client: TestClient) -> None:
         project_db = sorted(client.app.state.startup_config.project_databases_dir.glob('*.db'))[0]
         conn = sqlite3.connect(project_db)
@@ -712,6 +737,56 @@ class TestWebApi:
         assert report_response.content.lstrip()[:5].lower().startswith(b'<html') or b'<!doctype' in report_response.content.lower()
         report_payload = _download_artifact_json(client, json_id)
         assert report_payload['run']['vcf_path'] == 'original-upload.fasta'
+
+    def test_profile_fasta_use_example_profiles_stored_example(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+    ) -> None:
+        """use_example=true enqueues a fasta --example job without an uploaded FASTA."""
+        project_db = sorted(startup_config.project_databases_dir.glob('*.db'))[0]
+        conn = sqlite3.connect(project_db)
+        # Store the tiny reference itself as the example so it profiles cleanly (0 hits).
+        conn.execute(
+            "UPDATE project SET example_fasta = ? WHERE id = 1",
+            (f'>stored_example\n{TINY_REF_SEQ}\n',),
+        )
+        conn.commit()
+        conn.close()
+
+        submit = client.post(
+            '/api/profile/fasta',
+            json={
+                'use_example': True,
+                'sample': 'web-example',
+            },
+        )
+        assert submit.status_code == 200, submit.text
+        job_id = submit.json()['job_id']
+        assert job_id
+
+        payload = _poll_job(client, job_id)
+        assert payload['status'] == 'succeeded', payload
+        result = payload['result']
+        assert result['database_id'] == project_db.name
+        assert result['sample_name'] == 'web-example'
+
+    def test_profile_fasta_use_example_rejects_missing_example(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+    ) -> None:
+        """use_example=true on a DB without an example fails the job with a clear error."""
+        submit = client.post(
+            '/api/profile/fasta',
+            json={'use_example': True, 'sample': 'web-example'},
+        )
+        assert submit.status_code == 200
+        job_id = submit.json()['job_id']
+
+        payload = _poll_job(client, job_id)
+        assert payload['status'] == 'failed'
+        assert 'example' in (payload.get('error') or '').lower()
 
     def test_profile_fasta_path_outside_uploads_rejected(
         self,
