@@ -101,6 +101,8 @@ def _profile_fasta_command(
         cli_error('Provide either --fasta or --example, not both.')
     if not use_example and consensus_fasta is None:
         cli_error('Provide --fasta or --example to specify the input consensus sequence.')
+    # cli_error raises typer.Exit, but mypy cannot infer that; narrow explicitly.
+    assert consensus_fasta is not None
 
     example_temp_path: Path | None = None
     try:
@@ -120,6 +122,7 @@ def _profile_fasta_command(
                     f'No example FASTA is stored in project database {project!s}. '
                     'Add one with `respro init --example <fasta>`.'
                 )
+            assert example_text is not None
             temp_fd, temp_name = tempfile.mkstemp(prefix='respro_example_', suffix='.fasta')
             example_temp_path = Path(temp_name)
             os.close(temp_fd)
