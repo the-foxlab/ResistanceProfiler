@@ -1831,6 +1831,121 @@ class TestMultiSpeciesInterpretationSummary:
         # Single-organism attribution preserved (organism from _make_result is 'test').
         assert 'test' in text
 
+    def test_suppressed_ruleless_feature_omitted_from_summary(self) -> None:
+        """
+        A ruleless feature overlapping a ruled feature on the same reference is
+        omitted from the summary's "profiled features" list (its mutation rows are
+        suppressed in the annotation pipeline, so naming it as a profiled sequence
+        would mislead). The ruled feature it overlapped stays in the summary.
+        """
+        from respro.db.models import ReferenceGroup
+
+        # refA: ruled UL23 (0-30) + ruleless UL24 (20-60) overlapping UL23.
+        ruled_ul23 = FeatureRecord(
+            id=1, reference_id=1, name='UL23', protein='TK',
+            start=0, end=30, strand='+', codon_start=0, nt_sequence='ATG' + 'AAA' * 9,
+        )
+        ruleless_ul24 = FeatureRecord(
+            id=2, reference_id=1, name='UL24', protein='UL24',
+            start=20, end=60, strand='+', codon_start=0, nt_sequence='ATG' + 'GGG' * 19,
+        )
+        rg_a = ReferenceGroup(
+            reference_name='refA', reference_id=1, organism='Organism A',
+            reference_length_nt=1000, query_name='chrom_a', query_sequence='ATG' * 20,
+            features=[ruled_ul23, ruleless_ul24], rule_feature_names={'UL23'},
+            feature_matches=[
+                FeatureMatch(feature=ruled_ul23, identity=1.0, cds_coverage=1.0,
+                             query_coverage=1.0, query_start=0, query_end=30, strand='+',
+                             cigar='30M', cds_start=0),
+                FeatureMatch(feature=ruleless_ul24, identity=1.0, cds_coverage=1.0,
+                             query_coverage=1.0, query_start=0, query_end=40, strand='+',
+                             cigar='40M', cds_start=0),
+            ],
+        )
+        result = ProfilingResult(
+            project_name='P', organism='Organism A', sample_name='s', vcf_name='in.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[], references=[rg_a],
+        )
+        conn = self._make_algorithm_conn()
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+            features=[ruled_ul23, ruleless_ul24],
+        )
+        text = ctx['summary']['narrative']
+        # UL23 retained; UL24 (overlaps ruled UL23) omitted from the summary sentence.
+        assert 'UL23' in text
+        assert 'UL24' not in text
+
+    def test_same_name_standalone_feature_on_other_reference_kept_in_summary(self) -> None:
+        """
+        A ruleless feature name suppressed on refA must not be suppressed on refB.
+
+        refA has a ruled UL23 overlapping a ruleless UL24 (so UL24 is suppressed on
+        refA). refB has a standalone ruleless UL24 (no ruled overlap on refB). The
+        summary must retain refB's UL24 because suppression is scoped per
+        reference_id — dropping it by name globally would silently omit a
+        legitimately profiled feature from a multi-pathogen report (the HSV-1
+        UL23 + HCMV UL24 panel case).
+        """
+        from respro.db.models import ReferenceGroup
+
+        # refA: ruled UL23 (0-30) + ruleless UL24 (20-60) overlapping UL23.
+        ruled_ul23_a = FeatureRecord(
+            id=1, reference_id=1, name='UL23', protein='TK',
+            start=0, end=30, strand='+', codon_start=0, nt_sequence='ATG' + 'AAA' * 9,
+        )
+        ruleless_ul24_a = FeatureRecord(
+            id=2, reference_id=1, name='UL24', protein='UL24',
+            start=20, end=60, strand='+', codon_start=0, nt_sequence='ATG' + 'GGG' * 19,
+        )
+        # refB: standalone ruleless UL24 (0-60), no ruled feature on refB.
+        ruleless_ul24_b = FeatureRecord(
+            id=3, reference_id=2, name='UL24', protein='UL24',
+            start=0, end=60, strand='+', codon_start=0, nt_sequence='ATG' + 'GGG' * 19,
+        )
+        rg_a = ReferenceGroup(
+            reference_name='refA', reference_id=1, organism='Organism A',
+            reference_length_nt=1000, query_name='chrom_a', query_sequence='ATG' * 20,
+            features=[ruled_ul23_a, ruleless_ul24_a], rule_feature_names={'UL23'},
+            feature_matches=[
+                FeatureMatch(feature=ruled_ul23_a, identity=1.0, cds_coverage=1.0,
+                             query_coverage=1.0, query_start=0, query_end=30, strand='+',
+                             cigar='30M', cds_start=0),
+                FeatureMatch(feature=ruleless_ul24_a, identity=1.0, cds_coverage=1.0,
+                             query_coverage=1.0, query_start=0, query_end=40, strand='+',
+                             cigar='40M', cds_start=0),
+            ],
+        )
+        rg_b = ReferenceGroup(
+            reference_name='refB', reference_id=2, organism='Organism B',
+            reference_length_nt=1000, query_name='chrom_b', query_sequence='ATG' * 20,
+            features=[ruleless_ul24_b], rule_feature_names=set(),
+            feature_matches=[
+                FeatureMatch(feature=ruleless_ul24_b, identity=1.0, cds_coverage=1.0,
+                             query_coverage=1.0, query_start=0, query_end=60, strand='+',
+                             cigar='60M', cds_start=0),
+            ],
+        )
+        result = ProfilingResult(
+            project_name='P', organism='Organism A', sample_name='s', vcf_name='in.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[], references=[rg_a, rg_b],
+        )
+        conn = self._make_algorithm_conn()
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+            features=[ruled_ul23_a, ruleless_ul24_a, ruleless_ul24_b],
+        )
+        assert ctx['is_multi_species'] is True
+        text = ctx['summary']['narrative']
+        # refA's UL23 retained; refA's UL24 suppressed; refB's standalone UL24 retained.
+        assert 'UL23' in text
+        # UL24 must appear (refB's standalone copy), not be dropped by global name
+        # suppression. refB's organism must be named alongside it.
+        assert 'UL24' in text
+        assert 'Organism B' in text
+
 
 class TestPdfExports:
     def test_similarity_clinical_phenotype_shown_when_db_hits_have_it(self) -> None:

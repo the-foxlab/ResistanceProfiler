@@ -16,7 +16,12 @@ from markupsafe import Markup, escape
 
 from respro import __version__
 from respro.config.cli_settings import CLI_CONFIG
-from respro.core.annotation import CONSEQUENCE_LABELS, HIGH_IMPACT_CONSEQUENCES, classify_similarity
+from respro.core.annotation import (
+    CONSEQUENCE_LABELS,
+    HIGH_IMPACT_CONSEQUENCES,
+    _ruleless_features_overlapping_ruled,
+    classify_similarity,
+)
 from respro.db.models import (
     FeatureRecord,
     ProfilingResult,
@@ -1618,9 +1623,26 @@ def _build_summary_narrative(
         ]
     else:
         all_feature_matches = result.feature_matches
+
+    # A ruleless feature that overlaps a ruled feature on the same reference is
+    # suppressed in the annotation pipeline (no mutation rows). Exclude those
+    # feature names from the summary's "profiled features" list so the lead
+    # sentence does not name a feature whose mutations were intentionally dropped
+    # (e.g. UL24 overlapping ruled UL23). Suppression is recomputed per reference
+    # from each ReferenceGroup's features + rule_feature_names, matching the
+    # annotation pipeline's per-reference scope. The exclusion is keyed by
+    # (reference_id, feature name): a name suppressed on refA must not drop a
+    # standalone same-named feature on refB (e.g. HSV-1 UL24 vs HCMV UL24).
+    suppressed_by_ref: dict[int, set[str]] = {}
+    for rg in result.references:
+        suppressed = _ruleless_features_overlapping_ruled(rg.features, rg.rule_feature_names)
+        if suppressed:
+            suppressed_by_ref[rg.reference_id] = suppressed
     profiled_features = sorted({
         display_names.get(match.feature.name, match.feature.name)
         for match in all_feature_matches
+        if match.feature.reference_id not in suppressed_by_ref
+        or match.feature.name not in suppressed_by_ref[match.feature.reference_id]
     })
     was_were = 'were' if len(profiled_features) != 1 else 'was'
 

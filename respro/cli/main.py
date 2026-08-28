@@ -33,6 +33,7 @@ app = typer.Typer(
     help='ResistanceProfiler — agnostic antiviral resistance profiling framework.',
     no_args_is_help=True,
     pretty_exceptions_enable=False,
+    context_settings={'help_option_names': ['-h', '--help']},
 )
 
 _maintained_db_module.register(app)

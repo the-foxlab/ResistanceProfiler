@@ -763,7 +763,7 @@ export function AnalyzeTab({
             title="ResistanceProfiler report"
             src={buildReportUrl(inlineReportPath)}
             className="workspace-frame"
-            sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+            sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads"
             style={{ height: `${reportFrameHeight}px` }}
             onLoad={(event) => {
               try {
