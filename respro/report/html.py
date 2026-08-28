@@ -248,6 +248,7 @@ def build_report_context(
             'rows': all_mutations_rows,
             'count': len(all_mutations_rows),
             'has_database_hits': any(r['is_database_hit'] for r in all_mutations_rows),
+            'has_user_ref_column': not result.is_fasta_mode,
             'is_multi_species': is_multi_species,
             'search_icon': _load_svg_data_url('search.svg'),
             'reset_icon': _load_svg_data_url('reset_filter.svg'),
@@ -413,9 +414,17 @@ def _build_all_mutations_rows(
 
         pos_1based = ann.variant.pos + 1
         if ann.is_combined_codon_event and ann.ref_codon and ann.alt_codon:
-            nt_change = f'{ann.ref_codon}{ann.codon_pos + 1}{ann.alt_codon}'
+            nt_change_stored = f'{ann.ref_codon}{ann.codon_pos + 1}{ann.alt_codon}'
         else:
-            nt_change = f'{ann.variant.ref}{pos_1based}{ann.variant.alt}'
+            nt_change_stored = f'{ann.variant.ref}{pos_1based}{ann.variant.alt}'
+
+        # User-reference NT change: built from the preserved user-ref coords when present.
+        # FASTA-emitted variants have no supplied user reference, so this stays empty.
+        nt_change_user = ''
+        if ann.has_user_ref_coords:
+            user_chrom, user_pos, user_ref, user_alt = ann.user_ref_coords
+            nt_change_user = f'{user_ref}{user_pos + 1}{user_alt}'
+
         aa_change = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             if ann.ref_aa and ann.alt_aa
@@ -424,7 +433,8 @@ def _build_all_mutations_rows(
 
         rows.append({
             'feature': (display_names or {}).get(ann.feature_name, ann.feature_name),
-            'nt_change': nt_change,
+            'nt_change_stored': nt_change_stored,
+            'nt_change_user': nt_change_user,
             'nt_pos': pos_1based,
             'aa_change': aa_change,
             'consequence': display_consequence,
@@ -810,11 +820,34 @@ def _build_bibliography(
                 ordered.append({
                     'num': num,
                     'url': url,
-                    'label': pub.title or pub.doi or pub.pubmed_id or pub.raw_input,
+                    'label': _format_publication_label(pub),
                     'has_url': bool(url),
                 })
                 num += 1
     return ordered, seen
+
+
+def _format_publication_label(pub: Publication) -> str:
+    """
+    Build a human-readable bibliography label.
+
+    Preferred form: ``first Author et al., Year, Journal: Title``.
+    Falls back to the title, then ``raw_input``, when the rich fields are absent.
+    Only non-empty segments are joined, so partial metadata never produces
+    dangling commas or repeated separators.
+    """
+    prefix_parts: list[str] = []
+    if pub.first_author:
+        prefix_parts.append(f'{pub.first_author} et al.')
+    if pub.year:
+        prefix_parts.append(pub.year)
+    if pub.journal:
+        prefix_parts.append(pub.journal)
+    prefix = ', '.join(prefix_parts)
+    body = pub.title or pub.doi or pub.pubmed_id or pub.raw_input
+    if prefix and body:
+        return f'{prefix}: {body}'
+    return prefix or body
 
 
 def _publication_key(pub: Publication) -> tuple:

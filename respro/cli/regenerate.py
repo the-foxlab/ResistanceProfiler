@@ -243,6 +243,7 @@ def regenerate(
             total_variants=run_dict.get('total_variants', 0),
             variants_in_cds=run_dict.get('variants_in_cds', 0),
             resistance_hits=run_dict.get('resistance_hits', 0),
+            is_fasta_mode=bool(run_dict.get('is_fasta_mode', 0)),
             annotations=annotations,
             formula_hits=formula_hits,
             coverage_gaps=coverage_gaps,

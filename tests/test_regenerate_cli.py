@@ -226,6 +226,73 @@ class TestRegenerate:
         assert len(html_files) == 1
         assert 'resistance profile' in html_files[0].read_text()
 
+    def test_regenerate_vcf_report_shows_user_ref_column(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        """A regenerated VCF run shows the NT change user reference column."""
+        results_db = tmp_path / 'results.db'
+        _run_profile(project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
+
+        out_dir = tmp_path / 'regenerated_vcf'
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(project_db),
+            '--output', str(out_dir),
+        ])
+        assert result.exit_code == 0, result.output
+        html = list(out_dir.glob('*.html'))[0].read_text()
+        assert 'NT change stored reference' in html
+        assert '<th>NT change user reference</th>' in html
+
+    def test_regenerate_fasta_report_hides_user_ref_column(
+        self,
+        project_db: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        """A regenerated FASTA run hides the NT change user reference column.
+
+        Uses a consensus query with one SNP so the All Mutations table is
+        non-empty and the column-header assertion is meaningful.
+        """
+        from conftest import TINY_REF_SEQ
+
+        query_seq = list(TINY_REF_SEQ)
+        query_seq[4] = 'G' if query_seq[4] != 'G' else 'C'
+        query_fasta = tmp_path / 'query.fasta'
+        query_fasta.write_text(f'>tiny_ref\n{"".join(query_seq)}\n')
+
+        results_db = tmp_path / 'results.db'
+        run_result = CliRunner().invoke(app, [
+            'fasta',
+            '--project', str(project_db),
+            '--fasta', str(query_fasta),
+            '--results-db', str(results_db),
+            '--output', str(tmp_path / 'fasta_out'),
+        ])
+        assert run_result.exit_code == 0, run_result.output
+
+        out_dir = tmp_path / 'regenerated_fasta'
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(project_db),
+            '--output', str(out_dir),
+        ])
+        assert result.exit_code == 0, result.output
+        html = list(out_dir.glob('*.html'))[0].read_text()
+        # The All Mutations table must be non-empty (the SNP produced a row).
+        assert 'class="mutation-table"' in html
+        assert 'NT change stored reference' in html
+        assert '<th>NT change user reference</th>' not in html
+
     def test_regenerate_missing_project_flag_is_an_error(self, tmp_path: Path) -> None:
         results_db = tmp_path / 'db.db'
         conn = init_results_db(results_db)

@@ -474,6 +474,7 @@ def _finalize_and_export(
         total_variants=ctx.total_variants,
         variants_in_cds=ctx.variants_in_cds,
         resistance_hits=sum(1 for a in annotations if a.is_resistance_hit),
+        is_fasta_mode=True,
         annotations=annotations,
         formula_hits=formula_hits,
         coverage_gaps=ctx.coverage_gaps,

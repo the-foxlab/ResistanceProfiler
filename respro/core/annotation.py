@@ -296,6 +296,12 @@ def _annotate_combined_snp_codon(
         depth=anchor.depth,
         filter_status=anchor.filter_status,
         query_ref_codon=internal_codon if len(internal_codon) == 3 and '-' not in internal_codon else '',
+        # Carry the anchor member's user-reference coords so the combined event
+        # can display the original user-reference NT change.
+        user_chrom=anchor.user_chrom,
+        user_pos=anchor.user_pos,
+        user_ref=anchor.user_ref,
+        user_alt=anchor.user_alt,
     )
 
     return AnnotatedVariant(

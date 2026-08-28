@@ -362,3 +362,98 @@ def test_anchor_changed_indel_is_split_reverse_orientation() -> None:
     consequences = {a.consequence for a in anns}
     assert 'missense' in consequences
     assert any(c in consequences for c in ('deletion', 'frameshift'))
+
+
+class TestUserRefCoordsPreserved:
+    """remap_variants must carry the original user-reference coordinates through remap."""
+
+    def test_snp_user_ref_coords_survive_forward_remap(self) -> None:
+        """A forward-orientation SNP preserves user chrom/pos/ref/alt on the remapped variant."""
+        feature = _make_feature(strand='+')
+        query_seq = 'ATGCAAGTCGGAAACTAA'
+        match = _make_match(feature, match_strand='+', query=query_seq, cigar='18M')
+        var = VariantCall(
+            chrom='userchr', pos=4, ref='A', alt='G', allele_freq=0.9, depth=100,
+        )
+
+        remapped, warnings = remap_variants([var], [match], query_seq)
+
+        assert not warnings
+        assert len(remapped) == 1
+        out = remapped[0]
+        assert out.user_chrom == 'userchr'
+        assert out.user_pos == 4
+        assert out.user_ref == 'A'
+        assert out.user_alt == 'G'
+
+    def test_snp_user_ref_coords_survive_reverse_remap(self) -> None:
+        """A reverse-orientation SNP preserves the original user coords (not the transformed ones)."""
+        feature = _make_feature(strand='+')
+        query_seq = 'TTAGTTTCCGACTTGCAT'
+        match = _make_match(feature, match_strand='-', query=query_seq, cigar='18M')
+        var = VariantCall(
+            chrom='userchr', pos=13, ref='T', alt='C', allele_freq=0.9, depth=100,
+        )
+
+        remapped, warnings = remap_variants([var], [match], query_seq)
+
+        assert not warnings
+        assert len(remapped) == 1
+        out = remapped[0]
+        # Internal coords are transformed (A4G), but user coords stay as supplied.
+        assert _token_from_variant(out) == 'A4G'
+        assert out.user_chrom == 'userchr'
+        assert out.user_pos == 13
+        assert out.user_ref == 'T'
+        assert out.user_alt == 'C'
+
+    def test_indel_user_ref_coords_survive_reverse_remap(self) -> None:
+        """A reverse-orientation indel preserves the original user coords through anchor switching."""
+        feature = _make_feature(strand='+')
+        query_seq = 'TTAGTTTCCGACTTGCAT'
+        match = _make_match(feature, match_strand='-', query=query_seq, cigar='18M')
+        var = VariantCall(
+            chrom='userchr', pos=11, ref='C', alt='CAAA', allele_freq=0.9, depth=100,
+        )
+
+        remapped, warnings = remap_variants([var], [match], query_seq)
+
+        assert not warnings
+        assert len(remapped) == 1
+        out = remapped[0]
+        assert out.user_chrom == 'userchr'
+        assert out.user_pos == 11
+        assert out.user_ref == 'C'
+        assert out.user_alt == 'CAAA'
+
+    def test_split_anchor_changed_indel_preserves_user_coords_on_both_events(self) -> None:
+        """Both split events of a changed-anchor indel carry the original user coords."""
+        feature = _make_feature(strand='+')
+        query_seq = 'ATGCAAGTCGGAAACTAA'
+        match = _make_match(feature, match_strand='+', query=query_seq, cigar='18M')
+        var = VariantCall(
+            chrom='userchr', pos=4, ref='AAGT', alt='G', allele_freq=0.9, depth=100,
+        )
+
+        remapped, warnings = remap_variants([var], [match], query_seq)
+
+        assert any('Split' in w for w in warnings)
+        assert len(remapped) == 2
+        for out in remapped:
+            assert out.user_chrom == 'userchr'
+            assert out.user_pos == 4
+            assert out.user_ref == 'AAGT'
+            assert out.user_alt == 'G'
+
+
+def test_fasta_emitted_variant_has_empty_user_ref_coords() -> None:
+    """FASTA-emitted variants leave user-ref coords empty (no supplied user reference)."""
+    from respro.core.fasta_to_vcf import _make_variant_from_coding_nt
+
+    feature = _make_feature(strand='+')
+    var = _make_variant_from_coding_nt(feature, coding_nt_idx=3, ref='A', alt='G')
+
+    assert var.user_chrom == ''
+    assert var.user_pos == 0
+    assert var.user_ref == ''
+    assert var.user_alt == ''

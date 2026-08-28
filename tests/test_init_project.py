@@ -951,6 +951,178 @@ class TestComboRuleParsing:
         assert row[0] == '10.1086/590668'
 
 
+class TestPublicationRichFields:
+    """Author/year/journal are captured during import and loaded back into Publication."""
+
+    @pytest.fixture()
+    def tiny_genbank(self, tmp_path):
+        gb = tmp_path / 'tiny.gb'
+        write_genbank(gb, [
+            {
+                'id': 'tiny_ref',
+                'accession': 'tiny_ref',
+                'sequence': TINY_REF_SEQ,
+                'features': [{'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': 87, 'strand': '+'}],
+            }
+        ])
+        return gb
+
+    def test_pmid_import_stores_first_author_year_and_journal(
+        self, tmp_path, tiny_genbank
+    ) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tPMID:12345678
+        """))
+        db = tmp_path / 'proj.db'
+        with patch(
+            'respro.db._rules_publication.fetch_pubmed_metadata',
+            return_value={
+                'title': 'A resistance study.',
+                'doi': '10.1234/xyz',
+                'first_author': 'Smith J',
+                'year': '2021',
+                'journal': 'Journal of Virology',
+            },
+        ):
+            init_project(
+                db_path=db, name='test', genbank_paths=[tiny_genbank],
+                rules_tsv=tsv, additional_info=True,
+            )
+
+        conn = sqlite3.connect(str(db))
+        row = conn.execute(
+            'SELECT first_author, year, journal FROM publication WHERE pubmed_id = ?',
+            ('12345678',),
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] == 'Smith J'
+        assert row[1] == '2021'
+        assert row[2] == 'Journal of Virology'
+
+    def test_doi_import_stores_first_author_year_and_journal(
+        self, tmp_path, tiny_genbank
+    ) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tdoi.org/10.1234/xyz
+        """))
+        db = tmp_path / 'proj.db'
+        with (
+            patch('respro.db._rules_publication.fetch_pubmed_id_for_doi', return_value=None),
+            patch(
+                'respro.db._rules_publication.fetch_publication_metadata',
+                return_value={
+                    'title': 'A CrossRef study.',
+                    'first_author': 'Doe A',
+                    'year': '2022',
+                    'journal': 'Antimicrob Agents Chemother',
+                },
+            ),
+        ):
+            init_project(
+                db_path=db, name='test', genbank_paths=[tiny_genbank],
+                rules_tsv=tsv, additional_info=True,
+            )
+
+        conn = sqlite3.connect(str(db))
+        row = conn.execute(
+            "SELECT first_author, year, journal FROM publication WHERE doi = '10.1234/xyz'"
+        ).fetchone()
+        conn.close()
+        assert row is not None
+        assert row[0] == 'Doe A'
+        assert row[1] == '2022'
+        assert row[2] == 'Antimicrob Agents Chemother'
+
+    def test_loaded_publication_carries_rich_fields(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tPMID:12345678
+        """))
+        db = tmp_path / 'proj.db'
+        with patch(
+            'respro.db._rules_publication.fetch_pubmed_metadata',
+            return_value={
+                'title': 'A resistance study.',
+                'doi': '',
+                'first_author': 'Smith J',
+                'year': '2021',
+                'journal': 'Journal of Virology',
+            },
+        ):
+            init_project(
+                db_path=db, name='test', genbank_paths=[tiny_genbank],
+                rules_tsv=tsv, additional_info=True,
+            )
+
+        from respro.db.rules_queries import load_rules
+
+        conn = sqlite3.connect(str(db))
+        conn.row_factory = sqlite3.Row
+        rules = load_rules(conn, reference_id=1)
+        conn.close()
+        pubs = [p for r in rules for p in r.publications]
+        assert pubs, 'expected at least one linked publication'
+        assert pubs[0].first_author == 'Smith J'
+        assert pubs[0].year == '2021'
+        assert pubs[0].journal == 'Journal of Virology'
+
+    def test_legacy_db_without_rich_columns_migrates_cleanly(
+        self, tmp_path, tiny_genbank
+    ) -> None:
+        # Build a project DB, then strip the rich columns to emulate a legacy schema
+        # created before this feature. Re-opening must re-add them via the optional-
+        # column migration so the report layer can SELECT them.
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tpublication
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tPMID:12345678
+        """))
+        db = tmp_path / 'proj.db'
+        init_project(
+            db_path=db, name='test', genbank_paths=[tiny_genbank],
+            rules_tsv=tsv, additional_info=False,
+        )
+
+        conn = sqlite3.connect(str(db))
+        conn.row_factory = sqlite3.Row
+        conn.execute('BEGIN')
+        conn.execute(
+            'CREATE TABLE publication_legacy ('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT, doi TEXT NOT NULL DEFAULT "", '
+            'title TEXT NOT NULL DEFAULT "", pubmed_id TEXT NOT NULL DEFAULT "", '
+            'raw_input TEXT NOT NULL DEFAULT "")'
+        )
+        cols_legacy = ['id', 'doi', 'title', 'pubmed_id', 'raw_input']
+        conn.execute(
+            f'INSERT INTO publication_legacy ({",".join(cols_legacy)}) '
+            f'SELECT {",".join(cols_legacy)} FROM publication'
+        )
+        conn.execute('DROP TABLE publication')
+        conn.execute('ALTER TABLE publication_legacy RENAME TO publication')
+        conn.commit()
+        conn.close()
+
+        from respro.db.schema import open_project_db
+
+        with open_project_db(db) as migrated:
+            cols_after = {row[1] for row in migrated.execute('PRAGMA table_info(publication)').fetchall()}
+            # Existing row survives and rich fields default to empty.
+            row = migrated.execute(
+                'SELECT first_author, year, journal FROM publication LIMIT 1'
+            ).fetchone()
+        assert 'first_author' in cols_after
+        assert 'year' in cols_after
+        assert 'journal' in cols_after
+        assert row is not None
+        assert row[0] == '' and row[1] == '' and row[2] == ''
+
+
 class TestNcbiProteinAccession:
     def test_accepts_refseq_protein_accessions(self) -> None:
         assert _is_ncbi_protein_accession('YP_009137097.1') is True

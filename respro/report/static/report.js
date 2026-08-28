@@ -503,7 +503,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const hasDbCol = !!mutationTab.querySelector('thead th:last-child') &&
           mutationTab.querySelector('thead th:last-child').textContent.trim() === 'In database';
-        const headers = ['Feature', 'Nt change', 'AA change', 'Consequence', 'Variant frequency'];
+        const headerTexts = Array.prototype.map.call(
+          mutationTab.querySelectorAll('thead th'),
+          function (th) { return th.textContent.trim(); }
+        );
+        const hasUserRefCol = headerTexts.indexOf('NT change user reference') !== -1;
+        const headers = ['Feature', 'NT change stored reference'];
+        if (hasUserRefCol) {
+          headers.push('NT change user reference');
+        }
+        headers.push('AA change', 'Consequence', 'Variant frequency');
         if (hasDbCol) {
           headers.push('In database');
         }
@@ -515,13 +524,20 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
           }
 
-          const feature = (row.children[0]?.textContent || '').trim();
-          const ntChange = (row.children[1]?.textContent || '').trim();
-          const aaChange = (row.children[2]?.textContent || '').trim();
-          const consequence = (row.children[3]?.textContent || '').trim();
-          const alleleFreq = (row.children[4]?.textContent || '').trim();
+          const feature = (row.querySelector('.mutation-feature-cell, td:first-child')?.textContent || '').trim();
+          const ntChangeStored = (row.querySelector('.mutation-nt')?.textContent || '').trim();
+          const ntChangeUser = hasUserRefCol
+            ? (row.querySelector('.mutation-nt-user')?.textContent || '').trim()
+            : '';
+          const aaChange = (row.querySelector('.mutation-aa')?.textContent || '').trim();
+          const consequence = (row.querySelector('.mutation-consequence')?.textContent || '').trim();
+          const alleleFreq = (row.querySelector('.mutation-freq')?.textContent || '').trim();
 
-          const fields = [feature, ntChange, aaChange, consequence, alleleFreq];
+          const fields = [feature, ntChangeStored];
+          if (hasUserRefCol) {
+            fields.push(ntChangeUser);
+          }
+          fields.push(aaChange, consequence, alleleFreq);
           if (hasDbCol) {
             const inDatabase = ((row.getAttribute('data-database-values') || 'None')
               .split('|')

@@ -151,7 +151,10 @@ CREATE TABLE IF NOT EXISTS publication (
     doi         TEXT    NOT NULL DEFAULT '',
     title       TEXT    NOT NULL DEFAULT '',
     pubmed_id   TEXT    NOT NULL DEFAULT '',
-    raw_input   TEXT    NOT NULL DEFAULT ''
+    raw_input   TEXT    NOT NULL DEFAULT '',
+    first_author TEXT   NOT NULL DEFAULT '',
+    year        TEXT    NOT NULL DEFAULT '',
+    journal     TEXT    NOT NULL DEFAULT ''
 );
 
 -- Link tables between rules/rule-sets and publications
@@ -228,6 +231,7 @@ CREATE TABLE IF NOT EXISTS run (
     resistance_hits INTEGER NOT NULL DEFAULT 0,
     formula_hits    INTEGER NOT NULL DEFAULT 0,
     status          TEXT    NOT NULL DEFAULT 'complete',
+    is_fasta_mode   INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -349,6 +353,7 @@ _OPTIONAL_RESULTS_COLUMN_DEFS = {
         'formula_hits': 'INTEGER NOT NULL DEFAULT 0',
         'status': "TEXT NOT NULL DEFAULT 'complete'",
         'created_at': "TEXT DEFAULT ''",
+        'is_fasta_mode': 'INTEGER NOT NULL DEFAULT 0',
     },
     'variant_result': {
         'allele_freq': 'REAL',
@@ -391,6 +396,9 @@ _REQUIRED_PROJECT_COLUMNS = {
     'publication': {'id', 'doi', 'title', 'pubmed_id', 'raw_input'},
     'rule_publication': {'id', 'rule_id', 'publication_id'},
 }
+
+# Note: first_author/year/journal on `publication` are defined as optional columns
+# (see _OPTIONAL_PROJECT_COLUMN_DEFS) so legacy databases migrate automatically.
 
 _OPTIONAL_PROJECT_COLUMN_DEFS = {
     'project': {
@@ -466,6 +474,11 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'query_coverage': 'REAL NOT NULL DEFAULT 0',
         'cds_start': 'INTEGER NOT NULL DEFAULT 0',
         'intron_intervals': "TEXT NOT NULL DEFAULT '[]'",
+    },
+    'publication': {
+        'first_author': "TEXT NOT NULL DEFAULT ''",
+        'year': "TEXT NOT NULL DEFAULT ''",
+        'journal': "TEXT NOT NULL DEFAULT ''",
     },
 }
 
@@ -703,7 +716,10 @@ CREATE TABLE IF NOT EXISTS publication (
     doi        TEXT    NOT NULL DEFAULT '',
     title      TEXT    NOT NULL DEFAULT '',
     pubmed_id  TEXT    NOT NULL DEFAULT '',
-    raw_input  TEXT    NOT NULL DEFAULT ''
+    raw_input  TEXT    NOT NULL DEFAULT '',
+    first_author TEXT  NOT NULL DEFAULT '',
+    year       TEXT    NOT NULL DEFAULT '',
+    journal    TEXT    NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS feature_segment (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

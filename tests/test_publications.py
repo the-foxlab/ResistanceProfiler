@@ -132,13 +132,23 @@ class TestFetchPublicationMetadata:
         payload = {'message': {'title': ['A CrossRef Title']}}
         with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
             result = fetch_publication_metadata('10.1234/xyz')
-        assert result == {'title': 'A CrossRef Title'}
+        assert result == {
+            'title': 'A CrossRef Title',
+            'first_author': '',
+            'year': '',
+            'journal': '',
+        }
 
     def test_strips_whitespace_from_title(self) -> None:
         payload = {'message': {'title': ['  Trimmed Title  ']}}
         with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
             result = fetch_publication_metadata('10.1234/xyz')
-        assert result == {'title': 'Trimmed Title'}
+        assert result == {
+            'title': 'Trimmed Title',
+            'first_author': '',
+            'year': '',
+            'journal': '',
+        }
 
     def test_returns_none_on_404(self) -> None:
         with patch('respro.io.publications.urlopen', side_effect=urllib.error.HTTPError(
@@ -167,7 +177,12 @@ class TestFetchPublicationMetadata:
             patch('respro.io.publications.sleep') as mock_sleep,
         ):
             result = fetch_publication_metadata('10.1234/xyz')
-        assert result == {'title': 'A CrossRef Title'}
+        assert result == {
+            'title': 'A CrossRef Title',
+            'first_author': '',
+            'year': '',
+            'journal': '',
+        }
         mock_sleep.assert_called_once_with(0.0)
 
     def test_returns_none_when_title_field_is_not_list(self) -> None:
@@ -241,4 +256,111 @@ class TestFetchPubmedIdForDoi:
         payload = {'records': {'pmid': '12345678'}}
         with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
             assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
+
+
+# ── author / year / journal parsing ───────────────────────────────────────────
+
+_ESUMMARY_WITH_AUTHORS = {
+    'result': {
+        '12345678': {
+            'title': 'Some antiviral resistance study.',
+            'authors': [
+                {'name': 'Smith J'},
+                {'name': 'Doe A'},
+                {'name': 'Roe B'},
+            ],
+            'fulljournalname': 'Journal of Virology',
+            'pubdate': '2021 Jan 15',
+            'articleids': [
+                {'idtype': 'pubmed', 'value': '12345678'},
+                {'idtype': 'doi', 'value': '10.1234/xyz'},
+            ],
+        }
+    }
+}
+
+_CROSSREF_WITH_AUTHORS = {
+    'message': {
+        'title': ['A CrossRef Title'],
+        'author': [
+            {'family': 'Smith', 'given': 'J.'},
+            {'family': 'Doe', 'given': 'A.'},
+        ],
+        'container-title': ['Antimicrobial Agents and Chemotherapy'],
+        'published': {'date-parts': [[2022, 3, 1]]},
+        'issued': {'date-parts': [[2022]]},
+    }
+}
+
+
+class TestFetchPubmedMetadataRichFields:
+    def test_returns_first_author_year_and_journal_when_present(self) -> None:
+        with patch('respro.io.publications.urlopen', return_value=_mock_response(_ESUMMARY_WITH_AUTHORS)):
+            result = fetch_pubmed_metadata('12345678')
+        assert result is not None
+        assert result['title'] == 'Some antiviral resistance study.'
+        assert result['doi'] == '10.1234/xyz'
+        assert result['first_author'] == 'Smith J'
+        assert result['year'] == '2021'
+        assert result['journal'] == 'Journal of Virology'
+
+    def test_returns_empty_rich_fields_when_absent(self) -> None:
+        with patch('respro.io.publications.urlopen', return_value=_mock_response(_ESUMMARY_WITH_DOI)):
+            result = fetch_pubmed_metadata('12345678')
+        assert result is not None
+        assert result['first_author'] == ''
+        assert result['year'] == ''
+        assert result['journal'] == ''
+
+    def test_extracts_year_from_pubdate_without_month(self) -> None:
+        payload = {
+            'result': {
+                '1': {
+                    'title': 'T',
+                    'pubdate': '1998',
+                    'authors': [{'name': 'Lee K'}],
+                    'articleids': [],
+                }
+            }
+        }
+        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+            result = fetch_pubmed_metadata('1')
+        assert result is not None
+        assert result['year'] == '1998'
+        assert result['first_author'] == 'Lee K'
+
+
+class TestFetchPublicationMetadataRichFields:
+    def test_returns_first_author_year_and_journal_when_present(self) -> None:
+        with patch('respro.io.publications.urlopen', return_value=_mock_response(_CROSSREF_WITH_AUTHORS)):
+            result = fetch_publication_metadata('10.1234/xyz')
+        assert result is not None
+        assert result['title'] == 'A CrossRef Title'
+        assert result['first_author'] == 'Smith'
+        assert result['year'] == '2022'
+        assert result['journal'] == 'Antimicrobial Agents and Chemotherapy'
+
+    def test_returns_empty_rich_fields_when_absent(self) -> None:
+        payload = {'message': {'title': ['A CrossRef Title']}}
+        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+            result = fetch_publication_metadata('10.1234/xyz')
+        assert result is not None
+        assert result['first_author'] == ''
+        assert result['year'] == ''
+        assert result['journal'] == ''
+
+    def test_falls_back_to_issued_date_parts_when_published_absent(self) -> None:
+        payload = {
+            'message': {
+                'title': ['T'],
+                'author': [{'family': 'Ng', 'given': 'P.'}],
+                'container-title': ['JCM'],
+                'issued': {'date-parts': [[2019, 6]]},
+            }
+        }
+        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+            result = fetch_publication_metadata('10.1234/xyz')
+        assert result is not None
+        assert result['year'] == '2019'
+        assert result['first_author'] == 'Ng'
 

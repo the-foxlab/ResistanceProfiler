@@ -492,6 +492,9 @@ def _publication_from_row(row: sqlite3.Row) -> Publication:
         title=row['title'] or '',
         pubmed_id=row['pubmed_id'] or '',
         raw_input=row['raw_input'] or '',
+        first_author=row['first_author'] or '',
+        year=row['year'] or '',
+        journal=row['journal'] or '',
     )
 
 
@@ -508,7 +511,8 @@ def _fetch_publications_by_owner(
 
     placeholders = ','.join('?' * len(owner_ids))
     rows = conn.execute(
-        f'SELECT lp.{owner_column} AS owner_id, p.id, p.doi, p.title, p.pubmed_id, p.raw_input '
+        f'SELECT lp.{owner_column} AS owner_id, p.id, p.doi, p.title, p.pubmed_id, '
+        f'p.raw_input, p.first_author, p.year, p.journal '
         f'FROM {link_table} lp '
         f'JOIN publication p ON p.id = lp.publication_id '
         f'WHERE lp.{owner_column} IN ({placeholders})',

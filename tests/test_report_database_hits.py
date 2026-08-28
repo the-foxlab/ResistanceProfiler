@@ -358,4 +358,78 @@ class TestBuildDatabaseHitsRows:
 
         assert ctx['rows'] == []
         assert ctx['count'] == 0
-        assert not ctx['has_publications']
+
+
+class TestBibliographyRichFormat:
+    """Bibliography entries render as 'first Author et al., Year, Journal, Title'."""
+
+    def test_full_rich_fields_format_label(self) -> None:
+        pub = Publication(
+            id=1, doi='10.1/test', title='A resistance study.',
+            pubmed_id='', raw_input='',
+            first_author='Smith J', year='2021', journal='Journal of Virology',
+        )
+        rule = ResistanceRule(
+            id=1, feature_name='UL23', feature_id=1, drug_name='Aciclovir', drug_id=1,
+            reference_identifier='HSV1', position=1, reference='K', mutation='R',
+            phenotype='resistant', publications=[pub],
+        )
+        ann = _make_annotation(_make_variant(), rules=[rule])
+        result = ProfilingResult(annotations=[ann])
+
+        ctx = _build_database_hits_rows(result)
+
+        bib = ctx['bibliography'][0]
+        assert bib['label'] == 'Smith J et al., 2021, Journal of Virology: A resistance study.'
+
+    def test_label_falls_back_to_title_when_rich_fields_absent(self) -> None:
+        pub = Publication(
+            id=1, doi='10.1/test', title='Title only.', pubmed_id='', raw_input='',
+            first_author='', year='', journal='',
+        )
+        rule = ResistanceRule(
+            id=1, feature_name='UL23', feature_id=1, drug_name='Aciclovir', drug_id=1,
+            reference_identifier='HSV1', position=1, reference='K', mutation='R',
+            phenotype='resistant', publications=[pub],
+        )
+        ann = _make_annotation(_make_variant(), rules=[rule])
+        result = ProfilingResult(annotations=[ann])
+
+        ctx = _build_database_hits_rows(result)
+
+        assert ctx['bibliography'][0]['label'] == 'Title only.'
+
+    def test_label_uses_available_subset_of_rich_fields(self) -> None:
+        pub = Publication(
+            id=1, doi='10.1/test', title='Partial study.', pubmed_id='', raw_input='',
+            first_author='Doe A', year='', journal='JCM',
+        )
+        rule = ResistanceRule(
+            id=1, feature_name='UL23', feature_id=1, drug_name='Aciclovir', drug_id=1,
+            reference_identifier='HSV1', position=1, reference='K', mutation='R',
+            phenotype='resistant', publications=[pub],
+        )
+        ann = _make_annotation(_make_variant(), rules=[rule])
+        result = ProfilingResult(annotations=[ann])
+
+        ctx = _build_database_hits_rows(result)
+
+        # No year → author + journal + title, no dangling commas.
+        assert ctx['bibliography'][0]['label'] == 'Doe A et al., JCM: Partial study.'
+
+    def test_label_falls_back_to_raw_input_when_title_absent(self) -> None:
+        pub = Publication(
+            id=1, doi='', title='', pubmed_id='', raw_input='PMID:12345',
+            first_author='', year='', journal='',
+        )
+        rule = ResistanceRule(
+            id=1, feature_name='UL23', feature_id=1, drug_name='Aciclovir', drug_id=1,
+            reference_identifier='HSV1', position=1, reference='K', mutation='R',
+            phenotype='resistant', publications=[pub],
+        )
+        ann = _make_annotation(_make_variant(), rules=[rule])
+        result = ProfilingResult(annotations=[ann])
+
+        ctx = _build_database_hits_rows(result)
+
+        assert ctx['bibliography'][0]['label'] == 'PMID:12345'

@@ -155,6 +155,7 @@ def write_json(
         'formula_hits': len(result.formula_hits),
         'status': 'complete',
         'created_at': result.run_timestamp,
+        'is_fasta_mode': int(result.is_fasta_mode),
     }
 
     variant_rows = []

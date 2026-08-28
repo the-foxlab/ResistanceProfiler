@@ -1804,3 +1804,48 @@ class TestCombinedCodonEventDisplayFields:
         ann = results[0]
         assert ann.is_combined_codon_event is False
         assert ann.combined_member_count == 1
+
+
+class TestAnnotatedVariantUserRefCoords:
+    """AnnotatedVariant exposes the preserved user-reference coordinates."""
+
+    def test_combined_snp_codon_carries_anchor_user_ref_coords(self) -> None:
+        """A combined codon event carries the anchor member's user-ref coords."""
+        feature = TestCombinedCodonEventDisplayFields._fwd_feature()
+        variants = [
+            VariantCall(
+                chrom='c', pos=3, ref='T', alt='A', allele_freq=0.95, depth=100,
+                user_chrom='userchr', user_pos=10, user_ref='T', user_alt='A',
+            ),
+            VariantCall(
+                chrom='c', pos=5, ref='T', alt='G', allele_freq=0.95, depth=100,
+                user_chrom='userchr', user_pos=12, user_ref='T', user_alt='G',
+            ),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.has_user_ref_coords is True
+        # Anchor is the lowest-pos member (pos 3 → user_pos 10).
+        assert ann.user_ref_coords == ('userchr', 10, 'T', 'A')
+
+    def test_fasta_emitted_annotation_has_no_user_ref_coords(self) -> None:
+        """A FASTA-emitted annotation (empty user fields) reports no user-ref coords."""
+        feature = TestCombinedCodonEventDisplayFields._fwd_feature()
+        var = VariantCall(chrom='c', pos=3, ref='T', alt='A', allele_freq=1.0, depth=0)
+        results = annotate_variants([var], [feature], is_fasta_mode=True)
+        ann = results[0]
+        assert ann.has_user_ref_coords is False
+        assert ann.user_ref_coords == ('', 0, '', '')
+
+    def test_vcf_snp_annotation_carries_user_ref_coords(self) -> None:
+        """A VCF SNP annotation carries the user-ref coords from the input variant."""
+        feature = TestCombinedCodonEventDisplayFields._fwd_feature()
+        var = VariantCall(
+            chrom='c', pos=3, ref='T', alt='A', allele_freq=0.9, depth=100,
+            user_chrom='userchr', user_pos=10, user_ref='T', user_alt='A',
+        )
+        results = annotate_variants([var], [feature])
+        ann = results[0]
+        assert ann.has_user_ref_coords is True
+        assert ann.user_ref_coords == ('userchr', 10, 'T', 'A')

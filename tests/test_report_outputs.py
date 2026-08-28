@@ -1650,6 +1650,106 @@ class TestMultiSpeciesReferenceColumn:
         assert 'refB' in html
 
 
+def _make_vcf_result_with_user_ref_coords() -> ProfilingResult:
+    """Build a single-reference VCF ProfilingResult whose annotation carries user-ref coords."""
+    var = VariantCall(
+        chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500,
+        user_chrom='userchr', user_pos=10, user_ref='T', user_alt='C',
+    )
+    rule = ResistanceRule(
+        id=1, feature_name='gag', feature_id=1,
+        drug_name='DrugA', drug_id=1, reference_identifier='tiny_ref',
+        position=2, reference='K', mutation='E', phenotype='resistant',
+    )
+    ann = AnnotatedVariant(
+        variant=var, feature_name='gag', codon_pos=2,
+        ref_codon='AAA', alt_codon='GAA',
+        ref_aa='K', alt_aa='E',
+        consequence='missense', af_bin='high', rule_matches=[rule],
+    )
+    feature = FeatureRecord(
+        id=1, reference_id=1, name='gag', protein='Gag',
+        start=0, end=12, strand='+', codon_start=0, nt_sequence='ATGAAAGCTTAA',
+    )
+    return make_profiling_result(
+        project_name='Test', organism='test',
+        reference_name='ref', reference_length_nt=12000, sample_name='S1',
+        vcf_name='test.vcf',
+        total_variants=1, variants_in_cds=1, resistance_hits=1,
+        annotations=[ann],
+        query_sequence='ATGAAAGCTTAA',
+        feature_matches=[
+            FeatureMatch(
+                feature=feature, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+            ),
+        ],
+    )
+
+
+def _make_fasta_result() -> ProfilingResult:
+    """Build a single-reference FASTA ProfilingResult (no user-ref coords, is_fasta_mode=True)."""
+    r = _make_result()
+    r.is_fasta_mode = True
+    return r
+
+
+class TestAllMutationsUserRefNtChange:
+    """All Mutations rows expose stored- and user-reference NT change columns."""
+
+    def test_vcf_rows_carry_stored_and_user_nt_change(self) -> None:
+        """VCF rows carry nt_change_stored (internal coords) and nt_change_user (user coords)."""
+        result = _make_vcf_result_with_user_ref_coords()
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        assert len(rows) == 1
+        row = rows[0]
+        # Stored coords: variant at internal pos 3 (1-based 4) → A4G.
+        assert row['nt_change_stored'] == 'A4G'
+        # User coords: user_pos 10 (1-based 11) → T11C.
+        assert row['nt_change_user'] == 'T11C'
+        # Legacy nt_change key is no longer present.
+        assert 'nt_change' not in row
+
+    def test_fasta_rows_carry_empty_user_nt_change(self) -> None:
+        """FASTA rows leave nt_change_user empty (no supplied user reference)."""
+        result = _make_fasta_result()
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        assert len(rows) == 1
+        row = rows[0]
+        assert row['nt_change_stored'] == 'A4G'
+        assert row['nt_change_user'] == ''
+
+    def test_vcf_context_marks_show_user_ref_column(self) -> None:
+        """VCF reports set all_mutations.has_user_ref_column True."""
+        result = _make_vcf_result_with_user_ref_coords()
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0)
+        assert ctx['all_mutations']['has_user_ref_column'] is True
+
+    def test_fasta_context_marks_hide_user_ref_column(self) -> None:
+        """FASTA reports set all_mutations.has_user_ref_column False."""
+        result = _make_fasta_result()
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0)
+        assert ctx['all_mutations']['has_user_ref_column'] is False
+
+    def test_html_vcf_shows_user_ref_column_headers(self) -> None:
+        """A VCF report HTML contains the stored/user reference NT change column headers."""
+        result = _make_vcf_result_with_user_ref_coords()
+        html = render_html(result, similarity_high=1, similarity_moderate=0)
+        assert 'NT change stored reference' in html
+        assert '<th>NT change user reference</th>' in html
+        # The user-ref NT change value must appear in a cell.
+        assert 'T11C' in html
+
+    def test_html_fasta_hides_user_ref_column(self) -> None:
+        """A FASTA report HTML shows only the stored reference NT change header."""
+        result = _make_fasta_result()
+        html = render_html(result, similarity_high=1, similarity_moderate=0)
+        assert 'NT change stored reference' in html
+        assert '<th>NT change user reference</th>' not in html
+
+
 class TestMultiSpeciesAffectedFeaturesAttribution:
     """Affected sequence features attributed per-reference."""
 

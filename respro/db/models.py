@@ -24,6 +24,9 @@ class Publication:
     title: str
     pubmed_id: str
     raw_input: str  # original curator string; preserved as display fallback
+    first_author: str = ''  # surname + initials of the first author (e.g. 'Smith J')
+    year: str = ''  # publication year as a string (e.g. '2021')
+    journal: str = ''  # full journal name
 
 
 @dataclass(frozen=True)
@@ -253,7 +256,13 @@ class ResistanceRuleSet:
 
 @dataclass
 class VariantCall:
-    """A single variant extracted from a VCF record (0-based internal position)."""
+    """A single variant extracted from a VCF record (0-based internal position).
+
+    ``user_*`` fields preserve the variant's coordinates on the user-supplied
+    reference (the VCF CHROM/POS/REF/ALT as parsed, before remap to internal
+    coordinates). They are populated by the VCF remap path and left empty for
+    FASTA-emitted variants (no user reference is supplied in FASTA mode).
+    """
 
     chrom: str
     pos: int
@@ -263,6 +272,10 @@ class VariantCall:
     depth: int = 0
     filter_status: str = 'PASS'
     query_ref_codon: str = ''
+    user_chrom: str = ''
+    user_pos: int = 0
+    user_ref: str = ''
+    user_alt: str = ''
 
 
 @dataclass
@@ -282,6 +295,29 @@ class AnnotatedVariant:
     af_bin: str = ''
     is_fasta_mode: bool = False  # True when derived from consensus FASTA, not a VCF
     rule_matches: list[ResistanceRule] = field(default_factory=list)
+
+    @property
+    def has_user_ref_coords(self) -> bool:
+        """Return True when user-reference coordinates are recorded for this annotation.
+
+        FASTA-emitted variants have no supplied user reference, so their user-ref
+        fields stay empty; VCF-remapped variants always carry them.
+        """
+        return bool(self.variant.user_ref or self.variant.user_alt)
+
+    @property
+    def user_ref_coords(self) -> tuple[str, int, str, str]:
+        """Return the preserved user-reference coordinates ``(chrom, pos, ref, alt)``.
+
+        Positions are 0-based, matching VCF parsing. Empty strings/0 indicate
+        FASTA-emitted variants with no supplied user reference.
+        """
+        return (
+            self.variant.user_chrom,
+            self.variant.user_pos,
+            self.variant.user_ref,
+            self.variant.user_alt,
+        )
 
     @property
     def non_formula_component_rule_matches(self) -> list[ResistanceRule]:
@@ -311,7 +347,15 @@ class AnnotatedVariant:
                 'fold_ic50': r.fold_ic50,
                 'score': r.score,
                 'publications': [
-                    {'doi': p.doi, 'title': p.title, 'pubmed_id': p.pubmed_id, 'raw_input': p.raw_input}
+                    {
+                        'doi': p.doi,
+                        'title': p.title,
+                        'pubmed_id': p.pubmed_id,
+                        'raw_input': p.raw_input,
+                        'first_author': p.first_author,
+                        'year': p.year,
+                        'journal': p.journal,
+                    }
                     for p in r.publications
                 ],
                 'pubchem_url': r.pubchem_url,
@@ -436,6 +480,7 @@ class ProfilingResult:
     total_variants: int = 0
     variants_in_cds: int = 0
     resistance_hits: int = 0
+    is_fasta_mode: bool = False  # True when the run derived variants from a consensus FASTA, not a VCF
     annotations: list[AnnotatedVariant] = field(default_factory=list)
     formula_hits: list[FormulaRuleHit] = field(default_factory=list)
     coverage_gaps: list[CoverageGap] = field(default_factory=list)
