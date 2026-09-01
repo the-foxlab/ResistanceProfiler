@@ -992,7 +992,7 @@ describe('_resolveLegalLink', () => {
   });
 });
 
-describe('resproVersion', () => {
+describe('cliVersion', () => {
   // The footer always renders; the version string is sourced from
   // /api/ui/config so it reflects the running backend, not the build.
   beforeEach(() => {
@@ -1007,7 +1007,7 @@ describe('resproVersion', () => {
   it('exposes the version reported by /api/ui/config', async () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ data: { version: '1.2.3' } }),
+      json: () => Promise.resolve({ data: { cli_version: '1.2.3' } }),
     });
     global.fetch.mockResolvedValueOnce({
       ok: true,
@@ -1021,7 +1021,7 @@ describe('resproVersion', () => {
     const { result } = renderHook(() => useDashboardLogic());
 
     await waitFor(() => {
-      expect(result.current.resproVersion).toBe('1.2.3');
+      expect(result.current.cliVersion).toBe('1.2.3');
     });
   });
 
@@ -1044,6 +1044,6 @@ describe('resproVersion', () => {
     await waitFor(() => {
       expect(result.current.databases.length).toBe(0);
     });
-    expect(result.current.resproVersion).toBeNull();
+    expect(result.current.cliVersion).toBeNull();
   });
 });

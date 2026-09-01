@@ -44,7 +44,7 @@ def build_health_router(
             data={
                 'batch_max_samples': sample_limit_per_minute,
                 'sample_limit_per_minute': sample_limit_per_minute,
-                'version': version,
+                'cli_version': version,
             }
         )
 

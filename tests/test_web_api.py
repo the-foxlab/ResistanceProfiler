@@ -1691,7 +1691,7 @@ class TestWebApi:
 
         assert response.status_code == 200
         payload = response.json()['data']
-        assert payload['version'] == importlib.metadata.version('respro')
+        assert payload['cli_version'] == importlib.metadata.version('respro')
 
     def test_open_report_rejects_unknown_artifact_id(
         self,

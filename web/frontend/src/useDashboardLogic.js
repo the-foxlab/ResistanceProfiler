@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import faviconSrc from './assets/favicon.svg';
+import packageJson from '../package.json';
 import { FRONTEND_CONFIG } from './config';
 import { API_BASE, buildHeaders, apiGet } from './api';
 import { PROFILE_MODES } from './constants';
@@ -9,6 +10,10 @@ import { useMutationBrowser } from './hooks/useMutationBrowser';
 import { useSessionResults } from './hooks/useSessionResults';
 import { useUploadManager } from './hooks/useUploadManager';
 import { useComparisonManager } from './hooks/useComparisonManager';
+
+// Web version is a build-time constant from package.json; the CLI version comes
+// from the backend (/api/ui/config) since it reflects the installed respro package.
+const webVersion = packageJson.version;
 
 // Re-export existing public API for backward compatibility
 export { buildApiUrl, formatUserError, apiPostRaw } from './api';
@@ -23,7 +28,7 @@ export function useDashboardLogic() {
   // href the footer "Legal notice" link should point at — an external URL when the
   // backend reports ``kind:'url'``, or the self-hosted ``/legal`` route for path mode.
   const [legalLink, setLegalLink] = useState(null);
-  const [resproVersion, setResproVersion] = useState(null);
+  const [cliVersion, setCliVersion] = useState(null);
   const [activeMode, setActiveMode] = useState('analyze');
   const [activeProfileMode, setActiveProfileMode] = useState('vcf');
   const [analyzeSubMode, setAnalyzeSubMode] = useState('single');
@@ -77,8 +82,8 @@ export function useDashboardLogic() {
         if (Number.isFinite(uiConfig.sample_limit_per_minute) && uiConfig.sample_limit_per_minute > 0) {
           batch.setSampleLimitPerMinute(uiConfig.sample_limit_per_minute);
         }
-        if (uiConfig.version) {
-          setResproVersion(uiConfig.version);
+        if (uiConfig.cli_version) {
+          setCliVersion(uiConfig.cli_version);
         }
         const legalPayload = await apiGet('/api/ui/legal').catch(() => null);
         setLegalLink(_resolveLegalLink(legalPayload?.data));
@@ -177,7 +182,8 @@ export function useDashboardLogic() {
     setSelectedDatabaseId,
     statusError,
     legalLink,
-    resproVersion,
+    cliVersion,
+    webVersion,
     selectedProfileReportPath: session.selectedProfileReportPath,
     setSelectedProfileReportPath: session.setSelectedProfileReportPath,
     mutationFilter: mutations.mutationFilter,
