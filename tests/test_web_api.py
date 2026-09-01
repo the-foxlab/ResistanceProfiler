@@ -2438,6 +2438,187 @@ class TestLegalRoute:
         assert resolved == ImprintConfig(kind='url', url=external_url)
 
 
+class TestContactEmailResolver:
+    """``RESPRO_WEB_CONTACT_EMAIL`` resolver across the three input classes.
+
+    The env var accepts exactly one RFC-822 address. Unset/empty → ``None`` (feature
+    disabled); a valid address → ``ContactEmailConfig(email=...)``; an invalid value
+    → ``ValueError`` mentioning ``RESPRO_WEB_CONTACT_EMAIL`` (fail-fast at startup).
+    """
+
+    def test_env_key_is_registered(self) -> None:
+        """The contact-email env var name is declared on WebEnvKeys."""
+        from web.backend.config import WEB_ENV
+
+        assert WEB_ENV.contact_email == 'RESPRO_WEB_CONTACT_EMAIL'
+
+    def test_resolver_returns_none_when_env_unset(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.delenv('RESPRO_WEB_CONTACT_EMAIL', raising=False)
+        from web.backend.startup_config import _resolve_contact_email
+
+        assert _resolve_contact_email() is None
+
+    def test_resolver_returns_none_when_env_empty(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_CONTACT_EMAIL', '   ')
+        from web.backend.startup_config import _resolve_contact_email
+
+        assert _resolve_contact_email() is None
+
+    def test_resolver_returns_config_for_valid_address(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from web.backend.startup_config import ContactEmailConfig, _resolve_contact_email
+
+        monkeypatch.setenv('RESPRO_WEB_CONTACT_EMAIL', 'support@example.org')
+        resolved = _resolve_contact_email()
+        assert resolved == ContactEmailConfig(email='support@example.org')
+
+    def test_resolver_strips_surrounding_whitespace(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from web.backend.startup_config import ContactEmailConfig, _resolve_contact_email
+
+        monkeypatch.setenv('RESPRO_WEB_CONTACT_EMAIL', '  support@example.org  ')
+        resolved = _resolve_contact_email()
+        assert resolved == ContactEmailConfig(email='support@example.org')
+
+    @pytest.mark.parametrize('invalid', ['not-an-email', 'a@b c', '@no-local.example', 'no-domain@'])
+    def test_resolver_raises_value_error_for_invalid_address(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        invalid: str,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_CONTACT_EMAIL', invalid)
+        from web.backend.startup_config import _resolve_contact_email
+
+        with pytest.raises(ValueError, match='RESPRO_WEB_CONTACT_EMAIL'):
+            _resolve_contact_email()
+
+    def test_resolver_rejects_display_name_form(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A ``"Name <addr>"`` display-name form is rejected — exactly one bare address required."""
+        monkeypatch.setenv('RESPRO_WEB_CONTACT_EMAIL', 'Jonas Fuchs <jonas@example.org>')
+        from web.backend.startup_config import _resolve_contact_email
+
+        with pytest.raises(ValueError, match='RESPRO_WEB_CONTACT_EMAIL'):
+            _resolve_contact_email()
+
+    def test_startup_config_declares_contact_email_field(self, startup_config: StartupConfig) -> None:
+        """StartupConfig exposes an optional ``contact_email`` slot (None by default)."""
+        import dataclasses
+
+        from web.backend.startup_config import ContactEmailConfig
+
+        fields = {field.name: field for field in dataclasses.fields(StartupConfig)}
+        assert 'contact_email' in fields
+        assert fields['contact_email'].default is None
+        # The slot accepts a ContactEmailConfig and round-trips through replace.
+        sample = ContactEmailConfig(email='team@example.org')
+        assert dataclasses.replace(startup_config, contact_email=sample).contact_email == sample
+
+    def test_load_startup_config_wires_contact_email_from_env(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        startup_config: StartupConfig,
+    ) -> None:
+        """``load_startup_config`` resolves the env var and attaches the config.
+
+        Uses the ``startup_config`` fixture's data dir (writable tmp_path) by
+        pointing ``RESPRO_WEB_DATA_DIR`` at it, so the full startup path runs
+        against a real project database without touching ``/data``.
+        """
+        from web.backend.startup_config import ContactEmailConfig, load_startup_config
+
+        monkeypatch.setenv('RESPRO_WEB_DATA_DIR', str(startup_config.data_dir))
+        monkeypatch.setenv('RESPRO_WEB_CONTACT_EMAIL', 'team@example.org')
+        config = load_startup_config()
+        assert config.contact_email == ContactEmailConfig(email='team@example.org')
+
+    def test_load_startup_config_contact_email_none_when_unset(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        startup_config: StartupConfig,
+    ) -> None:
+        monkeypatch.setenv('RESPRO_WEB_DATA_DIR', str(startup_config.data_dir))
+        monkeypatch.delenv('RESPRO_WEB_CONTACT_EMAIL', raising=False)
+        from web.backend.startup_config import load_startup_config
+
+        config = load_startup_config()
+        assert config.contact_email is None
+
+
+class TestContactRoute:
+    """Contact e-mail indicator route across enabled / disabled states.
+
+    ``GET /api/ui/contact`` returns ``{'enabled': bool, 'email': str | None}```. The
+    route is public (no API token) so contact reachability is always available, mirroring
+    ``/api/ui/legal``.
+    """
+
+    def test_contact_indicator_disabled_when_unset(self, client: TestClient) -> None:
+        """No contact e-mail configured: indicator reports disabled with null email."""
+        response = client.get('/api/ui/contact')
+        assert response.status_code == 200
+        payload = response.json()['data']
+        assert payload['enabled'] is False
+        assert payload['email'] is None
+
+    def test_contact_indicator_enabled_reports_email(
+        self,
+        startup_config: StartupConfig,
+        sync_queue: Queue,
+    ) -> None:
+        """Contact e-mail configured: indicator reports enabled with the address."""
+        from web.backend.startup_config import ContactEmailConfig
+
+        enabled_config = replace(
+            startup_config,
+            contact_email=ContactEmailConfig(email='support@example.org'),
+        )
+        app = create_app(startup_config=enabled_config)
+        app.dependency_overrides[get_queue] = lambda: sync_queue
+        app.dependency_overrides[get_batch_queue] = lambda: sync_queue
+        contact_client = TestClient(app)
+
+        response = contact_client.get('/api/ui/contact')
+        assert response.status_code == 200
+        payload = response.json()['data']
+        assert payload['enabled'] is True
+        assert payload['email'] == 'support@example.org'
+
+    def test_contact_indicator_reachable_without_api_token(
+        self,
+        startup_config: StartupConfig,
+        sync_queue: Queue,
+    ) -> None:
+        """The contact indicator is public — no Authorization header required."""
+        from web.backend.startup_config import ContactEmailConfig
+
+        enabled_config = replace(
+            startup_config,
+            contact_email=ContactEmailConfig(email='team@example.org'),
+        )
+        app = create_app(startup_config=enabled_config)
+        app.dependency_overrides[get_queue] = lambda: sync_queue
+        app.dependency_overrides[get_batch_queue] = lambda: sync_queue
+        contact_client = TestClient(app)
+
+        # No Authorization header of any kind.
+        response = contact_client.get('/api/ui/contact')
+        assert response.status_code == 200
+        assert response.json()['data']['enabled'] is True
+
+
 class TestExtractDisplayAlgorithms:
     """Unit tests for web.backend.services.browse._extract_display_algorithms."""
 

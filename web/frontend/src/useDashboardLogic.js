@@ -28,6 +28,10 @@ export function useDashboardLogic() {
   // href the footer "Legal notice" link should point at — an external URL when the
   // backend reports ``kind:'url'``, or the self-hosted ``/legal`` route for path mode.
   const [legalLink, setLegalLink] = useState(null);
+  // ``contactEmail`` is null when the contact-e-mail feature is disabled; otherwise
+  // it is the bare address rendered as a ``mailto:`` link in the footer and on the
+  // About tab.
+  const [contactEmail, setContactEmail] = useState(null);
   const [cliVersion, setCliVersion] = useState(null);
   const [activeMode, setActiveMode] = useState('analyze');
   const [activeProfileMode, setActiveProfileMode] = useState('vcf');
@@ -87,6 +91,8 @@ export function useDashboardLogic() {
         }
         const legalPayload = await apiGet('/api/ui/legal').catch(() => null);
         setLegalLink(_resolveLegalLink(legalPayload?.data));
+        const contactPayload = await apiGet('/api/ui/contact').catch(() => null);
+        setContactEmail(_resolveContactEmail(contactPayload?.data));
         const payload = await apiGet('/api/databases');
         const items = payload.data.items || [];
         setDatabases(items);
@@ -182,6 +188,7 @@ export function useDashboardLogic() {
     setSelectedDatabaseId,
     statusError,
     legalLink,
+    contactEmail,
     cliVersion,
     webVersion,
     selectedProfileReportPath: session.selectedProfileReportPath,
@@ -297,5 +304,18 @@ export function _resolveLegalLink(legalData) {
     return legalData.url;
   }
   return `${API_BASE}/legal`;
+}
+
+/**
+ * Resolve the footer / About contact e-mail from the ``/api/ui/contact`` payload.
+ *
+ * Returns ``null`` when the contact feature is disabled or the address is missing,
+ * otherwise the bare address string (rendered as a ``mailto:`` link by the view).
+ */
+export function _resolveContactEmail(contactData) {
+  if (!contactData || !contactData.enabled || !contactData.email) {
+    return null;
+  }
+  return contactData.email;
 }
 

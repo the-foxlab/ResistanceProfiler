@@ -82,7 +82,13 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 | `RESPRO_WEB_API_TOKEN` | *(empty — auth disabled)* | Bearer token required for all protected API endpoints. Leave empty for local-only deployments; **set a strong random secret for any non-local deployment**. |
 | `RESPRO_WEB_CORS_ORIGINS` | `http://127.0.0.1:5173`, `http://localhost:5173` | Comma-separated list of allowed origins for cross-origin requests. Must be set explicitly when `RESPRO_WEB_API_TOKEN` is set. For public hosting, list your exact frontend origin(s), e.g. `https://respro.example.com`. |
 | `RESPRO_WEB_TRUSTED_PROXIES` | *(empty — proxy headers ignored)* | Comma-separated list of proxy IPs or CIDRs whose `X-Forwarded-*` headers are trusted. Set to your reverse proxy address for public hosting (see [nginx step-by-step](#nginx-step-by-step-local-network)). |
+
+### Footer variables (optional)
+
+| Variable | Default | Description |
+|---|---|---|
 | `RESPRO_WEB_IMPRESSUM_PATH` | *(empty — feature disabled)* | Absolute path to an HTML file served at `/legal` as a legal notice / Impressum. See [Legal notice / Impressum](#legal-notice-impressum-optional) for details. |
+| `RESPRO_WEB_CONTACT_EMAIL` | *(empty — feature disabled)* | Contact e-mail address surfaced as a `mailto:` link in the app footer and on the About tab. Must be a single valid e-mail address; an invalid value fails fast at startup. |
 
 ### Rate limiting and batch sizes
 
@@ -129,6 +135,9 @@ REDIS_URL=redis://redis:6379/0
 
 # Optional: legal notice
 # RESPRO_WEB_IMPRESSUM_PATH=/data/impressum.html
+
+# Optional: contact e-mail shown in the footer and on the About tab
+# RESPRO_WEB_CONTACT_EMAIL=contact@example.org
 
 # Optional: enable maintained database auto-download and weekly updates
 RESPRO_WEB_MAINTAINED_BOOTSTRAP=true

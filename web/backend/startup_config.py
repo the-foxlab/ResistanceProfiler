@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 from dataclasses import dataclass, field
+from email.utils import parseaddr
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
@@ -35,6 +36,17 @@ class ImprintConfig:
 
 
 @dataclass(frozen=True)
+class ContactEmailConfig:
+    """Validated contact e-mail configuration.
+
+    Holds a single bare RFC-822 address (no display-name form) surfaced as a
+    ``mailto:`` link in the app footer and on the About tab.
+    """
+
+    email: str
+
+
+@dataclass(frozen=True)
 class StartupConfig:
     """Validated startup configuration shared by API routes and workers."""
 
@@ -44,6 +56,7 @@ class StartupConfig:
     data_dir: Path
     allowed_roots: tuple[Path, ...]
     imprint: ImprintConfig | None = None
+    contact_email: ContactEmailConfig | None = None
     project_db_uuid_index: dict[str, Path] = field(default_factory=dict)
     deployment_mode: str = 'local'
 
@@ -64,6 +77,7 @@ def load_startup_config() -> StartupConfig:
     results_dir = (data_dir / 'results').resolve()
     maintained_bootstrap = _resolve_maintained_bootstrap_enabled()
     imprint = _resolve_imprint()
+    contact_email = _resolve_contact_email()
     deployment_mode = _resolve_deployment_mode()
 
     allowed_roots_env = os.getenv(WEB_ENV.allowed_roots, '')
@@ -97,6 +111,7 @@ def load_startup_config() -> StartupConfig:
         data_dir=data_dir,
         allowed_roots=allowed_roots,
         imprint=imprint,
+        contact_email=contact_email,
         project_db_uuid_index=project_db_uuid_index,
         deployment_mode=deployment_mode,
     )
@@ -223,6 +238,40 @@ def _looks_like_url(value: str) -> bool:
     error by :func:`_resolve_imprint` rather than being misread as a local file path.
     """
     return '://' in value and bool(urlparse(value).scheme)
+
+
+def _resolve_contact_email() -> ContactEmailConfig | None:
+    """Resolve optional contact e-mail config from the ``RESPRO_WEB_CONTACT_EMAIL`` env var.
+
+    The trimmed value is either:
+
+    * empty / unset → ``None`` (feature disabled);
+    * a single bare RFC-822 address → ``ContactEmailConfig(email=...)``;
+    * anything else (no ``@``, missing local/domain part, a ``"Name <addr>"`` display-name
+      form, embedded whitespace, …) → ``ValueError`` mentioning
+      ``RESPRO_WEB_CONTACT_EMAIL`` so an invalid value fails fast at startup rather than
+      silently rendering a broken ``mailto:`` link.
+
+    :func:`email.utils.parseaddr` is used to split display-name from address; a valid
+    contact address has an empty realname and a non-empty ``addr`` that itself contains
+    ``@`` and a domain.
+    """
+    raw = os.getenv(WEB_ENV.contact_email, '').strip()
+    if not raw:
+        return None
+
+    realname, addr = parseaddr(raw)
+    if realname or not addr or '@' not in addr or not _has_domain(addr):
+        raise ValueError(
+            f'RESPRO_WEB_CONTACT_EMAIL must be a single valid e-mail address, got {raw!r}'
+        )
+    return ContactEmailConfig(email=addr)
+
+
+def _has_domain(addr: str) -> bool:
+    """True when the local-part@domain ``addr`` has a non-empty domain with a dot."""
+    local, _, domain = addr.rpartition('@')
+    return bool(local) and '.' in domain and ' ' not in addr
 
 
 def _validate_data_dir(data_dir: Path) -> None:

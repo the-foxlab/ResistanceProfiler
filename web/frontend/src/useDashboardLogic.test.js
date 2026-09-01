@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useDashboardLogic, _resolveLegalLink } from './useDashboardLogic';
+import { useDashboardLogic, _resolveLegalLink, _resolveContactEmail } from './useDashboardLogic';
 
 // Mock XMLHttpRequest for file upload tests
 class MockXHR {
@@ -247,7 +247,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
   });
 
   it('should poll job until completion with succeeded status', async () => {
-    // Setup: ui/config and ui/legal are fetched before databases on init
+    // Setup: ui/config, ui/legal, and ui/contact are fetched before databases on init
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: {} }),
@@ -256,6 +256,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: { enabled: false } }),
+    });
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
     });
 
     // Setup: Initialize with a database
@@ -364,6 +369,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
       json: () => Promise.resolve({ data: { enabled: false } }),
     });
 
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
+    });
+
     // Setup: Initialize with a database
     global.fetch.mockResolvedValueOnce({
       ok: true,
@@ -439,6 +449,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: { enabled: false } }),
+    });
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
     });
 
     global.fetch.mockResolvedValueOnce({
@@ -528,6 +543,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: { enabled: false } }),
+    });
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
     });
 
     global.fetch.mockResolvedValueOnce({
@@ -992,6 +1012,30 @@ describe('_resolveLegalLink', () => {
   });
 });
 
+describe('_resolveContactEmail', () => {
+  // The footer contact e-mail is derived from the /api/ui/contact payload.
+  // Disabled → null (no footer link). Enabled → the bare address string.
+
+  it('returns null when the contact feature is disabled', () => {
+    expect(_resolveContactEmail({ enabled: false, email: null })).toBeNull();
+  });
+
+  it('returns null when the payload is missing', () => {
+    expect(_resolveContactEmail(null)).toBeNull();
+    expect(_resolveContactEmail(undefined)).toBeNull();
+  });
+
+  it('returns null when enabled but email is empty/missing', () => {
+    expect(_resolveContactEmail({ enabled: true, email: null })).toBeNull();
+    expect(_resolveContactEmail({ enabled: true, email: '' })).toBeNull();
+    expect(_resolveContactEmail({ enabled: true })).toBeNull();
+  });
+
+  it('returns the email address when enabled', () => {
+    expect(_resolveContactEmail({ enabled: true, email: 'support@example.org' })).toBe('support@example.org');
+  });
+});
+
 describe('cliVersion', () => {
   // The footer always renders; the version string is sourced from
   // /api/ui/config so it reflects the running backend, not the build.
@@ -1015,6 +1059,10 @@ describe('cliVersion', () => {
     });
     global.fetch.mockResolvedValueOnce({
       ok: true,
+      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
       json: () => Promise.resolve({ data: { items: [] } }),
     });
 
@@ -1033,6 +1081,10 @@ describe('cliVersion', () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: { enabled: false } }),
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
     });
     global.fetch.mockResolvedValueOnce({
       ok: true,

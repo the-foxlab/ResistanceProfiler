@@ -12,6 +12,7 @@ import { ResultsTab } from './tabs/ResultsTab';
 import { MutationsTab } from './tabs/MutationsTab';
 import { DatabaseTab } from './tabs/DatabaseTab';
 import { AboutTab } from './tabs/AboutTab';
+import { AppFooter } from './AppFooter';
 import { useTour } from './tour/TourContext';
 import { TourOverlay } from './tour/TourOverlay';
 
@@ -39,6 +40,7 @@ export function DashboardView({
   setSelectedDatabaseId,
   statusError,
   legalLink,
+  contactEmail,
   cliVersion,
   webVersion,
   selectedProfileReportPath,
@@ -314,26 +316,16 @@ export function DashboardView({
             <AboutTab
               setActiveMode={setActiveMode}
               onStartTour={startTour}
+              contactEmail={contactEmail}
             />
           )}
         </section>
-        <footer className="app-footer">
-          {legalLink && (
-            <a href={legalLink} target="_blank" rel="noreferrer">Legal notice</a>
-          )}
-          {legalLink && cliVersion && (
-            <span className="app-footer-sep" aria-hidden="true">·</span>
-          )}
-          {cliVersion && (
-            <span className="app-footer-version">ResistanceProfiler CLI v{cliVersion}</span>
-          )}
-          {cliVersion && webVersion && (
-            <span className="app-footer-sep" aria-hidden="true">·</span>
-          )}
-          {webVersion && (
-            <span className="app-footer-version">ResistanceProfiler Web v{webVersion}</span>
-          )}
-        </footer>
+        <AppFooter
+          legalLink={legalLink}
+          contactEmail={contactEmail}
+          cliVersion={cliVersion}
+          webVersion={webVersion}
+        />
       </div>
       <TourOverlay />
     </main>

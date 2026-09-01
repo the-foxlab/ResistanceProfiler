@@ -35,3 +35,21 @@ describe('AboutTab tour button', () => {
     expect(() => fireEvent.click(screen.getByRole('button', { name: /take a tour/i }))).not.toThrow();
   });
 });
+
+describe('AboutTab contact email', () => {
+  // The "Contributing and Contact" card shows a mailto link. When the deployment
+  // supplies a contact email via props, that address is used; otherwise the
+  // hardcoded maintainer fallback is shown so a contact is always available.
+
+  it('uses the env-sourced contact email when provided', () => {
+    render(<AboutTab setActiveMode={() => {}} contactEmail="support@example.org" />);
+    const link = screen.getByRole('link', { name: 'support@example.org' });
+    expect(link).toHaveAttribute('href', 'mailto:support@example.org');
+  });
+
+  it('falls back to the hardcoded maintainer address when contactEmail is absent', () => {
+    render(<AboutTab setActiveMode={() => {}} />);
+    const link = screen.getByRole('link', { name: /email jonas fuchs/i });
+    expect(link).toHaveAttribute('href', 'mailto:jonas.fuchs@uniklinik-freiburg.de');
+  });
+});
