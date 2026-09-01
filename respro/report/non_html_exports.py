@@ -289,23 +289,34 @@ TSV_COLUMNS: tuple[str, ...] = (
     'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
     'af', 'af_bin', 'depth', 'consequence', 'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
-    'external_id', 'source', 'publications',
+    'source', 'publications',
 )
 
 # Placeholder for empty categorical rule columns; numeric metric columns stay
 # empty so downstream parsers can treat them as missing.
-_TSV_PLACEHOLDER = '—'
+_TSV_PLACEHOLDER = 'n/a'
+
+# Columns only meaningful in VCF mode: ``reference`` is the matched internal
+# reference name (useful for multi-species VCF runs), ``nt_mut_user`` is the
+# nucleotide change on the user-supplied reference (VCF coords before remap),
+# and ``depth`` is read depth from sequencing reads. In FASTA mode (consensus
+# input, no reads, single reference) none of these carries useful information,
+# so they are omitted entirely — mirroring the HTML's
+# ``has_user_ref_column`` (= ``not is_fasta_mode``) and the multi-species
+# Reference column gate.
+_TSV_VCF_ONLY_COLUMNS: frozenset[str] = frozenset({'reference', 'nt_mut_user', 'depth'})
 
 # Rule-derived columns that are only emitted when at least one row carries a
 # real value for them, mirroring the HTML Database Hits table's has_*_metrics
 # flags (a column is displayed only when some row has a non-empty value for it).
-# Structural per-variant columns (reference, gene, nt_mut, ...) are always kept.
-# phenotype and clinical_phenotype are independent here (the HTML gates them via
-# separate has_phenotype_metrics / has_clinical_phenotype_metrics flags), so each
-# is dropped on its own when no row carries a real value for it.
+# Structural per-variant columns (reference, gene, nt_mut, ...) are always kept
+# (subject to the VCF-only drop above). phenotype and clinical_phenotype are
+# independent here (the HTML gates them via separate has_phenotype_metrics /
+# has_clinical_phenotype_metrics flags), so each is dropped on its own when no
+# row carries a real value for it.
 _TSV_CONDITIONAL_COLUMNS: frozenset[str] = frozenset({
     'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
-    'external_id', 'publications',
+    'publications',
 })
 
 # Fields whose ``unknown`` value is treated as absent (mirrors _build_rule_metrics,
@@ -328,13 +339,18 @@ def _is_real_tsv_value(column: str, value: str) -> bool:
     return True
 
 
-def _present_tsv_columns(rows: list[dict[str, str]]) -> tuple[str, ...]:
+def _present_tsv_columns(rows: list[dict[str, str]], *, is_fasta_mode: bool = False) -> tuple[str, ...]:
     """Return the column tuple to emit, dropping conditional columns with no real value.
 
-    Structural columns are always kept. Each conditional column is kept
-    independently when at least one row has a real value for it, mirroring the
-    HTML Database Hits table's independent ``has_*_metrics`` flags.
+    Structural columns are always kept (subject to the VCF-only drop in FASTA
+    mode). Each conditional column is kept independently when at least one row
+    has a real value for it, mirroring the HTML Database Hits table's independent
+    ``has_*_metrics`` flags. In FASTA mode the VCF-only columns
+    (``reference``, ``nt_mut_user``, ``depth``) are omitted entirely.
     """
+    dropped = set(_TSV_CONDITIONAL_COLUMNS)
+    if is_fasta_mode:
+        dropped |= _TSV_VCF_ONLY_COLUMNS
     present: set[str] = set()
     for row in rows:
         for column in _TSV_CONDITIONAL_COLUMNS:
@@ -342,7 +358,7 @@ def _present_tsv_columns(rows: list[dict[str, str]]) -> tuple[str, ...]:
                 continue
             if _is_real_tsv_value(column, row.get(column, '')):
                 present.add(column)
-    return tuple(c for c in TSV_COLUMNS if c not in _TSV_CONDITIONAL_COLUMNS or c in present)
+    return tuple(c for c in TSV_COLUMNS if c not in dropped or c in present)
 
 
 def _format_publications_tsv(publications: list[Publication]) -> str:
@@ -353,7 +369,7 @@ def _format_publications_tsv(publications: list[Publication]) -> str:
             ids.append(pub.doi)
         elif pub.pubmed_id:
             ids.append(pub.pubmed_id)
-    return ';'.join(ids)
+    return '|'.join(ids)
 
 
 def _aa_effect(ann: AnnotatedVariant) -> str:
@@ -415,7 +431,6 @@ def _effect_as_resistant_tsv_rows(
             'ic50': '',
             'fold_ic50': '',
             'score': '',
-            'external_id': _TSV_PLACEHOLDER,
             'source': 'Metadata algorithm',
             'publications': '',
         })
@@ -494,7 +509,6 @@ def write_tsv(
             'ic50': rule.ic50,
             'fold_ic50': rule.fold_ic50,
             'score': rule.score,
-            'external_id': rule.external_id,
             'source': rule.source,
             'publications': _format_publications_tsv(rule.publications),
         })
@@ -522,7 +536,6 @@ def write_tsv(
                 'ic50': '',
                 'fold_ic50': '',
                 'score': '',
-                'external_id': _TSV_PLACEHOLDER,
                 'source': _TSV_PLACEHOLDER,
                 'publications': '',
             })
@@ -539,7 +552,6 @@ def write_tsv(
                 'ic50': '',
                 'fold_ic50': '',
                 'score': '',
-                'external_id': _TSV_PLACEHOLDER,
                 'source': _TSV_PLACEHOLDER,
                 'publications': '',
             })
@@ -578,7 +590,6 @@ def write_tsv(
             'ic50': rs.ic50,
             'fold_ic50': rs.fold_ic50,
             'score': rs.score,
-            'external_id': rs.group_name,
             'source': rs.source,
             'publications': _format_publications_tsv(rs.publications),
         })
@@ -591,8 +602,9 @@ def write_tsv(
 
     output_path = Path(output_path)
     # Drop rule-derived columns that carry no real value in any row, mirroring the
-    # HTML Database Hits table's has_*_metrics flags.
-    fieldnames = _present_tsv_columns(rows)
+    # HTML Database Hits table's has_*_metrics flags. In FASTA mode also drop the
+    # VCF-only columns (reference, nt_mut_user, depth).
+    fieldnames = _present_tsv_columns(rows, is_fasta_mode=result.is_fasta_mode)
     with output_path.open('w', encoding='utf-8', newline='') as fh:
         writer = csv.DictWriter(
             fh, fieldnames=fieldnames, delimiter='\t',

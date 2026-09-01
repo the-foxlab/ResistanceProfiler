@@ -147,6 +147,8 @@ def _run_profile_fasta_subprocess(
         'json',
         '--export',
         'pdf',
+        '--export',
+        'tsv',
     ])
     if input_display_name:
         command.extend(['--input-display-name', input_display_name])
@@ -165,6 +167,7 @@ def _run_profile_fasta_subprocess(
         'report_html_path': str(artifacts['html']),
         'report_json_path': str(artifacts['json']),
         'report_pdf_path': str(artifacts['pdf']),
+        'report_tsv_path': str(artifacts['tsv']),
         'resistance_hits': int(run_payload.get('resistance_hits', 0) or 0),
         'total_variants': int(run_payload.get('total_variants', 0) or 0),
     }
@@ -208,6 +211,8 @@ def _run_profile_vcf_subprocess(
         'json',
         '--export',
         'pdf',
+        '--export',
+        'tsv',
     ]
     if input_display_name:
         command.extend(['--input-display-name', input_display_name])
@@ -228,6 +233,7 @@ def _run_profile_vcf_subprocess(
         'report_html_path': str(artifacts['html']),
         'report_json_path': str(artifacts['json']),
         'report_pdf_path': str(artifacts['pdf']),
+        'report_tsv_path': str(artifacts['tsv']),
         'resistance_hits': int(run_payload.get('resistance_hits', 0) or 0),
         'total_variants': int(run_payload.get('total_variants', 0) or 0),
     }
@@ -253,6 +259,8 @@ def _run_regenerate_json_subprocess(
         'json',
         '--export',
         'pdf',
+        '--export',
+        'tsv',
     ]
     _run_respro_command(command)
 
@@ -267,6 +275,7 @@ def _run_regenerate_json_subprocess(
         'report_html_path': str(artifacts['html']),
         'report_json_path': str(artifacts['json']),
         'report_pdf_path': str(artifacts['pdf']),
+        'report_tsv_path': str(artifacts['tsv']),
         'resistance_hits': int(run_payload.get('resistance_hits', 0) or 0),
         'total_variants': int(run_payload.get('total_variants', 0) or 0),
     }
@@ -322,6 +331,7 @@ def _artifact_paths_for_html(output_html_path: Path) -> dict[str, Path]:
         'html': html_path,
         'json': html_path.parent / f'{stem}.results.json',
         'pdf': html_path.parent / f'{stem}.report.pdf',
+        'tsv': html_path.parent / f'{stem}.results.tsv',
     }
 
 

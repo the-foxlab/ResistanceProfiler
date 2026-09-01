@@ -21,7 +21,7 @@ from web.backend.services.session import (
 )
 
 _WEB_TIMESTAMP_TOKEN = re.compile(
-    r'\.(\d{20})(?=\.(?:report\.html|report\.pdf|results\.json)$)'
+    r'\.(\d{20})(?=\.(?:report\.html|report\.pdf|results\.json|results\.tsv)$)'
 )
 
 
@@ -89,7 +89,7 @@ def build_artifacts_router(
         if not is_allowed_artifact_path(artifact_path):
             raise HTTPException(
                 status_code=400,
-                detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .report.html.',
+                detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .report.html, .results.tsv.',
             )
         if not artifact_path.is_file():
             raise HTTPException(status_code=404, detail='Artifact not found.')
@@ -211,7 +211,7 @@ def _build_artifact_bundle(
             if not is_allowed_artifact_path(artifact_path):
                 raise HTTPException(
                     status_code=400,
-                    detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .report.html.',
+                    detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .report.html, .results.tsv.',
                 )
             if not artifact_path.is_file():
                 raise HTTPException(status_code=404, detail='Artifact not found.')
@@ -251,4 +251,6 @@ def _derive_download_filename(artifact_path: Path) -> str:
         return file_name[:-11] + '.pdf'
     if file_name.endswith('.results.json'):
         return file_name[:-13] + '.json'
+    if file_name.endswith('.results.tsv'):
+        return file_name[:-12] + '.tsv'
     return file_name

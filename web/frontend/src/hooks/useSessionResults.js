@@ -36,6 +36,7 @@ export function useSessionResults() {
       result.report_html_path,
       result.report_json_path,
       result.report_pdf_path,
+      result.report_tsv_path,
     ].forEach((path) => {
       if (path) {
         addReportPath(path);
@@ -45,7 +46,7 @@ export function useSessionResults() {
 
   const downloadAllSessionArtifacts = async (setStatusError) => {
     const artifactPaths = sessionResults.flatMap((result) =>
-      [result.report_html_path, result.report_pdf_path, result.report_json_path].filter(Boolean)
+      [result.report_html_path, result.report_pdf_path, result.report_json_path, result.report_tsv_path].filter(Boolean)
     );
     if (artifactPaths.length === 0) return;
     setIsSessionDownloadBusy(true);
@@ -65,7 +66,7 @@ export function useSessionResults() {
       .map((i) => sessionResults[i])
       .filter(Boolean);
     const artifactPaths = selectedResults.flatMap((r) =>
-      [r.report_html_path, r.report_pdf_path, r.report_json_path].filter(Boolean)
+      [r.report_html_path, r.report_pdf_path, r.report_json_path, r.report_tsv_path].filter(Boolean)
     );
     if (artifactPaths.length === 0) return;
     try {
@@ -84,6 +85,7 @@ export function useSessionResults() {
         path: result.report_html_path,
         jsonPath: result.report_json_path || '',
         pdfPath: result.report_pdf_path || '',
+        tsvPath: result.report_tsv_path || '',
         label: `${result.sample_name} (${result.reference_name}) - ${formatResultTimestamp(result.created_at)}`,
         mode: result.mode,
       }))

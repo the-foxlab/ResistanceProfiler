@@ -875,6 +875,47 @@ class TestWebApi:
         assert 'filename="download-name-check.pdf"' in artifact.headers['content-disposition']
         assert artifact.content.startswith(b'%PDF')
 
+    def test_artifact_download_serves_tsv_from_results_dir(
+        self,
+        client: TestClient,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+    ) -> None:
+        """The TSV export produced by every profile job is downloadable via /api/artifact."""
+        vcf_id = _upload_file(client, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, web_sample_ref_fasta, 'fasta')
+        submit = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
+                'input_display_name': 'tsv-name-check.vcf',
+                'sample': 'artifact-tsv',
+            },
+        )
+        assert submit.status_code == 200
+
+        payload = _poll_job(client, submit.json()['job_id'])
+        assert payload['status'] == 'succeeded'
+        result = payload['result']
+        assert isinstance(result, dict)
+        tsv_id = result['report_tsv_path']
+        assert tsv_id
+
+        artifact = client.get(
+            '/api/artifact',
+            params={'artifact_id': tsv_id},
+        )
+
+        assert artifact.status_code == 200
+        assert artifact.headers['content-type'].startswith('text/tab-separated-values')
+        assert 'filename="tsv-name-check.tsv"' in artifact.headers['content-disposition']
+        text = artifact.content.decode('utf-8')
+        header = text.splitlines()[0]
+        assert header.startswith('reference\tgene\tnt_mut')
+        # The test DB's K->E rule matches the POS 4 variant, so at least one hit row exists.
+        assert 'TestDrug' in text
+
     def test_artifact_download_rejects_unknown_artifact_id(
         self,
         client: TestClient,
@@ -917,6 +958,7 @@ class TestWebApi:
                 'artifact_ids': [
                     result['report_json_path'],
                     result['report_pdf_path'],
+                    result['report_tsv_path'],
                 ],
             },
         )
@@ -929,6 +971,7 @@ class TestWebApi:
             names = set(archive.namelist())
             assert 'bundle-name-check.json' in names
             assert 'bundle-name-check.pdf' in names
+            assert 'bundle-name-check.tsv' in names
             report_payload = json.loads(archive.read('bundle-name-check.json').decode('utf-8'))
             assert report_payload['run']['sample_name'] == 'artifact-bundle'
 

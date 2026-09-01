@@ -98,27 +98,26 @@ respro vcf \
 
 | Column | Description |
 |---|---|
-| `reference` | Matched internal reference name (empty for single-reference runs where the chrom is not the reference accession; populated for multi-species VCF runs). |
+| `reference` | Matched internal reference name (VCF mode only; omitted in FASTA mode). Populated for multi-species VCF runs; empty for single-reference runs where the chrom is not the reference accession. |
 | `gene` | Feature / gene name (display name applied when configured). |
 | `nt_mut` | Nucleotide change on the internal reference, `ref{pos}alt` (1-based). Combined codon events use `ref_codon{codon_pos}alt_codon`. |
-| `nt_mut_user` | Nucleotide change on the user-supplied reference (VCF coords before remap). Empty in FASTA mode. |
+| `nt_mut_user` | Nucleotide change on the user-supplied reference (VCF coords before remap). VCF mode only; omitted in FASTA mode. |
 | `aa_effect` | Amino-acid change `ref_aa{codon_pos}alt_aa` (1-based). `INS_any (...)` prefix for wildcard insertion rules. |
 | `strand` | Coding strand of the feature (`+`/`-`), sourced from the feature record. |
 | `af` | Allele frequency (raw float). |
 | `af_bin` | AF bin label (e.g. `low`/`moderate`/`high`). |
-| `depth` | Read depth at the variant. Empty for combined formula rows. |
+| `depth` | Read depth at the variant (VCF mode only; omitted in FASTA mode). Empty for combined formula rows. |
 | `consequence` | Consequence label (`missense`, `frameshift`, …). |
 | `in_database` | `yes` when at least one rule matched (single or formula member); otherwise `no`. |
-| `rule_type` | `single`, `formula`, `formula-member`, or `—` for non-hits. |
-| `drug` | Drug name for the matched rule. `—` for non-hits. |
-| `phenotype` | Rule phenotype (`resistant`/`intermediate`/`sensitive`/…). `—` for non-hits. |
-| `clinical_phenotype` | Clinical phenotype. `—` for non-hits. |
+| `rule_type` | `single`, `formula`, `formula-member`, or `n/a` for non-hits. |
+| `drug` | Drug name for the matched rule. `n/a` for non-hits. |
+| `phenotype` | Rule phenotype (`resistant`/`intermediate`/`sensitive`/…). `n/a` for non-hits. |
+| `clinical_phenotype` | Clinical phenotype. `n/a` for non-hits. |
 | `ic50` | Rule IC50 value (string, may carry qualifiers). Empty for non-hits. |
 | `fold_ic50` | Rule fold-IC50 value. Empty for non-hits. |
 | `score` | Rule score. Empty for non-hits. |
-| `external_id` | Rule external ID (single) or formula group name (formula). `—` for non-hits. |
-| `source` | Rule source. `—` for non-hits. |
-| `publications` | `;`-joined publication identifiers (DOI, or PubMed ID as fallback). Empty for non-hits. |
+| `source` | Rule source. `n/a` for non-hits. |
+| `publications` | `|`-joined publication identifiers (DOI, or PubMed ID as fallback). Empty for non-hits. |
 
 ### Row semantics
 
@@ -137,5 +136,8 @@ respro vcf \
   with `source=Metadata algorithm`.
 
 !!! note "Web download"
-    The TSV is not exposed as a separate web artifact endpoint. Run the CLI with
-    `--export tsv`, or download the TSV directly from the HTML report UI.
+    In the webapp, the TSV is produced for every profile/regenerate run alongside
+    the HTML, PDF, and JSON artifacts. Download it from the *Analyze* tab
+    (single-report action bar), the *Reports* tab (per-row TSV link), or the
+    batch/session "Download all" zip bundles. Run the CLI with `--export tsv` for
+    command-line use.

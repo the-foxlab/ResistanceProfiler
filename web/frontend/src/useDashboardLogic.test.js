@@ -314,6 +314,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
           database_id: 'db1',
           report_html_path: '/data/results/test.report.html',
           report_json_path: '/data/results/test.report.json',
+          report_tsv_path: '/data/results/test.results.tsv',
           created_at: '2026-05-12T10:00:00',
           resistance_hits: 5,
           input_path: '/data/uploads/test.fasta',
@@ -349,6 +350,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     // Verify result was stored
     expect(result.current.reportOptions[0].path).toBe('/data/results/test.report.html');
     expect(result.current.reportOptions[0].label).toContain('test_sample');
+    expect(result.current.reportOptions[0].tsvPath).toBe('/data/results/test.results.tsv');
   });
 
   it('should handle job polling with failed status', async () => {

@@ -132,12 +132,12 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
         setActiveProfileMode('vcf');
       },
     },
-    // 11. Previous-reports dropdown + Open / Download PDF / Download JSON.
+    // 11. Previous-reports dropdown + Open / Download PDF / Download JSON / Download TSV.
     {
       id: 'previous-reports',
       targetSelector: '.analyze-report-actions',
       title: 'Reopen previous reports',
-      body: 'Reports from earlier in this session are listed here. Open one in a new tab, or download its PDF or JSON export without re-running the analysis.',
+      body: 'Reports from earlier in this session are listed here. Open one in a new tab, or download its PDF, JSON, or TSV export without re-running the analysis.',
       before: () => {
         setActiveMode('analyze');
         setAnalyzeSubMode('single');

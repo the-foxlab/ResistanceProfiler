@@ -28,19 +28,19 @@ from respro.report._row_helpers import (
 )
 from respro.report.non_html_exports import export_results, write_tsv
 
-# Canonical 21-column header, in order.
+# Canonical 20-column header, in order.
 TSV_COLUMNS = [
     'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
     'af', 'af_bin', 'depth', 'consequence', 'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
-    'external_id', 'source', 'publications',
+    'source', 'publications',
 ]
 
-_PLACEHOLDER = '—'
+_PLACEHOLDER = 'n/a'
 
 # Columns always present (structural / always-shown, mirroring the HTML Database
 # Hits table). Conditional columns (phenotype group, ic50, fold_ic50, score,
-# external_id, publications) are dropped when no row carries a real value.
+# publications) are dropped when no row carries a real value.
 _TSV_ALWAYS_COLUMNS = [
     'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
     'af', 'af_bin', 'depth', 'consequence', 'in_database', 'rule_type',
@@ -48,7 +48,7 @@ _TSV_ALWAYS_COLUMNS = [
 ]
 _TSV_CONDITIONAL_COLUMNS = [
     'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
-    'external_id', 'publications',
+    'publications',
 ]
 
 
@@ -203,7 +203,6 @@ class TestSingleRuleRows:
         assert acy[header.index('ic50')] == '>0.5'
         assert acy[header.index('fold_ic50')] == '12.4'
         assert acy[header.index('score')] == '3.0'
-        assert acy[header.index('external_id')] == 'R1'
         assert acy[header.index('publications')] == '10.1/a'
         fos = by_drug['Foscarnet']
         assert fos[header.index('publications')] == '99'  # pubmed_id fallback
@@ -212,6 +211,25 @@ class TestSingleRuleRows:
         assert acy[header.index('aa_effect')] == fos[header.index('aa_effect')] == 'K3E'
         assert acy[header.index('in_database')] == fos[header.index('in_database')] == 'yes'
         assert acy[header.index('strand')] == fos[header.index('strand')] == '+'
+
+    def test_multiple_publications_joined_with_pipe(self, tmp_path: Path) -> None:
+        # DOIs may contain ';' (e.g. structured suffixes), so publications are joined
+        # with '|' — not ';' — to stay unambiguous. Regression for the separator.
+        rule = _rule(
+            rid=1, drug='Acyclovir', phenotype='resistant', external_id='R1',
+            publications=[_pub(doi='10.1/a'), _pub(doi='10.2/b;suffix'), _pub(pubmed_id='77')],
+        )
+        ann = _ann(rule_matches=[rule])
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        rule_rows = [row for row in rows if row[header.index('rule_type')] == 'single']
+        assert len(rule_rows) == 1
+        pubs = rule_rows[0][header.index('publications')]
+        assert pubs == '10.1/a|10.2/b;suffix|77'
+        # The ';' inside a DOI survives intact because '|' is the separator.
+        assert ';' in pubs
 
 
 class TestFormulaRows:
@@ -263,7 +281,6 @@ class TestFormulaRows:
         assert row[header.index('ic50')] == '>1.0'
         assert row[header.index('fold_ic50')] == '15.0'
         assert row[header.index('score')] == '4.0'
-        assert row[header.index('external_id')] == 'FR1'
         assert row[header.index('publications')] == '10.1/comb'
         assert row[header.index('in_database')] == 'yes'
 
@@ -297,18 +314,32 @@ class TestNonHitAndFastaRows:
         # No real rule values anywhere -> conditional columns dropped entirely.
         assert header == _expected_header(set())
         for col in ('phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50',
-                    'score', 'external_id', 'publications'):
+                    'score', 'publications'):
             assert col not in header
 
-    def test_fasta_mode_nt_mut_user_empty_strand_populated(self, tmp_path: Path) -> None:
+    def test_fasta_mode_omits_vcf_only_columns(self, tmp_path: Path) -> None:
+        # reference, nt_mut_user, and depth are VCF-only columns. reference is the
+        # matched internal reference name for multi-species VCF runs; nt_mut_user
+        # is the VCF-coords-before-remap change; depth is read depth from
+        # sequencing reads. In FASTA mode (consensus input, no reads) none is
+        # meaningful, so all three columns are omitted entirely — mirroring the
+        # HTML's has_user_ref_column (= not is_fasta_mode) and the multi-species
+        # Reference column gate.
         ann = _ann(is_fasta_mode=True, af_bin='high')
         r = _result([ann], is_fasta_mode=True)
         out = tmp_path / 'r.results.tsv'
         write_tsv(r, out)
         header, rows = _read_tsv(out)
+        assert 'reference' not in header
+        assert 'nt_mut_user' not in header
+        assert 'depth' not in header
+        assert 'external_id' not in header
         row = rows[0]
-        assert row[header.index('nt_mut_user')] == ''
         assert row[header.index('strand')] == '+'
+        # The remaining structural columns are still present.
+        for col in ('gene', 'nt_mut', 'aa_effect', 'af', 'af_bin',
+                    'consequence', 'in_database', 'rule_type', 'drug', 'source'):
+            assert col in header
 
     def test_strand_taken_from_feature_record(self, tmp_path: Path) -> None:
         ann = _ann(feature='pol')
@@ -421,13 +452,12 @@ class TestEffectAsResistantRows:
         assert row[header.index('in_database')] == 'yes'
         assert row[header.index('gene')] == 'UL23'
         assert row[header.index('aa_effect')] == 'P7PfsX'
-        # Effect-as-resistant rows carry no numeric metrics, external_id, or clinical
+        # Effect-as-resistant rows carry no numeric metrics or clinical
         # phenotype, so those conditional columns are dropped (no real value in any
         # row). phenotype is kept because phenotype='resistant' is a real value.
         assert 'ic50' not in header
         assert 'fold_ic50' not in header
         assert 'score' not in header
-        assert 'external_id' not in header
         assert 'publications' not in header
         assert 'clinical_phenotype' not in header  # never a real value here
 
@@ -615,26 +645,25 @@ class TestEmptyColumnDropping:
         assert 'clinical_phenotype' in header
 
     def test_empty_numeric_columns_dropped(self, tmp_path: Path) -> None:
-        # No rule carries ic50/fold_ic50/score/external_id.
-        rule = _rule(rid=1, drug='Acyclovir', ic50='', fold_ic50='', score='',
-                     external_id='')
+        # No rule carries ic50/fold_ic50/score.
+        rule = _rule(rid=1, drug='Acyclovir', ic50='', fold_ic50='', score='')
         ann = _ann(rule_matches=[rule])
         r = _result([ann])
         out = tmp_path / 'r.results.tsv'
         write_tsv(r, out)
         header, _ = _read_tsv(out)
-        for col in ('ic50', 'fold_ic50', 'score', 'external_id'):
+        for col in ('ic50', 'fold_ic50', 'score'):
             assert col not in header, f'{col} should be dropped when always empty'
 
     def test_populated_numeric_columns_kept(self, tmp_path: Path) -> None:
         rule = _rule(rid=1, drug='Acyclovir', ic50='>0.5', fold_ic50='12.0',
-                     score='3.0', external_id='R1')
+                     score='3.0')
         ann = _ann(rule_matches=[rule])
         r = _result([ann])
         out = tmp_path / 'r.results.tsv'
         write_tsv(r, out)
         header, _ = _read_tsv(out)
-        for col in ('ic50', 'fold_ic50', 'score', 'external_id'):
+        for col in ('ic50', 'fold_ic50', 'score'):
             assert col in header, f'{col} should be kept when populated'
 
     def test_empty_publications_column_dropped(self, tmp_path: Path) -> None:

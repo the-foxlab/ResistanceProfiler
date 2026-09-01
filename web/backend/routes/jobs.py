@@ -125,6 +125,7 @@ _ARTIFACT_PATH_FIELDS = {
     'report_html_path': 'text/html',
     'report_json_path': 'application/json',
     'report_pdf_path': 'application/pdf',
+    'report_tsv_path': 'text/tab-separated-values',
 }
 
 

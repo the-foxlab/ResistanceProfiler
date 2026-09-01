@@ -438,6 +438,18 @@ export function AnalyzeTab({
               >
                 Download JSON
               </button>
+              <button
+                type="button"
+                className="button-link report-action-btn download-action-btn"
+                onClick={() => {
+                  if (selectedReportOption?.tsvPath) {
+                    window.open(buildArtifactUrl(selectedReportOption.tsvPath), '_blank', 'noopener,noreferrer');
+                  }
+                }}
+                disabled={!selectedReportOption?.tsvPath}
+              >
+                Download TSV
+              </button>
             </div>
           </div>
         ) : null}
@@ -706,6 +718,7 @@ export function AnalyzeTab({
                       <th>HTML</th>
                       <th>PDF</th>
                       <th>JSON</th>
+                      <th>TSV</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -721,6 +734,7 @@ export function AnalyzeTab({
                         <td>{sample.reportHtmlPath ? <a href={buildReportUrl(sample.reportHtmlPath)} target="_blank" rel="noreferrer">View</a> : '—'}</td>
                         <td>{sample.reportPdfPath ? <a href={buildArtifactUrl(sample.reportPdfPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
                         <td>{sample.reportJsonPath ? <a href={buildArtifactUrl(sample.reportJsonPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                        <td>{sample.reportTsvPath ? <a href={buildArtifactUrl(sample.reportTsvPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
