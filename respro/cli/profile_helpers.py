@@ -61,8 +61,8 @@ def _parse_export_formats(export_values: list[str] | None) -> set[str] | None:
     normalized_formats: set[str] = set()
     for export_value in export_values:
         normalized_value = export_value.strip().lower()
-        if normalized_value not in ('json', 'pdf'):
-            raise click.ClickException('Invalid --export value. Choose one of: json, pdf.')
+        if normalized_value not in ('json', 'pdf', 'tsv'):
+            raise click.ClickException('Invalid --export value. Choose one of: json, pdf, tsv.')
         normalized_formats.add(normalized_value)
 
     return normalized_formats if normalized_formats else None

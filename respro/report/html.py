@@ -36,6 +36,13 @@ from respro.db.report_queries import (
     load_feature_cards,
     load_numeric_metric_thresholds,
 )
+from respro.report._row_helpers import (
+    build_feature_display_names,
+    build_reference_name_by_chrom,
+    nt_change_stored,
+    nt_change_user,
+    select_effect_as_resistant_rules,
+)
 from respro.report.alignment_visualization import (
     FeatureAlignment,
     build_alignment_html,
@@ -45,10 +52,6 @@ from respro.report.alignment_visualization import (
 logger = logging.getLogger(__name__)
 
 _SYNONYMOUS_CONSEQUENCES: frozenset[str] = frozenset({'synonymous_variant', 'synonymous'})
-
-_ACCESSION_IDENTIFIER_RE = re.compile(
-    r'^(?P<base>(?:[A-Z]{1,6}_[A-Z0-9]*\d[A-Z0-9]*|[A-Z]{1,6}\d[A-Z0-9]*))(?:\.(?P<version>\d+))?$'
-)
 
 
 def _load_svg_data_url(asset_name: str) -> str:
@@ -102,9 +105,7 @@ def build_report_context(
     # Map each annotation's chrom (== ReferenceGroup.query_name) to its reference_name so
     # the Database Hits / All Mutations / Sequence Feature tables can attribute rows to a
     # reference. Used only for the conditional Reference column shown in multi-species reports.
-    reference_name_by_chrom: dict[str, str] = {
-        rg.query_name: rg.reference_name for rg in result.references
-    }
+    reference_name_by_chrom: dict[str, str] = build_reference_name_by_chrom(result)
     # Map feature reference_id -> reference_name for sequence-feature cards (keyed by feature).
     reference_name_by_ref_id: dict[int, str] = {
         rg.reference_id: rg.reference_name for rg in result.references
@@ -135,7 +136,7 @@ def build_report_context(
         f'Generated {timestamp}' if timestamp else '',
     ]
 
-    display_names = _build_feature_display_names(features)
+    display_names = build_feature_display_names(features)
     feature_lookup = _build_feature_lookup(features)
     detected_drug_names = _collect_detected_drug_names(result)
     drug_stats = _build_drug_stats(result)
@@ -418,17 +419,8 @@ def _build_all_mutations_rows(
         display_consequence = ann.consequence
 
         pos_1based = ann.variant.pos + 1
-        if ann.is_combined_codon_event and ann.ref_codon and ann.alt_codon:
-            nt_change_stored = f'{ann.ref_codon}{ann.codon_pos + 1}{ann.alt_codon}'
-        else:
-            nt_change_stored = f'{ann.variant.ref}{pos_1based}{ann.variant.alt}'
-
-        # User-reference NT change: built from the preserved user-ref coords when present.
-        # FASTA-emitted variants have no supplied user reference, so this stays empty.
-        nt_change_user = ''
-        if ann.has_user_ref_coords:
-            user_chrom, user_pos, user_ref, user_alt = ann.user_ref_coords
-            nt_change_user = f'{user_ref}{user_pos + 1}{user_alt}'
+        nt_change_stored_val = nt_change_stored(ann)
+        nt_change_user_val = nt_change_user(ann)
 
         aa_change = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
@@ -438,8 +430,8 @@ def _build_all_mutations_rows(
 
         rows.append({
             'feature': (display_names or {}).get(ann.feature_name, ann.feature_name),
-            'nt_change_stored': nt_change_stored,
-            'nt_change_user': nt_change_user,
+            'nt_change_stored': nt_change_stored_val,
+            'nt_change_user': nt_change_user_val,
             'nt_pos': pos_1based,
             'aa_change': aa_change,
             'consequence': display_consequence,
@@ -645,75 +637,6 @@ def _build_database_hits_rows(
     }
 
 
-def _load_algorithm_config(
-    project_conn: sqlite3.Connection | None,
-    algorithm_name: str,
-) -> dict | None:
-    """Load one interpretation algorithm config by name."""
-    if project_conn is None:
-        return None
-    try:
-        row = project_conn.execute(
-            'SELECT config_json FROM interpretation_algorithm '
-            'WHERE algorithm_name = ? LIMIT 1',
-            (algorithm_name,),
-        ).fetchone()
-    except sqlite3.Error as exc:
-        logger.debug('Failed to load %s algorithm from DB: %s', algorithm_name, exc)
-        return None
-
-    if row is None:
-        return None
-
-    try:
-        config = json.loads(row['config_json'])
-    except (TypeError, json.JSONDecodeError) as exc:
-        logger.debug('Failed to parse %s algorithm config JSON: %s', algorithm_name, exc)
-        return None
-    if not isinstance(config, dict):
-        return None
-    return config
-
-
-def _has_any_phenotype_association(project_conn: sqlite3.Connection | None) -> bool:
-    """Return whether any rule row carries a known phenotype field."""
-    if project_conn is None:
-        return False
-    known_clause = (
-        "(TRIM(COALESCE(phenotype, '')) <> '' AND LOWER(TRIM(phenotype)) <> 'unknown') "
-        "OR (TRIM(COALESCE(clinical_phenotype, '')) <> '' "
-        "AND LOWER(TRIM(clinical_phenotype)) <> 'unknown')"
-    )
-    try:
-        row = project_conn.execute(
-            f'SELECT (EXISTS(SELECT 1 FROM resistance_rule WHERE {known_clause}) '
-            f'OR EXISTS(SELECT 1 FROM resistance_formula_rule WHERE {known_clause})) AS has_rows'
-        ).fetchone()
-    except sqlite3.Error as exc:
-        logger.debug('Failed to check phenotype association rows in DB: %s', exc)
-        return False
-
-    if row is None:
-        return False
-    return bool(row['has_rows'])
-
-
-def _references_match_with_accession_version(
-    configured_reference: str,
-    observed_reference: str,
-) -> bool:
-    """Return whether two references match exactly or by accession base plus version."""
-    if configured_reference == observed_reference:
-        return True
-
-    configured_match = _ACCESSION_IDENTIFIER_RE.fullmatch(configured_reference)
-    observed_match = _ACCESSION_IDENTIFIER_RE.fullmatch(observed_reference)
-    if configured_match is None or observed_match is None:
-        return False
-
-    return configured_match.group('base') == observed_match.group('base')
-
-
 def _build_effect_as_resistant_rows(
     result: ProfilingResult,
     project_conn: sqlite3.Connection | None,
@@ -723,80 +646,52 @@ def _build_effect_as_resistant_rows(
     drug_alias_map: dict[str, str] | None = None,
     reference_name_by_chrom: dict[str, str] | None = None,
 ) -> list[dict]:
-    """Build metadata-only DB-hit rows for configured effect annotations."""
-    if project_conn is None:
-        return []
+    """Build metadata-only DB-hit rows for configured effect annotations.
 
-    effect_config = _load_algorithm_config(project_conn, 'effect_as_resistant')
-    if effect_config is None:
-        return []
-    if not _has_any_phenotype_association(project_conn):
-        return []
-
-    config_rules = effect_config.get('rules')
-    if not isinstance(config_rules, list) or not config_rules:
-        return []
-
-    rules_by_feature: dict[str, list[dict]] = {}
-    for rule in config_rules:
-        if not isinstance(rule, dict):
-            continue
-        feature = rule.get('feature')
-        reference = rule.get('reference')
-        drug = rule.get('drug')
-        if not isinstance(feature, str) or not isinstance(reference, str) or not isinstance(drug, str):
-            continue
-        if not _references_match_with_accession_version(reference, result.reference_name):
-            continue
-        rules_by_feature.setdefault(feature, []).append(rule)
-
-    if not rules_by_feature:
+    Rule selection (config load -> reference match -> feature grouping ->
+    consequence filter) is shared via :func:`select_effect_as_resistant_rules`
+    so the HTML and TSV paths cannot drift apart; this function only shapes the
+    selected matches into HTML badge rows.
+    """
+    matches = select_effect_as_resistant_rules(result, project_conn)
+    if not matches:
         return []
 
     rows: list[dict] = []
-    for ann in result.cds_annotations:
-        feature_rules = rules_by_feature.get(ann.feature_name, [])
-        if not feature_rules:
-            continue
-
-        # Collect all effect lists from matching rules for this annotation's feature
+    for match in matches:
+        ann = match.annotation
+        rule = match.rule
+        drug_name = (rule.get('drug') or '').strip()
         feature_display = (display_names or {}).get(ann.feature_name, ann.feature_name)
         aa_change = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             if ann.ref_aa and ann.alt_aa
             else ann.feature_name
         )
-        for rule in feature_rules:
-            rule_effects = rule.get('effect', [])
-            if ann.consequence not in rule_effects:
-                continue
-            drug_name = (rule.get('drug') or '').strip()
-            if not drug_name:
-                continue
-            label = CONSEQUENCE_LABELS.get(ann.consequence, ann.consequence)
-            comment = (
-                f'{label} interpreted as resistant by metadata algorithm '
-                f'({ann.feature_name}, {result.reference_name}).'
-            )
-            rows.append({
-                'drug_key': drug_name,
-                'drug': _format_drug_name_with_alias(drug_name, drug_alias_map or {}),
-                'drug_class': (drug_class_map or {}).get(drug_name.lower(), ''),
-                'mutation_groups': [{'feature': feature_display, 'muts': [aa_change]}],
-                'metrics': _build_rule_metrics(
-                    'resistant',
-                    '',
-                    '',
-                    '',
-                    '',
-                    thresholds=metric_thresholds,
-                ),
-                'af_bin': ann.af_bin,
-                'source': 'Metadata algorithm',
-                'comment': comment,
-                'reference_name': (reference_name_by_chrom or {}).get(ann.variant.chrom, ''),
-                '_raw_pubs': [],
-            })
+        label = CONSEQUENCE_LABELS.get(ann.consequence, ann.consequence)
+        comment = (
+            f'{label} interpreted as resistant by metadata algorithm '
+            f'({ann.feature_name}, {result.reference_name}).'
+        )
+        rows.append({
+            'drug_key': drug_name,
+            'drug': _format_drug_name_with_alias(drug_name, drug_alias_map or {}),
+            'drug_class': (drug_class_map or {}).get(drug_name.lower(), ''),
+            'mutation_groups': [{'feature': feature_display, 'muts': [aa_change]}],
+            'metrics': _build_rule_metrics(
+                'resistant',
+                '',
+                '',
+                '',
+                '',
+                thresholds=metric_thresholds,
+            ),
+            'af_bin': ann.af_bin,
+            'source': 'Metadata algorithm',
+            'comment': comment,
+            'reference_name': (reference_name_by_chrom or {}).get(ann.variant.chrom, ''),
+            '_raw_pubs': [],
+        })
     return rows
 
 
@@ -914,17 +809,6 @@ def _build_rule_metrics(
     if score:
         metrics.append({'label': 'Score', 'value': score, 'badge_class': _numeric_badge_class('score', score)})
     return metrics
-
-
-def _build_feature_display_names(features: list[FeatureRecord] | None) -> dict[str, str]:
-    """Build feature display-name mapping from loaded feature records."""
-    if not features:
-        return {}
-
-    names: dict[str, str] = {}
-    for feature in features:
-        names[feature.name] = feature.display_name or feature.name
-    return names
 
 
 def _build_feature_lookup(features: list[FeatureRecord] | None) -> dict[str, FeatureRecord]:

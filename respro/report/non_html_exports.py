@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import re
@@ -16,9 +17,26 @@ except ImportError:
     HTML = None
 
 from respro import __version__
-from respro.db.models import FeatureRecord, ProfilingResult, ResistanceRule
+from respro.db.models import (
+    AnnotatedVariant,
+    FeatureRecord,
+    ProfilingResult,
+    Publication,
+    ResistanceRule,
+    ResistanceRuleSet,
+)
 from respro.db.results import project_fingerprint, project_updated_at
-from respro.report.html import build_report_context, write_html
+from respro.report._row_helpers import (
+    build_feature_display_names,
+    build_reference_name_by_chrom,
+    nt_change_stored,
+    nt_change_user,
+    select_effect_as_resistant_rules,
+)
+from respro.report.html import (
+    build_report_context,
+    write_html,
+)
 from respro.report.plots import render_lollipop_plot_bytes
 
 logger = logging.getLogger(__name__)
@@ -68,7 +86,7 @@ def export_results(
         stem = html_path.name
 
     requested_formats = set(extra_export_formats or set())
-    unknown_formats = requested_formats - {'json', 'pdf'}
+    unknown_formats = requested_formats - {'json', 'pdf', 'tsv'}
     if unknown_formats:
         raise ValueError(f'Unsupported export format(s): {", ".join(sorted(unknown_formats))}')
 
@@ -119,6 +137,20 @@ def export_results(
             similarity_moderate=similarity_moderate,
         )
         outputs['pdf'] = pdf_path
+
+    if 'tsv' in requested_formats:
+        tsv_path = output_dir / f'{stem}.results.tsv'
+        # Forward display names + the chrom->reference map so the TSV gene column
+        # matches the HTML Database Hits table (FeatureRecord.display_name) and the
+        # reference column is sourced from the same map as the HTML/JSON paths.
+        write_tsv(
+            result,
+            tsv_path,
+            project_conn=project_conn,
+            display_names=build_feature_display_names(features),
+            reference_name_by_chrom=build_reference_name_by_chrom(result),
+        )
+        outputs['tsv'] = tsv_path
 
     logger.info('Exported report to %s', html_path)
     return outputs
@@ -247,6 +279,329 @@ def write_json(
     output_path = Path(output_path)
     output_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding='utf-8')
     logger.info('JSON report written to %s', output_path)
+    return output_path
+
+
+# Canonical column order for the TSV results export. One row is emitted per
+# (annotated variant × matched rule); non-hit variants also appear with empty
+# rule columns. See write_tsv for the row-emission rules.
+TSV_COLUMNS: tuple[str, ...] = (
+    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
+    'af', 'af_bin', 'depth', 'consequence', 'in_database', 'rule_type',
+    'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
+    'external_id', 'source', 'publications',
+)
+
+# Placeholder for empty categorical rule columns; numeric metric columns stay
+# empty so downstream parsers can treat them as missing.
+_TSV_PLACEHOLDER = '—'
+
+# Rule-derived columns that are only emitted when at least one row carries a
+# real value for them, mirroring the HTML Database Hits table's has_*_metrics
+# flags (a column is displayed only when some row has a non-empty value for it).
+# Structural per-variant columns (reference, gene, nt_mut, ...) are always kept.
+# phenotype and clinical_phenotype are independent here (the HTML gates them via
+# separate has_phenotype_metrics / has_clinical_phenotype_metrics flags), so each
+# is dropped on its own when no row carries a real value for it.
+_TSV_CONDITIONAL_COLUMNS: frozenset[str] = frozenset({
+    'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
+    'external_id', 'publications',
+})
+
+# Fields whose ``unknown`` value is treated as absent (mirrors _build_rule_metrics,
+# which only emits a Phenotype/Clinical phenotype chip for non-unknown values).
+_TSV_UNKNOWN_IS_ABSENT_COLUMNS: frozenset[str] = frozenset({'phenotype', 'clinical_phenotype'})
+
+
+def _is_real_tsv_value(column: str, value: str) -> bool:
+    """Return whether a cell carries a real (displayable) value for its column.
+
+    A value is real when it is non-empty and not the placeholder em-dash; for the
+    phenotype fields an ``unknown`` value is also treated as absent (mirrors
+    ``_build_rule_metrics`` which only emits a Phenotype/Clinical phenotype chip
+    for non-unknown values).
+    """
+    if not value or value == _TSV_PLACEHOLDER:
+        return False
+    if column in _TSV_UNKNOWN_IS_ABSENT_COLUMNS and value.lower() == 'unknown':
+        return False
+    return True
+
+
+def _present_tsv_columns(rows: list[dict[str, str]]) -> tuple[str, ...]:
+    """Return the column tuple to emit, dropping conditional columns with no real value.
+
+    Structural columns are always kept. Each conditional column is kept
+    independently when at least one row has a real value for it, mirroring the
+    HTML Database Hits table's independent ``has_*_metrics`` flags.
+    """
+    present: set[str] = set()
+    for row in rows:
+        for column in _TSV_CONDITIONAL_COLUMNS:
+            if column in present:
+                continue
+            if _is_real_tsv_value(column, row.get(column, '')):
+                present.add(column)
+    return tuple(c for c in TSV_COLUMNS if c not in _TSV_CONDITIONAL_COLUMNS or c in present)
+
+
+def _format_publications_tsv(publications: list[Publication]) -> str:
+    """Join publication identifiers with ';', preferring DOI then PubMed id."""
+    ids: list[str] = []
+    for pub in publications:
+        if pub.doi:
+            ids.append(pub.doi)
+        elif pub.pubmed_id:
+            ids.append(pub.pubmed_id)
+    return ';'.join(ids)
+
+
+def _aa_effect(ann: AnnotatedVariant) -> str:
+    """Return the amino-acid change string (or the feature name when AA is missing)."""
+    if ann.ref_aa and ann.alt_aa:
+        return f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+    return ann.feature_name
+
+
+def _build_strand_by_feature(result: ProfilingResult) -> dict[str, str]:
+    """Map feature_name -> strand from all ReferenceGroup features."""
+    strand_by_feature: dict[str, str] = {}
+    for rg in result.references:
+        for feature in rg.features:
+            strand_by_feature.setdefault(feature.name, feature.strand)
+    return strand_by_feature
+
+
+def _effect_as_resistant_tsv_rows(
+    result: ProfilingResult,
+    project_conn: sqlite3.Connection | None,
+    ref_by_chrom: dict[str, str],
+    strand_by_feature: dict[str, str],
+    display_names: dict[str, str] | None = None,
+) -> list[dict[str, str]]:
+    """Build ``rule_type=single`` rows for metadata-only effect-as-resistant hits.
+
+    Rule selection is shared via :func:`select_effect_as_resistant_rules` so the
+    HTML and TSV paths cannot drift apart; this function only shapes the selected
+    matches into flat TSV rows (drug, phenotype='resistant', empty numeric
+    metrics). Returns an empty list when no project DB or no matching rules.
+    """
+    matches = select_effect_as_resistant_rules(result, project_conn)
+    if not matches:
+        return []
+
+    rows: list[dict[str, str]] = []
+    for match in matches:
+        ann = match.annotation
+        rule = match.rule
+        drug_name = (rule.get('drug') or '').strip()
+        gene = (display_names or {}).get(ann.feature_name, ann.feature_name)
+        rows.append({
+            'reference': ref_by_chrom.get(ann.variant.chrom, ''),
+            'gene': gene,
+            'nt_mut': nt_change_stored(ann),
+            'nt_mut_user': nt_change_user(ann),
+            'aa_effect': _aa_effect(ann),
+            'strand': strand_by_feature.get(ann.feature_name, ''),
+            'af': repr(ann.variant.allele_freq),
+            'af_bin': ann.af_bin,
+            'depth': str(ann.variant.depth),
+            'consequence': ann.consequence,
+            'in_database': 'yes',
+            'rule_type': 'single',
+            'drug': drug_name,
+            'phenotype': 'resistant',
+            'clinical_phenotype': _TSV_PLACEHOLDER,
+            'ic50': '',
+            'fold_ic50': '',
+            'score': '',
+            'external_id': _TSV_PLACEHOLDER,
+            'source': 'Metadata algorithm',
+            'publications': '',
+        })
+    return rows
+
+
+def write_tsv(
+    result: ProfilingResult,
+    output_path: Path,
+    project_conn: sqlite3.Connection | None = None,
+    display_names: dict[str, str] | None = None,
+    reference_name_by_chrom: dict[str, str] | None = None,
+) -> Path:
+    """
+    Write a denormalized TSV of all annotated variants and their matched rules.
+
+    One row is emitted per (annotated variant × matched rule), plus one row per
+    non-hit variant. Single rules produce one row each (a variant matching two
+    drugs yields two rows). Each fired formula (combinatorial) rule produces one
+    combined row with its member mutations joined by ';'; member-only variants
+    also get a ``formula-member`` row. Effect-as-resistant synthetic rows are
+    included as ``single`` rows when a project DB supplies the algorithm config.
+
+    :param result: profiling result
+    :param output_path: path to write the TSV file to
+    :param project_conn: optional project DB connection for effect-as-resistant rows
+    :param display_names: optional feature display-name overrides
+    :param reference_name_by_chrom: optional chrom -> reference_name map; built from
+        ``result.references`` when not supplied
+    :return: path to the written TSV file
+    """
+    ref_by_chrom = reference_name_by_chrom or build_reference_name_by_chrom(result)
+    strand_by_feature = _build_strand_by_feature(result)
+
+    # Annotations participating in fired formula hits (by identity) so member-only
+    # variants can be flagged as in_database=yes with rule_type=formula-member.
+    formula_member_ann_ids: set[int] = set()
+    for hit in result.formula_hits:
+        for ann in hit.matched_variants:
+            formula_member_ann_ids.add(id(ann))
+
+    rows: list[dict[str, str]] = []
+
+    def _gene(ann: AnnotatedVariant) -> str:
+        return (display_names or {}).get(ann.feature_name, ann.feature_name)
+
+    def _reference(ann: AnnotatedVariant) -> str:
+        return ref_by_chrom.get(ann.variant.chrom, '')
+
+    # Per-annotation shared columns, with per-rule fields filled by the caller.
+    def _base_row(ann: AnnotatedVariant) -> dict[str, str]:
+        return {
+            'reference': _reference(ann),
+            'gene': _gene(ann),
+            'nt_mut': nt_change_stored(ann),
+            'nt_mut_user': nt_change_user(ann),
+            'aa_effect': _aa_effect(ann),
+            'strand': strand_by_feature.get(ann.feature_name, ''),
+            'af': repr(ann.variant.allele_freq),
+            'af_bin': ann.af_bin,
+            'depth': str(ann.variant.depth),
+            'consequence': ann.consequence,
+        }
+
+    def _rule_row(
+        ann: AnnotatedVariant, rule: ResistanceRule, aa_effect: str
+    ) -> dict[str, str]:
+        row = _base_row(ann)
+        row.update({
+            'aa_effect': aa_effect,
+            'in_database': 'yes',
+            'rule_type': 'single',
+            'drug': rule.drug_name,
+            'phenotype': rule.phenotype,
+            'clinical_phenotype': rule.clinical_phenotype,
+            'ic50': rule.ic50,
+            'fold_ic50': rule.fold_ic50,
+            'score': rule.score,
+            'external_id': rule.external_id,
+            'source': rule.source,
+            'publications': _format_publications_tsv(rule.publications),
+        })
+        return row
+
+    for ann in result.cds_annotations:
+        matches = ann.non_formula_component_rule_matches
+        if matches:
+            for rule in matches:
+                # Wildcard insertion rules prefix the AA change so the rule type and
+                # the actual allele are both visible (mirrors _build_database_hits_rows).
+                aa = _aa_effect(ann)
+                if rule.mutation == 'INS_any':
+                    aa = f'INS_any ({aa})'
+                rows.append(_rule_row(ann, rule, aa))
+        elif id(ann) in formula_member_ann_ids:
+            # Member-only variant (no single rule of its own) but part of a fired formula.
+            row = _base_row(ann)
+            row.update({
+                'in_database': 'yes',
+                'rule_type': 'formula-member',
+                'drug': _TSV_PLACEHOLDER,
+                'phenotype': _TSV_PLACEHOLDER,
+                'clinical_phenotype': _TSV_PLACEHOLDER,
+                'ic50': '',
+                'fold_ic50': '',
+                'score': '',
+                'external_id': _TSV_PLACEHOLDER,
+                'source': _TSV_PLACEHOLDER,
+                'publications': '',
+            })
+            rows.append(row)
+        else:
+            # Non-hit variant: rule columns empty/placeholder.
+            row = _base_row(ann)
+            row.update({
+                'in_database': 'no',
+                'rule_type': _TSV_PLACEHOLDER,
+                'drug': _TSV_PLACEHOLDER,
+                'phenotype': _TSV_PLACEHOLDER,
+                'clinical_phenotype': _TSV_PLACEHOLDER,
+                'ic50': '',
+                'fold_ic50': '',
+                'score': '',
+                'external_id': _TSV_PLACEHOLDER,
+                'source': _TSV_PLACEHOLDER,
+                'publications': '',
+            })
+            rows.append(row)
+
+    # One combined row per fired formula rule, members joined with ';'.
+    for hit in result.formula_hits:
+        rs: ResistanceRuleSet = hit.rule_set
+        members = hit.matched_variants
+        if not members:
+            continue
+        genes = ';'.join(_gene(a) for a in members)
+        nt_muts = ';'.join(nt_change_stored(a) for a in members)
+        nt_users = ';'.join(nt_change_user(a) for a in members)
+        aa_effects = ';'.join(_aa_effect(a) for a in members)
+        strands = ';'.join(strand_by_feature.get(a.feature_name, '') for a in members)
+        afs = ';'.join(repr(a.variant.allele_freq) for a in members)
+        af_bins = ';'.join(a.af_bin for a in members)
+        first_chrom = members[0].variant.chrom
+        rows.append({
+            'reference': ref_by_chrom.get(first_chrom, ''),
+            'gene': genes,
+            'nt_mut': nt_muts,
+            'nt_mut_user': nt_users,
+            'aa_effect': aa_effects,
+            'strand': strands,
+            'af': afs,
+            'af_bin': af_bins,
+            'depth': '',  # combined row spans multiple variants; no single depth
+            'consequence': ';'.join(a.consequence for a in members),
+            'in_database': 'yes',
+            'rule_type': 'formula',
+            'drug': rs.drug_name,
+            'phenotype': rs.phenotype,
+            'clinical_phenotype': rs.clinical_phenotype,
+            'ic50': rs.ic50,
+            'fold_ic50': rs.fold_ic50,
+            'score': rs.score,
+            'external_id': rs.group_name,
+            'source': rs.source,
+            'publications': _format_publications_tsv(rs.publications),
+        })
+
+    # Metadata-only effect-as-resistant synthetic rows (rule_type=single), emitted when
+    # a project DB supplies the effect_as_resistant algorithm config.
+    rows.extend(_effect_as_resistant_tsv_rows(
+        result, project_conn, ref_by_chrom, strand_by_feature, display_names,
+    ))
+
+    output_path = Path(output_path)
+    # Drop rule-derived columns that carry no real value in any row, mirroring the
+    # HTML Database Hits table's has_*_metrics flags.
+    fieldnames = _present_tsv_columns(rows)
+    with output_path.open('w', encoding='utf-8', newline='') as fh:
+        writer = csv.DictWriter(
+            fh, fieldnames=fieldnames, delimiter='\t',
+            lineterminator='\n', extrasaction='ignore',
+        )
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+    logger.info('TSV report written to %s', output_path)
     return output_path
 
 

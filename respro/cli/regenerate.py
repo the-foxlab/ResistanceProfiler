@@ -82,7 +82,8 @@ def regenerate(
         list[str] | None,
         typer.Option(
             '--export',
-            help='Optional extra export format in addition to HTML (pdf, json). Pdfs are summaries only. Can be provided multiple times.',
+            '-e',
+            help='Optional extra export format in addition to HTML (pdf, json, tsv). Pdfs are summaries only. Can be provided multiple times.',
         ),
     ] = None,
 ) -> None:
@@ -96,9 +97,9 @@ def regenerate(
         extra_export_formats: set[str] = set()
         for raw_export in export or []:
             export_value = raw_export.strip().lower()
-            if export_value not in ('json', 'pdf'):
+            if export_value not in ('json', 'pdf', 'tsv'):
                 cli_error(
-                    'Invalid --export value. Choose one of: json, pdf.'
+                    'Invalid --export value. Choose one of: json, pdf, tsv.'
                 )
             extra_export_formats.add(export_value)
 

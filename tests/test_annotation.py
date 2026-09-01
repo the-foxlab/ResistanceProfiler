@@ -1168,12 +1168,6 @@ class TestSuppressRulelessOverlapAnnotations:
             id=2, reference_id=1, name='UL24', protein='UL24',
             start=20, end=60, strand='+', codon_start=0, nt_sequence='ATG' + 'GGG' * 19,
         )
-        # refB: standalone ruleless UL24 (0-60), no ruled feature on refB.
-        ruleless_ul24_b = FeatureRecord(
-            id=3, reference_id=2, name='UL24', protein='UL24',
-            start=0, end=60, strand='+', codon_start=0, nt_sequence='ATG' + 'GGG' * 19,
-        )
-
         # refA UL24 annotation (chrom_a) — should be suppressed (overlaps ruled UL23).
         # refB UL24 annotation (chrom_b) — should survive (standalone on refB).
         ann_a = AnnotatedVariant(

@@ -549,9 +549,9 @@ _ASSESSMENT_RANK: dict[str, int] = {
 def _references_match(configured_reference: str, observed_reference: str) -> bool:
     """Return whether two references match exactly or by accession base plus version.
 
-    Mirrors ``respro.report.html._references_match_with_accession_version`` so that
-    drug_thresholds overrides resolve consistently between DB classification and
-    report rendering.
+    Mirrors ``respro.report._row_helpers.references_match_with_accession_version`` so
+    that drug_thresholds overrides resolve consistently between DB classification
+    and report rendering.
     """
     if configured_reference == observed_reference:
         return True
