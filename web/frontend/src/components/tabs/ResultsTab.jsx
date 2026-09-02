@@ -151,7 +151,9 @@ export function ResultsTab({
           >
             Clear comparison
           </button>
-          <label className="comparison-switch comparison-switch-right" title="Show only non-synonymous mutations">
+        </div>
+        <div className="comparison-filters">
+          <label className="comparison-switch" title="Show only non-synonymous mutations">
             <input
               type="checkbox"
               checked={nonSynonymousOnly}

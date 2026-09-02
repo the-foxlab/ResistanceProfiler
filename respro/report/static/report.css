@@ -766,13 +766,14 @@ body {
 
   .report-tabs {
     gap: 0;
-    flex-wrap: wrap;
-    align-items: flex-start;
+    flex-wrap: nowrap;
+    align-items: center;
   }
 
   .report-tabs-list {
-    flex-wrap: wrap;
-    overflow-x: visible;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .report-tabs-actions {

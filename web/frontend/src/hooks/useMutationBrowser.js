@@ -31,8 +31,9 @@ const MUTATION_COLUMN_ORDER = [
   'clinical_phenotype',
   'ic50',
   'fold_ic50',
-  'publication',
+  'score',
   'source',
+  'publication',
   'comment',
 ];
 
@@ -65,8 +66,9 @@ const FORMULA_COLUMN_ORDER = [
   'clinical_phenotype',
   'ic50',
   'fold_ic50',
-  'publication',
+  'score',
   'source',
+  'publication',
   'comment',
 ];
 

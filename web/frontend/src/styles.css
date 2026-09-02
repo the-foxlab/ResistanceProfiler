@@ -59,6 +59,7 @@
   --topbar-logo-height: 68px;
   --topbar-link-icon-size: 32px;
   --sidebar-width: 118px;
+  --sidebar-logo-gap: 5px;
   /* Mobile-responsive tokens (webapp-only; no report counterpart).
      --mobile-breakpoint is the viewport width at which the off-canvas
      sidebar + condensed top bar kick in. Redefining the structural
@@ -213,9 +214,19 @@ th {
 
 .about-tile {
   width: 100%;
+  min-width: 0;
   margin: 0;
   display: grid;
   gap: 1.25rem;
+}
+
+.about-tile > *,
+.about-notice-grid > *,
+.about-knowledge-grid > *,
+.about-cli-grid > *,
+.about-bottom-grid > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .about-tile p,
@@ -559,6 +570,10 @@ th {
   color: var(--muted-strong);
 }
 
+.about-table-wrap .about-inline-pill {
+  white-space: nowrap;
+}
+
 .about-operator-list {
   display: grid;
   gap: 0.55rem;
@@ -839,7 +854,7 @@ th {
   height: var(--topbar-logo-height);
   max-width: 100%;
   object-fit: contain;
-  transform: translateX(-2.5rem);
+  object-position: left center;
 }
 
 .brand-logo-wrap {
@@ -847,6 +862,7 @@ th {
   height: var(--topbar-logo-height);
   min-width: 0;
   flex: 1 1 0;
+  margin-left: var(--sidebar-logo-gap);
 }
 
 .top-bar-brand-block {
@@ -1207,6 +1223,11 @@ th {
 .header-db-badge {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  /* Fixed width keeps the selector and surrounding elements stable while
+     switching databases (entry counts vary in digit count). */
+  width: 6.5rem;
+  min-width: 6.5rem;
   padding: 0.2rem 0.6rem;
   border-radius: 999px;
   background: var(--accent);
@@ -1216,6 +1237,7 @@ th {
   font-weight: 600;
   white-space: nowrap;
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .header-db-bar {
@@ -1487,14 +1509,18 @@ th {
 }
 
 .comparison-actions .analyze-primary,
-.comparison-actions .comparison-clear-btn,
-.comparison-actions .comparison-switch {
+.comparison-actions .comparison-clear-btn {
   flex: 0 0 auto;
   white-space: nowrap;
 }
 
-.comparison-actions .comparison-switch-right {
-  margin-left: 0;
+.comparison-filters {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.6rem;
 }
 
 
@@ -2155,12 +2181,6 @@ th {
 
 .workspace-frame {
   width: 100%;
-  /* Floor the frame so it stays visible before onLoad fires and when the
-     report is cross-origin (dev mode), where contentDocument access throws
-     and the dynamic height measurement falls back to this minimum. The
-     onLoad handler in AnalyzeTab grows the height to the report's real
-     scrollHeight on same-origin deployments. */
-  min-height: 70vh;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface-strong);
@@ -2228,24 +2248,17 @@ th.sortable-col {
 .mutation-table-wrap table th,
 .mutation-table-wrap table td {
   text-align: left;
-}
-
-.mutation-table-wrap table th {
+  padding: 0.3rem 0.6rem;
   white-space: nowrap;
 }
 
-.mutation-table-wrap .mutation-comment-column {
-  width: clamp(24rem, 36vw, 32rem);
-  min-width: 24rem;
-  max-width: 32rem;
+.mutation-table-wrap table {
+  width: max-content;
+  min-width: 100%;
 }
 
 .mutation-comment-content {
-  display: block;
-  max-height: 4.65em;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  word-break: break-word;
+  white-space: nowrap;
 }
 
 @keyframes spin {
@@ -2285,15 +2298,10 @@ th.sortable-col {
   transition: transform 0.18s ease, opacity 0.18s ease;
 }
 
-/* Animate into an "X" when open. */
-.mobile-menu-btn.open .mobile-menu-bar:nth-child(1) {
-  transform: translateY(8px) rotate(45deg);
-}
-.mobile-menu-btn.open .mobile-menu-bar:nth-child(2) {
-  opacity: 0;
-}
-.mobile-menu-btn.open .mobile-menu-bar:nth-child(3) {
-  transform: translateY(-8px) rotate(-45deg);
+/* Button is hidden once the drawer is open — the backdrop click and Escape
+   already close it, so a separate close (X) affordance is not needed. */
+.mobile-menu-btn.open {
+  display: none;
 }
 
 @media (max-width: 980px) {
@@ -2474,6 +2482,7 @@ th.sortable-col {
   .brand-logo-wrap {
     grid-column: 1;
     grid-row: 1;
+    margin-left: 0;
     order: initial;
   }
 
@@ -2790,7 +2799,6 @@ th.sortable-col {
      as a follow-up. */
   .workspace-frame {
     width: 100%;
-    min-height: 55vh;
     -webkit-overflow-scrolling: touch;
   }
 }
