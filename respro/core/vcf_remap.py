@@ -259,12 +259,10 @@ def _expand_anchor_changed_indels(
             split_count += 1
             # Both split events describe the same user-reference record; preserve its
             # original user-ref coordinates so downstream display can show them.
-            user_kwargs = {
-                'user_chrom': var.user_chrom or var.chrom,
-                'user_pos': var.user_pos or var.pos,
-                'user_ref': var.user_ref or var.ref,
-                'user_alt': var.user_alt or var.alt,
-            }
+            user_chrom = var.user_chrom or var.chrom
+            user_pos = var.user_pos or var.pos
+            user_ref = var.user_ref or var.ref
+            user_alt = var.user_alt or var.alt
             expanded.append(
                 VariantCall(
                     chrom=var.chrom,
@@ -274,7 +272,10 @@ def _expand_anchor_changed_indels(
                     allele_freq=var.allele_freq,
                     depth=var.depth,
                     filter_status=var.filter_status,
-                    **user_kwargs,
+                    user_chrom=user_chrom,
+                    user_pos=user_pos,
+                    user_ref=user_ref,
+                    user_alt=user_alt,
                 )
             )
             expanded.append(
@@ -286,7 +287,10 @@ def _expand_anchor_changed_indels(
                     allele_freq=var.allele_freq,
                     depth=var.depth,
                     filter_status=var.filter_status,
-                    **user_kwargs,
+                    user_chrom=user_chrom,
+                    user_pos=user_pos,
+                    user_ref=user_ref,
+                    user_alt=user_alt,
                 )
             )
             continue
