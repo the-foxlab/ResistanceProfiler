@@ -7,7 +7,6 @@ import { TourProvider } from './tour/TourContext';
 function renderWithTour(ui) {
   return render(<TourProvider steps={[]}>{ui}</TourProvider>);
 }
-
 // Minimal prop set: DashboardView destructures many props, but only a few are
 // read in the sidebar/top-bar region exercised here. Provide stubs for the
 // rest so the component renders without throwing.
@@ -72,6 +71,34 @@ describe('DashboardView mobile sidebar toggle', () => {
     const reportsBtn = screen.getByRole('button', { name: /reports/i });
     fireEvent.click(reportsBtn);
     expect(setActiveMode).toHaveBeenCalledWith('results');
+    expect(document.getElementById('sidebar-rail')).not.toHaveClass('open');
+  });
+
+  it('renders a backdrop overlay only when the drawer is open', () => {
+    renderWithTour(<DashboardView {...minimalProps()} />);
+    // The backdrop element is always in the DOM but hidden via CSS until open.
+    const backdrop = document.querySelector('.mobile-nav-backdrop');
+    expect(backdrop).toBeInTheDocument();
+    expect(backdrop).not.toHaveClass('is-open');
+    // Open the drawer: backdrop becomes active.
+    fireEvent.click(screen.getByRole('button', { name: /toggle navigation/i }));
+    expect(backdrop).toHaveClass('is-open');
+    expect(backdrop).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('closes the sidebar when the backdrop is clicked', () => {
+    renderWithTour(<DashboardView {...minimalProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /toggle navigation/i }));
+    expect(document.getElementById('sidebar-rail')).toHaveClass('open');
+    fireEvent.click(document.querySelector('.mobile-nav-backdrop'));
+    expect(document.getElementById('sidebar-rail')).not.toHaveClass('open');
+  });
+
+  it('closes the sidebar on Escape when open', () => {
+    renderWithTour(<DashboardView {...minimalProps()} />);
+    fireEvent.click(screen.getByRole('button', { name: /toggle navigation/i }));
+    expect(document.getElementById('sidebar-rail')).toHaveClass('open');
+    fireEvent.keyDown(window, { key: 'Escape' });
     expect(document.getElementById('sidebar-rail')).not.toHaveClass('open');
   });
 });

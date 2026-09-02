@@ -155,6 +155,20 @@ export function DashboardView({
     return () => window.removeEventListener('scroll', updateScrollTopVisibility);
   }, []);
 
+  // Close the off-canvas drawer on Escape while it is open. Bound only when
+  // the drawer is open so it never swallows Escape intended for other widgets
+  // (e.g. the plot modal in AnalyzeTab manages its own Escape listener).
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') {
+        setMobileNavOpen(false);
+      }
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [mobileNavOpen]);
+
   const handleSelectMode = (modeId) => {
     setActiveMode(modeId);
     setMobileNavOpen(false);
@@ -198,6 +212,14 @@ export function DashboardView({
           ))}
         </nav>
       </aside>
+      {/* Scrim behind the off-canvas drawer on mobile. Hidden on desktop and
+          whenever the drawer is closed via CSS (.is-open). Clicking it
+          dismisses the drawer, mirroring a modal overlay. */}
+      <div
+        className={`mobile-nav-backdrop ${mobileNavOpen ? 'is-open' : ''}`}
+        aria-hidden="true"
+        onClick={() => setMobileNavOpen(false)}
+      />
 
       <div className="dashboard-main">
         <div className="top-bar">

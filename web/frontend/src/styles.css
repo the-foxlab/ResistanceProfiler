@@ -2155,6 +2155,12 @@ th {
 
 .workspace-frame {
   width: 100%;
+  /* Floor the frame so it stays visible before onLoad fires and when the
+     report is cross-origin (dev mode), where contentDocument access throws
+     and the dynamic height measurement falls back to this minimum. The
+     onLoad handler in AnalyzeTab grows the height to the report's real
+     scrollHeight on same-origin deployments. */
+  min-height: 70vh;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface-strong);
@@ -2407,6 +2413,24 @@ th.sortable-col {
 
   .sidebar-rail.open {
     transform: translateX(0);
+  }
+
+  /* Scrim behind the off-canvas drawer. Hidden unless the drawer is open,
+     and only rendered on mobile (the element exists in the DOM on desktop
+     but stays display:none here and is inert). */
+  .mobile-nav-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    background: rgba(8, 14, 22, 0.5);
+    opacity: 0;
+    transition: opacity 0.22s ease;
+  }
+
+  .mobile-nav-backdrop.is-open {
+    display: block;
+    opacity: 1;
   }
 
   .dashboard-main {
@@ -2766,6 +2790,7 @@ th.sortable-col {
      as a follow-up. */
   .workspace-frame {
     width: 100%;
+    min-height: 55vh;
     -webkit-overflow-scrolling: touch;
   }
 }

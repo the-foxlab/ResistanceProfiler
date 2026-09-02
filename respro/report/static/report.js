@@ -61,7 +61,16 @@ document.addEventListener('DOMContentLoaded', function () {
   if (plotModal && plotOpenButton && plotCloseButton && plotBackdrop) {
     plotOpenButton.addEventListener('click', function () {
       if (window.parent !== window && plotImage) {
-        window.parent.postMessage({ type: 'respro:open-plot' }, window.location.origin);
+        // Embedded in the webapp shell: delegate the modal to the parent so
+        // the plot escapes the iframe. Send the image data in the payload so
+        // the parent does not need cross-origin contentDocument access (which
+        // throws in dev mode where the report is served from a different
+        // origin than the Vite dev server).
+        window.parent.postMessage({
+          type: 'respro:open-plot',
+          src: plotImage.currentSrc || plotImage.src,
+          alt: plotImage.alt || 'Resistance plot',
+        }, window.location.origin);
         return;
       }
       openModal(plotModal);
@@ -72,6 +81,29 @@ document.addEventListener('DOMContentLoaded', function () {
     plotBackdrop.addEventListener('click', function () {
       closeModal(plotModal);
     });
+  }
+
+  // ── Hosted height sync ──────────────────────────────────────────────────
+  // When embedded in the webapp iframe, keep the parent's frame height in
+  // sync with this document's content. The parent cannot read
+  // contentDocument across origins (dev mode), so the report reports its
+  // own height. A ResizeObserver catches late layout shifts (images, tab
+  // switches) that arrive after the initial load.
+  if (window.parent !== window && typeof ResizeObserver !== 'undefined') {
+    var postReportHeight = function () {
+      var height = Math.max(
+        document.body.scrollHeight,
+        document.documentElement.scrollHeight
+      );
+      if (height > 0) {
+        window.parent.postMessage({ type: 'respro:report-height', height: height }, window.location.origin);
+      }
+    };
+    var heightObserver = new ResizeObserver(postReportHeight);
+    heightObserver.observe(document.body);
+    heightObserver.observe(document.documentElement);
+    window.addEventListener('load', postReportHeight);
+    postReportHeight();
   }
 
   if (sequenceModal && sequenceBackdrop && sequenceTitle && sequenceBlock) {

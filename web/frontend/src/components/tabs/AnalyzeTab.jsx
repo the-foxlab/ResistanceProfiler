@@ -71,7 +71,7 @@ export function AnalyzeTab({
   isAnalyzeScopeLocked,
   PROFILE_MODES,
 }) {
-  const [reportFrameHeight, setReportFrameHeight] = useState(1);
+  const [reportFrameHeight, setReportFrameHeight] = useState(null);
   const [hostedPlot, setHostedPlot] = useState(null);
   const analyzeSubmodeRowRef = useRef(null);
   const reportFrameRef = useRef(null);
@@ -82,30 +82,60 @@ export function AnalyzeTab({
   ) || null;
 
   useEffect(() => {
-    setReportFrameHeight(1);
+    setReportFrameHeight(null);
     setHostedPlot(null);
   }, [inlineReportPath]);
 
+  // Derive the origin the embedded report is served from, so we can validate
+  // incoming postMessage events against it. In production the report is
+  // same-origin (apiBase === ''); in dev it is served from the API host
+  // (e.g. http://127.0.0.1:8000). We read it from the iframe's own src so
+  // the check stays correct regardless of deployment topology.
+  const reportOrigin = (() => {
+    try {
+      const src = reportFrameRef.current?.src || (inlineReportPath ? buildReportUrl(inlineReportPath) : '');
+      return src ? new URL(src).origin : '';
+    } catch {
+      return '';
+    }
+  })();
+
   useEffect(() => {
     const handleMessage = (event) => {
-      if (event.data?.type !== 'respro:open-plot') {
+      // Only trust messages from the embedded report iframe's origin.
+      if (event.origin !== reportOrigin) {
+        return;
+      }
+      // And only from its contentWindow (defence-in-depth alongside origin).
+      if (event.source !== reportFrameRef.current?.contentWindow) {
         return;
       }
 
-      const plotImage = reportFrameRef.current?.contentDocument?.querySelector('.plot-modal-image');
-      if (event.source !== reportFrameRef.current?.contentWindow || !plotImage) {
+      if (event.data?.type === 'respro:open-plot') {
+        // The report sends the image src/alt in the payload, so we never need
+        // cross-origin contentDocument access (which throws in dev mode).
+        if (event.data.src) {
+          setHostedPlot({
+            src: event.data.src,
+            alt: event.data.alt || 'Resistance plot',
+          });
+        }
         return;
       }
 
-      setHostedPlot({
-        src: plotImage.currentSrc || plotImage.src,
-        alt: plotImage.alt || 'Resistance plot',
-      });
+      if (event.data?.type === 'respro:report-height' && typeof event.data.height === 'number') {
+        // The report measures its own content height and reports it; this
+        // works cross-origin (where contentDocument access throws) and
+        // catches late layout shifts via the report's ResizeObserver.
+        if (event.data.height > 0) {
+          setReportFrameHeight(event.data.height + 2);
+        }
+      }
     };
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  }, [reportOrigin]);
 
   useEffect(() => {
     if (!hostedPlot) {
@@ -822,7 +852,7 @@ export function AnalyzeTab({
             src={buildReportUrl(inlineReportPath)}
             className="workspace-frame"
             sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads"
-            style={{ height: `${reportFrameHeight}px` }}
+            style={reportFrameHeight ? { height: `${reportFrameHeight}px` } : undefined}
             onLoad={(event) => {
               try {
                 const frameDoc = event.currentTarget.contentDocument;
@@ -835,7 +865,12 @@ export function AnalyzeTab({
                 );
                 setReportFrameHeight(nextHeight + 2);
               } catch {
-                setReportFrameHeight(1);
+                // Cross-origin (dev mode): contentDocument access throws.
+                // Leave the height unset so the CSS min-height floor on
+                // .workspace-frame keeps the frame visible; the report's
+                // ResizeObserver will post a respro:report-height message
+                // once it mounts and set a precise height.
+                setReportFrameHeight(null);
               }
             }}
           />
