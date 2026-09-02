@@ -7,6 +7,11 @@ description: Run and host the ResPro web application
 
 This guide covers local development and public hosting of the ResPro web application.
 
+<figure markdown>
+  ![ResPro running on desktop, tablet, and mobile](assets/formats.png){ loading=lazy }
+  <figcaption>ResPro's responsive web app adapts to desktop, tablet, and mobile screens.</figcaption>
+</figure>
+
 The stack is intentionally minimal for local development:
 
 - `redis`
