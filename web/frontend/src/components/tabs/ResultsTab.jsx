@@ -126,7 +126,7 @@ export function ResultsTab({
             Download selected
           </button>
         </div>
-        <div className="profile-analyze-row">
+        <div className="profile-analyze-row comparison-actions">
           <button
             type="button"
             className="analyze-primary"

@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const plotOpenButton = document.getElementById('plot-modal-open');
   const plotCloseButton = document.getElementById('plot-modal-close');
   const plotBackdrop = document.getElementById('plot-modal-backdrop');
+  const plotImage = plotModal ? plotModal.querySelector('.plot-modal-image') : null;
   const structureModal = document.getElementById('drug-structure-modal');
   const structureButtons = document.querySelectorAll('.drug-structure-button');
   const structureBackdrop = document.getElementById('drug-structure-modal-backdrop');
@@ -59,6 +60,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   if (plotModal && plotOpenButton && plotCloseButton && plotBackdrop) {
     plotOpenButton.addEventListener('click', function () {
+      if (window.parent !== window && plotImage) {
+        window.parent.postMessage({ type: 'respro:open-plot' }, window.location.origin);
+        return;
+      }
       openModal(plotModal);
     });
     plotCloseButton.addEventListener('click', function () {

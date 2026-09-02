@@ -39,7 +39,7 @@ export function DatabasePositionPlot({ plot }) {
         bargap: 0.15,
         xaxis: {
           title: { text: plot.xAxisLabel || 'Amino-acid position', font: { size: 12, color: '#4c6072' } },
-          tickangle: 0,
+          tickangle: -45,
           showgrid: false,
           ...xaxisConfig,
         },
@@ -51,7 +51,7 @@ export function DatabasePositionPlot({ plot }) {
           griddash: 'dot',
           rangemode: 'tozero',
         },
-        margin: { l: 50, r: 12, t: 8, b: 40 },
+        margin: { l: 50, r: 12, t: 8, b: 58 },
         height: 250,
         showlegend: false,
         dragmode: false,

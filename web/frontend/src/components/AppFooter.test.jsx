@@ -34,7 +34,7 @@ describe('AppFooter', () => {
     expect(link).toHaveAttribute('href', 'https://example.org/legal');
   });
 
-  it('places separators only between present neighbours (legal · contact · version)', () => {
+  it('places separators only within the link and version groups', () => {
     const { container } = render(
       <AppFooter
         legalLink="https://example.org/legal"
@@ -44,8 +44,7 @@ describe('AppFooter', () => {
       />,
     );
     const separators = container.querySelectorAll('.app-footer-sep');
-    // legal, contact, core, webapp all present → 3 separators.
-    expect(separators).toHaveLength(3);
+    expect(separators).toHaveLength(2);
   });
 
   it('places a separator between legal and contact when versions are absent', () => {
@@ -56,12 +55,11 @@ describe('AppFooter', () => {
     expect(separators).toHaveLength(1);
   });
 
-  it('places no separator between contact and version when legal is absent', () => {
-    // contact + core version present → exactly one separator between them.
+  it('places no separator between the link and version groups', () => {
     const { container } = render(
       <AppFooter contactEmail="support@example.org" cliVersion="1.2.3" />,
     );
     const separators = container.querySelectorAll('.app-footer-sep');
-    expect(separators).toHaveLength(1);
+    expect(separators).toHaveLength(0);
   });
 });

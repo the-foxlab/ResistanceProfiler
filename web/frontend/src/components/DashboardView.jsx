@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import logoSrc from '../assets/logo.svg';
 import aboutIconSrc from '../assets/icon-about.svg';
 import databaseIconSrc from '../assets/icon-database.svg';
@@ -138,18 +139,56 @@ export function DashboardView({
 }) {
   const isAnalyzeScopeLocked = isProfileBusy || isRegenerateBusy || batchSubmitting;
   const { startTour } = useTour();
+  // Off-canvas sidebar state for mobile. Toggled by the hamburger button;
+  // auto-closed whenever the active mode changes so navigating away from a
+  // mode never leaves the drawer open over the new content.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  useEffect(() => {
+    const updateScrollTopVisibility = () => {
+      setShowScrollTop(window.scrollY > 240);
+    };
+
+    window.addEventListener('scroll', updateScrollTopVisibility, { passive: true });
+    updateScrollTopVisibility();
+    return () => window.removeEventListener('scroll', updateScrollTopVisibility);
+  }, []);
+
+  const handleSelectMode = (modeId) => {
+    setActiveMode(modeId);
+    setMobileNavOpen(false);
+  };
 
   return (
     <main className="dashboard-shell">
+      {/* Hamburger toggle for the off-canvas sidebar. Hidden on desktop via
+          CSS (.mobile-menu-btn is display:none above --mobile-breakpoint). */}
+      <button
+        type="button"
+        className={`mobile-menu-btn ${mobileNavOpen ? 'open' : ''}`}
+        aria-label="Toggle navigation"
+        aria-expanded={mobileNavOpen}
+        aria-controls="sidebar-rail"
+        onClick={() => setMobileNavOpen((v) => !v)}
+      >
+        <span className="mobile-menu-bar" aria-hidden="true" />
+        <span className="mobile-menu-bar" aria-hidden="true" />
+        <span className="mobile-menu-bar" aria-hidden="true" />
+      </button>
       {/* Left rail only switches visible mode; all data lives in shared hook state. */}
-      <aside className="sidebar-rail" aria-label="Dashboard modes">
+      <aside
+        id="sidebar-rail"
+        className={`sidebar-rail ${mobileNavOpen ? 'open' : ''}`}
+        aria-label="Dashboard modes"
+      >
         <nav className="sidebar-rail-nav">
           {MODES.map((mode) => (
             <button
               key={mode.id}
               type="button"
               className={`sidebar-rail-link ${activeMode === mode.id ? 'active' : ''} ${mode.id === 'about' ? 'about-tab' : ''}`}
-              onClick={() => setActiveMode(mode.id)}
+              onClick={() => handleSelectMode(mode.id)}
               aria-label={mode.label}
               data-tour-target={`sidebar-${mode.id}`}
             >
@@ -327,6 +366,15 @@ export function DashboardView({
           webVersion={webVersion}
         />
       </div>
+      <button
+        type="button"
+        className={`scroll-top-button ${showScrollTop ? 'is-visible' : ''}`}
+        title="Scroll to top"
+        aria-label="Scroll to top"
+        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      >
+        ↑
+      </button>
       <TourOverlay />
     </main>
   );

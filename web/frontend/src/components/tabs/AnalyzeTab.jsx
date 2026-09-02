@@ -71,13 +71,56 @@ export function AnalyzeTab({
   isAnalyzeScopeLocked,
   PROFILE_MODES,
 }) {
-  const [reportFrameHeight, setReportFrameHeight] = useState(900);
+  const [reportFrameHeight, setReportFrameHeight] = useState(1);
+  const [hostedPlot, setHostedPlot] = useState(null);
   const analyzeSubmodeRowRef = useRef(null);
+  const reportFrameRef = useRef(null);
   const [analyzeSubmodeRowWidth, setAnalyzeSubmodeRowWidth] = useState(0);
 
   const selectedReportOption = reportOptions.find(
     (option) => option.path === selectedProfileReportPath,
   ) || null;
+
+  useEffect(() => {
+    setReportFrameHeight(1);
+    setHostedPlot(null);
+  }, [inlineReportPath]);
+
+  useEffect(() => {
+    const handleMessage = (event) => {
+      if (event.data?.type !== 'respro:open-plot') {
+        return;
+      }
+
+      const plotImage = reportFrameRef.current?.contentDocument?.querySelector('.plot-modal-image');
+      if (event.source !== reportFrameRef.current?.contentWindow || !plotImage) {
+        return;
+      }
+
+      setHostedPlot({
+        src: plotImage.currentSrc || plotImage.src,
+        alt: plotImage.alt || 'Resistance plot',
+      });
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
+
+  useEffect(() => {
+    if (!hostedPlot) {
+      return undefined;
+    }
+
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') {
+        setHostedPlot(null);
+      }
+    };
+
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [hostedPlot]);
 
   useEffect(() => {
     // Count down the batch rate-limit cooldown each second until it reaches zero.
@@ -774,6 +817,7 @@ export function AnalyzeTab({
       {analyzeSubMode !== 'batch' && inlineReportPath ? (
         <article className="card full-width-tile tab-primary-tile">
           <iframe
+            ref={reportFrameRef}
             title="ResistanceProfiler report"
             src={buildReportUrl(inlineReportPath)}
             className="workspace-frame"
@@ -788,15 +832,32 @@ export function AnalyzeTab({
                 const nextHeight = Math.max(
                   frameDoc.body.scrollHeight,
                   frameDoc.documentElement.scrollHeight,
-                  900,
                 );
-                setReportFrameHeight(nextHeight + 24);
+                setReportFrameHeight(nextHeight + 2);
               } catch {
-                setReportFrameHeight(900);
+                setReportFrameHeight(1);
               }
             }}
           />
         </article>
+      ) : null}
+
+      {hostedPlot ? (
+        <div className="report-preview-plot-modal" role="dialog" aria-modal="true" aria-label="Resistance plot">
+          <div className="report-preview-plot-backdrop" onClick={() => setHostedPlot(null)} aria-hidden="true" />
+          <section className="report-preview-plot-panel">
+            <button
+              type="button"
+              className="report-preview-plot-close"
+              aria-label="Close resistance plot"
+              onClick={() => setHostedPlot(null)}
+              autoFocus
+            >
+              &times;
+            </button>
+            <img src={hostedPlot.src} alt={hostedPlot.alt} className="report-preview-plot-image" />
+          </section>
+        </div>
       ) : null}
     </>
   );

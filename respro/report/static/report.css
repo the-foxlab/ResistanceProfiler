@@ -711,6 +711,24 @@ body {
   overflow-y: auto;
 }
 
+/* Use the compact header before desktop actions compete with the title. */
+@media (max-width: 900px) {
+  .header-main {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .header-title-group {
+    flex-wrap: wrap;
+  }
+
+  .header-actions {
+    order: -1;
+    align-self: stretch;
+    justify-content: flex-end;
+  }
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .report-header {
@@ -723,15 +741,6 @@ body {
 
   .header-title {
     font-size: var(--font-size-xl);
-  }
-
-  .header-main {
-    align-items: flex-start;
-  }
-
-  .header-actions {
-    align-self: stretch;
-    justify-content: flex-end;
   }
 
   .header-plot-button {
@@ -1836,4 +1845,20 @@ a.db-hit-pub-link:hover {
   padding: 0.1rem 0.6rem;
   border-radius: 999px;
   font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .mutation-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .mutation-search {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .mutation-download-button {
+    margin-left: 0;
+  }
 }
