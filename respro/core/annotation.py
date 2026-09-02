@@ -106,18 +106,75 @@ def annotate_variants(
 def _suppress_ruleless_overlap_annotations(
     annotations: list[AnnotatedVariant],
     rule_feature_names: set[str],
+    features: list[FeatureRecord] | None = None,
+    scope_chroms: set[str] | None = None,
 ) -> list[AnnotatedVariant]:
     """
-    Suppress overlap annotations for features without rules when a ruled feature also matches.
+    Suppress annotations for ruleless features that overlap a ruled feature.
 
-    Groups by variant locus/alleles, keeps all single-feature groups unchanged, and for
-    overlap groups keeps only annotations whose feature has rules when at least one such
-    feature exists.
+    Two suppression mechanisms run, in order:
+
+    1. Feature-overlap suppression (when ``features`` is provided): a ruleless
+       feature whose genomic span overlaps any ruled feature on the same reference
+       is suppressed entirely — every annotation carrying that feature name is
+       dropped. This catches the common case where a ruleless feature extends
+       beyond a ruled feature (e.g. UL24 overlapping UL23) and carries variants
+       at loci no ruled-feature variant shares. Overlap is evaluated per
+       reference: features are grouped by ``reference_id`` and a ruleless feature
+       only competes with ruled features on the same reference. Scoping by
+       ``reference_id`` is correct because internal references share the same
+       coordinate origin; a ruled feature on refA cannot "claim" coordinates that
+       belong to a ruleless feature on refB.
+
+       The annotation filter is scoped by ``scope_chroms`` when provided: only
+       annotations whose ``variant.chrom`` is in ``scope_chroms`` are dropped.
+       This is required for the VCF multi-reference path, which calls this
+       function once per reference with only that reference's features. Two
+       references may share a ruleless feature name (e.g. HSV-1 and HCMV both
+       carry UL24); without chrom scoping, suppressing the name on refA would
+       also drop refB's standalone UL24 annotations — a silent cross-reference
+       over-suppression. When ``scope_chroms`` is None (FASTA single-reference
+       path), the filter applies by name across all annotations, since a single
+       reference cannot have cross-reference collisions.
+    2. Locus-group suppression (always): groups annotations by variant locus
+       ``(chrom, pos, ref, alt)`` and, for groups with more than one annotation,
+       keeps only the ruled-feature annotations when at least one is ruled. This
+       catches the in-overlap-zone case where a single variant lands inside both
+       a ruled and a ruleless feature (the original overlap-bug scenario).
 
     :param annotations: list of annotated variants
     :param rule_feature_names: feature names covered by at least one rule
+    :param features: feature records for the reference(s) the annotations belong
+        to; when provided, enables feature-overlap suppression. When None, only
+        locus-group suppression runs (legacy behaviour).
+    :param scope_chroms: when provided, feature-overlap suppression only drops
+        annotations whose ``variant.chrom`` is in this set. Pass the current
+        reference's chroms in the VCF multi-reference path; pass None for the
+        FASTA single-reference path.
     :return: filtered annotation list
     """
+    # 1. Feature-overlap suppression: drop ruleless features that overlap a ruled
+    #    feature on the same reference. Scope the drop to ``scope_chroms`` when
+    #    provided so a suppressed name on one reference does not erase the same
+    #    name's annotations on a different reference.
+    if features:
+        suppressed_feature_names = _ruleless_features_overlapping_ruled(features, rule_feature_names)
+        if suppressed_feature_names:
+            if scope_chroms is not None:
+                annotations = [
+                    ann for ann in annotations
+                    if not (
+                        ann.feature_name in suppressed_feature_names
+                        and ann.variant.chrom in scope_chroms
+                    )
+                ]
+            else:
+                annotations = [
+                    ann for ann in annotations if ann.feature_name not in suppressed_feature_names
+                ]
+
+    # 2. Locus-group suppression: for variants landing inside both a ruled and a
+    #    ruleless feature at the same locus, keep only the ruled annotations.
     variant_groups: dict[tuple[str, int, str, str], list[AnnotatedVariant]] = {}
     for ann in annotations:
         variant_key = (ann.variant.chrom, ann.variant.pos, ann.variant.ref, ann.variant.alt)
@@ -138,6 +195,44 @@ def _suppress_ruleless_overlap_annotations(
             filtered.extend(group)
 
     return filtered
+
+
+def _ruleless_features_overlapping_ruled(
+    features: list[FeatureRecord],
+    rule_feature_names: set[str],
+) -> set[str]:
+    """
+    Return the names of ruleless features that overlap any ruled feature.
+
+    Overlap is evaluated per reference (``reference_id``): a ruleless feature only
+    competes with ruled features on the same reference, because internal references
+    share the same coordinate origin and a span on refA is unrelated to the same
+    numeric span on refB. Two half-open intervals ``[start, end)`` overlap when
+    ``start < other_end and other_start < end``.
+
+    :param features: feature records (may span multiple references)
+    :param rule_feature_names: feature names covered by at least one rule
+    :return: set of ruleless feature names that overlap a ruled feature
+    """
+    ruled_by_ref: dict[int, list[FeatureRecord]] = {}
+    ruleless_by_ref: dict[int, list[FeatureRecord]] = {}
+    for feat in features:
+        if feat.name in rule_feature_names:
+            ruled_by_ref.setdefault(feat.reference_id, []).append(feat)
+        else:
+            ruleless_by_ref.setdefault(feat.reference_id, []).append(feat)
+
+    suppressed: set[str] = set()
+    for ref_id, ruleless_features in ruleless_by_ref.items():
+        ruled_features = ruled_by_ref.get(ref_id)
+        if not ruled_features:
+            continue
+        for ruleless in ruleless_features:
+            for ruled in ruled_features:
+                if ruleless.start < ruled.end and ruled.start < ruleless.end:
+                    suppressed.add(ruleless.name)
+                    break
+    return suppressed
 
 
 def reverse_complement(seq: str) -> str:
@@ -296,6 +391,12 @@ def _annotate_combined_snp_codon(
         depth=anchor.depth,
         filter_status=anchor.filter_status,
         query_ref_codon=internal_codon if len(internal_codon) == 3 and '-' not in internal_codon else '',
+        # Carry the anchor member's user-reference coords so the combined event
+        # can display the original user-reference NT change.
+        user_chrom=anchor.user_chrom,
+        user_pos=anchor.user_pos,
+        user_ref=anchor.user_ref,
+        user_alt=anchor.user_alt,
     )
 
     return AnnotatedVariant(

@@ -269,6 +269,7 @@ export function useBatchManager({
           reportHtmlPath: s.result ? s.result.report_html_path : null,
           reportPdfPath: s.result ? s.result.report_pdf_path : null,
           reportJsonPath: s.result ? s.result.report_json_path : null,
+          reportTsvPath: s.result ? s.result.report_tsv_path : null,
         }))
       );
     }
@@ -366,7 +367,7 @@ export function useBatchManager({
 
   const downloadAllBatchArtifacts = async () => {
     const artifactPaths = batchSamples.flatMap((sample) =>
-      [sample.reportHtmlPath, sample.reportPdfPath, sample.reportJsonPath].filter(Boolean)
+      [sample.reportHtmlPath, sample.reportPdfPath, sample.reportJsonPath, sample.reportTsvPath].filter(Boolean)
     );
     if (artifactPaths.length === 0) {
       setBatchError('No completed batch artifacts are available for download.');

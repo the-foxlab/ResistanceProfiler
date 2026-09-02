@@ -272,6 +272,28 @@ respro classify \
   --note "manual check"
 ```
 
+## Optional export formats
+
+All profiling commands write the HTML report by default. Pass `--export` (repeatable)
+to additionally emit structured exports alongside it:
+
+- `--export json` — machine-readable `*.results.json` (reproducible artifact; can be
+  fed back via `respro regenerate --json`).
+- `--export pdf` — summary-only `*.report.pdf`.
+- `--export tsv` — denormalized `*.results.tsv` table of every variant and its matched
+  rules. See the [Output guide](output.md#tsv-export-resultstsv) for the column layout
+  and row semantics.
+
+```bash
+respro vcf \
+  --project myrespro.db \
+  --vcf my_ngs_result.vcf \
+  --ref-fasta my_vcf_ref.fasta \
+  --output my_output \
+  --export json \
+  --export tsv
+```
+
 ## Regenerate reports
 
 From a stored run:

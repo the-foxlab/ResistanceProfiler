@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const plotOpenButton = document.getElementById('plot-modal-open');
   const plotCloseButton = document.getElementById('plot-modal-close');
   const plotBackdrop = document.getElementById('plot-modal-backdrop');
+  const plotImage = plotModal ? plotModal.querySelector('.plot-modal-image') : null;
   const structureModal = document.getElementById('drug-structure-modal');
   const structureButtons = document.querySelectorAll('.drug-structure-button');
   const structureBackdrop = document.getElementById('drug-structure-modal-backdrop');
@@ -59,6 +60,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
   if (plotModal && plotOpenButton && plotCloseButton && plotBackdrop) {
     plotOpenButton.addEventListener('click', function () {
+      if (window.parent !== window && plotImage) {
+        // Embedded in the webapp shell: delegate the modal to the parent so
+        // the plot escapes the iframe. Send the image data in the payload so
+        // the parent does not need cross-origin contentDocument access (which
+        // throws in dev mode where the report is served from a different
+        // origin than the Vite dev server).
+        window.parent.postMessage({
+          type: 'respro:open-plot',
+          src: plotImage.currentSrc || plotImage.src,
+          alt: plotImage.alt || 'Resistance plot',
+        }, window.location.origin);
+        return;
+      }
       openModal(plotModal);
     });
     plotCloseButton.addEventListener('click', function () {
@@ -67,6 +81,29 @@ document.addEventListener('DOMContentLoaded', function () {
     plotBackdrop.addEventListener('click', function () {
       closeModal(plotModal);
     });
+  }
+
+  // ── Hosted height sync ──────────────────────────────────────────────────
+  // When embedded in the webapp iframe, keep the parent's frame height in
+  // sync with this document's content. The parent cannot read
+  // contentDocument across origins (dev mode), so the report reports its
+  // own height. A ResizeObserver catches late layout shifts (images, tab
+  // switches) that arrive after the initial load.
+  if (window.parent !== window && typeof ResizeObserver !== 'undefined') {
+    var postReportHeight = function () {
+      var height = Math.max(
+        document.body.scrollHeight,
+        document.documentElement.scrollHeight
+      );
+      if (height > 0) {
+        window.parent.postMessage({ type: 'respro:report-height', height: height }, window.location.origin);
+      }
+    };
+    var heightObserver = new ResizeObserver(postReportHeight);
+    heightObserver.observe(document.body);
+    heightObserver.observe(document.documentElement);
+    window.addEventListener('load', postReportHeight);
+    postReportHeight();
   }
 
   if (sequenceModal && sequenceBackdrop && sequenceTitle && sequenceBlock) {
@@ -503,7 +540,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const hasDbCol = !!mutationTab.querySelector('thead th:last-child') &&
           mutationTab.querySelector('thead th:last-child').textContent.trim() === 'In database';
-        const headers = ['Feature', 'Nt change', 'AA change', 'Consequence', 'Variant frequency'];
+        const headerTexts = Array.prototype.map.call(
+          mutationTab.querySelectorAll('thead th'),
+          function (th) { return th.textContent.trim(); }
+        );
+        const hasUserRefCol = headerTexts.indexOf('NT change user reference') !== -1;
+        const headers = ['Feature', 'NT change stored reference'];
+        if (hasUserRefCol) {
+          headers.push('NT change user reference');
+        }
+        headers.push('AA change', 'Consequence', 'Variant frequency');
         if (hasDbCol) {
           headers.push('In database');
         }
@@ -515,13 +561,20 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
           }
 
-          const feature = (row.children[0]?.textContent || '').trim();
-          const ntChange = (row.children[1]?.textContent || '').trim();
-          const aaChange = (row.children[2]?.textContent || '').trim();
-          const consequence = (row.children[3]?.textContent || '').trim();
-          const alleleFreq = (row.children[4]?.textContent || '').trim();
+          const feature = (row.querySelector('.mutation-feature-cell, td:first-child')?.textContent || '').trim();
+          const ntChangeStored = (row.querySelector('.mutation-nt')?.textContent || '').trim();
+          const ntChangeUser = hasUserRefCol
+            ? (row.querySelector('.mutation-nt-user')?.textContent || '').trim()
+            : '';
+          const aaChange = (row.querySelector('.mutation-aa')?.textContent || '').trim();
+          const consequence = (row.querySelector('.mutation-consequence')?.textContent || '').trim();
+          const alleleFreq = (row.querySelector('.mutation-freq')?.textContent || '').trim();
 
-          const fields = [feature, ntChange, aaChange, consequence, alleleFreq];
+          const fields = [feature, ntChangeStored];
+          if (hasUserRefCol) {
+            fields.push(ntChangeUser);
+          }
+          fields.push(aaChange, consequence, alleleFreq);
           if (hasDbCol) {
             const inDatabase = ((row.getAttribute('data-database-values') || 'None')
               .split('|')

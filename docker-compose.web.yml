@@ -81,6 +81,8 @@ services:
       # - RESPRO_WEB_IMPRINT=https://example.org/impressum
       # …or an absolute path to a local HTML file served at /legal:
       # - RESPRO_WEB_IMPRINT=/data/imprint.html
+      # ── Optional contact e-mail (footer + About tab) ───────────────────────
+      # - RESPRO_WEB_CONTACT_EMAIL=contact@example.org
     depends_on:
       - redis
 

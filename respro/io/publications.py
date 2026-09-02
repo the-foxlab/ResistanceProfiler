@@ -78,7 +78,17 @@ def fetch_pubmed_metadata(pmid: str, timeout: int = CLI_CONFIG.timeouts.pubmed) 
                     raw_doi = entry.get('value', '')
                     doi = raw_doi.strip() if isinstance(raw_doi, str) else ''
                     break
-            return {'title': title, 'doi': doi}
+            first_author = _parse_pubmed_first_author(result_data.get('authors'))
+            year = _parse_pubmed_year(result_data.get('pubdate', ''))
+            raw_journal = result_data.get('fulljournalname', '')
+            journal = raw_journal.strip() if isinstance(raw_journal, str) else ''
+            return {
+                'title': title,
+                'doi': doi,
+                'first_author': first_author,
+                'year': year,
+                'journal': journal,
+            }
         except urllib.error.HTTPError as exc:
             if exc.code == 429 and attempt < _PUBMED_RATE_LIMIT_RETRIES:
                 delay = _parse_retry_after(exc)
@@ -214,8 +224,20 @@ def fetch_publication_metadata(doi: str, timeout: int = CLI_CONFIG.timeouts.cros
                 return None
             first_title = titles[0] if titles else ''
             title = first_title.strip() if isinstance(first_title, str) else ''
+            first_author = _parse_crossref_first_author(message.get('author'))
+            year = _parse_crossref_year(message)
+            container = message.get('container-title')
+            journal = ''
+            if isinstance(container, list) and container:
+                first_container = container[0]
+                journal = first_container.strip() if isinstance(first_container, str) else ''
             if title:
-                return {'title': title}
+                return {
+                    'title': title,
+                    'first_author': first_author,
+                    'year': year,
+                    'journal': journal,
+                }
             logger.debug('CrossRef: no title found for DOI %r', normalized_doi)
             return None
         except urllib.error.HTTPError as exc:
@@ -244,6 +266,53 @@ def fetch_publication_metadata(doi: str, timeout: int = CLI_CONFIG.timeouts.cros
 
     logger.warning('CrossRef lookup failed for DOI %r: all %d retries exhausted', normalized_doi, _DOI_RATE_LIMIT_RETRIES + 1)
     return None
+
+
+def _parse_pubmed_first_author(authors: object) -> str:
+    """Extract the first author's display name from an NCBI esummary ``authors`` list."""
+    if not isinstance(authors, list) or not authors:
+        return ''
+    first = authors[0]
+    if not isinstance(first, dict):
+        return ''
+    name = first.get('name', '')
+    return name.strip() if isinstance(name, str) else ''
+
+
+def _parse_pubmed_year(pubdate: object) -> str:
+    """Extract the 4-digit year from an NCBI esummary ``pubdate`` string (e.g. '2021 Jan 15')."""
+    if not isinstance(pubdate, str):
+        return ''
+    match = re.search(r'(\d{4})', pubdate)
+    return match.group(1) if match else ''
+
+
+def _parse_crossref_first_author(authors: object) -> str:
+    """Extract the first author's family name from a CrossRef ``author`` list."""
+    if not isinstance(authors, list) or not authors:
+        return ''
+    first = authors[0]
+    if not isinstance(first, dict):
+        return ''
+    family = first.get('family', '')
+    return family.strip() if isinstance(family, str) else ''
+
+
+def _parse_crossref_year(message: dict) -> str:
+    """Extract the publication year from a CrossRef message, preferring ``published`` over ``issued``."""
+    for key in ('published', 'issued'):
+        node = message.get(key)
+        if isinstance(node, dict):
+            date_parts = node.get('date-parts')
+            if isinstance(date_parts, list) and date_parts:
+                first_part = date_parts[0]
+                if isinstance(first_part, list) and first_part:
+                    year = first_part[0]
+                    if isinstance(year, int):
+                        return str(year)
+                    if isinstance(year, str) and year.strip():
+                        return year.strip()
+    return ''
 
 
 def normalize_doi_token(token: str) -> str:

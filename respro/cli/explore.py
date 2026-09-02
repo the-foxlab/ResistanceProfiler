@@ -77,6 +77,7 @@ PROJECT_INFO_LABELS = {
 manage_app = typer.Typer(
     help='Manage project and results databases.',
     no_args_is_help=True,
+    context_settings={'help_option_names': ['-h', '--help']},
 )
 
 

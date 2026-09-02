@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import logoSrc from '../assets/logo.svg';
 import aboutIconSrc from '../assets/icon-about.svg';
 import databaseIconSrc from '../assets/icon-database.svg';
@@ -12,6 +13,7 @@ import { ResultsTab } from './tabs/ResultsTab';
 import { MutationsTab } from './tabs/MutationsTab';
 import { DatabaseTab } from './tabs/DatabaseTab';
 import { AboutTab } from './tabs/AboutTab';
+import { AppFooter } from './AppFooter';
 import { useTour } from './tour/TourContext';
 import { TourOverlay } from './tour/TourOverlay';
 
@@ -39,7 +41,9 @@ export function DashboardView({
   setSelectedDatabaseId,
   statusError,
   legalLink,
-  resproVersion,
+  contactEmail,
+  cliVersion,
+  webVersion,
   selectedProfileReportPath,
   setSelectedProfileReportPath,
   mutationFilter,
@@ -135,18 +139,70 @@ export function DashboardView({
 }) {
   const isAnalyzeScopeLocked = isProfileBusy || isRegenerateBusy || batchSubmitting;
   const { startTour } = useTour();
+  // Off-canvas sidebar state for mobile. Toggled by the hamburger button;
+  // auto-closed whenever the active mode changes so navigating away from a
+  // mode never leaves the drawer open over the new content.
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [showScrollTop, setShowScrollTop] = useState(false);
+
+  useEffect(() => {
+    const updateScrollTopVisibility = () => {
+      setShowScrollTop(window.scrollY > 240);
+    };
+
+    window.addEventListener('scroll', updateScrollTopVisibility, { passive: true });
+    updateScrollTopVisibility();
+    return () => window.removeEventListener('scroll', updateScrollTopVisibility);
+  }, []);
+
+  // Close the off-canvas drawer on Escape while it is open. Bound only when
+  // the drawer is open so it never swallows Escape intended for other widgets
+  // (e.g. the plot modal in AnalyzeTab manages its own Escape listener).
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') {
+        setMobileNavOpen(false);
+      }
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [mobileNavOpen]);
+
+  const handleSelectMode = (modeId) => {
+    setActiveMode(modeId);
+    setMobileNavOpen(false);
+  };
 
   return (
     <main className="dashboard-shell">
+      {/* Hamburger toggle for the off-canvas sidebar. Hidden on desktop via
+          CSS (.mobile-menu-btn is display:none above --mobile-breakpoint). */}
+      <button
+        type="button"
+        className={`mobile-menu-btn ${mobileNavOpen ? 'open' : ''}`}
+        aria-label="Toggle navigation"
+        aria-expanded={mobileNavOpen}
+        aria-controls="sidebar-rail"
+        onClick={() => setMobileNavOpen((v) => !v)}
+      >
+        <span className="mobile-menu-bar" aria-hidden="true" />
+        <span className="mobile-menu-bar" aria-hidden="true" />
+        <span className="mobile-menu-bar" aria-hidden="true" />
+      </button>
       {/* Left rail only switches visible mode; all data lives in shared hook state. */}
-      <aside className="sidebar-rail" aria-label="Dashboard modes">
+      <aside
+        id="sidebar-rail"
+        className={`sidebar-rail ${mobileNavOpen ? 'open' : ''}`}
+        aria-label="Dashboard modes"
+      >
         <nav className="sidebar-rail-nav">
           {MODES.map((mode) => (
             <button
               key={mode.id}
               type="button"
               className={`sidebar-rail-link ${activeMode === mode.id ? 'active' : ''} ${mode.id === 'about' ? 'about-tab' : ''}`}
-              onClick={() => setActiveMode(mode.id)}
+              onClick={() => handleSelectMode(mode.id)}
               aria-label={mode.label}
               data-tour-target={`sidebar-${mode.id}`}
             >
@@ -156,6 +212,14 @@ export function DashboardView({
           ))}
         </nav>
       </aside>
+      {/* Scrim behind the off-canvas drawer on mobile. Hidden on desktop and
+          whenever the drawer is closed via CSS (.is-open). Clicking it
+          dismisses the drawer, mirroring a modal overlay. */}
+      <div
+        className={`mobile-nav-backdrop ${mobileNavOpen ? 'is-open' : ''}`}
+        aria-hidden="true"
+        onClick={() => setMobileNavOpen(false)}
+      />
 
       <div className="dashboard-main">
         <div className="top-bar">
@@ -313,21 +377,26 @@ export function DashboardView({
             <AboutTab
               setActiveMode={setActiveMode}
               onStartTour={startTour}
+              contactEmail={contactEmail}
             />
           )}
         </section>
-        <footer className="app-footer">
-          {legalLink && (
-            <a href={legalLink} target="_blank" rel="noreferrer">Legal notice</a>
-          )}
-          {legalLink && resproVersion && (
-            <span className="app-footer-sep" aria-hidden="true">·</span>
-          )}
-          {resproVersion && (
-            <span className="app-footer-version">ResistanceProfiler v{resproVersion}</span>
-          )}
-        </footer>
+        <AppFooter
+          legalLink={legalLink}
+          contactEmail={contactEmail}
+          cliVersion={cliVersion}
+          webVersion={webVersion}
+        />
       </div>
+      <button
+        type="button"
+        className={`scroll-top-button ${showScrollTop ? 'is-visible' : ''}`}
+        title="Scroll to top"
+        aria-label="Scroll to top"
+        onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+      >
+        ↑
+      </button>
       <TourOverlay />
     </main>
   );

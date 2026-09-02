@@ -26,6 +26,7 @@ class WebEnvKeys:
     maintained_db_update_interval: str = 'RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS'
     trusted_proxies: str = 'RESPRO_WEB_TRUSTED_PROXIES'
     imprint: str = 'RESPRO_WEB_IMPRINT'
+    contact_email: str = 'RESPRO_WEB_CONTACT_EMAIL'
     max_batch_size: str = 'RESPRO_WEB_MAX_BATCH_SIZE'
     deployment_mode: str = 'RESPRO_WEB_DEPLOYMENT_MODE'
     result_ttl: str = 'RESPRO_WEB_RESULT_TTL'
@@ -116,6 +117,7 @@ def _load_web_backend_config() -> WebBackendConfig:
         maintained_db_update_interval=str(env_payload['maintained_db_update_interval']),
         trusted_proxies=str(env_payload['trusted_proxies']),
         imprint=str(env_payload['imprint']),
+        contact_email=str(env_payload['contact_email']),
         deployment_mode=str(env_payload['deployment_mode']),
         result_ttl=str(env_payload['result_ttl']),
         session_ttl=str(env_payload['session_ttl']),

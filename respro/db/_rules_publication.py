@@ -129,6 +129,9 @@ def _get_or_create_publication(
         return pub_cache[raw_input]
 
     prefetched_title = ''
+    prefetched_first_author = ''
+    prefetched_year = ''
+    prefetched_journal = ''
     doi = normalize_doi_token(doi)
     pmid_to_doi_resolved = False
     doi_to_pmid_resolved = False
@@ -141,6 +144,9 @@ def _get_or_create_publication(
                 if doi:
                     pmid_to_doi_resolved = True
             prefetched_title = meta['title']
+            prefetched_first_author = meta.get('first_author', '')
+            prefetched_year = meta.get('year', '')
+            prefetched_journal = meta.get('journal', '')
         else:
             _record_publication_lookup_failure(
                 publication_lookup_failures,
@@ -156,6 +162,9 @@ def _get_or_create_publication(
             meta = fetch_pubmed_metadata(pubmed_id)
             if meta:
                 prefetched_title = prefetched_title or meta.get('title', '')
+                prefetched_first_author = prefetched_first_author or meta.get('first_author', '')
+                prefetched_year = prefetched_year or meta.get('year', '')
+                prefetched_journal = prefetched_journal or meta.get('journal', '')
                 if meta['doi'] and not doi:
                     normalized_doi = normalize_doi_token(meta['doi'])
                     if normalized_doi:
@@ -189,7 +198,12 @@ def _get_or_create_publication(
         return pub_id
 
     # Prefer CrossRef title whenever a DOI is known; fall back to PMID title.
+    # CrossRef also supplies author/year/journal; prefer it over the PMID values
+    # when present (CrossRef metadata is generally more structured/complete).
     title = prefetched_title
+    first_author = prefetched_first_author
+    year = prefetched_year
+    journal = prefetched_journal
     crossref_title_fetched = False
     if additional_info and doi:
         meta = fetch_publication_metadata(doi)
@@ -198,6 +212,12 @@ def _get_or_create_publication(
             if crossref_title:
                 title = crossref_title
                 crossref_title_fetched = True
+            if meta.get('first_author'):
+                first_author = meta['first_author']
+            if meta.get('year'):
+                year = meta['year']
+            if meta.get('journal'):
+                journal = meta['journal']
 
     if crossref_title_fetched:
         if doi_to_pmid_resolved:
@@ -224,8 +244,9 @@ def _get_or_create_publication(
         )
 
     cur = conn.execute(
-        'INSERT INTO publication (doi, title, pubmed_id, raw_input) VALUES (?, ?, ?, ?)',
-        (doi, title, pubmed_id, raw_input),
+        'INSERT INTO publication (doi, title, pubmed_id, raw_input, first_author, year, journal) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (doi, title, pubmed_id, raw_input, first_author, year, journal),
     )
     pub_id = int(cur.lastrowid)  # type: ignore[arg-type]
     pub_cache[cache_key] = pub_id

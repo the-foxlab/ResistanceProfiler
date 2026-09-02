@@ -55,6 +55,7 @@ export function ResultsTab({
                 <th>HTML</th>
                 <th>PDF</th>
                 <th>JSON</th>
+                <th>TSV</th>
               </tr>
             </thead>
             <tbody>
@@ -96,6 +97,7 @@ export function ResultsTab({
                     <td>{result.report_html_path ? <a href={buildReportUrl(result.report_html_path)} target="_blank" rel="noreferrer">View</a> : '—'}</td>
                     <td>{result.report_pdf_path ? <a href={buildArtifactUrl(result.report_pdf_path)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
                     <td>{result.report_json_path ? <a href={buildArtifactUrl(result.report_json_path)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                    <td>{result.report_tsv_path ? <a href={buildArtifactUrl(result.report_tsv_path)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
                   </tr>
                 );
               })}
@@ -124,7 +126,7 @@ export function ResultsTab({
             Download selected
           </button>
         </div>
-        <div className="profile-analyze-row">
+        <div className="profile-analyze-row comparison-actions">
           <button
             type="button"
             className="analyze-primary"
@@ -149,7 +151,9 @@ export function ResultsTab({
           >
             Clear comparison
           </button>
-          <label className="comparison-switch comparison-switch-right" title="Show only non-synonymous mutations">
+        </div>
+        <div className="comparison-filters">
+          <label className="comparison-switch" title="Show only non-synonymous mutations">
             <input
               type="checkbox"
               checked={nonSynonymousOnly}

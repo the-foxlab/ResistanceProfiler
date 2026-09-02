@@ -66,6 +66,8 @@ respro vcf --project my_folder/herpesdrg.db --vcf sample.vcf --ref-fasta ref.fas
 
 ## Web app (host the complete WebApp via docker)
 
+![ResPro on desktop, tablet, and mobile](docs/docs/assets/formats.png)
+
 ```bash
 git clone https://github.com/the-foxlab/ResistanceProfiler
 docker compose -f docker-compose.web.yml up --build

@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from web.backend.config import WEB_BACKEND_CONFIG
 from web.backend.models import ApiEnvelope
-from web.backend.startup_config import ImprintConfig, StartupConfig
+from web.backend.startup_config import ContactEmailConfig, ImprintConfig, StartupConfig
 
 
 def build_health_router(
@@ -44,7 +44,7 @@ def build_health_router(
             data={
                 'batch_max_samples': sample_limit_per_minute,
                 'sample_limit_per_minute': sample_limit_per_minute,
-                'version': version,
+                'cli_version': version,
             }
         )
 
@@ -78,5 +78,26 @@ def build_legal_router(*, imprint: ImprintConfig | None) -> APIRouter:
         if imprint.kind == 'url':
             return ApiEnvelope(data={'enabled': True, 'kind': 'url', 'url': imprint.url}, status='ok')
         return ApiEnvelope(data={'enabled': True, 'kind': 'path'}, status='ok')
+
+    return router
+
+
+def build_contact_router(*, contact_email: ContactEmailConfig | None) -> APIRouter:
+    """Build the public contact-e-mail indicator route (no API token — reachability is public).
+
+    ``GET /api/ui/contact`` returns ``{'enabled': bool, 'email': str | None}`` so the
+    frontend can render a ``mailto:`` footer link only when a contact address is
+    configured. Mirrors :func:`build_legal_router` in keeping the endpoint public.
+    """
+    router = APIRouter()
+
+    @router.get('/api/ui/contact', response_model=ApiEnvelope)
+    def contact_indicator() -> ApiEnvelope:
+        if contact_email is None:
+            return ApiEnvelope(data={'enabled': False, 'email': None}, status='ok')
+        return ApiEnvelope(
+            data={'enabled': True, 'email': contact_email.email},
+            status='ok',
+        )
 
     return router

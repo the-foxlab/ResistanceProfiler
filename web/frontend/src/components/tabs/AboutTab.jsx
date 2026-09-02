@@ -58,7 +58,10 @@ const ABOUT_WORKFLOW_STEPS = [
   },
 ];
 
-export function AboutTab({ setActiveMode, onStartTour }) {
+export function AboutTab({ setActiveMode, onStartTour, contactEmail }) {
+  // Deployment-configurable contact address (RESPRO_WEB_CONTACT_EMAIL); falls back
+  // to the maintainer address so the About tab always shows a contact.
+  const contactAddress = contactEmail || 'jonas.fuchs@uniklinik-freiburg.de';
   const [copiedCommandKey, setCopiedCommandKey] = useState('');
 
   const copyAboutCommand = async (content, key) => {
@@ -366,8 +369,10 @@ export function AboutTab({ setActiveMode, onStartTour }) {
             Contributions are very welcome, especially curated rule datasets, bug reports, reproducible test
             cases, and code improvements. Open an issue or submit a pull request on{' '}
             <a href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noreferrer">GitHub</a>{' '}
-            to get in touch. For direct contact, please{' '}
-            <a href="mailto:jonas.fuchs@uniklinik-freiburg.de">email Jonas Fuchs</a>.
+            to get in touch. For direct contact, please contact: {' '}
+            <a href={`mailto:${contactAddress}`}>
+              {contactEmail ? contactAddress : 'email Jonas Fuchs'}
+            </a>.
           </p>
         </article>
         <article className="about-section-card" tabIndex={0}>

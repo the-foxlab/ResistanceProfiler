@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
-import { useDashboardLogic, _resolveLegalLink } from './useDashboardLogic';
+import { useDashboardLogic, _resolveLegalLink, _resolveContactEmail } from './useDashboardLogic';
 
 // Mock XMLHttpRequest for file upload tests
 class MockXHR {
@@ -247,7 +247,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
   });
 
   it('should poll job until completion with succeeded status', async () => {
-    // Setup: ui/config and ui/legal are fetched before databases on init
+    // Setup: ui/config, ui/legal, and ui/contact are fetched before databases on init
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: {} }),
@@ -256,6 +256,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: { enabled: false } }),
+    });
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
     });
 
     // Setup: Initialize with a database
@@ -314,6 +319,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
           database_id: 'db1',
           report_html_path: '/data/results/test.report.html',
           report_json_path: '/data/results/test.report.json',
+          report_tsv_path: '/data/results/test.results.tsv',
           created_at: '2026-05-12T10:00:00',
           resistance_hits: 5,
           input_path: '/data/uploads/test.fasta',
@@ -349,6 +355,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     // Verify result was stored
     expect(result.current.reportOptions[0].path).toBe('/data/results/test.report.html');
     expect(result.current.reportOptions[0].label).toContain('test_sample');
+    expect(result.current.reportOptions[0].tsvPath).toBe('/data/results/test.results.tsv');
   });
 
   it('should handle job polling with failed status', async () => {
@@ -360,6 +367,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: { enabled: false } }),
+    });
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
     });
 
     // Setup: Initialize with a database
@@ -437,6 +449,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: { enabled: false } }),
+    });
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
     });
 
     global.fetch.mockResolvedValueOnce({
@@ -526,6 +543,11 @@ describe('useDashboardLogic - Job Polling Flow', () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: { enabled: false } }),
+    });
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
     });
 
     global.fetch.mockResolvedValueOnce({
@@ -990,7 +1012,31 @@ describe('_resolveLegalLink', () => {
   });
 });
 
-describe('resproVersion', () => {
+describe('_resolveContactEmail', () => {
+  // The footer contact e-mail is derived from the /api/ui/contact payload.
+  // Disabled → null (no footer link). Enabled → the bare address string.
+
+  it('returns null when the contact feature is disabled', () => {
+    expect(_resolveContactEmail({ enabled: false, email: null })).toBeNull();
+  });
+
+  it('returns null when the payload is missing', () => {
+    expect(_resolveContactEmail(null)).toBeNull();
+    expect(_resolveContactEmail(undefined)).toBeNull();
+  });
+
+  it('returns null when enabled but email is empty/missing', () => {
+    expect(_resolveContactEmail({ enabled: true, email: null })).toBeNull();
+    expect(_resolveContactEmail({ enabled: true, email: '' })).toBeNull();
+    expect(_resolveContactEmail({ enabled: true })).toBeNull();
+  });
+
+  it('returns the email address when enabled', () => {
+    expect(_resolveContactEmail({ enabled: true, email: 'support@example.org' })).toBe('support@example.org');
+  });
+});
+
+describe('cliVersion', () => {
   // The footer always renders; the version string is sourced from
   // /api/ui/config so it reflects the running backend, not the build.
   beforeEach(() => {
@@ -1005,11 +1051,15 @@ describe('resproVersion', () => {
   it('exposes the version reported by /api/ui/config', async () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ data: { version: '1.2.3' } }),
+      json: () => Promise.resolve({ data: { cli_version: '1.2.3' } }),
     });
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ data: { enabled: false } }),
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
     });
     global.fetch.mockResolvedValueOnce({
       ok: true,
@@ -1019,7 +1069,7 @@ describe('resproVersion', () => {
     const { result } = renderHook(() => useDashboardLogic());
 
     await waitFor(() => {
-      expect(result.current.resproVersion).toBe('1.2.3');
+      expect(result.current.cliVersion).toBe('1.2.3');
     });
   });
 
@@ -1034,6 +1084,10 @@ describe('resproVersion', () => {
     });
     global.fetch.mockResolvedValueOnce({
       ok: true,
+      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
       json: () => Promise.resolve({ data: { items: [] } }),
     });
 
@@ -1042,6 +1096,6 @@ describe('resproVersion', () => {
     await waitFor(() => {
       expect(result.current.databases.length).toBe(0);
     });
-    expect(result.current.resproVersion).toBeNull();
+    expect(result.current.cliVersion).toBeNull();
   });
 });

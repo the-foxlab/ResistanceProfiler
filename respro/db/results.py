@@ -56,8 +56,8 @@ def save_run(
         'INSERT INTO run '
         '(project_name, project_db_path, project_fingerprint, project_updated_at, reference_name, '
         'sample_name, vcf_path, total_variants, variants_in_cds, '
-        'resistance_hits, formula_hits, status) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'resistance_hits, formula_hits, status, is_fasta_mode) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         (
             result.project_name,
             str(project_db_path),
@@ -71,6 +71,7 @@ def save_run(
             result.resistance_hits,
             len(result.formula_hits),
             'complete',
+            int(result.is_fasta_mode),
         ),
     )
     run_id = cursor.lastrowid
@@ -366,6 +367,9 @@ def _rule_from_hit(hit: dict, feature_name: str) -> ResistanceRule:
             title=p.get('title', ''),
             pubmed_id=p.get('pubmed_id', ''),
             raw_input=p.get('raw_input', ''),
+            first_author=p.get('first_author', ''),
+            year=p.get('year', ''),
+            journal=p.get('journal', ''),
         )
         for p in hit.get('publications', [])
     ]
@@ -399,6 +403,9 @@ def _rule_set_from_formula_hit(payload: dict) -> ResistanceRuleSet:
             title=p.get('title', ''),
             pubmed_id=p.get('pubmed_id', ''),
             raw_input=p.get('raw_input', ''),
+            first_author=p.get('first_author', ''),
+            year=p.get('year', ''),
+            journal=p.get('journal', ''),
         )
         for p in payload.get('publications', [])
     ]

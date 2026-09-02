@@ -1,16 +1,8 @@
 name: Publish Docker Image
 
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - 'web/**'
-      - 'Dockerfile.web'
-      - 'docker-compose.web*.yml'
-      - 'docker/**'
-      - 'respro/**'
-  workflow_dispatch:
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -24,6 +16,7 @@ jobs:
   build-and-push:
     name: Build and publish image to GHCR
     runs-on: ubuntu-latest
+    if: startsWith(github.event.release.tag_name, 'web-v')
 
     steps:
       - name: Checkout repository

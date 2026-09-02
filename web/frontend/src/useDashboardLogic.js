@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import faviconSrc from './assets/favicon.svg';
+import packageJson from '../package.json';
 import { FRONTEND_CONFIG } from './config';
 import { API_BASE, buildHeaders, apiGet } from './api';
 import { PROFILE_MODES } from './constants';
@@ -9,6 +10,10 @@ import { useMutationBrowser } from './hooks/useMutationBrowser';
 import { useSessionResults } from './hooks/useSessionResults';
 import { useUploadManager } from './hooks/useUploadManager';
 import { useComparisonManager } from './hooks/useComparisonManager';
+
+// Web version is a build-time constant from package.json; the CLI version comes
+// from the backend (/api/ui/config) since it reflects the installed respro package.
+const webVersion = packageJson.version;
 
 // Re-export existing public API for backward compatibility
 export { buildApiUrl, formatUserError, apiPostRaw } from './api';
@@ -23,7 +28,11 @@ export function useDashboardLogic() {
   // href the footer "Legal notice" link should point at — an external URL when the
   // backend reports ``kind:'url'``, or the self-hosted ``/legal`` route for path mode.
   const [legalLink, setLegalLink] = useState(null);
-  const [resproVersion, setResproVersion] = useState(null);
+  // ``contactEmail`` is null when the contact-e-mail feature is disabled; otherwise
+  // it is the bare address rendered as a ``mailto:`` link in the footer and on the
+  // About tab.
+  const [contactEmail, setContactEmail] = useState(null);
+  const [cliVersion, setCliVersion] = useState(null);
   const [activeMode, setActiveMode] = useState('analyze');
   const [activeProfileMode, setActiveProfileMode] = useState('vcf');
   const [analyzeSubMode, setAnalyzeSubMode] = useState('single');
@@ -77,11 +86,13 @@ export function useDashboardLogic() {
         if (Number.isFinite(uiConfig.sample_limit_per_minute) && uiConfig.sample_limit_per_minute > 0) {
           batch.setSampleLimitPerMinute(uiConfig.sample_limit_per_minute);
         }
-        if (uiConfig.version) {
-          setResproVersion(uiConfig.version);
+        if (uiConfig.cli_version) {
+          setCliVersion(uiConfig.cli_version);
         }
         const legalPayload = await apiGet('/api/ui/legal').catch(() => null);
         setLegalLink(_resolveLegalLink(legalPayload?.data));
+        const contactPayload = await apiGet('/api/ui/contact').catch(() => null);
+        setContactEmail(_resolveContactEmail(contactPayload?.data));
         const payload = await apiGet('/api/databases');
         const items = payload.data.items || [];
         setDatabases(items);
@@ -177,7 +188,9 @@ export function useDashboardLogic() {
     setSelectedDatabaseId,
     statusError,
     legalLink,
-    resproVersion,
+    contactEmail,
+    cliVersion,
+    webVersion,
     selectedProfileReportPath: session.selectedProfileReportPath,
     setSelectedProfileReportPath: session.setSelectedProfileReportPath,
     mutationFilter: mutations.mutationFilter,
@@ -291,5 +304,18 @@ export function _resolveLegalLink(legalData) {
     return legalData.url;
   }
   return `${API_BASE}/legal`;
+}
+
+/**
+ * Resolve the footer / About contact e-mail from the ``/api/ui/contact`` payload.
+ *
+ * Returns ``null`` when the contact feature is disabled or the address is missing,
+ * otherwise the bare address string (rendered as a ``mailto:`` link by the view).
+ */
+export function _resolveContactEmail(contactData) {
+  if (!contactData || !contactData.enabled || !contactData.email) {
+    return null;
+  }
+  return contactData.email;
 }
 

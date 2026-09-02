@@ -71,13 +71,86 @@ export function AnalyzeTab({
   isAnalyzeScopeLocked,
   PROFILE_MODES,
 }) {
-  const [reportFrameHeight, setReportFrameHeight] = useState(900);
+  const [reportFrameHeight, setReportFrameHeight] = useState(null);
+  const [hostedPlot, setHostedPlot] = useState(null);
   const analyzeSubmodeRowRef = useRef(null);
+  const reportFrameRef = useRef(null);
   const [analyzeSubmodeRowWidth, setAnalyzeSubmodeRowWidth] = useState(0);
 
   const selectedReportOption = reportOptions.find(
     (option) => option.path === selectedProfileReportPath,
   ) || null;
+
+  useEffect(() => {
+    setReportFrameHeight(null);
+    setHostedPlot(null);
+  }, [inlineReportPath]);
+
+  // Derive the origin the embedded report is served from, so we can validate
+  // incoming postMessage events against it. In production the report is
+  // same-origin (apiBase === ''); in dev it is served from the API host
+  // (e.g. http://127.0.0.1:8000). We read it from the iframe's own src so
+  // the check stays correct regardless of deployment topology.
+  const reportOrigin = (() => {
+    try {
+      const src = reportFrameRef.current?.src || (inlineReportPath ? buildReportUrl(inlineReportPath) : '');
+      return src ? new URL(src).origin : '';
+    } catch {
+      return '';
+    }
+  })();
+
+  useEffect(() => {
+    const handleMessage = (event) => {
+      // Only trust messages from the embedded report iframe's origin.
+      if (event.origin !== reportOrigin) {
+        return;
+      }
+      // And only from its contentWindow (defence-in-depth alongside origin).
+      if (event.source !== reportFrameRef.current?.contentWindow) {
+        return;
+      }
+
+      if (event.data?.type === 'respro:open-plot') {
+        // The report sends the image src/alt in the payload, so we never need
+        // cross-origin contentDocument access (which throws in dev mode).
+        if (event.data.src) {
+          setHostedPlot({
+            src: event.data.src,
+            alt: event.data.alt || 'Resistance plot',
+          });
+        }
+        return;
+      }
+
+      if (event.data?.type === 'respro:report-height' && typeof event.data.height === 'number') {
+        // The report measures its own content height and reports it; this
+        // works cross-origin (where contentDocument access throws) and
+        // catches late layout shifts via the report's ResizeObserver.
+        if (event.data.height > 0) {
+          setReportFrameHeight(event.data.height + 2);
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [reportOrigin]);
+
+  useEffect(() => {
+    if (!hostedPlot) {
+      return undefined;
+    }
+
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') {
+        setHostedPlot(null);
+      }
+    };
+
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [hostedPlot]);
 
   useEffect(() => {
     // Count down the batch rate-limit cooldown each second until it reaches zero.
@@ -438,6 +511,18 @@ export function AnalyzeTab({
               >
                 Download JSON
               </button>
+              <button
+                type="button"
+                className="button-link report-action-btn download-action-btn"
+                onClick={() => {
+                  if (selectedReportOption?.tsvPath) {
+                    window.open(buildArtifactUrl(selectedReportOption.tsvPath), '_blank', 'noopener,noreferrer');
+                  }
+                }}
+                disabled={!selectedReportOption?.tsvPath}
+              >
+                Download TSV
+              </button>
             </div>
           </div>
         ) : null}
@@ -706,6 +791,7 @@ export function AnalyzeTab({
                       <th>HTML</th>
                       <th>PDF</th>
                       <th>JSON</th>
+                      <th>TSV</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -721,6 +807,7 @@ export function AnalyzeTab({
                         <td>{sample.reportHtmlPath ? <a href={buildReportUrl(sample.reportHtmlPath)} target="_blank" rel="noreferrer">View</a> : '—'}</td>
                         <td>{sample.reportPdfPath ? <a href={buildArtifactUrl(sample.reportPdfPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
                         <td>{sample.reportJsonPath ? <a href={buildArtifactUrl(sample.reportJsonPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
+                        <td>{sample.reportTsvPath ? <a href={buildArtifactUrl(sample.reportTsvPath)} target="_blank" rel="noreferrer">Download</a> : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -760,11 +847,12 @@ export function AnalyzeTab({
       {analyzeSubMode !== 'batch' && inlineReportPath ? (
         <article className="card full-width-tile tab-primary-tile">
           <iframe
+            ref={reportFrameRef}
             title="ResistanceProfiler report"
             src={buildReportUrl(inlineReportPath)}
             className="workspace-frame"
-            sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-            style={{ height: `${reportFrameHeight}px` }}
+            sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads"
+            style={reportFrameHeight ? { height: `${reportFrameHeight}px` } : undefined}
             onLoad={(event) => {
               try {
                 const frameDoc = event.currentTarget.contentDocument;
@@ -774,15 +862,37 @@ export function AnalyzeTab({
                 const nextHeight = Math.max(
                   frameDoc.body.scrollHeight,
                   frameDoc.documentElement.scrollHeight,
-                  900,
                 );
-                setReportFrameHeight(nextHeight + 24);
+                setReportFrameHeight(nextHeight + 2);
               } catch {
-                setReportFrameHeight(900);
+                // Cross-origin (dev mode): contentDocument access throws.
+                // Leave the height unset so the CSS min-height floor on
+                // .workspace-frame keeps the frame visible; the report's
+                // ResizeObserver will post a respro:report-height message
+                // once it mounts and set a precise height.
+                setReportFrameHeight(null);
               }
             }}
           />
         </article>
+      ) : null}
+
+      {hostedPlot ? (
+        <div className="report-preview-plot-modal" role="dialog" aria-modal="true" aria-label="Resistance plot">
+          <div className="report-preview-plot-backdrop" onClick={() => setHostedPlot(null)} aria-hidden="true" />
+          <section className="report-preview-plot-panel">
+            <button
+              type="button"
+              className="report-preview-plot-close"
+              aria-label="Close resistance plot"
+              onClick={() => setHostedPlot(null)}
+              autoFocus
+            >
+              &times;
+            </button>
+            <img src={hostedPlot.src} alt={hostedPlot.alt} className="report-preview-plot-image" />
+          </section>
+        </div>
       ) : null}
     </>
   );

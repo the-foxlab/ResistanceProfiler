@@ -564,6 +564,30 @@ class TestResultsPersistence:
         with pytest.raises(ValueError, match='No run found with id 999'):
             load_run(results_conn, 999)
 
+    def test_save_run_persists_is_fasta_mode(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """is_fasta_mode is persisted on the run row and restored by load_run."""
+        result = self._make_result()
+        result.is_fasta_mode = True
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+
+        row = results_conn.execute('SELECT is_fasta_mode FROM run WHERE id = 1').fetchone()
+        assert row['is_fasta_mode'] == 1
+
+        run_dict, _ = load_run(results_conn, 1)
+        assert run_dict['is_fasta_mode'] == 1
+
+    def test_save_run_defaults_is_fasta_mode_to_vcf(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """A VCF run (is_fasta_mode=False) persists 0 and is restored as False."""
+        result = self._make_result()
+        assert result.is_fasta_mode is False
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+
+        row = results_conn.execute('SELECT is_fasta_mode FROM run WHERE id = 1').fetchone()
+        assert row['is_fasta_mode'] == 0
+
+        run_dict, _ = load_run(results_conn, 1)
+        assert run_dict['is_fasta_mode'] == 0
+
     def test_reconstruct_annotations_restores_rule_matches(self, results_conn, minimal_project_conn, tmp_path) -> None:
         save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, self._make_result())
         _, variant_rows = load_run(results_conn, 1)

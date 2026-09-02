@@ -135,6 +135,13 @@ def remap_variants(
                 depth=var.depth,
                 filter_status=var.filter_status,
                 query_ref_codon=query_ref_codon,
+                # Preserve the original user-reference coords. For split anchor-changed
+                # indels the split events already carry the original record's user coords;
+                # fall back to this variant's own coords for unsplit inputs.
+                user_chrom=var.user_chrom or var.chrom,
+                user_pos=var.user_pos or var.pos,
+                user_ref=var.user_ref or var.ref,
+                user_alt=var.user_alt or var.alt,
             ))
             hit = True
 
@@ -250,6 +257,12 @@ def _expand_anchor_changed_indels(
     for var in variants:
         if _is_indel(var.ref, var.alt) and var.ref and var.alt and var.ref[0] != var.alt[0]:
             split_count += 1
+            # Both split events describe the same user-reference record; preserve its
+            # original user-ref coordinates so downstream display can show them.
+            user_chrom = var.user_chrom or var.chrom
+            user_pos = var.user_pos or var.pos
+            user_ref = var.user_ref or var.ref
+            user_alt = var.user_alt or var.alt
             expanded.append(
                 VariantCall(
                     chrom=var.chrom,
@@ -259,6 +272,10 @@ def _expand_anchor_changed_indels(
                     allele_freq=var.allele_freq,
                     depth=var.depth,
                     filter_status=var.filter_status,
+                    user_chrom=user_chrom,
+                    user_pos=user_pos,
+                    user_ref=user_ref,
+                    user_alt=user_alt,
                 )
             )
             expanded.append(
@@ -270,6 +287,10 @@ def _expand_anchor_changed_indels(
                     allele_freq=var.allele_freq,
                     depth=var.depth,
                     filter_status=var.filter_status,
+                    user_chrom=user_chrom,
+                    user_pos=user_pos,
+                    user_ref=user_ref,
+                    user_alt=user_alt,
                 )
             )
             continue

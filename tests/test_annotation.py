@@ -1006,6 +1006,215 @@ class TestSuppressRulelessOverlapAnnotations:
         assert len(filtered) == 1
         assert filtered[0].feature_name == 'gag-pol_5'
 
+    def test_ruleless_feature_overlapping_ruled_is_suppressed_across_distinct_loci(self) -> None:
+        """
+        A ruleless feature that overlaps a ruled feature must be suppressed entirely,
+        even when its variants land at loci the ruled feature does not cover.
+
+        This is the UL23/UL24 leak: UL23 (ruled, 46672-47803) and UL24 (ruleless,
+        47737-48547) overlap on 47737-47803. VCF variants in UL24's non-overlapping
+        tail (e.g. 47823, 47827) sit at loci no UL23 variant shares, so the old
+        locus-grouping suppression left them in the report. Feature-overlap-aware
+        suppression must drop every UL24 annotation because UL24 overlaps a ruled
+        feature on the same reference.
+        """
+        # Ruled feature: positions 0-30 (end exclusive).
+        ruled_feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='UL23',
+            protein='TK',
+            start=0,
+            end=30,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATG' + 'AAA' * 9,
+        )
+        # Ruleless feature: positions 20-60 — overlaps ruled_feature on 20-30 and
+        # extends beyond it, so a variant at position 40 is inside ruleless only.
+        ruleless_feature = FeatureRecord(
+            id=2,
+            reference_id=1,
+            name='UL24',
+            protein='UL24',
+            start=20,
+            end=60,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATG' + 'GGG' * 19,
+        )
+
+        # Variant inside the ruled feature (pos 5) and a variant inside the ruleless
+        # feature's non-overlapping tail (pos 40) — distinct loci, no shared group.
+        ruled_var = VariantCall(chrom='ref', pos=5, ref='A', alt='G', allele_freq=0.9, depth=100)
+        ruleless_var = VariantCall(chrom='ref', pos=40, ref='G', alt='A', allele_freq=0.9, depth=100)
+        annotations = annotate_variants([ruled_var, ruleless_var], [ruled_feature, ruleless_feature])
+
+        # One annotation per variant/feature hit; the ruleless variant only hits UL24.
+        feature_names = {ann.feature_name for ann in annotations}
+        assert feature_names == {'UL23', 'UL24'}
+
+        filtered = _suppress_ruleless_overlap_annotations(
+            annotations, {'UL23'}, features=[ruled_feature, ruleless_feature],
+        )
+
+        # UL24 must be suppressed entirely because it overlaps the ruled UL23.
+        surviving = {ann.feature_name for ann in filtered}
+        assert surviving == {'UL23'}
+        assert 'UL24' not in surviving
+
+    def test_ruleless_feature_not_overlapping_ruled_is_kept(self) -> None:
+        """
+        A ruleless feature that does NOT overlap any ruled feature is retained.
+
+        Feature-overlap-aware suppression must only drop ruleless features that
+        actually overlap a ruled feature on the same reference; isolated ruleless
+        features stay so their mutations still appear in the report.
+        """
+        # Ruled feature: positions 0-30.
+        ruled_feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='UL23',
+            protein='TK',
+            start=0,
+            end=30,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATG' + 'AAA' * 9,
+        )
+        # Ruleless feature: positions 100-130 — disjoint from the ruled feature.
+        ruleless_feature = FeatureRecord(
+            id=2,
+            reference_id=1,
+            name='UL30',
+            protein='Pol',
+            start=100,
+            end=130,
+            strand='+',
+            codon_start=0,
+            nt_sequence='ATG' + 'GGG' * 9,
+        )
+
+        ruled_var = VariantCall(chrom='ref', pos=5, ref='A', alt='G', allele_freq=0.9, depth=100)
+        ruleless_var = VariantCall(chrom='ref', pos=110, ref='G', alt='A', allele_freq=0.9, depth=100)
+        annotations = annotate_variants([ruled_var, ruleless_var], [ruled_feature, ruleless_feature])
+
+        filtered = _suppress_ruleless_overlap_annotations(
+            annotations, {'UL23'}, features=[ruled_feature, ruleless_feature],
+        )
+
+        surviving = {ann.feature_name for ann in filtered}
+        assert surviving == {'UL23', 'UL30'}
+
+    def test_ruleless_overlap_scoped_per_reference_by_chrom(self) -> None:
+        """
+        Feature-overlap suppression is scoped per reference via chrom.
+
+        Two references share no coordinate space, so a ruled feature on refA must not
+        suppress a ruleless feature on refB even if their genomic spans happen to
+        coincide numerically. The scope key is the annotation's chrom (== query_name),
+        unique per reference.
+        """
+        # refA: ruled feature 0-30.
+        ruled_feature_a = FeatureRecord(
+            id=1, reference_id=1, name='gagA', protein='GagA',
+            start=0, end=30, strand='+', codon_start=0, nt_sequence='ATG' + 'AAA' * 9,
+        )
+        # refB: ruleless feature 0-30 — same numeric span, different reference.
+        ruleless_feature_b = FeatureRecord(
+            id=2, reference_id=2, name='gagB', protein='GagB',
+            start=0, end=30, strand='+', codon_start=0, nt_sequence='ATG' + 'GGG' * 9,
+        )
+
+        ann_a = annotate_variants(
+            [VariantCall(chrom='chrom_a', pos=5, ref='A', alt='G', allele_freq=0.9, depth=100)],
+            [ruled_feature_a],
+        )
+        ann_b = annotate_variants(
+            [VariantCall(chrom='chrom_b', pos=5, ref='G', alt='A', allele_freq=0.9, depth=100)],
+            [ruleless_feature_b],
+        )
+        annotations = ann_a + ann_b
+
+        filtered = _suppress_ruleless_overlap_annotations(
+            annotations, {'gagA'},
+            features=[ruled_feature_a, ruleless_feature_b],
+        )
+
+        surviving = {ann.feature_name for ann in filtered}
+        # gagB is ruleless but on a different reference (different chrom) — must survive.
+        assert surviving == {'gagA', 'gagB'}
+
+    def test_same_name_ruleless_feature_on_other_reference_not_suppressed(self) -> None:
+        """
+        A ruleless feature name suppressed on refA must not be suppressed on refB.
+
+        The VCF multi-reference path calls ``_suppress_ruleless_overlap_annotations``
+        once per reference, passing only that reference's features plus the chroms
+        belonging to that reference as ``scope_chroms``. When refA has a ruled UL23
+        overlapping a ruleless UL24, the name ``UL24`` is suppressed — but only for
+        annotations on refA's chroms. A standalone ruleless UL24 on refB (same name,
+        no ruled overlap on refB) must survive, because dropping it by name globally
+        would silently erase a legitimate feature's mutations from a multi-pathogen
+        report (the HSV-1 UL23 + HCMV UL24 panel case).
+        """
+        # refA: ruled UL23 (0-30) + ruleless UL24 (20-60) overlapping UL23.
+        ruled_ul23_a = FeatureRecord(
+            id=1, reference_id=1, name='UL23', protein='TK',
+            start=0, end=30, strand='+', codon_start=0, nt_sequence='ATG' + 'AAA' * 9,
+        )
+        ruleless_ul24_a = FeatureRecord(
+            id=2, reference_id=1, name='UL24', protein='UL24',
+            start=20, end=60, strand='+', codon_start=0, nt_sequence='ATG' + 'GGG' * 19,
+        )
+        # refA UL24 annotation (chrom_a) — should be suppressed (overlaps ruled UL23).
+        # refB UL24 annotation (chrom_b) — should survive (standalone on refB).
+        ann_a = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_a', pos=25, ref='G', alt='A', allele_freq=0.9, depth=100),
+            feature_name='UL24',
+        )
+        ann_b = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_b', pos=5, ref='G', alt='A', allele_freq=0.9, depth=100),
+            feature_name='UL24',
+        )
+        annotations = [ann_a, ann_b]
+
+        # Simulate the VCF loop's refA iteration: refA features + refA rule names +
+        # refA chroms as the scope.
+        filtered = _suppress_ruleless_overlap_annotations(
+            annotations, {'UL23'},
+            features=[ruled_ul23_a, ruleless_ul24_a],
+            scope_chroms={'chrom_a'},
+        )
+
+        surviving_by_chrom = {(ann.feature_name, ann.variant.chrom) for ann in filtered}
+        # refA's UL24 dropped; refB's UL24 retained.
+        assert surviving_by_chrom == {('UL24', 'chrom_b')}
+
+    def test_scope_chroms_none_suppresses_globally_by_name(self) -> None:
+        """
+        When ``scope_chroms`` is None (FASTA single-reference path), feature-overlap
+        suppression applies by feature name across all annotations — the legacy
+        behaviour, since a single reference cannot have cross-reference collisions.
+        """
+        ruled_ul23 = FeatureRecord(
+            id=1, reference_id=1, name='UL23', protein='TK',
+            start=0, end=30, strand='+', codon_start=0, nt_sequence='ATG' + 'AAA' * 9,
+        )
+        ruleless_ul24 = FeatureRecord(
+            id=2, reference_id=1, name='UL24', protein='UL24',
+            start=20, end=60, strand='+', codon_start=0, nt_sequence='ATG' + 'GGG' * 19,
+        )
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=25, ref='G', alt='A', allele_freq=0.9, depth=100),
+            feature_name='UL24',
+        )
+        filtered = _suppress_ruleless_overlap_annotations(
+            [ann], {'UL23'}, features=[ruled_ul23, ruleless_ul24],
+        )
+        assert filtered == []
+
 
 # ─── Mid-codon in-frame indel splitting ───────────────────────────────
 
@@ -1804,3 +2013,48 @@ class TestCombinedCodonEventDisplayFields:
         ann = results[0]
         assert ann.is_combined_codon_event is False
         assert ann.combined_member_count == 1
+
+
+class TestAnnotatedVariantUserRefCoords:
+    """AnnotatedVariant exposes the preserved user-reference coordinates."""
+
+    def test_combined_snp_codon_carries_anchor_user_ref_coords(self) -> None:
+        """A combined codon event carries the anchor member's user-ref coords."""
+        feature = TestCombinedCodonEventDisplayFields._fwd_feature()
+        variants = [
+            VariantCall(
+                chrom='c', pos=3, ref='T', alt='A', allele_freq=0.95, depth=100,
+                user_chrom='userchr', user_pos=10, user_ref='T', user_alt='A',
+            ),
+            VariantCall(
+                chrom='c', pos=5, ref='T', alt='G', allele_freq=0.95, depth=100,
+                user_chrom='userchr', user_pos=12, user_ref='T', user_alt='G',
+            ),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.has_user_ref_coords is True
+        # Anchor is the lowest-pos member (pos 3 → user_pos 10).
+        assert ann.user_ref_coords == ('userchr', 10, 'T', 'A')
+
+    def test_fasta_emitted_annotation_has_no_user_ref_coords(self) -> None:
+        """A FASTA-emitted annotation (empty user fields) reports no user-ref coords."""
+        feature = TestCombinedCodonEventDisplayFields._fwd_feature()
+        var = VariantCall(chrom='c', pos=3, ref='T', alt='A', allele_freq=1.0, depth=0)
+        results = annotate_variants([var], [feature], is_fasta_mode=True)
+        ann = results[0]
+        assert ann.has_user_ref_coords is False
+        assert ann.user_ref_coords == ('', 0, '', '')
+
+    def test_vcf_snp_annotation_carries_user_ref_coords(self) -> None:
+        """A VCF SNP annotation carries the user-ref coords from the input variant."""
+        feature = TestCombinedCodonEventDisplayFields._fwd_feature()
+        var = VariantCall(
+            chrom='c', pos=3, ref='T', alt='A', allele_freq=0.9, depth=100,
+            user_chrom='userchr', user_pos=10, user_ref='T', user_alt='A',
+        )
+        results = annotate_variants([var], [feature])
+        ann = results[0]
+        assert ann.has_user_ref_coords is True
+        assert ann.user_ref_coords == ('userchr', 10, 'T', 'A')

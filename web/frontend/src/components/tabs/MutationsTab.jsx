@@ -81,7 +81,7 @@ export function MutationsTab({
                   {mutationColumns.map((column, index) => (
                     <th
                       key={column.key}
-                      className="sortable-col"
+                      className={`sortable-col ${column.key === 'comment' ? 'mutation-comment-column' : ''}`}
                       onClick={() => {
                         if (mutationSortColumn === index) {
                           setMutationSortAsc(!mutationSortAsc);
@@ -100,7 +100,15 @@ export function MutationsTab({
                 {displayedRules.map((rule, index) => (
                   <tr key={`${rule.id || 'rule'}-${index}`}>
                     {mutationColumns.map((column) => (
-                      <td key={`${column.key}-${index}`}>{column.accessor(rule)}</td>
+                      <td
+                        key={`${column.key}-${index}`}
+                        className={column.key === 'comment' ? 'mutation-comment-column' : ''}
+                        title={column.key === 'comment' ? column.accessor(rule) : undefined}
+                      >
+                        {column.key === 'comment' ? (
+                          <span className="mutation-comment-content">{column.accessor(rule)}</span>
+                        ) : column.accessor(rule)}
+                      </td>
                     ))}
                   </tr>
                 ))}
@@ -159,7 +167,7 @@ export function MutationsTab({
               <thead>
                 <tr>
                   {formulaColumns.map((column) => (
-                    <th key={column.key}>{column.label}</th>
+                    <th key={column.key} className={column.key === 'comment' ? 'mutation-comment-column' : ''}>{column.label}</th>
                   ))}
                 </tr>
               </thead>
@@ -167,7 +175,15 @@ export function MutationsTab({
                 {displayedFormulaRules.map((rule, index) => (
                   <tr key={`${rule.formula_id || 'formula'}-${index}`}>
                     {formulaColumns.map((column) => (
-                      <td key={`${column.key}-${index}`}>{column.accessor(rule)}</td>
+                      <td
+                        key={`${column.key}-${index}`}
+                        className={column.key === 'comment' ? 'mutation-comment-column' : ''}
+                        title={column.key === 'comment' ? column.accessor(rule) : undefined}
+                      >
+                        {column.key === 'comment' ? (
+                          <span className="mutation-comment-content">{column.accessor(rule)}</span>
+                        ) : column.accessor(rule)}
+                      </td>
                     ))}
                   </tr>
                 ))}

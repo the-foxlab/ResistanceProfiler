@@ -40,7 +40,7 @@ from web.backend.models import (
 )
 from web.backend.routes.artifacts import build_artifacts_router
 from web.backend.routes.catalog import build_catalog_router
-from web.backend.routes.health import build_health_router, build_legal_router
+from web.backend.routes.health import build_contact_router, build_health_router, build_legal_router
 from web.backend.routes.jobs import build_jobs_router
 from web.backend.routes.profile import build_profile_router
 from web.backend.routes.regenerate import build_regenerate_router
@@ -71,7 +71,7 @@ logger = logging.getLogger(__name__)
 _SAMPLE_QUOTA_LOCK = threading.Lock()
 _SAMPLE_QUOTA_COUNTER: dict[tuple[str, int], int] = {}
 _WEB_TIMESTAMP_TOKEN = re.compile(
-    r'\.(\d{20})(?=\.(?:report\.html|report\.pdf|results\.json)$)'
+    r'\.(\d{20})(?=\.(?:report\.html|report\.pdf|results\.json|results\.tsv)$)'
 )
 
 
@@ -81,6 +81,7 @@ def _is_allowed_artifact_path(artifact_path: Path) -> bool:
         '.report.pdf',
         '.results.json',
         '.report.html',
+        '.results.tsv',
     )
     return any(str(artifact_path).endswith(suffix) for suffix in allowed_suffixes)
 
@@ -224,6 +225,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     )
 
     app.include_router(build_legal_router(imprint=config.imprint))
+    app.include_router(build_contact_router(contact_email=config.contact_email))
 
     frontend_dist = Path(__file__).resolve().parents[1] / 'frontend' / 'dist'
     if frontend_dist.is_dir():
@@ -253,7 +255,7 @@ def _build_artifact_bundle(
             if not is_allowed_artifact_path(artifact_path):
                 raise HTTPException(
                     status_code=400,
-                    detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .report.html.',
+                    detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .report.html, .results.tsv.',
                 )
             if not artifact_path.is_file():
                 raise HTTPException(status_code=404, detail='Artifact not found.')
@@ -355,6 +357,8 @@ def _derive_download_filename(artifact_path: Path) -> str:
         return file_name[:-11] + '.pdf'
     if file_name.endswith('.results.json'):
         return file_name[:-13] + '.json'
+    if file_name.endswith('.results.tsv'):
+        return file_name[:-12] + '.tsv'
     return file_name
 
 

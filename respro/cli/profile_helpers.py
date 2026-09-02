@@ -61,8 +61,8 @@ def _parse_export_formats(export_values: list[str] | None) -> set[str] | None:
     normalized_formats: set[str] = set()
     for export_value in export_values:
         normalized_value = export_value.strip().lower()
-        if normalized_value not in ('json', 'pdf'):
-            raise click.ClickException('Invalid --export value. Choose one of: json, pdf.')
+        if normalized_value not in ('json', 'pdf', 'tsv'):
+            raise click.ClickException('Invalid --export value. Choose one of: json, pdf, tsv.')
         normalized_formats.add(normalized_value)
 
     return normalized_formats if normalized_formats else None
@@ -340,7 +340,12 @@ def assemble_multi_reference_result(
     # shared annotation objects in place, so filtering the passed list is sufficient.
     # _suppress_ruleless_overlap_annotations groups by (chrom, pos, ref, alt), so annotations
     # from different references (different chroms) never share a locus; it is safe to run on
-    # the full list and is idempotent under the reference_id dedup.
+    # the full list and is idempotent under the reference_id dedup. The ``features`` argument
+    # enables feature-overlap suppression: a ruleless feature that overlaps a ruled feature on
+    # the same reference is dropped entirely, even when its variants sit at loci no ruled
+    # feature shares (the UL23/UL24 leak). Overlap is scoped per reference_id inside the
+    # helper, matching the per-reference dedup here, and the locus grouping uses chrom so
+    # cross-reference annotations never collide.
     chroms_by_reference_id: dict[int, set[str]] = {}
     for rg in references:
         chroms_by_reference_id.setdefault(rg.reference_id, set()).add(rg.query_name)
@@ -350,7 +355,10 @@ def assemble_multi_reference_result(
         if rg.reference_id in seen_reference_ids:
             continue
         seen_reference_ids.add(rg.reference_id)
-        annotations = _suppress_ruleless_overlap_annotations(annotations, rg.rule_feature_names)
+        annotations = _suppress_ruleless_overlap_annotations(
+            annotations, rg.rule_feature_names,
+            features=rg.features, scope_chroms=chroms_by_reference_id[rg.reference_id],
+        )
         ref_chroms = chroms_by_reference_id[rg.reference_id]
         ref_annotations = [a for a in annotations if a.variant.chrom in ref_chroms]
         if ref_annotations:
@@ -441,7 +449,9 @@ def _finalize_and_export(
     :param extra_export_formats: optional additional output formats ('json', 'pdf')
     :return: (ProfilingResult, export path dict)
     """
-    annotations = _suppress_ruleless_overlap_annotations(ctx.annotations, ctx.rule_feature_names)
+    annotations = _suppress_ruleless_overlap_annotations(
+        ctx.annotations, ctx.rule_feature_names, features=ctx.features,
+    )
     annotations = match_rules(annotations, ctx.rules)
     formula_hits = match_formula_rules(
         annotations,
@@ -474,6 +484,7 @@ def _finalize_and_export(
         total_variants=ctx.total_variants,
         variants_in_cds=ctx.variants_in_cds,
         resistance_hits=sum(1 for a in annotations if a.is_resistance_hit),
+        is_fasta_mode=True,
         annotations=annotations,
         formula_hits=formula_hits,
         coverage_gaps=ctx.coverage_gaps,

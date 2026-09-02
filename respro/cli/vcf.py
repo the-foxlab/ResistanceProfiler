@@ -71,7 +71,7 @@ def _profile_vcf_command(
     bam: Annotated[
         Path | None,
         typer.Option(
-            '--bam', exists=True,
+            '--bam', '-b', exists=True,
             help='Optional BAM aligned against the same query reference as the VCF. '
                  'Used to mark non-covered codon stretches below --min-depth.',
         ),
@@ -89,7 +89,7 @@ def _profile_vcf_command(
         list[str] | None,
         typer.Option(
             '--export', '-e',
-            help='Optional extra export format in addition to HTML (pdf, json). Pdfs are summaries only. Can be provided multiple times.',
+            help='Optional extra export format in addition to HTML (pdf, json, tsv). Pdfs are summaries only. Can be provided multiple times.',
         ),
     ] = None,
     input_display_name: Annotated[
