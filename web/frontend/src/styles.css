@@ -58,7 +58,7 @@
   --neutral-border: #d3dde6;
   /* Webapp-only structural tokens (not used by the report) */
   --topbar-logo-width: 380px;
-  --topbar-logo-height: 68px;
+  --topbar-logo-height: 55px;
   --topbar-link-icon-size: 32px;
   --sidebar-width: 118px;
   --sidebar-logo-gap: 5px;
@@ -125,6 +125,7 @@ small {
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
   background: transparent;
 }
 
@@ -887,6 +888,7 @@ th {
   margin-left: var(--sidebar-width);
   width: auto;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -1402,6 +1404,7 @@ th {
 
 .mutation-browser-tile {
   height: calc(100vh - 74px - 0.8rem - 1rem);
+  height: calc(100dvh - 74px - 0.8rem - 1rem);
   grid-template-rows: auto auto 1fr auto;
   overflow: hidden;
 }
@@ -1510,10 +1513,21 @@ th {
   min-width: 0;
 }
 
-.comparison-actions .analyze-primary,
-.comparison-actions .comparison-clear-btn {
-  flex: 0 0 auto;
-  white-space: nowrap;
+.comparison-actions .analyze-primary {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: normal;
+  text-align: center;
+}
+
+.comparison-actions .comparison-secondary {
+  background-color: var(--neutral-text);
+  border-color: var(--neutral-text);
+}
+
+.comparison-actions .comparison-secondary:hover {
+  background-color: var(--muted-strong);
+  border-color: var(--muted-strong);
 }
 
 .comparison-filters {
@@ -1634,8 +1648,9 @@ th {
 .analyze-submode-controls {
   order: 1;
   display: inline-flex;
-  align-items: stretch;
-  gap: 0.35rem;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 /* One/multiple-sample toggle — an animated sliding switch (track + knob). */
@@ -2027,6 +2042,66 @@ th {
   min-width: 0;
 }
 
+/* ── Custom file input styling ─────────────────────────────────────────
+   Replace the browser-default "Choose File" control with a styled
+   drop-zone that matches the app's design tokens. */
+.profile-upload-row input[type="file"],
+.profile-upload-row-batch-files input[type="file"] {
+  display: block;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.3rem 0.5rem;
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--paper-soft);
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.profile-upload-row input[type="file"]:hover,
+.profile-upload-row-batch-files input[type="file"]:hover {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.profile-upload-row input[type="file"]:disabled,
+.profile-upload-row-batch-files input[type="file"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  border-style: solid;
+}
+
+.profile-upload-row input[type="file"]::file-selector-button,
+.profile-upload-row-batch-files input[type="file"]::file-selector-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--font-size-button);
+  font-weight: 700;
+  padding: 0.3rem 0.7rem;
+  margin-right: 0.5rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.profile-upload-row input[type="file"]:hover::file-selector-button,
+.profile-upload-row-batch-files input[type="file"]:hover::file-selector-button {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.profile-upload-row input[type="file"]:disabled::file-selector-button,
+.profile-upload-row-batch-files input[type="file"]:disabled::file-selector-button {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
 .profile-upload-row-batch-files {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -2052,6 +2127,10 @@ th {
 
 .database-meta-row-table {
   grid-column: 1 / -1;
+}
+
+.database-algorithm-table th {
+  white-space: nowrap;
 }
 
 .database-algorithm-table td {
@@ -2188,8 +2267,8 @@ th {
   top: 0;
   left: 0;
   width: var(--sidebar-width);
+  height: 100vh;
   height: 100dvh;
-  min-height: 100vh;
   background: linear-gradient(180deg, #142236, #0f1a28);
   border-right: 1px solid #28384e;
   z-index: 30;
@@ -2414,7 +2493,7 @@ th {
   border: none;
   border-radius: 0;
   border-bottom: 1px solid var(--line);
-  padding: 0.15rem 0.7rem;
+  padding: 0.5rem 0.7rem;
   margin-bottom: 0.8rem;
   display: flex;
   align-items: center;
@@ -2552,25 +2631,21 @@ th.sortable-col {
 }
 
 /* ── Mobile hamburger toggle ──────────────────────────────────────────────
-   Hidden on desktop; revealed inside the ≤768px media block below. The
-   button is fixed top-left so it stays reachable above the top bar. */
+   Hidden on desktop; revealed inside the ≤820px media block below.
+   Sits inside the top bar as a centered, borderless button. */
 .mobile-menu-btn {
   display: none;
-  position: fixed;
-  top: 0.5rem;
-  left: 0.5rem;
-  z-index: 40;
   width: var(--mobile-tap-target);
   height: var(--mobile-tap-target);
-  padding: 0.55rem;
-  border: 1px solid var(--line-strong);
+  padding: 0.7rem;
+  border: none;
   border-radius: var(--radius-md);
-  background: var(--surface-strong);
+  background: transparent;
   color: var(--ink);
   flex-direction: column;
   justify-content: center;
   gap: 5px;
-  box-shadow: var(--shadow-sm);
+  cursor: pointer;
 }
 
 .mobile-menu-bar {
@@ -2592,6 +2667,7 @@ th.sortable-col {
   .sidebar-rail {
     width: var(--sidebar-width);
     height: 100vh;
+    height: 100dvh;
     border-right: 1px solid #28384e;
     border-bottom: none;
   }
@@ -2696,6 +2772,7 @@ th.sortable-col {
 
   .sidebar-rail {
     width: var(--sidebar-width);
+    height: 100vh;
     height: 100dvh;
     transform: translateX(-100%);
     transition: transform 0.22s ease;
@@ -2730,15 +2807,24 @@ th.sortable-col {
     width: 100%;
   }
 
-  /* Add top padding so content clears the fixed hamburger button. */
+  /* Add top padding so content clears the top bar. */
   .top-bar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    padding-left: calc(var(--mobile-tap-target) + 0.85rem);
+    grid-template-columns: var(--mobile-tap-target) minmax(0, 1fr) auto;
+    align-items: center;
+    padding-left: 0.45rem;
+    padding-right: 0.45rem;
     padding-top: 0.15rem;
     padding-bottom: 0.5rem;
     row-gap: 0.35rem;
     margin-bottom: 0.3rem;
+  }
+
+  .mobile-menu-btn {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    justify-self: start;
+    align-self: center;
   }
 
   /* ── T3: top bar / brand block fluid on mobile ────────────────────────
@@ -2764,14 +2850,14 @@ th.sortable-col {
   }
 
   .brand-logo-wrap {
-    grid-column: 1;
+    grid-column: 2;
     grid-row: 1;
     margin-left: 0;
     order: initial;
   }
 
   .page-links {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 1;
     margin-left: auto;
     flex-shrink: 0;
@@ -2779,7 +2865,7 @@ th.sortable-col {
   }
 
   .topbar-db-bar {
-    grid-column: 1 / -1;
+    grid-column: 2 / -1;
     grid-row: 2;
     width: 100%;
     min-width: 0;
@@ -3013,7 +3099,7 @@ th.sortable-col {
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
-    padding: 0.35rem 0.6rem 0.35rem calc(var(--mobile-tap-target) + 0.85rem);
+    padding: 0.35rem 0.6rem 0.35rem 0.45rem;
   }
 
   .page-links {
@@ -3119,7 +3205,10 @@ th.sortable-col {
   }
 
   .top-bar {
-    padding: 0.15rem 0.45rem 0.15rem calc(var(--mobile-tap-target) + 0.45rem);
+    padding-top: 0.15rem;
+    padding-bottom: 0.15rem;
+    padding-left: 0.45rem;
+    padding-right: 0.45rem;
   }
 
   .panel-stack {
@@ -3281,6 +3370,17 @@ th.sortable-col {
   width: 2rem;
   min-width: 2rem;
   text-align: center;
+}
+
+.results-download-btn {
+  align-self: flex-start;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.full-width-tile > .workspace-output-header:first-child {
+  flex-wrap: nowrap;
 }
 
 .app-footer {

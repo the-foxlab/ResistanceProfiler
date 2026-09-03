@@ -270,6 +270,53 @@ export function AnalyzeTab({
                 </button>
                 <span className="analyze-submode-switch-knob" aria-hidden="true" />
               </div>
+              {analyzeSubMode === 'single' ? (
+                <div className="profile-settings-row" role="group" aria-label="Profiling mode">
+                  <div className="database-phenotype-switch" data-active-mode={activeProfileMode}>
+                    {PROFILE_MODES.map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        className={activeProfileMode === mode.id ? 'active' : ''}
+                        onClick={() => setActiveProfileMode(mode.id)}
+                        disabled={activeProfileMode === 'regenerate' ? isRegenerateBusy : isProfileBusy}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {analyzeSubMode === 'batch' && !batchSubmitted ? (
+                <div className="profile-settings-row" role="group" aria-label="Batch mode">
+                  <div className="database-phenotype-switch" data-active-mode={batchMode}>
+                    <button
+                      type="button"
+                      className={batchMode === 'vcf' ? 'active' : ''}
+                      onClick={() => setBatchMode('vcf')}
+                      disabled={batchSubmitting}
+                    >
+                      VCF
+                    </button>
+                    <button
+                      type="button"
+                      className={batchMode === 'fasta' ? 'active' : ''}
+                      onClick={() => setBatchMode('fasta')}
+                      disabled={batchSubmitting}
+                    >
+                      FASTA
+                    </button>
+                    <button
+                      type="button"
+                      className={batchMode === 'json' ? 'active' : ''}
+                      onClick={() => setBatchMode('json')}
+                      disabled={batchSubmitting}
+                    >
+                      JSON
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -277,23 +324,6 @@ export function AnalyzeTab({
         {/* SINGLE SAMPLE submode */}
         {analyzeSubMode === 'single' ? (
           <div className="profile-input-subtile section-subtile">
-            <div className="profile-mode-row">
-              <div className="profile-settings-row" role="group" aria-label="Profiling mode">
-                <div className="database-phenotype-switch" data-active-mode={activeProfileMode}>
-                  {PROFILE_MODES.map((mode) => (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      className={activeProfileMode === mode.id ? 'active' : ''}
-                      onClick={() => setActiveProfileMode(mode.id)}
-                      disabled={activeProfileMode === 'regenerate' ? isRegenerateBusy : isProfileBusy}
-                    >
-                      {mode.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
 
             {activeProfileMode === 'vcf' ? (
               <div className="profile-upload-row profile-upload-row-vcf">
@@ -553,38 +583,6 @@ export function AnalyzeTab({
           <div className="profile-input-subtile section-subtile">
           {!batchSubmitted ? (
             <>
-              {/* Mode sub-selector */}
-              <div className="profile-mode-row">
-                <div className="profile-settings-row" role="group" aria-label="Batch mode">
-                  <div className="database-phenotype-switch" data-active-mode={batchMode}>
-                    <button
-                      type="button"
-                      className={batchMode === 'vcf' ? 'active' : ''}
-                      onClick={() => setBatchMode('vcf')}
-                      disabled={batchSubmitting}
-                    >
-                      VCF
-                    </button>
-                    <button
-                      type="button"
-                      className={batchMode === 'fasta' ? 'active' : ''}
-                      onClick={() => setBatchMode('fasta')}
-                      disabled={batchSubmitting}
-                    >
-                      FASTA
-                    </button>
-                    <button
-                      type="button"
-                      className={batchMode === 'json' ? 'active' : ''}
-                      onClick={() => setBatchMode('json')}
-                      disabled={batchSubmitting}
-                    >
-                      JSON
-                    </button>
-                  </div>
-                </div>
-              </div>
-
               {/* File upload area */}
               {batchMode === 'vcf' ? (
                 <div className="profile-upload-row profile-upload-row-batch-vcf">

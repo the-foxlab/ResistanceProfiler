@@ -178,21 +178,6 @@ export function DashboardView({
 
   return (
     <main className="dashboard-shell">
-      {/* Hamburger toggle for the off-canvas sidebar. Hidden on desktop via
-          CSS (.mobile-menu-btn is display:none above --mobile-breakpoint). */}
-      <button
-        type="button"
-        className={`mobile-menu-btn ${mobileNavOpen ? 'open' : ''}`}
-        aria-label="Toggle navigation"
-        aria-expanded={mobileNavOpen}
-        aria-controls="sidebar-rail"
-        onClick={() => setMobileNavOpen((v) => !v)}
-      >
-        <span className="mobile-menu-bar" aria-hidden="true" />
-        <span className="mobile-menu-bar" aria-hidden="true" />
-        <span className="mobile-menu-bar" aria-hidden="true" />
-      </button>
-      {/* Left rail only switches visible mode; all data lives in shared hook state. */}
       <aside
         id="sidebar-rail"
         className={`sidebar-rail ${mobileNavOpen ? 'open' : ''}`}
@@ -225,6 +210,18 @@ export function DashboardView({
 
       <div className="dashboard-main">
         <div className="top-bar">
+          <button
+            type="button"
+            className={`mobile-menu-btn ${mobileNavOpen ? 'open' : ''}`}
+            aria-label="Toggle navigation"
+            aria-expanded={mobileNavOpen}
+            aria-controls="sidebar-rail"
+            onClick={() => setMobileNavOpen((v) => !v)}
+          >
+            <span className="mobile-menu-bar" aria-hidden="true" />
+            <span className="mobile-menu-bar" aria-hidden="true" />
+            <span className="mobile-menu-bar" aria-hidden="true" />
+          </button>
           <div className="top-bar-brand-block">
             <div className="brand-logo-wrap" aria-label="ResistanceProfiler dashboard">
               <img className="brand-logo" src={logoSrc} alt="ResistanceProfiler logo" />
