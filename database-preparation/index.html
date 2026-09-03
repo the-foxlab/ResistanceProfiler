@@ -1,0 +1,1217 @@
+<!DOCTYPE html><html lang="en" class="no-js"><head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Create and extend a project database">
+      
+      
+      
+        <link rel="canonical" href="https://the-foxlab.github.io/ResistanceProfiler/database-preparation/">
+      
+      
+        <link rel="prev" href="../how-it-works/">
+      
+      
+        <link rel="next" href="../rules-format/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Database Preparation - ResistanceProfiler</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+3:300,300i,400,400i,700,700i%7CFira+Code:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Source Sans 3";--md-code-font:"Fira Code"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  <link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#database-preparation" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="ResistanceProfiler" class="md-header__button md-logo" aria-label="ResistanceProfiler" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ResistanceProfiler
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Database Preparation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom" aria-label="Switch to dark mode" type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom" aria-label="Switch to light mode" type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"></path></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required="">
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix="">
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/the-foxlab/ResistanceProfiler" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="ResistanceProfiler" class="md-nav__button md-logo" aria-label="ResistanceProfiler" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    ResistanceProfiler
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/the-foxlab/ResistanceProfiler" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix="">
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manual
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Database preparation
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Database preparation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#create-a-new-project-database" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create a new project database
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#optional-metadata-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional metadata JSON
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#interpretation-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interpretation algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Interpretation algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ic50_thresholds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ic50_thresholds
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#drug_groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drug_groups
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#drug_interpretation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drug_interpretation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#drug_alias" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drug_alias
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#effect_as_resistant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        effect_as_resistant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inspect-project-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspect project metadata
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inspect-imported-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspect imported rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validate-new-rules-without-changing-the-database" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validate new rules without changing the database
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rules-format/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rules TSV format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algorithms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interpretation algorithms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../output/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../webapp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    License
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#create-a-new-project-database" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create a new project database
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#optional-metadata-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional metadata JSON
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#interpretation-algorithms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interpretation algorithms
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Interpretation algorithms">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ic50_thresholds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ic50_thresholds
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#drug_groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drug_groups
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#drug_interpretation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drug_interpretation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#drug_alias" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        drug_alias
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#effect_as_resistant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        effect_as_resistant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inspect-project-metadata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspect project metadata
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#inspect-imported-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspect imported rules
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validate-new-rules-without-changing-the-database" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validate new rules without changing the database
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="database-preparation">Database Preparation<a class="headerlink" href="#database-preparation" title="Permanent link">¶</a></h1>
+<p>ResistanceProfiler uses a project SQLite database (<code>project.db</code>) created from:</p>
+<ul>
+<li>at least one GenBank reference file</li>
+<li>one resistance <a href="../rules-format/">rules TSV</a></li>
+</ul>
+<p>If you are preparing your first database, make sure the rules file uses feature names that exist in the GenBank CDS annotations.</p>
+<p>This database is the central asset of a ResPro workflow. It does not just store reference files. It defines the internal references, feature annotations, and curated rule set that later FASTA and VCF samples are compared against.</p>
+<div class="admonition important">
+<p class="admonition-title">Build carefully and version it</p>
+<p>Build <code>project.db</code> carefully and version it in your workflow. Most downstream interpretation quality depends on this curated project database.</p>
+</div>
+<h2 id="create-a-new-project-database">Create a new project database<a class="headerlink" href="#create-a-new-project-database" title="Permanent link">¶</a></h2>
+<div class="highlight"><pre><span></span><code>respro<span class="w"> </span>init<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--name<span class="w"> </span><span class="s2">"Docs Demo"</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--genbank<span class="w"> </span>some_reference.gb<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--rules<span class="w"> </span>rules.tsv<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--output<span class="w"> </span>myrespro.db<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--no-additional-info
+</code></pre></div>
+<p>Notes:</p>
+<ul>
+<li><code>--genbank</code> can be repeated for multiple files.</li>
+<li><code>--no-additional-info</code> skips network lookups for extra metadata.</li>
+<li><code>--metadata</code> accepts a JSON file with curated project metadata. See the section below for the supported keys and value rules.</li>
+<li><code>--example</code> optionally stores a single-record consensus FASTA shipped with the database. Users can then profile it via <code>respro fasta --example</code> or via the webapp "Example" button. Use <code>respro add --example</code> to overwrite and <code>respro add --no-example</code> to clear it.</li>
+<li>After initialization, later profiling runs use this database as the internal coordinate and rule source.</li>
+</ul>
+<p>After this command succeeds, the file <code>myrespro.db</code> should exist.</p>
+<h2 id="optional-metadata-json">Optional metadata JSON<a class="headerlink" href="#optional-metadata-json" title="Permanent link">¶</a></h2>
+<p><code>respro init --metadata</code> accepts a JSON file whose top-level value must be an object. The file is used to populate project metadata fields during database creation.</p>
+<p>Supported canonical keys are <code>maintainers</code>, <code>contact</code>, <code>publication_pmid</code>, <code>website</code>, <code>description</code>, <code>maintainer_update</code>, <code>license</code>, and <code>tsv_checksum</code>.</p>
+<p>Common aliases are accepted for a few keys: <code>maintainer</code> maps to <code>maintainers</code>, <code>publication</code> and <code>pmid</code> map to <code>publication_pmid</code>, <code>maintainer update</code> maps to <code>maintainer_update</code>, and <code>tsv checksum</code> maps to <code>tsv_checksum</code>.</p>
+<p>Value rules are strict. <code>maintainers</code> may be either a string or a list of strings. <code>publication_pmid</code> must contain digits only. All other supported fields must be strings. Empty values are ignored, and unknown keys are rejected. When a PMID is provided, ResPro also tries to resolve the DOI automatically from PubMed when one is available.</p>
+<p>Example metadata file:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"maintainers"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"A Curator"</span><span class="p">,</span><span class="w"> </span><span class="s2">"B Curator"</span><span class="p">],</span>
+<span class="w">  </span><span class="nt">"contact"</span><span class="p">:</span><span class="w"> </span><span class="s2">"team@example.org"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"publication"</span><span class="p">:</span><span class="w"> </span><span class="s2">"12345678"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"website"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://example.org/db"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Curated antiviral resistance database."</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"maintainer update"</span><span class="p">:</span><span class="w"> </span><span class="s2">"2026-04-21"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"license"</span><span class="p">:</span><span class="w"> </span><span class="s2">"CC-BY-4.0"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"tsv checksum"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sha256:abc123"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"interpretation_algorithms"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ic50_thresholds"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"use"</span><span class="p">:</span><span class="w"> </span><span class="s2">"fold_ic50"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"thresholds"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"ACV"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"intermediate"</span><span class="p">:</span><span class="w"> </span><span class="mf">3.0</span><span class="p">,</span><span class="w"> </span><span class="nt">"resistant"</span><span class="p">:</span><span class="w"> </span><span class="mf">10.0</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">"PCV"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"intermediate"</span><span class="p">:</span><span class="w"> </span><span class="mf">3.0</span><span class="p">,</span><span class="w"> </span><span class="nt">"resistant"</span><span class="p">:</span><span class="w"> </span><span class="mf">10.0</span><span class="p">}</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"drug_interpretation"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"by_phenotype"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"thresholds"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"resistant"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"intermediate"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<blockquote>
+<p>Algorithms are optional. See <a href="#interpretation-algorithms">Interpretation algorithms</a> below for all supported types and configuration keys.</p>
+</blockquote>
+<h2 id="interpretation-algorithms">Interpretation algorithms<a class="headerlink" href="#interpretation-algorithms" title="Permanent link">¶</a></h2>
+<p><code>metadata.json</code> optionally supports a top-level <code>interpretation_algorithms</code> array. Each entry configures one algorithm by name. Each algorithm type may appear <strong>at most once</strong> in the list, and all five types can coexist.</p>
+<p>Detailed algorithm descriptions are on the <a href="../algorithms/">Interpretation Algorithms</a> page. Below is a summary of each type and its configuration keys.</p>
+<h3 id="ic50_thresholds"><code>ic50_thresholds</code><a class="headerlink" href="#ic50_thresholds" title="Permanent link">¶</a></h3>
+<p>Defines per-drug IC50 or fold-IC50 breakpoints. With this, each rule that has an IC50 value associated will be classified for a phenotype during init.</p>
+<ul>
+<li><code>use</code> — required; must be <code>"ic50"</code> or <code>"fold_ic50"</code></li>
+<li><code>thresholds</code> — required non-empty object; each key is a drug name; each value must have <code>"intermediate"</code> and <code>"resistant"</code> keys with positive numbers; <code>"resistant"</code> must be strictly greater than <code>"intermediate"</code></li>
+<li><code>drug_thresholds</code> — optional list of per-<code>(reference, drug)</code> overrides; each entry is <code>{reference?, drug, thresholds: {intermediate, resistant}}</code> (both keys required, <code>resistant</code> &gt; <code>intermediate</code>); resolution precedence is <code>(reference, drug)</code> &gt; <code>(drug)</code> &gt; global <code>thresholds</code>; see <a href="../algorithms/">Interpretation Algorithms</a> for details</li>
+</ul>
+<h3 id="drug_groups"><code>drug_groups</code><a class="headerlink" href="#drug_groups" title="Permanent link">¶</a></h3>
+<p>Assigns drugs to named groups (e.g. drug classes). This is only if you wish to group drugs in the final report.</p>
+<ul>
+<li><code>groups</code> — required non-empty object; each key is a group name; each value is a non-empty list of drug name strings; a drug name may not appear in more than one group</li>
+</ul>
+<h3 id="drug_interpretation"><code>drug_interpretation</code><a class="headerlink" href="#drug_interpretation" title="Permanent link">¶</a></h3>
+<p>Specifies how per-drug evidence translates into a final interpretation in the report (<code>resistant</code>, <code>intermediate</code>, <code>sensitive</code>). Multiple <code>drug_interpretation</code> entries may coexist in a project, each with a different <code>method</code>. This is useful when a database contains rules with mixed evidence types (e.g. one source provides phenotype labels while another provides numeric scores).</p>
+<p>Supported methods:</p>
+<ul>
+<li><code>by_phenotype</code> — counts phenotype-labelled hits per drug and compares counts against thresholds</li>
+<li><code>by_score</code> — sums score values per drug and compares totals against thresholds</li>
+<li><code>by_ic50</code> — checks per-hit IC50 values per drug; if any value meets the resistant threshold the drug is resistant, otherwise if any value meets the intermediate threshold the drug is intermediate, otherwise sensitive</li>
+<li><code>by_fold_ic50</code> — same logic as <code>by_ic50</code>, but using fold-IC50 values</li>
+</ul>
+<p>Keys:</p>
+<ul>
+<li><code>method</code> — required; must be <code>"by_phenotype"</code>, <code>"by_score"</code>, <code>"by_ic50"</code>, or <code>"by_fold_ic50"</code></li>
+<li><code>thresholds</code> — required object; must include <code>"resistant"</code>; <code>"intermediate"</code> is optional</li>
+<li>for <code>by_phenotype</code> and <code>by_score</code>, threshold values must be positive integers</li>
+<li>for <code>by_ic50</code> and <code>by_fold_ic50</code>, threshold values must be positive numbers; if <code>intermediate</code> is set, <code>resistant</code> must be strictly greater than <code>intermediate</code></li>
+<li>each method may appear at most once; two entries with the same <code>method</code> are rejected</li>
+<li><code>drug_thresholds</code> — optional list of per-<code>(reference, drug)</code> overrides; each entry is <code>{reference?, drug, thresholds: {resistant, intermediate?}}</code>; resolution precedence is <code>(reference, drug)</code> &gt; <code>(drug)</code> &gt; global <code>thresholds</code>; when configured, the report shows a per-cell hover on each method Assessment column naming the resolved thresholds and their source; see <a href="../algorithms/">Interpretation Algorithms</a> for details</li>
+</ul>
+<p>When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final <strong>Assessment</strong> column. The final assessment uses strongest-wins resolution: <code>resistant</code> &gt; <code>contradictory</code> &gt; <code>intermediate</code> &gt; <code>sensitive</code>. The most resistant result across all methods is taken as the final call.</p>
+<h3 id="drug_alias"><code>drug_alias</code><a class="headerlink" href="#drug_alias" title="Permanent link">¶</a></h3>
+<p>Defines canonical drug-name to short-alias mappings for report rendering.</p>
+<ul>
+<li><code>groups</code> — required non-empty object; keys are canonical drug names; values are aliases</li>
+<li>each key and value must be a non-empty string</li>
+<li>alias values must be unique across canonical drug names</li>
+</ul>
+<p>When configured, these mappings are written to the <code>drug.alias</code> column during <code>respro init</code> and used for report drug labels, for example <code>Aciclovir (ACV)</code>.</p>
+<h3 id="effect_as_resistant"><code>effect_as_resistant</code><a class="headerlink" href="#effect_as_resistant" title="Permanent link">¶</a></h3>
+<p>Defines report-only metadata interpretation for observed high-impact variant effects. This does not create curated database rule hits.</p>
+<ul>
+<li><code>rules</code> — required non-empty list</li>
+<li>each rule must include <code>feature</code>, <code>effect</code>, <code>reference</code>, and <code>drug</code> as case-sensitive exact non-empty strings</li>
+<li><code>effect</code> — required non-empty list of strings; each must be one of: <code>frameshift</code>, <code>stop_gained</code>, <code>stop_lost</code>, <code>start_lost</code>, <code>insertion</code>, <code>deletion</code></li>
+<li>each (<code>feature</code>, <code>reference</code>, <code>drug</code>) tuple must be unique across the list</li>
+</ul>
+<p>Each rule states: if a variant annotation in the given feature/reference has a consequence matching <strong>any</strong> of the listed effects, produce a metadata hit row with a resistant phenotype for the specified drug. The generated hit always carries a <code>resistant</code> value in the <code>phenotype</code> field; the <code>clinical_phenotype</code> field is left empty.</p>
+<p>This metadata output is only produced when the project database has at least one curated rule with a known phenotype or clinical phenotype.</p>
+<h3 id="example">Example<a class="headerlink" href="#example" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"description"</span><span class="p">:</span><span class="w"> </span><span class="s2">"HSV database"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"interpretation_algorithms"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ic50_thresholds"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"use"</span><span class="p">:</span><span class="w"> </span><span class="s2">"fold_ic50"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"thresholds"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"ACV"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"intermediate"</span><span class="p">:</span><span class="w"> </span><span class="mf">3.0</span><span class="p">,</span><span class="w"> </span><span class="nt">"resistant"</span><span class="p">:</span><span class="w"> </span><span class="mf">10.0</span><span class="p">},</span>
+<span class="w">        </span><span class="nt">"PCV"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"intermediate"</span><span class="p">:</span><span class="w"> </span><span class="mf">3.0</span><span class="p">,</span><span class="w"> </span><span class="nt">"resistant"</span><span class="p">:</span><span class="w"> </span><span class="mf">10.0</span><span class="p">}</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"drug_groups"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"groups"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"Nucleoside Analogues"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"ACV"</span><span class="p">,</span><span class="w"> </span><span class="s2">"PCV"</span><span class="p">],</span>
+<span class="w">        </span><span class="nt">"Pyrophosphate Analogues"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"FOS"</span><span class="p">]</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"drug_interpretation"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"by_phenotype"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"thresholds"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"resistant"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"intermediate"</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"drug_interpretation"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"method"</span><span class="p">:</span><span class="w"> </span><span class="s2">"by_score"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"thresholds"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"resistant"</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"intermediate"</span><span class="p">:</span><span class="w"> </span><span class="mi">2</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"drug_alias"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"groups"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"Aciclovir"</span><span class="p">:</span><span class="w"> </span><span class="s2">"ACV"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"Penciclovir"</span><span class="p">:</span><span class="w"> </span><span class="s2">"PCV"</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">},</span>
+<span class="w">    </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"effect_as_resistant"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"rules"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">        </span><span class="p">{</span>
+<span class="w">          </span><span class="nt">"feature"</span><span class="p">:</span><span class="w"> </span><span class="s2">"UL23"</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">"effect"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"frameshift"</span><span class="p">,</span><span class="w"> </span><span class="s2">"stop_gained"</span><span class="p">,</span><span class="w"> </span><span class="s2">"stop_lost"</span><span class="p">],</span>
+<span class="w">          </span><span class="nt">"reference"</span><span class="p">:</span><span class="w"> </span><span class="s2">"NC_001806"</span><span class="p">,</span>
+<span class="w">          </span><span class="nt">"drug"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Aciclovir"</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">      </span><span class="p">]</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>Algorithms are validated at <code>respro init</code> time and stored in the <code>interpretation_algorithm</code> table of the project database. Existing databases without this table are migrated automatically on next open.</p>
+<h2 id="inspect-project-metadata">Inspect project metadata<a class="headerlink" href="#inspect-project-metadata" title="Permanent link">¶</a></h2>
+<div class="highlight"><pre><span></span><code>respro<span class="w"> </span>manage<span class="w"> </span>database<span class="w"> </span>myrespro.db<span class="w"> </span>--info
+</code></pre></div>
+<h2 id="inspect-imported-rules">Inspect imported rules<a class="headerlink" href="#inspect-imported-rules" title="Permanent link">¶</a></h2>
+<div class="highlight"><pre><span></span><code>respro<span class="w"> </span>manage<span class="w"> </span>database<span class="w"> </span>myrespro.db<span class="w"> </span>--rules
+</code></pre></div>
+<h2 id="validate-new-rules-without-changing-the-database">Validate new rules without changing the database<a class="headerlink" href="#validate-new-rules-without-changing-the-database" title="Permanent link">¶</a></h2>
+<div class="highlight"><pre><span></span><code>respro<span class="w"> </span>add<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--project<span class="w"> </span>myrespro.db<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--rules<span class="w"> </span>rules.tsv<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--validate
+</code></pre></div>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>Use <code>--validate</code> in CI or curation review before importing rules into a production project database.</p>
+</div>
+<p>For detailed column and mutation token requirements, see <a href="../rules-format/">Rules TSV Format</a>.</p>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden="">
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+<div class="md-footer">
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-footer-copyright">
+        
+          © 2026 Jonas Fuchs, University Medical Center Freiburg — Licensed under AGPL-3.0
+        
+      </div>
+      <div class="md-footer-social">
+        <a href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noopener" title="GitHub">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.indexes", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.tooltips"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>

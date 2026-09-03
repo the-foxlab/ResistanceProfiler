@@ -1,0 +1,1527 @@
+<!DOCTYPE html><html lang="en" class="no-js"><head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Run and host the ResPro web application">
+      
+      
+      
+        <link rel="canonical" href="https://the-foxlab.github.io/ResistanceProfiler/webapp/">
+      
+      
+        <link rel="prev" href="../output/">
+      
+      
+        <link rel="next" href="../contributing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Web App - ResistanceProfiler</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+3:300,300i,400,400i,700,700i%7CFira+Code:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Source Sans 3";--md-code-font:"Fira Code"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  <link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#web-app-run-and-host" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="ResistanceProfiler" class="md-header__button md-logo" aria-label="ResistanceProfiler" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ResistanceProfiler
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Web App
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom" aria-label="Switch to dark mode" type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom" aria-label="Switch to light mode" type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"></path></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required="">
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix="">
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/the-foxlab/ResistanceProfiler" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="ResistanceProfiler" class="md-nav__button md-logo" aria-label="ResistanceProfiler" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    ResistanceProfiler
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/the-foxlab/ResistanceProfiler" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix="">
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manual
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../database-preparation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Database preparation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rules-format/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rules TSV format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algorithms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interpretation algorithms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../output/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web app
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#standard-local-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standard local development
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-and-binding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server and binding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-and-filesystem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data and filesystem
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authentication-and-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication and security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#footer-variables-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Footer variables (optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rate-limiting-and-batch-sizes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rate limiting and batch sizes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#redis-and-job-queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redis and job queue
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#maintained-databases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Maintained databases
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minimal-env-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal .env example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#public-hosting-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Public hosting setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Public hosting setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#legal-notice-impressum-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Legal notice / Impressum (optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#caddy-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caddy example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nginx-example-https" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        nginx example (HTTPS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nginx-step-by-step-local-network" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        nginx step-by-step (local network)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    License
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#standard-local-development" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Standard local development
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-and-binding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Server and binding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-and-filesystem" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data and filesystem
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#authentication-and-security" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication and security
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#footer-variables-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Footer variables (optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rate-limiting-and-batch-sizes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rate limiting and batch sizes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#redis-and-job-queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Redis and job queue
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#maintained-databases" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Maintained databases
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#minimal-env-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal .env example
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#public-hosting-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Public hosting setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Public hosting setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#legal-notice-impressum-optional" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Legal notice / Impressum (optional)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#caddy-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Caddy example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nginx-example-https" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        nginx example (HTTPS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#nginx-step-by-step-local-network" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        nginx step-by-step (local network)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="web-app-run-and-host">Web App: Run and Host<a class="headerlink" href="#web-app-run-and-host" title="Permanent link">¶</a></h1>
+<p>This guide covers local development and public hosting of the ResPro web application.</p>
+<figure>
+<p><a class="glightbox" data-type="image" data-width="100%" data-height="auto" href="../assets/formats.png" data-desc-position="bottom"><img alt="ResPro running on desktop, tablet, and mobile" loading="lazy" src="../assets/formats.png"></a>
+  </p>
+<figcaption>ResPro's responsive web app adapts to desktop, tablet, and mobile screens.</figcaption>
+</figure>
+<p>The stack is intentionally minimal for local development:</p>
+<ul>
+<li><code>redis</code></li>
+<li><code>respro-web</code> (FastAPI + bundled frontend)</li>
+<li><code>respro-worker</code> (RQ worker)</li>
+</ul>
+<h2 id="standard-local-development">Standard local development<a class="headerlink" href="#standard-local-development" title="Permanent link">¶</a></h2>
+<ol>
+<li>Prepare the mounted data directory:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>mkdir<span class="w"> </span>-p<span class="w"> </span>data
+</code></pre></div>
+<ol>
+<li>Start the stack:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.web.yml<span class="w"> </span>up<span class="w"> </span>--build
+</code></pre></div>
+<ol>
+<li>
+<p>Open the app and API checks:</p>
+</li>
+<li>
+<p>App: <code>http://127.0.0.1:8000/</code></p>
+</li>
+<li>Health: <code>http://127.0.0.1:8000/api/health</code></li>
+<li>
+<p>Readiness: <code>http://127.0.0.1:8000/api/readiness</code></p>
+</li>
+<li>
+<p>Optional detached mode:</p>
+</li>
+</ol>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.web.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
+</code></pre></div>
+<ol>
+<li>Stop the stack:</li>
+</ol>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.web.yml<span class="w"> </span>down
+</code></pre></div>
+<p>The backend creates and uses these folders inside the mounted data root:</p>
+<ul>
+<li><code>data/project_databases/</code></li>
+<li><code>data/uploads/</code></li>
+<li><code>data/results/</code></li>
+</ul>
+<p>If <code>RESPRO_WEB_MAINTAINED_BOOTSTRAP=true</code>, missing maintained databases are downloaded into <code>data/project_databases/</code> at startup. The flag also triggers a checksum-based update check: each existing maintained database is compared against the companion manifest's <code>tsv_checksum</code>, and a changed database is rebuilt into a temp file and atomically swapped in. A weekly background thread re-runs the same check. Set <code>RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS</code> to control the interval (default <code>604800</code> seconds = 7 days; <code>0</code> disables the weekly thread). Update failures are logged and never block startup.</p>
+<h2 id="configuration-reference">Configuration reference<a class="headerlink" href="#configuration-reference" title="Permanent link">¶</a></h2>
+<p>All webapp settings are optional environment variables. Set them in a <code>.env</code> file next to your <code>docker-compose.web.yml</code>, or inline under <code>services.respro-web.environment</code> (and <code>services.respro-worker.environment</code> where noted). Defaults are tuned for local development — review every variable before public hosting.</p>
+<h3 id="server-and-binding">Server and binding<a class="headerlink" href="#server-and-binding" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RESPRO_WEB_HOST</code></td>
+<td><code>127.0.0.1</code></td>
+<td>Network interface the API binds to. Use <code>0.0.0.0</code> to listen on all interfaces (required when behind a reverse proxy in Docker).</td>
+</tr>
+<tr>
+<td><code>RESPRO_WEB_PORT</code></td>
+<td><code>8000</code></td>
+<td>TCP port the API listens on.</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p class="admonition-title">Public bind requires a token</p>
+<p>Binding to anything other than <code>127.0.0.1</code>, <code>localhost</code>, or <code>0.0.0.0</code> without setting <code>RESPRO_WEB_API_TOKEN</code> fails fast at startup. <code>0.0.0.0</code> is allowed without a token only because it is the standard Docker bind address — combine it with a reverse proxy and a token for public hosting.</p>
+</div>
+<h3 id="data-and-filesystem">Data and filesystem<a class="headerlink" href="#data-and-filesystem" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RESPRO_WEB_DATA_DIR</code></td>
+<td><code>/data</code> if it exists, otherwise <code>./data</code></td>
+<td>Root directory for <code>project_databases/</code>, <code>uploads/</code>, and <code>results/</code>. Created if missing. Must be writable.</td>
+</tr>
+<tr>
+<td><code>RESPRO_WEB_ALLOWED_ROOTS</code></td>
+<td>the three subdirectories of <code>RESPRO_WEB_DATA_DIR</code></td>
+<td>Comma-separated list of absolute paths the API is allowed to read from and write to. Override only if you mount upload or result directories outside the data root.</td>
+</tr>
+<tr>
+<td><code>RESPRO_WEB_RESULT_TTL</code></td>
+<td><code>86400</code> (24 hours)</td>
+<td>Time-to-live in seconds for files in <code>uploads/</code> and <code>results/</code>. A background sweep thread deletes files older than this value.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="authentication-and-security">Authentication and security<a class="headerlink" href="#authentication-and-security" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RESPRO_WEB_API_TOKEN</code></td>
+<td><em>(empty — auth disabled)</em></td>
+<td>Bearer token required for all protected API endpoints. Leave empty for local-only deployments; <strong>set a strong random secret for any non-local deployment</strong>.</td>
+</tr>
+<tr>
+<td><code>RESPRO_WEB_CORS_ORIGINS</code></td>
+<td><code>http://127.0.0.1:5173</code>, <code>http://localhost:5173</code></td>
+<td>Comma-separated list of allowed origins for cross-origin requests. Must be set explicitly when <code>RESPRO_WEB_API_TOKEN</code> is set. For public hosting, list your exact frontend origin(s), e.g. <code>https://respro.example.com</code>.</td>
+</tr>
+<tr>
+<td><code>RESPRO_WEB_TRUSTED_PROXIES</code></td>
+<td><em>(empty — proxy headers ignored)</em></td>
+<td>Comma-separated list of proxy IPs or CIDRs whose <code>X-Forwarded-*</code> headers are trusted. Set to your reverse proxy address for public hosting (see <a href="#nginx-step-by-step-local-network">nginx step-by-step</a>).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="footer-variables-optional">Footer variables (optional)<a class="headerlink" href="#footer-variables-optional" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RESPRO_WEB_IMPRESSUM_PATH</code></td>
+<td><em>(empty — feature disabled)</em></td>
+<td>Absolute path to an HTML file served at <code>/legal</code> as a legal notice / Impressum. See <a href="#legal-notice-impressum-optional">Legal notice / Impressum</a> for details.</td>
+</tr>
+<tr>
+<td><code>RESPRO_WEB_CONTACT_EMAIL</code></td>
+<td><em>(empty — feature disabled)</em></td>
+<td>Contact e-mail address surfaced as a <code>mailto:</code> link in the app footer and on the About tab. Must be a single valid e-mail address; an invalid value fails fast at startup.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="rate-limiting-and-batch-sizes">Rate limiting and batch sizes<a class="headerlink" href="#rate-limiting-and-batch-sizes" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RESPRO_WEB_UPLOAD_RATE_LIMIT</code></td>
+<td><code>25/minute</code></td>
+<td>slowapi rate-limit string for upload endpoints. Applied per client identity (token hash, or client IP when no token is configured).</td>
+</tr>
+<tr>
+<td><code>RESPRO_WEB_MAX_BATCH_SIZE</code></td>
+<td><code>25</code></td>
+<td>Maximum number of samples accepted in a single batch profiling request. Must be <code>&gt; 0</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="redis-and-job-queue">Redis and job queue<a class="headerlink" href="#redis-and-job-queue" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>REDIS_URL</code></td>
+<td><code>redis://127.0.0.1:6379/0</code></td>
+<td>Redis connection URL used by the API, the RQ worker, and the rate limiter. <strong>Set identically on <code>respro-web</code> and <code>respro-worker</code>.</strong></td>
+</tr>
+<tr>
+<td><code>RESPRO_WEB_JOB_TIMEOUT</code></td>
+<td><code>3600</code> (1 hour)</td>
+<td>Maximum runtime in seconds for a single profiling job before RQ marks it failed. Must be <code>&gt;= 0</code>.</td>
+</tr>
+<tr>
+<td><code>RESPRO_WEB_JOB_RETRY_MAX</code></td>
+<td><code>0</code> (no retries)</td>
+<td>Maximum number of automatic retries for a failed job. Must be <code>&gt;= 0</code>.</td>
+</tr>
+<tr>
+<td><code>RESPRO_WEB_JOB_RETRY_INTERVALS</code></td>
+<td><code>30</code></td>
+<td>Comma-separated delay in seconds between retries. Applied cyclically when <code>RESPRO_WEB_JOB_RETRY_MAX</code> is greater than the number of intervals. All values must be <code>&gt; 0</code>.</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">Worker reads queue settings too</p>
+<p><code>REDIS_URL</code>, <code>RESPRO_WEB_JOB_TIMEOUT</code>, <code>RESPRO_WEB_JOB_RETRY_MAX</code>, and <code>RESPRO_WEB_JOB_RETRY_INTERVALS</code> must be set on the <code>respro-worker</code> service as well as <code>respro-web</code> so the worker and the API agree on timeouts and retries.</p>
+</div>
+<h3 id="maintained-databases">Maintained databases<a class="headerlink" href="#maintained-databases" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RESPRO_WEB_MAINTAINED_BOOTSTRAP</code></td>
+<td><code>false</code></td>
+<td>When <code>true</code> (or <code>1</code>/<code>yes</code>/<code>on</code>), missing maintained databases are downloaded into <code>data/project_databases/</code> at startup, and a weekly background thread checks for updates.</td>
+</tr>
+<tr>
+<td><code>RESPRO_WEB_MAINTAINED_DB_UPDATE_INTERVAL_SECONDS</code></td>
+<td><code>604800</code> (7 days)</td>
+<td>Interval between maintained-database update checks. Set to <code>0</code> to disable the weekly thread (a one-time check still runs at startup when bootstrap is enabled). Invalid values fall back to the default.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="minimal-env-example">Minimal <code>.env</code> example<a class="headerlink" href="#minimal-env-example" title="Permanent link">¶</a></h3>
+<p>For local development you can usually leave everything at defaults. For a public deployment, start from:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Binding</span>
+<span class="nv">RESPRO_WEB_HOST</span><span class="o">=</span><span class="m">0</span>.0.0.0
+<span class="nv">RESPRO_WEB_PORT</span><span class="o">=</span><span class="m">8000</span>
+
+<span class="c1"># Auth and security — required for public hosting</span>
+<span class="nv">RESPRO_WEB_API_TOKEN</span><span class="o">=</span>replace-with-a-long-random-secret
+<span class="nv">RESPRO_WEB_CORS_ORIGINS</span><span class="o">=</span>https://respro.example.com
+<span class="nv">RESPRO_WEB_TRUSTED_PROXIES</span><span class="o">=</span><span class="m">127</span>.0.0.1
+
+<span class="c1"># Redis (set on both respro-web and respro-worker)</span>
+<span class="nv">REDIS_URL</span><span class="o">=</span>redis://redis:6379/0
+
+<span class="c1"># Optional: legal notice</span>
+<span class="c1"># RESPRO_WEB_IMPRESSUM_PATH=/data/impressum.html</span>
+
+<span class="c1"># Optional: contact e-mail shown in the footer and on the About tab</span>
+<span class="c1"># RESPRO_WEB_CONTACT_EMAIL=contact@example.org</span>
+
+<span class="c1"># Optional: enable maintained database auto-download and weekly updates</span>
+<span class="nv">RESPRO_WEB_MAINTAINED_BOOTSTRAP</span><span class="o">=</span><span class="nb">true</span>
+</code></pre></div>
+<h2 id="public-hosting-setup">Public hosting setup<a class="headerlink" href="#public-hosting-setup" title="Permanent link">¶</a></h2>
+<p>For internet-facing deployment, keep <code>respro-web</code> reachable only through a reverse proxy and TLS.</p>
+<ol>
+<li>Keep the app behind a reverse proxy (Caddy/nginx/Traefik).</li>
+<li>Terminate TLS at the proxy (HTTPS required).</li>
+<li>Set a strong <code>RESPRO_WEB_API_TOKEN</code>.</li>
+<li>Set explicit <code>RESPRO_WEB_CORS_ORIGINS</code> for your frontend domain(s).</li>
+<li>Configure <code>RESPRO_WEB_TRUSTED_PROXIES</code> only for known proxy IPs/CIDRs.</li>
+<li>Optionally enable a legal notice (Impressum) — see below.</li>
+</ol>
+<h3 id="legal-notice-impressum-optional">Legal notice / Impressum (optional)<a class="headerlink" href="#legal-notice-impressum-optional" title="Permanent link">¶</a></h3>
+<p>For public hosting in jurisdictions that require a legal notice (e.g. a DSGVO/§5 TMG
+Impressum in Germany), ResistanceProfiler can serve a deployment-specific HTML page at
+<code>/legal</code> and surface a "Legal notice" link in the app footer.</p>
+<p>The feature is <strong>off by default</strong>. The repo ships with no impressum content — each hoster
+provides their own and keeps it out of version control.</p>
+<p>Enable it by pointing <code>RESPRO_WEB_IMPRESSUM_PATH</code> at an HTML file and mounting it into the
+container:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">services</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">respro-web</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">RESPRO_WEB_IMPRESSUM_PATH=/data/impressum.html</span>
+<span class="w">    </span><span class="nt">volumes</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./data:/data:rw</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./impressum.html:/data/impressum.html:ro</span>
+</code></pre></div>
+<p>Then create <code>impressum.html</code> on the host next to your <code>docker-compose.web.yml</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="cp">&lt;!DOCTYPE html&gt;</span>
+<span class="p">&lt;</span><span class="nt">html</span> <span class="na">lang</span><span class="o">=</span><span class="s">"en"</span><span class="p">&gt;</span>
+<span class="p">&lt;</span><span class="nt">head</span><span class="p">&gt;</span>
+    <span class="p">&lt;</span><span class="nt">meta</span> <span class="na">charset</span><span class="o">=</span><span class="s">"utf-8"</span><span class="p">&gt;</span>
+    <span class="p">&lt;</span><span class="nt">meta</span> <span class="na">name</span><span class="o">=</span><span class="s">"viewport"</span> <span class="na">content</span><span class="o">=</span><span class="s">"width=device-width, initial-scale=1"</span><span class="p">&gt;</span>
+    <span class="p">&lt;</span><span class="nt">title</span><span class="p">&gt;</span>Legal notice<span class="p">&lt;/</span><span class="nt">title</span><span class="p">&gt;</span>
+<span class="p">&lt;/</span><span class="nt">head</span><span class="p">&gt;</span>
+<span class="p">&lt;</span><span class="nt">body</span><span class="p">&gt;</span>
+    <span class="p">&lt;</span><span class="nt">h1</span><span class="p">&gt;</span>Legal notice / Impressum<span class="p">&lt;/</span><span class="nt">h1</span><span class="p">&gt;</span>
+    <span class="cm">&lt;!-- Add the content required by your jurisdiction here, e.g. provider</span>
+<span class="cm">         name, address, contact, and responsible person per §18 MStV. --&gt;</span>
+<span class="p">&lt;/</span><span class="nt">body</span><span class="p">&gt;</span>
+<span class="p">&lt;/</span><span class="nt">html</span><span class="p">&gt;</span>
+</code></pre></div>
+<p>Behaviour notes:</p>
+<ul>
+<li>The <code>/legal</code> route is <strong>public</strong> (no API token required). This is intentional: a legal
+  notice must be reachable without barriers for DSGVO compliance.</li>
+<li>The file is read once at startup. Editing it requires a container restart.</li>
+<li>If <code>RESPRO_WEB_IMPRESSUM_PATH</code> is set but the file is missing or unreadable, startup
+  fails fast with a clear error. Leaving the variable unset silently disables the feature.</li>
+<li>The "Legal notice" link in the footer only appears when an impressum is configured.</li>
+</ul>
+<h3 id="caddy-example">Caddy example<a class="headerlink" href="#caddy-example" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code>respro.example.com {
+    encode gzip
+
+    reverse_proxy 127.0.0.1:8000 {
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Host {host}
+    }
+}
+</code></pre></div>
+<h3 id="nginx-example-https">nginx example (HTTPS)<a class="headerlink" href="#nginx-example-https" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code><span class="k">server</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kn">listen</span><span class="w"> </span><span class="mi">443</span><span class="w"> </span><span class="s">ssl</span><span class="w"> </span><span class="s">http2</span><span class="p">;</span>
+<span class="w">    </span><span class="kn">server_name</span><span class="w"> </span><span class="s">respro.example.com</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kn">ssl_certificate</span><span class="w"> </span><span class="s">/etc/letsencrypt/live/respro.example.com/fullchain.pem</span><span class="p">;</span>
+<span class="w">    </span><span class="kn">ssl_certificate_key</span><span class="w"> </span><span class="s">/etc/letsencrypt/live/respro.example.com/privkey.pem</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kn">location</span><span class="w"> </span><span class="s">/</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kn">proxy_pass</span><span class="w"> </span><span class="s">http://127.0.0.1:8000</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">Host</span><span class="w"> </span><span class="nv">$host</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">X-Real-IP</span><span class="w"> </span><span class="nv">$remote_addr</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">X-Forwarded-For</span><span class="w"> </span><span class="nv">$proxy_add_x_forwarded_for</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">X-Forwarded-Proto</span><span class="w"> </span><span class="nv">$scheme</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_http_version</span><span class="w"> </span><span class="mi">1</span><span class="s">.1</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="k">server</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kn">listen</span><span class="w"> </span><span class="mi">80</span><span class="p">;</span>
+<span class="w">    </span><span class="kn">server_name</span><span class="w"> </span><span class="s">respro.example.com</span><span class="p">;</span>
+<span class="w">    </span><span class="kn">return</span><span class="w"> </span><span class="mi">301</span><span class="w"> </span><span class="s">https://</span><span class="nv">$host$request_uri</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="nginx-step-by-step-local-network">nginx step-by-step (local network)<a class="headerlink" href="#nginx-step-by-step-local-network" title="Permanent link">¶</a></h3>
+<p>Use this when your app is currently reachable directly on a LAN or intranet host and you want nginx in front of it.</p>
+<ol>
+<li><strong>Keep <code>respro-web</code> private to the host.</strong></li>
+</ol>
+<p>In <code>docker-compose.web.yml</code>, bind the app to loopback only so clients cannot bypass nginx:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">services</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">respro-web</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">ports</span><span class="p">:</span>
+<span class="w">            </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">'127.0.0.1:8000:8000'</span>
+</code></pre></div>
+<p>Then restart:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.web.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
+</code></pre></div>
+<ol>
+<li><strong>Install nginx on the same machine as Docker.</strong></li>
+</ol>
+<p>Example for Debian/Ubuntu:</p>
+<div class="highlight"><pre><span></span><code>sudo<span class="w"> </span>apt<span class="w"> </span>update
+sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>-y<span class="w"> </span>nginx
+</code></pre></div>
+<ol>
+<li><strong>Choose the hostname clients should use.</strong></li>
+</ol>
+<p>Use either:</p>
+<ul>
+<li>a fixed LAN IP such as <code>http://192.168.1.50/</code></li>
+<li>an internal DNS name such as <code>http://respro.internal/</code></li>
+<li>
+<p>a host entry on client machines if no internal DNS is available</p>
+</li>
+<li>
+<p><strong>Create an nginx site config for HTTP on the local network.</strong></p>
+</li>
+</ul>
+<p>Create <code>/etc/nginx/sites-available/respro</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">server</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kn">listen</span><span class="w"> </span><span class="mi">80</span><span class="p">;</span>
+<span class="w">    </span><span class="kn">server_name</span><span class="w"> </span><span class="s">respro.internal</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kn">client_max_body_size</span><span class="w"> </span><span class="mi">1024m</span><span class="p">;</span>
+<span class="w">    </span><span class="kn">proxy_read_timeout</span><span class="w"> </span><span class="s">3600s</span><span class="p">;</span>
+
+<span class="w">    </span><span class="kn">location</span><span class="w"> </span><span class="s">/</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kn">proxy_pass</span><span class="w"> </span><span class="s">http://127.0.0.1:8000</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">Host</span><span class="w"> </span><span class="nv">$host</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">X-Real-IP</span><span class="w"> </span><span class="nv">$remote_addr</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">X-Forwarded-For</span><span class="w"> </span><span class="nv">$proxy_add_x_forwarded_for</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_set_header</span><span class="w"> </span><span class="s">X-Forwarded-Proto</span><span class="w"> </span><span class="nv">$scheme</span><span class="p">;</span>
+<span class="w">        </span><span class="kn">proxy_http_version</span><span class="w"> </span><span class="mi">1</span><span class="s">.1</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Replace <code>respro.internal</code> with the hostname or IP that clients will use. <code>client_max_body_size</code> is important for larger uploads. <code>proxy_read_timeout</code> avoids premature timeouts for longer profiling requests.</p>
+</div>
+<ol>
+<li><strong>Enable the site and reload nginx.</strong></li>
+</ol>
+<div class="highlight"><pre><span></span><code>sudo<span class="w"> </span>ln<span class="w"> </span>-s<span class="w"> </span>/etc/nginx/sites-available/respro<span class="w"> </span>/etc/nginx/sites-enabled/respro
+sudo<span class="w"> </span>nginx<span class="w"> </span>-t
+sudo<span class="w"> </span>systemctl<span class="w"> </span>reload<span class="w"> </span>nginx
+</code></pre></div>
+<p>If you use another firewall, allow inbound TCP traffic to the nginx port you selected.</p>
+<ol>
+<li><strong>Configure backend trust and auth settings.</strong></li>
+</ol>
+<p>Set in <code>.env</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">RESPRO_WEB_API_TOKEN</span><span class="o">=</span>replace-with-a-long-random-secret
+<span class="nv">RESPRO_WEB_CORS_ORIGINS</span><span class="o">=</span>http://respro.internal
+<span class="nv">RESPRO_WEB_TRUSTED_PROXIES</span><span class="o">=</span><span class="m">127</span>.0.0.1
+</code></pre></div>
+<p>If clients will access the app by IP instead of hostname, set <code>RESPRO_WEB_CORS_ORIGINS</code> to that exact origin, for example <code>http://192.168.1.50</code>.</p>
+<p>Then restart the stack:</p>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.web.yml<span class="w"> </span>up<span class="w"> </span>-d
+</code></pre></div>
+<ol>
+<li><strong>Validate end-to-end from another client on the same network.</strong></li>
+</ol>
+
+
+
+
+
+
+
+  
+  
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden="">
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+<div class="md-footer">
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-footer-copyright">
+        
+          © 2026 Jonas Fuchs, University Medical Center Freiburg — Licensed under AGPL-3.0
+        
+      </div>
+      <div class="md-footer-social">
+        <a href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noopener" title="GitHub">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.indexes", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.tooltips"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>
