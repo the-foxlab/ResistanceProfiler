@@ -24,13 +24,13 @@ export function AppFooter({ legalLink, contactEmail, cliVersion, webVersion }) {
       {(cliVersion || webVersion) && (
         <div className="app-footer-group">
           {cliVersion && (
-            <span className="app-footer-version">ResistanceProfiler Core v{cliVersion}</span>
+            <span className="app-footer-version">ResPro Core v{cliVersion}</span>
           )}
           {cliVersion && webVersion && (
             <span className="app-footer-sep" aria-hidden="true">·</span>
           )}
           {webVersion && (
-            <span className="app-footer-version">ResistanceProfiler WebApp v{webVersion}</span>
+            <span className="app-footer-version">ResPro WebApp v{webVersion}</span>
           )}
         </div>
       )}

@@ -98,6 +98,7 @@ export function DashboardView({
   setBatchMode,
   batchVcfFiles,
   batchFastaFiles,
+  batchJsonFiles,
   batchReferenceFasta,
   batchSamples,
   batchSubmitting,
@@ -113,6 +114,7 @@ export function DashboardView({
   setBatchVcfCutoffs,
   addBatchVcfFiles,
   addBatchFastaFiles,
+  addBatchJsonFiles,
   addBatchBamFiles,
   attachBatchBam,
   removeBatchFile,
@@ -283,6 +285,7 @@ export function DashboardView({
               setBatchMode={setBatchMode}
               batchVcfFiles={batchVcfFiles}
               batchFastaFiles={batchFastaFiles}
+              batchJsonFiles={batchJsonFiles}
               batchReferenceFasta={batchReferenceFasta}
               batchSamples={batchSamples}
               batchSubmitting={batchSubmitting}
@@ -297,6 +300,7 @@ export function DashboardView({
               setBatchVcfCutoffs={setBatchVcfCutoffs}
               addBatchVcfFiles={addBatchVcfFiles}
               addBatchFastaFiles={addBatchFastaFiles}
+              addBatchJsonFiles={addBatchJsonFiles}
               addBatchBamFiles={addBatchBamFiles}
               attachBatchBam={attachBatchBam}
               removeBatchFile={removeBatchFile}

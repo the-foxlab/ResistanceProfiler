@@ -330,3 +330,138 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
     });
   });
 });
+
+describe('useBatchManager — JSON regenerate batch', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.fetch.mockReset();
+    mockXHRInstances.length = 0;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Upload a results-JSON file into the hook via addBatchJsonFiles.
+  async function uploadJson(result, fileName, uploadId) {
+    const file = new File(['{"run":{}}'], fileName, { type: 'application/json' });
+    let promise;
+    await act(async () => {
+      promise = result.current.addBatchJsonFiles([file]);
+      mockXHRInstance.triggerSuccess({ upload_id: uploadId, file_type: 'json', size_bytes: 12 });
+      await promise;
+    });
+  }
+
+  it('addBatchJsonFiles uploads via /api/upload/json and records the file', async () => {
+    const stubs = makeStubs();
+    const { result } = renderHook(() => useBatchManager(stubs));
+
+    await uploadJson(result, 'sample1.results.json', 'up-json-1');
+
+    expect(result.current.batchJsonFiles).toHaveLength(1);
+    expect(result.current.batchJsonFiles[0].uploadId).toBe('up-json-1');
+    expect(result.current.batchJsonFiles[0].name).toBe('sample1.results.json');
+    expect(stubs.addUploadedPath).toHaveBeenCalledWith('up-json-1');
+  });
+
+  it('removeBatchFile drops a JSON row in json mode', async () => {
+    const stubs = makeStubs();
+    const { result } = renderHook(() => useBatchManager(stubs));
+
+    await uploadJson(result, 'sample1.results.json', 'up-json-1');
+    await uploadJson(result, 'sample2.results.json', 'up-json-2');
+    act(() => {
+      result.current.setBatchMode('json');
+    });
+
+    act(() => {
+      result.current.removeBatchFile(0);
+    });
+
+    expect(result.current.batchJsonFiles).toHaveLength(1);
+    expect(result.current.batchJsonFiles[0].name).toBe('sample2.results.json');
+  });
+
+  it('submitBatch JSON branch POSTs /api/regenerate/batch with json_ids and database_id', async () => {
+    const stubs = makeStubs();
+    const { result } = renderHook(() => useBatchManager(stubs));
+
+    await uploadJson(result, 'sample1.results.json', 'up-json-1');
+    await uploadJson(result, 'sample2.results.json', 'up-json-2');
+    act(() => {
+      result.current.setBatchMode('json');
+    });
+
+    let submittedBody;
+    global.fetch.mockImplementation(async (url, options) => {
+      if (options && options.body) {
+        submittedBody = JSON.parse(options.body);
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          samples: [
+            { job_id: 'j1', sample_name: 'sample1', status: 'succeeded' },
+            { job_id: 'j2', sample_name: 'sample2', status: 'succeeded' },
+          ],
+          total: 2,
+        }),
+      };
+    });
+
+    await act(async () => {
+      await result.current.submitBatch();
+    });
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalled();
+    });
+    expect(submittedBody.json_ids).toEqual(['up-json-1', 'up-json-2']);
+    expect(submittedBody.sample_names).toEqual(['sample1.results', 'sample2.results']);
+    expect(submittedBody.input_display_names).toEqual(['sample1.results.json', 'sample2.results.json']);
+    expect(submittedBody.database_id).toBe('db1');
+    // JSON regenerate has no shared reference or cutoffs.
+    expect(submittedBody.reference_id).toBeUndefined();
+    expect(submittedBody.db_path).toBeUndefined();
+    expect(submittedBody.min_af).toBeUndefined();
+  });
+
+  it('submitBatch JSON branch surfaces a 429 rate limit via batchError', async () => {
+    const stubs = makeStubs();
+    const { result } = renderHook(() => useBatchManager(stubs));
+
+    await uploadJson(result, 'sample1.results.json', 'up-json-1');
+    act(() => {
+      result.current.setBatchMode('json');
+    });
+
+    global.fetch.mockImplementation(async () => ({
+      ok: false,
+      status: 429,
+      json: async () => ({ detail: 'rate limited' }),
+    }));
+
+    await act(async () => {
+      await result.current.submitBatch();
+    });
+
+    await waitFor(() => {
+      expect(result.current.batchError).toMatch(/Rate limit/);
+      expect(result.current.batchRateLimitCooldown).toBe(60);
+    });
+  });
+
+  it('resetBatch clears JSON files', async () => {
+    const stubs = makeStubs();
+    const { result } = renderHook(() => useBatchManager(stubs));
+
+    await uploadJson(result, 'sample1.results.json', 'up-json-1');
+    act(() => {
+      result.current.resetBatch();
+    });
+
+    expect(result.current.batchJsonFiles).toHaveLength(0);
+  });
+});

@@ -14,6 +14,7 @@ export function useBatchManager({
   const [batchMode, setBatchMode] = useState('vcf');
   const [batchVcfFiles, setBatchVcfFiles] = useState([]);
   const [batchFastaFiles, setBatchFastaFiles] = useState([]);
+  const [batchJsonFiles, setBatchJsonFiles] = useState([]);
   const [batchReferenceFasta, setBatchReferenceFastaState] = useState(null);
   const [batchSamples, setBatchSamples] = useState([]);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
@@ -188,11 +189,36 @@ export function useBatchManager({
     }
   };
 
+  const addBatchJsonFiles = async (files) => {
+    const toUpload = Array.from(files).slice(0, batchMaxSamples - batchJsonFiles.length);
+    for (const file of toUpload) {
+      try {
+        setUploadProgress({
+          percent: 0,
+          fileName: `BATCH JSON - ${file.name}`,
+        });
+        const response = await apiUpload('/api/upload/json', file, (percent) => {
+          setUploadProgress((prev) => ({
+            ...prev,
+            percent,
+          }));
+        });
+        setUploadProgress((prev) => ({ ...prev, percent: 100 }));
+        setBatchJsonFiles((prev) => [...prev, { uploadId: response.upload_id, name: file.name, size: file.size }]);
+        addUploadedPath(response.upload_id);
+      } catch (error) {
+        setBatchError(formatUserError(error.message));
+      }
+    }
+  };
+
   const removeBatchFile = (index) => {
     if (batchMode === 'vcf') {
       setBatchVcfFiles((prev) => prev.filter((_, i) => i !== index));
-    } else {
+    } else if (batchMode === 'fasta') {
       setBatchFastaFiles((prev) => prev.filter((_, i) => i !== index));
+    } else {
+      setBatchJsonFiles((prev) => prev.filter((_, i) => i !== index));
     }
   };
 
@@ -278,7 +304,7 @@ export function useBatchManager({
   const submitBatch = async () => {
     setBatchError(null);
     setBatchSubmitting(true);
-    const files = batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles;
+    const files = batchMode === 'vcf' ? batchVcfFiles : batchMode === 'fasta' ? batchFastaFiles : batchJsonFiles;
     if (files.length === 0) {
       setBatchError('No files uploaded.');
       setBatchSubmitting(false);
@@ -316,7 +342,7 @@ export function useBatchManager({
           throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
         }
         responseData = await response.json();
-      } else {
+      } else if (batchMode === 'fasta') {
         const sampleNames = batchFastaFiles.map((file) => formatPathStem(file.name));
         const body = {
           fasta_ids: batchFastaFiles.map((f) => f.uploadId),
@@ -325,6 +351,27 @@ export function useBatchManager({
           db_path: selectedDatabaseId,
         };
         const response = await apiPostRaw('/api/profile/batch/fasta', body);
+        if (response.status === 429) {
+          setBatchRateLimitCooldown(60);
+          setBatchError(`Rate limit reached. At most ${sampleLimitPerMinute} samples can be analyzed per minute.`);
+          return;
+        }
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          throw new Error(formatUserError(payload.detail || `Request failed: ${response.status}`));
+        }
+        responseData = await response.json();
+      } else {
+        // JSON regenerate batch: each results-JSON resolves its own project DB via the
+        // stored fingerprint on the backend, so no shared db_path is sent.
+        const sampleNames = batchJsonFiles.map((file) => formatPathStem(file.name));
+        const body = {
+          json_ids: batchJsonFiles.map((f) => f.uploadId),
+          sample_names: sampleNames,
+          input_display_names: batchJsonFiles.map((f) => f.name),
+          database_id: selectedDatabaseId,
+        };
+        const response = await apiPostRaw('/api/regenerate/batch', body);
         if (response.status === 429) {
           setBatchRateLimitCooldown(60);
           setBatchError(`Rate limit reached. At most ${sampleLimitPerMinute} samples can be analyzed per minute.`);
@@ -357,6 +404,7 @@ export function useBatchManager({
   const resetBatch = () => {
     setBatchVcfFiles([]);
     setBatchFastaFiles([]);
+    setBatchJsonFiles([]);
     setBatchReferenceFastaState(null);
     setBatchSamples([]);
     setBatchSubmitting(false);
@@ -389,6 +437,7 @@ export function useBatchManager({
     setBatchMode,
     batchVcfFiles,
     batchFastaFiles,
+    batchJsonFiles,
     batchReferenceFasta,
     batchSamples,
     batchSubmitting,
@@ -405,6 +454,7 @@ export function useBatchManager({
     setBatchVcfCutoffs,
     addBatchVcfFiles,
     addBatchFastaFiles,
+    addBatchJsonFiles,
     addBatchBamFiles,
     attachBatchBam,
     removeBatchBam,

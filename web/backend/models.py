@@ -135,6 +135,24 @@ class BatchProfileFastaPayload(BaseModel):
     threads: int = Field(default=1, ge=1, le=WEB_BACKEND_CONFIG.defaults.profile_max_threads)
 
 
+class BatchRegenerateJsonPayload(BaseModel):
+    """Payload for submitting a batch regenerate-from-JSON job.
+
+    Each uploaded results-JSON ID is resolved to its own project database via the
+    stored ``project_fingerprint`` (with ``database_id`` as a per-request fallback),
+    so a single batch may span databases — unlike VCF/FASTA batches which share one
+    ``db_path``. Inputs are referenced by opaque upload IDs.
+    """
+
+    json_ids: list[str] = Field(max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length)
+    sample_names: list[str] = Field(max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length)
+    input_display_names: list[str] | None = Field(
+        default=None,
+        max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length,
+    )
+    database_id: str | None = Field(default=None, max_length=WEB_BACKEND_CONFIG.defaults.opaque_id_max_length)
+
+
 class UploadResponse(BaseModel):
     """Response returned after a file is successfully uploaded.
 
