@@ -30,6 +30,15 @@ export function ResultsTab({
   fetchComparisonData,
   clearComparison,
 }) {
+  const selectedResults = [...selectedResultIndices]
+    .map((i) => sessionResults[i])
+    .filter(Boolean);
+  const selectedDbIds = new Set(selectedResults.map((r) => r.database_id || ''));
+  const selectedRefNames = new Set(selectedResults.map((r) => r.reference_name || ''));
+  const isSelectionComparable = selectedResults.length >= 2
+    && selectedDbIds.size === 1
+    && selectedRefNames.size === 1;
+
   return (
     <article className="card full-width-tile tab-primary-tile">
       <div className="workspace-output-header section-header">
@@ -37,6 +46,20 @@ export function ResultsTab({
           <h2>Session results</h2>
           <p>All analysis outputs from this session. Results are cleared on page reload.</p>
         </div>
+        {sessionResults.length > 0 ? (
+          <button
+            type="button"
+            className="analyze-primary results-download-btn"
+            onClick={() => downloadSelectedArtifacts()}
+            disabled={selectedResultIndices.size === 0 || isSessionDownloadBusy}
+          >
+            {isSessionDownloadBusy ? (
+              <><Spinner /> Preparing...</>
+            ) : (
+              'Download'
+            )}
+          </button>
+        ) : null}
       </div>
       {sessionResults.length === 0 ? (
         <p className="status">No results yet. Run an analysis to see results here.</p>
@@ -46,7 +69,20 @@ export function ResultsTab({
           <table>
             <thead>
               <tr>
-                <th className="checkbox-col"></th>
+                <th className="checkbox-col">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all results"
+                    checked={sessionResults.length > 0 && selectedResultIndices.size === sessionResults.length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedResultIndices(new Set(sessionResults.map((_, i) => i)));
+                      } else {
+                        setSelectedResultIndices(new Set());
+                      }
+                    }}
+                  />
+                </th>
                 <th>Mode</th>
                 <th>Sample</th>
                 <th>Reference</th>
@@ -104,32 +140,10 @@ export function ResultsTab({
             </tbody>
           </table>
         </div>
-        <div className="profile-analyze-row">
-          <button
-            type="button"
-            className="analyze-primary"
-            onClick={() => downloadAllSessionArtifacts()}
-            disabled={isSessionDownloadBusy}
-          >
-            {isSessionDownloadBusy ? (
-              <><Spinner /> Preparing...</>
-            ) : (
-              'Download all'
-            )}
-          </button>
-          <button
-            type="button"
-            className="analyze-primary"
-            onClick={() => downloadSelectedArtifacts()}
-            disabled={selectedResultIndices.size === 0 || isSessionDownloadBusy}
-          >
-            Download selected
-          </button>
-        </div>
         <div className="profile-analyze-row comparison-actions">
           <button
             type="button"
-            className="analyze-primary"
+            className="analyze-primary comparison-secondary"
             onClick={() => selectAllComparable()}
             disabled={selectedResultIndices.size === 0}
           >
@@ -139,19 +153,21 @@ export function ResultsTab({
             type="button"
             className="analyze-primary"
             onClick={() => fetchComparisonData()}
-            disabled={selectedResultIndices.size < 2 || isComparisonBusy}
+            disabled={selectedResultIndices.size < 2 || isComparisonBusy || !isSelectionComparable}
           >
             {isComparisonBusy ? <><Spinner /> Comparing...</> : 'Compare selected'}
           </button>
           <button
             type="button"
-            className="comparison-clear-btn"
+            className="analyze-primary"
             onClick={() => clearComparison()}
             disabled={!comparisonData}
           >
             Clear comparison
           </button>
         </div>
+        {comparisonData && (
+          <>
         <div className="comparison-filters">
           <label className="comparison-switch" title="Show only non-synonymous mutations">
             <input
@@ -180,8 +196,7 @@ export function ResultsTab({
             <span>DB hits only</span>
           </label>
         </div>
-        {comparisonData && (
-          <section className="comparison-section">
+        <section className="comparison-section">
             <div className="workspace-output-header section-header">
               <div>
                 <h3>Comparison heatmap
@@ -204,6 +219,7 @@ export function ResultsTab({
             </div>
             <ComparisonHeatmap data={comparisonData} isBusy={isComparisonBusy} />
           </section>
+          </>
         )}
         </>
       )}

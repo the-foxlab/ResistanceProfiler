@@ -1,5 +1,5 @@
 export const PROFILE_MODES = [
-  { id: 'vcf', label: 'VCF mode' },
-  { id: 'fasta', label: 'FASTA mode' },
-  { id: 'regenerate', label: 'Regenerate mode' },
+  { id: 'vcf', label: 'VCF' },
+  { id: 'fasta', label: 'FASTA' },
+  { id: 'regenerate', label: 'JSON' },
 ];

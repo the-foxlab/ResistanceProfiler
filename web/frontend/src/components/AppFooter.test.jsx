@@ -12,8 +12,8 @@ describe('AppFooter', () => {
     render(<AppFooter />);
     expect(screen.queryByText('Legal notice')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /contact/i })).not.toBeInTheDocument();
-    expect(screen.queryByText(/ResistanceProfiler Core/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/ResistanceProfiler WebApp/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/respro CLI/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/respro WebApp/)).not.toBeInTheDocument();
   });
 
   it('renders a mailto contact link only when contactEmail is set', () => {

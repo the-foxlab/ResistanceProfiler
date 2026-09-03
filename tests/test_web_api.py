@@ -2328,6 +2328,241 @@ class TestBatchProfileEndpoints:
         assert enqueued_bam_paths == [None, None]
 
 
+class TestBatchRegenerateEndpoints:
+    """Batch regenerate-from-JSON endpoint: /api/regenerate/batch.
+
+    Mirrors the single ``/api/regenerate/json`` route but accepts a list of uploaded
+    results-JSON IDs. Each JSON resolves its own project DB via the stored
+    ``project_fingerprint`` (with a per-request fallback ``database_id``), so a batch
+    may span databases — unlike VCF/FASTA batches which share one ``db_path``.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_sample_quota(self):
+        _SAMPLE_QUOTA_COUNTER.clear()
+        reset_memory_stores()
+        yield
+        _SAMPLE_QUOTA_COUNTER.clear()
+        reset_memory_stores()
+
+    def _default_db(self, startup_config: StartupConfig) -> str:
+        return sorted(startup_config.project_databases_dir.glob('*.db'))[0].name
+
+    def _produce_results_json_bytes(
+        self,
+        client: TestClient,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        sample_name: str,
+    ) -> bytes:
+        """Run one VCF profile job and return the bytes of its results-JSON artifact."""
+        vcf_id = _upload_file(client, web_sample_vcf, 'vcf')
+        ref_id = _upload_file(client, web_sample_ref_fasta, 'fasta')
+        submit = client.post(
+            '/api/profile/vcf',
+            json={
+                'vcf_id': vcf_id,
+                'reference_id': ref_id,
+                'sample': sample_name,
+            },
+        )
+        assert submit.status_code == 200, submit.text
+        payload = _poll_job(client, submit.json()['job_id'])
+        assert payload['status'] == 'succeeded', payload
+        json_artifact_id = payload['result']['report_json_path']
+        return client.get('/api/artifact', params={'artifact_id': json_artifact_id}).content
+
+    def test_batch_regenerate_submit_success(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+    ) -> None:
+        json_a = self._produce_results_json_bytes(
+            client, web_sample_vcf, web_sample_ref_fasta, 'batch-regen-a',
+        )
+        json_b = self._produce_results_json_bytes(
+            client, web_sample_vcf, web_sample_ref_fasta, 'batch-regen-b',
+        )
+        json_id_a = _upload_bytes(client, json_a, 'json', 'sample-a.results.json')
+        json_id_b = _upload_bytes(client, json_b, 'json', 'sample-b.results.json')
+
+        response = client.post(
+            '/api/regenerate/batch',
+            json={
+                'json_ids': [json_id_a, json_id_b],
+                'sample_names': ['regen-a', 'regen-b'],
+                'input_display_names': ['sample-a.results.json', 'sample-b.results.json'],
+                'database_id': self._default_db(startup_config),
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data['total'] == 2
+        assert len(data['samples']) == 2
+        for entry in data['samples']:
+            assert entry['job_id']
+            assert entry['status'] == 'queued'
+
+    def test_batch_regenerate_jobs_resolve_to_regenerated_artifacts(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+    ) -> None:
+        json_bytes = self._produce_results_json_bytes(
+            client, web_sample_vcf, web_sample_ref_fasta, 'batch-regen-resolve',
+        )
+        json_id = _upload_bytes(client, json_bytes, 'json', 'resolve.results.json')
+
+        response = client.post(
+            '/api/regenerate/batch',
+            json={
+                'json_ids': [json_id],
+                'sample_names': ['regen-resolve'],
+                'input_display_names': ['resolve.results.json'],
+                'database_id': self._default_db(startup_config),
+            },
+        )
+        assert response.status_code == 200, response.text
+        submitted = response.json()['samples']
+
+        for sample in submitted:
+            payload = _poll_job(client, sample['job_id'])
+            assert payload['status'] == 'succeeded', payload
+            result = payload['result']
+            assert result['mode'] == 'regenerate-json'
+            assert result['report_html_path']
+            assert result['report_json_path']
+            assert result['report_pdf_path']
+
+    def test_batch_regenerate_mismatched_lengths_returns_422(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+    ) -> None:
+        json_bytes = self._produce_results_json_bytes(
+            client, web_sample_vcf, web_sample_ref_fasta, 'batch-regen-mismatch',
+        )
+        json_id = _upload_bytes(client, json_bytes, 'json', 'mismatch.results.json')
+
+        response = client.post(
+            '/api/regenerate/batch',
+            json={
+                'json_ids': [json_id, json_id],
+                'sample_names': ['only-one'],
+                'database_id': self._default_db(startup_config),
+            },
+        )
+
+        assert response.status_code == 422
+        assert 'json_ids and sample_names must have the same length.' in response.json()['detail']
+
+    def test_batch_regenerate_exceeds_max_size_returns_422(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+    ) -> None:
+        json_bytes = self._produce_results_json_bytes(
+            client, web_sample_vcf, web_sample_ref_fasta, 'batch-regen-oversize',
+        )
+        json_id = _upload_bytes(client, json_bytes, 'json', 'oversize.results.json')
+
+        response = client.post(
+            '/api/regenerate/batch',
+            json={
+                'json_ids': [json_id] * 26,
+                'sample_names': [f'regen-{i}' for i in range(26)],
+                'database_id': self._default_db(startup_config),
+            },
+        )
+
+        assert response.status_code == 422
+        detail = str(response.json())
+        assert 'batch' in detail.lower() or '25' in detail
+
+    def test_batch_regenerate_missing_json_file_returns_404_without_partial_enqueue(
+        self,
+        client: TestClient,
+        sync_queue: Queue,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        json_bytes = self._produce_results_json_bytes(
+            client, web_sample_vcf, web_sample_ref_fasta, 'batch-regen-partial',
+        )
+        json_id = _upload_bytes(client, json_bytes, 'json', 'partial.results.json')
+
+        enqueue_calls = 0
+        original_enqueue = sync_queue.enqueue
+
+        def counting_enqueue(*args, **kwargs):
+            nonlocal enqueue_calls
+            enqueue_calls += 1
+            return original_enqueue(*args, **kwargs)
+
+        monkeypatch.setattr(sync_queue, 'enqueue', counting_enqueue)
+
+        response = client.post(
+            '/api/regenerate/batch',
+            json={
+                'json_ids': [json_id, 'nonexistent-json-id'],
+                'sample_names': ['regen-a', 'regen-b'],
+                'database_id': self._default_db(startup_config),
+            },
+        )
+
+        assert response.status_code == 404
+        assert 'JSON file not found for sample' in response.json()['detail']
+        assert enqueue_calls == 0
+
+    def test_batch_regenerate_rate_limit_returns_429(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        web_sample_vcf: Path,
+        web_sample_ref_fasta: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Exceeding the per-minute sample quota returns 429 with no jobs enqueued."""
+        json_bytes = self._produce_results_json_bytes(
+            client, web_sample_vcf, web_sample_ref_fasta, 'batch-regen-ratelimit',
+        )
+        json_id = _upload_bytes(client, json_bytes, 'json', 'ratelimit.results.json')
+
+        # Force the in-memory quota path (no Redis) and a fixed identity so we can
+        # pre-saturate the counter for the exact key the route will use.
+        monkeypatch.delenv('REDIS_URL', raising=False)
+        import web.backend.main as main_module
+
+        fixed_identity = 'ip:testclient'
+        monkeypatch.setattr(main_module, '_rate_limit_key', lambda request: fixed_identity)
+        max_per_minute = WEB_BACKEND_CONFIG.defaults.max_batch_size
+        window_minute = main_module._current_window_minute()
+        _SAMPLE_QUOTA_COUNTER.clear()
+        _SAMPLE_QUOTA_COUNTER[(fixed_identity, window_minute)] = max_per_minute
+
+        response = client.post(
+            '/api/regenerate/batch',
+            json={
+                'json_ids': [json_id],
+                'sample_names': ['regen-ratelimit'],
+                'database_id': self._default_db(startup_config),
+            },
+        )
+
+        assert response.status_code == 429
+
+
 class TestLegalRoute:
     """Legal notice / imprint route across the four configuration states.
 

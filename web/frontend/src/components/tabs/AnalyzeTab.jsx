@@ -3,13 +3,9 @@ import { useEffect, useRef, useState } from 'react';
 import analyzeIconSrc from '../../assets/icon-analyze.svg';
 import batchIconSrc from '../../assets/batch.svg';
 import exampleIconSrc from '../../assets/example.svg';
+import fileIconSrc from '../../assets/file.svg';
 import infoIconSrc from '../../assets/info.svg';
 import { Spinner } from '../Spinner';
-
-const ANALYZE_SUBMODES = [
-  { id: 'single', label: 'One Sample', iconSrc: analyzeIconSrc },
-  { id: 'batch', label: 'Multiple Samples', iconSrc: batchIconSrc },
-];
 
 export function AnalyzeTab({
   selectedDatabase,
@@ -46,6 +42,7 @@ export function AnalyzeTab({
   setBatchMode,
   batchVcfFiles,
   batchFastaFiles,
+  batchJsonFiles,
   batchReferenceFasta,
   batchSamples,
   batchSubmitting,
@@ -60,6 +57,7 @@ export function AnalyzeTab({
   setBatchVcfCutoffs,
   addBatchVcfFiles,
   addBatchFastaFiles,
+  addBatchJsonFiles,
   addBatchBamFiles,
   attachBatchBam,
   removeBatchFile,
@@ -202,13 +200,6 @@ export function AnalyzeTab({
         <div className="analyze-shell-header section-header">
           <div>
             <h2>{analyzeSubMode === 'batch' ? 'Analyze multiple samples' : 'Analyze'}</h2>
-            <p>
-              {analyzeSubMode === 'batch'
-                ? 'Submit multiple sequence file at once (max 25 per batch and minute).'
-                : 'Profile vcf files or consensus fasta sequence or regenerate a previous report. Bam files are optional and can be used for coverage analysis.'}
-            </p>
-          </div>
-          <div className="analyze-submode-row" role="group" aria-label="Analysis workflow" ref={analyzeSubmodeRowRef}>
             {selectedDatabase?.has_example ? (
               <button
                 type="button"
@@ -225,53 +216,13 @@ export function AnalyzeTab({
                 Example
               </button>
             ) : null}
-            {ANALYZE_SUBMODES.map((subMode) => (
-              <button
-                key={subMode.id}
-                type="button"
-                className={`analyze-submode-btn ${analyzeSubMode === subMode.id ? 'active' : ''}`}
-                onClick={() => {
-                  if (subMode.id === 'single') {
-                    setActiveProfileMode('vcf');
-                    setAnalyzeSubMode('single');
-                    return;
-                  }
-
-                  if (subMode.id === 'batch') {
-                    setBatchMode('vcf');
-                    resetBatch();
-                    setAnalyzeSubMode('batch');
-                    return;
-                  }
-                }}
-                disabled={isAnalyzeScopeLocked}
-              >
-                <span className="sidebar-icon-mask analyze-submode-icon" style={{ '--icon-src': `url(${subMode.iconSrc})` }} aria-hidden="true" />
-                {subMode.label}
-              </button>
-            ))}
+            <p>
+              Profile VCF files, consensus FASTA sequences, or regenerate a previous report from JSON.
+              BAM files are optional and can be used for coverage analysis.
+            </p>
           </div>
-        </div>
-
-        {/* SINGLE SAMPLE submode */}
-        {analyzeSubMode === 'single' ? (
-          <div className="profile-input-subtile section-subtile">
-            <div className="profile-mode-row">
-              <div className="profile-settings-row" role="group" aria-label="Profiling mode">
-                <div className="database-phenotype-switch">
-                  {PROFILE_MODES.map((mode) => (
-                    <button
-                      key={mode.id}
-                      type="button"
-                      className={activeProfileMode === mode.id ? 'active' : ''}
-                      onClick={() => setActiveProfileMode(mode.id)}
-                      disabled={activeProfileMode === 'regenerate' ? isRegenerateBusy : isProfileBusy}
-                    >
-                      {mode.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          {analyzeSubMode === 'single' || !batchSubmitted ? (
+            <div className="analyze-submode-progress">
               <div className="upload-progress" aria-label="Upload progress">
                 <div className="upload-progress-head">
                   <span>Upload progress</span>
@@ -282,6 +233,97 @@ export function AnalyzeTab({
                 </div>
               </div>
             </div>
+          ) : null}
+          <div className="analyze-submode-row" role="group" aria-label="Analysis workflow" ref={analyzeSubmodeRowRef}>
+            <div className="analyze-submode-controls">
+              <div
+                className="analyze-submode-switch"
+                role="switch"
+                aria-label="One or multiple samples"
+                aria-checked={analyzeSubMode === 'batch'}
+                data-state={analyzeSubMode}
+              >
+                <button
+                  type="button"
+                  className={`analyze-submode-switch-option ${analyzeSubMode === 'single' ? 'active' : ''}`}
+                  onClick={() => {
+                    setActiveProfileMode('vcf');
+                    setAnalyzeSubMode('single');
+                  }}
+                  disabled={isAnalyzeScopeLocked}
+                >
+                  <span className="sidebar-icon-mask analyze-submode-icon" style={{ '--icon-src': `url(${analyzeIconSrc})` }} aria-hidden="true" />
+                  One Sample
+                </button>
+                <button
+                  type="button"
+                  className={`analyze-submode-switch-option ${analyzeSubMode === 'batch' ? 'active' : ''}`}
+                  onClick={() => {
+                    setBatchMode('vcf');
+                    resetBatch();
+                    setAnalyzeSubMode('batch');
+                  }}
+                  disabled={isAnalyzeScopeLocked}
+                >
+                  <span className="sidebar-icon-mask analyze-submode-icon" style={{ '--icon-src': `url(${batchIconSrc})` }} aria-hidden="true" />
+                  Multiple Samples
+                </button>
+                <span className="analyze-submode-switch-knob" aria-hidden="true" />
+              </div>
+              {analyzeSubMode === 'single' ? (
+                <div className="profile-settings-row" role="group" aria-label="Profiling mode">
+                  <div className="database-phenotype-switch" data-active-mode={activeProfileMode}>
+                    {PROFILE_MODES.map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        className={activeProfileMode === mode.id ? 'active' : ''}
+                        onClick={() => setActiveProfileMode(mode.id)}
+                        disabled={activeProfileMode === 'regenerate' ? isRegenerateBusy : isProfileBusy}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {analyzeSubMode === 'batch' && !batchSubmitted ? (
+                <div className="profile-settings-row" role="group" aria-label="Batch mode">
+                  <div className="database-phenotype-switch" data-active-mode={batchMode}>
+                    <button
+                      type="button"
+                      className={batchMode === 'vcf' ? 'active' : ''}
+                      onClick={() => setBatchMode('vcf')}
+                      disabled={batchSubmitting}
+                    >
+                      VCF
+                    </button>
+                    <button
+                      type="button"
+                      className={batchMode === 'fasta' ? 'active' : ''}
+                      onClick={() => setBatchMode('fasta')}
+                      disabled={batchSubmitting}
+                    >
+                      FASTA
+                    </button>
+                    <button
+                      type="button"
+                      className={batchMode === 'json' ? 'active' : ''}
+                      onClick={() => setBatchMode('json')}
+                      disabled={batchSubmitting}
+                    >
+                      JSON
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        {/* SINGLE SAMPLE submode */}
+        {analyzeSubMode === 'single' ? (
+          <div className="profile-input-subtile section-subtile">
 
             {activeProfileMode === 'vcf' ? (
               <div className="profile-upload-row profile-upload-row-vcf">
@@ -524,6 +566,15 @@ export function AnalyzeTab({
                 Download TSV
               </button>
             </div>
+
+            {!inlineReportPath ? (
+              <div className="report-placeholder">
+                <div className="report-placeholder-icon-wrap">
+                  <img src={fileIconSrc} alt="" className="report-placeholder-icon" aria-hidden="true" />
+                </div>
+                <p className="report-placeholder-text">Your analysis report will open here</p>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -532,39 +583,6 @@ export function AnalyzeTab({
           <div className="profile-input-subtile section-subtile">
           {!batchSubmitted ? (
             <>
-              {/* Mode sub-selector */}
-              <div className="profile-mode-row">
-                <div className="profile-settings-row" role="group" aria-label="Batch mode">
-                  <div className="database-phenotype-switch">
-                    <button
-                      type="button"
-                      className={batchMode === 'vcf' ? 'active' : ''}
-                      onClick={() => setBatchMode('vcf')}
-                      disabled={batchSubmitting}
-                    >
-                      VCF batch
-                    </button>
-                    <button
-                      type="button"
-                      className={batchMode === 'fasta' ? 'active' : ''}
-                      onClick={() => setBatchMode('fasta')}
-                      disabled={batchSubmitting}
-                    >
-                      FASTA batch
-                    </button>
-                  </div>
-                </div>
-                <div className="upload-progress" aria-label="Batch upload progress">
-                  <div className="upload-progress-head">
-                    <span>Upload progress</span>
-                    <span>{uploadProgress.percent}%</span>
-                  </div>
-                  <div className="upload-progress-track" aria-hidden="true">
-                    <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
-                  </div>
-                </div>
-              </div>
-
               {/* File upload area */}
               {batchMode === 'vcf' ? (
                 <div className="profile-upload-row profile-upload-row-batch-vcf">
@@ -649,7 +667,7 @@ export function AnalyzeTab({
                     />
                   </label>
                 </div>
-              ) : (
+              ) : batchMode === 'fasta' ? (
                 <div className="profile-upload-row">
                   <label>
                     <span className="input-label-row">FASTA files <button type="button" className="input-info-btn" aria-label="Batch FASTA help" title="Upload one or more consensus FASTA files."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
@@ -668,14 +686,36 @@ export function AnalyzeTab({
                     />
                   </label>
                 </div>
+              ) : (
+                <div className="profile-upload-row profile-upload-row-batch-json">
+                  <label>
+                    <span className="input-label-row">Results JSON files <button type="button" className="input-info-btn" aria-label="Batch JSON help" title="Upload one or more prior results JSON files exported by ResistanceProfiler. Each JSON is matched to its database by a unique project fingerprint."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                    <input
+                      type="file"
+                      multiple
+                      accept=".json"
+                      disabled={batchSubmitting}
+                      onChange={(event) => {
+                        if (!event.target.files) {
+                          return;
+                        }
+                        addBatchJsonFiles(event.target.files);
+                        event.target.value = '';
+                      }}
+                    />
+                  </label>
+                </div>
               )}
 
               {/* Uploaded file list */}
-              {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length > 0 ? (
+              {(() => {
+                const batchFiles = batchMode === 'vcf' ? batchVcfFiles : batchMode === 'fasta' ? batchFastaFiles : batchJsonFiles;
+                const fileColumnLabel = batchMode === 'vcf' ? 'VCF file' : batchMode === 'fasta' ? 'FASTA file' : 'JSON file';
+                return batchFiles.length > 0 ? (
                 <div className="profile-upload-row profile-upload-row-batch-files">
                   <p className="field-optional">
-                    {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length} / {batchMaxSamples} files
-                    {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length >= batchMaxSamples ? (
+                    {batchFiles.length} / {batchMaxSamples} files
+                    {batchFiles.length >= batchMaxSamples ? (
                       <span style={{ color: 'var(--color-error, #c2410c)', marginLeft: '0.4em' }}>Limit reached</span>
                     ) : null}
                   </p>
@@ -683,7 +723,7 @@ export function AnalyzeTab({
                     <table className="batch-uploaded-table">
                       <thead>
                         <tr>
-                          <th>{batchMode === 'vcf' ? 'VCF file' : 'FASTA file'}</th>
+                          <th>{fileColumnLabel}</th>
                           <th>Size</th>
                           {batchMode === 'vcf' ? <th>BAM file</th> : null}
                           {batchMode === 'vcf' ? <th>BAM size</th> : null}
@@ -692,7 +732,7 @@ export function AnalyzeTab({
                         </tr>
                       </thead>
                       <tbody>
-                        {(batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).map((file, index) => (
+                        {batchFiles.map((file, index) => (
                           <tr key={file.uploadId}>
                             <td className="batch-uploaded-cell-name" title={file.name}>{file.name}</td>
                             <td className="batch-uploaded-cell-size field-optional">{Math.round(file.size / 1024)} KB</td>
@@ -741,7 +781,8 @@ export function AnalyzeTab({
                     </table>
                   </div>
                 </div>
-              ) : null}
+              ) : null;
+              })()}
 
               {/* Shared reference FASTA selection status (VCF mode) */}
               {batchMode === 'vcf' && batchReferenceFasta ? (
@@ -757,7 +798,7 @@ export function AnalyzeTab({
                   disabled={
                     batchSubmitting
                     || batchRateLimitCooldown > 0
-                    || (batchMode === 'vcf' ? batchVcfFiles : batchFastaFiles).length === 0
+                    || (batchMode === 'vcf' ? batchVcfFiles : batchMode === 'fasta' ? batchFastaFiles : batchJsonFiles).length === 0
                     || (batchMode === 'vcf' && !batchReferenceFasta)
                   }
                 >

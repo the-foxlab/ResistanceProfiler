@@ -215,6 +215,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     app.include_router(
         build_regenerate_router(
             config=config,
+            sample_limit_per_minute=sample_limit_per_minute,
+            consume_sample_quota=_consume_sample_quota,
             user_facing_error_message=_user_facing_error_message,
             is_path_within_allowed_roots=is_path_within_allowed_roots,
             resolve_regenerate_project_db_path=resolve_regenerate_project_db_path,

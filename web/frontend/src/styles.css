@@ -31,6 +31,8 @@
   --font-size-caption: var(--font-size-xs);
   --font-size-table: var(--font-size-sm);
   --font-size-button: var(--font-size-sm);
+  --analysis-slider-width: 21.5rem;
+  --analysis-progress-width: 28rem;
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
@@ -56,7 +58,7 @@
   --neutral-border: #d3dde6;
   /* Webapp-only structural tokens (not used by the report) */
   --topbar-logo-width: 380px;
-  --topbar-logo-height: 68px;
+  --topbar-logo-height: 55px;
   --topbar-link-icon-size: 32px;
   --sidebar-width: 118px;
   --sidebar-logo-gap: 5px;
@@ -123,6 +125,7 @@ small {
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh;
   background: transparent;
 }
 
@@ -885,6 +888,7 @@ th {
   margin-left: var(--sidebar-width);
   width: auto;
   min-height: 100vh;
+  min-height: 100dvh;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -1400,6 +1404,7 @@ th {
 
 .mutation-browser-tile {
   height: calc(100vh - 74px - 0.8rem - 1rem);
+  height: calc(100dvh - 74px - 0.8rem - 1rem);
   grid-template-rows: auto auto 1fr auto;
   overflow: hidden;
 }
@@ -1508,10 +1513,21 @@ th {
   min-width: 0;
 }
 
-.comparison-actions .analyze-primary,
-.comparison-actions .comparison-clear-btn {
-  flex: 0 0 auto;
-  white-space: nowrap;
+.comparison-actions .analyze-primary {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: normal;
+  text-align: center;
+}
+
+.comparison-actions .comparison-secondary {
+  background-color: var(--neutral-text);
+  border-color: var(--neutral-text);
+}
+
+.comparison-actions .comparison-secondary:hover {
+  background-color: var(--muted-strong);
+  border-color: var(--muted-strong);
 }
 
 .comparison-filters {
@@ -1558,25 +1574,175 @@ th {
 
   .analyze-shell-header h2 {
     grid-column: 1;
+    grid-row: 1;
+  }
+
+  .analyze-shell-header .example-btn {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+    justify-self: end;
+  }
+
+  .analyze-shell-header p {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .analyze-submode-progress {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .analyze-submode-row {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
+}
+
+@media (max-width: 820px) {
+  .analyze-shell-header > div:first-child {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 0.75rem;
+    row-gap: 0.35rem;
+  }
+
+  .analyze-shell-header h2 {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .analyze-shell-header .example-btn {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+    height: 2rem;
   }
 
   .analyze-shell-header p {
     grid-column: 1 / -1;
-  }
-
-  .analyze-submode-row {
-    grid-column: 2;
-    grid-row: 1;
+    grid-row: 2;
   }
 }
 
 .analyze-submode-row {
-  display: inline-flex;
-  gap: 0.35rem;
+  display: flex;
   align-items: center;
-  justify-self: end;
-  flex-shrink: 0;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.analyze-submode-progress {
+  width: var(--analysis-progress-width);
+}
+
+.analyze-submode-progress .upload-progress {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+}
+
+.analyze-submode-controls {
+  order: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
   flex-wrap: wrap;
+}
+
+/* One/multiple-sample toggle — an animated sliding switch (track + knob). */
+.analyze-submode-switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  width: var(--analysis-slider-width);
+  min-width: 0;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent);
+  height: 2rem;
+  padding: 0.14rem;
+  gap: 0;
+  isolation: isolate;
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 16%);
+}
+
+.analyze-submode-switch-option {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: none;
+  background: transparent;
+  color: var(--on-accent);
+  height: 100%;
+  padding: 0 0.65rem;
+  font-size: var(--font-size-button);
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  border-radius: 999px;
+  transition: color 0.22s ease, opacity 0.22s ease;
+}
+
+.analyze-submode-switch-option.active {
+  color: var(--accent);
+}
+
+.analyze-submode-switch-option:hover:not(:disabled) {
+  background: transparent;
+}
+
+.analyze-submode-switch-option.active:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.analyze-submode-switch-option:not(.active):hover:not(:disabled) {
+  color: var(--on-accent);
+  opacity: 0.82;
+}
+
+.analyze-submode-switch-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.analyze-submode-switch-option .analyze-submode-icon {
+  opacity: 0.82;
+  transition: opacity 0.22s ease;
+}
+
+.analyze-submode-switch-option.active .analyze-submode-icon {
+  opacity: 1;
+}
+
+.analyze-submode-switch-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+/* The sliding knob sits behind the options and translates to the active side. */
+.analyze-submode-switch-knob {
+  position: absolute;
+  z-index: 1;
+  top: 0.14rem;
+  left: 0.14rem;
+  bottom: 0.14rem;
+  width: calc(50% - 0.14rem);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  box-shadow: 0 2px 5px rgb(0 0 0 / 18%), inset 0 1px rgb(255 255 255 / 72%);
+  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* When the switch is in the "batch" state, slide the knob to the right half. */
+.analyze-submode-switch[data-state='batch'] .analyze-submode-switch-knob {
+  transform: translateX(100%);
 }
 
 .analyze-regenerate-progress-row {
@@ -1619,6 +1785,77 @@ th {
   cursor: not-allowed;
 }
 
+.example-btn {
+  display: inline-flex;
+  width: fit-content;
+  height: 2rem;
+  padding: 0 0.72rem;
+}
+
+/* Profile input modes use the same filled-slider language as the workflow switch. */
+.profile-settings-row .database-phenotype-switch {
+  --profile-mode-accent: #7e7f80;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: var(--analysis-slider-width);
+  min-width: 0;
+  height: 2rem;
+  gap: 0;
+  padding: 0.14rem;
+  border: 1px solid var(--profile-mode-accent);
+  border-radius: 999px;
+  background: var(--profile-mode-accent);
+  isolation: isolate;
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 16%);
+}
+
+.profile-settings-row .database-phenotype-switch::before {
+  position: absolute;
+  z-index: 1;
+  top: 0.14rem;
+  bottom: 0.14rem;
+  left: 0.14rem;
+  width: calc((100% - 0.28rem) / 3);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  box-shadow: 0 2px 5px rgb(0 0 0 / 18%), inset 0 1px rgb(255 255 255 / 72%);
+  content: '';
+  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.profile-settings-row .database-phenotype-switch[data-active-mode='fasta']::before {
+  transform: translateX(100%);
+}
+
+.profile-settings-row .database-phenotype-switch[data-active-mode='regenerate']::before,
+.profile-settings-row .database-phenotype-switch[data-active-mode='json']::before {
+  transform: translateX(200%);
+}
+
+.profile-settings-row .database-phenotype-switch button {
+  position: relative;
+  z-index: 2;
+  height: 100%;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--on-accent);
+  padding: 0 0.55rem;
+}
+
+.profile-settings-row .database-phenotype-switch button.active,
+.profile-settings-row .database-phenotype-switch button.active:hover:not(:disabled) {
+  border-color: transparent;
+  background: transparent;
+  color: var(--profile-mode-accent);
+}
+
+.profile-settings-row .database-phenotype-switch button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--on-accent);
+}
+
 .analyze-submode-icon {
   width: 14px;
   height: 14px;
@@ -1649,15 +1886,41 @@ th {
   .analyze-submode-row {
     width: 100%;
     justify-self: stretch;
+    flex-wrap: wrap;
+  }
+
+  .analyze-submode-progress {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .analyze-submode-controls {
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   /* Let submode pills shrink and wrap their label instead of overflowing
      past the card edge when "Multiple Sample(s)" doesn't fit on one line. */
-  .analyze-submode-btn {
+  .analyze-submode-btn,
+  .analyze-submode-switch-option {
     flex: 1 1 auto;
     min-width: 0;
     white-space: normal;
     text-align: center;
+    justify-content: center;
+  }
+
+  .analyze-submode-switch {
+    width: 100%;
+  }
+
+  .profile-settings-row .database-phenotype-switch {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .analyze-submode-switch-option {
+    flex: 1 1 auto;
     justify-content: center;
   }
 }
@@ -1779,6 +2042,66 @@ th {
   min-width: 0;
 }
 
+/* ── Custom file input styling ─────────────────────────────────────────
+   Replace the browser-default "Choose File" control with a styled
+   drop-zone that matches the app's design tokens. */
+.profile-upload-row input[type="file"],
+.profile-upload-row-batch-files input[type="file"] {
+  display: block;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0.3rem 0.5rem;
+  border: 1.5px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--paper-soft);
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.profile-upload-row input[type="file"]:hover,
+.profile-upload-row-batch-files input[type="file"]:hover {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.profile-upload-row input[type="file"]:disabled,
+.profile-upload-row-batch-files input[type="file"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  border-style: solid;
+}
+
+.profile-upload-row input[type="file"]::file-selector-button,
+.profile-upload-row-batch-files input[type="file"]::file-selector-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--font-size-button);
+  font-weight: 700;
+  padding: 0.3rem 0.7rem;
+  margin-right: 0.5rem;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.profile-upload-row input[type="file"]:hover::file-selector-button,
+.profile-upload-row-batch-files input[type="file"]:hover::file-selector-button {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.profile-upload-row input[type="file"]:disabled::file-selector-button,
+.profile-upload-row-batch-files input[type="file"]:disabled::file-selector-button {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
 .profile-upload-row-batch-files {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -1804,6 +2127,10 @@ th {
 
 .database-meta-row-table {
   grid-column: 1 / -1;
+}
+
+.database-algorithm-table th {
+  white-space: nowrap;
 }
 
 .database-algorithm-table td {
@@ -1940,8 +2267,8 @@ th {
   top: 0;
   left: 0;
   width: var(--sidebar-width);
+  height: 100vh;
   height: 100dvh;
-  min-height: 100vh;
   background: linear-gradient(180deg, #142236, #0f1a28);
   border-right: 1px solid #28384e;
   z-index: 30;
@@ -2166,7 +2493,7 @@ th {
   border: none;
   border-radius: 0;
   border-bottom: 1px solid var(--line);
-  padding: 0.15rem 0.7rem;
+  padding: 0.5rem 0.7rem;
   margin-bottom: 0.8rem;
   display: flex;
   align-items: center;
@@ -2185,6 +2512,42 @@ th {
   border-radius: var(--radius-lg);
   background: var(--surface-strong);
   box-shadow: var(--shadow-sm);
+}
+
+/* Placeholder shown before a report is generated */
+.report-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem 1.5rem;
+  margin-block: auto;
+  min-height: 14rem;
+}
+
+.report-placeholder-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: var(--accent-tint);
+  border: 2px solid var(--accent-soft);
+}
+
+.report-placeholder-icon {
+  width: 44px;
+  height: 44px;
+  opacity: 0.75;
+}
+
+.report-placeholder-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-md);
+  font-weight: 600;
 }
 
 .workspace-output-header {
@@ -2268,25 +2631,21 @@ th.sortable-col {
 }
 
 /* ── Mobile hamburger toggle ──────────────────────────────────────────────
-   Hidden on desktop; revealed inside the ≤768px media block below. The
-   button is fixed top-left so it stays reachable above the top bar. */
+   Hidden on desktop; revealed inside the ≤820px media block below.
+   Sits inside the top bar as a centered, borderless button. */
 .mobile-menu-btn {
   display: none;
-  position: fixed;
-  top: 0.5rem;
-  left: 0.5rem;
-  z-index: 40;
   width: var(--mobile-tap-target);
   height: var(--mobile-tap-target);
-  padding: 0.55rem;
-  border: 1px solid var(--line-strong);
+  padding: 0.7rem;
+  border: none;
   border-radius: var(--radius-md);
-  background: var(--surface-strong);
+  background: transparent;
   color: var(--ink);
   flex-direction: column;
   justify-content: center;
   gap: 5px;
-  box-shadow: var(--shadow-sm);
+  cursor: pointer;
 }
 
 .mobile-menu-bar {
@@ -2308,6 +2667,7 @@ th.sortable-col {
   .sidebar-rail {
     width: var(--sidebar-width);
     height: 100vh;
+    height: 100dvh;
     border-right: 1px solid #28384e;
     border-bottom: none;
   }
@@ -2412,6 +2772,7 @@ th.sortable-col {
 
   .sidebar-rail {
     width: var(--sidebar-width);
+    height: 100vh;
     height: 100dvh;
     transform: translateX(-100%);
     transition: transform 0.22s ease;
@@ -2446,15 +2807,24 @@ th.sortable-col {
     width: 100%;
   }
 
-  /* Add top padding so content clears the fixed hamburger button. */
+  /* Add top padding so content clears the top bar. */
   .top-bar {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    padding-left: calc(var(--mobile-tap-target) + 0.85rem);
+    grid-template-columns: var(--mobile-tap-target) minmax(0, 1fr) auto;
+    align-items: center;
+    padding-left: 0.45rem;
+    padding-right: 0.45rem;
     padding-top: 0.15rem;
     padding-bottom: 0.5rem;
     row-gap: 0.35rem;
     margin-bottom: 0.3rem;
+  }
+
+  .mobile-menu-btn {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    justify-self: start;
+    align-self: center;
   }
 
   /* ── T3: top bar / brand block fluid on mobile ────────────────────────
@@ -2480,14 +2850,14 @@ th.sortable-col {
   }
 
   .brand-logo-wrap {
-    grid-column: 1;
+    grid-column: 2;
     grid-row: 1;
     margin-left: 0;
     order: initial;
   }
 
   .page-links {
-    grid-column: 2;
+    grid-column: 3;
     grid-row: 1;
     margin-left: auto;
     flex-shrink: 0;
@@ -2495,7 +2865,7 @@ th.sortable-col {
   }
 
   .topbar-db-bar {
-    grid-column: 1 / -1;
+    grid-column: 2 / -1;
     grid-row: 2;
     width: 100%;
     min-width: 0;
@@ -2536,13 +2906,37 @@ th.sortable-col {
     flex-wrap: wrap;
   }
 
-  .analyze-submode-btn {
+  .analyze-submode-progress,
+  .analyze-submode-controls {
+    width: 100%;
+  }
+
+  .analyze-submode-progress {
+    margin-left: 0;
+  }
+
+  .analyze-submode-btn,
+  .analyze-submode-switch-option {
     flex: 1 1 8rem;
     min-width: 0;
     max-width: 100%;
     padding-inline: 0.55rem;
     white-space: nowrap;
     justify-content: center;
+  }
+
+  .analyze-submode-switch {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .profile-settings-row {
+    width: 100%;
+  }
+
+  .profile-settings-row .database-phenotype-switch {
+    width: 100%;
+    min-width: 0;
   }
 
   .profile-upload-row,
@@ -2705,7 +3099,7 @@ th.sortable-col {
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
-    padding: 0.35rem 0.6rem 0.35rem calc(var(--mobile-tap-target) + 0.85rem);
+    padding: 0.35rem 0.6rem 0.35rem 0.45rem;
   }
 
   .page-links {
@@ -2785,7 +3179,7 @@ th.sortable-col {
 
   /* Ensure tappable controls meet the ≥44px target size on touch devices. */
   .sidebar-rail-link,
-  .analyze-submode-btn,
+  .analyze-submode-btn:not(.example-btn),
   .mutation-download-button,
   .mutation-reset-button,
   .mobile-menu-btn {
@@ -2811,11 +3205,18 @@ th.sortable-col {
   }
 
   .top-bar {
-    padding: 0.15rem 0.45rem 0.15rem calc(var(--mobile-tap-target) + 0.45rem);
+    padding-top: 0.3rem;
+    padding-bottom: 0.3rem;
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
   }
 
   .panel-stack {
-    padding: 0 0.5rem 0.5rem;
+    padding: 0 0.65rem 0.65rem;
+  }
+
+  .topbar-db-bar .header-db-select {
+    min-width: 90px;
   }
 }
 
@@ -2973,6 +3374,17 @@ th.sortable-col {
   width: 2rem;
   min-width: 2rem;
   text-align: center;
+}
+
+.results-download-btn {
+  align-self: flex-start;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.full-width-tile > .workspace-output-header:first-child {
+  flex-wrap: nowrap;
 }
 
 .app-footer {
