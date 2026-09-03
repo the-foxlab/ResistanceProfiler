@@ -3205,14 +3205,18 @@ th.sortable-col {
   }
 
   .top-bar {
-    padding-top: 0.15rem;
-    padding-bottom: 0.15rem;
-    padding-left: 0.45rem;
-    padding-right: 0.45rem;
+    padding-top: 0.3rem;
+    padding-bottom: 0.3rem;
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
   }
 
   .panel-stack {
-    padding: 0 0.5rem 0.5rem;
+    padding: 0 0.65rem 0.65rem;
+  }
+
+  .topbar-db-bar .header-db-select {
+    min-width: 90px;
   }
 }
 

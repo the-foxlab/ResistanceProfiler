@@ -74,12 +74,15 @@ body {
   line-height: 1.55;
   background-color: var(--paper);
   min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
 }
 
 .report-container {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--surface-strong);
 }
 
@@ -799,6 +802,20 @@ body {
     bottom: 0.75rem;
     width: 2.35rem;
     height: 2.35rem;
+  }
+}
+
+@media (max-width: 400px) {
+  .report-main {
+    padding: 0.75rem;
+  }
+
+  .header-top {
+    padding: 0.6rem 0.75rem;
+  }
+
+  .summary-tile {
+    padding: 0.85rem;
   }
 }
 
