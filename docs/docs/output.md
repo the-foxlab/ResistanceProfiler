@@ -111,8 +111,8 @@ respro vcf \
 | `in_database` | `yes` when at least one rule matched (single or formula member); otherwise `no`. |
 | `rule_type` | `single`, `formula`, `formula-member`, or `n/a` for non-hits. |
 | `drug` | Drug name for the matched rule. `n/a` for non-hits. |
-| `phenotype` | Rule phenotype (`resistant`/`intermediate`/`sensitive`/…). `n/a` for non-hits. |
-| `clinical_phenotype` | Clinical phenotype. `n/a` for non-hits. |
+| `phenotype` | Rule phenotype label, stored verbatim (lowercased + whitespace-stripped) and resolved to a [rank](rules-format.md#phenotype-normalization) (e.g. `susceptible` / `low-level resistance` / `resistant`). `n/a` for non-hits. |
+| `clinical_phenotype` | Clinical phenotype label (same vocabulary as `phenotype`). `n/a` for non-hits. |
 | `ic50` | Rule IC50 value (string, may carry qualifiers). Empty for non-hits. |
 | `fold_ic50` | Rule fold-IC50 value. Empty for non-hits. |
 | `score` | Rule score. Empty for non-hits. |

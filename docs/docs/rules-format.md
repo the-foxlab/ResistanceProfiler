@@ -206,30 +206,28 @@ For substitutions/stops, `reference` and normalized `mutation` are stored as dir
 
 ### Phenotype normalization
 
-`phenotype` and `clinical_phenotype` are normalized independently to:
+`phenotype` and `clinical_phenotype` are stored **verbatim** — lowercased and whitespace-stripped, exactly as written in the rules sheet. Each label maps to a **rank** via the built-in vocabulary below, and the rank is inferred wherever severity comparison or colouring is needed.
 
-- `resistant`
-- `intermediate`
-- `sensitive`
-- `unknown`
+| Rank | Accepted labels (case-insensitive) | Report colour | Fallback label |
+|---|---|---|---|
+| 1 | `susceptible`, `sensitive`, `normal inhibition`, `ni`, `normal` | green | `susceptible` |
+| 2 | `potential low-level resistance`, `possibly resistant`, `suspected reduced` | yellow | `potential low-level resistance` |
+| 3 | `low-level resistance`, `reduced susceptibility`, `limited susceptibility` | slight orange | `low-level resistance` |
+| 4 | `intermediate`, `intermediate resistance`, `reduced inhibition`, `ri` | orange | `intermediate` |
+| 5 | `resistant`, `high-level resistance`, `highly reduced inhibition`, `hri` | red | `resistant` |
+| 0 | `unknown`, `not analysed`, `none`, *(empty cell)* | grey | `unknown` |
+| -1 | `contradictory`, `conflicting` | dark | `contradictory` |
 
-Accepted flexible inputs are intentionally limited.
+Ranks run 1 (mildest) to 5 (most severe); `0` and `-1` are sentinels for *unknown* and *contradictory*.
 
-| Input | Normalized to |
-|---|---|
-| `resistant`, `resistance`, `res`, `r`, `true`, `1` | `resistant` |
-| `intermediate`, `interm`, `i` | `intermediate` |
-| `sensitive`, `susceptible`, `sensi`, `sens`, `s`, `false`, `0` | `sensitive` |
-| `contradictory`, `contra`, `conflict`, `conflicting` | `contradictory` |
-| empty value, `None`, `unknown`, `na`, `n/a`, `nd` | `unknown` |
+Normalization rules:
 
-Rules:
+- Labels are lowercased and whitespace-stripped before storage and lookup.
+- **Bare ranks accepted.** A value of `1`–`5` resolves to the *fallback label* for that rank (the last column above).
+- **Empty = unknown.** An empty cell stores `''` (rank 0). The synonyms `none` and `not analysed` collapse to the canonical `unknown` label.
+- `phenotype` and `clinical_phenotype` are normalized independently. You may provide either, both, or neither.
 
-- You may provide only `phenotype`.
-- You may provide only `clinical_phenotype`.
-- You may provide both.
-- Both fields are normalized independently and stored separately.
-- Empty values normalize to `unknown` in each field.
+> **Breaking change:** project databases built before this version stored an `unknown` default and accepted fuzzy synonyms. They must be rebuilt — there is no automatic migration.
 
 ### IC50 parsing rules
 

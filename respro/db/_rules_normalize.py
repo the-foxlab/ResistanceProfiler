@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import re
 
+from respro.db.phenotype_ranks import _LABEL_TO_RANK, RANK_UNKNOWN, rank_to_label
+
 _CONTRADICTORY_COMMENT = 'Publications have contradictory phenotype associations.'
 
 
@@ -108,39 +110,38 @@ def _normalize_score_from_row(
         return ''
 
 
-def _normalize_phenotype_token(raw: str) -> str | None:
-    """Map supported phenotype inputs to canonical internal values."""
-    value = raw.strip().lower()
-    if not value or value == 'none':
-        return 'unknown'
+def normalize_phenotype_label(raw: str) -> str:
+    """Strict phenotype label normalizer for the rank-based system.
 
-    mapping = {
-        'resistant': 'resistant',
-        'resistance': 'resistant',
-        'res': 'resistant',
-        'r': 'resistant',
-        'true': 'resistant',
-        '1': 'resistant',
-        'intermediate': 'intermediate',
-        'interm': 'intermediate',
-        'i': 'intermediate',
-        'sensitive': 'sensitive',
-        'susceptible': 'sensitive',
-        'sensi': 'sensitive',
-        'sens': 'sensitive',
-        's': 'sensitive',
-        'false': 'sensitive',
-        '0': 'sensitive',
-        'unknown': 'unknown',
-        'na': 'unknown',
-        'n/a': 'unknown',
-        'nd': 'unknown',
-        'contradictory': 'contradictory',
-        'contra': 'contradictory',
-        'conflict': 'contradictory',
-        'conflicting': 'contradictory',
-    }
-    return mapping.get(value)
+    Lowercases and whitespace-strips *raw*, then resolves it against the rank
+    vocabulary. Empty input returns ``''`` (rank 0 / unknown). A bare integer
+    rank string (``'1'``–``'5'``) resolves to the canonical fallback label for
+    that rank. Any non-empty value not present in the vocabulary raises
+    :class:`ValueError` — there are no fuzzy synonyms.
+
+    :param raw: raw phenotype cell value
+    :return: the lowercased + whitespace-stripped label to store, or ``''``
+    :raises ValueError: if *raw* is non-empty but not a known label or rank
+    """
+
+    key = raw.strip().lower()
+    if not key:
+        return ''
+    if key in _LABEL_TO_RANK:
+        # Unknown-sentinel synonyms ('none', 'not analysed') collapse to the
+        # canonical 'unknown' label; 'unknown' itself passes through.
+        if _LABEL_TO_RANK[key] == RANK_UNKNOWN and key != 'unknown':
+            return 'unknown'
+        return key
+    # A bare severity rank (1–5) resolves to its canonical fallback label.
+    # Sentinels (0, -1) are not accepted as bare input.
+    if key.isdigit() and 1 <= (rank := int(key)) <= 5:
+        return rank_to_label(rank)
+    raise ValueError(
+        f'Unknown phenotype label {raw!r}. '
+        f'Allowed labels: {sorted(_LABEL_TO_RANK)} '
+        f'or a bare rank 1–5.'
+    )
 
 
 def _normalize_phenotypes_from_row(
@@ -151,37 +152,26 @@ def _normalize_phenotypes_from_row(
     missing_phenotype_default: str = '',
     missing_clinical_default: str = '',
 ) -> tuple[str, str]:
-    """Normalize phenotype and clinical_phenotype to canonical values independently."""
+    """Normalize phenotype and clinical_phenotype to strict rank-vocabulary labels.
+
+    Each non-empty value is lowercased + whitespace-stripped and resolved against
+    the rank vocabulary via :func:`normalize_phenotype_label`. Unknown non-empty
+    labels raise :class:`ValueError` (collected into *errors* so the caller can
+    report all row errors at once). Empty cells store ``''`` (rank 0 / unknown).
+    The ``missing_*_default`` arguments are accepted for backward call-site
+    compatibility but are no longer meaningful under the strict system — empty
+    is the only default.
+    """
     phenotype_raw = _get_value(row, 'phenotype')
     clinical_raw = _get_value(row, 'clinical_phenotype')
 
-    phenotype_normalized: str
-    if phenotype_raw:
-        token = _normalize_phenotype_token(phenotype_raw)
-        if token is None:
-            errors.append(f'{context}: invalid phenotype value {phenotype_raw!r}')
-            phenotype_normalized = missing_phenotype_default
-        else:
-            phenotype_normalized = token
-    else:
-        phenotype_normalized = missing_phenotype_default
+    def _resolve(raw: str, column: str) -> str:
+        if not raw:
+            return ''
+        try:
+            return normalize_phenotype_label(raw)
+        except ValueError as exc:
+            errors.append(f'{context}: invalid {column} value {raw!r}: {exc}')
+            raise
 
-    clinical_normalized: str
-    if clinical_raw:
-        token = _normalize_phenotype_token(clinical_raw)
-        if token is None:
-            errors.append(f'{context}: invalid clinical_phenotype value {clinical_raw!r}')
-            clinical_normalized = missing_clinical_default
-        else:
-            clinical_normalized = token
-    else:
-        clinical_normalized = missing_clinical_default
-
-    return phenotype_normalized, clinical_normalized
-
-
-def _phenotype_missing_defaults(rows: list[dict[str, str]]) -> tuple[str, str]:
-    """Return per-column defaults for rows that omit phenotype classifications."""
-    phenotype_default = 'unknown' if any(_get_value(row, 'phenotype') for row in rows) else ''
-    clinical_default = 'unknown' if any(_get_value(row, 'clinical_phenotype') for row in rows) else ''
-    return phenotype_default, clinical_default
+    return _resolve(phenotype_raw, 'phenotype'), _resolve(clinical_raw, 'clinical_phenotype')

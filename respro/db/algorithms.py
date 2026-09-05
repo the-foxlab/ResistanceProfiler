@@ -3,11 +3,23 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 
 from respro.core.annotation import HIGH_IMPACT_CONSEQUENCES
-from respro.db._rules_normalize import _append_contradictory_comment, _parse_ic50_value
+from respro.db._rules_normalize import (
+    _append_contradictory_comment,
+    _parse_ic50_value,
+    normalize_phenotype_label,
+)
+from respro.db.phenotype_ranks import (
+    RANK_CONTRADICTORY,
+    RANK_UNKNOWN,
+    label_to_rank,
+)
+
+logger = logging.getLogger(__name__)
 
 _ALLOWED_EFFECTS: frozenset[str] = HIGH_IMPACT_CONSEQUENCES
 
@@ -24,6 +36,48 @@ _KNOWN_ALGORITHM_NAMES = {
     'drug_alias',
     'effect_as_resistant',
 }
+
+
+def _normalize_threshold_label_key(key: object) -> str:
+    """Normalize a threshold dict key to a canonical phenotype label.
+
+    Accepts a verbatim label (lowercased + whitespace-stripped), a bare integer
+    rank (1–5), or a bare-rank string (``'1'``–``'5'``); returns the canonical
+    label for that rank. Unknown value raise :class:`ValueError` pointing at the
+    vocabulary.
+
+    :param key: raw threshold key (label string or rank int/str)
+    :return: canonical lowercased phenotype label
+    :raises ValueError: if *key* is not a known label or bare rank
+    """
+
+    if isinstance(key, int) and not isinstance(key, bool):
+        # Bare integer rank: convert to its string form and let the normalizer
+        # resolve it to the canonical fallback label.
+        key = str(key)
+    if not isinstance(key, str):
+        raise ValueError(
+            f'Unknown phenotype label {key!r}. '
+            'Allowed: a phenotype label or a bare rank 1–5.'
+        )
+    return normalize_phenotype_label(key)
+
+
+def _normalize_thresholds_dict_keys(thresholds: dict) -> dict:
+    """Return a new thresholds dict with all keys normalized to canonical labels.
+
+    Raises :class:`ValueError` if any key is an unknown label/shorthand. If a
+    normalized key collides with an existing normalized key, the later value
+    wins (last-write-wins), mirroring dict construction semantics.
+
+    :param thresholds: raw thresholds dict (label/rank → value)
+    :return: new dict with canonical label keys
+    """
+    normalized: dict = {}
+    for raw_key, value in thresholds.items():
+        label = _normalize_threshold_label_key(raw_key)
+        normalized[label] = value
+    return normalized
 
 
 def validate_interpretation_algorithms(algorithms: object) -> list[dict]:
@@ -84,6 +138,73 @@ def validate_interpretation_algorithms(algorithms: object) -> list[dict]:
                 _validate_effect_as_resistant(item)
 
     return algorithms
+
+
+def _collect_algorithm_labels(algorithms: list[dict]) -> set[str]:
+    """Return the set of phenotype labels declared by the algorithm configs.
+
+    ``drug_interpretation`` and ``ic50_thresholds`` declare labels as threshold
+    dict keys. ``effect_as_resistant`` implicitly declares ``'resistant'``.
+    Other algorithm kinds declare no phenotype labels.
+
+    :param algorithms: validated algorithm config list
+    :return: set of declared phenotype labels (lowercased)
+    """
+    labels: set[str] = set()
+    for config in algorithms:
+        name = config.get('name')
+        if name == 'drug_interpretation':
+            labels.update(config.get('thresholds', {}).keys())
+        elif name == 'ic50_thresholds':
+            for drug_limits in config.get('thresholds', {}).values():
+                if isinstance(drug_limits, dict):
+                    labels.update(drug_limits.keys())
+        elif name == 'effect_as_resistant':
+            labels.add('resistant')
+    return labels
+
+
+def warn_algorithm_labels_not_in_db(
+    conn: sqlite3.Connection,
+    project_id: int,
+    algorithms: list[dict],
+) -> None:
+    """Emit a non-fatal warning for each algorithm label absent from the DB.
+
+    For each phenotype label declared by *algorithms* (see
+    :func:`_collect_algorithm_labels`), check whether that exact label string is
+    among the labels stored in the project's ``resistance_rule`` and
+    ``resistance_formula_rule`` tables (both already lowercased + whitespace-
+    stripped at import time). When a declared label is not present in the DB, a
+    WARNING is logged. The label still resolves to a rank via the vocabulary, so
+    processing continues. Labels not in the vocabulary at all already hard-fail
+    during :func:`validate_interpretation_algorithms`.
+
+    :param conn: open project DB connection
+    :param project_id: project id
+    :param algorithms: validated algorithm config list
+    """
+    declared = _collect_algorithm_labels(algorithms)
+    if not declared:
+        return
+    stored: set[str] = set()
+    for table in ('resistance_rule', 'resistance_formula_rule'):
+        rows = conn.execute(
+            f'SELECT DISTINCT t.phenotype AS phenotype FROM {table} t '
+            'JOIN drug d ON d.id = t.drug_id '
+            'WHERE d.project_id = ? AND TRIM(COALESCE(t.phenotype, "")) <> ""',
+            (project_id,),
+        ).fetchall()
+        stored.update(r['phenotype'].strip() for r in rows)
+    for label in sorted(declared):
+        if label not in stored:
+            logger.warning(
+                'Algorithm config declares phenotype label %r, which is not among '
+                'the labels stored in the database (%s). The label still resolves '
+                'to a rank and processing continues; verify the vocabulary is '
+                'consistent between the algorithm config and the rules sheet.',
+                label, sorted(stored) or 'none',
+            )
 
 
 def store_interpretation_algorithms(
@@ -196,8 +317,8 @@ def apply_ic50_threshold_classification(
         existing_phenotype = (row['phenotype'] or '').strip().lower()
         # If an existing non-trivial phenotype conflicts with the IC50-derived call,
         # flag as contradictory and append the standard comment rather than silently
-        # overwriting the stored association.
-        if existing_phenotype and existing_phenotype not in ('unknown', 'contradictory') and existing_phenotype != new_phenotype:
+        # overwriting the stored association. Empty/unknown count as trivial.
+        if existing_phenotype and existing_phenotype not in ('', 'unknown', 'contradictory') and existing_phenotype != new_phenotype:
             new_phenotype = 'contradictory'
         updated_comment = _append_contradictory_comment(
             row['comment'] or '',
@@ -240,12 +361,22 @@ def apply_drug_alias_mappings(
 
 
 def _classify_ic50(value: float, drug_thresholds: dict) -> str:
-    """Return the canonical phenotype for a numeric IC50 value against breakpoints."""
-    if value >= drug_thresholds['resistant']:
-        return 'resistant'
-    intermediate = drug_thresholds.get('intermediate')
-    if intermediate is not None and value >= intermediate:
-        return 'intermediate'
+    """Return the phenotype label for a numeric IC50 value against breakpoints.
+
+    Breakpoint keys are phenotype labels (e.g. ``'resistant'``, ``'intermediate'``,
+    ``'low-level resistance'``). The highest breakpoint whose value is ≤ *value*
+    wins; if no breakpoint is met, returns ``'sensitive'`` (the rank-1 fallback).
+    """
+    # Sort breakpoints by numeric value descending so the strongest matched
+    # breakpoint's label is returned.
+    sorted_breakpoints = sorted(
+        (label, threshold)
+        for label, threshold in drug_thresholds.items()
+        if threshold is not None
+    )
+    for label, threshold in reversed(sorted_breakpoints):
+        if value >= threshold:
+            return label
     return 'sensitive'
 
 
@@ -266,6 +397,9 @@ def _validate_ic50_thresholds(config: dict) -> None:
                 f'ic50_thresholds: thresholds[{drug!r}] must be a dict, '
                 f'got {type(limits).__name__}.'
             )
+        # Normalize label/rank keys to canonical labels (rejects shorthand).
+        thresholds[drug] = _normalize_thresholds_dict_keys(limits)
+        limits = thresholds[drug]
         for key in ('intermediate', 'resistant'):
             val = limits.get(key)
             if val is None:
@@ -328,8 +462,11 @@ def _validate_drug_interpretation(config: dict) -> None:
     if not isinstance(thresholds, dict):
         raise ValueError('drug_interpretation: "thresholds" must be a dict.')
 
-    if 'resistant' not in thresholds:
-        raise ValueError('drug_interpretation: "thresholds" must include the "resistant" key.')
+    # Normalize label/rank keys to canonical labels (rejects shorthand).
+    config['thresholds'] = _normalize_thresholds_dict_keys(thresholds)
+    thresholds = config['thresholds']
+
+    _require_severity_label(thresholds, prefix='drug_interpretation: "thresholds"')
 
     numeric_methods = {'by_ic50', 'by_fold_ic50'}
     is_numeric = method in numeric_methods
@@ -340,6 +477,26 @@ def _validate_drug_interpretation(config: dict) -> None:
     _validate_drug_thresholds_overrides(
         config, is_numeric=is_numeric, prefix='drug_interpretation: drug_thresholds',
     )
+
+
+def _require_severity_label(thresholds: dict, *, prefix: str) -> None:
+    """Require at least one severity label (rank > 0) in a thresholds dict.
+
+    Any phenotype label that resolves to a positive rank (1–5) counts as a
+    severity label; sentinels (``unknown``/``contradictory``, rank 0/-1) do
+    not. A thresholds dict with no severity label is rejected — there would be
+    no breakpoint to evaluate.
+
+    :param thresholds: thresholds dict with canonical label keys
+    :param prefix: descriptive prefix for error messages
+    :raises ValueError: if no key resolves to a positive rank
+    """
+    if not any(label_to_rank(k) is not None and label_to_rank(k) > 0 for k in thresholds):
+        raise ValueError(
+            f'{prefix} must include at least one severity label '
+            '(a phenotype label with rank 1–5, e.g. "resistant" or '
+            '"low-level resistance").'
+        )
 
 
 def _validate_threshold_values(
@@ -425,10 +582,12 @@ def _validate_drug_thresholds_overrides(
             raise ValueError(
                 f'{prefix}[{i}][\'thresholds\'] must be a dict.'
             )
-        if 'resistant' not in override_thresholds:
-            raise ValueError(
-                f"{prefix}[{i}][\'thresholds\'] must include the \"resistant\" key."
-            )
+        # Normalize label/rank keys to canonical labels (rejects shorthand).
+        entry['thresholds'] = _normalize_thresholds_dict_keys(override_thresholds)
+        override_thresholds = entry['thresholds']
+        _require_severity_label(
+            override_thresholds, prefix=f"{prefix}[{i}][\'thresholds\']",
+        )
         if require_intermediate and 'intermediate' not in override_thresholds:
             raise ValueError(
                 f"{prefix}[{i}][\'thresholds\'] must include the \"intermediate\" key."
@@ -538,12 +697,30 @@ _METHOD_LABEL: dict[str, str] = {
     'by_fold_ic50': 'Fold IC50',
 }
 
-_ASSESSMENT_RANK: dict[str, int] = {
-    'resistant': 0,
-    'contradictory': 1,
-    'intermediate': 2,
-    'sensitive': 3,
-}
+
+# Severity strength for strongest-wins resolution (higher = more severe).
+# Severity ranks 1–5 map to themselves. Contradictory is treated as stronger
+# than any severity rank; unknown and unrecognized labels are weakest.
+_STRENGTH_CONTRADICTORY = 6
+_STRENGTH_WEAKEST = 0
+
+
+def _assessment_strength(label: str) -> int:
+    """Return a severity strength for *label* (higher = more severe).
+
+    Used by :func:`compute_drug_assessment` to pick the strongest result across
+    methods via ``max()``. Contradictory (rank -1) is stronger than every
+    severity rank; unknown (rank 0) and unrecognized labels are weakest.
+
+    :param label: assessment label (a vocabulary entry or empty string)
+    :return: severity strength; 0 (weakest) … 6 (contradictory, strongest)
+    """
+    rank = label_to_rank(label)
+    if rank is None or rank == RANK_UNKNOWN:
+        return _STRENGTH_WEAKEST
+    if rank == RANK_CONTRADICTORY:
+        return _STRENGTH_CONTRADICTORY
+    return rank
 
 
 def _references_match(configured_reference: str, observed_reference: str) -> bool:
@@ -637,6 +814,54 @@ def resolve_thresholds(
     return (global_thresholds.get('resistant', 1), global_thresholds.get('intermediate'))
 
 
+def resolve_thresholds_dict(
+    config: dict,
+    reference_name: str | None,
+    drug_name: str,
+) -> dict:
+    """Resolve the full multi-tier thresholds dict for one drug.
+
+    Like :func:`resolve_thresholds` but returns the complete thresholds dict
+    (all severity-label keys), so multi-tier configs (e.g.
+    ``{resistant, low-level resistance}``) are preserved rather than collapsed
+    to a ``(resistant, intermediate)`` pair. Precedence and reference matching
+    are identical to :func:`resolve_thresholds`.
+
+    :param config: validated algorithm config dict (``drug_interpretation``)
+    :param reference_name: observed reference name, or ``None`` when unavailable
+    :param drug_name: drug name to resolve
+    :return: resolved thresholds dict mapping severity labels to threshold values
+    """
+    drug_thresholds = config.get('drug_thresholds') or []
+    drug_lower = drug_name.strip().lower()
+
+    drug_only: dict | None = None
+    reference_specific: dict | None = None
+    for entry in drug_thresholds:
+        if entry.get('drug', '').strip().lower() != drug_lower:
+            continue
+        ref = entry.get('reference')
+        if ref is None:
+            drug_only = entry.get('thresholds')
+        elif reference_name is not None and _references_match(ref, reference_name):
+            reference_specific = entry.get('thresholds')
+
+    if reference_specific is not None:
+        return dict(reference_specific)
+    if drug_only is not None:
+        return dict(drug_only)
+
+    global_thresholds = config.get('thresholds', {})
+    # ic50_thresholds keys thresholds by drug name; drug_interpretation uses flat keys.
+    if isinstance(global_thresholds.get('resistant'), (int, float)):
+        return dict(global_thresholds)
+    drug_entry = global_thresholds.get(drug_name) or global_thresholds.get(drug_name.strip())
+    if drug_entry is not None:
+        return dict(drug_entry)
+    # Last-resort fallback: drug_interpretation's flat thresholds when drug absent.
+    return dict(global_thresholds)
+
+
 def compute_drug_assessment(
     drug_data: dict,
     configs: list[dict],
@@ -666,21 +891,19 @@ def compute_drug_assessment(
     for config in configs:
         method = config.get('method', '')
         if drug_name is not None:
-            resistant_threshold, intermediate_threshold = resolve_thresholds(
+            resolved_thresholds = resolve_thresholds_dict(
                 config, reference_name, drug_name,
             )
         else:
-            thresholds = config.get('thresholds', {})
-            resistant_threshold = thresholds.get('resistant', 1)
-            intermediate_threshold = thresholds.get('intermediate')
+            resolved_thresholds = config.get('thresholds', {})
+            resolved_thresholds = {
+                k: v for k, v in resolved_thresholds.items()
+            }
 
         assessment = _compute_single_method(
-            method, drug_data, resistant_threshold, intermediate_threshold,
+            method, drug_data, resolved_thresholds,
         )
         # Default to "sensitive" when the method has no evidence of resistance.
-        # Previous single-method logic defaulted no-hit drugs to "sensitive";
-        # the multi-method refactoring changed this to empty string (meaning "—").
-        # Restore the original behavior: no evidence = sensitive.
         if not assessment:
             assessment = 'sensitive'
         method_assessments.append({
@@ -689,68 +912,103 @@ def compute_drug_assessment(
             'assessment': assessment,
         })
 
-    best = min(method_assessments, key=lambda m: _ASSESSMENT_RANK.get(m['assessment'], 99))
+    best = max(method_assessments, key=lambda m: _assessment_strength(m['assessment']))
     return best['assessment'], method_assessments
 
 
 def _compute_single_method(
     method: str,
     drug_data: dict,
-    resistant_threshold,
-    intermediate_threshold,
+    thresholds: dict,
 ) -> str:
-    """Compute assessment for a single method. Returns empty string if no data."""
+    """Compute assessment for a single method. Returns empty string if no data.
+
+    *thresholds* maps phenotype labels to numeric thresholds (counts for
+    by_phenotype, values for by_score/by_ic50/by_fold_ic50). Labels are
+    resolved to ranks via the vocabulary so multi-tier configs work.
+    """
     if method == 'by_phenotype':
-        return _assess_by_phenotype(drug_data, resistant_threshold, intermediate_threshold)
+        return _assess_by_phenotype(drug_data, thresholds)
     if method == 'by_score':
-        return _assess_by_score(drug_data, resistant_threshold, intermediate_threshold)
+        return _assess_by_score(drug_data, thresholds)
     if method == 'by_ic50':
-        return _assess_by_ic50(drug_data, resistant_threshold, intermediate_threshold)
+        return _assess_by_ic50(drug_data, thresholds)
     if method == 'by_fold_ic50':
-        return _assess_by_fold_ic50(drug_data, resistant_threshold, intermediate_threshold)
+        return _assess_by_fold_ic50(drug_data, thresholds)
     return ''
 
 
-def _assess_by_phenotype(drug_data: dict, resistant_threshold, intermediate_threshold) -> str:
-    if drug_data['resistant_count'] >= resistant_threshold:
-        return 'resistant'
-    if intermediate_threshold is not None and drug_data['intermediate_count'] >= intermediate_threshold:
-        return 'intermediate'
-    if drug_data['contradictory_count'] > 0:
+def _assess_by_phenotype(drug_data: dict, thresholds: dict) -> str:
+    """Assess by per-rank rule counts against label-keyed count thresholds.
+
+    *thresholds* maps labels (e.g. ``'resistant'``, ``'intermediate'``) to the
+    minimum count required to call that label. The highest-rank label whose
+    threshold is met wins. Contradictory (any count > 0) wins over severity
+    labels only when no severity threshold is met, mirroring the original
+    precedence. ``rank_counts`` maps rank → count of rules at that rank.
+    """
+
+    rank_counts: dict[int, int] = drug_data.get('rank_counts', {})
+
+    # Evaluate severity thresholds highest-rank first.
+    severity_items = sorted(
+        (label, count_threshold)
+        for label, count_threshold in thresholds.items()
+        if count_threshold is not None and label_to_rank(label) is not None
+        and label_to_rank(label) > 0
+    )
+    for label, count_threshold in reversed(severity_items):
+        rank = label_to_rank(label)
+        # Sum counts of rules at or above this label's rank.
+        total_at_or_above = sum(c for r, c in rank_counts.items() if r >= rank and r > 0)
+        if total_at_or_above >= count_threshold:
+            return label
+
+    if rank_counts.get(RANK_CONTRADICTORY, 0) > 0:
         return 'contradictory'
     if drug_data['hit_count'] > 0:
         return 'sensitive'
     return ''
 
 
-def _assess_by_score(drug_data: dict, resistant_threshold, intermediate_threshold) -> str:
+def _assess_by_score(drug_data: dict, thresholds: dict) -> str:
+    """Assess by total score against label-keyed score thresholds."""
     total = drug_data['score_total']
-    if total >= resistant_threshold:
-        return 'resistant'
-    if intermediate_threshold is not None and total >= intermediate_threshold:
-        return 'intermediate'
+    severity_items = sorted(
+        (label, threshold)
+        for label, threshold in thresholds.items()
+        if threshold is not None and label_to_rank(label) is not None and label_to_rank(label) > 0
+    )
+    for label, threshold in reversed(severity_items):
+        if total >= threshold:
+            return label
     if drug_data['hit_count'] > 0:
         return 'sensitive'
     return ''
 
 
-def _assess_by_ic50(drug_data: dict, resistant_threshold, intermediate_threshold) -> str:
+def _assess_by_ic50(drug_data: dict, thresholds: dict) -> str:
     ic50_values = drug_data['ic50_values']
     if not ic50_values:
         return ''
-    if any(value >= resistant_threshold for value in ic50_values):
-        return 'resistant'
-    if intermediate_threshold is not None and any(value >= intermediate_threshold for value in ic50_values):
-        return 'intermediate'
-    return 'sensitive'
+    return _assess_numeric(ic50_values, thresholds)
 
 
-def _assess_by_fold_ic50(drug_data: dict, resistant_threshold, intermediate_threshold) -> str:
+def _assess_by_fold_ic50(drug_data: dict, thresholds: dict) -> str:
     fold_ic50_values = drug_data['fold_ic50_values']
     if not fold_ic50_values:
         return ''
-    if any(value >= resistant_threshold for value in fold_ic50_values):
-        return 'resistant'
-    if intermediate_threshold is not None and any(value >= intermediate_threshold for value in fold_ic50_values):
-        return 'intermediate'
+    return _assess_numeric(fold_ic50_values, thresholds)
+
+
+def _assess_numeric(values: list[float], thresholds: dict) -> str:
+    """Assess numeric values against label-keyed breakpoints; return strongest matched label."""
+    severity_items = sorted(
+        (label, threshold)
+        for label, threshold in thresholds.items()
+        if threshold is not None and label_to_rank(label) is not None and label_to_rank(label) > 0
+    )
+    for label, threshold in reversed(severity_items):
+        if any(value >= threshold for value in values):
+            return label
     return 'sensitive'

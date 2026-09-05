@@ -105,25 +105,25 @@ Example:
 
 ### `drug_interpretation`
 
-Combines matched rules into one overall drug result. Depending on the database, this can be based on phenotype labels, scores, IC50 values, or fold-change cutoffs.
+Combines matched rules into one overall drug result. Depending on the database, this can be based on phenotype labels, scores, IC50 values, or fold-change cutoffs. Threshold keys are **phenotype labels** (or bare ranks `1`–`5`) resolved via the [rank vocabulary](rules-format.md#phenotype-normalization); the report shows the stored verbatim label coloured by its inferred rank, so multi-tier vocabularies (e.g. `{1, 3, 5}`) work without special-casing.
 
 Supported methods:
 
 - **`by_phenotype`** — counts phenotype-labelled hits per drug and compares counts against thresholds
 - **`by_score`** — sums score values per drug and compares totals against thresholds
-- **`by_ic50`** — checks per-hit IC50 values per drug; if any value meets the resistant threshold the drug is resistant, otherwise if any value meets the intermediate threshold the drug is intermediate, otherwise sensitive
+- **`by_ic50`** — checks per-hit IC50 values per drug; the highest-rank label whose breakpoint is met wins, otherwise the rank-1 fallback (`susceptible`)
 - **`by_fold_ic50`** — same logic as `by_ic50`, but using fold-IC50 values
 
 Configuration keys:
 
 - `method` — required; must be `"by_phenotype"`, `"by_score"`, `"by_ic50"`, or `"by_fold_ic50"`
-- `thresholds` — required object; must include `"resistant"`; `"intermediate"` is optional
+- `thresholds` — required object mapping phenotype labels (or bare ranks) to thresholds; must include `"resistant"`; `"intermediate"` is optional. Labels are lowercased + whitespace-stripped and resolved via the rank vocabulary, so multi-tier configs work.
 - for `by_phenotype` and `by_score`, threshold values must be positive integers
 - for `by_ic50` and `by_fold_ic50`, threshold values must be positive numbers; if `intermediate` is set, `resistant` must be strictly greater than `intermediate`
 - each method may appear at most once; two entries with the same `method` are rejected
 - `drug_thresholds` — optional list of per-drug overrides; see [Per-drug / per-reference overrides](#per-drug--per-reference-overrides) below
 
-When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final **Assessment** column. The final assessment uses strongest-wins resolution: `resistant` > `contradictory` > `intermediate` > `sensitive`. The most resistant result across all methods is taken as the final call.
+When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final **Assessment** column. The final assessment is strongest-wins by inferred rank: rank 5 (resistant) > … > rank 1 (susceptible), with `contradictory` (rank -1) winning over severity and `unknown` (rank 0) weakest. The most severe result across all methods becomes the final call.
 
 When `drug_thresholds` overrides are configured, each per-method assessment cell in the report shows an info icon on hover naming the resolved thresholds and their source (override `(reference, drug)`, override `(drug)`, or global default). The table layout, badge styling, and final Assessment column are unchanged; without overrides the report renders identically to the global-only case.
 
@@ -142,10 +142,10 @@ Example:
 
 ### `ic50_thresholds`
 
-Defines per-drug IC50 or fold-IC50 breakpoints. With this, each rule that has an IC50 value associated will be classified for a phenotype during init.
+Defines per-drug IC50 or fold-IC50 breakpoints. Each rule with an IC50 value is classified into a phenotype label during init.
 
-- `use` — required; must be `"ic50"` or `"fold_ic50"`
-- `thresholds` — required non-empty object; each key is a drug name; each value must have `"intermediate"` and `"resistant"` keys with positive numbers; `"resistant"` must be strictly greater than `"intermediate"`
+- `use` — required; `"ic50"` or `"fold_ic50"`
+- `thresholds` — required non-empty object keyed by drug name. Each value maps **phenotype labels** (or bare ranks `1`–`5`) to positive numeric breakpoints. `"intermediate"` and `"resistant"` are required, with `resistant > intermediate`. Labels resolve via the [rank vocabulary](rules-format.md#phenotype-normalization).
 - `drug_thresholds` — optional list of per-drug overrides; see [Per-drug / per-reference overrides](#per-drug--per-reference-overrides) below
 
 Example:
@@ -253,10 +253,10 @@ Example:
 
 Two independent phenotype fields are tracked per rule:
 
-- **Phenotype** — captures in-vitro susceptibility interpretation (resistant, intermediate, sensitive, unknown).
-- **Clinical phenotype** — captures treatment-oriented interpretation where available.
+- **Phenotype** — in-vitro susceptibility interpretation.
+- **Clinical phenotype** — treatment-oriented interpretation, where available.
 
-Both are normalized independently from flexible input values. See [Rules TSV Format](rules-format.md) for the full normalization table.
+Both are stored verbatim (lowercased + whitespace-stripped) and resolved to a rank via the [rank vocabulary](rules-format.md#phenotype-normalization) (1 = susceptible … 5 = resistant; sentinels 0 = unknown, -1 = contradictory). Severity comparison and report colouring use the inferred rank so multi-tier vocabularies (e.g. `{susceptible, low-level resistance, resistant}`) work uniformly.
 
 ## Full configuration example
 

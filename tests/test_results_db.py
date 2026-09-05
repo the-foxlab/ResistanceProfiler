@@ -290,8 +290,8 @@ class TestProjectSchemaBoundary:
         assert migrated_rule is not None
         assert migrated_rule['reference_identifier'] == ''
         assert migrated_rule['reference'] == ''
-        assert migrated_rule['phenotype'] == 'unknown'
-        assert migrated_rule['clinical_phenotype'] == 'unknown'
+        assert migrated_rule['phenotype'] == ''
+        assert migrated_rule['clinical_phenotype'] == ''
         assert migrated_mapping_stats is not None
         assert int(migrated_mapping_stats['total']) == 1
         assert int(migrated_mapping_stats['max_cds_start']) == 0

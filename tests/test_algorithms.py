@@ -476,12 +476,12 @@ class TestValidateInterpretationAlgorithms:
             ])
 
     def test_drug_interpretation_missing_resistant_threshold(self) -> None:
-        with pytest.raises(ValueError, match='"resistant" key'):
+        with pytest.raises(ValueError, match='at least one severity label'):
             validate_interpretation_algorithms([
                 {
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'intermediate': 2},
+                    'thresholds': {'unknown': 2},
                 }
             ])
 
@@ -660,10 +660,24 @@ class TestStoreAndLoadAlgorithms:
 class TestComputeDrugAssessment:
 
     def _drug(self, **overrides) -> dict:
+        # Translate legacy count kwargs into the rank_counts dict expected by
+        # the rank-based algorithms. rank 5 = resistant, 4 = intermediate,
+        # 1 = sensitive, -1 = contradictory.
+        legacy_to_rank = {
+            'resistant_count': 5,
+            'intermediate_count': 4,
+            'sensitive_count': 1,
+            'contradictory_count': -1,
+        }
+        rank_counts: dict[int, int] = {}
+        for key, rank in legacy_to_rank.items():
+            if key in overrides:
+                val = overrides.pop(key)
+                if val:
+                    rank_counts[rank] = val
         base = {
             'hit_count': 0,
-            'resistant_count': 0, 'intermediate_count': 0,
-            'sensitive_count': 0, 'contradictory_count': 0,
+            'rank_counts': rank_counts,
             'score_total': 0.0,
             'ic50_values': [], 'fold_ic50_values': [],
         }
@@ -817,14 +831,14 @@ class TestValidateDrugInterpretationOverrides:
         assert result == algorithms
 
     def test_drug_thresholds_without_resistant_key_rejected(self) -> None:
-        with pytest.raises(ValueError, match='must include the "resistant" key'):
+        with pytest.raises(ValueError, match='at least one severity label'):
             validate_interpretation_algorithms([
                 {
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
                     'thresholds': {'resistant': 1},
                     'drug_thresholds': [
-                        {'drug': 'ACV', 'thresholds': {'intermediate': 1}},
+                        {'drug': 'ACV', 'thresholds': {'unknown': 1}},
                     ],
                 }
             ])
@@ -1097,10 +1111,24 @@ class TestResolveThresholds:
 class TestComputeDrugAssessmentWithOverrides:
 
     def _drug(self, **overrides) -> dict:
+        # Translate legacy count kwargs into the rank_counts dict expected by
+        # the rank-based algorithms. rank 5 = resistant, 4 = intermediate,
+        # 1 = sensitive, -1 = contradictory.
+        legacy_to_rank = {
+            'resistant_count': 5,
+            'intermediate_count': 4,
+            'sensitive_count': 1,
+            'contradictory_count': -1,
+        }
+        rank_counts: dict[int, int] = {}
+        for key, rank in legacy_to_rank.items():
+            if key in overrides:
+                val = overrides.pop(key)
+                if val:
+                    rank_counts[rank] = val
         base = {
             'hit_count': 0,
-            'resistant_count': 0, 'intermediate_count': 0,
-            'sensitive_count': 0, 'contradictory_count': 0,
+            'rank_counts': rank_counts,
             'score_total': 0.0,
             'ic50_values': [], 'fold_ic50_values': [],
         }
@@ -1323,7 +1351,7 @@ class TestApplyIc50ThresholdClassification:
             "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
             "WHERE d.name = 'DrugB'"
         ).fetchone()
-        assert row['phenotype'] == 'unknown'
+        assert row['phenotype'] == ''
 
     def test_skips_empty_ic50_value(
         self, db_with_rules: tuple[sqlite3.Connection, int]
@@ -1336,7 +1364,7 @@ class TestApplyIc50ThresholdClassification:
             "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
             "WHERE d.name = 'DrugA' AND r.ic50 = ''"
         ).fetchone()
-        assert row['phenotype'] == 'unknown'
+        assert row['phenotype'] == ''
 
     def test_returns_count_of_updated_rules(
         self, db_with_rules: tuple[sqlite3.Connection, int]
@@ -1530,7 +1558,7 @@ class TestApplyIc50ThresholdClassification:
             "SELECT r.phenotype FROM resistance_rule r JOIN drug d ON d.id = r.drug_id "
             "WHERE d.name = 'DrugX'"
         ).fetchone()
-        assert row['phenotype'] == 'unknown'
+        assert row['phenotype'] == ''
 
     def test_override_only_drug_only_without_global_skips_rule(
         self, tmp_path: Path

@@ -260,9 +260,19 @@ body {
   white-space: nowrap;
 }
 
-.assessment.is-resistant {
-  background: var(--badge-resistant-bg);
-  color: var(--badge-resistant-text);
+.assessment.is-susceptible {
+  background: var(--badge-sensitive-bg);
+  color: var(--badge-sensitive-text);
+}
+
+.assessment.is-potential {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.assessment.is-low-level {
+  background: #ffedd5;
+  color: #9a3412;
 }
 
 .assessment.is-intermediate {
@@ -270,14 +280,19 @@ body {
   color: var(--badge-intermediate-text);
 }
 
-.assessment.is-sensitive {
-  background: var(--badge-sensitive-bg);
-  color: var(--badge-sensitive-text);
+.assessment.is-resistant {
+  background: var(--badge-resistant-bg);
+  color: var(--badge-resistant-text);
 }
 
 .assessment.is-unknown {
   background: var(--badge-unknown-bg);
   color: var(--badge-unknown-text);
+}
+
+.assessment.is-contradictory {
+  background: #334142;
+  color: #e2e8f0;
 }
 
 .empty,
