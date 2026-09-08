@@ -92,6 +92,13 @@ def _manifest_with_example_fasta_path(example_fasta_path: str) -> dict:
     return manifest
 
 
+def _manifest_with_respro_version(respro_version: object) -> dict:
+    """Return a manifest copy with a top-level respro_version field."""
+    manifest = json.loads(json.dumps(_MANIFEST))
+    manifest['respro_version'] = respro_version
+    return manifest
+
+
 _EXAMPLE_FASTA_CONTENT = b'>example_sample\nATGAAAGCTTTTGGCCCC\n'
 
 _RULES_TSV_CONTENT = (
@@ -245,6 +252,115 @@ class TestValidateManifestEntryExampleFasta:
         with patch('urllib.request.urlopen', return_value=_json_mock(manifest)):
             with pytest.raises(RuntimeError, match='example_fasta_path must be a string'):
                 list_maintained_databases()
+
+
+# ── respro_version compatibility check ──────────────────────────────────────
+
+class TestResproVersionCompatibility:
+    """The manifest ships a respro_version specifier; installed respro must satisfy it."""
+
+    def test_passes_when_installed_satisfies_spec(self) -> None:
+        """A spec the installed version satisfies does not raise."""
+        manifest = _manifest_with_respro_version('>=0.0.1')
+        with (
+            patch('urllib.request.urlopen', return_value=_json_mock(manifest)),
+            patch('respro.io.maintained_db.__version__', '0.1.3'),
+        ):
+            result = list_maintained_databases()
+        assert result == ['hiv_hivdb', 'hsv_daehne_jaki']
+
+    def test_raises_when_installed_below_minimum(self) -> None:
+        """Installed version below the manifest minimum raises a clear upgrade error."""
+        manifest = _manifest_with_respro_version('>=0.2.0')
+        with (
+            patch('urllib.request.urlopen', return_value=_json_mock(manifest)),
+            patch('respro.io.maintained_db.__version__', '0.1.3'),
+        ):
+            with pytest.raises(RuntimeError, match='incompatible'):
+                list_maintained_databases()
+
+    def test_error_mentions_installed_and_required_versions(self) -> None:
+        """The error message must name both the installed and required versions."""
+        manifest = _manifest_with_respro_version('>=0.5.0')
+        with (
+            patch('urllib.request.urlopen', return_value=_json_mock(manifest)),
+            patch('respro.io.maintained_db.__version__', '0.1.3'),
+        ):
+            with pytest.raises(RuntimeError) as exc_info:
+                list_maintained_databases()
+        msg = str(exc_info.value)
+        assert '0.1.3' in msg
+        assert '>=0.5.0' in msg
+        assert 'upgrade' in msg.lower()
+
+    def test_check_applies_to_download_command(self) -> None:
+        """The version check must also guard download_database_files, not just --list."""
+        manifest = _manifest_with_respro_version('>=0.9.0')
+        with (
+            patch('urllib.request.urlopen', return_value=_json_mock(manifest)),
+            patch('respro.io.maintained_db.__version__', '0.1.3'),
+        ):
+            with pytest.raises(RuntimeError, match='incompatible'):
+                download_database_files('hsv_daehne_jaki', Path('/tmp/fake'))
+
+    def test_absent_respro_version_field_is_allowed(self) -> None:
+        """Older manifests without respro_version are still usable (back-compat)."""
+        manifest = json.loads(json.dumps(_MANIFEST))
+        assert 'respro_version' not in manifest
+        with (
+            patch('urllib.request.urlopen', return_value=_json_mock(manifest)),
+            patch('respro.io.maintained_db.__version__', '0.1.3'),
+        ):
+            result = list_maintained_databases()
+        assert result == ['hiv_hivdb', 'hsv_daehne_jaki']
+
+    def test_malformed_specifier_raises(self) -> None:
+        """A syntactically invalid respro_version raises a manifest error."""
+        manifest = _manifest_with_respro_version('not-a-version')
+        with (
+            patch('urllib.request.urlopen', return_value=_json_mock(manifest)),
+            patch('respro.io.maintained_db.__version__', '0.1.3'),
+        ):
+            with pytest.raises(RuntimeError, match='respro_version must be'):
+                list_maintained_databases()
+
+    def test_non_string_specifier_raises(self) -> None:
+        """A non-string respro_version raises a manifest error."""
+        manifest = _manifest_with_respro_version(123)
+        with (
+            patch('urllib.request.urlopen', return_value=_json_mock(manifest)),
+            patch('respro.io.maintained_db.__version__', '0.1.3'),
+        ):
+            with pytest.raises(RuntimeError, match='respro_version must be a non-empty string'):
+                list_maintained_databases()
+
+    def test_cli_list_command_reports_incompatible_version(self) -> None:
+        """The --list CLI command surfaces the upgrade message to the user."""
+        manifest = _manifest_with_respro_version('>=0.9.0')
+        with (
+            patch('urllib.request.urlopen', return_value=_json_mock(manifest)),
+            patch('respro.io.maintained_db.__version__', '0.1.3'),
+        ):
+            result = runner.invoke(app, ['databases', '--list'])
+        assert result.exit_code != 0
+        combined = _strip_ansi(result.output + str(result.exception or ''))
+        assert 'incompatible' in combined
+
+    def test_cli_download_command_reports_incompatible_version(self, tmp_path: Path) -> None:
+        """The --download CLI command surfaces the upgrade message to the user."""
+        manifest = _manifest_with_respro_version('>=0.9.0')
+        with (
+            patch('urllib.request.urlopen', return_value=_json_mock(manifest)),
+            patch('respro.io.maintained_db.__version__', '0.1.3'),
+        ):
+            result = runner.invoke(app, [
+                'databases',
+                '--download', 'hsv_daehne_jaki',
+                '--output', str(tmp_path / 'out.db'),
+            ])
+        assert result.exit_code != 0
+        combined = _strip_ansi(result.output + str(result.exception or ''))
+        assert 'incompatible' in combined
 
 
 # ── _parse_reference_identifiers ─────────────────────────────────────────────
