@@ -9,7 +9,6 @@ pass because those labels are valid vocabulary entries (ranks 5/4/1).
 from __future__ import annotations
 
 from respro.db.algorithms import (
-    _classify_ic50,
     compute_drug_assessment,
 )
 
@@ -41,35 +40,14 @@ def _drug(**overrides) -> dict:
     return base
 
 
-class TestClassifyIc50RankLabels:
-    """_classify_ic50 returns the config-declared label for the matched breakpoint."""
-
-    def test_resistant_label_returned(self):
-        assert _classify_ic50(15.0, {'resistant': 10.0, 'intermediate': 3.0}) == 'resistant'
-
-    def test_intermediate_label_returned(self):
-        assert _classify_ic50(5.0, {'resistant': 10.0, 'intermediate': 3.0}) == 'intermediate'
-
-    def test_sensitive_label_returned(self):
-        assert _classify_ic50(1.0, {'resistant': 10.0, 'intermediate': 3.0}) == 'sensitive'
-
-    def test_multi_tier_label_returned(self):
-        """A config using a multi-tier label returns that label verbatim."""
-        thresholds = {
-            'resistant': 10.0,
-            'low-level resistance': 3.0,
-        }
-        assert _classify_ic50(5.0, thresholds) == 'low-level resistance'
-
-
 class TestComputeDrugAssessmentRankInference:
     """compute_drug_assessment infers ranks from labels for strongest-wins."""
 
     def test_multi_tier_labels_strongest_wins(self):
         """A 3-tier DB {1,3,5}: resistant (5) beats low-level resistance (3)."""
         drug = _drug(hit_count=2, resistant_count=1)
-        # by_phenotype with a rank-3 threshold label: 1 resistant rule >= 1 threshold
-        configs = [{'method': 'by_phenotype', 'thresholds': {'resistant': 1}}]
+        # by_phenotype hardcoded: highest-rank hit wins → resistant (rank 5).
+        configs = [{'method': 'by_phenotype'}]
         final, methods = compute_drug_assessment(drug, configs)
         assert final == 'resistant'
 
@@ -77,58 +55,87 @@ class TestComputeDrugAssessmentRankInference:
         """Contradictory (rank -1) wins over resistant (rank 5) in the merge."""
         drug = _drug(hit_count=2, resistant_count=1, contradictory_count=1)
         configs = [
-            {'method': 'by_phenotype', 'thresholds': {'resistant': 2}},
+            {'method': 'by_phenotype'},
             {'method': 'by_score', 'thresholds': {'resistant': 5, 'intermediate': 2}},
         ]
         drug['score_total'] = 6.0  # by_score → resistant
         final, methods = compute_drug_assessment(drug, configs)
-        # by_phenotype: contradictory (threshold 2 not met by 1 resistant, but contradictory>0)
+        # by_phenotype: resistant (1 resistant hit, highest rank with count >= 1)
         # by_score: resistant (6 >= 5)
-        # contradictory wins
-        assert final == 'contradictory'
+        # but contradictory is present in rank_counts; by_phenotype returns resistant
+        # (severity hit exists), so the merge is resistant vs resistant → resistant.
+        # To exercise contradictory winning, use a drug where by_phenotype returns
+        # contradictory (only contradictory hits, no severity):
+        drug2 = _drug(hit_count=1, contradictory_count=1)
+        final2, _ = compute_drug_assessment(drug2, configs)
+        assert final2 == 'contradictory'
 
     def test_all_resistant_returns_resistant(self):
         drug = _drug(hit_count=2, resistant_count=2)
-        configs = [{'method': 'by_phenotype', 'thresholds': {'resistant': 1}}]
+        configs = [{'method': 'by_phenotype'}]
         final, _ = compute_drug_assessment(drug, configs)
         assert final == 'resistant'
 
     def test_ic50_above_intermediate_returns_intermediate_label(self):
         drug = _drug(hit_count=1, ic50_values=[5.0])
-        configs = [{'method': 'by_ic50', 'thresholds': {'resistant': 10.0, 'intermediate': 3.0}}]
+        configs = [{'method': 'by_ic50', 'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 3.0}}]
         final, methods = compute_drug_assessment(drug, configs)
         assert final == 'intermediate'
 
     def test_three_tier_db_labels_work(self):
         """A DB using only {susceptible, low-level resistance, resistant} labels works."""
         drug = _drug(hit_count=1, resistant_count=1)
-        configs = [{'method': 'by_phenotype', 'thresholds': {'resistant': 1}}]
+        configs = [{'method': 'by_phenotype'}]
         final, _ = compute_drug_assessment(drug, configs)
         assert final == 'resistant'
 
-    def test_multi_tier_thresholds_preserved_through_drug_name_path(self):
-        """When drug_name is passed, multi-tier thresholds are not collapsed to
-        {resistant, intermediate}. A config with {resistant, low-level resistance}
-        must still evaluate the low-level resistance threshold."""
-        # 1 low-level-resistance rule (rank 3), 0 resistant rules.
+    def test_low_level_hit_returns_low_level_through_drug_name_path(self):
+        """by_phenotype hardcoded: 1 low-level-resistance hit (rank 3), 0 resistant
+        → highest rank with count >= 1 is rank 3 → 'low-level resistance'."""
         drug = _drug(hit_count=1, low_level_resistance_count=1)
-        configs = [
-            {'method': 'by_phenotype', 'thresholds': {'resistant': 1, 'low-level resistance': 1}},
-        ]
+        configs = [{'method': 'by_phenotype'}]
         final, methods = compute_drug_assessment(drug, configs, drug_name='DrugA')
         assert final == 'low-level resistance'
 
-    def test_multi_tier_override_preserved_through_drug_name_path(self):
-        """A per-drug override with a multi-tier label is resolved and applied."""
+
+class TestByPhenotypeHardcoded:
+    """by_phenotype is hardcoded: highest-rank hit wins, no configurable thresholds."""
+
+    def test_one_resistant_hit_returns_resistant(self):
+        drug = _drug(hit_count=1, resistant_count=1)
+        configs = [{'method': 'by_phenotype'}]
+        final, _ = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+
+    def test_one_low_level_hit_no_resistant_returns_low_level(self):
         drug = _drug(hit_count=1, low_level_resistance_count=1)
-        configs = [
-            {
-                'method': 'by_phenotype',
-                'thresholds': {'resistant': 1},
-                'drug_thresholds': [
-                    {'drug': 'DrugA', 'thresholds': {'low-level resistance': 1}},
-                ],
-            },
-        ]
-        final, methods = compute_drug_assessment(drug, configs, drug_name='DrugA')
+        configs = [{'method': 'by_phenotype'}]
+        final, _ = compute_drug_assessment(drug, configs)
         assert final == 'low-level resistance'
+
+    def test_resistant_plus_low_level_returns_resistant(self):
+        """Highest rank wins regardless of other labels — no ceiling/summation."""
+        drug = _drug(hit_count=2, resistant_count=1, low_level_resistance_count=1)
+        configs = [{'method': 'by_phenotype'}]
+        final, _ = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+
+    def test_only_contradictory_hits_returns_contradictory(self):
+        drug = _drug(hit_count=1, contradictory_count=1)
+        configs = [{'method': 'by_phenotype'}]
+        final, _ = compute_drug_assessment(drug, configs)
+        assert final == 'contradictory'
+
+    def test_hits_but_no_severity_or_contradictory_returns_susceptible(self):
+        # rank 1 (susceptible) is a severity label but weakest; with only
+        # susceptible hits the highest-rank > 0 with count >= 1 is susceptible.
+        drug = _drug(hit_count=1, sensitive_count=1)
+        configs = [{'method': 'by_phenotype'}]
+        final, _ = compute_drug_assessment(drug, configs)
+        assert final == 'susceptible'
+
+    def test_no_hits_returns_susceptible_default(self):
+        drug = _drug(hit_count=0)
+        configs = [{'method': 'by_phenotype'}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'susceptible'  # default when no evidence

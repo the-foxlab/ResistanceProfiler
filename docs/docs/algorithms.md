@@ -109,19 +109,19 @@ Combines matched rules into one overall drug result. Depending on the database, 
 
 Supported methods:
 
-- **`by_phenotype`** — counts phenotype-labelled hits per drug and compares counts against thresholds
+- **`by_phenotype`** — the highest-rank phenotype label among the drug's hits wins; contradictory wins only when no severity hit exists; hits with no severity/contradictory label yield `susceptible`. No `thresholds` key is accepted — labels come from the DB rules, not the config.
 - **`by_score`** — sums score values per drug and compares totals against thresholds
-- **`by_ic50`** — checks per-hit IC50 values per drug; the highest-rank label whose breakpoint is met wins, otherwise the rank-1 fallback (`susceptible`)
+- **`by_ic50`** — checks per-hit IC50 values per drug; the highest-rank label whose breakpoint is met wins, otherwise the configured rank-1 label
 - **`by_fold_ic50`** — same logic as `by_ic50`, but using fold-IC50 values
 
 Configuration keys:
 
 - `method` — required; must be `"by_phenotype"`, `"by_score"`, `"by_ic50"`, or `"by_fold_ic50"`
-- `thresholds` — required object mapping phenotype labels (or bare ranks) to thresholds; must include `"resistant"`; `"intermediate"` is optional. Labels are lowercased + whitespace-stripped and resolved via the rank vocabulary, so multi-tier configs work.
-- for `by_phenotype` and `by_score`, threshold values must be positive integers
-- for `by_ic50` and `by_fold_ic50`, threshold values must be positive numbers; if `intermediate` is set, `resistant` must be strictly greater than `intermediate`
+- `thresholds` — required object mapping phenotype labels (or bare ranks) to thresholds; must include `"resistant"`; `"intermediate"` is optional. Labels are lowercased + whitespace-stripped and resolved via the rank vocabulary, so multi-tier configs work. **Not accepted for `by_phenotype`** (the method is hardcoded).
+- for `by_score`, threshold values must be positive integers
+- for `by_ic50` and `by_fold_ic50`, threshold values must be positive numbers; if `intermediate` is set, `resistant` must be strictly greater than `intermediate`; the config must include at least one rank-1 label (e.g. `susceptible`), which is returned when the value falls below all higher-rank breakpoints
 - each method may appear at most once; two entries with the same `method` are rejected
-- `drug_thresholds` — optional list of per-drug overrides; see [Per-drug / per-reference overrides](#per-drug--per-reference-overrides) below
+- `drug_thresholds` — optional list of per-drug overrides; not accepted for `by_phenotype` (there are no thresholds to override). See [Per-drug / per-reference overrides](#per-drug--per-reference-overrides) below
 
 When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final **Assessment** column. The final assessment is strongest-wins by inferred rank: rank 5 (resistant) > … > rank 1 (susceptible), with `contradictory` (rank -1) winning over severity and `unknown` (rank 0) weakest. The most severe result across all methods becomes the final call.
 
@@ -132,46 +132,34 @@ Example:
 ```json
 {
   "name": "drug_interpretation",
-  "method": "by_phenotype",
-  "thresholds": {
-    "resistant": 1,
-    "intermediate": 1
-  }
+  "method": "by_phenotype"
 }
 ```
 
-### `ic50_thresholds`
-
-Defines per-drug IC50 or fold-IC50 breakpoints. Each rule with an IC50 value is classified into a phenotype label during init.
-
-- `use` — required; `"ic50"` or `"fold_ic50"`
-- `thresholds` — required non-empty object keyed by drug name. Each value maps **phenotype labels** (or bare ranks `1`–`5`) to positive numeric breakpoints. `"intermediate"` and `"resistant"` are required, with `resistant > intermediate`. Labels resolve via the [rank vocabulary](rules-format.md#phenotype-normalization).
-- `drug_thresholds` — optional list of per-drug overrides; see [Per-drug / per-reference overrides](#per-drug--per-reference-overrides) below
-
-Example:
+A numeric example with a rank-1 label:
 
 ```json
 {
-  "name": "ic50_thresholds",
-  "use": "fold_ic50",
+  "name": "drug_interpretation",
+  "method": "by_ic50",
   "thresholds": {
-    "ACV": {"intermediate": 3.0, "resistant": 10.0},
-    "PCV": {"intermediate": 3.0, "resistant": 10.0}
+    "susceptible": 0.0,
+    "intermediate": 3.0,
+    "resistant": 10.0
   }
 }
 ```
 
 ### Per-drug / per-reference overrides
 
-Both `drug_interpretation` and `ic50_thresholds` accept an optional `drug_thresholds` list that overrides the global `thresholds` for specific drugs, optionally scoped to a single reference. This is useful when a drug needs finer breakpoints than the database-wide default, or when the same drug has different breakpoints across references (e.g. different viral species).
+`drug_interpretation` accepts an optional `drug_thresholds` list that overrides the global `thresholds` for specific drugs, optionally scoped to a single reference. This is useful when a drug needs finer breakpoints than the database-wide default, or when the same drug has different breakpoints across references (e.g. different viral species).
 
 Each entry is an object with:
 
 - `reference` — optional non-empty string; when present, the override applies only to rules/drugs whose reference matches (accession-version tolerant, e.g. `NC_001345.1` matches `NC_001345`)
 - `drug` — required non-empty string; the drug name to override
 - `thresholds` — required object with the same shape and constraints as the parent algorithm's `thresholds`:
-  - for `drug_interpretation`: must include `resistant`; `intermediate` is optional; integer for `by_phenotype`/`by_score`, positive number for `by_ic50`/`by_fold_ic50` (with `resistant` > `intermediate` when `intermediate` is set)
-  - for `ic50_thresholds`: both `intermediate` and `resistant` are required, and `resistant` must be strictly greater than `intermediate`
+  - must include `resistant`; `intermediate` is optional; integer for `by_score`, positive number for `by_ic50`/`by_fold_ic50` (with `resistant` > `intermediate` when `intermediate` is set)
 
 Resolution precedence (most specific wins):
 
@@ -188,23 +176,10 @@ Example — `drug_interpretation` with a per-reference override:
 ```json
 {
   "name": "drug_interpretation",
-  "method": "by_phenotype",
+  "method": "by_score",
   "thresholds": {"resistant": 1, "intermediate": 1},
   "drug_thresholds": [
     {"reference": "ref", "drug": "ACV", "thresholds": {"resistant": 1, "intermediate": 1}}
-  ]
-}
-```
-
-Example — `ic50_thresholds` with a per-reference override:
-
-```json
-{
-  "name": "ic50_thresholds",
-  "use": "fold_ic50",
-  "thresholds": {"ACV": {"intermediate": 3.0, "resistant": 10.0}},
-  "drug_thresholds": [
-    {"reference": "ref", "drug": "ACV", "thresholds": {"intermediate": 1.0, "resistant": 2.0}}
   ]
 }
 ```

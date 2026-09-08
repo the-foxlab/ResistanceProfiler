@@ -284,7 +284,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -347,7 +347,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_fold_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -431,7 +431,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -496,7 +496,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -554,7 +554,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_fold_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -621,7 +621,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -632,7 +632,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -706,7 +706,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -725,7 +725,7 @@ class TestBuildReportContext:
         # Method assessments should have badge classes
         ma = drug_table['rows'][0]['method_assessments']
         assert len(ma) == 1
-        assert ma[0]['assessment'] == 'sensitive'
+        assert ma[0]['assessment'] == 'susceptible'
         assert ma[0]['assessment_badge_class'] == 'phenotype--susceptible'
 
     def test_drug_thresholds_override_attaches_resolved_thresholds_and_source(self) -> None:
@@ -742,6 +742,7 @@ class TestBuildReportContext:
             reference='K',
             mutation='E',
             phenotype='resistant',
+            ic50='15.0',
         )
         result = make_profiling_result(
             project_name='T',
@@ -773,10 +774,10 @@ class TestBuildReportContext:
                 'drug_interpretation',
                 json.dumps({
                     'name': 'drug_interpretation',
-                    'method': 'by_phenotype',
-                    'thresholds': {'resistant': 2},
+                    'method': 'by_ic50',
+                    'thresholds': {'susceptible': 0.0, 'intermediate': 3.0, 'resistant': 10.0},
                     'drug_thresholds': [
-                        {'reference': 'ref', 'drug': 'DrugA', 'thresholds': {'resistant': 1}},
+                        {'reference': 'ref', 'drug': 'DrugA', 'thresholds': {'susceptible': 0.0, 'intermediate': 2.0, 'resistant': 5.0}},
                     ],
                 }),
             ),
@@ -790,9 +791,9 @@ class TestBuildReportContext:
         assert drug_table['has_drug_thresholds'] is True
         ma = drug_table['rows'][0]['method_assessments']
         assert len(ma) == 1
-        # Override sets resistant threshold to 1 → resistant
+        # Override lowers the resistant breakpoint to 5.0; IC50 15.0 ≥ 5.0 → resistant
         assert ma[0]['assessment'] == 'resistant'
-        assert ma[0]['resolved_thresholds'] == {'resistant': 1}
+        assert ma[0]['resolved_thresholds'] == {'susceptible': 0.0, 'intermediate': 2.0, 'resistant': 5.0}
         assert ma[0]['threshold_source'] == 'override (reference, drug)'
 
     def test_drug_thresholds_override_absent_has_no_resolved_fields(self) -> None:
@@ -841,7 +842,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -871,6 +872,7 @@ class TestBuildReportContext:
             reference='K',
             mutation='E',
             phenotype='resistant',
+            ic50='3.0',
         )
         result = make_profiling_result(
             project_name='T',
@@ -905,8 +907,8 @@ class TestBuildReportContext:
                 'drug_interpretation',
                 json.dumps({
                     'name': 'drug_interpretation',
-                    'method': 'by_phenotype',
-                    'thresholds': {'resistant': 2},
+                    'method': 'by_ic50',
+                    'thresholds': {'susceptible': 0.0, 'low-level resistance': 1.0, 'resistant': 2.0},
                     'drug_thresholds': [override],
                 }),
             ),
@@ -941,7 +943,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -2429,6 +2431,7 @@ class TestPdfExports:
             reference='K',
             mutation='E',
             phenotype='resistant',
+            ic50='15.0',
         )
         result = make_profiling_result(
             project_name='T',
@@ -2459,17 +2462,17 @@ class TestPdfExports:
                 'drug_interpretation',
                 json.dumps({
                     'name': 'drug_interpretation',
-                    'method': 'by_phenotype',
-                    'thresholds': {'resistant': 2},
+                    'method': 'by_ic50',
+                    'thresholds': {'susceptible': 0.0, 'intermediate': 3.0, 'resistant': 10.0},
                     'drug_thresholds': [
-                        {'reference': 'ref', 'drug': 'DrugA', 'thresholds': {'resistant': 1}},
+                        {'reference': 'ref', 'drug': 'DrugA', 'thresholds': {'susceptible': 0.0, 'intermediate': 2.0, 'resistant': 5.0}},
                     ],
                 }),
             ),
         )
         conn.commit()
         html = render_html(result, similarity_high=1, similarity_moderate=0, project_conn=conn)
-        assert 'Thresholds applied: resistant=1' in html
+        assert 'Thresholds applied: susceptible=0.0, intermediate=2.0, resistant=5.0' in html
         assert 'override (reference, drug)' in html
 
     def test_render_html_drug_thresholds_hover_absent_without_overrides(self) -> None:
@@ -2515,7 +2518,7 @@ class TestPdfExports:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -2536,12 +2539,12 @@ class TestPdfExports:
         rule_a = ResistanceRule(
             id=1, feature_name='gagA', feature_id=1, drug_name='DrugA', drug_id=1,
             reference_identifier='refA', position=2, reference='K', mutation='E',
-            phenotype='resistant',
+            phenotype='resistant', ic50='6.0',
         )
         rule_b = ResistanceRule(
             id=2, feature_name='polB', feature_id=2, drug_name='DrugA', drug_id=1,
             reference_identifier='refB', position=2, reference='K', mutation='E',
-            phenotype='resistant',
+            phenotype='resistant', ic50='6.0',
         )
         ann_a = AnnotatedVariant(
             variant=VariantCall(chrom='chrom_a', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
@@ -2606,10 +2609,10 @@ class TestPdfExports:
                 'drug_interpretation',
                 json.dumps({
                     'name': 'drug_interpretation',
-                    'method': 'by_phenotype',
-                    'thresholds': {'resistant': 2},
+                    'method': 'by_ic50',
+                    'thresholds': {'susceptible': 0.0, 'intermediate': 3.0, 'resistant': 10.0},
                     'drug_thresholds': [
-                        {'reference': 'refA', 'drug': 'DrugA', 'thresholds': {'resistant': 1}},
+                        {'reference': 'refA', 'drug': 'DrugA', 'thresholds': {'susceptible': 0.0, 'intermediate': 2.0, 'resistant': 5.0}},
                     ],
                 }),
             ),
@@ -2624,10 +2627,11 @@ class TestPdfExports:
         drug_row = next(r for r in drug_table['rows'] if r['name'] == 'DrugA')
         ma = drug_row['method_assessments']
         assert len(ma) == 1
-        # refA sorts before refB → override (resistant=1) applies → resistant.
+        # refA sorts before refB → refA's override (resistant=5.0) applies;
+        # IC50 6.0 ≥ 5.0 → resistant.
         assert ma[0]['assessment'] == 'resistant'
         assert ma[0]['threshold_source'] == 'override (reference, drug)'
-        assert ma[0]['resolved_thresholds'] == {'resistant': 1}
+        assert ma[0]['resolved_thresholds'] == {'susceptible': 0.0, 'intermediate': 2.0, 'resistant': 5.0}
 
     def test_render_html_includes_table_filter_controls_js(self) -> None:
         r = _make_result()
@@ -4627,7 +4631,7 @@ class TestPdfDrugRows:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -4725,7 +4729,7 @@ class TestPdfDrugRows:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -4797,7 +4801,7 @@ class TestPdfDrugRows:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -4808,7 +4812,7 @@ class TestPdfDrugRows:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )

@@ -2863,7 +2863,7 @@ class TestExtractDisplayAlgorithms:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'resistant': 1},
                 'drug_thresholds': [
                     {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'resistant': 2}},
@@ -2875,40 +2875,14 @@ class TestExtractDisplayAlgorithms:
             {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'resistant': 2}},
         ]
 
-    def test_includes_drug_thresholds_for_ic50_thresholds(self) -> None:
-        from web.backend.services.browse import _extract_display_algorithms
-
-        algorithms = [
-            {
-                'name': 'ic50_thresholds',
-                'use': 'fold_ic50',
-                'thresholds': {'ACV': {'intermediate': 3.0, 'resistant': 10.0}},
-                'drug_thresholds': [
-                    {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'intermediate': 2.0, 'resistant': 5.0}},
-                ],
-            }
-        ]
-        result = _extract_display_algorithms(algorithms)
-        assert result['ic50_thresholds']['use'] == 'fold_ic50'
-        assert result['ic50_thresholds']['drug_thresholds'] == [
-            {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'intermediate': 2.0, 'resistant': 5.0}},
-        ]
-
     def test_omits_drug_thresholds_key_when_absent(self) -> None:
         from web.backend.services.browse import _extract_display_algorithms
 
         algorithms = [
-            {'name': 'drug_interpretation', 'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'name': 'drug_interpretation', 'method': 'by_score', 'thresholds': {'resistant': 1}},
         ]
         result = _extract_display_algorithms(algorithms)
         assert 'drug_thresholds' not in result['drug_interpretation'][0]
-        assert 'ic50_thresholds' not in result
-
-    def test_omits_ic50_thresholds_when_not_configured(self) -> None:
-        from web.backend.services.browse import _extract_display_algorithms
-
-        result = _extract_display_algorithms([])
-        assert 'ic50_thresholds' not in result
 
 
 class TestApiRouteRateLimits:

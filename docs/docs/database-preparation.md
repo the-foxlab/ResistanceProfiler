@@ -40,7 +40,7 @@ After this command succeeds, the file `myrespro.db` should exist.
 
 ### Phenotype input is strict
 
-The `phenotype` and `clinical_phenotype` columns in the rules TSV are normalized against the rank vocabulary described in [Rules Format](rules-format.md#phenotype-normalization). In short: labels are stored verbatim (lowercased + whitespace-stripped), bare ranks `1`–`5` resolve to canonical fallback labels, empty cells mean *unknown* (rank 0), and any non-empty unknown label or old shorthand (`s`/`r`/`i`/`res`) **hard-fails** during `respro init`.
+The `phenotype` and `clinical_phenotype` columns in the rules TSV are normalized against the rank vocabulary described in [Rules Format](rules-format.md#phenotype-normalization). In short: labels are stored verbatim (lowercased + whitespace-stripped), bare ranks `1`–`5` resolve to canonical fallback labels, empty cells mean *unknown* (rank 0), and any non-empty unknown label **hard-fails** during `respro init`.
 
 > **Breaking change:** databases built before this version must be rebuilt — there is no automatic migration.
 
@@ -68,14 +68,6 @@ Example metadata file:
   "tsv checksum": "sha256:abc123",
   "interpretation_algorithms": [
     {
-      "name": "ic50_thresholds",
-      "use": "fold_ic50",
-      "thresholds": {
-        "ACV": {"intermediate": 3.0, "resistant": 10.0},
-        "PCV": {"intermediate": 3.0, "resistant": 10.0}
-      }
-    },
-    {
       "name": "drug_interpretation",
       "method": "by_phenotype",
       "thresholds": {
@@ -91,17 +83,9 @@ Example metadata file:
 
 ## Interpretation algorithms
 
-`metadata.json` optionally supports a top-level `interpretation_algorithms` array. Each entry configures one algorithm by name. Each algorithm type may appear **at most once** in the list, and all five types can coexist.
+`metadata.json` optionally supports a top-level `interpretation_algorithms` array. Each entry configures one algorithm by name. Each algorithm type may appear **at most once** in the list, and all four types can coexist.
 
 Detailed algorithm descriptions are on the [Interpretation Algorithms](algorithms.md) page. Below is a summary of each type and its configuration keys.
-
-### `ic50_thresholds`
-
-Defines per-drug IC50 or fold-IC50 breakpoints. Each rule with an IC50 value is classified into a phenotype label during init.
-
-- `use` — required; `"ic50"` or `"fold_ic50"`
-- `thresholds` — required non-empty object keyed by drug name. Each value maps **phenotype labels** (or bare ranks `1`–`5`) to positive numeric breakpoints. `"resistant"` and `"intermediate"` are required, with `resistant > intermediate`. Labels resolve via the [rank vocabulary](rules-format.md#phenotype-normalization); unknown labels or old shorthand are rejected.
-- `drug_thresholds` — optional per-`(reference, drug)` overrides; each entry is `{reference?, drug, thresholds: {intermediate, resistant}}` (both required, `resistant > intermediate`). Precedence: `(reference, drug)` > `(drug)` > global. See [Interpretation Algorithms](algorithms.md).
 
 ### `drug_groups`
 
@@ -115,19 +99,19 @@ Turns per-drug evidence into a final report assessment. Threshold keys are **phe
 
 Supported methods:
 
-- `by_phenotype` — count phenotype-labelled hits per drug, compare against thresholds
+- `by_phenotype` — the highest-rank phenotype label among the drug's hits wins; contradictory wins only when no severity hit exists; hits with no severity/contradictory label yield `susceptible`. No `thresholds` key is accepted.
 - `by_score` — sum score values per drug, compare against thresholds
-- `by_ic50` — the highest-rank label whose breakpoint is met wins; otherwise the rank-1 fallback (`susceptible`)
+- `by_ic50` — the highest-rank label whose breakpoint is met wins; otherwise the configured rank-1 label
 - `by_fold_ic50` — same as `by_ic50`, using fold-IC50 values
 
 Keys:
 
 - `method` — required; one of `"by_phenotype"`, `"by_score"`, `"by_ic50"`, `"by_fold_ic50"`
-- `thresholds` — required object mapping labels (or bare ranks) to thresholds; must include `"resistant"`; `"intermediate"` is optional. Labels resolve via the rank vocabulary, so multi-tier vocabularies like `{1, 3, 5}` work.
-- `by_phenotype` / `by_score`: threshold values are positive integers
-- `by_ic50` / `by_fold_ic50`: threshold values are positive numbers; if `intermediate` is set, `resistant > intermediate`
+- `thresholds` — required object mapping labels (or bare ranks) to thresholds; must include `"resistant"`; `"intermediate"` is optional. Labels resolve via the rank vocabulary, so multi-tier vocabularies like `{1, 3, 5}` work. **Not accepted for `by_phenotype`**.
+- `by_score`: threshold values are positive integers
+- `by_ic50` / `by_fold_ic50`: threshold values are positive numbers; if `intermediate` is set, `resistant > intermediate`; the config must include at least one rank-1 label (e.g. `susceptible`), returned when the value falls below all higher-rank breakpoints
 - each method may appear at most once
-- `drug_thresholds` — optional per-`(reference, drug)` overrides; see [Interpretation Algorithms](algorithms.md)
+- `drug_thresholds` — optional per-`(reference, drug)` overrides; not accepted for `by_phenotype`. See [Interpretation Algorithms](algorithms.md)
 
 With multiple methods, the report shows one assessment column per method plus a final **Assessment** column. The final call is strongest-wins by inferred rank: rank 5 > … > rank 1, with `contradictory` (-1) winning over severity and `unknown` (0) weakest.
 
@@ -162,14 +146,6 @@ This metadata output is only produced when the project database has at least one
 {
   "description": "HSV database",
   "interpretation_algorithms": [
-    {
-      "name": "ic50_thresholds",
-      "use": "fold_ic50",
-      "thresholds": {
-        "ACV": {"intermediate": 3.0, "resistant": 10.0},
-        "PCV": {"intermediate": 3.0, "resistant": 10.0}
-      }
-    },
     {
       "name": "drug_groups",
       "groups": {

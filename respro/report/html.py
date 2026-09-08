@@ -1686,7 +1686,7 @@ def _threshold_source_label(
 ) -> str:
     """Return a human-readable label for the resolution source of a drug's thresholds.
 
-    Mirrors the precedence in :func:`respro.db.algorithms.resolve_thresholds`:
+    Mirrors the precedence in :func:`respro.db.algorithms.resolve_thresholds_dict`:
     ``(reference, drug)`` override > ``(drug)`` override > global ``thresholds``.
 
     :param config: drug_interpretation config dict
@@ -1763,11 +1763,10 @@ def _build_drug_interpretation_table(
         )
         if method == 'by_phenotype':
             parts = [
-                f'{lbl.title()}: \u2265{val} {lbl} phenotype hit(s).'
-                for _rank, lbl, val in ranked
+                'Highest-rank phenotype label among the drug\u2019s hits wins.',
+                'Contradictory: wins only when no severity hit exists.',
+                'Otherwise: Susceptible.',
             ]
-            parts.append('Contradictory: any contradictory hit(s).')
-            parts.append('Otherwise: Susceptible.')
         elif method == 'by_score':
             parts = [
                 f'{lbl.title()}: total score \u2265 {val}.'
@@ -1775,17 +1774,19 @@ def _build_drug_interpretation_table(
             ]
             parts.append('Otherwise: Susceptible.')
         elif method == 'by_ic50':
+            rank1 = next((lbl for r, lbl, _ in ranked if r == 1), 'susceptible')
             parts = [
                 f'{lbl.title()}: any IC50 value \u2265 {val}.'
-                for _rank, lbl, val in ranked
+                for _rank, lbl, val in ranked if _rank > 1
             ]
-            parts.append('Otherwise: Susceptible.')
+            parts.append(f'Otherwise: {rank1.title()}.')
         elif method == 'by_fold_ic50':
+            rank1 = next((lbl for r, lbl, _ in ranked if r == 1), 'susceptible')
             parts = [
                 f'{lbl.title()}: any fold IC50 value \u2265 {val}.'
-                for _rank, lbl, val in ranked
+                for _rank, lbl, val in ranked if _rank > 1
             ]
-            parts.append('Otherwise: Susceptible.')
+            parts.append(f'Otherwise: {rank1.title()}.')
         else:
             parts = []
         return ' '.join(parts)
@@ -1959,8 +1960,13 @@ def _build_drug_interpretation_table(
             # Attach resolved thresholds + source for the per-cell hover when
             # overrides are configured. Source labels mirror the precedence in
             # resolve_thresholds_dict: (reference, drug) > (drug) > global.
+            # by_phenotype is hardcoded (no configurable thresholds), so it is
+            # skipped — its hover uses the fixed description from
+            # _assessment_description instead.
             if has_drug_thresholds and drug_name:
                 for ma in method_assessments:
+                    if ma['method'] == 'by_phenotype':
+                        continue
                     config = next(
                         (c for c in drug_interp_configs if c.get('method') == ma['method']),
                         {},

@@ -59,7 +59,7 @@ class TestWarnAlgorithmLabelsNotInDb:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'resistant': 1},
             }
         ]
@@ -73,7 +73,7 @@ class TestWarnAlgorithmLabelsNotInDb:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'sensitive': 1, 'resistant': 1},
             }
         ]
@@ -88,22 +88,6 @@ class TestWarnAlgorithmLabelsNotInDb:
             if r.message.startswith("Algorithm config declares phenotype label 'resistant'")
         ]
         assert flagged == []
-
-    def test_ic50_thresholds_labels_checked(self, project_db, caplog):
-        conn, project_id = project_db
-        algorithms = [
-            {
-                'name': 'ic50_thresholds',
-                'use': 'ic50',
-                'thresholds': {'DrugA': {'resistant': 10.0, 'intermediate': 3.0}},
-            }
-        ]
-        with caplog.at_level(logging.WARNING, logger='respro.db.algorithms'):
-            warn_algorithm_labels_not_in_db(conn, project_id, algorithms)
-        messages = ' '.join(r.message for r in caplog.records)
-        # 'intermediate' is not among the stored labels ('susceptible', 'resistant').
-        assert 'intermediate' in messages
-        assert 'not among' in messages
 
     def test_effect_as_resistant_label_checked(self, project_db, caplog):
         conn, project_id = project_db
@@ -126,7 +110,7 @@ class TestWarnAlgorithmLabelsNotInDb:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'low-level resistance': 1},
             }
         ]

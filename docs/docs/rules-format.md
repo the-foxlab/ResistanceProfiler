@@ -227,7 +227,6 @@ Normalization rules:
 - **Empty = unknown.** An empty cell stores `''` (rank 0). The synonyms `none` and `not analysed` collapse to the canonical `unknown` label.
 - `phenotype` and `clinical_phenotype` are normalized independently. You may provide either, both, or neither.
 
-> **Breaking change:** project databases built before this version stored an `unknown` default and accepted fuzzy synonyms. They must be rebuilt — there is no automatic migration.
 
 ### IC50 parsing rules
 

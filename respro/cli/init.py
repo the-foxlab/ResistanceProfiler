@@ -16,7 +16,6 @@ from rich.console import Console
 from respro.core.rules import import_rules_with_summary, validate_rules_tsv
 from respro.db.algorithms import (
     apply_drug_alias_mappings,
-    apply_ic50_threshold_classification,
     load_interpretation_algorithms,
     store_interpretation_algorithms,
     warn_algorithm_labels_not_in_db,
@@ -136,9 +135,6 @@ def init_project(
         alias_config = next((a for a in algorithms if a['name'] == 'drug_alias'), None)
         if alias_config:
             apply_drug_alias_mappings(conn, project_id, alias_config)
-        ic50_config = next((a for a in algorithms if a['name'] == 'ic50_thresholds'), None)
-        if ic50_config:
-            apply_ic50_threshold_classification(conn, project_id, ic50_config)
         if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
         conn.commit()
@@ -221,9 +217,6 @@ def add_to_project(
         alias_config = next((a for a in stored_algorithms if a['name'] == 'drug_alias'), None)
         if alias_config:
             apply_drug_alias_mappings(conn, project_id, alias_config)
-        ic50_config = next((a for a in stored_algorithms if a['name'] == 'ic50_thresholds'), None)
-        if ic50_config:
-            apply_ic50_threshold_classification(conn, project_id, ic50_config)
         if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
         if example_text:

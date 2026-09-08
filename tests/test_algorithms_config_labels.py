@@ -14,7 +14,7 @@ class TestConfigStrictLabels:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {5: 1, 3: 1},
             }
         ]
@@ -28,7 +28,7 @@ class TestConfigStrictLabels:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'4': 1, 'resistant': 1},
             }
         ]
@@ -41,7 +41,7 @@ class TestConfigStrictLabels:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'Resistant': 1, 'Low-Level Resistance': 1},
             }
         ]
@@ -54,7 +54,7 @@ class TestConfigStrictLabels:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'r': 1},
             }
         ]
@@ -65,7 +65,7 @@ class TestConfigStrictLabels:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'s': 1},
             }
         ]
@@ -76,32 +76,8 @@ class TestConfigStrictLabels:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'res': 1, 'resistant': 1},
-            }
-        ]
-        with pytest.raises(ValueError, match='Unknown phenotype label'):
-            validate_interpretation_algorithms(algorithms)
-
-    def test_ic50_thresholds_bare_rank_keys_resolved(self) -> None:
-        algorithms = [
-            {
-                'name': 'ic50_thresholds',
-                'use': 'ic50',
-                'thresholds': {'ACV': {5: 10.0, 4: 3.0}},
-            }
-        ]
-        result = validate_interpretation_algorithms(algorithms)
-        acv = result[0]['thresholds']['ACV']
-        assert 'resistant' in acv
-        assert 'intermediate' in acv
-
-    def test_ic50_thresholds_rejects_shorthand(self) -> None:
-        algorithms = [
-            {
-                'name': 'ic50_thresholds',
-                'use': 'ic50',
-                'thresholds': {'ACV': {'r': 10.0, 'intermediate': 3.0}},
             }
         ]
         with pytest.raises(ValueError, match='Unknown phenotype label'):
@@ -112,7 +88,7 @@ class TestConfigStrictLabels:
             {
                 'name': 'drug_interpretation',
                 'method': 'by_ic50',
-                'thresholds': {'resistant': 10.0, 'intermediate': 3.0},
+                'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 3.0},
                 'drug_thresholds': [
                     {'drug': 'ACV', 'thresholds': {5: 5.0, 4: 2.0}},
                 ],
@@ -136,7 +112,7 @@ class TestMultiTierWithoutResistant:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'low-level resistance': 1},
             }
         ]
@@ -158,7 +134,7 @@ class TestMultiTierWithoutResistant:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'susceptible': 1},
             }
         ]
@@ -169,7 +145,7 @@ class TestMultiTierWithoutResistant:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {},
             }
         ]
@@ -180,7 +156,7 @@ class TestMultiTierWithoutResistant:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'unknown': 1},
             }
         ]
@@ -192,7 +168,7 @@ class TestMultiTierWithoutResistant:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'resistant': 1},
                 'drug_thresholds': [
                     {'drug': 'ACV', 'thresholds': {'low-level resistance': 2}},
@@ -207,7 +183,7 @@ class TestMultiTierWithoutResistant:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'resistant': 1},
                 'drug_thresholds': [
                     {'drug': 'ACV', 'thresholds': {'unknown': 1}},

@@ -52,18 +52,8 @@ def project_db(tmp_path: Path, tiny_genbank: Path) -> Path:
     metadata.write_text(json.dumps({
         'interpretation_algorithms': [
             {
-                'name': 'ic50_thresholds',
-                'use': 'ic50',
-                'thresholds': {
-                    'DrugR': {'resistant': 10.0, 'intermediate': 3.0},
-                    'DrugL': {'resistant': 10.0, 'intermediate': 3.0},
-                    'DrugS': {'resistant': 10.0, 'intermediate': 3.0},
-                },
-            },
-            {
                 'name': 'drug_interpretation',
                 'method': 'by_phenotype',
-                'thresholds': {'resistant': 1, 'low-level resistance': 1},
             },
         ],
     }))
