@@ -297,6 +297,15 @@ CREATE TABLE IF NOT EXISTS sample_classification (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sc_run ON sample_classification(run_id);
+
+CREATE TABLE IF NOT EXISTS profiled_feature (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id          INTEGER NOT NULL REFERENCES run(id),
+    reference_name  TEXT    NOT NULL DEFAULT '',
+    feature_name    TEXT    NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_pf_run ON profiled_feature(run_id);
 """
 
 
@@ -340,6 +349,14 @@ CREATE TABLE IF NOT EXISTS sample_classification (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sc_run ON sample_classification(run_id);
+
+CREATE TABLE IF NOT EXISTS profiled_feature (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id          INTEGER NOT NULL REFERENCES run(id),
+    reference_name  TEXT    NOT NULL DEFAULT '',
+    feature_name    TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_pf_run ON profiled_feature(run_id);
 """
 
 _OPTIONAL_RESULTS_COLUMN_DEFS = {

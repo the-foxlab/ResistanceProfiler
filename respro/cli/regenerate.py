@@ -14,11 +14,12 @@ from rich.panel import Panel
 
 from respro.config.cli_settings import CLI_CONFIG
 from respro.db.features import load_features_for_reference
-from respro.db.models import ProfilingResult, ReferenceGroup
+from respro.db.models import FeatureMatch, ProfilingResult, ReferenceGroup
 from respro.db.results import (
     load_classifications,
     load_coverage_gaps,
     load_formula_rule_hits,
+    load_profiled_features,
     load_run,
     load_run_from_json,
     reconstruct_annotations,
@@ -188,6 +189,29 @@ def regenerate(
             reference_names = [fallback]
             query_name_by_reference_name[fallback] = fallback
 
+        # Recover the per-reference profiled feature names so the summary drug
+        # interpretation table's in-scope drug set includes zero-hit (susceptible)
+        # drugs. The live run derives this from result.feature_matches (the
+        # aligned features); regenerate reconstructs it from persisted data:
+        #   - JSON path: each reference's `profiled_feature_names` list
+        #   - Results-DB path: the `profiled_feature` table
+        # Legacy runs without this data fall back to all ruled features on the
+        # reference (best-effort: may over-include drugs whose features were not
+        # aligned in a partial query, but this only affects the susceptible-drug
+        # set, not hit drugs).
+        profiled_feature_names_by_ref: dict[str, list[str]] = {}
+        if json_references:
+            for ref in json_references:
+                name = ref.get('reference_name', '')
+                names = ref.get('profiled_feature_names') or []
+                if name and names:
+                    profiled_feature_names_by_ref[name] = list(names)
+        if not profiled_feature_names_by_ref and result_db is not None and run_id is not None:
+            # results-DB path: load from the profiled_feature table
+            db_profiled = load_profiled_features(results_conn, run_id)
+            if db_profiled:
+                profiled_feature_names_by_ref = db_profiled
+
         # Build one ReferenceGroup per distinct reference, accumulating the union of
         # features/rules/rule_feature_names for export_results (matches the live
         # multi-reference assembly path in profile_helpers._finalize_and_export_multi).
@@ -222,6 +246,32 @@ def regenerate(
             all_rules.extend(ref_rules)
             all_rule_feature_names |= ref_rule_feature_names
 
+            # Synthesize FeatureMatch shells for the profiled features so the
+            # summary drug interpretation table (which derives its in-scope drug
+            # set from {m.feature.name for m in result.feature_matches}) includes
+            # zero-hit/susceptible drugs. The full FeatureMatch alignment data
+            # (identity, cigar, etc.) is not available in regenerate; only the
+            # feature name matters for the drug table. Falls back to all ruled
+            # features on this reference when no profiled set was persisted.
+            profiled_names = profiled_feature_names_by_ref.get(ref_name)
+            if not profiled_names:
+                profiled_names = sorted(ref_rule_feature_names)
+            ref_feature_by_name = {f.name: f for f in ref_features}
+            ref_feature_matches: list[FeatureMatch] = []
+            for fname in profiled_names:
+                feature = ref_feature_by_name.get(fname)
+                if feature is not None:
+                    ref_feature_matches.append(FeatureMatch(
+                        feature=feature,
+                        identity=0.0,
+                        cds_coverage=0.0,
+                        query_coverage=0.0,
+                        query_start=0,
+                        query_end=0,
+                        strand='+',
+                        cigar='',
+                    ))
+
             references.append(ReferenceGroup(
                 reference_name=ref_name,
                 reference_id=ref_id if ref_id is not None else 0,
@@ -229,7 +279,7 @@ def regenerate(
                 reference_length_nt=reference_length_nt,
                 query_name=query_name_by_reference_name.get(ref_name, ref_name),
                 query_sequence='',
-                feature_matches=[],
+                feature_matches=ref_feature_matches,
                 features=ref_features,
                 rules=ref_rules,
                 rule_feature_names=ref_rule_feature_names,

@@ -128,6 +128,13 @@ def save_run(
             (run_id, _reference_name_for_chrom(hit_chrom), json.dumps(formula_hit.to_dict())),
         )
 
+    # Persist the per-reference profiled feature names so regenerate can
+    # reconstruct the summary drug interpretation table's in-scope drug set
+    # (including zero-hit/susceptible drugs) without the project DB feature-
+    # mapping cache. The table is optional (created by schema migration); guard
+    # with a table-existence check so older results DBs without it still save.
+    _save_profiled_features(results_conn, run_id, result)
+
     results_conn.commit()
     return run_id
 
@@ -195,6 +202,16 @@ def delete_run(results_conn: sqlite3.Connection, run_identifier: str | int) -> d
     results_conn.execute('DELETE FROM coverage_gap WHERE run_id = ?', (run_id,))
     results_conn.execute('DELETE FROM formula_rule_hit WHERE run_id = ?', (run_id,))
     results_conn.execute('DELETE FROM sample_classification WHERE run_id = ?', (run_id,))
+    # profiled_feature is optional (legacy DBs may lack the table); guard so
+    # delete_run works on older results databases created before the table existed.
+    tables = {
+        row['name']
+        for row in results_conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    if 'profiled_feature' in tables:
+        results_conn.execute('DELETE FROM profiled_feature WHERE run_id = ?', (run_id,))
     results_conn.execute('DELETE FROM run WHERE id = ?', (run_id,))
     results_conn.commit()
 
@@ -287,6 +304,73 @@ def load_formula_rule_hits(results_conn: sqlite3.Connection, run_id: int) -> lis
         (run_id,),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+def load_profiled_features(
+    results_conn: sqlite3.Connection,
+    run_id: int,
+) -> dict[str, list[str]]:
+    """
+    Load persisted profiled feature names for a run, grouped by reference_name.
+
+    Returns an empty dict when the ``profiled_feature`` table does not exist
+    (legacy results DBs) or has no rows for the run.
+
+    :param results_conn: open results DB connection
+    :param run_id: id of the run to load profiled features for
+    :return: dict mapping reference_name -> list of feature names
+    """
+    tables = {
+        row['name']
+        for row in results_conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    if 'profiled_feature' not in tables:
+        return {}
+
+    rows = results_conn.execute(
+        'SELECT reference_name, feature_name FROM profiled_feature WHERE run_id = ? ORDER BY id',
+        (run_id,),
+    ).fetchall()
+    by_ref: dict[str, list[str]] = {}
+    for row in rows:
+        ref = row['reference_name'] or ''
+        by_ref.setdefault(ref, []).append(row['feature_name'])
+    return by_ref
+
+
+def _save_profiled_features(
+    results_conn: sqlite3.Connection,
+    run_id: int,
+    result: ProfilingResult,
+) -> None:
+    """Persist per-reference profiled feature names to the ``profiled_feature`` table.
+
+    The table is created by the schema's optional-tables migration; if it does
+    not exist yet (very old results DB opened without migration), the save is
+    silently skipped so ``save_run`` remains backward-compatible.
+    """
+    tables = {
+        row['name']
+        for row in results_conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        ).fetchall()
+    }
+    if 'profiled_feature' not in tables:
+        return
+
+    for rg in result.references:
+        seen: set[str] = set()
+        for match in rg.feature_matches:
+            name = (match.feature.name or '').strip()
+            if name and name not in seen:
+                seen.add(name)
+                results_conn.execute(
+                    'INSERT INTO profiled_feature (run_id, reference_name, feature_name) '
+                    'VALUES (?, ?, ?)',
+                    (run_id, rg.reference_name, name),
+                )
 
 
 def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:

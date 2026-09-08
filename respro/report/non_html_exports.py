@@ -257,6 +257,10 @@ def write_json(
 
     # Serialise the per-reference groups so regenerate --json can reconstruct
     # multiple ReferenceGroups without re-querying the project DB for reference names.
+    # ``profiled_feature_names`` persists the set of feature names that aligned to
+    # the query for this reference; regenerate uses it to pre-populate the summary
+    # drug interpretation table's in-scope drug set (including zero-hit/susceptible
+    # drugs) without relying on the project DB feature-mapping cache.
     references_payload = [
         {
             'reference_name': rg.reference_name,
@@ -264,6 +268,9 @@ def write_json(
             'organism': rg.organism,
             'reference_length_nt': rg.reference_length_nt,
             'query_name': rg.query_name,
+            'profiled_feature_names': sorted(
+                {m.feature.name for m in rg.feature_matches}
+            ),
         }
         for rg in result.references
     ]
