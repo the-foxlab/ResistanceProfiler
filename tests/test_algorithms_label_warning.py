@@ -118,3 +118,29 @@ class TestWarnAlgorithmLabelsNotInDb:
             warn_algorithm_labels_not_in_db(conn, project_id, algorithms)
         messages = ' '.join(r.message for r in caplog.records)
         assert 'low-level resistance' in messages
+
+    def test_no_warning_when_db_has_no_stored_labels(self, tmp_path, caplog):
+        """When the DB stores no phenotype labels at all, the comparison is
+        meaningless and no warning should be emitted."""
+        db_path = tmp_path / 'project.db'
+        conn = create_schema(db_path)
+        conn.execute(
+            "INSERT INTO project (name, schema_version, uuid) VALUES ('test', 1, 'test-uuid')"
+        )
+        conn.commit()
+        project_id = conn.execute('SELECT id FROM project LIMIT 1').fetchone()[0]
+        # A drug with no resistance rules → no phenotype labels stored.
+        conn.execute(
+            "INSERT INTO drug (project_id, name) VALUES (?, 'DrugA')", (project_id,)
+        )
+        conn.commit()
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_score',
+                'thresholds': {'potential low-level resistance': 1},
+            }
+        ]
+        with caplog.at_level(logging.WARNING, logger='respro.db.algorithms'):
+            warn_algorithm_labels_not_in_db(conn, project_id, algorithms)
+        assert not any('not among' in r.message for r in caplog.records)

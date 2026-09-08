@@ -194,6 +194,11 @@ def warn_algorithm_labels_not_in_db(
             (project_id,),
         ).fetchall()
         stored.update(r['phenotype'].strip() for r in rows)
+    # Only warn when the database actually stores phenotype labels. When no
+    # labels are stored at all the comparison is meaningless and the warning
+    # is just noise (e.g. projects whose rules carry no phenotype column).
+    if not stored:
+        return
     for label in sorted(declared):
         if label not in stored:
             logger.warning(
@@ -201,7 +206,7 @@ def warn_algorithm_labels_not_in_db(
                 'the labels stored in the database (%s). The label still resolves '
                 'to a rank and processing continues; verify the vocabulary is '
                 'consistent between the algorithm config and the rules sheet.',
-                label, sorted(stored) or 'none',
+                label, sorted(stored),
             )
 
 
