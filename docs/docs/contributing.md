@@ -49,8 +49,17 @@ These principles guide development and code review:
 
 ## Local quality gates
 
+Install with dev dependencies first:
+
 ```bash
-python -m pytest
+pip install -e ".[dev]"
+```
+
+Then run the checks that CI runs:
+
+```bash
+ruff check .
+pytest
 ```
 
 ## Direct contact

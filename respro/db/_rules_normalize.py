@@ -156,11 +156,11 @@ def _normalize_phenotypes_from_row(
 
     Each non-empty value is lowercased + whitespace-stripped and resolved against
     the rank vocabulary via :func:`normalize_phenotype_label`. Unknown non-empty
-    labels raise :class:`ValueError` (collected into *errors* so the caller can
-    report all row errors at once). Empty cells store ``''`` (rank 0 / unknown).
-    The ``missing_*_default`` arguments are accepted for backward call-site
-    compatibility but are no longer meaningful under the strict system — empty
-    is the only default.
+    labels are appended to *errors* (with row context) and the cell stores
+    ``''`` so the caller can collect all row errors and raise once at the end.
+    Empty cells store ``''`` (rank 0 / unknown). The ``missing_*_default``
+    arguments are accepted for backward call-site compatibility but are no
+    longer meaningful under the strict system — empty is the only default.
     """
     phenotype_raw = _get_value(row, 'phenotype')
     clinical_raw = _get_value(row, 'clinical_phenotype')
@@ -172,6 +172,6 @@ def _normalize_phenotypes_from_row(
             return normalize_phenotype_label(raw)
         except ValueError as exc:
             errors.append(f'{context}: invalid {column} value {raw!r}: {exc}')
-            raise
+            return ''
 
     return _resolve(phenotype_raw, 'phenotype'), _resolve(clinical_raw, 'clinical_phenotype')

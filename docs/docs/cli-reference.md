@@ -5,23 +5,18 @@ description: Complete CLI command reference with examples
 
 # CLI Reference
 
-This reference covers all primary CLI command groups:
+This reference covers every `respro` command. The commands are grouped by what they do:
 
-- `databases`
-- `init`
-- `add`
-- `vcf`
-- `fasta`
-- `regenerate`
-- `classify`
-- `manage database`
-- `manage results` (including sync via `--sync` option)
+- **Get a database:** [`databases`](#download-a-maintained-database), [`init`](#initialize-a-project-database), [`add`](#extend-or-validate-rules-in-an-existing-project)
+- **Profile samples:** [`fasta`](#profile-fasta-input), [`vcf`](#profile-vcf-input)
+- **Work with results:** [`regenerate`](#regenerate-reports), [`classify`](#add-manual-interpretation-fields)
+- **Inspect and manage:** [`manage database`](#inspect-project-metadata-and-curated-rules), [`manage results`](#inspect-and-delete-stored-runs)
 
-The important workflow idea is that ResPro profiles against one internal project database. New sample data is first normalized to that internal reference space before amino-acid rules are matched.
+The core idea: ResPro profiles samples against one internal project database. New sample data is first normalised into that database's reference space, then amino-acid rules are matched.
 
 ## Download a maintained database
 
-List available pre-ported databases:
+List available pre-built databases:
 
 ```bash
 respro databases --list
@@ -33,7 +28,14 @@ Download a database by name:
 respro databases --download db_name --output my_folder/
 ```
 
-ResPro automatically downloads TSV rules and GenBank files, then builds a ResPro-compatible SQLite database from scratch. Database creation can take a moment because ResPro enriches entries with PubMed and PubChem information.
+ResPro downloads the TSV rules and GenBank files, then builds a SQLite database from them. This can take a moment because ResPro enriches entries with PubMed and PubChem information by default. Add `--no-additional-info` to skip those network lookups for a faster build.
+
+| Option | Description |
+|---|---|
+| `--list`, `-l` | List available maintained databases and their metadata. |
+| `--download NAME`, `-d` | Database name to download (use a value from `--list`). |
+| `--output PATH`, `-o` | Output path (directory or file). Defaults to `<database_name>.db`. |
+| `--additional-info` / `--no-additional-info` | Fetch PubChem/PubMed enrichment during the build (default: on). |
 
 !!! tip "Verbose progress"
     Add `-vv` to see verbose progress:
@@ -54,11 +56,23 @@ respro init \
   --output myrespro.db
 ```
 
-If your dataset only contains atomic mutation rules, omit `--formula-rules`.
+If your dataset only contains single-mutation rules, omit `--formula-rules`.
+
+| Option | Description |
+|---|---|
+| `--name TEXT`, `-n` | Project name. **Required.** |
+| `--rules PATH`, `-r` | Resistance rules TSV. **Required.** |
+| `--genbank PATH`, `-g` | GenBank file(s). Repeat for multiple files. |
+| `--formula-rules PATH`, `-f` | Optional formula (combination) rules TSV. |
+| `--output PATH`, `-o` | Output SQLite database path. Default: `project.db`. |
+| `--metadata PATH`, `-m` | Optional metadata JSON file. See [Database Preparation](database-preparation.md#optional-metadata-json). |
+| `--overwrite`, `-w` | Overwrite an existing database at the output path. |
+| `--additional-info` / `--no-additional-info` | Query PubChem/PubMed for enrichment (default: on). |
+| `--example PATH`, `-ex` | Store a single-record consensus FASTA as the database example. |
 
 Optionally ship a per-database example consensus FASTA that users can profile
 with a single command (see [Profile FASTA input](#profile-fasta-input)) and that
-the webapp exposes as an "Example" button. The example must be a single-record
+the web app exposes as an "Example" button. The example must be a single-record
 FASTA:
 
 ```bash
@@ -94,6 +108,17 @@ respro add \
   --formula-rules combinatorial_rules.tsv
 ```
 
+| Option | Description |
+|---|---|
+| `--project PATH`, `-p` | Existing project database. **Required.** |
+| `--rules PATH`, `-r` | Resistance rules TSV to add. **Required.** |
+| `--formula-rules PATH`, `-f` | Optional formula (combination) rules TSV. |
+| `--genbank PATH`, `-g` | Optional additional GenBank file(s). |
+| `--additional-info` / `--no-additional-info` | Query PubChem/PubMed for enrichment (default: on). |
+| `--validate`, `-v` | Validate rules and exit without writing changes. |
+| `--example PATH`, `-ex` | Replace the stored example consensus FASTA with this file. |
+| `--no-example` | Clear any stored example consensus FASTA. |
+
 Use `--example example_consensus.fasta` to store or overwrite a per-database
 example FASTA, or `--no-example` to clear a previously stored example:
 
@@ -115,6 +140,18 @@ respro fasta \
   --export json \
   --export pdf
 ```
+
+| Option | Description |
+|---|---|
+| `--project PATH`, `-p` | Project database. **Required.** |
+| `--fasta PATH`, `-f` | Input consensus FASTA sequence. Mutually exclusive with `--example`. |
+| `--example` | Profile the example consensus FASTA stored in the project database. |
+| `--sample TEXT`, `-s` | Sample name for the report. Default: `sample`. |
+| `--output PATH`, `-o` | Output path (directory or HTML file path). Default: `output`. |
+| `--results-db PATH`, `-d` | Optional results database path. Creates or appends to an existing SQLite results database. |
+| `--threads N`, `-th` | Thread count for alignment calculations. Default: `1`. |
+| `--cache` / `--no-cache` | Cache the FASTA reference mapping in the project database for report regeneration (default: off). |
+| `--export FORMAT`, `-e` | Extra export format alongside HTML (`pdf`, `json`, `tsv`). Repeatable. |
 
 To profile the example consensus FASTA stored in the project database (set via
 `respro init --example` or `respro add --example`), use `--example` instead of
@@ -143,6 +180,21 @@ respro vcf \
   --export json \
   --export pdf
 ```
+
+| Option | Description |
+|---|---|
+| `--project PATH`, `-p` | Project database. **Required.** |
+| `--vcf PATH`, `-f` | Input VCF file. **Required.** |
+| `--ref-fasta PATH`, `-r` | Reference FASTA the VCF was called against. **Required.** |
+| `--sample TEXT`, `-s` | Sample name for the report. Default: `sample`. |
+| `--output PATH`, `-o` | Output path (directory or HTML file path). Default: `output`. |
+| `--results-db PATH`, `-d` | Optional results database path. Creates or appends to an existing SQLite results database. |
+| `--min-af FLOAT`, `-ma` | Minimum allele frequency filter. Default: `0.01`. |
+| `--min-depth INT`, `-md` | Minimum read depth filter (used with `--bam`). Default: `10`. |
+| `--bam PATH`, `-b` | Optional BAM aligned against the same query reference as the VCF. Used to mark non-covered codon stretches below `--min-depth`. |
+| `--threads N`, `-th` | Thread count for alignment calculations. Default: `1`. |
+| `--cache` / `--no-cache` | Reuse/store the FASTA reference mapping cache in the project database (default: off). |
+| `--export FORMAT`, `-e` | Extra export format alongside HTML (`pdf`, `json`, `tsv`). Repeatable. |
 
 The VCF may be **multi-chrom** and the reference FASTA **multi-record**: each VCF
 `CHROM` is matched to one FASTA record by header name. This supports targeted
@@ -227,17 +279,32 @@ Project metadata:
 respro manage database myrespro.db --info
 ```
 
-Rules table:
+Rules table (both single and combination rules):
 
 ```bash
 respro manage database myrespro.db --rules
 ```
 
-Rules table filtered by reference:
+Rules table filtered by reference (partial, case-insensitive match):
 
 ```bash
 respro manage database myrespro.db --rules --reference NC_001806
 ```
+
+List only single (atomic) rules or only combination (formula) rules:
+
+```bash
+respro manage database myrespro.db --list-single
+respro manage database myrespro.db --list-combi
+```
+
+| Option | Description |
+|---|---|
+| `--info` | Show project metadata. |
+| `--rules` | Show all resistance rules (single and combination). |
+| `--list-single` | List only single (atomic) resistance rules. |
+| `--list-combi` | List only combination (formula) resistance rules. |
+| `--reference TEXT` | Optional reference filter (partial, case-insensitive). Use with `--rules`, `--list-single`, or `--list-combi`. |
 
 ## Inspect and delete stored runs
 
@@ -253,15 +320,26 @@ Delete one run without interactive confirmation:
 respro manage results my_results.db --delete 1 --force
 ```
 
+| Option | Description |
+|---|---|
+| `--list` | List stored profiling runs. |
+| `--delete ID` | Delete one run by id. Prompts for confirmation unless `--force` is set. |
+| `--sync PATH` | Re-annotate all stored runs against this project database (see below). |
+| `--force`, `-f` | Skip the delete confirmation prompt. |
+
 ## Re-annotate stored runs against updated rules
 
-Sync all runs with matching project fingerprint:
+When you update the rules in your project database, you can re-annotate all stored runs that share the same project fingerprint in one go:
 
 ```bash
 respro manage results my_results.db --sync myrespro.db
 ```
 
+This updates the rule hits in the results database so that regenerating a report reflects the latest rules.
+
 ## Add manual interpretation fields
+
+Attach a manual classification to a stored run. If the report is regenerated from the same results database later, the classification is preserved and shown in the HTML report.
 
 ```bash
 respro classify \
@@ -271,6 +349,20 @@ respro classify \
   --phenotype resistant \
   --note "manual check"
 ```
+
+At least one of `--phenotype`, `--clinical-phenotype`, `--ic50`, or `--fold-ic50` must be provided.
+
+| Option | Description |
+|---|---|
+| `--results-db PATH`, `-d` | Results database. **Required.** |
+| `--run-id INT`, `-i` | Run ID to classify. **Required.** |
+| `--drug TEXT` | Drug name this classification applies to. **Required.** |
+| `--phenotype TEXT` | Resistance phenotype label (e.g. `susceptible` / `intermediate` / `resistant` / `low-level resistance` / `unknown`) or a bare rank `1`–`5`. |
+| `--clinical-phenotype TEXT` | Externally verified clinical phenotype label (same vocabulary as `--phenotype`) or a bare rank `1`–`5`. |
+| `--ic50 TEXT` | IC50 value string. |
+| `--fold-ic50 TEXT` | Fold-IC50 value string. |
+| `--note TEXT` | Free-text note. |
+| `--source TEXT` | Source or reference for this classification. |
 
 ## Optional export formats
 
@@ -296,6 +388,8 @@ respro vcf \
 
 ## Regenerate reports
 
+Rebuild a report from a stored run or from a JSON export. Use either `--results-db` with `--run-id`, **or** `--json` — not both.
+
 From a stored run:
 
 ```bash
@@ -316,5 +410,14 @@ respro regenerate \
   --output my_output
 ```
 
+| Option | Description |
+|---|---|
+| `--project PATH`, `-p` | Project database. **Required.** |
+| `--output PATH`, `-o` | Output path (directory or HTML file path). **Required.** |
+| `--results-db PATH`, `-d` | Results database. Use with `--run-id`. |
+| `--run-id INT`, `-i` | Run ID to regenerate. Use with `--results-db`. |
+| `--json PATH`, `-j` | Results JSON export to regenerate from. |
+| `--export FORMAT`, `-e` | Extra export format alongside HTML (`pdf`, `json`, `tsv`). Repeatable. |
+
 !!! tip "Regenerate from JSON"
-    You can also regenerate your result from a JSON file. This is useful for archival and deterministic reproduction without needing the original results database.
+    Regenerating from a JSON file is useful for archival and deterministic reproduction without needing the original results database.

@@ -139,3 +139,84 @@ class TestByPhenotypeHardcoded:
         configs = [{'method': 'by_phenotype'}]
         final, methods = compute_drug_assessment(drug, configs)
         assert final == 'susceptible'  # default when no evidence
+
+
+class TestNumericAndScoreMultiTierOrdering:
+    """by_score / by_ic50 / by_fold_ic50 select the strongest matched breakpoint.
+
+    Regression coverage for AUD-001 (by_score short-circuits on the rank-1
+    label) and AUD-002 (breakpoints sorted by label string instead of by
+    rank/threshold). The strongest *matched* breakpoint is the highest-rank
+    label whose threshold the value meets; when only rank-1 is matched (or no
+    severity-rank > 1 breakpoint is met) the configured rank-1 label is
+    returned.
+    """
+
+    def test_by_score_with_rank1_label_returns_resistant_for_high_score(self):
+        """AUD-001: a rank-1 label in by_score must not short-circuit the loop."""
+        drug = _drug(hit_count=1, score_total=15.0)
+        configs = [{'method': 'by_score', 'thresholds': {'susceptible': 0, 'intermediate': 3, 'resistant': 10}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+        assert methods[0]['assessment'] == 'resistant'
+
+    def test_by_score_with_rank1_label_returns_susceptible_below_breakpoints(self):
+        """Below the lowest non-rank-1 breakpoint, the rank-1 label is returned."""
+        drug = _drug(hit_count=1, score_total=1.0)
+        configs = [{'method': 'by_score', 'thresholds': {'susceptible': 0, 'intermediate': 3, 'resistant': 10}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'susceptible'
+        assert methods[0]['assessment'] == 'susceptible'
+
+    def test_by_score_intermediate_threshold_met(self):
+        drug = _drug(hit_count=1, score_total=5.0)
+        configs = [{'method': 'by_score', 'thresholds': {'susceptible': 0, 'intermediate': 3, 'resistant': 10}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'intermediate'
+
+    def test_by_ic50_same_rank_higher_threshold_wins_between(self):
+        """AUD-002: two rank-5 labels - value between thresholds returns the lower-threshold label."""
+        drug = _drug(hit_count=1, ic50_values=[15.0])
+        configs = [{
+            'method': 'by_ic50',
+            'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'high-level resistance': 20.0},
+        }]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+        assert methods[0]['assessment'] == 'resistant'
+
+    def test_by_ic50_same_rank_higher_threshold_wins_above_it(self):
+        """AUD-002: value above the higher same-rank threshold returns that label."""
+        drug = _drug(hit_count=1, ic50_values=[25.0])
+        configs = [{
+            'method': 'by_ic50',
+            'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'high-level resistance': 20.0},
+        }]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'high-level resistance'
+        assert methods[0]['assessment'] == 'high-level resistance'
+
+    def test_by_ic50_cross_rank_alphabetical_divergence(self):
+        """AUD-002: 'intermediate' (rank 4) vs 'low-level resistance' (rank 3).
+
+        Alphabetically 'intermediate' < 'low-level resistance'; a value meeting
+        only the rank-4 breakpoint must return 'intermediate', not the rank-3
+        label that sorts later alphabetically.
+        """
+        drug = _drug(hit_count=1, ic50_values=[4.0])
+        configs = [{
+            'method': 'by_ic50',
+            'thresholds': {'susceptible': 0.0, 'intermediate': 3.0, 'low-level resistance': 5.0},
+        }]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'intermediate'
+
+    def test_by_score_same_rank_higher_threshold_wins(self):
+        """AUD-002: by_score same-rank labels - value between thresholds returns lower-threshold label."""
+        drug = _drug(hit_count=1, score_total=15.0)
+        configs = [{
+            'method': 'by_score',
+            'thresholds': {'susceptible': 0, 'resistant': 10, 'high-level resistance': 20},
+        }]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'

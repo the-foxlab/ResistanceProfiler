@@ -18,17 +18,23 @@ callbacks catch those propagated exceptions and route them through
 
 from __future__ import annotations
 
+from typing import NoReturn
+
 import click
 import typer
 
 
-def cli_error(message: str, exit_code: int = 1) -> None:
+def cli_error(message: str, exit_code: int = 1) -> NoReturn:
     """Render a user-facing CLI error message and exit.
 
     Writes ``Error: <message>`` to stderr (Click's standard error formatting) and
     raises :class:`typer.Exit` so Typer terminates the process cleanly without a
     traceback. Use this from command callbacks for validation failures and for
     re-raising helper-propagated :class:`click.ClickException` instances.
+
+    Declared ``NoReturn`` so callers' control-flow narrowing (e.g. after a
+    validation ``except`` that delegates here) is sound: execution never
+    continues past a ``cli_error`` call.
 
     :param message: human-readable error message
     :param exit_code: process exit code (default 1)

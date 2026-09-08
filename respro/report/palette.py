@@ -30,19 +30,6 @@ FEATURE_HIGHLIGHTED_EDGE = 'black'
 FEATURE_DEFAULT_EDGE = "#a2a2a2"
 FEATURE_BASELINE_COLOUR = 'dimgrey'
 
-# Phenotype badge colours — keyed by rank, derived from the rank vocabulary.
-# Importing here would create a circular import (phenotype_ranks is in respro.db),
-# so we mirror the rank→colour mapping. The canonical source is
-# respro.db.phenotype_ranks.RANK_COLOURS; keep these in sync.
-PHENOTYPE_COLOURS = {
-    1: '#27ae60',   # susceptible — green
-    2: '#f1c40f',   # potential low-level resistance — pleasant yellow
-    3: '#e67e22',   # low-level resistance — slight orange
-    4: '#e67e22',   # intermediate — orange
-    5: '#e74c3c',   # resistant — red
-    0: '#bdc3c7',   # unknown — grey
-    -1: '#334142',  # contradictory — dark
-}
 
 # Allele-frequency bin badge colours
 AF_BIN_COLOURS = {

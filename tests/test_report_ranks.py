@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from respro.db.models import (
     AnnotatedVariant,
-    ProfilingResult,
-    Publication,
     ResistanceRule,
     VariantCall,
 )
-from respro.report.html import _phenotype_badge_class, _build_rule_metrics, render_html
-from respro.report.palette import PHENOTYPE_COLOURS
+from respro.db.phenotype_ranks import RANK_COLOURS
+from respro.report.html import _build_rule_metrics, _phenotype_badge_class, render_html
 from tests.conftest import make_profiling_result
 
 
@@ -41,13 +39,13 @@ class TestPhenotypeBadgeClassByRank:
 
 
 class TestPaletteRankColours:
-    """PHENOTYPE_COLOURS is keyed by rank."""
+    """The canonical rank→colour mapping lives in respro.db.phenotype_ranks."""
 
     def test_rank_colours_present(self):
-        assert PHENOTYPE_COLOURS[1] == '#27ae60'
-        assert PHENOTYPE_COLOURS[5] == '#e74c3c'
-        assert PHENOTYPE_COLOURS[-1] == '#334142'
-        assert PHENOTYPE_COLOURS[0] == '#bdc3c7'
+        assert RANK_COLOURS[1] == '#27ae60'
+        assert RANK_COLOURS[5] == '#e74c3c'
+        assert RANK_COLOURS[-1] == '#334142'
+        assert RANK_COLOURS[0] == '#bdc3c7'
 
 
 class TestBuildRuleMetricsVerbatimLabel:

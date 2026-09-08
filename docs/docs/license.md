@@ -15,6 +15,6 @@ External references, rules, and publication-linked datasets may have separate li
 
 ## Data usage
 
-- Session-scoped uploads and reports are cleaned up automatically when a browser tab closes.
-- No data is stored on remote servers.
+- Uploads and generated reports are temporary. The web app deletes files older than the configured result TTL (default 24 hours) via a background sweep.
+- The CLI stores results only where you tell it to (via `--output` and `--results-db`). No data leaves your machine unless you use the `--additional-info` lookups.
 - Avoid naming results with sensitive information such as patient identifiers or names.

@@ -5,17 +5,20 @@ description: Create and extend a project database
 
 # Database Preparation
 
-ResistanceProfiler uses a project SQLite database (`project.db`) created from:
+A ResPro **project database** is a single SQLite file that holds your reference sequences, gene annotations, and curated resistance rules. Every profiling run compares new samples against this database, so it is the central asset of your workflow.
 
-- at least one GenBank reference file
-- one resistance [rules TSV](rules-format.md)
+!!! important "Build it once, then version it"
+    Take care building your project database and keep it under version control. The quality of every report depends on the rules and references you curate here.
 
-If you are preparing your first database, make sure the rules file uses feature names that exist in the GenBank CDS annotations.
+## What you need
 
-This database is the central asset of a ResPro workflow. It does not just store reference files. It defines the internal references, feature annotations, and curated rule set that later FASTA and VCF samples are compared against.
+A project database is built from two inputs:
 
-!!! important "Build carefully and version it"
-    Build `project.db` carefully and version it in your workflow. Most downstream interpretation quality depends on this curated project database.
+- **One or more GenBank reference files** — these define the reference sequences and the gene (CDS) annotations.
+- **One rules TSV file** — your curated resistance rules. See [Rules TSV Format](rules-format.md) for the column layout.
+
+!!! tip "Match feature names"
+    If this is your first database, make sure every `feature` name in your rules TSV exists as a CDS or mat_peptide annotation in your GenBank file. ResPro checks this during import and rejects unknown features.
 
 ## Create a new project database
 
@@ -28,31 +31,82 @@ respro init \
   --no-additional-info
 ```
 
-Notes:
+Options:
 
-- `--genbank` can be repeated for multiple files.
-- `--no-additional-info` skips network lookups for extra metadata.
-- `--metadata` accepts a JSON file with curated project metadata. See the section below for the supported keys and value rules.
-- `--example` optionally stores a single-record consensus FASTA shipped with the database. Users can then profile it via `respro fasta --example` or via the webapp "Example" button. Use `respro add --example` to overwrite and `respro add --no-example` to clear it.
-- After initialization, later profiling runs use this database as the internal coordinate and rule source.
+- `--genbank` — repeat this flag to include multiple GenBank files.
+- `--no-additional-info` — skip network lookups for extra drug and publication metadata. Use this for a faster, offline build.
+- `--metadata` — attach a JSON file with curated project metadata (see [Metadata JSON](#optional-metadata-json) below).
+- `--example` — store a single-record consensus FASTA alongside the database. Users can then profile it with `respro fasta --example` or click the "Example" button in the web app. Use `respro add --example` to overwrite it later and `respro add --no-example` to remove it.
 
-After this command succeeds, the file `myrespro.db` should exist.
+After the command finishes, the file `myrespro.db` exists and is ready for profiling.
 
-### Phenotype input is strict
+### Phenotype labels are checked strictly
 
 The `phenotype` and `clinical_phenotype` columns in the rules TSV are normalized against the rank vocabulary described in [Rules Format](rules-format.md#phenotype-normalization). In short: labels are stored verbatim (lowercased + whitespace-stripped), bare ranks `1`–`5` resolve to canonical fallback labels, empty cells mean *unknown* (rank 0), and any non-empty unknown label **hard-fails** during `respro init`.
 
-> **Breaking change:** databases built before this version must be rebuilt — there is no automatic migration.
+## Add rules to an existing database
+
+You can extend a database with new rules (and optionally new GenBank references) without rebuilding it from scratch:
+
+```bash
+respro add \
+  --project myrespro.db \
+  --rules new_rules.tsv \
+  --formula-rules new_formula.tsv
+```
+
+To only check whether a rules file is valid — without writing anything to the database — add `--validate`:
+
+```bash
+respro add \
+  --project myrespro.db \
+  --rules new_rules.tsv \
+  --validate
+```
+
+!!! tip "Use --validate in review"
+    Run `--validate` in your CI or curation review step before importing rules into a production database.
+
+## Inspect a database
+
+View project metadata:
+
+```bash
+respro manage database myrespro.db --info
+```
+
+List all curated rules:
+
+```bash
+respro manage database myrespro.db --rules
+```
+
+Filter rules by reference (partial, case-insensitive match):
+
+```bash
+respro manage database myrespro.db --rules --reference NC_001806
+```
+
+To list only single rules or only combination (formula) rules, use `--list-single` or `--list-combi` instead of `--rules`.
+
+For detailed column and mutation token requirements, see [Rules TSV Format](rules-format.md).
 
 ## Optional metadata JSON
 
-`respro init --metadata` accepts a JSON file whose top-level value must be an object. The file is used to populate project metadata fields during database creation.
+`respro init --metadata` accepts a JSON file that fills in project metadata fields when the database is created. The top-level value must be an object.
 
-Supported canonical keys are `maintainers`, `contact`, `publication_pmid`, `website`, `description`, `maintainer_update`, `license`, and `tsv_checksum`.
+**Supported keys:** `maintainers`, `contact`, `publication_pmid`, `website`, `description`, `maintainer_update`, `license`, `tsv_checksum`.
 
-Common aliases are accepted for a few keys: `maintainer` maps to `maintainers`, `publication` and `pmid` map to `publication_pmid`, `maintainer update` maps to `maintainer_update`, and `tsv checksum` maps to `tsv_checksum`.
+A few common aliases are accepted: `maintainer` → `maintainers`, `publication` and `pmid` → `publication_pmid`, `maintainer update` → `maintainer_update`, `tsv checksum` → `tsv_checksum`.
 
-Value rules are strict. `maintainers` may be either a string or a list of strings. `publication_pmid` must contain digits only. All other supported fields must be strings. Empty values are ignored, and unknown keys are rejected. When a PMID is provided, ResPro also tries to resolve the DOI automatically from PubMed when one is available.
+**Value rules:**
+
+- `maintainers` — a string or a list of strings.
+- `publication_pmid` — digits only.
+- All other supported fields — strings.
+- Empty values are ignored; unknown keys are rejected.
+
+When a PMID is provided, ResPro tries to resolve the DOI automatically from PubMed.
 
 Example metadata file:
 
@@ -69,11 +123,7 @@ Example metadata file:
   "interpretation_algorithms": [
     {
       "name": "drug_interpretation",
-      "method": "by_phenotype",
-      "thresholds": {
-        "resistant": 1,
-        "intermediate": 1
-      }
+      "method": "by_phenotype"
     }
   ]
 }
@@ -83,62 +133,66 @@ Example metadata file:
 
 ## Interpretation algorithms
 
-`metadata.json` optionally supports a top-level `interpretation_algorithms` array. Each entry configures one algorithm by name. Each algorithm type may appear **at most once** in the list, and all four types can coexist.
+The metadata JSON may include an `interpretation_algorithms` array. Each entry configures one algorithm by name. Each algorithm type may appear **at most once**, and all four types can coexist in the same database.
 
-Detailed algorithm descriptions are on the [Interpretation Algorithms](algorithms.md) page. Below is a summary of each type and its configuration keys.
+Algorithms are validated at `respro init` time and stored in the project database. Full descriptions live on the [Interpretation Algorithms](algorithms.md) page; below is a concise reference for each type and its keys.
 
-### `drug_groups`
+### `drug_interpretation` — turn rule hits into a per-drug assessment
 
-Assigns drugs to named groups (e.g. drug classes). This is only if you wish to group drugs in the final report.
+Combines the matched rules for a drug into one overall call. You can configure multiple entries with different `method` values — useful when a database mixes evidence types (for example, phenotype labels from one source and numeric scores from another).
 
-- `groups` — required non-empty object; each key is a group name; each value is a non-empty list of drug name strings; a drug name may not appear in more than one group
+**Methods:**
 
-### `drug_interpretation`
+| Method | How it decides | Needs `thresholds`? |
+|---|---|---|
+| `by_phenotype` | The highest-rank phenotype label among the drug's hits wins. `contradictory` wins only when no severity hit exists. Hits with no label yield `susceptible`. | **No** — labels come from the rules, not the config. |
+| `by_score` | Sums the `score` values per drug and compares the total against thresholds. | Yes |
+| `by_ic50` | Checks each hit's IC50; the highest-rank label whose breakpoint is met wins, otherwise the rank-1 label. | Yes |
+| `by_fold_ic50` | Same logic as `by_ic50`, using fold-IC50 values. | Yes |
 
-Turns per-drug evidence into a final report assessment. Threshold keys are **phenotype labels** (or bare ranks `1`–`5`) resolved via the [rank vocabulary](rules-format.md#phenotype-normalization), so the report shows the stored verbatim label coloured by its inferred rank. Multiple entries may coexist, each with a different `method` — useful when a database mixes evidence types (e.g. phenotype labels from one source, numeric scores from another).
+**Keys:**
 
-Supported methods:
+- `method` — required; one of `"by_phenotype"`, `"by_score"`, `"by_ic50"`, `"by_fold_ic50"`.
+- `thresholds` — required for `by_score`, `by_ic50`, and `by_fold_ic50`; **not accepted** for `by_phenotype`. An object mapping phenotype labels (or bare ranks `1`–`5`) to threshold values. Must include `"resistant"`; `"intermediate"` is optional. Labels resolve via the [rank vocabulary](rules-format.md#phenotype-normalization), so multi-tier vocabularies like `{1, 3, 5}` work.
+    - `by_score`: threshold values are positive integers.
+    - `by_ic50` / `by_fold_ic50`: threshold values are positive numbers. If `intermediate` is set, `resistant` must be greater than `intermediate`. The config must include at least one rank-1 label (e.g. `susceptible`), which is returned when the value falls below all higher-rank breakpoints.
+- `drug_thresholds` — optional list of per-drug overrides (see [Per-drug / per-reference overrides](algorithms.md#per-drug--per-reference-overrides)). Not accepted for `by_phenotype`.
 
-- `by_phenotype` — the highest-rank phenotype label among the drug's hits wins; contradictory wins only when no severity hit exists; hits with no severity/contradictory label yield `susceptible`. No `thresholds` key is accepted.
-- `by_score` — sum score values per drug, compare against thresholds
-- `by_ic50` — the highest-rank label whose breakpoint is met wins; otherwise the configured rank-1 label
-- `by_fold_ic50` — same as `by_ic50`, using fold-IC50 values
+Each `method` may appear at most once; two entries with the same `method` are rejected.
 
-Keys:
+When multiple methods are configured, the report shows one assessment column per method plus a final **Assessment** column. The final call is strongest-wins by inferred rank: rank 5 > … > rank 1, with `contradictory` (-1) winning over severity and `unknown` (0) weakest.
 
-- `method` — required; one of `"by_phenotype"`, `"by_score"`, `"by_ic50"`, `"by_fold_ic50"`
-- `thresholds` — required object mapping labels (or bare ranks) to thresholds; must include `"resistant"`; `"intermediate"` is optional. Labels resolve via the rank vocabulary, so multi-tier vocabularies like `{1, 3, 5}` work. **Not accepted for `by_phenotype`**.
-- `by_score`: threshold values are positive integers
-- `by_ic50` / `by_fold_ic50`: threshold values are positive numbers; if `intermediate` is set, `resistant > intermediate`; the config must include at least one rank-1 label (e.g. `susceptible`), returned when the value falls below all higher-rank breakpoints
-- each method may appear at most once
-- `drug_thresholds` — optional per-`(reference, drug)` overrides; not accepted for `by_phenotype`. See [Interpretation Algorithms](algorithms.md)
+!!! note "Label mismatches are warned, not fatal"
+    If a config uses a label that is not present in the rules sheet (for example `"sensitive"` instead of the sheet's `"susceptible"` — same rank, different wording), `respro init` logs a non-fatal warning and continues. Fix the vocabulary if the mismatch is unintended.
 
-With multiple methods, the report shows one assessment column per method plus a final **Assessment** column. The final call is strongest-wins by inferred rank: rank 5 > … > rank 1, with `contradictory` (-1) winning over severity and `unknown` (0) weakest.
+### `drug_groups` — group drugs in the report
 
-> **Note:** if a config declares a label not present in the rules sheet (e.g. `"sensitive"` vs the sheet's `"susceptible"` — same rank, different wording), `respro init` logs a non-fatal warning. Processing continues; fix the vocabulary if the mismatch is unintended.
+Assigns drugs to named groups (for example, drug classes) for display in the final report.
 
-### `drug_alias`
+- `groups` — required non-empty object. Each key is a group name; each value is a non-empty list of drug name strings. A drug may not appear in more than one group.
 
-Defines canonical drug-name to short-alias mappings for report rendering.
+### `drug_alias` — short drug names in the report
 
-- `groups` — required non-empty object; keys are canonical drug names; values are aliases
-- each key and value must be a non-empty string
-- alias values must be unique across canonical drug names
+Maps canonical drug names to short aliases shown in the report (for example, `Aciclovir (ACV)`).
 
-When configured, these mappings are written to the `drug.alias` column during `respro init` and used for report drug labels, for example `Aciclovir (ACV)`.
+- `groups` — required non-empty object. Keys are canonical drug names; values are aliases. Each key and value must be a non-empty string, and aliases must be unique across drugs.
 
-### `effect_as_resistant`
+These mappings are written to the `drug.alias` column during `respro init`.
 
-Defines report-only metadata interpretation for observed high-impact variant effects. This does not create curated database rule hits.
+### `effect_as_resistant` — treat high-impact effects as resistant
 
-- `rules` — required non-empty list
-- each rule must include `feature`, `effect`, `reference`, and `drug` as case-sensitive exact non-empty strings
-- `effect` — required non-empty list of strings; each must be one of: `frameshift`, `stop_gained`, `stop_lost`, `start_lost`, `insertion`, `deletion`
-- each (`feature`, `reference`, `drug`) tuple must be unique across the list
+Produces report-only metadata hits when a variant has a high-impact consequence in a given feature and reference. This does **not** create curated rule hits — it only adds a resistant metadata row for the configured drug.
 
-Each rule states: if a variant annotation in the given feature/reference has a consequence matching **any** of the listed effects, produce a metadata hit row with a resistant phenotype for the specified drug. The generated hit always carries a `resistant` value in the `phenotype` field; the `clinical_phenotype` field is left empty.
+- `rules` — required non-empty list. Each rule must include:
+    - `feature` — case-sensitive exact feature name.
+    - `reference` — case-sensitive exact reference name.
+    - `drug` — case-sensitive exact drug name.
+    - `effect` — a non-empty list of strings, each one of: `frameshift`, `stop_gained`, `stop_lost`, `start_lost`, `insertion`, `deletion`.
+- Each (`feature`, `reference`, `drug`) tuple must be unique across the list.
 
-This metadata output is only produced when the project database has at least one curated rule with a known phenotype or clinical phenotype.
+Each rule states: if a variant in the given feature/reference has a consequence matching **any** of the listed effects, a metadata hit row with phenotype `resistant` is produced for that drug. The `clinical_phenotype` field is left empty.
+
+This output is only produced when the database already contains at least one curated rule with a known phenotype or clinical phenotype.
 
 ### Example
 
@@ -155,11 +209,7 @@ This metadata output is only produced when the project database has at least one
     },
     {
       "name": "drug_interpretation",
-      "method": "by_phenotype",
-      "thresholds": {
-        "resistant": 1,
-        "intermediate": 1
-      }
+      "method": "by_phenotype"
     },
     {
       "name": "drug_interpretation",
@@ -191,30 +241,4 @@ This metadata output is only produced when the project database has at least one
 }
 ```
 
-Algorithms are validated at `respro init` time and stored in the `interpretation_algorithm` table of the project database. Existing databases without this table are migrated automatically on next open.
-
-## Inspect project metadata
-
-```bash
-respro manage database myrespro.db --info
-```
-
-## Inspect imported rules
-
-```bash
-respro manage database myrespro.db --rules
-```
-
-## Validate new rules without changing the database
-
-```bash
-respro add \
-  --project myrespro.db \
-  --rules rules.tsv \
-  --validate
-```
-
-!!! tip
-    Use `--validate` in CI or curation review before importing rules into a production project database.
-
-For detailed column and mutation token requirements, see [Rules TSV Format](rules-format.md).
+Algorithms are validated at `respro init` time and stored in the `interpretation_algorithm` table of the project database. If you open an older database that predates this table, ResPro adds it automatically.

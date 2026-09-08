@@ -192,3 +192,115 @@ class TestMultiTierWithoutResistant:
         ]
         with pytest.raises(ValueError, match='at least one severity label'):
             validate_interpretation_algorithms(algorithms)
+
+
+class TestNumericThresholdMonotonicity:
+    """AUD-002: numeric-method thresholds must be non-decreasing with rank.
+
+    The strongest-matched-breakpoint selection in ``_assess_numeric`` assumes
+    higher ranks have thresholds at least as high as lower ranks. A config
+    where a higher rank has a *lower* threshold than a lower rank would let the
+    lower-rank breakpoint fire first for values in between, producing a weaker
+    label than intended. Validation must reject such configs.
+    """
+
+    def test_higher_rank_lower_threshold_rejected(self) -> None:
+        # rank 5 (resistant) threshold 2 < rank 3 (low-level resistance) threshold 3
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_ic50',
+                'thresholds': {'susceptible': 0.0, 'low-level resistance': 3.0, 'resistant': 2.0},
+            }
+        ]
+        with pytest.raises(ValueError, match='non-decreasing with rank'):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_higher_rank_equal_threshold_accepted(self) -> None:
+        # Equal thresholds across ranks are allowed (a breakpoint shared by two tiers).
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_ic50',
+                'thresholds': {'susceptible': 0.0, 'low-level resistance': 3.0, 'resistant': 3.0},
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result[0]['thresholds']['resistant'] == 3.0
+
+    def test_properly_ordered_thresholds_accepted(self) -> None:
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_ic50',
+                'thresholds': {'susceptible': 0.0, 'low-level resistance': 3.0, 'resistant': 10.0},
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result[0]['thresholds']['resistant'] == 10.0
+
+    def test_monotonicity_checked_in_drug_thresholds_overrides(self) -> None:
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_ic50',
+                'thresholds': {'susceptible': 0.0, 'resistant': 10.0},
+                'drug_thresholds': [
+                    {'drug': 'ACV', 'thresholds': {'susceptible': 0.0, 'resistant': 1.0, 'low-level resistance': 5.0}},
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match='non-decreasing with rank'):
+            validate_interpretation_algorithms(algorithms)
+
+
+class TestThresholdKeyCollisionRejected:
+    """AUD-004: a bare rank and its label synonym must not silently collide.
+
+    ``_normalize_thresholds_dict_keys`` reduces keys to canonical labels. When
+    two raw keys normalize to the same label (e.g. bare rank ``'1'`` and the
+    label ``'susceptible'``), the previous last-write-wins behaviour silently
+    discarded one threshold with no warning. The normalizer must reject the
+    collision explicitly.
+    """
+
+    def test_bare_rank_and_label_synonym_rejected(self) -> None:
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_ic50',
+                'thresholds': {'1': 0.0, 'susceptible': 5.0, 'resistant': 10.0},
+            }
+        ]
+        with pytest.raises(ValueError, match='duplicate.*susceptible'):
+            validate_interpretation_algorithms(algorithms)
+
+    def test_two_labels_same_rank_distinct_strings_accepted(self) -> None:
+        """'susceptible' and 'sensitive' are distinct canonical labels (both rank 1).
+
+        They do NOT collide because they normalize to different strings; both
+        are kept. Only keys that normalize to the *same* string collide.
+        """
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_ic50',
+                'thresholds': {'susceptible': 0.0, 'sensitive': 5.0, 'resistant': 10.0},
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result[0]['thresholds'] == {'susceptible': 0.0, 'sensitive': 5.0, 'resistant': 10.0}
+
+    def test_collision_in_drug_thresholds_override_rejected(self) -> None:
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_ic50',
+                'thresholds': {'susceptible': 0.0, 'resistant': 10.0},
+                'drug_thresholds': [
+                    {'drug': 'ACV', 'thresholds': {'5': 5.0, 'resistant': 2.0}},
+                ],
+            }
+        ]
+        with pytest.raises(ValueError, match='duplicate.*resistant'):
+            validate_interpretation_algorithms(algorithms)

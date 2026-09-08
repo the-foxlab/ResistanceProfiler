@@ -3,16 +3,18 @@ title: Output Interpretation
 description: Understanding HTML, JSON, and TSV outputs
 ---
 
-# Output Interpretation Guide (HTML, JSON, TSV)
+# Output Interpretation
 
-ResistanceProfiler produces one required output and optional structured exports.
+Every profiling run produces an HTML report. You can also request structured exports (JSON, PDF, TSV) with `--export` for automation and downstream processing.
 
 !!! tip "Start with the HTML report"
     Use the HTML report first for interpretation context, then use JSON/TSV for automation and downstream processing.
 
 ## HTML report (`*.report.html`)
 
-What to inspect first:
+The HTML report is a single, portable file you can open in any browser. It is always generated.
+
+**What to inspect first:**
 
 - sample and project identity
 - total hits and matched rules
@@ -20,7 +22,7 @@ What to inspect first:
 - phenotype and clinical phenotype context
 - optional manual classifications
 
-Best use:
+**Best for:**
 
 - review by analysts and clinicians
 - sharing a portable report artifact
@@ -34,21 +36,21 @@ Best use:
 
 <figure markdown>
 ![Database tab](../assets/2_database_hits.png){: loading=lazy}
-<figcaption>Detailed overview over all mutations that have rule hits in the selected database.</figcaption>
+<figcaption>Detailed overview of all mutations that have rule hits in the selected database.</figcaption>
 </figure>
 
 <figure markdown>
 ![Mutation tab](../assets/3_all_mutations.png){: loading=lazy}
-<figcaption>Detailed overview over all mutations independent on whether they have database hits.</figcaption>
+<figcaption>Detailed overview of all mutations, regardless of whether they have database hits.</figcaption>
 </figure>
 
 
 
 ## JSON export (`*.results.json`)
 
-Structured machine-readable export for automation and reproducibility.
+A structured, machine-readable export for automation and reproducibility.
 
-Top-level sections include:
+**Top-level sections:**
 
 - `run`
 - `variant_result`
@@ -56,7 +58,7 @@ Top-level sections include:
 - `formula_rule_hit`
 - `sample_classification`
 
-Best use:
+**Best for:**
 
 - downstream pipelines
 - archival and deterministic regeneration

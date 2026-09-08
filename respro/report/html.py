@@ -1790,9 +1790,9 @@ def _build_drug_interpretation_table(
         """
         # Order labels by severity rank (weakest first); skip sentinels.
         ranked = sorted(
-            (label_to_rank(lbl), lbl, val)
+            (rank, lbl, val)
             for lbl, val in thresholds.items()
-            if label_to_rank(lbl) is not None and label_to_rank(lbl) > 0
+            if (rank := label_to_rank(lbl)) is not None and rank > 0
         )
         if method == 'by_phenotype':
             parts = [

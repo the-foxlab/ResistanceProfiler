@@ -5,19 +5,19 @@ description: Drug interpretation, IC50 thresholds, effect-as-resistant, and comb
 
 # Interpretation Algorithms
 
-Interpretation algorithms extend rule evaluation with additional logic. They are configured per project in the metadata JSON at `respro init` time and stored in the project database.
+Interpretation algorithms extend rule evaluation with additional logic. They are configured per project in the metadata JSON at `respro init` time and stored in the project database. See [Database Preparation](database-preparation.md) for how to add them.
 
-## Overview
+## How ResPro evaluates resistance
 
-ResPro evaluates resistance at multiple levels:
+ResPro evaluates resistance at three levels:
 
-1. **Single rules** — each row in the primary rules TSV is an atomic mutation-to-interpretation mapping.
-2. **Combination rules** — boolean formulas over atomic `member_id` values from grouped rules.
-3. **Interpretation algorithms** — project-level logic that aggregates matched rules into per-drug results.
+1. **Single rules** — each row in the primary rules TSV maps one mutation to an interpretation.
+2. **Combination rules** — boolean formulas over single-rule `member_id` values (e.g. "mutation A AND mutation B").
+3. **Interpretation algorithms** — project-level logic that aggregates matched rules into per-drug results in the report.
 
-## Rule nomenclature basics
+## Rule notation basics
 
-Rules are amino-acid-centric. A notation such as <span class="respro-pill">A123V</span> means reference amino acid A at position 123 changes to V.
+Rules are amino-acid-centric. A notation such as <span class="respro-pill">A123V</span> means the reference amino acid A at position 123 changes to V.
 
 | Type | Example | Meaning |
 |---|---|---|
@@ -25,10 +25,10 @@ Rules are amino-acid-centric. A notation such as <span class="respro-pill">A123V
 | Anchored deletion | <span class="respro-pill">VG215V</span> | The G after position 215 is deleted. |
 | Anchored insertion | <span class="respro-pill">V215VG</span> | Insertion of G after the V at position 215. |
 | Frameshift | <span class="respro-pill">L201LfsX</span> | Reading-frame shift after the L at position 201. |
-| Phenotype | <span class="respro-pill">sensitive / resistant</span> | Captures in-vitro susceptibility interpretation. |
-| Clinical phenotype | <span class="respro-pill">sensitive / resistant</span> | Captures treatment-oriented interpretation where available. |
+| Phenotype | <span class="respro-pill">sensitive / resistant</span> | In-vitro susceptibility interpretation. |
+| Clinical phenotype | <span class="respro-pill">sensitive / resistant</span> | Treatment-oriented interpretation, where available. |
 
-See [Rules TSV Format](rules-format.md) for the full mutation normalization reference.
+See [Rules TSV Format](rules-format.md) for the full mutation normalisation reference.
 
 ## Combination rules
 
@@ -72,56 +72,28 @@ Single rules represent one mutation-to-interpretation mapping. Combination rules
 
 ## Interpretation algorithms
 
-### `effect_as_resistant`
+### `drug_interpretation` — turn rule hits into a per-drug assessment
 
-Defines report-only metadata interpretation for observed high-impact variant effects. This does not create curated database rule hits.
+Combines the matched rules for a drug into one overall result. Depending on your database, this can be based on phenotype labels, scores, IC50 values, or fold-change cutoffs. Threshold keys are **phenotype labels** (or bare ranks `1`–`5`) resolved via the [rank vocabulary](rules-format.md#phenotype-normalization); the report shows the stored verbatim label coloured by its inferred rank, so multi-tier vocabularies (e.g. `{1, 3, 5}`) work without special-casing.
 
-Configured high-impact variant effects (frameshift, stop_gained, stop_lost, start_lost, insertion, deletion) observed in a feature/reference pair are interpreted as <span class="respro-pill">phenotype='resistant'</span> for the configured drug. This algorithm does not set <span class="respro-pill">clinical_phenotype</span>.
+**Methods:**
 
-Configuration keys:
+| Method | How it decides | Needs `thresholds`? |
+|---|---|---|
+| `by_phenotype` | The highest-rank phenotype label among the drug's hits wins. `contradictory` wins only when no severity hit exists. Hits with no label yield `susceptible`. | **No** — labels come from the rules, not the config. |
+| `by_score` | Sums the `score` values per drug and compares the total against thresholds. | Yes |
+| `by_ic50` | Checks each hit's IC50; the highest-rank label whose breakpoint is met wins, otherwise the rank-1 label. | Yes |
+| `by_fold_ic50` | Same logic as `by_ic50`, using fold-IC50 values. | Yes |
 
-- `rules` — required non-empty list
-- each rule must include `feature`, `effect`, `reference`, and `drug` as case-sensitive exact non-empty strings
-- `effect` — required non-empty list of strings; each must be one of: `frameshift`, `stop_gained`, `stop_lost`, `start_lost`, `insertion`, `deletion`
-- each (`feature`, `reference`, `drug`) tuple must be unique across the list
+**Configuration keys:**
 
-This metadata output is only produced when the project database has at least one curated rule with a known phenotype or clinical phenotype.
+- `method` — required; must be `"by_phenotype"`, `"by_score"`, `"by_ic50"`, or `"by_fold_ic50"`.
+- `thresholds` — required for `by_score`, `by_ic50`, and `by_fold_ic50`; **not accepted** for `by_phenotype`. An object mapping phenotype labels (or bare ranks) to threshold values. Must include `"resistant"`; `"intermediate"` is optional. Labels are lowercased + whitespace-stripped and resolved via the rank vocabulary, so multi-tier configs work.
+    - `by_score`: threshold values are positive integers.
+    - `by_ic50` / `by_fold_ic50`: threshold values are positive numbers. If `intermediate` is set, `resistant` must be strictly greater than `intermediate`. The config must include at least one rank-1 label (e.g. `susceptible`), which is returned when the value falls below all higher-rank breakpoints.
+- `drug_thresholds` — optional list of per-drug overrides; not accepted for `by_phenotype`. See [Per-drug / per-reference overrides](#per-drug--per-reference-overrides) below.
 
-Example:
-
-```json
-{
-  "name": "effect_as_resistant",
-  "rules": [
-    {
-      "feature": "UL23",
-      "effect": ["frameshift", "stop_gained", "stop_lost"],
-      "reference": "NC_001806",
-      "drug": "Aciclovir"
-    }
-  ]
-}
-```
-
-### `drug_interpretation`
-
-Combines matched rules into one overall drug result. Depending on the database, this can be based on phenotype labels, scores, IC50 values, or fold-change cutoffs. Threshold keys are **phenotype labels** (or bare ranks `1`–`5`) resolved via the [rank vocabulary](rules-format.md#phenotype-normalization); the report shows the stored verbatim label coloured by its inferred rank, so multi-tier vocabularies (e.g. `{1, 3, 5}`) work without special-casing.
-
-Supported methods:
-
-- **`by_phenotype`** — the highest-rank phenotype label among the drug's hits wins; contradictory wins only when no severity hit exists; hits with no severity/contradictory label yield `susceptible`. No `thresholds` key is accepted — labels come from the DB rules, not the config.
-- **`by_score`** — sums score values per drug and compares totals against thresholds
-- **`by_ic50`** — checks per-hit IC50 values per drug; the highest-rank label whose breakpoint is met wins, otherwise the configured rank-1 label
-- **`by_fold_ic50`** — same logic as `by_ic50`, but using fold-IC50 values
-
-Configuration keys:
-
-- `method` — required; must be `"by_phenotype"`, `"by_score"`, `"by_ic50"`, or `"by_fold_ic50"`
-- `thresholds` — required object mapping phenotype labels (or bare ranks) to thresholds; must include `"resistant"`; `"intermediate"` is optional. Labels are lowercased + whitespace-stripped and resolved via the rank vocabulary, so multi-tier configs work. **Not accepted for `by_phenotype`** (the method is hardcoded).
-- for `by_score`, threshold values must be positive integers
-- for `by_ic50` and `by_fold_ic50`, threshold values must be positive numbers; if `intermediate` is set, `resistant` must be strictly greater than `intermediate`; the config must include at least one rank-1 label (e.g. `susceptible`), which is returned when the value falls below all higher-rank breakpoints
-- each method may appear at most once; two entries with the same `method` are rejected
-- `drug_thresholds` — optional list of per-drug overrides; not accepted for `by_phenotype` (there are no thresholds to override). See [Per-drug / per-reference overrides](#per-drug--per-reference-overrides) below
+Each `method` may appear at most once; two entries with the same `method` are rejected.
 
 When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final **Assessment** column. The final assessment is strongest-wins by inferred rank: rank 5 (resistant) > … > rank 1 (susceptible), with `contradictory` (rank -1) winning over severity and `unknown` (rank 0) weakest. The most severe result across all methods becomes the final call.
 
@@ -184,11 +156,44 @@ Example — `drug_interpretation` with a per-reference override:
 }
 ```
 
-### `drug_groups`
+### `effect_as_resistant` — treat high-impact effects as resistant
 
-Assigns drugs to named groups (e.g. drug classes). This is only if you wish to group drugs in the final report.
+Produces report-only metadata hits when a variant has a high-impact consequence in a given feature and reference. This does **not** create curated rule hits — it only adds a resistant metadata row for the configured drug.
 
-- `groups` — required non-empty object; each key is a group name; each value is a non-empty list of drug name strings; a drug name may not appear in more than one group
+Configured high-impact variant effects (frameshift, stop_gained, stop_lost, start_lost, insertion, deletion) observed in a feature/reference pair are interpreted as <span class="respro-pill">phenotype='resistant'</span> for the configured drug. This algorithm does not set <span class="respro-pill">clinical_phenotype</span>.
+
+Configuration keys:
+
+- `rules` — required non-empty list. Each rule must include:
+    - `feature` — case-sensitive exact feature name.
+    - `reference` — case-sensitive exact reference name.
+    - `drug` — case-sensitive exact drug name.
+    - `effect` — a non-empty list of strings, each one of: `frameshift`, `stop_gained`, `stop_lost`, `start_lost`, `insertion`, `deletion`.
+- Each (`feature`, `reference`, `drug`) tuple must be unique across the list.
+
+This metadata output is only produced when the project database has at least one curated rule with a known phenotype or clinical phenotype.
+
+Example:
+
+```json
+{
+  "name": "effect_as_resistant",
+  "rules": [
+    {
+      "feature": "UL23",
+      "effect": ["frameshift", "stop_gained", "stop_lost"],
+      "reference": "NC_001806",
+      "drug": "Aciclovir"
+    }
+  ]
+}
+```
+
+### `drug_groups` — group drugs in the report
+
+Assigns drugs to named groups (for example, drug classes) for display in the final report.
+
+- `groups` — required non-empty object. Each key is a group name; each value is a non-empty list of drug name strings. A drug may not appear in more than one group.
 
 Example:
 
@@ -202,15 +207,13 @@ Example:
 }
 ```
 
-### `drug_alias`
+### `drug_alias` — short drug names in the report
 
-Defines canonical drug-name to short-alias mappings for report rendering.
+Maps canonical drug names to short aliases shown in the report (for example, `Aciclovir (ACV)`).
 
-- `groups` — required non-empty object; keys are canonical drug names; values are aliases
-- each key and value must be a non-empty string
-- alias values must be unique across canonical drug names
+- `groups` — required non-empty object. Keys are canonical drug names; values are aliases. Each key and value must be a non-empty string, and aliases must be unique across drugs.
 
-When configured, these mappings are written to the `drug.alias` column during `respro init` and used for report drug labels, for example `Aciclovir (ACV)`.
+These mappings are written to the `drug.alias` column during `respro init`.
 
 Example:
 

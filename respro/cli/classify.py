@@ -11,7 +11,6 @@ import typer
 from rich.console import Console
 
 from respro.db._rules_normalize import normalize_phenotype_label
-from respro.db.phenotype_ranks import label_to_rank
 from respro.db.results import (
     load_run,
     save_classification,

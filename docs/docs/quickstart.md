@@ -9,10 +9,11 @@ Get ResistanceProfiler running in three steps.
 
 ## 1. Install
 
-Install ResPro via bioconda:
+Install ResPro via Bioconda (recommended):
 
 ```bash
-conda install respro
+conda create -n respro -c conda-forge -c bioconda respro
+conda activate respro
 ```
 
 Verify the installation:

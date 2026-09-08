@@ -25,9 +25,8 @@ One harmonized report that classifies mutations and assists diagnostic interpret
 Install the CLI via conda (recommended):
 
 ```bash
-conda create -n respro
+conda create -n respro -c conda-forge -c bioconda respro
 conda activate respro
-conda install bioconda::respro
 ```
 
 Install via Docker (BioContainers):
@@ -40,7 +39,8 @@ Install via pip:
 
 ```bash
 git clone https://github.com/the-foxlab/ResistanceProfiler
-pip install -e ".[dev]"
+cd ResistanceProfiler
+pip install -e .
 ```
 
 Download a maintained database (e.g. herpesDRG):

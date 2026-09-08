@@ -59,19 +59,27 @@ def _normalize_threshold_label_key(key: object) -> str:
     return normalize_phenotype_label(key)
 
 
-def _normalize_thresholds_dict_keys(thresholds: dict) -> dict:
+def _normalize_thresholds_dict_keys(thresholds: dict, *, prefix: str = 'thresholds') -> dict:
     """Return a new thresholds dict with all keys normalized to canonical labels.
 
-    Raises :class:`ValueError` if any key is an unknown label/shorthand. If a
-    normalized key collides with an existing normalized key, the later value
-    wins (last-write-wins), mirroring dict construction semantics.
+    Raises :class:`ValueError` if any key is an unknown label/shorthand, or if
+    two raw keys normalize to the same canonical label (e.g. bare rank ``'1'``
+    and the label ``'susceptible'``). A silent last-write-wins collision would
+    discard one threshold with no warning, so the collision is rejected
+    explicitly.
 
     :param thresholds: raw thresholds dict (label/rank → value)
+    :param prefix: descriptive prefix for error messages
     :return: new dict with canonical label keys
     """
     normalized: dict = {}
     for raw_key, value in thresholds.items():
         label = _normalize_threshold_label_key(raw_key)
+        if label in normalized:
+            raise ValueError(
+                f'{prefix}: duplicate threshold keys normalize to the same label '
+                f'{label!r} (from {raw_key!r}); provide each label only once.'
+            )
         normalized[label] = value
     return normalized
 
@@ -322,8 +330,10 @@ def _validate_drug_interpretation(config: dict) -> None:
     if not isinstance(thresholds, dict):
         raise ValueError('drug_interpretation: "thresholds" must be a dict.')
 
-    # Normalize label/rank keys to canonical labels (rejects shorthand).
-    config['thresholds'] = _normalize_thresholds_dict_keys(thresholds)
+    # Normalize label/rank keys to canonical labels (rejects shorthand and duplicate-key collisions).
+    config['thresholds'] = _normalize_thresholds_dict_keys(
+        thresholds, prefix='drug_interpretation: "thresholds"',
+    )
     thresholds = config['thresholds']
 
     _require_severity_label(thresholds, prefix='drug_interpretation: "thresholds"')
@@ -353,7 +363,7 @@ def _require_severity_label(thresholds: dict, *, prefix: str) -> None:
     :param prefix: descriptive prefix for error messages
     :raises ValueError: if no key resolves to a positive rank
     """
-    if not any(label_to_rank(k) is not None and label_to_rank(k) > 0 for k in thresholds):
+    if not any((rank := label_to_rank(k)) is not None and rank > 0 for k in thresholds):
         raise ValueError(
             f'{prefix} must include at least one severity label '
             '(a phenotype label with rank 1–5, e.g. "resistant" or '
@@ -413,12 +423,49 @@ def _validate_threshold_values(
                 f'{prefix}: "resistant" threshold must be strictly greater than '
                 '"intermediate" for numeric methods.'
             )
+        _require_monotonic_thresholds(thresholds, prefix=prefix)
         return
 
     for key, val in thresholds.items():
         if not isinstance(val, int) or val <= 0:
             raise ValueError(
                 f'{prefix}[{key!r}] must be a positive integer, got {val!r}.'
+            )
+
+
+def _require_monotonic_thresholds(thresholds: dict, *, prefix: str) -> None:
+    """Require numeric thresholds to be non-decreasing with severity rank.
+
+    The strongest-matched-breakpoint selection in :func:`_assess_numeric`
+    iterates breakpoints highest-rank-first and returns the first whose
+    threshold the value meets. This is only well-defined when a higher rank
+    never has a *lower* threshold than a lower rank — otherwise a value could
+    meet a lower-rank breakpoint while a higher-rank (stronger) breakpoint with
+    a smaller threshold is also met but visited later. Equal thresholds across
+    ranks are permitted (a breakpoint shared by two tiers).
+
+    Only labels resolving to a positive severity rank (1–5) participate;
+    sentinels and unrecognized labels are ignored here (they are rejected
+    elsewhere).
+
+    :param thresholds: thresholds dict with canonical label keys
+    :param prefix: descriptive prefix for error messages
+    :raises ValueError: if any higher rank has a strictly lower threshold than
+        a lower rank
+    """
+    ranked = sorted(
+        (rank, threshold)
+        for label, threshold in thresholds.items()
+        if threshold is not None and (rank := label_to_rank(label)) is not None and rank > 0
+    )
+    for i in range(1, len(ranked)):
+        prev_rank, prev_threshold = ranked[i - 1]
+        cur_rank, cur_threshold = ranked[i]
+        if cur_rank > prev_rank and cur_threshold < prev_threshold:
+            raise ValueError(
+                f'{prefix}: numeric thresholds must be non-decreasing with rank, '
+                f'but rank {cur_rank} ({cur_threshold!r}) is lower than '
+                f'rank {prev_rank} ({prev_threshold!r}).'
             )
 
 
@@ -471,8 +518,10 @@ def _validate_drug_thresholds_overrides(
             raise ValueError(
                 f'{prefix}[{i}][\'thresholds\'] must be a dict.'
             )
-        # Normalize label/rank keys to canonical labels (rejects shorthand).
-        entry['thresholds'] = _normalize_thresholds_dict_keys(override_thresholds)
+        # Normalize label/rank keys to canonical labels (rejects shorthand and duplicate-key collisions).
+        entry['thresholds'] = _normalize_thresholds_dict_keys(
+            override_thresholds, prefix=f"{prefix}[{i}][\'thresholds\']",
+        )
         override_thresholds = entry['thresholds']
         _require_severity_label(
             override_thresholds, prefix=f"{prefix}[{i}][\'thresholds\']",
@@ -795,15 +844,37 @@ def _assess_by_phenotype(drug_data: dict, thresholds: dict) -> str:
     return ''
 
 
+def _severity_breakpoints(thresholds: dict) -> list[tuple[int, float, str]]:
+    """Return severity breakpoints as ``(rank, threshold, label)`` sorted weakest-first.
+
+    Only labels that resolve to a positive severity rank (1–5) with a non-None
+    threshold are included. Sorting by ``(rank, threshold)`` — not by label
+    string — guarantees that iterating in reverse visits the strongest matched
+    breakpoint first, so multi-tier and same-rank configs resolve correctly.
+    """
+    items: list[tuple[int, float, str]] = []
+    for label, threshold in thresholds.items():
+        if threshold is None:
+            continue
+        rank = label_to_rank(label)
+        if rank is None or rank <= 0:
+            continue
+        items.append((rank, threshold, label))
+    items.sort(key=lambda item: (item[0], item[1]))
+    return items
+
+
 def _assess_by_score(drug_data: dict, thresholds: dict) -> str:
-    """Assess by total score against label-keyed score thresholds."""
+    """Assess by total score against label-keyed score thresholds.
+
+    The strongest matched breakpoint is the highest-rank label whose threshold
+    the total score meets; ties within a rank go to the higher threshold. When
+    no severity-rank > 1 breakpoint is met, the configured rank-1 label is
+    returned (the caller defaults to ``'susceptible'`` when no rank-1 label is
+    configured).
+    """
     total = drug_data['score_total']
-    severity_items = sorted(
-        (label, threshold)
-        for label, threshold in thresholds.items()
-        if threshold is not None and label_to_rank(label) is not None and label_to_rank(label) > 0
-    )
-    for label, threshold in reversed(severity_items):
+    for _rank, threshold, label in reversed(_severity_breakpoints(thresholds)):
         if total >= threshold:
             return label
     if drug_data['hit_count'] > 0:
@@ -828,21 +899,19 @@ def _assess_by_fold_ic50(drug_data: dict, thresholds: dict) -> str:
 def _assess_numeric(values: list[float], thresholds: dict) -> str:
     """Assess numeric values against label-keyed breakpoints; return strongest matched label.
 
-    When no severity-rank > 1 breakpoint is met, return the configured rank-1
-    label (e.g. ``susceptible``). If no rank-1 label is configured (unvalidated
-    legacy config), fall back to the canonical rank-1 label ``'susceptible'``.
+    Iterates severity breakpoints strongest-first (by ``(rank, threshold)``,
+    not label string) and returns the first rank > 1 label whose threshold any
+    value meets. When no severity-rank > 1 breakpoint is met, the configured
+    rank-1 label is returned (e.g. ``susceptible``). If no rank-1 label is
+    configured (unvalidated legacy config), fall back to the canonical rank-1
+    label ``'susceptible'``.
     """
-    severity_items = sorted(
-        (label, threshold)
-        for label, threshold in thresholds.items()
-        if threshold is not None and label_to_rank(label) is not None and label_to_rank(label) > 0
-    )
-    for label, threshold in reversed(severity_items):
-        if label_to_rank(label) == 1:
+    for rank, threshold, label in reversed(_severity_breakpoints(thresholds)):
+        if rank == 1:
             continue
         if any(value >= threshold for value in values):
             return label
     rank1_labels = [label for label in thresholds if label_to_rank(label) == 1]
     if rank1_labels:
-        return rank1_labels[0]
+        return str(rank1_labels[0])
     return 'susceptible'

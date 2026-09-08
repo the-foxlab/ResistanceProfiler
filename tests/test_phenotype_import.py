@@ -151,6 +151,28 @@ class TestUnknownLabelHardFails:
                 rules_tsv=tsv, additional_info=False,
             )
 
+    def test_multiple_unknown_labels_all_reported(self, tmp_path: Path) -> None:
+        """AUD-003: all invalid phenotype rows are collected, not just the first.
+
+        The importer accumulates per-row errors and raises once at the end so a
+        user sees every bad row in one pass. Raising on the first bad row
+        forces an iterative fix-rerun cycle and is a regression of the
+        pre-rank-refactor behaviour.
+        """
+        tsv = _rules_tsv(tmp_path, 'phenotype', [
+            ('gag', 'tiny_ref', 2, 'K', 'E', 'DrugA', 'foobar'),
+            ('gag', 'tiny_ref', 3, 'A', 'E', 'DrugA', 'bazqux'),
+        ])
+        db = tmp_path / 'proj.db'
+        with pytest.raises(ValueError) as exc_info:
+            init_project(
+                db_path=db, name='t', genbank_paths=[_tiny_genbank(tmp_path)],
+                rules_tsv=tsv, additional_info=False,
+            )
+        message = str(exc_info.value)
+        assert 'foobar' in message
+        assert 'bazqux' in message
+
 
 class TestEmptyPhenotype:
     """An empty phenotype cell stores '' (rank 0 / unknown)."""
