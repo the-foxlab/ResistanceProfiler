@@ -216,7 +216,7 @@ For substitutions/stops, `reference` and normalized `mutation` are stored as dir
 | 4 | `intermediate`, `intermediate resistance`, `reduced inhibition`, `ri` | orange | `intermediate` |
 | 5 | `resistant`, `high-level resistance`, `highly reduced inhibition`, `hri` | red | `resistant` |
 | 0 | `unknown`, `not analysed`, `none`, *(empty cell)* | grey | `unknown` |
-| -1 | `contradictory`, `conflicting` | dark | `contradictory` |
+| -1 | `contradictory`, `conflicting` | slate | `contradictory` |
 
 Ranks run 1 (mildest) to 5 (most severe); `0` and `-1` are sentinels for *unknown* and *contradictory*.
 

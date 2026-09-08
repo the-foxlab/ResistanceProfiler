@@ -1331,7 +1331,7 @@ body {
 .phenotype--intermediate  { background: var(--intermediate-bg); color: var(--intermediate-text); border: 1px solid var(--intermediate-border); }
 .phenotype--resistant     { background: var(--resistant-bg);    color: var(--resistant-text);    border: 1px solid var(--resistant-border);    }
 .phenotype--unknown       { background: var(--neutral-bg);      color: var(--neutral-text);      border: 1px solid var(--neutral-border);      }
-.phenotype--contradictory { background: #334142;                color: #e2e8f0;                  border: 1px solid #1e293b;                    }
+.phenotype--contradictory { background: #64748b;                color: #f1f5f9;                  border: 1px solid #475569;                    }
 
 /* Numeric metric tier badges — coloured by mean±std position */
 /* tier1: at/below mean     */ .metric--tier1 { background: var(--metric-tier1-bg); color: var(--metric-tier1-text); border-color: var(--metric-tier1-border); }

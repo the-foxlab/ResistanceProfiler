@@ -80,7 +80,7 @@ Combines the matched rules for a drug into one overall result. Depending on your
 
 | Method | How it decides | Needs `thresholds`? |
 |---|---|---|
-| `by_phenotype` | The highest-rank phenotype label among the drug's hits wins. `contradictory` wins only when no severity hit exists. Hits with no label yield `susceptible`. | **No** — labels come from the rules, not the config. |
+| `by_phenotype` | The highest-rank phenotype label among the drug's hits wins. `contradictory` wins over `susceptible` (rank 1) but loses to any higher-tier severity (ranks 2–5). Hits with no label yield `susceptible`. | **No** — labels come from the rules, not the config. |
 | `by_score` | Sums the `score` values per drug and compares the total against thresholds. | Yes |
 | `by_ic50` | Checks each hit's IC50; the highest-rank label whose breakpoint is met wins, otherwise the rank-1 label. | Yes |
 | `by_fold_ic50` | Same logic as `by_ic50`, using fold-IC50 values. | Yes |
@@ -95,7 +95,7 @@ Combines the matched rules for a drug into one overall result. Depending on your
 
 Each `method` may appear at most once; two entries with the same `method` are rejected.
 
-When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final **Assessment** column. The final assessment is strongest-wins by inferred rank: rank 5 (resistant) > … > rank 1 (susceptible), with `contradictory` (rank -1) winning over severity and `unknown` (rank 0) weakest. The most severe result across all methods becomes the final call.
+When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final **Assessment** column. The final assessment is strongest-wins by inferred rank: rank 5 (resistant) > … > rank 2 (potential low-level resistance) > `contradictory` (rank -1) > rank 1 (susceptible), with `unknown` (rank 0) weakest. `contradictory` thus wins over susceptible but loses to any higher-tier severity. The most severe result across all methods becomes the final call.
 
 When `drug_thresholds` overrides are configured, each per-method assessment cell in the report shows an info icon on hover naming the resolved thresholds and their source (override `(reference, drug)`, override `(drug)`, or global default). The table layout, badge styling, and final Assessment column are unchanged; without overrides the report renders identically to the global-only case.
 

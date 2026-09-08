@@ -51,8 +51,8 @@ class TestComputeDrugAssessmentRankInference:
         final, methods = compute_drug_assessment(drug, configs)
         assert final == 'resistant'
 
-    def test_contradictory_wins_over_resistant(self):
-        """Contradictory (rank -1) wins over resistant (rank 5) in the merge."""
+    def test_contradictory_wins_over_susceptible_only(self):
+        """Contradictory (rank -1) wins over susceptible (rank 1) but loses to higher tiers."""
         drug = _drug(hit_count=2, resistant_count=1, contradictory_count=1)
         configs = [
             {'method': 'by_phenotype'},
@@ -62,12 +62,17 @@ class TestComputeDrugAssessmentRankInference:
         final, methods = compute_drug_assessment(drug, configs)
         # by_phenotype: resistant (1 resistant hit, highest rank with count >= 1)
         # by_score: resistant (6 >= 5)
-        # but contradictory is present in rank_counts; by_phenotype returns resistant
+        # contradictory is present in rank_counts but by_phenotype returns resistant
         # (severity hit exists), so the merge is resistant vs resistant → resistant.
+        # Contradictory loses to any severity rank >= 2.
+        assert final == 'resistant'
         # To exercise contradictory winning, use a drug where by_phenotype returns
-        # contradictory (only contradictory hits, no severity):
-        drug2 = _drug(hit_count=1, contradictory_count=1)
+        # contradictory (only contradictory hits, no severity) and by_score returns
+        # susceptible (below all non-rank-1 breakpoints):
+        drug2 = _drug(hit_count=1, contradictory_count=1, score_total=1.0)
         final2, _ = compute_drug_assessment(drug2, configs)
+        # by_phenotype: contradictory; by_score: susceptible (1 < 2)
+        # contradictory (strength 1.5) > susceptible (strength 1) → contradictory.
         assert final2 == 'contradictory'
 
     def test_all_resistant_returns_resistant(self):
@@ -126,9 +131,25 @@ class TestByPhenotypeHardcoded:
         final, _ = compute_drug_assessment(drug, configs)
         assert final == 'contradictory'
 
+    def test_contradictory_wins_over_susceptible_hits(self):
+        """Contradictory wins over susceptible (rank 1) hits: aciclovir case
+        with 4 contradictory + 1 susceptible hit → contradictory, not susceptible."""
+        drug = _drug(hit_count=5, sensitive_count=1, contradictory_count=4)
+        configs = [{'method': 'by_phenotype'}]
+        final, _ = compute_drug_assessment(drug, configs)
+        assert final == 'contradictory'
+
+    def test_contradictory_loses_to_resistant_hit(self):
+        """Contradictory loses to any higher-tier severity (rank >= 2)."""
+        drug = _drug(hit_count=5, resistant_count=1, contradictory_count=4)
+        configs = [{'method': 'by_phenotype'}]
+        final, _ = compute_drug_assessment(drug, configs)
+        assert final == 'resistant'
+
     def test_hits_but_no_severity_or_contradictory_returns_susceptible(self):
         # rank 1 (susceptible) is a severity label but weakest; with only
-        # susceptible hits the highest-rank > 0 with count >= 1 is susceptible.
+        # susceptible hits (no rank >= 2, no contradictory) the fallback is
+        # susceptible.
         drug = _drug(hit_count=1, sensitive_count=1)
         configs = [{'method': 'by_phenotype'}]
         final, _ = compute_drug_assessment(drug, configs)

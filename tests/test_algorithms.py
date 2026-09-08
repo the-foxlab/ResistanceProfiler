@@ -723,17 +723,18 @@ class TestComputeDrugAssessment:
         assert final == 'intermediate'
         assert len(methods) == 2
 
-    def test_two_methods_contradictory_ranks_between_resistant_and_intermediate(self):
+    def test_two_methods_contradictory_loses_to_intermediate(self):
         drug = self._drug(hit_count=2, contradictory_count=1, score_total=3.0)
         configs = [
             {'method': 'by_phenotype'},
             {'method': 'by_score', 'thresholds': {'resistant': 5, 'intermediate': 2}},
         ]
         final, methods = compute_drug_assessment(drug, configs)
-        # by_phenotype: contradictory (no severity hit, contradictory > 0)
+        # by_phenotype: contradictory (no severity hit >= rank 2, contradictory > 0)
         # by_score: intermediate (3 >= 2)
-        # strongest: contradictory (rank -1) wins over intermediate (rank 4)
-        assert final == 'contradictory'
+        # strongest: intermediate (rank 4) wins over contradictory (rank -1,
+        # strength between rank 1 and rank 2)
+        assert final == 'intermediate'
 
     def test_ic50_method(self):
         drug = self._drug(hit_count=1, ic50_values=[15.0])

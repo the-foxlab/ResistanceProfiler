@@ -2777,6 +2777,145 @@ class TestPdfExports:
         assert 'gag' in text.lower()
         assert 'rt' in text.lower()
 
+    def test_contradictory_only_drug_surfaced_in_narrative(self) -> None:
+        """A drug whose only hits are contradictory must surface in the summary
+        narrative as contradictory evidence (it wins over susceptible). The lead
+        sentence must mention contradictory evidence and a list section must name
+        the drug, using the contradictory rank colour."""
+        contradict_rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='tiny_ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='contradictory',
+        )
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+            feature_name='gag',
+            codon_pos=2,
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            af_bin='high',
+            rule_matches=[contradict_rule],
+        )
+        result = make_profiling_result(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            organism='Test organism',
+            annotations=[ann],
+        )
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            'CREATE TABLE interpretation_algorithm '
+            '(id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)'
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            ('drug_interpretation', json.dumps({'name': 'drug_interpretation', 'method': 'by_phenotype'})),
+        )
+        conn.commit()
+
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
+        drug_table = ctx['summary']['drug_table']
+        # by_phenotype with only contradictory hits → contradictory assessment.
+        assert drug_table['rows'][0]['assessment'] == 'contradictory'
+        text = ctx['summary']['narrative']
+        # Lead sentence must mention contradictory evidence.
+        assert 'contradictory evidence for 1 drug' in text
+        # List section must name the drug under a contradictory heading.
+        assert 'Drugs with contradictory evidence' in text
+        assert 'DrugA' in text
+        # The contradictory list line must use the contradictory rank colour.
+        from respro.db.phenotype_ranks import RANK_CONTRADICTORY, rank_to_colour
+        assert rank_to_colour(RANK_CONTRADICTORY) in text
+
+    def test_contradictory_loses_to_higher_tier_in_narrative(self) -> None:
+        """When a drug has both a resistant hit (by_phenotype) and a contradictory
+        hit, by_phenotype returns resistant (severity hit exists) and the final
+        assessment is resistant — contradictory must NOT appear in the narrative."""
+        resistant_rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='tiny_ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+        contradict_rule = ResistanceRule(
+            id=2,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugB',
+            drug_id=2,
+            reference_identifier='tiny_ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='contradictory',
+        )
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+            feature_name='gag',
+            codon_pos=2,
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            af_bin='high',
+            rule_matches=[resistant_rule, contradict_rule],
+        )
+        result = make_profiling_result(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            organism='Test organism',
+            annotations=[ann],
+        )
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            'CREATE TABLE interpretation_algorithm '
+            '(id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)'
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            ('drug_interpretation', json.dumps({'name': 'drug_interpretation', 'method': 'by_phenotype'})),
+        )
+        conn.commit()
+
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
+        # DrugA (resistant hit) → resistant; DrugB (contradictory hit) → contradictory.
+        rows = {r['summary_name']: r for r in ctx['summary']['drug_table']['rows']}
+        assert rows['DrugA']['assessment'] == 'resistant'
+        assert rows['DrugB']['assessment'] == 'contradictory'
+        text = ctx['summary']['narrative']
+        # Resistant drug surfaced; contradictory drug also surfaced (it has no
+        # higher-tier hit on its own).
+        assert 'Drugs assessed as resistant' in text
+        assert 'Drugs with contradictory evidence' in text
+        assert 'DrugB' in text
+
     def test_render_html_includes_summary_translation_controls(self) -> None:
         conn = sqlite3.connect(':memory:')
         conn.row_factory = sqlite3.Row

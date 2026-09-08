@@ -30,7 +30,7 @@ _FALLBACK_LABELS: dict[int, str] = {
 }
 
 # Rank → display colour. Severity gradient is monotonic: 1 green, 2 yellow,
-# 3 light orange, 4 deep orange, 5 red; 0 grey, -1 dark. Each rank is visually
+# 3 light orange, 4 deep orange, 5 red; 0 grey, -1 slate. Each rank is visually
 # darker/redder than the one below it so badge colours never invert severity.
 RANK_COLOURS: dict[int, str] = {
     1: '#27ae60',
@@ -39,7 +39,7 @@ RANK_COLOURS: dict[int, str] = {
     4: '#e67e22',
     5: '#e74c3c',
     RANK_UNKNOWN: '#bdc3c7',
-    RANK_CONTRADICTORY: '#334142',
+    RANK_CONTRADICTORY: '#64748b',
 }
 
 # Label → rank. All keys lowercased. Multiple labels may map to the same rank.

@@ -645,21 +645,24 @@ _METHOD_LABEL: dict[str, str] = {
 
 
 # Severity strength for strongest-wins resolution (higher = more severe).
-# Severity ranks 1–5 map to themselves. Contradictory is treated as stronger
-# than any severity rank; unknown and unrecognized labels are weakest.
-_STRENGTH_CONTRADICTORY = 6
+# Severity ranks 1–5 map to themselves. Contradictory sits *between* rank 1
+# (susceptible) and rank 2 (potential low-level resistance): it wins over
+# susceptible and unknown, but any higher-tier severity (ranks 2–5) wins over
+# contradictory. Unknown and unrecognized labels are weakest.
+_STRENGTH_CONTRADICTORY = 1.5
 _STRENGTH_WEAKEST = 0
 
 
-def _assessment_strength(label: str) -> int:
+def _assessment_strength(label: str) -> float:
     """Return a severity strength for *label* (higher = more severe).
 
     Used by :func:`compute_drug_assessment` to pick the strongest result across
-    methods via ``max()``. Contradictory (rank -1) is stronger than every
-    severity rank; unknown (rank 0) and unrecognized labels are weakest.
+    methods via ``max()``. Contradictory (rank -1) wins only over susceptible
+    (rank 1) and unknown (rank 0); any higher-tier severity rank (2–5) wins
+    over contradictory. Unknown (rank 0) and unrecognized labels are weakest.
 
     :param label: assessment label (a vocabulary entry or empty string)
-    :return: severity strength; 0 (weakest) … 6 (contradictory, strongest)
+    :return: severity strength; 0 (weakest) … 5 (resistant, strongest)
     """
     rank = label_to_rank(label)
     if rank is None or rank == RANK_UNKNOWN:
@@ -834,18 +837,21 @@ def _assess_by_phenotype(drug_data: dict, thresholds: dict) -> str:
     """Assess by phenotype labels: the highest-rank hit wins.
 
     Hardcoded logic (no configurable thresholds): iterate ``rank_counts``
-    highest-rank first and return the canonical label of the first rank > 0
-    with count ≥ 1. Contradictory (any count > 0) wins only when no severity
-    hit exists. Hits with no severity/contradictory label yield ``'susceptible'``.
-    No hits yield ``''`` (the caller defaults to ``'susceptible'``).
+    highest-rank first and return the canonical label of the first rank >= 2
+    with count >= 1. Contradictory (any count > 0) wins over susceptible (rank
+    1) but loses to any higher-tier severity hit (ranks 2-5). Hits with no
+    severity/contradictory label yield ``'susceptible'``. No hits yield ``''``
+    (the caller defaults to ``'susceptible'``).
 
     *thresholds* is accepted for signature parity with the other assess helpers
     but is ignored.
     """
     rank_counts: dict[int, int] = drug_data.get('rank_counts', {})
 
-    # Severity ranks 1–5, highest first; return the first with any hits.
-    for rank in sorted((r for r in rank_counts if r > 0), reverse=True):
+    # Severity ranks 2–5, highest first; return the first with any hits.
+    # Rank 1 (susceptible) is deliberately skipped here so that contradictory
+    # can win over it — contradictory sits between rank 1 and rank 2.
+    for rank in sorted((r for r in rank_counts if r >= 2), reverse=True):
         if rank_counts[rank] >= 1:
             return rank_to_label(rank)
 

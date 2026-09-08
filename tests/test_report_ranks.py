@@ -44,7 +44,7 @@ class TestPaletteRankColours:
     def test_rank_colours_present(self):
         assert RANK_COLOURS[1] == '#27ae60'
         assert RANK_COLOURS[5] == '#e74c3c'
-        assert RANK_COLOURS[-1] == '#334142'
+        assert RANK_COLOURS[-1] == '#64748b'
         assert RANK_COLOURS[0] == '#bdc3c7'
 
 

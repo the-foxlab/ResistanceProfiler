@@ -145,7 +145,7 @@ Combines the matched rules for a drug into one overall call. You can configure m
 
 | Method | How it decides | Needs `thresholds`? |
 |---|---|---|
-| `by_phenotype` | The highest-rank phenotype label among the drug's hits wins. `contradictory` wins only when no severity hit exists. Hits with no label yield `susceptible`. | **No** — labels come from the rules, not the config. |
+| `by_phenotype` | The highest-rank phenotype label among the drug's hits wins. `contradictory` wins over `susceptible` (rank 1) but loses to any higher-tier severity (ranks 2–5). Hits with no label yield `susceptible`. | **No** — labels come from the rules, not the config. |
 | `by_score` | Sums the `score` values per drug and compares the total against thresholds. | Yes |
 | `by_ic50` | Checks each hit's IC50; the highest-rank label whose breakpoint is met wins, otherwise the rank-1 label. | Yes |
 | `by_fold_ic50` | Same logic as `by_ic50`, using fold-IC50 values. | Yes |
@@ -160,7 +160,7 @@ Combines the matched rules for a drug into one overall call. You can configure m
 
 Each `method` may appear at most once; two entries with the same `method` are rejected.
 
-When multiple methods are configured, the report shows one assessment column per method plus a final **Assessment** column. The final call is strongest-wins by inferred rank: rank 5 > … > rank 1, with `contradictory` (-1) winning over severity and `unknown` (0) weakest.
+When multiple methods are configured, the report shows one assessment column per method plus a final **Assessment** column. The final call is strongest-wins by inferred rank: rank 5 > … > rank 2 > `contradictory` (-1) > rank 1, with `unknown` (0) weakest. `contradictory` thus wins over susceptible but loses to any higher-tier severity.
 
 !!! note "Label mismatches are warned, not fatal"
     If a config uses a label that is not present in the rules sheet (for example `"sensitive"` instead of the sheet's `"susceptible"` — same rank, different wording), `respro init` logs a non-fatal warning and continues. Fix the vocabulary if the mismatch is unintended.

@@ -38,6 +38,7 @@ from respro.db.models import (
 )
 from respro.db.phenotype_ranks import (
     RANK_CONTRADICTORY,
+    RANK_UNKNOWN,
     label_to_rank,
     rank_to_colour,
     rank_to_label,
@@ -1488,13 +1489,16 @@ def _build_summary_narrative(
     #   rank 3 → low-level resistance
     #   rank 2 → potential low-level resistance
     #   rank 1 → susceptible
-    # Sentinels (0/-1: unknown / contradictory) are excluded from these lists.
-    # Each non-susceptible rank gets its own bucket so the narrative and the
-    # drug list sections use the same terminology as the per-drug badges.
+    #   rank -1 → contradictory
+    # Unknown (rank 0) is excluded. Each non-susceptible rank gets its own bucket
+    # so the narrative and the drug list sections use the same terminology as the
+    # per-drug badges. Contradictory is surfaced as its own bucket so drugs whose
+    # final assessment is contradictory (it wins over susceptible but loses to
+    # higher tiers) appear in the summary narrative.
     drugs_by_rank: dict[int, list[str]] = {}
     for row in assessed_rows:
         rank = label_to_rank((row.get('assessment') or '').strip())
-        if rank is None or rank <= 0:
+        if rank is None or rank == RANK_UNKNOWN:
             continue
         name = row.get('summary_name') or row.get('name') or 'Unknown'
         drugs_by_rank.setdefault(rank, []).append(name)
@@ -1506,9 +1510,10 @@ def _build_summary_narrative(
     low_level_drugs = drugs_by_rank.get(3, [])
     potential_low_level_drugs = drugs_by_rank.get(2, [])
     sensitive_drugs = drugs_by_rank.get(1, [])
+    contradictory_drugs = drugs_by_rank.get(RANK_CONTRADICTORY, [])
 
-    # All non-susceptible, non-resistant ranks (2–4) form the intermediate-tier
-    # group used by the lead-sentence count.
+    # All non-susceptible, non-resistant, non-contradictory ranks (2–4) form the
+    # intermediate-tier group used by the lead-sentence count.
     intermediate_tier_drugs = (
         potential_low_level_drugs + low_level_drugs + intermediate_drugs
     )
@@ -1602,13 +1607,14 @@ def _build_summary_narrative(
         n_resistant = len(resistant_drugs)
         n_intermediate_tier = len(intermediate_tier_drugs)
         n_susceptible = len(sensitive_drugs)
-        if n_resistant == 0 and n_intermediate_tier == 0:
+        n_contradictory = len(contradictory_drugs)
+        if n_resistant == 0 and n_intermediate_tier == 0 and n_contradictory == 0:
             lead = (
                 f'{feature_organism_clause} {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
                 'The assessment found no evidence for resistance for any drug.'
             )
-        elif n_susceptible == 0 and n_intermediate_tier == 0:
+        elif n_susceptible == 0 and n_intermediate_tier == 0 and n_contradictory == 0:
             lead = (
                 f'{feature_organism_clause} {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
@@ -1617,11 +1623,12 @@ def _build_summary_narrative(
         else:
             # Build the lead sentence listing only non-zero categories, using
             # the canonical rank terminology: resistance / reduced
-            # susceptibility / susceptibility. The "reduced susceptibility"
-            # bucket aggregates ranks 2–4 (potential low-level resistance,
-            # low-level resistance, intermediate), which are listed
-            # individually in the drug list sections below. Zero-count
-            # categories are omitted entirely.
+            # susceptibility / contradictory evidence / susceptibility. The
+            # "reduced susceptibility" bucket aggregates ranks 2–4 (potential
+            # low-level resistance, low-level resistance, intermediate), which
+            # are listed individually in the drug list sections below.
+            # Contradictory evidence is its own category. Zero-count categories
+            # are omitted entirely.
             parts: list[str] = []
             if n_resistant:
                 parts.append(
@@ -1632,6 +1639,11 @@ def _build_summary_narrative(
                 parts.append(
                     f"reduced susceptibility against {n_intermediate_tier} "
                     f"{'drug' if n_intermediate_tier == 1 else 'drugs'}"
+                )
+            if n_contradictory:
+                parts.append(
+                    f"contradictory evidence for {n_contradictory} "
+                    f"{'drug' if n_contradictory == 1 else 'drugs'}"
                 )
             if n_susceptible:
                 parts.append(
@@ -1732,6 +1744,12 @@ def _build_summary_narrative(
                 1,
                 sensitive_drugs,
             ))
+        if contradictory_drugs:
+            list_sections.append(_list_line(
+                'Drugs with contradictory evidence',
+                RANK_CONTRADICTORY,
+                contradictory_drugs,
+            ))
 
     narrative_text = ' '.join(paragraphs)
     if list_sections:
@@ -1826,7 +1844,7 @@ def _build_drug_interpretation_table(
         if method == 'by_phenotype':
             parts = [
                 'Highest-rank phenotype label among the drug\u2019s hits wins.',
-                'Contradictory: wins only when no severity hit exists.',
+                'Contradictory: wins over susceptible but loses to any higher-tier severity.',
                 'Otherwise: Susceptible.',
             ]
         elif method == 'by_score':
@@ -1984,7 +2002,8 @@ def _build_drug_interpretation_table(
         # Final assessment description
         assessment_description = (
             'Final assessment: most severe result across all methods '
-            '(contradictory > resistant > \u2026 > susceptible).'
+            '(resistant > \u2026 > potential low-level resistance > '
+            'contradictory > susceptible).'
         )
 
         for drug_data in by_drug.values():
