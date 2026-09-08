@@ -36,7 +36,12 @@ from respro.db.models import (
     Publication,
     ResistanceRule,
 )
-from respro.db.phenotype_ranks import RANK_CONTRADICTORY, label_to_rank, rank_to_label
+from respro.db.phenotype_ranks import (
+    RANK_CONTRADICTORY,
+    label_to_rank,
+    rank_to_colour,
+    rank_to_label,
+)
 from respro.db.report_queries import (
     has_interpretation_algorithm,
     load_drug_alias_map,
@@ -1581,26 +1586,53 @@ def _build_summary_narrative(
     n_drugs = len(assessed_rows) if assessed_rows else len(drug_rows)
     if has_assessment and n_drugs:
         drug_word = 'drug' if n_drugs == 1 else 'drugs'
-        if len(resistant_drugs) == 0 and len(intermediate_drugs) == 0:
+        n_resistant = len(resistant_drugs)
+        n_intermediate = len(intermediate_drugs)
+        n_susceptible = len(sensitive_drugs)
+        if n_resistant == 0 and n_intermediate == 0:
             lead = (
                 f'{feature_organism_clause} {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
                 'The assessment found no evidence for antiviral resistance for any drug.'
             )
-        elif len(sensitive_drugs) == 0 and len(intermediate_drugs) == 0:
+        elif n_susceptible == 0 and n_intermediate == 0:
             lead = (
                 f'{feature_organism_clause} {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
                 'The assessment found evidence for antiviral resistance for all analysed drugs.'
             )
         else:
+            # Build the lead sentence listing only non-zero categories, using
+            # rank-vocabulary terminology (resistant / reduced susceptibility /
+            # susceptible). Zero-count categories are omitted entirely.
+            parts: list[str] = []
+            if n_resistant:
+                parts.append(
+                    f"antiviral resistance against {n_resistant} "
+                    f"{'drug' if n_resistant == 1 else 'drugs'}"
+                )
+            if n_intermediate:
+                parts.append(
+                    f"reduced susceptibility against {n_intermediate} "
+                    f"{'drug' if n_intermediate == 1 else 'drugs'}"
+                )
+            if n_susceptible:
+                parts.append(
+                    f"susceptibility for {n_susceptible} "
+                    f"{'drug' if n_susceptible == 1 else 'drugs'}"
+                )
+            if len(parts) == 1:
+                findings = f'The assessment found evidence for {parts[0]}.'
+            else:
+                findings = (
+                    'The assessment found evidence for '
+                    + ', '.join(parts[:-1])
+                    + f', and {parts[-1]}.'
+                )
             lead = (
                 f'{feature_organism_clause} {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
-                f'The assessment found evidence for antiviral resistance against '
-                f"{len(resistant_drugs)} {'drug' if len(resistant_drugs) == 1 else 'drugs'}, "
-                f"intermediate resistance against {len(intermediate_drugs)} {'drug' if len(intermediate_drugs) == 1 else 'drugs'}, "
-                f"and sensitivity for {len(sensitive_drugs)} {'drug' if len(sensitive_drugs) == 1 else 'drugs'}."
+                f'{findings}'
             )
     elif drug_rows:
         lead = (
@@ -1646,30 +1678,31 @@ def _build_summary_narrative(
             ' manual interpretation.'
         )
 
-    def _list_line(title: str, colour: str, drugs: list[str]) -> str:
-        if drugs:
-            values = _join_english_list([escape(name) for name in drugs])
-        else:
-            values = 'none'
-        return f'<strong style="color: {colour};">{escape(title)}:</strong> {values}. '
+    def _list_line(title: str, rank: int, drugs: list[str]) -> str:
+        values = _join_english_list([escape(name) for name in drugs])
+        colour = rank_to_colour(rank)
+        return f'<strong style="color: {colour};">{escape(title)}:</strong> {values}.'
 
     list_sections: list[str] = []
     if has_assessment and (assessed_rows or drug_rows):
-        list_sections.append(_list_line(
-            'List of drugs with resistance-associated mutations',
-            '#991b1b',
-            resistant_drugs,
-        ))
-        list_sections.append(_list_line(
-            'List of drugs with mutations associated with intermediate resistance',
-            '#c2410c',
-            intermediate_drugs,
-        ))
-        list_sections.append(_list_line(
-            'List of drugs without resistance-associated mutations',
-            '#166534',
-            sensitive_drugs,
-        ))
+        if resistant_drugs:
+            list_sections.append(_list_line(
+                'Drugs with resistance-associated mutations',
+                5,
+                resistant_drugs,
+            ))
+        if intermediate_drugs:
+            list_sections.append(_list_line(
+                'Drugs with mutations associated with reduced susceptibility',
+                4,
+                intermediate_drugs,
+            ))
+        if sensitive_drugs:
+            list_sections.append(_list_line(
+                'Drugs without resistance-associated mutations',
+                1,
+                sensitive_drugs,
+            ))
 
     narrative_text = ' '.join(paragraphs)
     if list_sections:
