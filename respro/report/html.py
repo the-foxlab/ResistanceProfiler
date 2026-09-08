@@ -1481,24 +1481,37 @@ def _build_summary_narrative(
         if (row.get('assessment') or '').strip()
     ]
 
-    # Categorize assessed drugs by the inferred rank of their assessment label.
-    # rank 5 → resistant; ranks 2–4 → reduced susceptibility (intermediate-tier);
-    # rank 1 → susceptible; sentinels (0/-1) are excluded from these lists.
-    resistant_drugs = sorted([
-        row.get('summary_name') or row.get('name') or 'Unknown'
-        for row in assessed_rows
-        if label_to_rank((row.get('assessment') or '').strip()) == 5
-    ], key=lambda name: name.lower())
-    intermediate_drugs = sorted([
-        row.get('summary_name') or row.get('name') or 'Unknown'
-        for row in assessed_rows
-        if label_to_rank((row.get('assessment') or '').strip()) in (2, 3, 4)
-    ], key=lambda name: name.lower())
-    sensitive_drugs = sorted([
-        row.get('summary_name') or row.get('name') or 'Unknown'
-        for row in assessed_rows
-        if label_to_rank((row.get('assessment') or '').strip()) == 1
-    ], key=lambda name: name.lower())
+    # Categorize assessed drugs by the inferred rank of their assessment label,
+    # using the canonical rank vocabulary (respro.db.phenotype_ranks):
+    #   rank 5 → resistant
+    #   rank 4 → intermediate
+    #   rank 3 → low-level resistance
+    #   rank 2 → potential low-level resistance
+    #   rank 1 → susceptible
+    # Sentinels (0/-1: unknown / contradictory) are excluded from these lists.
+    # Each non-susceptible rank gets its own bucket so the narrative and the
+    # drug list sections use the same terminology as the per-drug badges.
+    drugs_by_rank: dict[int, list[str]] = {}
+    for row in assessed_rows:
+        rank = label_to_rank((row.get('assessment') or '').strip())
+        if rank is None or rank <= 0:
+            continue
+        name = row.get('summary_name') or row.get('name') or 'Unknown'
+        drugs_by_rank.setdefault(rank, []).append(name)
+    for rank in drugs_by_rank:
+        drugs_by_rank[rank] = sorted(drugs_by_rank[rank], key=lambda n: n.lower())
+
+    resistant_drugs = drugs_by_rank.get(5, [])
+    intermediate_drugs = drugs_by_rank.get(4, [])
+    low_level_drugs = drugs_by_rank.get(3, [])
+    potential_low_level_drugs = drugs_by_rank.get(2, [])
+    sensitive_drugs = drugs_by_rank.get(1, [])
+
+    # All non-susceptible, non-resistant ranks (2–4) form the intermediate-tier
+    # group used by the lead-sentence count.
+    intermediate_tier_drugs = (
+        potential_low_level_drugs + low_level_drugs + intermediate_drugs
+    )
 
     # When multi-species, ProfilingResult.feature_matches only exposes the primary
     # reference's matches (it delegates to references[0]); aggregate across all
@@ -1587,38 +1600,42 @@ def _build_summary_narrative(
     if has_assessment and n_drugs:
         drug_word = 'drug' if n_drugs == 1 else 'drugs'
         n_resistant = len(resistant_drugs)
-        n_intermediate = len(intermediate_drugs)
+        n_intermediate_tier = len(intermediate_tier_drugs)
         n_susceptible = len(sensitive_drugs)
-        if n_resistant == 0 and n_intermediate == 0:
+        if n_resistant == 0 and n_intermediate_tier == 0:
             lead = (
                 f'{feature_organism_clause} {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
-                'The assessment found no evidence for antiviral resistance for any drug.'
+                'The assessment found no evidence for resistance for any drug.'
             )
-        elif n_susceptible == 0 and n_intermediate == 0:
+        elif n_susceptible == 0 and n_intermediate_tier == 0:
             lead = (
                 f'{feature_organism_clause} {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
-                'The assessment found evidence for antiviral resistance for all analysed drugs.'
+                'The assessment found evidence for resistance for all analysed drugs.'
             )
         else:
             # Build the lead sentence listing only non-zero categories, using
-            # rank-vocabulary terminology (resistant / reduced susceptibility /
-            # susceptible). Zero-count categories are omitted entirely.
+            # the canonical rank terminology: resistance / reduced
+            # susceptibility / susceptibility. The "reduced susceptibility"
+            # bucket aggregates ranks 2–4 (potential low-level resistance,
+            # low-level resistance, intermediate), which are listed
+            # individually in the drug list sections below. Zero-count
+            # categories are omitted entirely.
             parts: list[str] = []
             if n_resistant:
                 parts.append(
-                    f"antiviral resistance against {n_resistant} "
+                    f"resistance against {n_resistant} "
                     f"{'drug' if n_resistant == 1 else 'drugs'}"
                 )
-            if n_intermediate:
+            if n_intermediate_tier:
                 parts.append(
-                    f"reduced susceptibility against {n_intermediate} "
-                    f"{'drug' if n_intermediate == 1 else 'drugs'}"
+                    f"reduced susceptibility against {n_intermediate_tier} "
+                    f"{'drug' if n_intermediate_tier == 1 else 'drugs'}"
                 )
             if n_susceptible:
                 parts.append(
-                    f"susceptibility for {n_susceptible} "
+                    f"susceptibility to {n_susceptible} "
                     f"{'drug' if n_susceptible == 1 else 'drugs'}"
                 )
             if len(parts) == 1:
@@ -1687,19 +1704,31 @@ def _build_summary_narrative(
     if has_assessment and (assessed_rows or drug_rows):
         if resistant_drugs:
             list_sections.append(_list_line(
-                'Drugs with resistance-associated mutations',
+                'Drugs assessed as resistant',
                 5,
                 resistant_drugs,
             ))
         if intermediate_drugs:
             list_sections.append(_list_line(
-                'Drugs with mutations associated with reduced susceptibility',
+                'Drugs assessed as intermediate',
                 4,
                 intermediate_drugs,
             ))
+        if low_level_drugs:
+            list_sections.append(_list_line(
+                'Drugs assessed as low-level resistance',
+                3,
+                low_level_drugs,
+            ))
+        if potential_low_level_drugs:
+            list_sections.append(_list_line(
+                'Drugs assessed as potential low-level resistance',
+                2,
+                potential_low_level_drugs,
+            ))
         if sensitive_drugs:
             list_sections.append(_list_line(
-                'Drugs without resistance-associated mutations',
+                'Drugs assessed as susceptible',
                 1,
                 sensitive_drugs,
             ))
@@ -1805,21 +1834,16 @@ def _build_drug_interpretation_table(
                 f'{lbl.title()}: total score \u2265 {val}.'
                 for _rank, lbl, val in ranked
             ]
-            parts.append('Otherwise: Susceptible.')
         elif method == 'by_ic50':
-            rank1 = next((lbl for r, lbl, _ in ranked if r == 1), 'susceptible')
             parts = [
                 f'{lbl.title()}: any IC50 value \u2265 {val}.'
-                for _rank, lbl, val in ranked if _rank > 1
+                for _rank, lbl, val in ranked
             ]
-            parts.append(f'Otherwise: {rank1.title()}.')
         elif method == 'by_fold_ic50':
-            rank1 = next((lbl for r, lbl, _ in ranked if r == 1), 'susceptible')
             parts = [
                 f'{lbl.title()}: any fold IC50 value \u2265 {val}.'
-                for _rank, lbl, val in ranked if _rank > 1
+                for _rank, lbl, val in ranked
             ]
-            parts.append(f'Otherwise: {rank1.title()}.')
         else:
             parts = []
         return ' '.join(parts)

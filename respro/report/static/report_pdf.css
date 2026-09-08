@@ -199,7 +199,7 @@ body {
 }
 
 .drug-summary-text {
-  margin: 0;
+  margin: 0 0 7px;
   color: var(--ink);
   line-height: 1.22;
 }
@@ -271,13 +271,13 @@ body {
 }
 
 .assessment.is-low-level {
-  background: #ffedd5;
-  color: #9a3412;
+  background: var(--badge-intermediate-bg);
+  color: var(--badge-intermediate-text);
 }
 
 .assessment.is-intermediate {
-  background: var(--badge-intermediate-bg);
-  color: var(--badge-intermediate-text);
+  background: #ffedd5;
+  color: #9a3412;
 }
 
 .assessment.is-resistant {

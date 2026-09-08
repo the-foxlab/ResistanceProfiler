@@ -431,8 +431,15 @@ def _validate_threshold_values(
         _require_monotonic_thresholds(thresholds, prefix=prefix)
         return
 
+    # by_score: positive integers for rank > 1; rank-1 labels are the lower
+    # bound fallback ceiling and accept 0 (consistent with numeric methods).
     for key, val in thresholds.items():
-        if not isinstance(val, int) or val <= 0:
+        rank = label_to_rank(key)
+        if not isinstance(val, int) or isinstance(val, bool):
+            raise ValueError(
+                f'{prefix}[{key!r}] must be a positive integer, got {val!r}.'
+            )
+        if rank != 1 and val <= 0:
             raise ValueError(
                 f'{prefix}[{key!r}] must be a positive integer, got {val!r}.'
             )
@@ -873,15 +880,21 @@ def _assess_by_score(drug_data: dict, thresholds: dict) -> str:
     """Assess by total score against label-keyed score thresholds.
 
     The strongest matched breakpoint is the highest-rank label whose threshold
-    the total score meets; ties within a rank go to the higher threshold. When
-    no severity-rank > 1 breakpoint is met, the configured rank-1 label is
-    returned (the caller defaults to ``'susceptible'`` when no rank-1 label is
-    configured).
+    the total score meets; ties within a rank go to the higher threshold. The
+    rank-1 label is the lower-bound fallback ceiling and is **skipped** during
+    matching (consistent with ``_assess_numeric``) — its threshold value has no
+    effect; only its label is returned when no rank > 1 breakpoint is met. When
+    no rank-1 label is configured, the caller defaults to ``'susceptible'``.
     """
     total = drug_data['score_total']
-    for _rank, threshold, label in reversed(_severity_breakpoints(thresholds)):
+    for rank, threshold, label in reversed(_severity_breakpoints(thresholds)):
+        if rank == 1:
+            continue
         if total >= threshold:
             return label
+    rank1_labels = [label for label in thresholds if label_to_rank(label) == 1]
+    if rank1_labels:
+        return str(rank1_labels[0])
     if drug_data['hit_count'] > 0:
         return 'susceptible'
     return ''

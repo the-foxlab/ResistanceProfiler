@@ -119,7 +119,22 @@ document.addEventListener('DOMContentLoaded', function () {
       button.addEventListener('click', function () {
         const ntSeq = this.getAttribute('data-nt-sequence') || '';
         const aaSeq = this.getAttribute('data-aa-sequence') || '';
-        sequenceTitle.textContent = this.getAttribute('data-feature-title') || 'Feature sequence';
+        const title = this.getAttribute('data-feature-title') || 'Feature sequence';
+
+        if (window.parent !== window) {
+          // Embedded in the webapp shell: delegate the modal to the parent so
+          // the sequence escapes the iframe, mirroring the plot/structure
+          // modals. The parent owns the DNA/Protein toggle state.
+          window.parent.postMessage({
+            type: 'respro:open-sequence',
+            title: title,
+            ntSequence: ntSeq,
+            aaSequence: aaSeq,
+          }, window.location.origin);
+          return;
+        }
+
+        sequenceTitle.textContent = title;
 
         const showNt = Boolean(ntSeq);
         sequenceBlock.textContent = showNt ? ntSeq : aaSeq;
@@ -158,6 +173,16 @@ document.addEventListener('DOMContentLoaded', function () {
       button.addEventListener('click', function () {
         const url = this.getAttribute('data-structure-url') || '';
         const title = this.getAttribute('data-drug-title') || 'Structure';
+        if (window.parent !== window) {
+          // Embedded in the webapp shell: delegate the modal to the parent so
+          // the structure image escapes the iframe, mirroring the plot modal.
+          window.parent.postMessage({
+            type: 'respro:open-structure',
+            src: url,
+            title: title,
+          }, window.location.origin);
+          return;
+        }
         structureTitle.textContent = title;
         structureImg.src = url;
         structureImg.alt = 'Chemical structure of ' + title;

@@ -2311,12 +2311,6 @@ class TestMultiReferenceRegenerate:
         self, multi_ref_db: Path, tmp_path: Path,
     ) -> None:
         """Regenerated multi-species report shows per-row Reference names and the lollipop plot.
-
-        Regression guard for AUD-001: regenerate previously set ReferenceGroup.query_name to the
-        internal reference_name, but annotations carry the original VCF CHROM as variant.chrom.
-        The report maps chrom -> reference_name via query_name, so the mismatch made the
-        Database Hits / All Mutations Reference column render '—' for every row and dropped the
-        multi-reference lollipop plot entirely. The fix restores query_name from the stored chrom.
         """
         results_db, _json_path, out_live = _run_two_ref_profile_with_results(multi_ref_db, tmp_path)
         live_html = list(out_live.glob('*.report.html'))[0].read_text()

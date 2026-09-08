@@ -152,8 +152,7 @@ class TestUnknownLabelHardFails:
             )
 
     def test_multiple_unknown_labels_all_reported(self, tmp_path: Path) -> None:
-        """AUD-003: all invalid phenotype rows are collected, not just the first.
-
+        """
         The importer accumulates per-row errors and raises once at the end so a
         user sees every bad row in one pass. Raising on the first bad row
         forces an iterative fix-rerun cycle and is a regression of the

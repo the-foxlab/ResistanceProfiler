@@ -161,6 +161,19 @@ class TestValidateInterpretationAlgorithms:
         result = validate_interpretation_algorithms(algorithms)
         assert result == algorithms
 
+    def test_by_score_rank1_zero_threshold_accepted(self) -> None:
+        # Consistent with numeric methods: rank-1 labels are the lower-bound
+        # fallback ceiling and accept 0; their value has no effect on matching.
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_score',
+                'thresholds': {'susceptible': 0, 'intermediate': 3, 'resistant': 10},
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result == algorithms
+
     def test_valid_drug_alias(self) -> None:
         algorithms = [
             {

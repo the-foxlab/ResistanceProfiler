@@ -29,12 +29,13 @@ _FALLBACK_LABELS: dict[int, str] = {
     RANK_CONTRADICTORY: 'contradictory',
 }
 
-# Rank → display colour. 1 green, 2 pleasant yellow, 3 slight orange, 4 orange,
-# 5 red, 0 grey, -1 dark.
+# Rank → display colour. Severity gradient is monotonic: 1 green, 2 yellow,
+# 3 light orange, 4 deep orange, 5 red; 0 grey, -1 dark. Each rank is visually
+# darker/redder than the one below it so badge colours never invert severity.
 RANK_COLOURS: dict[int, str] = {
     1: '#27ae60',
     2: '#f1c40f',
-    3: '#e67e22',
+    3: '#f39c12',
     4: '#e67e22',
     5: '#e74c3c',
     RANK_UNKNOWN: '#bdc3c7',

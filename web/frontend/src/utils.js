@@ -3,6 +3,102 @@
  */
 
 /**
+ * Rank-based phenotype severity vocabulary.
+ *
+ * Mirrors `respro/db/phenotype_ranks.py` so the frontend can order threshold
+ * labels by severity (weakest → strongest) without a round-trip to the backend.
+ * Ranks 1–5 denote increasing severity; sentinels 0 (unknown) and -1
+ * (contradictory) sit outside the severity ladder. Labels are matched
+ * case-insensitively and whitespace-tolerantly, exactly as in Python.
+ */
+const PHENOTYPE_RANKS = {
+  // Rank 1 — susceptible
+  susceptible: 1,
+  sensitive: 1,
+  'normal inhibition': 1,
+  ni: 1,
+  normal: 1,
+  // Rank 2 — potential low-level resistance
+  'potential low-level resistance': 2,
+  'possibly resistant': 2,
+  'suspected reduced': 2,
+  // Rank 3 — low-level resistance
+  'low-level resistance': 3,
+  'reduced susceptibility': 3,
+  'limited susceptibility': 3,
+  // Rank 4 — intermediate
+  intermediate: 4,
+  'intermediate resistance': 4,
+  'reduced inhibition': 4,
+  ri: 4,
+  // Rank 5 — resistant
+  resistant: 5,
+  'high-level resistance': 5,
+  'highly reduced inhibition': 5,
+  hri: 5,
+  // Sentinel — unknown / not analysed
+  unknown: 0,
+  'not analysed': 0,
+  none: 0,
+  '': 0,
+  // Sentinel — contradictory / conflicting
+  contradictory: -1,
+  conflicting: -1,
+};
+
+/**
+ * Resolve a phenotype label to its severity rank.
+ *
+ * @param {string} label - phenotype label (case-insensitive, whitespace-tolerant)
+ * @returns {number|null} rank (1–5, or 0/-1 sentinels), or null if unrecognized
+ */
+export function labelToRank(label) {
+  const key = String(label ?? '').trim().toLowerCase();
+  if (!key) {
+    // Empty/missing input is not a label at all — distinguish from the literal
+    // labels "unknown"/"none" which legitimately resolve to rank 0.
+    return null;
+  }
+  if (key in PHENOTYPE_RANKS) {
+    return PHENOTYPE_RANKS[key];
+  }
+  return null;
+}
+
+/**
+ * Return threshold labels ordered by severity rank (weakest → strongest).
+ *
+ * Sentinels (unknown/contradictory) are excluded — they are not severity
+ * breakpoints. Unrecognized labels sort last (after all known ranks) in
+ * alphabetical order so they are still shown rather than dropped.
+ *
+ * @param {Object} thresholds - thresholds dict (label → value)
+ * @returns {string[]} ordered label keys
+ */
+export function orderedThresholdLabels(thresholds) {
+  if (!thresholds || typeof thresholds !== 'object') {
+    return [];
+  }
+  const entries = Object.keys(thresholds)
+    .map((label) => ({ label, rank: labelToRank(label) }))
+    // Exclude sentinels (unknown/contradictory, rank <= 0) — they are not
+    // severity breakpoints and mirror the Python `_assessment_description`
+    // which only iterates labels with rank > 0.
+    .filter((e) => e.rank !== null && e.rank > 0);
+  entries.sort((a, b) => {
+    // Known positive ranks sort weakest → strongest.
+    if (a.rank > 0 && b.rank > 0) {
+      return a.rank - b.rank;
+    }
+    // Unrecognized labels (rank === null) sort last, alphabetically.
+    if (a.rank === null && b.rank !== null) return 1;
+    if (b.rank === null && a.rank !== null) return -1;
+    return a.label.localeCompare(b.label);
+  });
+  return entries.map((e) => e.label);
+}
+
+/**
  * Returns true if the value is neither null, undefined, nor whitespace-only.
  */
 export function isPopulated(value) {

@@ -142,4 +142,88 @@ describe('AnalyzeTab embedded report messaging', () => {
     });
     expect(frame.style.height).toBe('');
   });
+
+  it('ignores respro:open-structure messages from an unexpected origin', () => {
+    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    dispatchReportMessage('respro:open-structure', { src: 'blob:evil', title: 'Drug X' }, {
+      origin: 'https://evil.example',
+    });
+    expect(screen.queryByRole('dialog', { name: /chemical structure of drug x/i })).not.toBeInTheDocument();
+  });
+
+  it('opens the hosted structure modal from a same-origin respro:open-structure payload', () => {
+    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    const frame = document.querySelector('.workspace-frame');
+    dispatchReportMessage('respro:open-structure', { src: 'blob:struct', title: 'Zidovudine' }, {
+      source: frame?.contentWindow ?? null,
+    });
+    const dialog = screen.getByRole('dialog', { name: /chemical structure of zidovudine/i });
+    expect(dialog).toBeInTheDocument();
+    const img = dialog.querySelector('.report-preview-plot-image');
+    expect(img).toHaveAttribute('src', 'blob:struct');
+    expect(img).toHaveAttribute('alt', 'Chemical structure of Zidovudine');
+  });
+
+  it('closes the hosted structure modal on Escape', () => {
+    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    const frame = document.querySelector('.workspace-frame');
+    dispatchReportMessage('respro:open-structure', { src: 'blob:struct', title: 'Drug X' }, {
+      source: frame?.contentWindow ?? null,
+    });
+    expect(screen.getByRole('dialog', { name: /chemical structure of drug x/i })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: /chemical structure of drug x/i })).not.toBeInTheDocument();
+  });
+
+  it('ignores respro:open-sequence messages from an unexpected origin', () => {
+    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    dispatchReportMessage('respro:open-sequence', { title: 'PR', ntSequence: 'ACGT', aaSequence: 'M' }, {
+      origin: 'https://evil.example',
+    });
+    expect(screen.queryByRole('dialog', { name: /feature sequence/i })).not.toBeInTheDocument();
+  });
+
+  it('opens the hosted sequence modal from a same-origin respro:open-sequence payload', () => {
+    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    const frame = document.querySelector('.workspace-frame');
+    dispatchReportMessage('respro:open-sequence', {
+      title: 'Protease',
+      ntSequence: 'ACGTACGT',
+      aaSequence: 'TVTV',
+    }, { source: frame?.contentWindow ?? null });
+    const dialog = screen.getByRole('dialog', { name: /feature sequence/i });
+    expect(dialog).toBeInTheDocument();
+    expect(dialog.querySelector('.report-preview-sequence-title')).toHaveTextContent('Protease');
+    // Defaults to DNA view when ntSequence is present.
+    const block = dialog.querySelector('.report-preview-sequence-block');
+    expect(block).toHaveTextContent('ACGTACGT');
+  });
+
+  it('switches the hosted sequence modal between DNA and Protein views', () => {
+    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    const frame = document.querySelector('.workspace-frame');
+    dispatchReportMessage('respro:open-sequence', {
+      title: 'Protease',
+      ntSequence: 'ACGTACGT',
+      aaSequence: 'TVTV',
+    }, { source: frame?.contentWindow ?? null });
+    const dialog = screen.getByRole('dialog', { name: /feature sequence/i });
+    const block = dialog.querySelector('.report-preview-sequence-block');
+    expect(block).toHaveTextContent('ACGTACGT');
+    fireEvent.click(dialog.querySelector('.seq-toggle-btn:last-child'));
+    expect(block).toHaveTextContent('TVTV');
+    fireEvent.click(dialog.querySelector('.seq-toggle-btn:first-child'));
+    expect(block).toHaveTextContent('ACGTACGT');
+  });
+
+  it('closes the hosted sequence modal on Escape', () => {
+    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    const frame = document.querySelector('.workspace-frame');
+    dispatchReportMessage('respro:open-sequence', { title: 'PR', ntSequence: 'ACGT', aaSequence: 'M' }, {
+      source: frame?.contentWindow ?? null,
+    });
+    expect(screen.getByRole('dialog', { name: /feature sequence/i })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: /feature sequence/i })).not.toBeInTheDocument();
+  });
 });

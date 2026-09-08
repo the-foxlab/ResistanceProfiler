@@ -183,8 +183,7 @@ def client(sync_queue: Queue, startup_config: StartupConfig):
 
 
 class TestNoApiToken:
-    """AUTH-001: RESPRO_WEB_API_TOKEN and require_api_token are removed entirely.
-
+    """
     The webapp is a pure browser UI; programmatic use is served by the CLI. The
     bearer-token gate, the ``api_token`` field, and the body-token fallback are
     all gone. Every route is open; the session cookie provides per-user data
@@ -228,8 +227,7 @@ class TestNoApiToken:
         startup_config: StartupConfig,
         sync_queue: Queue,
     ) -> None:
-        """AUTH-006: online mode must not re-introduce a token gate on /api/databases.
-
+        """
         The local-mode test above covers the default; this guards the online
         deployment path, where the session cookie is marked ``Secure`` and the
         docs are disabled, but the API routes remain open.
