@@ -42,13 +42,19 @@ class MockXHR {
 
 let mockXHRInstance;
 
-global.XMLHttpRequest = vi.fn(() => {
-  mockXHRInstance = new MockXHR();
-  return mockXHRInstance;
-});
+// Plain class stub — vi.fn(() => ...) loses its implementation when vi.clearAllMocks()
+// runs in Vitest 5, so a plain constructor is used instead and re-stubbed per test.
+function setupXhrStub() {
+  vi.stubGlobal('XMLHttpRequest', class {
+    constructor() {
+      mockXHRInstance = new MockXHR();
+      return mockXHRInstance;
+    }
+  });
+}
 
 // Mock fetch for API calls and job polling
-global.fetch = vi.fn();
+vi.stubGlobal('fetch', vi.fn());
 
 // Mock config
 vi.mock('./config.js', () => ({
@@ -73,12 +79,13 @@ vi.mock('./config.js', () => ({
 
 describe('useDashboardLogic - File Upload Flow', () => {
   beforeEach(() => {
+    setupXhrStub();
     vi.clearAllMocks();
     global.fetch.mockReset();
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it('should handle FASTA file upload with progress tracking', async () => {
@@ -238,12 +245,13 @@ describe('useDashboardLogic - File Upload Flow', () => {
 
 describe('useDashboardLogic - Job Polling Flow', () => {
   beforeEach(() => {
+    setupXhrStub();
     vi.clearAllMocks();
     global.fetch.mockReset();
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it('should poll job until completion with succeeded status', async () => {
@@ -643,12 +651,13 @@ describe('useDashboardLogic - Job Polling Flow', () => {
 
 describe('useDashboardLogic - Report Display Flow', () => {
   beforeEach(() => {
+    setupXhrStub();
     vi.clearAllMocks();
     global.fetch.mockReset();
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it('should set report path when job succeeds', async () => {
@@ -884,12 +893,13 @@ describe('useDashboardLogic - Report Display Flow', () => {
 
 describe('useDashboardLogic - Example FASTA profile', () => {
   beforeEach(() => {
+    setupXhrStub();
     vi.clearAllMocks();
     global.fetch.mockReset();
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it('runExampleProfile posts use_example:true to /api/profile/fasta and stores the result', async () => {
@@ -1040,12 +1050,13 @@ describe('cliVersion', () => {
   // The footer always renders; the version string is sourced from
   // /api/ui/config so it reflects the running backend, not the build.
   beforeEach(() => {
+    setupXhrStub();
     vi.clearAllMocks();
     global.fetch.mockReset();
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it('exposes the version reported by /api/ui/config', async () => {

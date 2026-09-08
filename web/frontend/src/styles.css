@@ -2135,6 +2135,7 @@ th {
 
 .database-algorithm-table td {
   vertical-align: top;
+  white-space: nowrap;
 }
 
 .about-section-card-algorithms {

@@ -1,4 +1,4 @@
-![ResistanceProfiler](docs/docs/assets/logo.svg)
+<img src="docs/docs/assets/logo.svg" alt="ResistanceProfiler" width="220" />
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0) [![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-2f6db3)](https://www.python.org/) [![codecov](https://codecov.io/gh/the-foxlab/ResistanceProfiler/branch/master/graph/badge.svg)](https://codecov.io/gh/the-foxlab/ResistanceProfiler) [![Conda Update](https://anaconda.org/bioconda/respro/badges/latest_release_date.svg)](https://anaconda.org/channels/bioconda/packages/respro/overview) [![Conda version](https://anaconda.org/bioconda/respro/badges/version.svg)](https://anaconda.org/channels/bioconda/packages/respro/overview) [![Conda downloads](https://anaconda.org/bioconda/respro/badges/downloads.svg)](https://anaconda.org/channels/bioconda/packages/respro/overview)
 
