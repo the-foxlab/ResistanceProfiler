@@ -5,11 +5,11 @@ description: Pipeline overview, reference matching, and rule evaluation
 
 # How It Works
 
-ResistanceProfiler is a framework for building a consistent resistance project database and then profiling new samples against it.
+ResistanceProfiler compares a new sample against a curated project database and reports the resistance mutations it finds. This page explains what happens behind the scenes, from input file to final report.
 
-The core idea is that ResPro stores curated rules against internal project references, then maps new FASTA- or VCF-based inputs back into that internal reference space before comparing amino-acid mutations against the rules.
+The core idea: ResPro stores curated rules against internal project references, then maps new FASTA- or VCF-based inputs back into that internal reference space before comparing amino-acid mutations against the rules.
 
-!!! tip "Think of it as a normalization framework"
+!!! tip "Think of it as a normalisation framework"
     Different sample reference spaces go in, one internal project reference space comes out for rule matching.
 
 ## Pipeline overview
@@ -38,6 +38,7 @@ In both modes, input is converted into a common internal representation before r
 - **IUPAC ambiguity codes** in the consensus sequence are expanded into all possible alternative bases. Each mutation ALT receives a fractional allele frequency of `1 / len(options)`, where `options` is the full IUPAC base set (the reference base is one of the equally-likely possibilities = no mutation, so it is included in the denominator but not emitted as an ALT). For example, `ref=A, query=R` (R={A,G}) → `G=0.5`; `ref=A, query=Y` (Y={C,T}) → `C=0.5, T=0.5`; `ref=A, query=N` (N={A,C,G,T}) → `C=0.25, G=0.25, T=0.25`.
 - **N-stretch coverage gaps** — full-NNN codons are treated as non-covered positions and reported as coverage gaps rather than variants. Partial-N codons (1–2 N bases) remain assessable and emit expanded IUPAC variants for the non-N positions.
 - **FASTA-mode AF bins** use adjusted thresholds for the discrete IUPAC-derived frequencies: **high** (0.75–1.0), **intermediate** (0.35–0.74), **low** (0.01–0.34).
+- **VCF-mode AF bins** use: **high** (0.75–1.0), **intermediate** (0.25–0.7499), **low** (0.01–0.2499).
 - **VCF-mode AF source** — for VCF input, per-allele allele frequency is resolved from a fixed INFO-then-FORMAT precedence (`INFO/AF` → `INFO/VAF` → `INFO/FREQ` → `FORMAT/AF` → `FORMAT/AD`-derived), reading only the first sample for FORMAT-level values. Missing entries and short allele-specific arrays use a **residual** fallback (`max(0, 1 - sum(known))` split equally among missing alleles) rather than assuming a missing allele is fully present. See [CLI Reference — Allele-frequency source](cli-reference.md#allele-frequency-source-vcf-mode) for the full contract.
 - **Insertions and deletions** in FASTA mode are detected from alignment gaps (CIGAR-based) between the aligned query and the reference CDS.
 
@@ -96,8 +97,8 @@ SNPs below the threshold are annotated individually. This prevents low-AF varian
 
 ### Reporting and exports
 
-- HTML report is always generated.
-- Optional JSON and PDF exports are available.
+- The HTML report is always generated.
+- Optional JSON, PDF, and TSV exports are available via `--export` (repeatable). See [Output Interpretation](output.md) for details.
 
 ### Coverage assessment
 

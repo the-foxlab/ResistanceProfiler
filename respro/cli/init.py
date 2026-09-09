@@ -16,13 +16,16 @@ from rich.console import Console
 from respro.core.rules import import_rules_with_summary, validate_rules_tsv
 from respro.db.algorithms import (
     apply_drug_alias_mappings,
-    apply_ic50_threshold_classification,
     load_interpretation_algorithms,
     store_interpretation_algorithms,
+    warn_algorithm_labels_not_in_db,
 )
 from respro.db.drugs import _consolidate_drug_names_to_lowercase, _get_drugs_from_pubchem
 from respro.db.features import _load_genbank_records
-from respro.db.project_metadata import load_metadata_json, store_project_metadata
+from respro.db.project_metadata import (
+    load_metadata_json,
+    store_project_metadata,
+)
 from respro.db.schema import PROJECT_SCHEMA_VERSION, create_schema, open_project_db
 from respro.io.genbank import ParsedGenBankReference, parse_genbank_sources
 from respro.io.reference import read_fasta
@@ -128,12 +131,10 @@ def init_project(
             algorithms = _sanitize_effect_as_resistant_algorithms(conn, project_id, algorithms)
             if algorithms:
                 store_interpretation_algorithms(conn, project_id, algorithms)
+                warn_algorithm_labels_not_in_db(conn, project_id, algorithms)
         alias_config = next((a for a in algorithms if a['name'] == 'drug_alias'), None)
         if alias_config:
             apply_drug_alias_mappings(conn, project_id, alias_config)
-        ic50_config = next((a for a in algorithms if a['name'] == 'ic50_thresholds'), None)
-        if ic50_config:
-            apply_ic50_threshold_classification(conn, project_id, ic50_config)
         if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
         conn.commit()
@@ -216,9 +217,6 @@ def add_to_project(
         alias_config = next((a for a in stored_algorithms if a['name'] == 'drug_alias'), None)
         if alias_config:
             apply_drug_alias_mappings(conn, project_id, alias_config)
-        ic50_config = next((a for a in stored_algorithms if a['name'] == 'ic50_thresholds'), None)
-        if ic50_config:
-            apply_ic50_threshold_classification(conn, project_id, ic50_config)
         if additional_info:
             _get_drugs_from_pubchem(conn, project_id)
         if example_text:

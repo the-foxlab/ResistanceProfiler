@@ -10,6 +10,7 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
+from respro.db._rules_normalize import normalize_phenotype_label
 from respro.db.results import (
     load_run,
     save_classification,
@@ -47,14 +48,20 @@ def classify(
         str | None,
         typer.Option(
             '--phenotype',
-            help='Resistance phenotype (resistant / intermediate / sensitive / unknown).',
+            help=(
+                'Resistance phenotype label (e.g. susceptible / intermediate / '
+                'resistant / low-level resistance / unknown) or a bare rank 1–5.'
+            ),
         ),
     ] = None,
     clinical_phenotype: Annotated[
         str | None,
         typer.Option(
             '--clinical-phenotype',
-            help='Externally verified clinical phenotype.',
+            help=(
+                'Externally verified clinical phenotype label (same vocabulary '
+                'as --phenotype) or a bare rank 1–5.'
+            ),
         ),
     ] = None,
     ic50: Annotated[
@@ -97,6 +104,15 @@ def classify(
             'At least one of --phenotype, --clinical-phenotype, --ic50, or --fold-ic50 must be provided.'
         )
 
+    # Strictly normalize phenotype labels via the rank vocabulary.
+    try:
+        phenotype = normalize_phenotype_label(phenotype) if phenotype else ''
+        clinical_phenotype = (
+            normalize_phenotype_label(clinical_phenotype) if clinical_phenotype else ''
+        )
+    except ValueError as exc:
+        cli_error(str(exc))
+
     console = Console(highlight=False)
     results_conn = None
     try:
@@ -107,8 +123,8 @@ def classify(
             results_conn,
             run_id,
             drug=drug,
-            phenotype=phenotype or 'unknown',
-            clinical_phenotype=clinical_phenotype or 'unknown',
+            phenotype=phenotype,
+            clinical_phenotype=clinical_phenotype,
             ic50=ic50,
             fold_ic50=fold_ic50,
             note=note,

@@ -71,6 +71,9 @@ export function AnalyzeTab({
 }) {
   const [reportFrameHeight, setReportFrameHeight] = useState(null);
   const [hostedPlot, setHostedPlot] = useState(null);
+  const [hostedStructure, setHostedStructure] = useState(null);
+  const [hostedSequence, setHostedSequence] = useState(null);
+  const [sequenceView, setSequenceView] = useState('nt');
   const analyzeSubmodeRowRef = useRef(null);
   const reportFrameRef = useRef(null);
   const [analyzeSubmodeRowWidth, setAnalyzeSubmodeRowWidth] = useState(0);
@@ -121,6 +124,31 @@ export function AnalyzeTab({
         return;
       }
 
+      if (event.data?.type === 'respro:open-structure') {
+        // Mirrors respro:open-plot but for the drug chemical-structure
+        // image, so it escapes the iframe when embedded in the webapp shell.
+        if (event.data.src) {
+          setHostedStructure({
+            src: event.data.src,
+            title: event.data.title || 'Structure',
+          });
+        }
+        return;
+      }
+
+      if (event.data?.type === 'respro:open-sequence') {
+        // Mirrors respro:open-plot but for the feature sequence viewer, so
+        // the sequence escapes the iframe when embedded in the webapp shell.
+        // The parent owns the DNA/Protein toggle state.
+        setHostedSequence({
+          title: event.data.title || 'Feature sequence',
+          ntSequence: event.data.ntSequence || '',
+          aaSequence: event.data.aaSequence || '',
+        });
+        setSequenceView(event.data.ntSequence ? 'nt' : 'aa');
+        return;
+      }
+
       if (event.data?.type === 'respro:report-height' && typeof event.data.height === 'number') {
         // The report measures its own content height and reports it; this
         // works cross-origin (where contentDocument access throws) and
@@ -149,6 +177,36 @@ export function AnalyzeTab({
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [hostedPlot]);
+
+  useEffect(() => {
+    if (!hostedStructure) {
+      return undefined;
+    }
+
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') {
+        setHostedStructure(null);
+      }
+    };
+
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [hostedStructure]);
+
+  useEffect(() => {
+    if (!hostedSequence) {
+      return undefined;
+    }
+
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') {
+        setHostedSequence(null);
+      }
+    };
+
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [hostedSequence]);
 
   useEffect(() => {
     // Count down the batch rate-limit cooldown each second until it reaches zero.
@@ -932,6 +990,70 @@ export function AnalyzeTab({
               &times;
             </button>
             <img src={hostedPlot.src} alt={hostedPlot.alt} className="report-preview-plot-image" />
+          </section>
+        </div>
+      ) : null}
+
+      {hostedStructure ? (
+        <div className="report-preview-plot-modal" role="dialog" aria-modal="true" aria-label={`Chemical structure of ${hostedStructure.title}`}>
+          <div className="report-preview-plot-backdrop" onClick={() => setHostedStructure(null)} aria-hidden="true" />
+          <section className="report-preview-plot-panel report-preview-structure-panel">
+            <button
+              type="button"
+              className="report-preview-plot-close"
+              aria-label="Close chemical structure"
+              onClick={() => setHostedStructure(null)}
+              autoFocus
+            >
+              &times;
+            </button>
+            <h2 className="report-preview-structure-title">{hostedStructure.title}</h2>
+            <img
+              src={hostedStructure.src}
+              alt={`Chemical structure of ${hostedStructure.title}`}
+              className="report-preview-plot-image"
+            />
+          </section>
+        </div>
+      ) : null}
+
+      {hostedSequence ? (
+        <div className="report-preview-plot-modal" role="dialog" aria-modal="true" aria-label="Feature sequence">
+          <div className="report-preview-plot-backdrop" onClick={() => setHostedSequence(null)} aria-hidden="true" />
+          <section className="report-preview-plot-panel report-preview-sequence-panel">
+            <button
+              type="button"
+              className="report-preview-plot-close"
+              aria-label="Close feature sequence"
+              onClick={() => setHostedSequence(null)}
+              autoFocus
+            >
+              &times;
+            </button>
+            <div className="report-preview-sequence-header">
+              <h2 className="report-preview-sequence-title">{hostedSequence.title}</h2>
+              <div className="report-preview-sequence-toggle">
+                <button
+                  type="button"
+                  className={`seq-toggle-btn${sequenceView === 'nt' ? ' seq-toggle-btn--active' : ''}`}
+                  disabled={!hostedSequence.ntSequence}
+                  onClick={() => setSequenceView('nt')}
+                >
+                  DNA
+                </button>
+                <button
+                  type="button"
+                  className={`seq-toggle-btn${sequenceView === 'aa' ? ' seq-toggle-btn--active' : ''}`}
+                  disabled={!hostedSequence.aaSequence}
+                  onClick={() => setSequenceView('aa')}
+                >
+                  Protein
+                </button>
+              </div>
+            </div>
+            <pre className="report-preview-sequence-block">
+              {sequenceView === 'nt' ? hostedSequence.ntSequence : hostedSequence.aaSequence}
+            </pre>
           </section>
         </div>
       ) : null}

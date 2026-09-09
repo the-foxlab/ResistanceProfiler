@@ -183,8 +183,7 @@ def client(sync_queue: Queue, startup_config: StartupConfig):
 
 
 class TestNoApiToken:
-    """AUTH-001: RESPRO_WEB_API_TOKEN and require_api_token are removed entirely.
-
+    """
     The webapp is a pure browser UI; programmatic use is served by the CLI. The
     bearer-token gate, the ``api_token`` field, and the body-token fallback are
     all gone. Every route is open; the session cookie provides per-user data
@@ -228,8 +227,7 @@ class TestNoApiToken:
         startup_config: StartupConfig,
         sync_queue: Queue,
     ) -> None:
-        """AUTH-006: online mode must not re-introduce a token gate on /api/databases.
-
+        """
         The local-mode test above covers the default; this guards the online
         deployment path, where the session cookie is marked ``Secure`` and the
         docs are disabled, but the API routes remain open.
@@ -2863,7 +2861,7 @@ class TestExtractDisplayAlgorithms:
         algorithms = [
             {
                 'name': 'drug_interpretation',
-                'method': 'by_phenotype',
+                'method': 'by_score',
                 'thresholds': {'resistant': 1},
                 'drug_thresholds': [
                     {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'resistant': 2}},
@@ -2875,40 +2873,14 @@ class TestExtractDisplayAlgorithms:
             {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'resistant': 2}},
         ]
 
-    def test_includes_drug_thresholds_for_ic50_thresholds(self) -> None:
-        from web.backend.services.browse import _extract_display_algorithms
-
-        algorithms = [
-            {
-                'name': 'ic50_thresholds',
-                'use': 'fold_ic50',
-                'thresholds': {'ACV': {'intermediate': 3.0, 'resistant': 10.0}},
-                'drug_thresholds': [
-                    {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'intermediate': 2.0, 'resistant': 5.0}},
-                ],
-            }
-        ]
-        result = _extract_display_algorithms(algorithms)
-        assert result['ic50_thresholds']['use'] == 'fold_ic50'
-        assert result['ic50_thresholds']['drug_thresholds'] == [
-            {'reference': 'ref1', 'drug': 'ACV', 'thresholds': {'intermediate': 2.0, 'resistant': 5.0}},
-        ]
-
     def test_omits_drug_thresholds_key_when_absent(self) -> None:
         from web.backend.services.browse import _extract_display_algorithms
 
         algorithms = [
-            {'name': 'drug_interpretation', 'method': 'by_phenotype', 'thresholds': {'resistant': 1}},
+            {'name': 'drug_interpretation', 'method': 'by_score', 'thresholds': {'resistant': 1}},
         ]
         result = _extract_display_algorithms(algorithms)
         assert 'drug_thresholds' not in result['drug_interpretation'][0]
-        assert 'ic50_thresholds' not in result
-
-    def test_omits_ic50_thresholds_when_not_configured(self) -> None:
-        from web.backend.services.browse import _extract_display_algorithms
-
-        result = _extract_display_algorithms([])
-        assert 'ic50_thresholds' not in result
 
 
 class TestApiRouteRateLimits:

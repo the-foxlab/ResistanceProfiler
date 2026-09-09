@@ -182,7 +182,7 @@ class ResistanceRule:
     mutation: str
     phenotype: str
     external_id: str = ''
-    clinical_phenotype: str = 'unknown'
+    clinical_phenotype: str = ''
     ic50: str = ''
     fold_ic50: str = ''
     score: str = ''
@@ -240,7 +240,7 @@ class ResistanceRuleSet:
     drug_name: str
     drug_id: int
     phenotype: str
-    clinical_phenotype: str = 'unknown'
+    clinical_phenotype: str = ''
     ic50: str = ''
     fold_ic50: str = ''
     score: str = ''

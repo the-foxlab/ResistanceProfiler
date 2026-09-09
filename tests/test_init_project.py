@@ -1275,9 +1275,9 @@ class TestPhenotypeNormalization:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
-            gag\ttiny_ref\t2\tK\tE\tDrugR\tTrue
-            gag\ttiny_ref\t3\tA\tV\tDrugI\tinterm
-            gag\ttiny_ref\t4\tF\tL\tDrugS\tSENSI
+            gag\ttiny_ref\t2\tK\tE\tDrugR\tresistant
+            gag\ttiny_ref\t3\tA\tV\tDrugI\tintermediate
+            gag\ttiny_ref\t4\tF\tL\tDrugS\tsensitive
             gag\ttiny_ref\t5\tG\tA\tDrugU\tNone
         """))
         db = tmp_path / 'proj.db'
@@ -1303,7 +1303,7 @@ class TestPhenotypeNormalization:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tclinical_phenotype
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tres\tR
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tresistant
         """))
         db = tmp_path / 'proj.db'
         init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
@@ -1320,7 +1320,7 @@ class TestPhenotypeNormalization:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\tclinical_phenotype
-            gag\ttiny_ref\t2\tK\tE\tDrugA\tres\ts
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tresistant\tsensitive
         """))
         db = tmp_path / 'proj.db'
         init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
@@ -1332,6 +1332,16 @@ class TestPhenotypeNormalization:
         conn.close()
         assert phenotype == 'resistant'
         assert clinical == 'sensitive'
+
+    def test_rejects_old_shorthand_phenotype(self, tmp_path, tiny_genbank) -> None:
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(textwrap.dedent("""\
+            feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
+            gag\ttiny_ref\t2\tK\tE\tDrugA\tres
+        """))
+        db = tmp_path / 'proj.db'
+        with pytest.raises(ValueError, match='Unknown phenotype label'):
+            init_project(db_path=db, name='test', genbank_paths=[tiny_genbank], rules_tsv=tsv, additional_info=False)
 
     def test_missing_phenotype_columns_do_not_default_to_unknown(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
@@ -1350,7 +1360,7 @@ class TestPhenotypeNormalization:
         assert phenotype == ''
         assert clinical == ''
 
-    def test_missing_phenotype_defaults_to_unknown_when_ruleset_has_phenotypes(self, tmp_path, tiny_genbank) -> None:
+    def test_missing_phenotype_defaults_to_empty_when_ruleset_has_phenotypes(self, tmp_path, tiny_genbank) -> None:
         tsv = tmp_path / 'rules.tsv'
         tsv.write_text(textwrap.dedent("""\
             feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype
@@ -1366,9 +1376,9 @@ class TestPhenotypeNormalization:
         ).fetchall()
         conn.close()
         assert rows[0] == ('resistant', '')
-        assert rows[1] == ('unknown', '')
+        assert rows[1] == ('', '')
 
-    def test_missing_clinical_phenotype_defaults_to_unknown_when_ruleset_has_clinical_values(
+    def test_missing_clinical_phenotype_defaults_to_empty_when_ruleset_has_clinical_values(
         self,
         tmp_path,
         tiny_genbank,
@@ -1388,7 +1398,7 @@ class TestPhenotypeNormalization:
         ).fetchall()
         conn.close()
         assert rows[0] == ('', 'resistant')
-        assert rows[1] == ('', 'unknown')
+        assert rows[1] == ('', '')
 
     def test_rejects_ambiguous_deletion_tokens(self, tmp_path, tiny_genbank) -> None:
         # F67del at position 2 with reference K: deleted block 'F' does not match

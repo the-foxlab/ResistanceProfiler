@@ -5,6 +5,8 @@ description: Reference for curated rules TSV files
 
 # Rules TSV Format Reference
 
+A rules TSV file is a tab-separated table that defines which mutations confer resistance. Each row is one rule. This document is the source of truth for the file format used by `respro init` and `respro add`.
+
 ## Quick example
 
 A minimal rules TSV with only the required columns:
@@ -28,14 +30,12 @@ Combination rules use a separate formula TSV (`--formula-rules`) that defines bo
 
 For full column definitions, mutation notation, and combination rule syntax, see the sections below.
 
-This document is the source of truth for curated rules TSV files used by `respro init` and `respro add`.
-
 ## Overview
 
-- The primary rules TSV defines atomic mutation rules, one row per mutation.
-- Atomic rules can carry their own metadata or act mainly as building blocks for higher-order rules.
-- Optional boolean combination rules can be provided in a second TSV via `--formula-rules`.
-- Combinatorial association is defined via `member_id` values in the primary TSV that are referenced by boolean expressions in a formula TSV.
+- The **primary rules TSV** defines single-mutation rules — one row per mutation.
+- Single rules can carry their own metadata (phenotype, IC50, publications, …) or act mainly as building blocks for combination rules.
+- Optional **boolean combination rules** can be provided in a second TSV via `--formula-rules`.
+- Combination rules reference single rules by their `member_id` values.
 
 ---
 
@@ -100,15 +100,15 @@ Notes:
 
 ### How mutation normalization works
 
-Normalization means that different textual inputs describing the same biological event are converted into one canonical representation before rules are stored and matched.
+Different textual inputs can describe the same biological event (for example, `V` and `A336V` both mean "change position 336 to V"). Normalisation converts all of these to one canonical form before rules are stored and matched, so matching is exact and deterministic.
 
-High-level processing order:
+Processing order:
 
-1. Read row context (`feature`, `reference_identifier`, `position`, `reference`).
-2. Detect mutation category (substitution, stop, frameshift, insertion, deletion).
-3. Normalize token spelling to canonical internal form.
-4. Validate against reference protein context.
-5. Store explicit allele state for deterministic matching.
+1. Read the row context (`feature`, `reference_identifier`, `position`, `reference`).
+2. Detect the mutation category (substitution, stop, frameshift, insertion, deletion).
+3. Convert the token to its canonical internal form.
+4. Validate it against the reference protein context.
+5. Store the explicit allele state for deterministic matching.
 
 ### Normalization examples (input → canonical interpretation)
 
@@ -206,30 +206,27 @@ For substitutions/stops, `reference` and normalized `mutation` are stored as dir
 
 ### Phenotype normalization
 
-`phenotype` and `clinical_phenotype` are normalized independently to:
+`phenotype` and `clinical_phenotype` are stored **verbatim** — lowercased and whitespace-stripped, exactly as written in the rules sheet. Each label maps to a **rank** via the built-in vocabulary below, and the rank is inferred wherever severity comparison or colouring is needed.
 
-- `resistant`
-- `intermediate`
-- `sensitive`
-- `unknown`
+| Rank | Accepted labels (case-insensitive) | Report colour | Fallback label |
+|---|---|---|---|
+| 1 | `susceptible`, `sensitive`, `normal inhibition`, `ni`, `normal` | green | `susceptible` |
+| 2 | `potential low-level resistance`, `possibly resistant`, `suspected reduced` | yellow | `potential low-level resistance` |
+| 3 | `low-level resistance`, `reduced susceptibility`, `limited susceptibility` | slight orange | `low-level resistance` |
+| 4 | `intermediate`, `intermediate resistance`, `reduced inhibition`, `ri` | orange | `intermediate` |
+| 5 | `resistant`, `high-level resistance`, `highly reduced inhibition`, `hri` | red | `resistant` |
+| 0 | `unknown`, `not analysed`, `none`, *(empty cell)* | grey | `unknown` |
+| -1 | `contradictory`, `conflicting` | slate | `contradictory` |
 
-Accepted flexible inputs are intentionally limited.
+Ranks run 1 (mildest) to 5 (most severe); `0` and `-1` are sentinels for *unknown* and *contradictory*.
 
-| Input | Normalized to |
-|---|---|
-| `resistant`, `resistance`, `res`, `r`, `true`, `1` | `resistant` |
-| `intermediate`, `interm`, `i` | `intermediate` |
-| `sensitive`, `susceptible`, `sensi`, `sens`, `s`, `false`, `0` | `sensitive` |
-| `contradictory`, `contra`, `conflict`, `conflicting` | `contradictory` |
-| empty value, `None`, `unknown`, `na`, `n/a`, `nd` | `unknown` |
+Normalization rules:
 
-Rules:
+- Labels are lowercased and whitespace-stripped before storage and lookup.
+- **Bare ranks accepted.** A value of `1`–`5` resolves to the *fallback label* for that rank (the last column above).
+- **Empty = unknown.** An empty cell stores `''` (rank 0). The synonyms `none` and `not analysed` collapse to the canonical `unknown` label.
+- `phenotype` and `clinical_phenotype` are normalized independently. You may provide either, both, or neither.
 
-- You may provide only `phenotype`.
-- You may provide only `clinical_phenotype`.
-- You may provide both.
-- Both fields are normalized independently and stored separately.
-- Empty values normalize to `unknown` in each field.
 
 ### IC50 parsing rules
 
@@ -346,16 +343,16 @@ Define a formula that requires both mutations:
 |---|---|---|---|---|
 | group_1 | Aciclovir | (mut_A OR mut_B) AND NOT mut_C | resistant | resistant |
 
-The `group_id` in the formula TSV identifies each formula rule. Each `member_id` value from the atomic rules TSV that appears in an `expression` must correspond to an atomic rule.
+The `group_id` in the formula TSV identifies each formula rule. Each `member_id` value from the primary rules TSV that appears in an `expression` must correspond to a single rule.
 
 ### Annotation handling
 
-When optional metadata columns are provided in the atomic rules TSV:
+When optional metadata columns are provided in the primary rules TSV:
 
 - **If provided** (`ic50`, `fold_ic50`, `phenotype`, `clinical_phenotype`, `source`, `publication`, `comment`):
-    - Values are stored in the atomic rule row.
-    - If the same mutation appears in both singular and formula contexts, the stored annotation applies to all uses.
-    - Formula-level annotations (provided in the formula.tsv) override atomic annotations for that specific formula combination.
+    - Values are stored in the single rule row.
+    - If the same mutation appears in both single and formula contexts, the stored annotation applies to all uses.
+    - Formula-level annotations (provided in the formula.tsv) override single-rule annotations for that specific formula combination.
 - **If omitted** (e.g., all rows lack `ic50`):
     - The field is stored as `NULL` or empty for that rule.
     - During profiling, the absence is treated as "no data available" and reported as `unknown` or blank in output.

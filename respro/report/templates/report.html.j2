@@ -191,9 +191,9 @@
                     <th>Drug</th>
                     <th class="drug-table-count">Database Hits</th>
                     {% if context.summary.drug_table.has_phenotypes %}
-                      <th class="drug-table-count">Resistant</th>
-                      <th class="drug-table-count">Intermediate</th>
-                      <th class="drug-table-count">Sensitive</th>
+                      {% for col in context.summary.drug_table.phenotype_columns %}
+                      <th class="drug-table-count">{{ col.label }}</th>
+                      {% endfor %}
                     {% endif %}
                     {% if context.summary.drug_table.has_scores %}
                       <th class="drug-table-count">Sum of Scores</th>
@@ -236,9 +236,9 @@
                           <td><span class="drug-name-badge {{ drug.assessment_badge_class }}">{{ drug.name }}</span></td>
                           <td class="drug-table-count">{{ drug.hit_count }}</td>
                           {% if context.summary.drug_table.has_phenotypes %}
-                            <td class="drug-table-count">{{ drug.resistant_count }}</td>
-                            <td class="drug-table-count">{{ drug.intermediate_count }}</td>
-                            <td class="drug-table-count">{{ drug.sensitive_count }}</td>
+                            {% for col in context.summary.drug_table.phenotype_columns %}
+                            <td class="drug-table-count">{{ drug.rank_counts.get(col.rank, 0) }}</td>
+                            {% endfor %}
                           {% endif %}
                           {% if context.summary.drug_table.has_scores %}
                             <td class="drug-table-count">{{ drug.score_display }}</td>
@@ -259,7 +259,7 @@
                                 {% if context.summary.drug_table.has_drug_thresholds and ma[0].resolved_thresholds is defined %}
                                 <span class="db-hit-freq-info">
                                   <img class="db-hit-info-icon" src="{{ context.summary.info_icon }}" alt="info" width="13" height="13">
-                                  <div class="db-hit-info-panel">Thresholds applied: resistant={{ ma[0].resolved_thresholds.resistant }}{% if ma[0].resolved_thresholds.intermediate is not none %}, intermediate={{ ma[0].resolved_thresholds.intermediate }}{% endif %}. Source: {{ ma[0].threshold_source }}.</div>
+                                  <div class="db-hit-info-panel">Thresholds applied: {% for lbl, val in ma[0].resolved_thresholds.items() %}{{ lbl }}={{ val }}{% if not loop.last %}, {% endif %}{% endfor %}. Source: {{ ma[0].threshold_source }}.</div>
                                 </span>
                                 {% endif %}
                               {% else %}—{% endif %}
@@ -282,9 +282,9 @@
                         <td><span class="drug-name-badge {{ drug.assessment_badge_class }}">{{ drug.name }}</span></td>
                         <td class="drug-table-count">{{ drug.hit_count }}</td>
                         {% if context.summary.drug_table.has_phenotypes %}
-                          <td class="drug-table-count">{{ drug.resistant_count }}</td>
-                          <td class="drug-table-count">{{ drug.intermediate_count }}</td>
-                          <td class="drug-table-count">{{ drug.sensitive_count }}</td>
+                          {% for col in context.summary.drug_table.phenotype_columns %}
+                          <td class="drug-table-count">{{ drug.rank_counts.get(col.rank, 0) }}</td>
+                          {% endfor %}
                         {% endif %}
                         {% if context.summary.drug_table.has_scores %}
                           <td class="drug-table-count">{{ drug.score_display }}</td>
@@ -305,7 +305,7 @@
                               {% if context.summary.drug_table.has_drug_thresholds and ma[0].resolved_thresholds is defined %}
                               <span class="db-hit-freq-info">
                                 <img class="db-hit-info-icon" src="{{ context.summary.info_icon }}" alt="info" width="13" height="13">
-                                <div class="db-hit-info-panel">Thresholds applied: resistant={{ ma[0].resolved_thresholds.resistant }}{% if ma[0].resolved_thresholds.intermediate is not none %}, intermediate={{ ma[0].resolved_thresholds.intermediate }}{% endif %}. Source: {{ ma[0].threshold_source }}.</div>
+                                <div class="db-hit-info-panel">Thresholds applied: {% for lbl, val in ma[0].resolved_thresholds.items() %}{{ lbl }}={{ val }}{% if not loop.last %}, {% endif %}{% endfor %}. Source: {{ ma[0].threshold_source }}.</div>
                               </span>
                               {% endif %}
                             {% else %}—{% endif %}

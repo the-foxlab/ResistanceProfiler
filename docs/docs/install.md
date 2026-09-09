@@ -17,9 +17,11 @@ Choose the installation method that fits your use case:
 ```bash
 git clone https://github.com/the-foxlab/ResistanceProfiler.git
 cd ResistanceProfiler
-pip install -e ".[dev]"
+pip install -e .
 respro --version
 ```
+
+Add `.[dev]` instead of `.` if you also want the test and linting tools (pytest, ruff, mypy, etc.).
 
 ### via Bioconda
 

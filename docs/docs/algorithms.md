@@ -5,19 +5,19 @@ description: Drug interpretation, IC50 thresholds, effect-as-resistant, and comb
 
 # Interpretation Algorithms
 
-Interpretation algorithms extend rule evaluation with additional logic. They are configured per project in the metadata JSON at `respro init` time and stored in the project database.
+Interpretation algorithms extend rule evaluation with additional logic. They are configured per project in the metadata JSON at `respro init` time and stored in the project database. See [Database Preparation](database-preparation.md) for how to add them.
 
-## Overview
+## How ResPro evaluates resistance
 
-ResPro evaluates resistance at multiple levels:
+ResPro evaluates resistance at three levels:
 
-1. **Single rules** — each row in the primary rules TSV is an atomic mutation-to-interpretation mapping.
-2. **Combination rules** — boolean formulas over atomic `member_id` values from grouped rules.
-3. **Interpretation algorithms** — project-level logic that aggregates matched rules into per-drug results.
+1. **Single rules** — each row in the primary rules TSV maps one mutation to an interpretation.
+2. **Combination rules** — boolean formulas over single-rule `member_id` values (e.g. "mutation A AND mutation B").
+3. **Interpretation algorithms** — project-level logic that aggregates matched rules into per-drug results in the report.
 
-## Rule nomenclature basics
+## Rule notation basics
 
-Rules are amino-acid-centric. A notation such as <span class="respro-pill">A123V</span> means reference amino acid A at position 123 changes to V.
+Rules are amino-acid-centric. A notation such as <span class="respro-pill">A123V</span> means the reference amino acid A at position 123 changes to V.
 
 | Type | Example | Meaning |
 |---|---|---|
@@ -25,10 +25,10 @@ Rules are amino-acid-centric. A notation such as <span class="respro-pill">A123V
 | Anchored deletion | <span class="respro-pill">VG215V</span> | The G after position 215 is deleted. |
 | Anchored insertion | <span class="respro-pill">V215VG</span> | Insertion of G after the V at position 215. |
 | Frameshift | <span class="respro-pill">L201LfsX</span> | Reading-frame shift after the L at position 201. |
-| Phenotype | <span class="respro-pill">sensitive / resistant</span> | Captures in-vitro susceptibility interpretation. |
-| Clinical phenotype | <span class="respro-pill">sensitive / resistant</span> | Captures treatment-oriented interpretation where available. |
+| Phenotype | <span class="respro-pill">sensitive / resistant</span> | In-vitro susceptibility interpretation. |
+| Clinical phenotype | <span class="respro-pill">sensitive / resistant</span> | Treatment-oriented interpretation, where available. |
 
-See [Rules TSV Format](rules-format.md) for the full mutation normalization reference.
+See [Rules TSV Format](rules-format.md) for the full mutation normalisation reference.
 
 ## Combination rules
 
@@ -72,18 +72,104 @@ Single rules represent one mutation-to-interpretation mapping. Combination rules
 
 ## Interpretation algorithms
 
-### `effect_as_resistant`
+### `drug_interpretation` — turn rule hits into a per-drug assessment
 
-Defines report-only metadata interpretation for observed high-impact variant effects. This does not create curated database rule hits.
+Combines the matched rules for a drug into one overall result. Depending on your database, this can be based on phenotype labels, scores, IC50 values, or fold-change cutoffs. Threshold keys are **phenotype labels** (or bare ranks `1`–`5`) resolved via the [rank vocabulary](rules-format.md#phenotype-normalization); the report shows the stored verbatim label coloured by its inferred rank, so multi-tier vocabularies (e.g. `{1, 3, 5}`) work without special-casing.
+
+**Methods:**
+
+| Method | How it decides | Needs `thresholds`? |
+|---|---|---|
+| `by_phenotype` | The highest-rank phenotype label among the drug's hits wins. `contradictory` wins over `susceptible` (rank 1) but loses to any higher-tier severity (ranks 2–5). Hits with no label yield `susceptible`. | **No** — labels come from the rules, not the config. |
+| `by_score` | Sums the `score` values per drug and compares the total against thresholds. | Yes |
+| `by_ic50` | Checks each hit's IC50; the highest-rank label whose breakpoint is met wins, otherwise the rank-1 label. | Yes |
+| `by_fold_ic50` | Same logic as `by_ic50`, using fold-IC50 values. | Yes |
+
+**Configuration keys:**
+
+- `method` — required; must be `"by_phenotype"`, `"by_score"`, `"by_ic50"`, or `"by_fold_ic50"`.
+- `thresholds` — required for `by_score`, `by_ic50`, and `by_fold_ic50`; **not accepted** for `by_phenotype`. An object mapping phenotype labels (or bare ranks) to threshold values. Must include at least one severity label (a phenotype label with rank 1-5); thresholds must be non-decreasing with severity rank. Labels are lowercased + whitespace-stripped and resolved via the rank vocabulary, so multi-tier configs work.
+    - `by_score`: threshold values are positive integers.
+    - `by_ic50` / `by_fold_ic50`: threshold values are positive numbers. The config must include at least one rank-1 label (e.g. `susceptible`), which is returned when the value falls below all higher-rank breakpoints.
+- `drug_thresholds` — optional list of per-drug overrides; not accepted for `by_phenotype`. See [Per-drug / per-reference overrides](#per-drug--per-reference-overrides) below.
+
+Each `method` may appear at most once; two entries with the same `method` are rejected.
+
+When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final **Assessment** column. The final assessment is strongest-wins by inferred rank: rank 5 (resistant) > … > rank 2 (potential low-level resistance) > `contradictory` (rank -1) > rank 1 (susceptible), with `unknown` (rank 0) weakest. `contradictory` thus wins over susceptible but loses to any higher-tier severity. The most severe result across all methods becomes the final call.
+
+When `drug_thresholds` overrides are configured, each per-method assessment cell in the report shows an info icon on hover naming the resolved thresholds and their source (override `(reference, drug)`, override `(drug)`, or global default). The table layout, badge styling, and final Assessment column are unchanged; without overrides the report renders identically to the global-only case.
+
+Example:
+
+```json
+{
+  "name": "drug_interpretation",
+  "method": "by_phenotype"
+}
+```
+
+A numeric example with a rank-1 label:
+
+```json
+{
+  "name": "drug_interpretation",
+  "method": "by_ic50",
+  "thresholds": {
+    "susceptible": 0.0,
+    "intermediate": 3.0,
+    "resistant": 10.0
+  }
+}
+```
+
+### Per-drug / per-reference overrides
+
+`drug_interpretation` accepts an optional `drug_thresholds` list that overrides the global `thresholds` for specific drugs, optionally scoped to a single reference. This is useful when a drug needs finer breakpoints than the database-wide default, or when the same drug has different breakpoints across references (e.g. different viral species).
+
+Each entry is an object with:
+
+- `reference` — optional non-empty string; when present, the override applies only to rules/drugs whose reference matches (accession-version tolerant, e.g. `NC_001345.1` matches `NC_001345`)
+- `drug` — required non-empty string; the drug name to override
+- `thresholds` — required object with the same shape and constraints as the parent algorithm's `thresholds`:
+  - must include at least one severity label (rank 1-5); integer for `by_score`, positive number for `by_ic50`/`by_fold_ic50`; thresholds must be non-decreasing with severity rank
+
+Resolution precedence (most specific wins):
+
+1. an override matching `(reference, drug)`
+2. an override matching `(drug)` only (no `reference`)
+3. the global `thresholds`
+
+Duplicate `(reference, drug)` or `(drug)`-only keys are rejected. Two overrides whose `reference` values differ only by accession version (e.g. `NC_001345` and `NC_001345.1`) are treated as the same key and rejected as duplicates. Overrides with no matching drug or reference fall back to the next precedence level. The Database Dashboard condenses overrides for display: entries sharing the same `reference` (shown as `(all)` when absent) and the same threshold values collapse into one row with a sorted drug set, mirroring the `effect_as_resistant` condensing.
+
+When a drug has hits under multiple references in a single report (e.g. a multi-species run), the reference used to resolve per-(reference, drug) overrides is selected deterministically as the alphabetically first reference name. This keeps the report output stable across process invocations (set iteration order is otherwise hash-seed dependent).
+
+Example — `drug_interpretation` with a per-reference override:
+
+```json
+{
+  "name": "drug_interpretation",
+  "method": "by_score",
+  "thresholds": {"resistant": 1, "intermediate": 1},
+  "drug_thresholds": [
+    {"reference": "ref", "drug": "ACV", "thresholds": {"resistant": 1, "intermediate": 1}}
+  ]
+}
+```
+
+### `effect_as_resistant` — treat high-impact effects as resistant
+
+Produces report-only metadata hits when a variant has a high-impact consequence in a given feature and reference. This does **not** create curated rule hits — it only adds a resistant metadata row for the configured drug.
 
 Configured high-impact variant effects (frameshift, stop_gained, stop_lost, start_lost, insertion, deletion) observed in a feature/reference pair are interpreted as <span class="respro-pill">phenotype='resistant'</span> for the configured drug. This algorithm does not set <span class="respro-pill">clinical_phenotype</span>.
 
 Configuration keys:
 
-- `rules` — required non-empty list
-- each rule must include `feature`, `effect`, `reference`, and `drug` as case-sensitive exact non-empty strings
-- `effect` — required non-empty list of strings; each must be one of: `frameshift`, `stop_gained`, `stop_lost`, `start_lost`, `insertion`, `deletion`
-- each (`feature`, `reference`, `drug`) tuple must be unique across the list
+- `rules` — required non-empty list. Each rule must include:
+    - `feature` — case-sensitive exact feature name.
+    - `reference` — case-sensitive exact reference name.
+    - `drug` — case-sensitive exact drug name.
+    - `effect` — a non-empty list of strings, each one of: `frameshift`, `stop_gained`, `stop_lost`, `start_lost`, `insertion`, `deletion`.
+- Each (`feature`, `reference`, `drug`) tuple must be unique across the list.
 
 This metadata output is only produced when the project database has at least one curated rule with a known phenotype or clinical phenotype.
 
@@ -103,117 +189,11 @@ Example:
 }
 ```
 
-### `drug_interpretation`
+### `drug_groups` — group drugs in the report
 
-Combines matched rules into one overall drug result. Depending on the database, this can be based on phenotype labels, scores, IC50 values, or fold-change cutoffs.
+Assigns drugs to named groups (for example, drug classes) for display in the final report.
 
-Supported methods:
-
-- **`by_phenotype`** — counts phenotype-labelled hits per drug and compares counts against thresholds
-- **`by_score`** — sums score values per drug and compares totals against thresholds
-- **`by_ic50`** — checks per-hit IC50 values per drug; if any value meets the resistant threshold the drug is resistant, otherwise if any value meets the intermediate threshold the drug is intermediate, otherwise sensitive
-- **`by_fold_ic50`** — same logic as `by_ic50`, but using fold-IC50 values
-
-Configuration keys:
-
-- `method` — required; must be `"by_phenotype"`, `"by_score"`, `"by_ic50"`, or `"by_fold_ic50"`
-- `thresholds` — required object; must include `"resistant"`; `"intermediate"` is optional
-- for `by_phenotype` and `by_score`, threshold values must be positive integers
-- for `by_ic50` and `by_fold_ic50`, threshold values must be positive numbers; if `intermediate` is set, `resistant` must be strictly greater than `intermediate`
-- each method may appear at most once; two entries with the same `method` are rejected
-- `drug_thresholds` — optional list of per-drug overrides; see [Per-drug / per-reference overrides](#per-drug--per-reference-overrides) below
-
-When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final **Assessment** column. The final assessment uses strongest-wins resolution: `resistant` > `contradictory` > `intermediate` > `sensitive`. The most resistant result across all methods is taken as the final call.
-
-When `drug_thresholds` overrides are configured, each per-method assessment cell in the report shows an info icon on hover naming the resolved thresholds and their source (override `(reference, drug)`, override `(drug)`, or global default). The table layout, badge styling, and final Assessment column are unchanged; without overrides the report renders identically to the global-only case.
-
-Example:
-
-```json
-{
-  "name": "drug_interpretation",
-  "method": "by_phenotype",
-  "thresholds": {
-    "resistant": 1,
-    "intermediate": 1
-  }
-}
-```
-
-### `ic50_thresholds`
-
-Defines per-drug IC50 or fold-IC50 breakpoints. With this, each rule that has an IC50 value associated will be classified for a phenotype during init.
-
-- `use` — required; must be `"ic50"` or `"fold_ic50"`
-- `thresholds` — required non-empty object; each key is a drug name; each value must have `"intermediate"` and `"resistant"` keys with positive numbers; `"resistant"` must be strictly greater than `"intermediate"`
-- `drug_thresholds` — optional list of per-drug overrides; see [Per-drug / per-reference overrides](#per-drug--per-reference-overrides) below
-
-Example:
-
-```json
-{
-  "name": "ic50_thresholds",
-  "use": "fold_ic50",
-  "thresholds": {
-    "ACV": {"intermediate": 3.0, "resistant": 10.0},
-    "PCV": {"intermediate": 3.0, "resistant": 10.0}
-  }
-}
-```
-
-### Per-drug / per-reference overrides
-
-Both `drug_interpretation` and `ic50_thresholds` accept an optional `drug_thresholds` list that overrides the global `thresholds` for specific drugs, optionally scoped to a single reference. This is useful when a drug needs finer breakpoints than the database-wide default, or when the same drug has different breakpoints across references (e.g. different viral species).
-
-Each entry is an object with:
-
-- `reference` — optional non-empty string; when present, the override applies only to rules/drugs whose reference matches (accession-version tolerant, e.g. `NC_001345.1` matches `NC_001345`)
-- `drug` — required non-empty string; the drug name to override
-- `thresholds` — required object with the same shape and constraints as the parent algorithm's `thresholds`:
-  - for `drug_interpretation`: must include `resistant`; `intermediate` is optional; integer for `by_phenotype`/`by_score`, positive number for `by_ic50`/`by_fold_ic50` (with `resistant` > `intermediate` when `intermediate` is set)
-  - for `ic50_thresholds`: both `intermediate` and `resistant` are required, and `resistant` must be strictly greater than `intermediate`
-
-Resolution precedence (most specific wins):
-
-1. an override matching `(reference, drug)`
-2. an override matching `(drug)` only (no `reference`)
-3. the global `thresholds`
-
-Duplicate `(reference, drug)` or `(drug)`-only keys are rejected. Two overrides whose `reference` values differ only by accession version (e.g. `NC_001345` and `NC_001345.1`) are treated as the same key and rejected as duplicates. Overrides with no matching drug or reference fall back to the next precedence level. The Database Dashboard condenses overrides for display: entries sharing the same `reference` (shown as `(all)` when absent) and the same threshold values collapse into one row with a sorted drug set, mirroring the `effect_as_resistant` condensing.
-
-When a drug has hits under multiple references in a single report (e.g. a multi-species run), the reference used to resolve per-(reference, drug) overrides is selected deterministically as the alphabetically first reference name. This keeps the report output stable across process invocations (set iteration order is otherwise hash-seed dependent).
-
-Example — `drug_interpretation` with a per-reference override:
-
-```json
-{
-  "name": "drug_interpretation",
-  "method": "by_phenotype",
-  "thresholds": {"resistant": 1, "intermediate": 1},
-  "drug_thresholds": [
-    {"reference": "ref", "drug": "ACV", "thresholds": {"resistant": 1, "intermediate": 1}}
-  ]
-}
-```
-
-Example — `ic50_thresholds` with a per-reference override:
-
-```json
-{
-  "name": "ic50_thresholds",
-  "use": "fold_ic50",
-  "thresholds": {"ACV": {"intermediate": 3.0, "resistant": 10.0}},
-  "drug_thresholds": [
-    {"reference": "ref", "drug": "ACV", "thresholds": {"intermediate": 1.0, "resistant": 2.0}}
-  ]
-}
-```
-
-### `drug_groups`
-
-Assigns drugs to named groups (e.g. drug classes). This is only if you wish to group drugs in the final report.
-
-- `groups` — required non-empty object; each key is a group name; each value is a non-empty list of drug name strings; a drug name may not appear in more than one group
+- `groups` — required non-empty object. Each key is a group name; each value is a non-empty list of drug name strings. A drug may not appear in more than one group.
 
 Example:
 
@@ -227,15 +207,13 @@ Example:
 }
 ```
 
-### `drug_alias`
+### `drug_alias` — short drug names in the report
 
-Defines canonical drug-name to short-alias mappings for report rendering.
+Maps canonical drug names to short aliases shown in the report (for example, `Aciclovir (ACV)`).
 
-- `groups` — required non-empty object; keys are canonical drug names; values are aliases
-- each key and value must be a non-empty string
-- alias values must be unique across canonical drug names
+- `groups` — required non-empty object. Keys are canonical drug names; values are aliases. Each key and value must be a non-empty string, and aliases must be unique across drugs.
 
-When configured, these mappings are written to the `drug.alias` column during `respro init` and used for report drug labels, for example `Aciclovir (ACV)`.
+These mappings are written to the `drug.alias` column during `respro init`.
 
 Example:
 
@@ -253,10 +231,10 @@ Example:
 
 Two independent phenotype fields are tracked per rule:
 
-- **Phenotype** — captures in-vitro susceptibility interpretation (resistant, intermediate, sensitive, unknown).
-- **Clinical phenotype** — captures treatment-oriented interpretation where available.
+- **Phenotype** — in-vitro susceptibility interpretation.
+- **Clinical phenotype** — treatment-oriented interpretation, where available.
 
-Both are normalized independently from flexible input values. See [Rules TSV Format](rules-format.md) for the full normalization table.
+Both are stored verbatim (lowercased + whitespace-stripped) and resolved to a rank via the [rank vocabulary](rules-format.md#phenotype-normalization) (1 = susceptible … 5 = resistant; sentinels 0 = unknown, -1 = contradictory). Severity comparison and report colouring use the inferred rank so multi-tier vocabularies (e.g. `{susceptible, low-level resistance, resistant}`) work uniformly.
 
 ## Full configuration example
 

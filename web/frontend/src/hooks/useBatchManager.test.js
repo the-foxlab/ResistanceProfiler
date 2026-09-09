@@ -29,14 +29,20 @@ let mockXHRInstance;
 // though ``mockXHRInstance`` is reassigned on each ``new XMLHttpRequest()`` call.
 const mockXHRInstances = [];
 
-global.XMLHttpRequest = vi.fn(() => {
-  mockXHRInstance = new MockXHR();
-  mockXHRInstances.push(mockXHRInstance);
-  return mockXHRInstance;
-});
+// Plain class stub — vi.fn(() => ...) loses its implementation when vi.clearAllMocks()
+// runs in Vitest 5, so a plain constructor is used instead and re-stubbed per test.
+function setupXhrStub() {
+  vi.stubGlobal('XMLHttpRequest', class {
+    constructor() {
+      mockXHRInstance = new MockXHR();
+      mockXHRInstances.push(mockXHRInstance);
+      return mockXHRInstance;
+    }
+  });
+}
 
 // Mock fetch used by apiPostRaw (submitBatch) and apiGet (job polling).
-global.fetch = vi.fn();
+vi.stubGlobal('fetch', vi.fn());
 
 vi.mock('../config.js', () => ({
   FRONTEND_CONFIG: {
@@ -104,13 +110,14 @@ function flushPromises() {
 
 describe('useBatchManager — batch BAM auto-pairing and per-row override', () => {
   beforeEach(() => {
+    setupXhrStub();
     vi.clearAllMocks();
     global.fetch.mockReset();
     mockXHRInstances.length = 0;
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   it('auto-pairs a multi-select BAM to the VCF row with a matching filename stem', async () => {
@@ -333,13 +340,14 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
 
 describe('useBatchManager — JSON regenerate batch', () => {
   beforeEach(() => {
+    setupXhrStub();
     vi.clearAllMocks();
     global.fetch.mockReset();
     mockXHRInstances.length = 0;
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
   });
 
   // Upload a results-JSON file into the hook via addBatchJsonFiles.

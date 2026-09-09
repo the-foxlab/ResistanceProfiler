@@ -18,6 +18,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from respro import __version__
 from respro.config.cli_settings import CLI_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -194,16 +195,14 @@ def _fetch_manifest() -> dict:
     if not isinstance(payload, dict):
         raise RuntimeError('Malformed manifest: top-level JSON value must be an object')
 
-    manifest_version = payload.get('manifest_version')
-    if not isinstance(manifest_version, int):
-        raise RuntimeError('Malformed manifest: manifest_version must be an integer')
-
     databases = payload.get('databases')
     if not isinstance(databases, list):
         raise RuntimeError('Malformed manifest: databases must be a list')
 
     for idx, entry in enumerate(databases):
         _validate_manifest_entry(entry, idx)
+
+    _check_respro_version_compatibility(payload)
 
     return payload
 
@@ -238,6 +237,57 @@ def _validate_manifest_entry(entry: object, idx: int) -> None:
     metadata = entry.get('metadata')
     if not isinstance(metadata, dict):
         raise RuntimeError(f'Malformed manifest: databases[{idx}].metadata must be an object')
+
+
+def _check_respro_version_compatibility(manifest: dict) -> None:
+    """Raise RuntimeError if the installed respro version is incompatible with the manifest.
+
+    The manifest ships a ``respro_version`` specifier (PEP 440, e.g. ``">=0.1.3"``)
+    describing the minimum respro version that can build the maintained databases.
+    If the currently installed version does not satisfy the specifier, both the
+    ``--list`` and ``--download`` commands fail fast with an actionable upgrade
+    message rather than producing a silently broken database.
+    """
+    raw_spec = manifest.get('respro_version')
+    if raw_spec is None:
+        # Older manifests without the field are still usable.
+        return
+    if not isinstance(raw_spec, str) or not raw_spec.strip():
+        raise RuntimeError('Malformed manifest: respro_version must be a non-empty string')
+
+    required = _parse_required_version(raw_spec)
+    if __version__ == '0.0.0' or _version_tuple(__version__) < required:
+        raise RuntimeError(
+            f'The installed respro version ({__version__}) is incompatible with the '
+            f'maintained databases, which require respro {raw_spec}. '
+            f'Please upgrade respro (e.g. ``pip install --upgrade respro``) and try again.'
+        )
+
+
+_VERSION_SPEC_RE = re.compile(r'^\s*>=\s*(\d+(?:\.\d+)*)\s*$')
+
+
+def _parse_required_version(spec: str) -> tuple[int, ...]:
+    """Parse a ``>=X.Y.Z`` specifier into a version tuple, raising RuntimeError on bad input."""
+    m = _VERSION_SPEC_RE.match(spec)
+    if not m:
+        raise RuntimeError(f'Malformed manifest: respro_version must be ">=X.Y.Z", got {spec!r}')
+    return tuple(int(p) for p in m.group(1).split('.'))
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    """Convert a dotted version string into a comparable int tuple.
+
+    Robust to PEP 440 pre-release/dev segments (e.g. ``0.2.0.dev1`` or
+    ``0.2.0a1``): each dot-separated component is reduced to its leading
+    numeric part, so the pre-release suffix is dropped before ``int()``-parsing.
+    A component with no leading digits contributes ``0``.
+    """
+    parts: list[int] = []
+    for part in version.split('.'):
+        m = re.match(r'\d+', part)
+        parts.append(int(m.group()) if m is not None else 0)
+    return tuple(parts)
 
 
 def _find_manifest_database_entry(db_name: str) -> dict:

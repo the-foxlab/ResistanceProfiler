@@ -189,9 +189,9 @@ class TestBuildReportContext:
         metrics_dict = {m['label']: m['value'] for m in row['metrics']}
         assert metrics_dict.get('Phenotype') == 'resistant'
         assert metrics_dict.get('Clinical phenotype') == 'intermediate'
-        # Verify drug table counts it correctly: 1 resistant, 0 intermediate
-        assert ctx['summary']['drug_table']['rows'][0]['resistant_count'] == 1
-        assert ctx['summary']['drug_table']['rows'][0]['intermediate_count'] == 0
+        # Verify drug table counts it correctly: rank 5 (resistant) count = 1
+        assert ctx['summary']['drug_table']['rows'][0]['rank_counts'].get(5) == 1
+        assert ctx['summary']['drug_table']['rows'][0]['rank_counts'].get(4) in (0, None)
 
     def test_db_hits_falls_back_to_clinical_phenotype_when_phenotype_unknown(self) -> None:
         # Rule with phenotype='unknown', clinical_phenotype='resistant'
@@ -284,7 +284,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -347,7 +347,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_fold_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -431,7 +431,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -496,7 +496,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -554,7 +554,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_fold_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -621,7 +621,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -632,7 +632,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -647,9 +647,12 @@ class TestBuildReportContext:
         assert drug_table['has_final_assessment'] is True
         # Two method labels: by_phenotype + by_ic50
         assert len(drug_table['method_labels']) == 2
-        # col_count includes Drug, Hits, Resistant/Intermediate/Sensitive (3),
-        # by_phenotype assessment (1), Highest IC50 value (1), by_ic50 assessment (1), + Final Assessment (1) = 9
-        assert drug_table['col_count'] == 9
+        # col_count includes Drug, Hits, one phenotype column per rank present
+        # (here only rank 5 'resistant' → 1), by_phenotype assessment (1), Highest
+        # IC50 value (1), by_ic50 assessment (1), + Final Assessment (1) = 7
+        assert drug_table['col_count'] == 7
+        # One phenotype column for rank 5 (resistant).
+        assert [c['rank'] for c in drug_table['phenotype_columns']] == [5]
         # The final assessment should be 'resistant' (most severe across methods)
         assert drug_table['rows'][0]['assessment'] == 'resistant'
         # Per-method assessments should NOT have badge class in multi-method
@@ -703,7 +706,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -716,13 +719,14 @@ class TestBuildReportContext:
         # Single method: has_assessment=True but has_final_assessment=False
         assert drug_table['has_assessment'] is True
         assert drug_table['has_final_assessment'] is False
-        # col_count: Drug + Hits + 3 phenotype cols + by_phenotype assessment = 6
-        assert drug_table['col_count'] == 6
+        # col_count: Drug + Hits + 1 phenotype col (rank 1 only) + by_phenotype assessment = 4
+        assert drug_table['col_count'] == 4
+        assert [c['rank'] for c in drug_table['phenotype_columns']] == [1]
         # Method assessments should have badge classes
         ma = drug_table['rows'][0]['method_assessments']
         assert len(ma) == 1
-        assert ma[0]['assessment'] == 'sensitive'
-        assert ma[0]['assessment_badge_class'] == 'phenotype--sensitive'
+        assert ma[0]['assessment'] == 'susceptible'
+        assert ma[0]['assessment_badge_class'] == 'phenotype--susceptible'
 
     def test_drug_thresholds_override_attaches_resolved_thresholds_and_source(self) -> None:
         """When drug_thresholds overrides are configured, each method assessment carries
@@ -738,6 +742,7 @@ class TestBuildReportContext:
             reference='K',
             mutation='E',
             phenotype='resistant',
+            ic50='15.0',
         )
         result = make_profiling_result(
             project_name='T',
@@ -769,10 +774,10 @@ class TestBuildReportContext:
                 'drug_interpretation',
                 json.dumps({
                     'name': 'drug_interpretation',
-                    'method': 'by_phenotype',
-                    'thresholds': {'resistant': 2},
+                    'method': 'by_ic50',
+                    'thresholds': {'susceptible': 0.0, 'intermediate': 3.0, 'resistant': 10.0},
                     'drug_thresholds': [
-                        {'reference': 'ref', 'drug': 'DrugA', 'thresholds': {'resistant': 1}},
+                        {'reference': 'ref', 'drug': 'DrugA', 'thresholds': {'susceptible': 0.0, 'intermediate': 2.0, 'resistant': 5.0}},
                     ],
                 }),
             ),
@@ -786,9 +791,9 @@ class TestBuildReportContext:
         assert drug_table['has_drug_thresholds'] is True
         ma = drug_table['rows'][0]['method_assessments']
         assert len(ma) == 1
-        # Override sets resistant threshold to 1 → resistant
+        # Override lowers the resistant breakpoint to 5.0; IC50 15.0 ≥ 5.0 → resistant
         assert ma[0]['assessment'] == 'resistant'
-        assert ma[0]['resolved_thresholds'] == {'resistant': 1, 'intermediate': None}
+        assert ma[0]['resolved_thresholds'] == {'susceptible': 0.0, 'intermediate': 2.0, 'resistant': 5.0}
         assert ma[0]['threshold_source'] == 'override (reference, drug)'
 
     def test_drug_thresholds_override_absent_has_no_resolved_fields(self) -> None:
@@ -837,7 +842,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -851,6 +856,77 @@ class TestBuildReportContext:
         ma = drug_table['rows'][0]['method_assessments']
         assert 'resolved_thresholds' not in ma[0]
         assert 'threshold_source' not in ma[0]
+
+    def test_drug_thresholds_hover_preserves_multi_tier_labels(self) -> None:
+        """A multi-tier override (susceptible / low-level resistance / resistant)
+        is preserved verbatim in resolved_thresholds and rendered in the hover
+        text — not collapsed to {resistant, intermediate}."""
+        rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+            ic50='3.0',
+        )
+        result = make_profiling_result(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+                    feature_name='gag',
+                    codon_pos=2,
+                    ref_aa='K',
+                    alt_aa='E',
+                    consequence='missense',
+                    af_bin='high',
+                    rule_matches=[rule],
+                ),
+            ],
+        )
+        override = {
+            'reference': 'ref', 'drug': 'DrugA',
+            'thresholds': {'susceptible': 0, 'low-level resistance': 1, 'resistant': 2},
+        }
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            (
+                'drug_interpretation',
+                json.dumps({
+                    'name': 'drug_interpretation',
+                    'method': 'by_ic50',
+                    'thresholds': {'susceptible': 0.0, 'low-level resistance': 1.0, 'resistant': 2.0},
+                    'drug_thresholds': [override],
+                }),
+            ),
+        )
+        conn.commit()
+
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
+        drug_table = ctx['summary']['drug_table']
+        ma = drug_table['rows'][0]['method_assessments']
+        # All three labels survive — no collapse to {resistant, intermediate}.
+        assert ma[0]['resolved_thresholds'] == override['thresholds']
+
+        html = render_html(result, similarity_high=1, similarity_moderate=0, project_conn=conn)
+        # Hover renders every label, not just resistant/intermediate.
+        assert 'Thresholds applied: susceptible=0, low-level resistance=1, resistant=2.' in html
+        assert 'intermediate=' not in html
 
     def test_drug_alias_is_rendered_from_drug_table_alias_column(self) -> None:
         result = _make_result()
@@ -867,7 +943,7 @@ class TestBuildReportContext:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -2355,6 +2431,7 @@ class TestPdfExports:
             reference='K',
             mutation='E',
             phenotype='resistant',
+            ic50='15.0',
         )
         result = make_profiling_result(
             project_name='T',
@@ -2385,17 +2462,17 @@ class TestPdfExports:
                 'drug_interpretation',
                 json.dumps({
                     'name': 'drug_interpretation',
-                    'method': 'by_phenotype',
-                    'thresholds': {'resistant': 2},
+                    'method': 'by_ic50',
+                    'thresholds': {'susceptible': 0.0, 'intermediate': 3.0, 'resistant': 10.0},
                     'drug_thresholds': [
-                        {'reference': 'ref', 'drug': 'DrugA', 'thresholds': {'resistant': 1}},
+                        {'reference': 'ref', 'drug': 'DrugA', 'thresholds': {'susceptible': 0.0, 'intermediate': 2.0, 'resistant': 5.0}},
                     ],
                 }),
             ),
         )
         conn.commit()
         html = render_html(result, similarity_high=1, similarity_moderate=0, project_conn=conn)
-        assert 'Thresholds applied: resistant=1' in html
+        assert 'Thresholds applied: susceptible=0.0, intermediate=2.0, resistant=5.0' in html
         assert 'override (reference, drug)' in html
 
     def test_render_html_drug_thresholds_hover_absent_without_overrides(self) -> None:
@@ -2441,7 +2518,7 @@ class TestPdfExports:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -2462,12 +2539,12 @@ class TestPdfExports:
         rule_a = ResistanceRule(
             id=1, feature_name='gagA', feature_id=1, drug_name='DrugA', drug_id=1,
             reference_identifier='refA', position=2, reference='K', mutation='E',
-            phenotype='resistant',
+            phenotype='resistant', ic50='6.0',
         )
         rule_b = ResistanceRule(
             id=2, feature_name='polB', feature_id=2, drug_name='DrugA', drug_id=1,
             reference_identifier='refB', position=2, reference='K', mutation='E',
-            phenotype='resistant',
+            phenotype='resistant', ic50='6.0',
         )
         ann_a = AnnotatedVariant(
             variant=VariantCall(chrom='chrom_a', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
@@ -2532,10 +2609,10 @@ class TestPdfExports:
                 'drug_interpretation',
                 json.dumps({
                     'name': 'drug_interpretation',
-                    'method': 'by_phenotype',
-                    'thresholds': {'resistant': 2},
+                    'method': 'by_ic50',
+                    'thresholds': {'susceptible': 0.0, 'intermediate': 3.0, 'resistant': 10.0},
                     'drug_thresholds': [
-                        {'reference': 'refA', 'drug': 'DrugA', 'thresholds': {'resistant': 1}},
+                        {'reference': 'refA', 'drug': 'DrugA', 'thresholds': {'susceptible': 0.0, 'intermediate': 2.0, 'resistant': 5.0}},
                     ],
                 }),
             ),
@@ -2550,10 +2627,11 @@ class TestPdfExports:
         drug_row = next(r for r in drug_table['rows'] if r['name'] == 'DrugA')
         ma = drug_row['method_assessments']
         assert len(ma) == 1
-        # refA sorts before refB → override (resistant=1) applies → resistant.
+        # refA sorts before refB → refA's override (resistant=5.0) applies;
+        # IC50 6.0 ≥ 5.0 → resistant.
         assert ma[0]['assessment'] == 'resistant'
         assert ma[0]['threshold_source'] == 'override (reference, drug)'
-        assert ma[0]['resolved_thresholds'] == {'resistant': 1, 'intermediate': None}
+        assert ma[0]['resolved_thresholds'] == {'susceptible': 0.0, 'intermediate': 2.0, 'resistant': 5.0}
 
     def test_render_html_includes_table_filter_controls_js(self) -> None:
         r = _make_result()
@@ -2698,6 +2776,145 @@ class TestPdfExports:
         assert 'incomplete sequence data' in text
         assert 'gag' in text.lower()
         assert 'rt' in text.lower()
+
+    def test_contradictory_only_drug_surfaced_in_narrative(self) -> None:
+        """A drug whose only hits are contradictory must surface in the summary
+        narrative as contradictory evidence (it wins over susceptible). The lead
+        sentence must mention contradictory evidence and a list section must name
+        the drug, using the contradictory rank colour."""
+        contradict_rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='tiny_ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='contradictory',
+        )
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+            feature_name='gag',
+            codon_pos=2,
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            af_bin='high',
+            rule_matches=[contradict_rule],
+        )
+        result = make_profiling_result(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            organism='Test organism',
+            annotations=[ann],
+        )
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            'CREATE TABLE interpretation_algorithm '
+            '(id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)'
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            ('drug_interpretation', json.dumps({'name': 'drug_interpretation', 'method': 'by_phenotype'})),
+        )
+        conn.commit()
+
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
+        drug_table = ctx['summary']['drug_table']
+        # by_phenotype with only contradictory hits → contradictory assessment.
+        assert drug_table['rows'][0]['assessment'] == 'contradictory'
+        text = ctx['summary']['narrative']
+        # Lead sentence must mention contradictory evidence.
+        assert 'contradictory evidence for 1 drug' in text
+        # List section must name the drug under a contradictory heading.
+        assert 'Drugs with contradictory evidence' in text
+        assert 'DrugA' in text
+        # The contradictory list line must use the contradictory rank colour.
+        from respro.db.phenotype_ranks import RANK_CONTRADICTORY, rank_to_colour
+        assert rank_to_colour(RANK_CONTRADICTORY) in text
+
+    def test_contradictory_loses_to_higher_tier_in_narrative(self) -> None:
+        """When a drug has both a resistant hit (by_phenotype) and a contradictory
+        hit, by_phenotype returns resistant (severity hit exists) and the final
+        assessment is resistant — contradictory must NOT appear in the narrative."""
+        resistant_rule = ResistanceRule(
+            id=1,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugA',
+            drug_id=1,
+            reference_identifier='tiny_ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='resistant',
+        )
+        contradict_rule = ResistanceRule(
+            id=2,
+            feature_name='gag',
+            feature_id=1,
+            drug_name='DrugB',
+            drug_id=2,
+            reference_identifier='tiny_ref',
+            position=2,
+            reference='K',
+            mutation='E',
+            phenotype='contradictory',
+        )
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.95, depth=200),
+            feature_name='gag',
+            codon_pos=2,
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            af_bin='high',
+            rule_matches=[resistant_rule, contradict_rule],
+        )
+        result = make_profiling_result(
+            project_name='T',
+            reference_name='ref',
+            reference_length_nt=1000,
+            total_variants=1,
+            variants_in_cds=1,
+            resistance_hits=1,
+            organism='Test organism',
+            annotations=[ann],
+        )
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            'CREATE TABLE interpretation_algorithm '
+            '(id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)'
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            ('drug_interpretation', json.dumps({'name': 'drug_interpretation', 'method': 'by_phenotype'})),
+        )
+        conn.commit()
+
+        ctx = build_report_context(
+            result, similarity_high=1, similarity_moderate=0, project_conn=conn,
+        )
+        # DrugA (resistant hit) → resistant; DrugB (contradictory hit) → contradictory.
+        rows = {r['summary_name']: r for r in ctx['summary']['drug_table']['rows']}
+        assert rows['DrugA']['assessment'] == 'resistant'
+        assert rows['DrugB']['assessment'] == 'contradictory'
+        text = ctx['summary']['narrative']
+        # Resistant drug surfaced; contradictory drug also surfaced (it has no
+        # higher-tier hit on its own).
+        assert 'Drugs assessed as resistant' in text
+        assert 'Drugs with contradictory evidence' in text
+        assert 'DrugB' in text
 
     def test_render_html_includes_summary_translation_controls(self) -> None:
         conn = sqlite3.connect(':memory:')
@@ -4553,7 +4770,7 @@ class TestPdfDrugRows:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -4651,7 +4868,7 @@ class TestPdfDrugRows:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )
@@ -4723,7 +4940,7 @@ class TestPdfDrugRows:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_phenotype',
-                    'thresholds': {'resistant': 1},
+
                 }),
             ),
         )
@@ -4734,7 +4951,7 @@ class TestPdfDrugRows:
                 json.dumps({
                     'name': 'drug_interpretation',
                     'method': 'by_ic50',
-                    'thresholds': {'resistant': 10.0, 'intermediate': 5.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 10.0, 'intermediate': 5.0},
                 }),
             ),
         )

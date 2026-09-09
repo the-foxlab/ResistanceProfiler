@@ -7,7 +7,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from io import BytesIO
-from pathlib import Path
 
 import matplotlib
 import matplotlib.patches as mpatches
@@ -36,35 +35,6 @@ from respro.report.palette import (
 
 matplotlib.use('Agg')
 logger = logging.getLogger(__name__)
-
-
-def lollipop_plot(
-    result: ProfilingResult,
-    features: list[FeatureRecord],
-    output_path: Path,
-    fmt: str = 'svg',
-    rule_feature_names: set[str] | None = None,
-) -> Path:
-    """
-    Create a report plot with genome overview and feature-level mutation panels.
-
-    :param result: profiling result with annotated variants
-    :param features: feature records for drawing the overview and feature panels
-    :param output_path: file path for the saved figure
-    :param fmt: output format (svg, png)
-    :param rule_feature_names: optional rule-backed feature names to focus feature panels
-    :return: path to saved figure
-    """
-    output_path = Path(output_path)
-    fig = _build_lollipop_figure(result, features, rule_feature_names=rule_feature_names)
-    if fig is None:
-        return output_path
-
-    fig.savefig(output_path, format=fmt, dpi=150)
-    plt.close(fig)
-
-    logger.info('Lollipop plot saved to %s', output_path)
-    return output_path
 
 
 def render_lollipop_plot_bytes(

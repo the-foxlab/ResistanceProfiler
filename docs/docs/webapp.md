@@ -79,6 +79,7 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 | `RESPRO_WEB_DATA_DIR` | `/data` if it exists, otherwise `./data` | Root directory for `project_databases/`, `uploads/`, and `results/`. Created if missing. Must be writable. |
 | `RESPRO_WEB_ALLOWED_ROOTS` | the three subdirectories of `RESPRO_WEB_DATA_DIR` | Comma-separated list of absolute paths the API is allowed to read from and write to. Override only if you mount upload or result directories outside the data root. |
 | `RESPRO_WEB_RESULT_TTL` | `86400` (24 hours) | Time-to-live in seconds for files in `uploads/` and `results/`. A background sweep thread deletes files older than this value. |
+| `RESPRO_WEB_SESSION_TTL` | `604800` (7 days) | Time-to-live in seconds for anonymous session records in Redis. Sessions are additive in local mode (no auth required) and become the ownership boundary for uploads/jobs/artifacts in non-local modes. |
 
 ### Authentication and security
 
@@ -87,12 +88,13 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 | `RESPRO_WEB_API_TOKEN` | *(empty — auth disabled)* | Bearer token required for all protected API endpoints. Leave empty for local-only deployments; **set a strong random secret for any non-local deployment**. |
 | `RESPRO_WEB_CORS_ORIGINS` | `http://127.0.0.1:5173`, `http://localhost:5173` | Comma-separated list of allowed origins for cross-origin requests. Must be set explicitly when `RESPRO_WEB_API_TOKEN` is set. For public hosting, list your exact frontend origin(s), e.g. `https://respro.example.com`. |
 | `RESPRO_WEB_TRUSTED_PROXIES` | *(empty — proxy headers ignored)* | Comma-separated list of proxy IPs or CIDRs whose `X-Forwarded-*` headers are trusted. Set to your reverse proxy address for public hosting (see [nginx step-by-step](#nginx-step-by-step-local-network)). |
+| `RESPRO_WEB_DEPLOYMENT_MODE` | `local` | Trust model: `local` (default; zero-config, API docs enabled, loopback) or `online` (behind a reverse proxy; requires `RESPRO_WEB_TRUSTED_PROXIES`; API docs disabled). In `online` mode the session cookie is marked `Secure`, so it only works over HTTPS (or `http://localhost`). |
 
 ### Footer variables (optional)
 
 | Variable | Default | Description |
 |---|---|---|
-| `RESPRO_WEB_IMPRESSUM_PATH` | *(empty — feature disabled)* | Absolute path to an HTML file served at `/legal` as a legal notice / Impressum. See [Legal notice / Impressum](#legal-notice-impressum-optional) for details. |
+| `RESPRO_WEB_IMPRINT` | *(empty — feature disabled)* | Legal notice / Impressum. Accepts either an absolute `http(s)://` URL (the footer links there and `/legal` redirects to it) or a local file path to an HTML file served at `/legal`. See [Legal notice / Impressum](#legal-notice-impressum-optional) for details. |
 | `RESPRO_WEB_CONTACT_EMAIL` | *(empty — feature disabled)* | Contact e-mail address surfaced as a `mailto:` link in the app footer and on the About tab. Must be a single valid e-mail address; an invalid value fails fast at startup. |
 
 ### Rate limiting and batch sizes
@@ -100,6 +102,7 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 | Variable | Default | Description |
 |---|---|---|
 | `RESPRO_WEB_UPLOAD_RATE_LIMIT` | `25/minute` | slowapi rate-limit string for upload endpoints. Applied per client identity (token hash, or client IP when no token is configured). |
+| `RESPRO_WEB_API_RATE_LIMIT` | `120/minute` | slowapi rate-limit string for general (non-upload) API endpoints. Applied per client identity. |
 | `RESPRO_WEB_MAX_BATCH_SIZE` | `25` | Maximum number of samples accepted in a single batch profiling request. Must be `> 0`. |
 
 ### Redis and job queue
@@ -134,12 +137,14 @@ RESPRO_WEB_PORT=8000
 RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
 RESPRO_WEB_CORS_ORIGINS=https://respro.example.com
 RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
+RESPRO_WEB_DEPLOYMENT_MODE=online
 
 # Redis (set on both respro-web and respro-worker)
 REDIS_URL=redis://redis:6379/0
 
-# Optional: legal notice
-# RESPRO_WEB_IMPRESSUM_PATH=/data/impressum.html
+# Optional: legal notice (URL or local HTML file path)
+# RESPRO_WEB_IMPRINT=https://example.org/impressum
+# RESPRO_WEB_IMPRINT=/data/impressum.html
 
 # Optional: contact e-mail shown in the footer and on the About tab
 # RESPRO_WEB_CONTACT_EMAIL=contact@example.org
@@ -162,20 +167,25 @@ For internet-facing deployment, keep `respro-web` reachable only through a rever
 ### Legal notice / Impressum (optional)
 
 For public hosting in jurisdictions that require a legal notice (e.g. a DSGVO/§5 TMG
-Impressum in Germany), ResistanceProfiler can serve a deployment-specific HTML page at
-`/legal` and surface a "Legal notice" link in the app footer.
+Impressum in Germany), ResistanceProfiler can serve a deployment-specific legal notice
+and surface a "Legal notice" link in the app footer.
 
 The feature is **off by default**. The repo ships with no impressum content — each hoster
 provides their own and keeps it out of version control.
 
-Enable it by pointing `RESPRO_WEB_IMPRESSUM_PATH` at an HTML file and mounting it into the
-container:
+Set `RESPRO_WEB_IMPRINT` to either:
+
+- an absolute `http(s)://` URL of an already-hosted impressum page — the footer links
+  straight there and `/legal` redirects to it; or
+- a local file path to an HTML file that the app serves at `/legal`.
+
+Local file example — mount the file and point at it:
 
 ```yaml
 services:
   respro-web:
     environment:
-      - RESPRO_WEB_IMPRESSUM_PATH=/data/impressum.html
+      - RESPRO_WEB_IMPRINT=/data/impressum.html
     volumes:
       - ./data:/data:rw
       - ./impressum.html:/data/impressum.html:ro
@@ -203,10 +213,10 @@ Behaviour notes:
 
 - The `/legal` route is **public** (no API token required). This is intentional: a legal
   notice must be reachable without barriers for DSGVO compliance.
-- The file is read once at startup. Editing it requires a container restart.
-- If `RESPRO_WEB_IMPRESSUM_PATH` is set but the file is missing or unreadable, startup
-  fails fast with a clear error. Leaving the variable unset silently disables the feature.
-- The "Legal notice" link in the footer only appears when an impressum is configured.
+- A local file is read once at startup. Editing it requires a container restart.
+- If `RESPRO_WEB_IMPRINT` points at a missing or unreadable file, startup fails fast with
+  a clear error. Leaving the variable unset silently disables the feature.
+- The "Legal notice" link in the footer only appears when an imprint is configured.
 
 ### Caddy example
 
@@ -332,6 +342,9 @@ RESPRO_WEB_API_TOKEN=replace-with-a-long-random-secret
 RESPRO_WEB_CORS_ORIGINS=http://respro.internal
 RESPRO_WEB_TRUSTED_PROXIES=127.0.0.1
 ```
+
+!!! note "Keep `DEPLOYMENT_MODE=local` for plain HTTP"
+    This setup uses plain HTTP on a local network, so leave `RESPRO_WEB_DEPLOYMENT_MODE` at its default (`local`). In `online` mode the session cookie is marked `Secure`, which browsers reject over plain HTTP (except `http://localhost`) — sessions would silently break.
 
 If clients will access the app by IP instead of hostname, set `RESPRO_WEB_CORS_ORIGINS` to that exact origin, for example `http://192.168.1.50`.
 

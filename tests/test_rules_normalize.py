@@ -8,7 +8,6 @@ Covers: respro/db/_rules_normalize.py
 - _normalize_ic50_from_row()
 - _normalize_fold_ic50_from_row()
 - _normalize_score_from_row()
-- _normalize_phenotype_token()
 - _append_contradictory_comment()
 """
 
@@ -20,7 +19,6 @@ from respro.db._rules_normalize import (
     _get_value,
     _normalize_fold_ic50_from_row,
     _normalize_ic50_from_row,
-    _normalize_phenotype_token,
     _normalize_score_from_row,
     _parse_ic50_value,
     _parse_single_ic50,
@@ -308,58 +306,6 @@ class TestNormalizeScoreFromRow:
         errors: list[str] = []
         result = _normalize_score_from_row(row, errors=errors, context='test')
         assert result == '5'  # :g format removes trailing .0
-
-
-class TestNormalizePhenotypeToken:
-    """Tests for _normalize_phenotype_token()."""
-
-    def test_maps_resistant_variants(self):
-        """Should map resistant variants to 'resistant'."""
-        assert _normalize_phenotype_token('resistant') == 'resistant'
-        assert _normalize_phenotype_token('resistance') == 'resistant'
-        assert _normalize_phenotype_token('res') == 'resistant'
-
-    def test_maps_sensitive_variants(self):
-        """Should map sensitive variants to 'sensitive'."""
-        assert _normalize_phenotype_token('sensitive') == 'sensitive'
-        assert _normalize_phenotype_token('susceptible') == 'sensitive'
-        assert _normalize_phenotype_token('sens') == 'sensitive'
-
-    def test_maps_intermediate_variants(self):
-        """Should map intermediate variants."""
-        assert _normalize_phenotype_token('intermediate') == 'intermediate'
-        assert _normalize_phenotype_token('interm') == 'intermediate'
-        assert _normalize_phenotype_token('i') == 'intermediate'
-
-    def test_maps_contradictory(self):
-        """Should map contradictory variants."""
-        assert _normalize_phenotype_token('contradictory') == 'contradictory'
-        assert _normalize_phenotype_token('contra') == 'contradictory'
-        assert _normalize_phenotype_token('conflict') == 'contradictory'
-        assert _normalize_phenotype_token('conflicting') == 'contradictory'
-
-    def test_maps_unknown_to_unknown(self):
-        """Should map unknown/empty to 'unknown'."""
-        assert _normalize_phenotype_token('unknown') == 'unknown'
-        assert _normalize_phenotype_token('none') == 'unknown'
-        assert _normalize_phenotype_token('') == 'unknown'
-        assert _normalize_phenotype_token('   ') == 'unknown'
-
-    def test_case_insensitive(self):
-        """Should be case-insensitive."""
-        assert _normalize_phenotype_token('RESISTANT') == 'resistant'
-        assert _normalize_phenotype_token('Resistant') == 'resistant'
-        assert _normalize_phenotype_token('ReSiStAnT') == 'resistant'
-
-    def test_strips_whitespace(self):
-        """Should strip whitespace."""
-        assert _normalize_phenotype_token('  resistant  ') == 'resistant'
-        assert _normalize_phenotype_token('\tsensitive\n') == 'sensitive'
-
-    def test_returns_none_for_unmapped(self):
-        """Should return None for unmapped phenotypes."""
-        assert _normalize_phenotype_token('invalid') is None
-        assert _normalize_phenotype_token('mixed') is None
 
 
 class TestAppendContradictoryComment:

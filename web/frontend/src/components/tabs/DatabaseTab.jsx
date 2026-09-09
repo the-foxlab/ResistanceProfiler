@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import infoIconSrc from '../../assets/info.svg';
-import { isPopulated, groupDrugThresholds } from '../../utils';
+import { isPopulated, groupDrugThresholds, orderedThresholdLabels } from '../../utils';
 import { buildDatabasePlots } from '../database-plots/buildDatabasePlots';
 import { DatabasePieSummaryRow } from '../database-plots/DatabasePieSummaryTile';
 import { DatabasePositionPlot } from '../database-plots/DatabasePositionPlot';
@@ -97,10 +97,9 @@ function _groupEffectRules(rules) {
 }
 
 /**
- * Render a single threshold value (`intermediate` or `resistant`) as a table
- * cell. Returns an empty string when the key is absent (e.g. `intermediate` is
- * optional for `drug_interpretation`) so each threshold gets its own column
- * instead of being joined with `;` in one cell.
+ * Render a single threshold value as a table cell. Returns an empty string when
+ * the key is absent so each configured label gets its own column instead of
+ * being joined with `;` in one cell.
  */
 function _thresholdCell(thresholds, key) {
   if (!thresholds || typeof thresholds !== 'object') {
@@ -111,15 +110,54 @@ function _thresholdCell(thresholds, key) {
 }
 
 /**
- * Render the per-drug override table shared by `ic50_thresholds` and
- * `drug_interpretation`. Each row shows the reference, the collapsed drug set,
- * and the `intermediate`/`resistant` thresholds in separate columns.
+ * Title-case a phenotype label for use as a column header.
+ */
+function _titleLabel(label) {
+  return String(label || '').trim()
+    ? String(label).replace(/\b\w/g, (c) => c.toUpperCase())
+    : '';
+}
+
+/**
+ * Collect the ordered set of threshold labels across a list of threshold dicts.
+ *
+ * Each config's own labels are ordered by severity rank (weakest → strongest)
+ * via :func:`orderedThresholdLabels`; labels seen in later configs that were
+ * absent from earlier ones are appended in rank order. This produces a stable
+ * superset of columns for multi-method tables where methods may declare
+ * different tiers.
+ *
+ * @param {Object[]} thresholdDicts - list of thresholds objects
+ * @returns {string[]} ordered, de-duplicated label keys
+ */
+function _collectThresholdLabels(thresholdDicts) {
+  const seen = new Set();
+  const ordered = [];
+  for (const thresholds of thresholdDicts) {
+    if (!thresholds || typeof thresholds !== 'object') {
+      continue;
+    }
+    for (const label of orderedThresholdLabels(thresholds)) {
+      if (!seen.has(label)) {
+        seen.add(label);
+        ordered.push(label);
+      }
+    }
+  }
+  return ordered;
+}
+
+/**
+ * Render the per-drug override table for `drug_interpretation`. Each row shows
+ * the reference, the collapsed drug set, and one column per configured
+ * threshold label (ordered weakest → strongest by severity rank).
  */
 function _renderDrugThresholdsOverrides(drugThresholds, label) {
   const grouped = groupDrugThresholds(drugThresholds);
   if (grouped.length === 0) {
     return null;
   }
+  const labels = _collectThresholdLabels(grouped.map((row) => row.thresholds));
   return (
     <div className="database-meta-row database-meta-row-table">
       <span className="database-meta-label">{label}</span>
@@ -129,8 +167,9 @@ function _renderDrugThresholdsOverrides(drugThresholds, label) {
             <tr>
               <th>Reference</th>
               <th>Drugs</th>
-              <th>Intermediate</th>
-              <th>Resistant</th>
+              {labels.map((lbl) => (
+                <th key={lbl}>{_titleLabel(lbl)}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -138,8 +177,9 @@ function _renderDrugThresholdsOverrides(drugThresholds, label) {
               <tr key={`${row.reference}-${row.drugs.join(',')}-${idx}`}>
                 <td>{row.reference}</td>
                 <td>{row.drugs.join(', ')}</td>
-                <td>{_thresholdCell(row.thresholds, 'intermediate')}</td>
-                <td>{_thresholdCell(row.thresholds, 'resistant')}</td>
+                {labels.map((lbl) => (
+                  <td key={lbl}>{_thresholdCell(row.thresholds, lbl)}</td>
+                ))}
               </tr>
             ))}
           </tbody>
@@ -149,58 +189,20 @@ function _renderDrugThresholdsOverrides(drugThresholds, label) {
   );
 }
 
-/**
- * Render one row per drug for the `ic50_thresholds` algorithm table.
- *
- * The algorithm stores thresholds as a dict keyed by drug name, each mapping
- * to `{intermediate, resistant}`. Displaying each drug on its own row (instead
- * of joining them with `;` in a single cell) keeps the table aligned with the
- * actual input structure. The `use` value is shown on the first row only.
- */
-function _renderIc50ThresholdRows(ic50Thresholds) {
-  const useValue = String(ic50Thresholds.use || '').trim() || 'Not configured';
-  const thresholds = ic50Thresholds.thresholds;
-  if (!thresholds || typeof thresholds !== 'object') {
-    return [
-      <tr key="empty">
-        <td>{useValue}</td>
-        <td>Not configured</td>
-        <td></td>
-        <td></td>
-      </tr>,
-    ];
-  }
-  const drugs = Object.keys(thresholds).sort((a, b) => a.localeCompare(b));
-  if (drugs.length === 0) {
-    return [
-      <tr key="empty">
-        <td>{useValue}</td>
-        <td>Not configured</td>
-        <td></td>
-        <td></td>
-      </tr>,
-    ];
-  }
-  return drugs.map((drug, idx) => {
-    const limits = thresholds[drug] || {};
-    return (
-      <tr key={drug}>
-        <td>{idx === 0 ? useValue : ''}</td>
-        <td>{drug}</td>
-        <td>{_thresholdCell(limits, 'intermediate')}</td>
-        <td>{_thresholdCell(limits, 'resistant')}</td>
-      </tr>
-    );
-  });
-}
-
 function _renderDatabaseAlgorithms(algorithms) {
   if (!algorithms) return null;
   const effectAsResistant = algorithms.effect_as_resistant;
   const drugInterp = algorithms.drug_interpretation;
-  const ic50Thresholds = algorithms.ic50_thresholds;
   const groupedEffectRules = _groupEffectRules(effectAsResistant?.rules);
-  if (!effectAsResistant && !drugInterp && !ic50Thresholds) return null;
+  if (!effectAsResistant && !drugInterp) return null;
+
+  // Collect the superset of threshold labels across all drug_interpretation
+  // methods, ordered weakest → strongest by severity rank. This drives the
+  // dynamic column headers so multi-tier vocabularies (e.g. 5-tier HIV scores)
+  // display every configured breakpoint instead of only intermediate/resistant.
+  const labels = drugInterp
+    ? _collectThresholdLabels(drugInterp.map((entry) => entry.thresholds))
+    : [];
 
   return (
     <section className="database-meta-panel database-algorithms-panel" aria-label="Configured algorithms">
@@ -217,29 +219,6 @@ function _renderDatabaseAlgorithms(algorithms) {
           </button>
         </span>
       </div>
-      {ic50Thresholds ? (
-        <div className="database-meta-row database-meta-row-table">
-          <span className="database-meta-label">ic50_thresholds</span>
-          <span className="database-meta-value">
-            <table className="database-algorithm-table">
-              <thead>
-                <tr>
-                  <th>Use</th>
-                  <th>Drug</th>
-                  <th>Intermediate</th>
-                  <th>Resistant</th>
-                </tr>
-              </thead>
-              <tbody>
-                {_renderIc50ThresholdRows(ic50Thresholds)}
-              </tbody>
-            </table>
-          </span>
-        </div>
-      ) : null}
-      {ic50Thresholds?.drug_thresholds
-        ? _renderDrugThresholdsOverrides(ic50Thresholds.drug_thresholds, 'ic50_thresholds overrides')
-        : null}
       {drugInterp && drugInterp.length > 0 ? (
         <>
           <div className="database-meta-row database-meta-row-table">
@@ -249,16 +228,18 @@ function _renderDatabaseAlgorithms(algorithms) {
                 <thead>
                   <tr>
                     <th>Method</th>
-                    <th>Intermediate</th>
-                    <th>Resistant</th>
+                    {labels.map((lbl) => (
+                      <th key={lbl}>{_titleLabel(lbl)}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {drugInterp.map((entry, idx) => (
                     <tr key={entry.method || idx}>
                       <td>{String(entry.method || '').trim() || 'Not configured'}</td>
-                      <td>{_thresholdCell(entry.thresholds, 'intermediate')}</td>
-                      <td>{_thresholdCell(entry.thresholds, 'resistant')}</td>
+                      {labels.map((lbl) => (
+                        <td key={lbl}>{_thresholdCell(entry.thresholds, lbl)}</td>
+                      ))}
                     </tr>
                   ))}
                 </tbody>

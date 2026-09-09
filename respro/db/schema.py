@@ -100,8 +100,8 @@ CREATE TABLE IF NOT EXISTS resistance_rule (
     position    INTEGER NOT NULL,  -- 0-based AA position within feature
     reference   TEXT    DEFAULT '',
     mutation    TEXT    NOT NULL,
-    phenotype   TEXT    NOT NULL DEFAULT 'unknown',
-    clinical_phenotype TEXT NOT NULL DEFAULT 'unknown',
+    phenotype   TEXT    NOT NULL DEFAULT '',
+    clinical_phenotype TEXT NOT NULL DEFAULT '',
     ic50        TEXT    DEFAULT '',
     fold_ic50   TEXT    DEFAULT '',
     score       TEXT    DEFAULT '',
@@ -121,8 +121,8 @@ CREATE TABLE IF NOT EXISTS resistance_formula_rule (
     formula_id  TEXT    NOT NULL,
     label       TEXT    DEFAULT '',
     normalized_expression TEXT NOT NULL,
-    phenotype   TEXT    NOT NULL DEFAULT 'unknown',
-    clinical_phenotype TEXT NOT NULL DEFAULT 'unknown',
+    phenotype   TEXT    NOT NULL DEFAULT '',
+    clinical_phenotype TEXT NOT NULL DEFAULT '',
     ic50        TEXT    DEFAULT '',
     fold_ic50   TEXT    DEFAULT '',
     score       TEXT    DEFAULT '',
@@ -287,8 +287,8 @@ CREATE TABLE IF NOT EXISTS sample_classification (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id              INTEGER NOT NULL REFERENCES run(id),
     drug                TEXT    DEFAULT '',
-    phenotype           TEXT    NOT NULL DEFAULT 'unknown',
-    clinical_phenotype  TEXT    NOT NULL DEFAULT 'unknown',
+    phenotype           TEXT    NOT NULL DEFAULT '',
+    clinical_phenotype  TEXT    NOT NULL DEFAULT '',
     ic50                TEXT    DEFAULT '',
     fold_ic50           TEXT    DEFAULT '',
     note                TEXT    DEFAULT '',
@@ -297,6 +297,15 @@ CREATE TABLE IF NOT EXISTS sample_classification (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sc_run ON sample_classification(run_id);
+
+CREATE TABLE IF NOT EXISTS profiled_feature (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id          INTEGER NOT NULL REFERENCES run(id),
+    reference_name  TEXT    NOT NULL DEFAULT '',
+    feature_name    TEXT    NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_pf_run ON profiled_feature(run_id);
 """
 
 
@@ -330,8 +339,8 @@ CREATE TABLE IF NOT EXISTS sample_classification (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id              INTEGER NOT NULL REFERENCES run(id),
     drug                TEXT    DEFAULT '',
-    phenotype           TEXT    NOT NULL DEFAULT 'unknown',
-    clinical_phenotype  TEXT    NOT NULL DEFAULT 'unknown',
+    phenotype           TEXT    NOT NULL DEFAULT '',
+    clinical_phenotype  TEXT    NOT NULL DEFAULT '',
     ic50                TEXT    DEFAULT '',
     fold_ic50           TEXT    DEFAULT '',
     note                TEXT    DEFAULT '',
@@ -340,6 +349,14 @@ CREATE TABLE IF NOT EXISTS sample_classification (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sc_run ON sample_classification(run_id);
+
+CREATE TABLE IF NOT EXISTS profiled_feature (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id          INTEGER NOT NULL REFERENCES run(id),
+    reference_name  TEXT    NOT NULL DEFAULT '',
+    feature_name    TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_pf_run ON profiled_feature(run_id);
 """
 
 _OPTIONAL_RESULTS_COLUMN_DEFS = {
@@ -444,8 +461,8 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'external_id': "TEXT NOT NULL DEFAULT ''",
         'reference_identifier': "TEXT DEFAULT ''",
         'reference': "TEXT DEFAULT ''",
-        'phenotype': "TEXT NOT NULL DEFAULT 'unknown'",
-        'clinical_phenotype': "TEXT NOT NULL DEFAULT 'unknown'",
+        'phenotype': "TEXT NOT NULL DEFAULT ''",
+        'clinical_phenotype': "TEXT NOT NULL DEFAULT ''",
         'ic50': "TEXT DEFAULT ''",
         'fold_ic50': "TEXT DEFAULT ''",
         'score': "TEXT DEFAULT ''",
@@ -454,8 +471,8 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'comment': "TEXT DEFAULT ''",
     },
     'resistance_rule_set': {
-        'phenotype': "TEXT NOT NULL DEFAULT 'unknown'",
-        'clinical_phenotype': "TEXT NOT NULL DEFAULT 'unknown'",
+        'phenotype': "TEXT NOT NULL DEFAULT ''",
+        'clinical_phenotype': "TEXT NOT NULL DEFAULT ''",
         'ic50': "TEXT DEFAULT ''",
         'fold_ic50': "TEXT DEFAULT ''",
         'publication': "TEXT DEFAULT ''",
@@ -743,8 +760,8 @@ CREATE TABLE IF NOT EXISTS resistance_formula_rule (
     formula_id  TEXT    NOT NULL,
     label       TEXT    DEFAULT '',
     normalized_expression TEXT NOT NULL,
-    phenotype   TEXT    NOT NULL DEFAULT 'unknown',
-    clinical_phenotype TEXT NOT NULL DEFAULT 'unknown',
+    phenotype   TEXT    NOT NULL DEFAULT '',
+    clinical_phenotype TEXT NOT NULL DEFAULT '',
     ic50        TEXT    DEFAULT '',
     fold_ic50   TEXT    DEFAULT '',
     source      TEXT    DEFAULT '',

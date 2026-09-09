@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildApiUrl, formatUserError } from '../api';
-import { isPopulated, buildDrugAliasLookup, groupDrugThresholds, formatAlgorithmThresholds } from '../utils';
+import { isPopulated, buildDrugAliasLookup, groupDrugThresholds, formatAlgorithmThresholds, labelToRank, orderedThresholdLabels } from '../utils';
 
 describe('API Utility Functions', () => {
   describe('buildApiUrl', () => {
@@ -211,5 +211,72 @@ describe('formatAlgorithmThresholds', () => {
   it('formats nested thresholds', () => {
     const result = formatAlgorithmThresholds({ ACV: { intermediate: 3.0, resistant: 10.0 } });
     expect(result).toBe('ACV: intermediate=3, resistant=10');
+  });
+});
+
+describe('labelToRank', () => {
+  it('resolves canonical labels to their ranks', () => {
+    expect(labelToRank('susceptible')).toBe(1);
+    expect(labelToRank('intermediate')).toBe(4);
+    expect(labelToRank('resistant')).toBe(5);
+  });
+
+  it('resolves synonyms and multi-word labels', () => {
+    expect(labelToRank('Susceptible')).toBe(1);
+    expect(labelToRank('  high-level resistance ')).toBe(5);
+    expect(labelToRank('potential low-level resistance')).toBe(2);
+    expect(labelToRank('low-level resistance')).toBe(3);
+    expect(labelToRank('intermediate resistance')).toBe(4);
+  });
+
+  it('resolves sentinels', () => {
+    expect(labelToRank('unknown')).toBe(0);
+    expect(labelToRank('contradictory')).toBe(-1);
+  });
+
+  it('returns null for unrecognized or missing labels', () => {
+    expect(labelToRank('foo')).toBeNull();
+    expect(labelToRank(null)).toBeNull();
+    expect(labelToRank(undefined)).toBeNull();
+    expect(labelToRank('')).toBeNull();
+  });
+});
+
+describe('orderedThresholdLabels', () => {
+  it('orders labels weakest → strongest by rank', () => {
+    const thresholds = {
+      resistant: 60,
+      susceptible: 0,
+      'low-level resistance': 15,
+      'high-level resistance': 60,
+      'potential low-level resistance': 10,
+    };
+    expect(orderedThresholdLabels(thresholds)).toEqual([
+      'susceptible',
+      'potential low-level resistance',
+      'low-level resistance',
+      'resistant',
+      'high-level resistance',
+    ]);
+  });
+
+  it('handles a simple two-tier config', () => {
+    const thresholds = { resistant: 10, intermediate: 3 };
+    expect(orderedThresholdLabels(thresholds)).toEqual(['intermediate', 'resistant']);
+  });
+
+  it('excludes sentinels from the severity ordering', () => {
+    const thresholds = { susceptible: 0, resistant: 10, unknown: -1 };
+    expect(orderedThresholdLabels(thresholds)).toEqual(['susceptible', 'resistant']);
+  });
+
+  it('excludes unrecognized labels (not in the rank vocabulary)', () => {
+    const thresholds = { resistant: 10, 'custom-tier': 5, susceptible: 0 };
+    expect(orderedThresholdLabels(thresholds)).toEqual(['susceptible', 'resistant']);
+  });
+
+  it('returns empty array for null or non-object', () => {
+    expect(orderedThresholdLabels(null)).toEqual([]);
+    expect(orderedThresholdLabels([])).toEqual([]);
   });
 });

@@ -452,6 +452,101 @@ class TestRegenerate:
         pdf_files = list(out_dir.glob('*.report.pdf'))
         assert len(pdf_files) == 1
 
+    def test_regenerate_preserves_susceptible_zero_hit_drugs(
+        self,
+        project_db: Path,
+        sample_vcf: Path,
+        sample_ref_fasta: Path,
+        tmp_path: Path,
+    ) -> None:
+        """A zero-hit (susceptible) drug must survive regenerate from both
+        the results DB and the JSON export.
+
+        Regression: ``regenerate`` previously rebuilt the profiling result with
+        ``feature_matches=[]``, which starved the drug-interpretation table's
+        in-scope drug set (populated from the project DB via
+        ``WHERE f.name IN (profiled_features)``). Zero-hit drugs were dropped
+        from the regenerated Summary tab and PDF. The fix persists the profiled
+        feature names in the results DB (``profiled_feature`` table) and the
+        JSON export, and ``regenerate`` synthesises ``FeatureMatch`` shells
+        from them so the in-scope drug set is restored.
+        """
+        # Extend the project DB: add a second drug with a rule for the same
+        # feature (gag) at a codon position the sample VCF does not hit, so the
+        # drug has zero hits and should be assessed as susceptible. Also add a
+        # by_phenotype drug_interpretation config so assessments are computed.
+        conn = sqlite3.connect(project_db)
+        conn.row_factory = sqlite3.Row
+        conn.execute("INSERT INTO drug (project_id, name) VALUES (?, ?)", (1, 'OtherDrug'))
+        other_drug_id = conn.execute(
+            "SELECT id FROM drug WHERE name = 'OtherDrug'"
+        ).fetchone()['id']
+        # Position 10 (0-based AA) — well beyond the single hit at codon 1.
+        conn.execute(
+            'INSERT INTO resistance_rule (feature_id, drug_id, position, reference, mutation, phenotype) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (1, other_drug_id, 10, 'A', 'V', 'resistant'),
+        )
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (project_id, algorithm_name, config_json) VALUES (?, ?, ?)',
+            (1, 'drug_interpretation', json.dumps({'name': 'drug_interpretation', 'method': 'by_phenotype'})),
+        )
+        conn.commit()
+        conn.close()
+
+        # Live profile with both results DB and JSON export.
+        profile_out = tmp_path / 'profile_out'
+        results_db = tmp_path / 'results.db'
+        profile_result = CliRunner().invoke(app, [
+            'vcf',
+            '--project', str(project_db),
+            '--vcf', str(sample_vcf),
+            '--ref-fasta', str(sample_ref_fasta),
+            '--results-db', str(results_db),
+            '--output', str(profile_out),
+            '--min-af', '0.01',
+            '--min-depth', '0',
+            '--export', 'json',
+        ])
+        assert profile_result.exit_code == 0, profile_result.output
+
+        # The live report must include both drugs and the susceptible narrative.
+        live_html = list(profile_out.glob('*.html'))[0].read_text()
+        assert 'TestDrug' in live_html
+        assert 'OtherDrug' in live_html
+        assert 'susceptibility to 1 drug' in live_html
+
+        # Regenerate from the results DB.
+        regen_db_dir = tmp_path / 'regen_db'
+        regen_db_result = CliRunner().invoke(app, [
+            'regenerate',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(project_db),
+            '--output', str(regen_db_dir),
+        ])
+        assert regen_db_result.exit_code == 0, regen_db_result.output
+        regen_db_html = list(regen_db_dir.glob('*.html'))[0].read_text()
+        assert 'TestDrug' in regen_db_html
+        assert 'OtherDrug' in regen_db_html
+        assert 'susceptibility to 1 drug' in regen_db_html
+
+        # Regenerate from the JSON export.
+        json_files = list(profile_out.glob('*.results.json'))
+        assert len(json_files) == 1
+        regen_json_dir = tmp_path / 'regen_json'
+        regen_json_result = CliRunner().invoke(app, [
+            'regenerate',
+            '--json', str(json_files[0]),
+            '--project', str(project_db),
+            '--output', str(regen_json_dir),
+        ])
+        assert regen_json_result.exit_code == 0, regen_json_result.output
+        regen_json_html = list(regen_json_dir.glob('*.html'))[0].read_text()
+        assert 'TestDrug' in regen_json_html
+        assert 'OtherDrug' in regen_json_html
+        assert 'susceptibility to 1 drug' in regen_json_html
+
     def test_regenerate_from_json_rejects_invalid_json(
         self,
         project_db: Path,

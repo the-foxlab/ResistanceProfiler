@@ -25,6 +25,7 @@ from respro.db.models import (
     ResistanceRule,
     ResistanceRuleSet,
 )
+from respro.db.phenotype_ranks import label_to_rank
 from respro.db.results import project_fingerprint, project_updated_at
 from respro.report._row_helpers import (
     build_feature_display_names,
@@ -243,8 +244,8 @@ def write_json(
         {
             'id': row.get('id'),
             'drug': row.get('drug', ''),
-            'phenotype': row.get('phenotype', 'unknown'),
-            'clinical_phenotype': row.get('clinical_phenotype', 'unknown'),
+            'phenotype': row.get('phenotype', ''),
+            'clinical_phenotype': row.get('clinical_phenotype', ''),
             'ic50': row.get('ic50', ''),
             'fold_ic50': row.get('fold_ic50', ''),
             'note': row.get('note', ''),
@@ -256,6 +257,10 @@ def write_json(
 
     # Serialise the per-reference groups so regenerate --json can reconstruct
     # multiple ReferenceGroups without re-querying the project DB for reference names.
+    # ``profiled_feature_names`` persists the set of feature names that aligned to
+    # the query for this reference; regenerate uses it to pre-populate the summary
+    # drug interpretation table's in-scope drug set (including zero-hit/susceptible
+    # drugs) without relying on the project DB feature-mapping cache.
     references_payload = [
         {
             'reference_name': rg.reference_name,
@@ -263,6 +268,9 @@ def write_json(
             'organism': rg.organism,
             'reference_length_nt': rg.reference_length_nt,
             'query_name': rg.query_name,
+            'profiled_feature_names': sorted(
+                {m.feature.name for m in rg.feature_matches}
+            ),
         }
         for rg in result.references
     ]
@@ -857,25 +865,39 @@ def _build_pdf_drug_rows(drug_table: dict) -> list[dict]:
 
 
 def _normalize_assessment_badge_class(existing_class: str, assessment: str) -> str:
-    """Normalize assessment class names to the PDF CSS variant names."""
+    """Normalize assessment class names to the PDF CSS variant names.
+
+    Maps the HTML ``phenotype--<rank>`` badge class (or the assessment label
+    directly) to the PDF ``is-<rank>`` CSS variant via the rank vocabulary.
+    """
+    # Prefer the HTML badge class when it carries rank information.
     normalized_class = (existing_class or '').strip().lower()
     if normalized_class.startswith('phenotype--'):
-        normalized_class = normalized_class.replace('phenotype--', 'is-', 1)
-    if normalized_class in {'is-resistant', 'is-intermediate', 'is-sensitive', 'is-unknown'}:
-        return normalized_class
+        rank_suffix = normalized_class.removeprefix('phenotype--')
+        pdf_class = f'is-{rank_suffix}'
+        if pdf_class in {
+            'is-susceptible', 'is-potential', 'is-low-level',
+            'is-intermediate', 'is-resistant', 'is-unknown', 'is-contradictory',
+        }:
+            return pdf_class
+    # Fall back to inferring the rank from the assessment label.
     return _assessment_label_to_class(assessment)
 
 
 def _assessment_label_to_class(assessment: str) -> str:
-    """Map assessment label text to PDF CSS variant names."""
-    normalized = (assessment or '').strip().lower()
-    if normalized == 'resistant':
-        return 'is-resistant'
-    if normalized == 'intermediate':
-        return 'is-intermediate'
-    if normalized == 'sensitive':
-        return 'is-sensitive'
-    return 'is-unknown'
+    """Map an assessment label to a PDF CSS variant name via its inferred rank."""
+    rank = label_to_rank((assessment or '').strip())
+    if rank is None:
+        return 'is-unknown'
+    return {
+        1: 'is-susceptible',
+        2: 'is-potential',
+        3: 'is-low-level',
+        4: 'is-intermediate',
+        5: 'is-resistant',
+        0: 'is-unknown',
+        -1: 'is-contradictory',
+    }.get(rank, 'is-unknown')
 
 
 def _condense_pdf_narrative(narrative: str) -> str:

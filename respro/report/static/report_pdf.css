@@ -199,7 +199,7 @@ body {
 }
 
 .drug-summary-text {
-  margin: 0;
+  margin: 0 0 7px;
   color: var(--ink);
   line-height: 1.22;
 }
@@ -260,24 +260,39 @@ body {
   white-space: nowrap;
 }
 
+.assessment.is-susceptible {
+  background: var(--badge-sensitive-bg);
+  color: var(--badge-sensitive-text);
+}
+
+.assessment.is-potential {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.assessment.is-low-level {
+  background: var(--badge-intermediate-bg);
+  color: var(--badge-intermediate-text);
+}
+
+.assessment.is-intermediate {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
 .assessment.is-resistant {
   background: var(--badge-resistant-bg);
   color: var(--badge-resistant-text);
 }
 
-.assessment.is-intermediate {
-  background: var(--badge-intermediate-bg);
-  color: var(--badge-intermediate-text);
-}
-
-.assessment.is-sensitive {
-  background: var(--badge-sensitive-bg);
-  color: var(--badge-sensitive-text);
-}
-
 .assessment.is-unknown {
   background: var(--badge-unknown-bg);
   color: var(--badge-unknown-text);
+}
+
+.assessment.is-contradictory {
+  background: #64748b;
+  color: #f1f5f9;
 }
 
 .empty,

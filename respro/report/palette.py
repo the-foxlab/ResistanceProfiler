@@ -30,14 +30,6 @@ FEATURE_HIGHLIGHTED_EDGE = 'black'
 FEATURE_DEFAULT_EDGE = "#a2a2a2"
 FEATURE_BASELINE_COLOUR = 'dimgrey'
 
-# Phenotype badge colours — key is the raw phenotype value
-PHENOTYPE_COLOURS = {
-    'resistant':      '#e74c3c',
-    'intermediate':   '#f39c12',
-    'sensitive':      '#27ae60',
-    'contradictory':  "#334142",
-    'unknown':        '#bdc3c7'
-}
 
 # Allele-frequency bin badge colours
 AF_BIN_COLOURS = {

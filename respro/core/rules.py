@@ -181,7 +181,9 @@ def match_formula_rules(
     """
     Evaluate formula rules over AF-gated matched atomic member_ids.
 
-    The AF gate uses strict '>' semantics to keep compatibility with prior combo behavior.
+    The AF gate uses strict ``>`` semantics: a member rule contributes only when
+    its annotation's allele frequency exceeds the threshold, so borderline-equal
+    variants are excluded from formula evaluation.
     """
     if not formula_rules:
         return []

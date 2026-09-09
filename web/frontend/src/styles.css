@@ -44,12 +44,29 @@
   --resistant-bg: #fee2e2;
   --resistant-text: #991b1b;
   --resistant-border: #f4b0b0;
-  --intermediate-bg: #fef3c7;
-  --intermediate-text: #92400e;
-  --intermediate-border: #f5d78a;
+  --intermediate-bg: #ffedd5;
+  --intermediate-text: #9a3412;
+  --intermediate-border: #fed7aa;
+  --low-level-bg: #fef3c7;
+  --low-level-text: #92400e;
+  --low-level-border: #f5d78a;
   --sensitive-bg: #dcfce7;
   --sensitive-text: #166534;
   --sensitive-border: #a7e3bd;
+  /* Numeric metric tier colours — statistical mean±σ gradient, independent of
+     the phenotype rank palette. tier1 low → tier4 high. */
+  --metric-tier1-bg: #f0f9ff;
+  --metric-tier1-text: #0369a1;
+  --metric-tier1-border: #bae6fd;
+  --metric-tier2-bg: #fef3c7;
+  --metric-tier2-text: #92400e;
+  --metric-tier2-border: #f5d78a;
+  --metric-tier3-bg: #ffedd5;
+  --metric-tier3-text: #c2410c;
+  --metric-tier3-border: #fed7aa;
+  --metric-tier4-bg: #fee2e2;
+  --metric-tier4-text: #991b1b;
+  --metric-tier4-border: #f4b0b0;
   --info-bg: #dbeafe;
   --info-text: #1d4ed8;
   --info-border: #bcd5fb;
@@ -2129,12 +2146,19 @@ th {
   grid-column: 1 / -1;
 }
 
+.database-meta-row-table .database-meta-value {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
 .database-algorithm-table th {
   white-space: nowrap;
 }
 
 .database-algorithm-table td {
   vertical-align: top;
+  white-space: nowrap;
 }
 
 .about-section-card-algorithms {
@@ -3516,6 +3540,85 @@ th.sortable-col {
   display: block;
   width: 100%;
   height: auto;
+}
+
+.report-preview-structure-panel {
+  width: min(100%, 520px);
+}
+
+.report-preview-structure-title {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.report-preview-sequence-panel {
+  width: min(100%, 72rem);
+}
+
+.report-preview-sequence-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.report-preview-sequence-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.report-preview-sequence-toggle {
+  display: flex;
+  gap: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 0.22rem;
+  background: var(--paper-soft);
+  width: fit-content;
+}
+
+.report-preview-sequence-toggle .seq-toggle-btn {
+  padding: 0.28rem 0.8rem;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.report-preview-sequence-toggle .seq-toggle-btn--active {
+  background: var(--surface-strong);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.report-preview-sequence-toggle .seq-toggle-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.report-preview-sequence-block {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-soft);
+  padding: 1rem;
+  color: var(--ink);
+  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 
 /* ── Guided tour overlay ────────────────────────────────────────────────── */

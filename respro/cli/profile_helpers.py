@@ -418,6 +418,67 @@ class _ProfilingRunContext:
     af_bins: dict[str, tuple[float, float]]
 
 
+def _export_and_persist(
+    result: ProfilingResult,
+    *,
+    features: list,
+    rules: list,
+    rule_feature_names: set[str],
+    project_conn: sqlite3.Connection,
+    input_basename: str,
+    output_target: Path,
+    results_conn: sqlite3.Connection | None,
+    project_path: Path,
+    logger: logging.Logger,
+    extra_export_formats: set[str] | None = None,
+) -> tuple[ProfilingResult, dict]:
+    """Export a profiling result to disk and optionally persist its run record.
+
+    Shared tail of :func:`_finalize_and_export` and
+    :func:`_finalize_and_export_multi`: derives a safe filename stem from
+    *input_basename*, resolves the HTML output path, calls
+    :func:`export_results` with the supplied feature/rule/rule_feature_names,
+    and saves the run to the results database when *results_conn* is provided.
+
+    :param result: assembled ProfilingResult to export and persist
+    :param features: feature records forwarded to :func:`export_results`
+    :param rules: resistance rules forwarded to :func:`export_results`
+    :param rule_feature_names: rule-backed feature names forwarded to
+        :func:`export_results`
+    :param project_conn: open project database connection
+    :param input_basename: filename of the input VCF or FASTA
+    :param output_target: output path option; interpreted as directory or explicit HTML file
+    :param results_conn: open results database connection, or None
+    :param project_path: path to the project database file
+    :param logger: logger instance
+    :param extra_export_formats: optional additional output formats ('json', 'pdf')
+    :return: (ProfilingResult, export path dict)
+    """
+    raw_stem = Path(input_basename).stem.strip() or 'profile'
+    safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', raw_stem) or 'profile'
+    html_output_path = resolve_output_file(output_target, f'{safe_stem}.report.html')
+
+    outputs = export_results(
+        result,
+        html_output_path.parent,
+        features=features,
+        rule_feature_names=rule_feature_names,
+        project_conn=project_conn,
+        rules=rules,
+        extra_export_formats=extra_export_formats,
+        project_db_path=project_path.resolve(),
+        output_html_path=html_output_path,
+        similarity_high=CLI_CONFIG.similarity.high,
+        similarity_moderate=CLI_CONFIG.similarity.moderate,
+    )
+
+    if results_conn is not None:
+        run_id = save_run(results_conn, project_path.resolve(), project_conn, result)
+        logger.info('Run saved to results database with id %d', run_id)
+
+    return result, outputs
+
+
 def _finalize_and_export(
     ctx: _ProfilingRunContext,
     project_conn: sqlite3.Connection,
@@ -491,29 +552,19 @@ def _finalize_and_export(
         references=[reference_group],
     )
 
-    raw_stem = Path(input_basename).stem.strip() or 'profile'
-    safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', raw_stem) or 'profile'
-    html_output_path = resolve_output_file(output_target, f'{safe_stem}.report.html')
-
-    outputs = export_results(
+    return _export_and_persist(
         result,
-        html_output_path.parent,
         features=ctx.features,
+        rules=ctx.rules,
         rule_feature_names=ctx.rule_feature_names,
         project_conn=project_conn,
-        rules=ctx.rules,
+        input_basename=input_basename,
+        output_target=output_target,
+        results_conn=results_conn,
+        project_path=project_path,
+        logger=logger,
         extra_export_formats=extra_export_formats,
-        project_db_path=project_path.resolve(),
-        output_html_path=html_output_path,
-        similarity_high=CLI_CONFIG.similarity.high,
-        similarity_moderate=CLI_CONFIG.similarity.moderate,
     )
-
-    if results_conn is not None:
-        run_id = save_run(results_conn, project_path.resolve(), project_conn, result)
-        logger.info('Run saved to results database with id %d', run_id)
-
-    return result, outputs
 
 
 def _finalize_and_export_multi(
@@ -555,29 +606,20 @@ def _finalize_and_export_multi(
         rules.extend(rg.rules)
         rule_feature_names |= rg.rule_feature_names
 
-    raw_stem = Path(input_basename).stem.strip() or 'profile'
-    safe_stem = re.sub(r'[^A-Za-z0-9._-]+', '_', raw_stem) or 'profile'
-    html_output_path = resolve_output_file(output_target, f'{safe_stem}.report.html')
-
-    outputs = export_results(
+    return _export_and_persist(
         result,
-        html_output_path.parent,
         features=features,
+        rules=rules,
         rule_feature_names=rule_feature_names,
         project_conn=project_conn,
-        rules=rules,
+        input_basename=input_basename,
+        output_target=output_target,
+        results_conn=results_conn,
+        project_path=project_path,
+        logger=logger,
         extra_export_formats=extra_export_formats,
-        project_db_path=project_path.resolve(),
-        output_html_path=html_output_path,
-        similarity_high=CLI_CONFIG.similarity.high,
-        similarity_moderate=CLI_CONFIG.similarity.moderate,
     )
 
-    if results_conn is not None:
-        run_id = save_run(results_conn, project_path.resolve(), project_conn, result)
-        logger.info('Run saved to results database with id %d', run_id)
-
-    return result, outputs
 
 def _print_completion_panel(console: Console, title: str, result: ProfilingResult, outputs: dict) -> None:
     """Render a summary panel after a profiling run."""

@@ -22,11 +22,27 @@ from respro.core.annotation import (
     _ruleless_features_overlapping_ruled,
     classify_similarity,
 )
+from respro.db.algorithms import (
+    _METHOD_LABEL,
+    _assessment_strength,
+    compute_drug_assessment,
+    resolve_thresholds_dict,
+)
+from respro.db.algorithms import (
+    _references_match as _algorithms_references_match,
+)
 from respro.db.models import (
     FeatureRecord,
     ProfilingResult,
     Publication,
     ResistanceRule,
+)
+from respro.db.phenotype_ranks import (
+    RANK_CONTRADICTORY,
+    RANK_UNKNOWN,
+    label_to_rank,
+    rank_to_colour,
+    rank_to_label,
 )
 from respro.db.report_queries import (
     has_interpretation_algorithm,
@@ -358,7 +374,7 @@ def write_html(
     """
     Render and write the HTML report to a file.
 
-    Phase 2 stub - not yet implemented.
+    Render the HTML report via :func:`render_html` and write it to ``output_path``.
 
     :param result: profiling result to report on
     :param output_path: path to write HTML file to
@@ -762,12 +778,28 @@ def _publication_key(pub: Publication) -> tuple:
     return ('meta', doi, pubmed_id, raw_input, title)
 
 
-_PHENOTYPE_BADGE_CLASS = {
-    'resistant': 'phenotype--resistant',
-    'intermediate': 'phenotype--intermediate',
-    'sensitive': 'phenotype--sensitive',
-    'contradictory': 'phenotype--contradictory',
+# Phenotype badge CSS classes keyed by rank. The canonical rank→colour mapping
+# lives in respro.db.phenotype_ranks; these CSS classes mirror it for the HTML
+# badge styling. Ranks 1–5 map to increasing severity; 0 = unknown, -1 = contradictory.
+_PHENOTYPE_BADGE_CLASS_BY_RANK: dict[int, str] = {
+    1: 'phenotype--susceptible',
+    2: 'phenotype--potential',
+    3: 'phenotype--low-level',
+    4: 'phenotype--intermediate',
+    5: 'phenotype--resistant',
+    0: 'phenotype--unknown',
+    -1: 'phenotype--contradictory',
 }
+
+
+def _phenotype_badge_class(label: str) -> str:
+    """Return the CSS badge class for a phenotype label, inferred from its rank."""
+    if not label:
+        return ''
+    rank = label_to_rank(label)
+    if rank is None:
+        return ''
+    return _PHENOTYPE_BADGE_CLASS_BY_RANK.get(rank, '')
 
 
 def _build_rule_metrics(
@@ -784,13 +816,13 @@ def _build_rule_metrics(
         metrics.append({
             'label': 'Phenotype',
             'value': phenotype,
-            'badge_class': _PHENOTYPE_BADGE_CLASS.get(phenotype.lower(), ''),
+            'badge_class': _phenotype_badge_class(phenotype),
         })
     if clinical_phenotype and clinical_phenotype.lower() != 'unknown':
         metrics.append({
             'label': 'Clinical phenotype',
             'value': clinical_phenotype,
-            'badge_class': _PHENOTYPE_BADGE_CLASS.get(clinical_phenotype.lower(), ''),
+            'badge_class': _phenotype_badge_class(clinical_phenotype),
         })
 
     def _numeric_badge_class(field: str, value_str: str) -> str:
@@ -1193,36 +1225,6 @@ def _join_english_list(items: list[str]) -> str:
     return ', '.join(items[:-1]) + f', and {items[-1]}'
 
 
-def _phenotype_sentence(stats: dict) -> str:
-    """
-    Build a concise phenotype-distribution sentence for one drug.
-
-    Returns an empty string when all evidence is of unknown phenotype.
-    """
-    parts: list[str] = []
-    if stats['resistant']:
-        n = stats['resistant']
-        parts.append(f"{n} {'mutation' if n == 1 else 'mutations'} associated with resistance")
-    if stats['intermediate']:
-        n = stats['intermediate']
-        parts.append(f"{n} with an intermediate phenotype")
-    if stats['sensitive']:
-        n = stats['sensitive']
-        parts.append(f"{n} associated with drug sensitivity")
-    if not parts:
-        return ''
-    return _join_english_list(parts)
-
-
-def _range_sentence(ranges: dict[str, int]) -> str:
-    """Format IC50/fold-IC50 range data as a short parenthetical phrase."""
-    if not ranges:
-        return ''
-    ordered = sorted(ranges.items(), key=lambda item: (-item[1], item[0].lower()))
-    labels = [label for label, _ in ordered[:3]]
-    return f"quantitative values: {_join_english_list(labels)}"
-
-
 def _build_summary_context(
     result: ProfilingResult,
     display_names: dict[str, str],
@@ -1481,21 +1483,41 @@ def _build_summary_narrative(
         if (row.get('assessment') or '').strip()
     ]
 
-    resistant_drugs = sorted([
-        row.get('summary_name') or row.get('name') or 'Unknown'
-        for row in assessed_rows
-        if (row.get('assessment') or '').strip().lower() == 'resistant'
-    ], key=lambda name: name.lower())
-    intermediate_drugs = sorted([
-        row.get('summary_name') or row.get('name') or 'Unknown'
-        for row in assessed_rows
-        if (row.get('assessment') or '').strip().lower() == 'intermediate'
-    ], key=lambda name: name.lower())
-    sensitive_drugs = sorted([
-        row.get('summary_name') or row.get('name') or 'Unknown'
-        for row in assessed_rows
-        if (row.get('assessment') or '').strip().lower() == 'sensitive'
-    ], key=lambda name: name.lower())
+    # Categorize assessed drugs by the inferred rank of their assessment label,
+    # using the canonical rank vocabulary (respro.db.phenotype_ranks):
+    #   rank 5 → resistant
+    #   rank 4 → intermediate
+    #   rank 3 → low-level resistance
+    #   rank 2 → potential low-level resistance
+    #   rank 1 → susceptible
+    #   rank -1 → contradictory
+    # Unknown (rank 0) is excluded. Each non-susceptible rank gets its own bucket
+    # so the narrative and the drug list sections use the same terminology as the
+    # per-drug badges. Contradictory is surfaced as its own bucket so drugs whose
+    # final assessment is contradictory (it wins over susceptible but loses to
+    # higher tiers) appear in the summary narrative.
+    drugs_by_rank: dict[int, list[str]] = {}
+    for row in assessed_rows:
+        rank = label_to_rank((row.get('assessment') or '').strip())
+        if rank is None or rank == RANK_UNKNOWN:
+            continue
+        name = row.get('summary_name') or row.get('name') or 'Unknown'
+        drugs_by_rank.setdefault(rank, []).append(name)
+    for rank in drugs_by_rank:
+        drugs_by_rank[rank] = sorted(drugs_by_rank[rank], key=lambda n: n.lower())
+
+    resistant_drugs = drugs_by_rank.get(5, [])
+    intermediate_drugs = drugs_by_rank.get(4, [])
+    low_level_drugs = drugs_by_rank.get(3, [])
+    potential_low_level_drugs = drugs_by_rank.get(2, [])
+    sensitive_drugs = drugs_by_rank.get(1, [])
+    contradictory_drugs = drugs_by_rank.get(RANK_CONTRADICTORY, [])
+
+    # All non-susceptible, non-resistant, non-contradictory ranks (2–4) form the
+    # intermediate-tier group used by the lead-sentence count.
+    intermediate_tier_drugs = (
+        potential_low_level_drugs + low_level_drugs + intermediate_drugs
+    )
 
     # When multi-species, ProfilingResult.feature_matches only exposes the primary
     # reference's matches (it delegates to references[0]); aggregate across all
@@ -1583,26 +1605,64 @@ def _build_summary_narrative(
     n_drugs = len(assessed_rows) if assessed_rows else len(drug_rows)
     if has_assessment and n_drugs:
         drug_word = 'drug' if n_drugs == 1 else 'drugs'
-        if len(resistant_drugs) == 0 and len(intermediate_drugs) == 0:
+        n_resistant = len(resistant_drugs)
+        n_intermediate_tier = len(intermediate_tier_drugs)
+        n_susceptible = len(sensitive_drugs)
+        n_contradictory = len(contradictory_drugs)
+        if n_resistant == 0 and n_intermediate_tier == 0 and n_contradictory == 0:
             lead = (
                 f'{feature_organism_clause} {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
-                'The assessment found no evidence for antiviral resistance for any drug.'
+                'The assessment found no evidence for resistance for any drug.'
             )
-        elif len(sensitive_drugs) == 0 and len(intermediate_drugs) == 0:
+        elif n_susceptible == 0 and n_intermediate_tier == 0 and n_contradictory == 0:
             lead = (
                 f'{feature_organism_clause} {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
-                'The assessment found evidence for antiviral resistance for all analysed drugs.'
+                'The assessment found evidence for resistance for all analysed drugs.'
             )
         else:
+            # Build the lead sentence listing only non-zero categories, using
+            # the canonical rank terminology: resistance / reduced
+            # susceptibility / contradictory evidence / susceptibility. The
+            # "reduced susceptibility" bucket aggregates ranks 2–4 (potential
+            # low-level resistance, low-level resistance, intermediate), which
+            # are listed individually in the drug list sections below.
+            # Contradictory evidence is its own category. Zero-count categories
+            # are omitted entirely.
+            parts: list[str] = []
+            if n_resistant:
+                parts.append(
+                    f"resistance against {n_resistant} "
+                    f"{'drug' if n_resistant == 1 else 'drugs'}"
+                )
+            if n_intermediate_tier:
+                parts.append(
+                    f"reduced susceptibility against {n_intermediate_tier} "
+                    f"{'drug' if n_intermediate_tier == 1 else 'drugs'}"
+                )
+            if n_contradictory:
+                parts.append(
+                    f"contradictory evidence for {n_contradictory} "
+                    f"{'drug' if n_contradictory == 1 else 'drugs'}"
+                )
+            if n_susceptible:
+                parts.append(
+                    f"susceptibility to {n_susceptible} "
+                    f"{'drug' if n_susceptible == 1 else 'drugs'}"
+                )
+            if len(parts) == 1:
+                findings = f'The assessment found evidence for {parts[0]}.'
+            else:
+                findings = (
+                    'The assessment found evidence for '
+                    + ', '.join(parts[:-1])
+                    + f', and {parts[-1]}.'
+                )
             lead = (
                 f'{feature_organism_clause} {was_were} evaluated against '
                 f'known resistance-associated mutations for {n_drugs} {drug_word}. '
-                f'The assessment found evidence for antiviral resistance against '
-                f"{len(resistant_drugs)} {'drug' if len(resistant_drugs) == 1 else 'drugs'}, "
-                f"intermediate resistance against {len(intermediate_drugs)} {'drug' if len(intermediate_drugs) == 1 else 'drugs'}, "
-                f"and sensitivity for {len(sensitive_drugs)} {'drug' if len(sensitive_drugs) == 1 else 'drugs'}."
+                f'{findings}'
             )
     elif drug_rows:
         lead = (
@@ -1648,30 +1708,49 @@ def _build_summary_narrative(
             ' manual interpretation.'
         )
 
-    def _list_line(title: str, colour: str, drugs: list[str]) -> str:
-        if drugs:
-            values = _join_english_list([escape(name) for name in drugs])
-        else:
-            values = 'none'
-        return f'<strong style="color: {colour};">{escape(title)}:</strong> {values}. '
+    def _list_line(title: str, rank: int, drugs: list[str]) -> str:
+        values = _join_english_list([escape(name) for name in drugs])
+        colour = rank_to_colour(rank)
+        return f'<strong style="color: {colour};">{escape(title)}:</strong> {values}.'
 
     list_sections: list[str] = []
     if has_assessment and (assessed_rows or drug_rows):
-        list_sections.append(_list_line(
-            'List of drugs with resistance-associated mutations',
-            '#991b1b',
-            resistant_drugs,
-        ))
-        list_sections.append(_list_line(
-            'List of drugs with mutations associated with intermediate resistance',
-            '#c2410c',
-            intermediate_drugs,
-        ))
-        list_sections.append(_list_line(
-            'List of drugs without resistance-associated mutations',
-            '#166534',
-            sensitive_drugs,
-        ))
+        if resistant_drugs:
+            list_sections.append(_list_line(
+                'Drugs assessed as resistant',
+                5,
+                resistant_drugs,
+            ))
+        if intermediate_drugs:
+            list_sections.append(_list_line(
+                'Drugs assessed as intermediate',
+                4,
+                intermediate_drugs,
+            ))
+        if low_level_drugs:
+            list_sections.append(_list_line(
+                'Drugs assessed as low-level resistance',
+                3,
+                low_level_drugs,
+            ))
+        if potential_low_level_drugs:
+            list_sections.append(_list_line(
+                'Drugs assessed as potential low-level resistance',
+                2,
+                potential_low_level_drugs,
+            ))
+        if sensitive_drugs:
+            list_sections.append(_list_line(
+                'Drugs assessed as susceptible',
+                1,
+                sensitive_drugs,
+            ))
+        if contradictory_drugs:
+            list_sections.append(_list_line(
+                'Drugs with contradictory evidence',
+                RANK_CONTRADICTORY,
+                contradictory_drugs,
+            ))
 
     narrative_text = ' '.join(paragraphs)
     if list_sections:
@@ -1688,7 +1767,7 @@ def _threshold_source_label(
 ) -> str:
     """Return a human-readable label for the resolution source of a drug's thresholds.
 
-    Mirrors the precedence in :func:`respro.db.algorithms.resolve_thresholds`:
+    Mirrors the precedence in :func:`respro.db.algorithms.resolve_thresholds_dict`:
     ``(reference, drug)`` override > ``(drug)`` override > global ``thresholds``.
 
     :param config: drug_interpretation config dict
@@ -1741,7 +1820,7 @@ def _build_drug_interpretation_table(
             'summary_name': alias if alias and len(alias) < len(name) else name,
             'drug_class': drug_class,
             'hit_count': 0,
-            'resistant_count': 0, 'intermediate_count': 0, 'sensitive_count': 0, 'contradictory_count': 0,
+            'rank_counts': {},  # rank -> count, populated from phenotype labels
             'score_total': 0.0, 'score_display': '0',
             'ic50_display': '\u2014', 'fold_ic50_display': '\u2014',
             'ic50_values': [], 'fold_ic50_values': [],
@@ -1750,28 +1829,40 @@ def _build_drug_interpretation_table(
             'reference_names': set(),
         }
 
-    def _assessment_description(method: str, resistant_t, intermediate_t) -> str:
+    def _assessment_description(method: str, thresholds: dict) -> str:
+        """Build a human-readable description of one method's threshold logic.
+
+        Iterates over all configured severity labels (ordered weakest→strongest
+        by rank) so multi-tier configs are described fully, not just
+        resistant/intermediate.
+        """
+        # Order labels by severity rank (weakest first); skip sentinels.
+        ranked = sorted(
+            (rank, lbl, val)
+            for lbl, val in thresholds.items()
+            if (rank := label_to_rank(lbl)) is not None and rank > 0
+        )
         if method == 'by_phenotype':
-            parts = [f'Resistant: \u2265{resistant_t} resistant phenotype hit(s).']
-            if intermediate_t is not None:
-                parts.append(f'Intermediate: \u2265{intermediate_t} intermediate phenotype hit(s).')
-            parts.append('Contradictory: any contradictory hit(s).')
-            parts.append('Otherwise: Sensitive.')
+            parts = [
+                'Highest-rank phenotype label among the drug\u2019s hits wins.',
+                'Contradictory: wins over susceptible but loses to any higher-tier severity.',
+                'Otherwise: Susceptible.',
+            ]
         elif method == 'by_score':
-            parts = [f'Resistant: total score \u2265 {resistant_t}.']
-            if intermediate_t is not None:
-                parts.append(f'Intermediate: total score \u2265 {intermediate_t}.')
-            parts.append('Otherwise: Sensitive.')
+            parts = [
+                f'{lbl.title()}: total score \u2265 {val}.'
+                for _rank, lbl, val in ranked
+            ]
         elif method == 'by_ic50':
-            parts = [f'Resistant: any IC50 value \u2265 {resistant_t}.']
-            if intermediate_t is not None:
-                parts.append(f'Intermediate: any IC50 value \u2265 {intermediate_t}.')
-            parts.append('Otherwise: Sensitive.')
+            parts = [
+                f'{lbl.title()}: any IC50 value \u2265 {val}.'
+                for _rank, lbl, val in ranked
+            ]
         elif method == 'by_fold_ic50':
-            parts = [f'Resistant: any fold IC50 value \u2265 {resistant_t}.']
-            if intermediate_t is not None:
-                parts.append(f'Intermediate: any fold IC50 value \u2265 {intermediate_t}.')
-            parts.append('Otherwise: Sensitive.')
+            parts = [
+                f'{lbl.title()}: any fold IC50 value \u2265 {val}.'
+                for _rank, lbl, val in ranked
+            ]
         else:
             parts = []
         return ' '.join(parts)
@@ -1826,42 +1917,44 @@ def _build_drug_interpretation_table(
         if ref_name:
             by_drug[drug]['reference_names'].add(ref_name)
         metrics = row.get('metrics', [])
+        # Index metrics by label once per row instead of scanning the list
+        # repeatedly for Score/IC50/Fold IC50. Phenotype keeps a dedicated
+        # scan because it has first-non-unknown semantics across two labels
+        # ('Phenotype' and 'Clinical phenotype') and breaks early. The dict
+        # keeps the FIRST occurrence of each label to match the original
+        # ``for m in metrics: if label == X: ... break`` first-match semantics.
+        metrics_by_label: dict[str, dict] = {}
+        for m in metrics:
+            metrics_by_label.setdefault(m.get('label'), m)
         pheno = ''
         for m in metrics:
             if m.get('label') in ('Phenotype', 'Clinical phenotype'):
                 pheno = (m.get('value') or '').strip().lower()
                 if pheno and pheno != 'unknown':
                     break
-        if pheno == 'resistant':
-            by_drug[drug]['resistant_count'] += 1
-        elif pheno == 'intermediate':
-            by_drug[drug]['intermediate_count'] += 1
-        elif pheno == 'sensitive':
-            by_drug[drug]['sensitive_count'] += 1
-        elif pheno == 'contradictory':
-            by_drug[drug]['contradictory_count'] += 1
-        for m in metrics:
-            if m.get('label') == 'Score':
-                val = _parse_numeric_value((m.get('value') or '').strip())
-                if val is not None:
-                    by_drug[drug]['score_total'] += val
-                break
-        for m in metrics:
-            if m.get('label') == 'IC50':
-                val = _parse_numeric_value((m.get('value') or '').strip())
-                if val is not None:
-                    by_drug[drug]['ic50_values'].append(val)
-                break
-        for m in metrics:
-            if m.get('label') == 'Fold IC50':
-                val = _parse_numeric_value((m.get('value') or '').strip())
-                if val is not None:
-                    by_drug[drug]['fold_ic50_values'].append(val)
-                break
+        if pheno and pheno != 'unknown':
+            rank = label_to_rank(pheno)
+            if rank is not None:
+                by_drug[drug]['rank_counts'][rank] = by_drug[drug]['rank_counts'].get(rank, 0) + 1
+        score_metric = metrics_by_label.get('Score')
+        if score_metric is not None:
+            val = _parse_numeric_value((score_metric.get('value') or '').strip())
+            if val is not None:
+                by_drug[drug]['score_total'] += val
+        ic50_metric = metrics_by_label.get('IC50')
+        if ic50_metric is not None:
+            val = _parse_numeric_value((ic50_metric.get('value') or '').strip())
+            if val is not None:
+                by_drug[drug]['ic50_values'].append(val)
+        fold_ic50_metric = metrics_by_label.get('Fold IC50')
+        if fold_ic50_metric is not None:
+            val = _parse_numeric_value((fold_ic50_metric.get('value') or '').strip())
+            if val is not None:
+                by_drug[drug]['fold_ic50_values'].append(val)
 
     # Column presence is determined by actual hit data, not zero-hit entries
     has_phenotypes = any(
-        d['resistant_count'] + d['intermediate_count'] + d['sensitive_count'] + d['contradictory_count'] > 0
+        sum(d['rank_counts'].values()) > 0
         for d in by_drug.values()
     )
     has_scores = any(
@@ -1893,19 +1986,9 @@ def _build_drug_interpretation_table(
     )
     method_labels: list[dict] = []
     if has_assessment:
-        from respro.db.algorithms import (
-            _METHOD_LABEL,
-            compute_drug_assessment,
-            resolve_thresholds,
-        )
-        from respro.db.algorithms import (
-            _references_match as _algorithms_references_match,
-        )
         for config in drug_interp_configs:
             method = config.get('method', '')
             thresholds = config.get('thresholds', {})
-            resistant_threshold = thresholds.get('resistant', 1)
-            intermediate_threshold = thresholds.get('intermediate')
 
             value_header = None
             value_field = None
@@ -1919,14 +2002,15 @@ def _build_drug_interpretation_table(
             method_labels.append({
                 'method': method,
                 'label': _METHOD_LABEL.get(method, method),
-                'description': _assessment_description(method, resistant_threshold, intermediate_threshold),
+                'description': _assessment_description(method, thresholds),
                 'value_header': value_header,
                 'value_field': value_field,
             })
         # Final assessment description
         assessment_description = (
             'Final assessment: most severe result across all methods '
-            '(resistant > contradictory > intermediate > sensitive).'
+            '(resistant > \u2026 > potential low-level resistance > '
+            'contradictory > susceptible).'
         )
 
         for drug_data in by_drug.values():
@@ -1940,46 +2024,74 @@ def _build_drug_interpretation_table(
             ref_names = drug_data.get('reference_names') or set()
             if not ref_names:
                 ref_names = {result.reference_name} if result.reference_name else set()
-            # Select the reference deterministically (sorted) so per-(reference,
+            # Iterate references deterministically (sorted) so per-(reference,
             # drug) override resolution is stable across process invocations
             # (set iteration order depends on PYTHONHASHSEED).
-            selected_reference = sorted(ref_names)[0] if ref_names else None
-            final_assessment, method_assessments = compute_drug_assessment(
-                drug_data, drug_interp_configs,
-                reference_name=selected_reference,
-                drug_name=drug_name or None,
-            )
+            sorted_refs = sorted(ref_names) if ref_names else [None]
+            if len(sorted_refs) > 1:
+                # Multi-reference: resolve against each reference and keep the
+                # strongest-wins assessment (highest _assessment_strength).
+                best_assessment = ''
+                best_method_assessments: list[dict] = []
+                winning_reference = sorted_refs[0]
+                # Baseline: the weakest possible strength (susceptible/unknown).
+                # _assessment_strength('') == 0, so any real assessment wins.
+                best_strength = _assessment_strength('')
+                for candidate_ref in sorted_refs:
+                    candidate_assessment, candidate_methods = compute_drug_assessment(
+                        drug_data, drug_interp_configs,
+                        reference_name=candidate_ref,
+                        drug_name=drug_name or None,
+                    )
+                    strength = _assessment_strength(candidate_assessment)
+                    if strength > best_strength:
+                        best_strength = strength
+                        best_assessment = candidate_assessment
+                        best_method_assessments = candidate_methods
+                        winning_reference = candidate_ref
+                final_assessment = best_assessment
+                method_assessments = best_method_assessments
+                selected_reference = winning_reference
+            else:
+                selected_reference = sorted_refs[0]
+                final_assessment, method_assessments = compute_drug_assessment(
+                    drug_data, drug_interp_configs,
+                    reference_name=selected_reference,
+                    drug_name=drug_name or None,
+                )
             drug_data['assessment'] = final_assessment
             drug_data['method_assessments'] = method_assessments
             # Add badge classes for per-method assessment styling
             for ma in method_assessments:
-                ma['assessment_badge_class'] = _PHENOTYPE_BADGE_CLASS.get(
-                    ma['assessment'].lower(), ''
+                ma['assessment_badge_class'] = _phenotype_badge_class(
+                    ma['assessment']
                 )
             # Attach resolved thresholds + source for the per-cell hover when
             # overrides are configured. Source labels mirror the precedence in
-            # resolve_thresholds: (reference, drug) > (drug) > global.
+            # resolve_thresholds_dict: (reference, drug) > (drug) > global.
+            # by_phenotype is hardcoded (no configurable thresholds), so it is
+            # skipped — its hover uses the fixed description from
+            # _assessment_description instead.
             if has_drug_thresholds and drug_name:
                 for ma in method_assessments:
+                    if ma['method'] == 'by_phenotype':
+                        continue
                     config = next(
                         (c for c in drug_interp_configs if c.get('method') == ma['method']),
                         {},
                     )
                     ref_for_resolution = selected_reference
-                    resistant_t, intermediate_t = resolve_thresholds(
+                    ma['resolved_thresholds'] = resolve_thresholds_dict(
                         config, ref_for_resolution, drug_name,
                     )
-                    ma['resolved_thresholds'] = {
-                        'resistant': resistant_t, 'intermediate': intermediate_t,
-                    }
                     ma['threshold_source'] = _threshold_source_label(
                         config, ref_for_resolution, drug_name,
                         _algorithms_references_match,
                     )
 
     for drug_data in by_drug.values():
-        drug_data['assessment_badge_class'] = _PHENOTYPE_BADGE_CLASS.get(
-            drug_data['assessment'].lower(), ''
+        drug_data['assessment_badge_class'] = _phenotype_badge_class(
+            drug_data['assessment']
         )
         score = drug_data['score_total']
         drug_data['score_display'] = str(int(score)) if score == int(score) else f'{score:.2g}'
@@ -1997,10 +2109,32 @@ def _build_drug_interpretation_table(
     for drug_data in drug_rows:
         groups.setdefault(drug_data['drug_class'], []).append(drug_data)
 
+    # Build the dynamic phenotype count columns: one per rank present across all
+    # drugs, ordered most-severe first. Each column carries its canonical label
+    # (title-cased for the header) and badge class for the count cell.
+    present_ranks: set[int] = set()
+    for d in drug_rows:
+        present_ranks.update(d['rank_counts'].keys())
+    # Always include contradictory if any drug has it; keep severity ranks > 0.
+    phenotype_ranks = sorted(
+        (r for r in present_ranks if r != RANK_CONTRADICTORY),
+        reverse=True,
+    )
+    if RANK_CONTRADICTORY in present_ranks:
+        phenotype_ranks.append(RANK_CONTRADICTORY)
+    phenotype_columns = [
+        {
+            'rank': rank,
+            'label': rank_to_label(rank).title(),
+            'badge_class': _phenotype_badge_class(rank_to_label(rank)),
+        }
+        for rank in phenotype_ranks
+    ]
+
     num_value_columns = sum(1 for ml in method_labels if ml['value_header'])
     col_count = (
         2
-        + (3 if has_phenotypes else 0)
+        + (len(phenotype_columns) if has_phenotypes else 0)
         + (1 if has_scores else 0)
         + (len(method_labels) if has_assessment else 0)
         + (num_value_columns if has_assessment else 0)
@@ -2019,6 +2153,7 @@ def _build_drug_interpretation_table(
         'method_labels': method_labels,
         'assessment_description': assessment_description,
         'col_count': col_count,
+        'phenotype_columns': phenotype_columns,
     }
 
 

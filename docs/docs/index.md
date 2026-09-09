@@ -7,7 +7,9 @@ description: Pathogen-agnostic antiviral resistance profiling — full documenta
 
 # Manual
 
-Pathogen-agnostic antiviral resistance profiling from consensus sequences or VCF-derived variants. One harmonized report that classifies mutations and assists diagnostic interpretations against curated project databases.
+ResistanceProfiler (ResPro) classifies mutations in a pathogen's genome and helps interpret them as antiviral resistance markers. It works from a consensus sequence (FASTA) or variant calls (VCF) and compares them against a curated project database, producing one harmonized report per sample.
+
+It is pathogen-agnostic: you build or download a project database for the pathogen you care about, then profile samples against it. ResPro comes as a command-line tool (CLI) and as a web app.
 
 [Get started →](quickstart.md){ .md-button .md-button--primary }
 [Install](install.md){ .md-button }
@@ -20,15 +22,15 @@ Pathogen-agnostic antiviral resistance profiling from consensus sequences or VCF
 
 ## Why use ResPro?
 
-- **Framework for genotypic resistance analysis** — not a single pathogen-specific workflow
-- **One harmonized report** classifies mutations and assists diagnostic interpretations
-- **Reusable project database** — curated rules and references stored in one SQLite file
-- **Maintained databases available** — download pre-ported databases directly via the CLI
-- **Custom rule sets** — transform in-house databases into ResPro-compatible format
-- **Codon-aware profiling** — reference-normalized amino-acid mutation matching with automatic reference selection
+- **Works with any pathogen** — a general framework for genotypic resistance analysis, not a single-pathogen workflow.
+- **One harmonized report** — classifies mutations and assists diagnostic interpretation in a single output.
+- **Reusable project database** — curated rules and references stored in one SQLite file you can version and share.
+- **Maintained databases available** — download pre-built databases directly via the CLI, or build your own.
+- **Custom rule sets** — transform in-house databases into ResPro-compatible format.
+- **Codon-aware profiling** — reference-normalised amino-acid mutation matching with automatic reference selection.
 
 ## Get started
 
-1. **Install** ResPro — see [Installation](install.md) for full details or the [Quickstart](quickstart.md) for a condensed three-step guide.
-2. **Prepare a database** — either download a maintained database or initialize one from your own GenBank and rules TSV files. See [Database Preparation](database-preparation.md) and [Rules TSV Format](rules-format.md).
-3. **Profile samples** — run FASTA or VCF profiling and interpret results. See [CLI Reference](cli-reference.md) and [Output Interpretation](output.md).
+1. **Install** ResPro — see [Installation](install.md) for all methods, or the [Quickstart](quickstart.md) for a condensed three-step guide.
+2. **Get a database** — download a maintained database with `respro databases --download`, or build your own from GenBank and rules TSV files. See [Database Preparation](database-preparation.md) and [Rules TSV Format](rules-format.md).
+3. **Profile samples** — run `respro fasta` or `respro vcf` against your database, then read the results. See [CLI Reference](cli-reference.md) and [Output Interpretation](output.md).
