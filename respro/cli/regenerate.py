@@ -206,7 +206,7 @@ def regenerate(
                 names = ref.get('profiled_feature_names') or []
                 if name and names:
                     profiled_feature_names_by_ref[name] = list(names)
-        if not profiled_feature_names_by_ref and result_db is not None and run_id is not None:
+        if not profiled_feature_names_by_ref and results_conn is not None and run_id is not None:
             # results-DB path: load from the profiled_feature table
             db_profiled = load_profiled_features(results_conn, run_id)
             if db_profiled:

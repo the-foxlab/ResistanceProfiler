@@ -195,10 +195,6 @@ def _fetch_manifest() -> dict:
     if not isinstance(payload, dict):
         raise RuntimeError('Malformed manifest: top-level JSON value must be an object')
 
-    manifest_version = payload.get('manifest_version')
-    if not isinstance(manifest_version, int):
-        raise RuntimeError('Malformed manifest: manifest_version must be an integer')
-
     databases = payload.get('databases')
     if not isinstance(databases, list):
         raise RuntimeError('Malformed manifest: databases must be a list')

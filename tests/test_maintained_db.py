@@ -55,7 +55,6 @@ _METADATA = {
 }
 
 _MANIFEST = {
-    'manifest_version': 1,
     'databases': [
         {
             'source_name': 'hsv_daehne_jaki',
