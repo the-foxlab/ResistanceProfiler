@@ -5,7 +5,7 @@
 Pathogen-agnostic antiviral resistance profiling from consensus sequences or VCF-derived variants.  
 
 > [!TIP]
-> Built your own database. Its super simple.
+> Built your own database. Its really simple.
 
 One harmonized report that classifies mutations and assists diagnostic interpretation against curated project databases. Comes as a CLI or a WebApp. Everything is open-source. Contributions are welcome!
 
