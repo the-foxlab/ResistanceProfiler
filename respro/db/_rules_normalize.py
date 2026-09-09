@@ -149,8 +149,6 @@ def _normalize_phenotypes_from_row(
     *,
     errors: list[str],
     context: str,
-    missing_phenotype_default: str = '',
-    missing_clinical_default: str = '',
 ) -> tuple[str, str]:
     """Normalize phenotype and clinical_phenotype to strict rank-vocabulary labels.
 
@@ -158,9 +156,7 @@ def _normalize_phenotypes_from_row(
     the rank vocabulary via :func:`normalize_phenotype_label`. Unknown non-empty
     labels are appended to *errors* (with row context) and the cell stores
     ``''`` so the caller can collect all row errors and raise once at the end.
-    Empty cells store ``''`` (rank 0 / unknown). The ``missing_*_default``
-    arguments are accepted for backward call-site compatibility but are no
-    longer meaningful under the strict system — empty is the only default.
+    Empty cells store ``''`` (rank 0 / unknown).
     """
     phenotype_raw = _get_value(row, 'phenotype')
     clinical_raw = _get_value(row, 'clinical_phenotype')

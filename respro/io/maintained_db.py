@@ -280,8 +280,18 @@ def _parse_required_version(spec: str) -> tuple[int, ...]:
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
-    """Convert a dotted version string into a comparable int tuple."""
-    return tuple(int(p) for p in version.split('.'))
+    """Convert a dotted version string into a comparable int tuple.
+
+    Robust to PEP 440 pre-release/dev segments (e.g. ``0.2.0.dev1`` or
+    ``0.2.0a1``): each dot-separated component is reduced to its leading
+    numeric part, so the pre-release suffix is dropped before ``int()``-parsing.
+    A component with no leading digits contributes ``0``.
+    """
+    parts: list[int] = []
+    for part in version.split('.'):
+        m = re.match(r'\d+', part)
+        parts.append(int(m.group()) if m is not None else 0)
+    return tuple(parts)
 
 
 def _find_manifest_database_entry(db_name: str) -> dict:

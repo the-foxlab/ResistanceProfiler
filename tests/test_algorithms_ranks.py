@@ -241,3 +241,28 @@ class TestNumericAndScoreMultiTierOrdering:
         }]
         final, methods = compute_drug_assessment(drug, configs)
         assert final == 'resistant'
+
+
+class TestNumericIntermediateWithoutResistant:
+    """AUD-001: by_ic50 with intermediate but no resistant must still classify correctly.
+
+    The redundant ``intermediate``/``resistant`` comparison was removed; the
+    rank-generic monotonic check now guards ordering. A config with only
+    ``{susceptible, intermediate}`` must classify a value above the
+    intermediate breakpoint as ``intermediate`` and a value below as
+    ``susceptible``.
+    """
+
+    def test_value_above_intermediate_returns_intermediate(self):
+        drug = _drug(hit_count=1, ic50_values=[6.0])
+        configs = [{'method': 'by_ic50', 'thresholds': {'susceptible': 0.0, 'intermediate': 5.0}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'intermediate'
+        assert methods[0]['assessment'] == 'intermediate'
+
+    def test_value_below_intermediate_returns_susceptible(self):
+        drug = _drug(hit_count=1, ic50_values=[3.0])
+        configs = [{'method': 'by_ic50', 'thresholds': {'susceptible': 0.0, 'intermediate': 5.0}}]
+        final, methods = compute_drug_assessment(drug, configs)
+        assert final == 'susceptible'
+        assert methods[0]['assessment'] == 'susceptible'

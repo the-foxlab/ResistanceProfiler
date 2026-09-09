@@ -526,12 +526,14 @@ class TestValidateInterpretationAlgorithms:
             ])
 
     def test_drug_interpretation_numeric_method_rejects_invalid_threshold_order(self) -> None:
-        with pytest.raises(ValueError, match='strictly greater than'):
+        # resistant (rank 5) threshold below intermediate (rank 4) violates the
+        # rank-generic non-decreasing rule. Equal thresholds are accepted.
+        with pytest.raises(ValueError, match='non-decreasing with rank'):
             validate_interpretation_algorithms([
                 {
                     'name': 'drug_interpretation',
                     'method': 'by_fold_ic50',
-                    'thresholds': {'susceptible': 0.0, 'resistant': 3.0, 'intermediate': 3.0},
+                    'thresholds': {'susceptible': 0.0, 'resistant': 2.0, 'intermediate': 3.0},
                 }
             ])
 
@@ -923,7 +925,9 @@ class TestValidateDrugInterpretationOverrides:
             ])
 
     def test_drug_thresholds_resistant_not_greater_than_intermediate_numeric_rejected(self) -> None:
-        with pytest.raises(ValueError, match='strictly greater than'):
+        # resistant (rank 5) below intermediate (rank 4) violates the rank-generic
+        # non-decreasing rule (previously a hardcoded intermediate/resistant check).
+        with pytest.raises(ValueError, match='non-decreasing with rank'):
             validate_interpretation_algorithms([
                 {
                     'name': 'drug_interpretation',

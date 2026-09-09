@@ -193,6 +193,64 @@ class TestMultiTierWithoutResistant:
         with pytest.raises(ValueError, match='at least one severity label'):
             validate_interpretation_algorithms(algorithms)
 
+    def test_numeric_intermediate_without_resistant_accepted(self) -> None:
+        """AUD-001: by_ic50 with intermediate but no resistant must not raise TypeError.
+
+        Previously the redundant ``intermediate``/``resistant`` comparison did
+        ``None <= 5.0`` and raised ``TypeError`` (not ``ValueError``), which
+        propagated as a raw traceback because the CLI only catches ``ValueError``.
+        The rank-generic monotonic check now covers this case.
+        """
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_ic50',
+                'thresholds': {'susceptible': 0.0, 'intermediate': 5.0},
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result[0]['thresholds'] == {'susceptible': 0.0, 'intermediate': 5.0}
+
+    def test_numeric_low_level_without_resistant_accepted(self) -> None:
+        """AUD-001: a rank-3 label without resistant validates OK for numeric methods."""
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_ic50',
+                'thresholds': {'susceptible': 0.0, 'low-level resistance': 3.0},
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        assert result[0]['thresholds'] == {'susceptible': 0.0, 'low-level resistance': 3.0}
+
+    def test_override_numeric_intermediate_without_resistant_accepted(self) -> None:
+        """AUD-001: a per-drug override with intermediate but no resistant validates OK."""
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_ic50',
+                'thresholds': {'susceptible': 0.0, 'resistant': 10.0},
+                'drug_thresholds': [
+                    {'drug': 'ACV', 'thresholds': {'susceptible': 0.0, 'intermediate': 5.0}},
+                ],
+            }
+        ]
+        result = validate_interpretation_algorithms(algorithms)
+        override = result[0]['drug_thresholds'][0]['thresholds']
+        assert override == {'susceptible': 0.0, 'intermediate': 5.0}
+
+    def test_numeric_resistant_below_intermediate_still_rejected(self) -> None:
+        """AUD-001: the rank-generic monotonic check still rejects resistant < intermediate."""
+        algorithms = [
+            {
+                'name': 'drug_interpretation',
+                'method': 'by_ic50',
+                'thresholds': {'susceptible': 0.0, 'intermediate': 10.0, 'resistant': 5.0},
+            }
+        ]
+        with pytest.raises(ValueError, match='non-decreasing'):
+            validate_interpretation_algorithms(algorithms)
+
 
 class TestNumericThresholdMonotonicity:
     """AUD-002: numeric-method thresholds must be non-decreasing with rank.

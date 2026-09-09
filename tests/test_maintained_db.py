@@ -362,6 +362,41 @@ class TestResproVersionCompatibility:
         combined = _strip_ansi(result.output + str(result.exception or ''))
         assert 'incompatible' in combined
 
+    def test_pre_release_version_satisfies_spec(self) -> None:
+        """AUD-002: a PEP 440 dev version satisfies a >= minimum spec.
+
+        ``0.1.3.dev1`` must parse to ``(0, 1, 3)`` and satisfy ``>=0.1.3``;
+        previously ``int('dev1')`` raised ``ValueError`` (not ``RuntimeError``),
+        surfacing as a raw traceback because the CLI only catches ``RuntimeError``.
+        """
+        manifest = _manifest_with_respro_version('>=0.1.3')
+        with (
+            patch('urllib.request.urlopen', return_value=_json_mock(manifest)),
+            patch('respro.io.maintained_db.__version__', '0.1.3.dev1'),
+        ):
+            result = list_maintained_databases()
+        assert result == ['hiv_hivdb', 'hsv_daehne_jaki']
+
+    def test_pre_release_version_below_spec_rejected(self) -> None:
+        """AUD-002: a dev version below the minimum is still rejected."""
+        manifest = _manifest_with_respro_version('>=0.1.3')
+        with (
+            patch('urllib.request.urlopen', return_value=_json_mock(manifest)),
+            patch('respro.io.maintained_db.__version__', '0.1.2.dev1'),
+        ):
+            with pytest.raises(RuntimeError, match='incompatible'):
+                list_maintained_databases()
+
+    def test_alpha_version_parsed(self) -> None:
+        """AUD-002: a PEP 440 alpha version (``0.2.0a1``) parses to ``(0, 2, 0)``."""
+        manifest = _manifest_with_respro_version('>=0.2.0')
+        with (
+            patch('urllib.request.urlopen', return_value=_json_mock(manifest)),
+            patch('respro.io.maintained_db.__version__', '0.2.0a1'),
+        ):
+            result = list_maintained_databases()
+        assert result == ['hiv_hivdb', 'hsv_daehne_jaki']
+
 
 # ── _parse_reference_identifiers ─────────────────────────────────────────────
 

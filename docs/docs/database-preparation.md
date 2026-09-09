@@ -153,9 +153,9 @@ Combines the matched rules for a drug into one overall call. You can configure m
 **Keys:**
 
 - `method` — required; one of `"by_phenotype"`, `"by_score"`, `"by_ic50"`, `"by_fold_ic50"`.
-- `thresholds` — required for `by_score`, `by_ic50`, and `by_fold_ic50`; **not accepted** for `by_phenotype`. An object mapping phenotype labels (or bare ranks `1`–`5`) to threshold values. Must include `"resistant"`; `"intermediate"` is optional. Labels resolve via the [rank vocabulary](rules-format.md#phenotype-normalization), so multi-tier vocabularies like `{1, 3, 5}` work.
+- `thresholds` — required for `by_score`, `by_ic50`, and `by_fold_ic50`; **not accepted** for `by_phenotype`. An object mapping phenotype labels (or bare ranks `1`–`5`) to threshold values. Must include at least one severity label (a phenotype label with rank 1-5). Labels resolve via the [rank vocabulary](rules-format.md#phenotype-normalization), so multi-tier vocabularies like `{1, 3, 5}` work.
     - `by_score`: threshold values are positive integers.
-    - `by_ic50` / `by_fold_ic50`: threshold values are positive numbers. If `intermediate` is set, `resistant` must be greater than `intermediate`. The config must include at least one rank-1 label (e.g. `susceptible`), which is returned when the value falls below all higher-rank breakpoints.
+    - `by_ic50` / `by_fold_ic50`: threshold values are positive numbers. The config must include at least one rank-1 label (e.g. `susceptible`), which is returned when the value falls below all higher-rank breakpoints.
 - `drug_thresholds` — optional list of per-drug overrides (see [Per-drug / per-reference overrides](algorithms.md#per-drug--per-reference-overrides)). Not accepted for `by_phenotype`.
 
 Each `method` may appear at most once; two entries with the same `method` are rejected.

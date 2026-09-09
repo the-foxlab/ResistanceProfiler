@@ -88,9 +88,9 @@ Combines the matched rules for a drug into one overall result. Depending on your
 **Configuration keys:**
 
 - `method` — required; must be `"by_phenotype"`, `"by_score"`, `"by_ic50"`, or `"by_fold_ic50"`.
-- `thresholds` — required for `by_score`, `by_ic50`, and `by_fold_ic50`; **not accepted** for `by_phenotype`. An object mapping phenotype labels (or bare ranks) to threshold values. Must include `"resistant"`; `"intermediate"` is optional. Labels are lowercased + whitespace-stripped and resolved via the rank vocabulary, so multi-tier configs work.
+- `thresholds` — required for `by_score`, `by_ic50`, and `by_fold_ic50`; **not accepted** for `by_phenotype`. An object mapping phenotype labels (or bare ranks) to threshold values. Must include at least one severity label (a phenotype label with rank 1-5); thresholds must be non-decreasing with severity rank. Labels are lowercased + whitespace-stripped and resolved via the rank vocabulary, so multi-tier configs work.
     - `by_score`: threshold values are positive integers.
-    - `by_ic50` / `by_fold_ic50`: threshold values are positive numbers. If `intermediate` is set, `resistant` must be strictly greater than `intermediate`. The config must include at least one rank-1 label (e.g. `susceptible`), which is returned when the value falls below all higher-rank breakpoints.
+    - `by_ic50` / `by_fold_ic50`: threshold values are positive numbers. The config must include at least one rank-1 label (e.g. `susceptible`), which is returned when the value falls below all higher-rank breakpoints.
 - `drug_thresholds` — optional list of per-drug overrides; not accepted for `by_phenotype`. See [Per-drug / per-reference overrides](#per-drug--per-reference-overrides) below.
 
 Each `method` may appear at most once; two entries with the same `method` are rejected.
@@ -131,7 +131,7 @@ Each entry is an object with:
 - `reference` — optional non-empty string; when present, the override applies only to rules/drugs whose reference matches (accession-version tolerant, e.g. `NC_001345.1` matches `NC_001345`)
 - `drug` — required non-empty string; the drug name to override
 - `thresholds` — required object with the same shape and constraints as the parent algorithm's `thresholds`:
-  - must include `resistant`; `intermediate` is optional; integer for `by_score`, positive number for `by_ic50`/`by_fold_ic50` (with `resistant` > `intermediate` when `intermediate` is set)
+  - must include at least one severity label (rank 1-5); integer for `by_score`, positive number for `by_ic50`/`by_fold_ic50`; thresholds must be non-decreasing with severity rank
 
 Resolution precedence (most specific wins):
 

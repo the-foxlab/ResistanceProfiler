@@ -24,6 +24,7 @@ from respro.core.annotation import (
 )
 from respro.db.algorithms import (
     _METHOD_LABEL,
+    _assessment_strength,
     compute_drug_assessment,
     resolve_thresholds_dict,
 )
@@ -373,7 +374,7 @@ def write_html(
     """
     Render and write the HTML report to a file.
 
-    Phase 2 stub - not yet implemented.
+    Render the HTML report via :func:`render_html` and write it to ``output_path``.
 
     :param result: profiling result to report on
     :param output_path: path to write HTML file to
@@ -1916,6 +1917,15 @@ def _build_drug_interpretation_table(
         if ref_name:
             by_drug[drug]['reference_names'].add(ref_name)
         metrics = row.get('metrics', [])
+        # Index metrics by label once per row instead of scanning the list
+        # repeatedly for Score/IC50/Fold IC50. Phenotype keeps a dedicated
+        # scan because it has first-non-unknown semantics across two labels
+        # ('Phenotype' and 'Clinical phenotype') and breaks early. The dict
+        # keeps the FIRST occurrence of each label to match the original
+        # ``for m in metrics: if label == X: ... break`` first-match semantics.
+        metrics_by_label: dict[str, dict] = {}
+        for m in metrics:
+            metrics_by_label.setdefault(m.get('label'), m)
         pheno = ''
         for m in metrics:
             if m.get('label') in ('Phenotype', 'Clinical phenotype'):
@@ -1926,24 +1936,21 @@ def _build_drug_interpretation_table(
             rank = label_to_rank(pheno)
             if rank is not None:
                 by_drug[drug]['rank_counts'][rank] = by_drug[drug]['rank_counts'].get(rank, 0) + 1
-        for m in metrics:
-            if m.get('label') == 'Score':
-                val = _parse_numeric_value((m.get('value') or '').strip())
-                if val is not None:
-                    by_drug[drug]['score_total'] += val
-                break
-        for m in metrics:
-            if m.get('label') == 'IC50':
-                val = _parse_numeric_value((m.get('value') or '').strip())
-                if val is not None:
-                    by_drug[drug]['ic50_values'].append(val)
-                break
-        for m in metrics:
-            if m.get('label') == 'Fold IC50':
-                val = _parse_numeric_value((m.get('value') or '').strip())
-                if val is not None:
-                    by_drug[drug]['fold_ic50_values'].append(val)
-                break
+        score_metric = metrics_by_label.get('Score')
+        if score_metric is not None:
+            val = _parse_numeric_value((score_metric.get('value') or '').strip())
+            if val is not None:
+                by_drug[drug]['score_total'] += val
+        ic50_metric = metrics_by_label.get('IC50')
+        if ic50_metric is not None:
+            val = _parse_numeric_value((ic50_metric.get('value') or '').strip())
+            if val is not None:
+                by_drug[drug]['ic50_values'].append(val)
+        fold_ic50_metric = metrics_by_label.get('Fold IC50')
+        if fold_ic50_metric is not None:
+            val = _parse_numeric_value((fold_ic50_metric.get('value') or '').strip())
+            if val is not None:
+                by_drug[drug]['fold_ic50_values'].append(val)
 
     # Column presence is determined by actual hit data, not zero-hit entries
     has_phenotypes = any(
@@ -2017,15 +2024,41 @@ def _build_drug_interpretation_table(
             ref_names = drug_data.get('reference_names') or set()
             if not ref_names:
                 ref_names = {result.reference_name} if result.reference_name else set()
-            # Select the reference deterministically (sorted) so per-(reference,
+            # Iterate references deterministically (sorted) so per-(reference,
             # drug) override resolution is stable across process invocations
             # (set iteration order depends on PYTHONHASHSEED).
-            selected_reference = sorted(ref_names)[0] if ref_names else None
-            final_assessment, method_assessments = compute_drug_assessment(
-                drug_data, drug_interp_configs,
-                reference_name=selected_reference,
-                drug_name=drug_name or None,
-            )
+            sorted_refs = sorted(ref_names) if ref_names else [None]
+            if len(sorted_refs) > 1:
+                # Multi-reference: resolve against each reference and keep the
+                # strongest-wins assessment (highest _assessment_strength).
+                best_assessment = ''
+                best_method_assessments: list[dict] = []
+                winning_reference = sorted_refs[0]
+                # Baseline: the weakest possible strength (susceptible/unknown).
+                # _assessment_strength('') == 0, so any real assessment wins.
+                best_strength = _assessment_strength('')
+                for candidate_ref in sorted_refs:
+                    candidate_assessment, candidate_methods = compute_drug_assessment(
+                        drug_data, drug_interp_configs,
+                        reference_name=candidate_ref,
+                        drug_name=drug_name or None,
+                    )
+                    strength = _assessment_strength(candidate_assessment)
+                    if strength > best_strength:
+                        best_strength = strength
+                        best_assessment = candidate_assessment
+                        best_method_assessments = candidate_methods
+                        winning_reference = candidate_ref
+                final_assessment = best_assessment
+                method_assessments = best_method_assessments
+                selected_reference = winning_reference
+            else:
+                selected_reference = sorted_refs[0]
+                final_assessment, method_assessments = compute_drug_assessment(
+                    drug_data, drug_interp_configs,
+                    reference_name=selected_reference,
+                    drug_name=drug_name or None,
+                )
             drug_data['assessment'] = final_assessment
             drug_data['method_assessments'] = method_assessments
             # Add badge classes for per-method assessment styling

@@ -402,10 +402,13 @@ def _validate_threshold_values(
 ) -> None:
     """Validate a thresholds dict's values for one algorithm scope.
 
-    :param thresholds: thresholds dict (must already contain ``resistant``)
+    Thresholds must be non-decreasing with severity rank; this is enforced by
+    :func:`_require_monotonic_thresholds` (rank-generic, covers all tier pairs).
+
+    :param thresholds: thresholds dict with canonical label keys
     :param is_numeric: True for by_ic50/by_fold_ic50 (non-negative numbers for
-        rank-1 labels, positive numbers for higher ranks, resistant > intermediate);
-        False for by_score (positive integers)
+        rank-1 labels, positive numbers for higher ranks); False for by_score
+        (positive integers)
     :param prefix: descriptive prefix for error messages
     """
     if is_numeric:
@@ -421,13 +424,6 @@ def _validate_threshold_values(
                 raise ValueError(
                     f'{prefix}[{key!r}] must be a positive number, got {val!r}.'
                 )
-        intermediate = thresholds.get('intermediate')
-        resistant = thresholds.get('resistant')
-        if intermediate is not None and resistant <= intermediate:
-            raise ValueError(
-                f'{prefix}: "resistant" threshold must be strictly greater than '
-                '"intermediate" for numeric methods.'
-            )
         _require_monotonic_thresholds(thresholds, prefix=prefix)
         return
 
@@ -486,9 +482,9 @@ def _validate_drug_thresholds_overrides(
 ) -> None:
     """Validate the optional ``drug_thresholds`` override list on a config.
 
-    Each entry is ``{reference?, drug, thresholds: {resistant, intermediate?}}``.
-    For ``drug_interpretation`` only ``resistant`` is required and
-    ``intermediate`` is optional.
+    Each entry is ``{reference?, drug, thresholds}`` where the override's
+    ``thresholds`` must include at least one severity label (rank 1–5); the
+    thresholds must be non-decreasing with severity rank.
 
     :param config: algorithm config dict
     :param is_numeric: True when threshold values must be positive numbers
@@ -761,9 +757,8 @@ def compute_drug_assessment(
     """
     Compute per-method assessments and a final merged assessment for one drug.
 
-    :param drug_data: dict with keys ``resistant_count``, ``intermediate_count``,
-        ``sensitive_count``, ``contradictory_count``, ``score_total``,
-        ``ic50_values``, ``fold_ic50_values``, ``hit_count``
+    :param drug_data: dict with keys ``rank_counts`` (dict[int, int]),
+        ``score_total``, ``ic50_values``, ``fold_ic50_values``, ``hit_count``
     :param configs: list of validated ``drug_interpretation`` config dicts
     :param reference_name: observed reference name for the drug; when provided together
         with ``drug_name``, per-``(reference, drug)`` overrides take precedence over
