@@ -1,7 +1,7 @@
 [timeouts]
-pubchem = 5
-pubmed = 5
-crossref = 5
+pubchem = 7
+pubmed = 7
+crossref = 7
 
 [urls]
 pubchem_compound_page = 'https://pubchem.ncbi.nlm.nih.gov/compound/{cid}'
