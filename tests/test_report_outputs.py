@@ -121,10 +121,13 @@ class TestCombinedStatesReport:
         ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
         rows = ctx['all_mutations']['rows']
         assert len(rows) == 2
-        # A->T row: single K2M (0.5) + combined K2I (0.5); K2M (0.5)
+        # A->T row: single K2M (0.5) + combined K2I (0.5). The combined state
+        # that also produces M is deduped (same amino acid as the single).
         a_row = next(row for row in rows if row['aa_change'] == 'K2M')
         assert 'K2M (0.5)' in a_row['aa_effects']
         assert 'K2I (0.5)' in a_row['aa_effects']
+        # K2M must appear exactly once (no duplication).
+        assert a_row['aa_effects'].count('K2M') == 1
         # G->T row: promoted single K2I (0.5), no combined states
         g_row = next(row for row in rows if row['aa_change'] == 'K2I')
         assert g_row['aa_effects'] == 'K2I (0.5)'

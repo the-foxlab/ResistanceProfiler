@@ -570,7 +570,11 @@ document.addEventListener('DOMContentLoaded', function () {
           function (th) { return th.textContent.trim(); }
         );
         const hasUserRefCol = headerTexts.indexOf('NT change user reference') !== -1;
-        const hasCombiCol = headerTexts.indexOf('Combined SNP codon') !== -1;
+        // The "Combined SNP codon" header carries a nested info span, so its
+        // textContent is not the bare label — match by prefix instead.
+        const hasCombiCol = headerTexts.some(function (t) {
+          return t.indexOf('Combined SNP codon') === 0;
+        });
         const headers = ['Feature', 'NT change stored reference'];
         if (hasUserRefCol) {
           headers.push('NT change user reference');
@@ -598,8 +602,9 @@ document.addEventListener('DOMContentLoaded', function () {
             : '';
           const aaChange = (row.querySelector('.mutation-aa')?.textContent || '').trim();
           const consequence = (row.querySelector('.mutation-consequence')?.textContent || '').trim();
+          // Export a clean true/false classifier rather than the ✓/— glyph shown in the UI.
           const combiFlag = hasCombiCol
-            ? (row.querySelector('.mutation-combined-flag')?.textContent || '').trim()
+            ? (row.querySelector('.mutation-combined-flag .combined-codon-yes') ? 'true' : 'false')
             : '';
           const alleleFreq = (row.querySelector('.mutation-freq')?.textContent || '').trim();
 

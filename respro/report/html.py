@@ -484,14 +484,22 @@ def _build_all_mutations_rows(
         # is > 0), followed by every accepted combined-state effect. For a
         # non-combined variant this is just the single effect at the variant
         # frequency. For a combined member whose single is Fréchet-impossible
-        # (lower=0) only the combined states are shown.
+        # (lower=0) only the combined states are shown. A combined state that
+        # produces the same amino acid as the single-exchange is omitted from the
+        # display to avoid duplicate entries (the single-exchange is the more
+        # direct interpretation of that amino-acid effect).
         aa_effects_parts: list[str] = []
+        single_label = ''
         if ann.alt_aa and ann.single_exchange_lower > 0.0:
+            single_label = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             aa_effects_parts.append(
-                f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa} ({round(ann.single_exchange_lower, 3)})'
+                f'{single_label} ({round(ann.single_exchange_lower, 3)})'
             )
         for s in ann.combined_states:
             if s.accepted:
+                combined_label = f'{ann.ref_aa}{ann.codon_pos + 1}{s.alt_aa}'
+                if combined_label == single_label:
+                    continue
                 aa_effects_parts.append(
                     f'{ann.ref_aa}{ann.codon_pos + 1}{s.alt_aa} ({round(s.lower, 3)})'
                 )

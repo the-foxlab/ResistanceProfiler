@@ -308,8 +308,8 @@ def write_json(
 # (annotated variant × matched rule); non-hit variants also appear with empty
 # rule columns. See write_tsv for the row-emission rules.
 TSV_COLUMNS: tuple[str, ...] = (
-    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
-    'af', 'af_bin', 'depth', 'consequence', 'aa_effects',
+    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
+    'af', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
     'source', 'publications',
@@ -395,13 +395,6 @@ def _format_publications_tsv(publications: list[Publication]) -> str:
     return '|'.join(ids)
 
 
-def _aa_effect(ann: AnnotatedVariant) -> str:
-    """Return the amino-acid change string (or the feature name when AA is missing)."""
-    if ann.ref_aa and ann.alt_aa:
-        return f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
-    return ann.feature_name
-
-
 def _aa_effects(ann: AnnotatedVariant) -> str:
     """Format all amino-acid effects (single + combined) for TSV/JSON export.
 
@@ -410,15 +403,22 @@ def _aa_effects(ann: AnnotatedVariant) -> str:
     frequency ``single_exchange_lower`` is > 0), followed by every accepted
     combined-state effect. For a single-SNP variant this is just the single
     effect at the variant frequency. For a combined member whose single is
-    Fréchet-impossible (lower=0) only the combined states are shown.
+    Fréchet-impossible (lower=0) only the combined states are shown. A combined
+    state that produces the same amino acid as the single-exchange is omitted to
+    avoid duplicate entries.
     """
     parts: list[str] = []
+    single_label = ''
     if ann.alt_aa and ann.single_exchange_lower > 0.0:
-        parts.append(f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa} ({ann.single_exchange_lower})')
+        single_label = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+        parts.append(f'{single_label} ({round(ann.single_exchange_lower, 3)})')
     for state in ann.combined_states:
         if not state.accepted:
             continue
-        parts.append(f'{ann.ref_aa}{ann.codon_pos + 1}{state.alt_aa} ({state.lower})')
+        combined_label = f'{ann.ref_aa}{ann.codon_pos + 1}{state.alt_aa}'
+        if combined_label == single_label:
+            continue
+        parts.append(f'{combined_label} ({round(state.lower, 3)})')
     return '; '.join(parts)
 
 
@@ -460,10 +460,8 @@ def _effect_as_resistant_tsv_rows(
             'gene': gene,
             'nt_mut': nt_change_stored(ann),
             'nt_mut_user': nt_change_user(ann),
-            'aa_effect': _aa_effect(ann),
             'strand': strand_by_feature.get(ann.feature_name, ''),
-            'af': repr(ann.variant.allele_freq),
-            'af_bin': ann.af_bin,
+            'af': repr(round(ann.variant.allele_freq, 3)),
             'depth': str(ann.variant.depth),
             'consequence': display_consequence(ann),
             'aa_effects': _aa_effects(ann),
@@ -531,21 +529,18 @@ def write_tsv(
             'gene': _gene(ann),
             'nt_mut': nt_change_stored(ann),
             'nt_mut_user': nt_change_user(ann),
-            'aa_effect': _aa_effect(ann),
             'strand': strand_by_feature.get(ann.feature_name, ''),
-            'af': repr(ann.variant.allele_freq),
-            'af_bin': ann.af_bin,
+            'af': repr(round(ann.variant.allele_freq, 3)),
             'depth': str(ann.variant.depth),
             'consequence': display_consequence(ann),
             'aa_effects': _aa_effects(ann),
         }
 
     def _rule_row(
-        ann: AnnotatedVariant, rule: ResistanceRule, aa_effect: str
+        ann: AnnotatedVariant, rule: ResistanceRule
     ) -> dict[str, str]:
         row = _base_row(ann)
         row.update({
-            'aa_effect': aa_effect,
             'in_database': 'yes',
             'rule_type': 'single',
             'drug': rule.drug_name,
@@ -563,12 +558,7 @@ def write_tsv(
         matches = ann.non_formula_component_rule_matches
         if matches:
             for rule in matches:
-                # Wildcard insertion rules prefix the AA change so the rule type and
-                # the actual allele are both visible (mirrors _build_database_hits_rows).
-                aa = _aa_effect(ann)
-                if rule.mutation == 'INS_any':
-                    aa = f'INS_any ({aa})'
-                rows.append(_rule_row(ann, rule, aa))
+                rows.append(_rule_row(ann, rule))
         elif id(ann) in formula_member_ann_ids:
             # Member-only variant (no single rule of its own) but part of a fired formula.
             row = _base_row(ann)
@@ -611,23 +601,20 @@ def write_tsv(
         genes = ';'.join(_gene(a) for a in members)
         nt_muts = ';'.join(nt_change_stored(a) for a in members)
         nt_users = ';'.join(nt_change_user(a) for a in members)
-        aa_effects = ';'.join(_aa_effect(a) for a in members)
+        aa_effects = ';'.join(_aa_effects(a) for a in members)
         strands = ';'.join(strand_by_feature.get(a.feature_name, '') for a in members)
-        afs = ';'.join(repr(a.variant.allele_freq) for a in members)
-        af_bins = ';'.join(a.af_bin for a in members)
+        afs = ';'.join(repr(round(a.variant.allele_freq, 3)) for a in members)
         first_chrom = members[0].variant.chrom
         rows.append({
             'reference': ref_by_chrom.get(first_chrom, ''),
             'gene': genes,
             'nt_mut': nt_muts,
             'nt_mut_user': nt_users,
-            'aa_effect': aa_effects,
             'strand': strands,
             'af': afs,
-            'af_bin': af_bins,
             'depth': '',  # combined row spans multiple variants; no single depth
             'consequence': ';'.join(a.consequence for a in members),
-            'aa_effects': '',
+            'aa_effects': aa_effects,
             'in_database': 'yes',
             'rule_type': 'formula',
             'drug': rs.drug_name,

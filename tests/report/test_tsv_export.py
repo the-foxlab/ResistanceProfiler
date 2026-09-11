@@ -29,10 +29,10 @@ from respro.report._row_helpers import (
 )
 from respro.report.non_html_exports import export_results, write_tsv
 
-# Canonical 21-column header, in order.
+# Canonical 19-column header, in order.
 TSV_COLUMNS = [
-    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
-    'af', 'af_bin', 'depth', 'consequence', 'aa_effects',
+    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
+    'af', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
     'source', 'publications',
@@ -44,8 +44,8 @@ _PLACEHOLDER = 'n/a'
 # Hits table). Conditional columns (phenotype group, ic50, fold_ic50, score,
 # publications) are dropped when no row carries a real value.
 _TSV_ALWAYS_COLUMNS = [
-    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
-    'af', 'af_bin', 'depth', 'consequence', 'aa_effects',
+    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
+    'af', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'source',
 ]
@@ -218,9 +218,11 @@ class TestAaEffectsColumn:
         effects = rows[0][col]
         # Single exchange first (at its amino-acid frequency = allele_freq 0.95).
         assert 'K2M (0.95)' in effects
-        # Combined states follow.
+        # Combined state I follows.
         assert 'K2I (0.5)' in effects
-        assert 'K2M (0.5)' in effects
+        # The combined state that also produces M is deduped (same AA as single).
+        assert 'K2M (0.5)' not in effects
+        assert effects.count('K2M') == 1
 
     def test_combined_member_zero_single_omits_single(self, tmp_path: Path) -> None:
         """A combined member whose single-exchange is Fréchet-impossible
@@ -287,7 +289,7 @@ class TestSingleRuleRows:
         assert fos[header.index('publications')] == '99'  # pubmed_id fallback
         # Shared variant columns identical across both rows.
         assert acy[header.index('gene')] == fos[header.index('gene')] == 'gag'
-        assert acy[header.index('aa_effect')] == fos[header.index('aa_effect')] == 'K3E'
+        assert acy[header.index('aa_effects')] == fos[header.index('aa_effects')]
         assert acy[header.index('in_database')] == fos[header.index('in_database')] == 'yes'
         assert acy[header.index('strand')] == fos[header.index('strand')] == '+'
 
@@ -348,10 +350,11 @@ class TestFormulaRows:
         formula_rows = [row for row in rows if row[header.index('rule_type')] == 'formula']
         assert len(formula_rows) == 1
         row = formula_rows[0]
-        # Members joined with ';' in gene/nt_mut/aa_effect/af/strand.
+        # Members joined with ';' in gene/nt_mut/aa_effects/af/strand.
         assert row[header.index('gene')] == 'gag;gag'
         assert ';' in row[header.index('nt_mut')]
-        assert row[header.index('aa_effect')] == 'K3E;A5T'
+        assert 'K3E' in row[header.index('aa_effects')]
+        assert 'A5T' in row[header.index('aa_effects')]
         assert ';' in row[header.index('af')]
         assert row[header.index('strand')] == '+;+'
         # Metrics come from the combined rule set, not members.
@@ -416,7 +419,7 @@ class TestNonHitAndFastaRows:
         row = rows[0]
         assert row[header.index('strand')] == '+'
         # The remaining structural columns are still present.
-        for col in ('gene', 'nt_mut', 'aa_effect', 'af', 'af_bin',
+        for col in ('gene', 'nt_mut', 'aa_effects', 'af',
                     'consequence', 'in_database', 'rule_type', 'drug', 'source'):
             assert col in header
 
@@ -430,7 +433,7 @@ class TestNonHitAndFastaRows:
 
 
 class TestInsAnyWildcard:
-    def test_ins_any_prefixes_aa_effect(self, tmp_path: Path) -> None:
+    def test_ins_any_rule_row_emitted(self, tmp_path: Path) -> None:
         rule = _rule(rid=1, drug='Acyclovir', mutation='INS_any')
         ann = _ann(alt_aa='E', rule_matches=[rule])
         r = _result([ann])
@@ -438,7 +441,8 @@ class TestInsAnyWildcard:
         write_tsv(r, out)
         header, rows = _read_tsv(out)
         row = [row for row in rows if row[header.index('rule_type')] == 'single'][0]
-        assert row[header.index('aa_effect')] == 'INS_any (K3E)'
+        # The aa_effects column carries the amino-acid change.
+        assert 'K3E' in row[header.index('aa_effects')]
 
 
 class TestCombinedCodonEvent:
@@ -531,7 +535,7 @@ class TestEffectAsResistantRows:
         assert row[header.index('source')] == 'Metadata algorithm'
         assert row[header.index('in_database')] == 'yes'
         assert row[header.index('gene')] == 'UL23'
-        assert row[header.index('aa_effect')] == 'P7PfsX'
+        assert 'P7PfsX' in row[header.index('aa_effects')]
         # Effect-as-resistant rows carry no numeric metrics or clinical
         # phenotype, so those conditional columns are dropped (no real value in any
         # row). phenotype is kept because phenotype='resistant' is a real value.
@@ -762,8 +766,8 @@ class TestEmptyColumnDropping:
         out = tmp_path / 'r.results.tsv'
         write_tsv(r, out)
         header, _ = _read_tsv(out)
-        for col in ('reference', 'gene', 'nt_mut', 'aa_effect', 'strand', 'af',
-                    'af_bin', 'depth', 'consequence', 'in_database', 'rule_type',
+        for col in ('reference', 'gene', 'nt_mut', 'strand', 'af',
+                    'depth', 'consequence', 'aa_effects', 'in_database', 'rule_type',
                     'drug', 'source'):
             assert col in header, f'{col} should always be present'
 

@@ -691,7 +691,7 @@
                     Combined SNP codon
                     <span class="db-hit-freq-info">
                       <img class="db-hit-info-icon" src="{{ context.all_mutations.info_icon }}" alt="info" width="13" height="13">
-                      <div class="db-hit-info-panel">Yes when this SNP shares its codon with one or more other SNPs. The AA effects column then lists the combined outcomes alongside the single-exchange one.</div>
+                      <div class="db-hit-info-panel">Yes when this SNP shares its codon with one or more other SNPs. The combined outcome is called only when the SNPs' minimum frequency overlap (Fréchet lower bound) clears the configured forced fraction.</div>
                     </span>
                   </th>
                   {% endif %}
