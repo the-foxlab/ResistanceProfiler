@@ -21,6 +21,7 @@ from respro.cli.init import init_project
 from respro.db.features import load_features_for_reference
 from respro.db.models import (
     AnnotatedVariant,
+    CodonState,
     CoverageGap,
     FormulaRuleHit,
     ProfilingResult,
@@ -599,6 +600,69 @@ class TestResultsPersistence:
         assert ann.ref_aa == 'K'
         assert ann.is_resistance_hit
         assert ann.rule_matches[0].drug_name == 'drugx'
+
+    def test_combined_states_round_trip_through_results_db(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """combined_states are serialized to JSON on save and deserialized on load."""
+        result = self._make_result()
+        result.annotations[0].combined_states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            CodonState(alt_codon='ATG', alt_aa='M', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0,)),
+        ]
+        result.annotations[0].is_combined_codon_event = True
+        result.annotations[0].combined_member_count = 2
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+
+        row = results_conn.execute(
+            'SELECT combined_states FROM variant_result WHERE run_id = 1'
+        ).fetchone()
+        blob = json.loads(row['combined_states'])
+        assert len(blob) == 2
+        assert blob[0]['alt_codon'] == 'ATT'
+        assert blob[0]['alt_aa'] == 'I'
+        assert blob[0]['lower'] == 0.5
+
+        _, variant_rows = load_run(results_conn, 1)
+        annotations = reconstruct_annotations(variant_rows)
+        ann = annotations[0]
+        assert ann.is_combined_codon_event is True
+        assert ann.combined_member_count == 2
+        assert len(ann.combined_states) == 2
+        assert ann.combined_states[0].alt_codon == 'ATT'
+        assert ann.combined_states[0].alt_aa == 'I'
+        assert ann.combined_states[0].lower == 0.5
+        assert ann.combined_states[0].accepted is True
+        assert ann.combined_states[1].alt_codon == 'ATG'
+        assert ann.combined_states[1].member_indices == (0,)
+
+    def test_empty_combined_states_round_trip(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """A single-SNP annotation with no combined_states round-trips as empty."""
+        result = self._make_result()
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+        _, variant_rows = load_run(results_conn, 1)
+        annotations = reconstruct_annotations(variant_rows)
+        assert annotations[0].combined_states == []
+
+    def test_legacy_db_without_combined_states_column_opens(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """An existing results DB without the combined_states column opens after migration."""
+        result = self._make_result()
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+        results_conn.close()
+        # Simulate a legacy DB by dropping the column.
+        legacy_path = tmp_path / 'results.db'
+        conn = sqlite3.connect(legacy_path)
+        conn.execute('ALTER TABLE variant_result DROP COLUMN combined_states')
+        conn.commit()
+        conn.close()
+        # Re-init adds the missing column.
+        init_results_db(legacy_path)
+        # The DB opens and loads without error.
+        conn = sqlite3.connect(legacy_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute('SELECT * FROM variant_result WHERE run_id = 1').fetchone()
+        assert row['combined_states'] == '[]'
+        conn.close()
 
     def test_save_run_persists_formula_rule_hits(self, results_conn, minimal_project_conn, tmp_path) -> None:
         save_run(

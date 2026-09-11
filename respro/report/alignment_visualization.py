@@ -229,16 +229,31 @@ def _apply_vcf_overlay(
     native_pos = list(native_positions)
     native_anchor_pos = list(native_anchor_positions)
 
-    # Combined codon events: overlay all codon positions where ref differs from alt.
+    # Combined codon events: overlay only the member's own single exchange when
+    # per-SNP combined_states are available (new per-SNP model). For legacy
+    # single-merged-row annotations (no combined_states), overlay all codon
+    # positions where ref differs from alt.
     if ann.is_combined_codon_event and len(ann.ref_codon) == 3 and len(ann.alt_codon) == 3:
-        for idx, (ref_nt, alt_nt) in enumerate(zip(ann.ref_codon, ann.alt_codon)):
-            if ref_nt == alt_nt:
-                continue
-            coding_target = alignment.codon_start + ann.codon_pos * 3 + idx
-            # Find the alignment index for this coding position in the window
+        anchor_native = _variant_native_pos(ann, alignment)
+        own_coding_targets: list[int] = []
+        if ann.combined_states:
+            for idx in range(len(ann.ref_codon)):
+                target_coding_pos = alignment.codon_start + ann.codon_pos * 3 + idx
+                target_native_pos = (
+                    alignment.feature_length - 1 - target_coding_pos
+                    if alignment.strand == '-' else target_coding_pos
+                )
+                if target_native_pos == anchor_native:
+                    own_coding_targets.append(target_coding_pos)
+        if not own_coding_targets:
+            for idx, (ref_nt, alt_nt) in enumerate(zip(ann.ref_codon, ann.alt_codon)):
+                if ref_nt == alt_nt:
+                    continue
+                own_coding_targets.append(alignment.codon_start + ann.codon_pos * 3 + idx)
+        for coding_target in own_coding_targets:
             for aln_idx, cpos in enumerate(coding_pos):
                 if cpos == coding_target:
-                    display_alt = reverse_complement(alt_nt) if alignment.strand == '-' else alt_nt
+                    display_alt = reverse_complement(ann.variant.alt) if alignment.strand == '-' else ann.variant.alt
                     query_chars[aln_idx] = display_alt
                     break
         return ''.join(ref_chars), ''.join(query_chars), coding_pos, native_pos, native_anchor_pos
@@ -407,10 +422,24 @@ def _affected_nt_positions(
         deleted_len = ref_len - alt_len
         return set(range(anchor_pos + 1, anchor_pos + 1 + deleted_len))
 
-    # Combined codon events: highlight all positions where ref_codon differs from alt_codon.
-    # Must come before the generic equal-length branch because combined events have
-    # single-base variant.ref/variant.alt but need codon-level highlighting.
+    # Combined codon events: highlight only the member's own single exchange when
+    # per-SNP combined_states are available (new per-SNP model). For legacy
+    # single-merged-row annotations (no combined_states), highlight all positions
+    # where ref_codon differs from alt_codon.
     if ann.is_combined_codon_event and len(ann.ref_codon) == 3 and len(ann.alt_codon) == 3:
+        if ann.combined_states:
+            # Per-SNP model: highlight only this member's own anchor exchange.
+            own: set[int] = set()
+            for idx in range(len(ann.ref_codon)):
+                coding_pos = codon_nt_start + idx
+                native_pos = (
+                    alignment.feature_length - 1 - coding_pos
+                    if alignment.strand == '-' else coding_pos
+                )
+                if native_pos == anchor_pos:
+                    own.add(native_pos)
+            if own:
+                return own
         affected: set[int] = set()
         for idx, (ref_nt, alt_nt) in enumerate(zip(ann.ref_codon, ann.alt_codon)):
             if ref_nt == alt_nt:
@@ -563,6 +592,8 @@ def build_alignment_html(
     )
     query_label = 'FASTA' if ann.is_fasta_mode else 'Query'
 
+    partner_note = _partner_changes_note(ann, alignment)
+
     return Markup(
         "<div class='aln-block'>"
         f"<div class='aln-meta'>{escape(orientation_note)}</div>"
@@ -572,8 +603,40 @@ def build_alignment_html(
         f"{match_fmt}</span></div>"
         f"<div class='aln-line'><span class='aln-label'>{escape(query_label)}</span><span class='aln-seq'>"
         f"{query_fmt}</span></div>"
+        f"{partner_note}"
         "</div>"
     )
+
+
+def _partner_changes_note(ann: AnnotatedVariant, alignment: FeatureAlignment) -> str:
+    """Build a 'partner codon changes' note for combined-codon members.
+
+    For a per-SNP combined-codon annotation (``combined_states`` populated), the
+    member's alignment highlights only its own single exchange. The other codon
+    exchanges — carried by partner SNPs in the same codon — are surfaced here as a
+    text label so the reader sees the full combinatorial context.
+    """
+    if not ann.is_combined_codon_event or not ann.combined_states:
+        return ''
+    if len(ann.ref_codon) != 3 or len(ann.alt_codon) != 3:
+        return ''
+    anchor_native = _variant_native_pos(ann, alignment)
+    partners: list[str] = []
+    for idx, (ref_nt, alt_nt) in enumerate(zip(ann.ref_codon, ann.alt_codon)):
+        if ref_nt == alt_nt:
+            continue
+        coding_pos = alignment.codon_start + ann.codon_pos * 3 + idx
+        native_pos = (
+            alignment.feature_length - 1 - coding_pos
+            if alignment.strand == '-' else coding_pos
+        )
+        if native_pos == anchor_native:
+            continue
+        partners.append(f'{ref_nt}>{alt_nt}')
+    if not partners:
+        return ''
+    label = 'Partner codon changes: ' + ', '.join(partners)
+    return f"<div class='aln-partner-note'>{escape(label)}</div>"
 
 
 def _deleted_nt_length(ann: AnnotatedVariant) -> int:

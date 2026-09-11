@@ -215,6 +215,18 @@ def write_json(
             'drug_hits': json.dumps(ann.drug_hits_json()),
             'is_combined_codon_event': ann.is_combined_codon_event,
             'combined_member_count': ann.combined_member_count,
+            'combined_states': json.dumps([
+                {
+                    'alt_codon': s.alt_codon,
+                    'alt_aa': s.alt_aa,
+                    'lower': s.lower,
+                    'upper': s.upper,
+                    'forced_fraction': s.forced_fraction,
+                    'accepted': s.accepted,
+                    'member_indices': list(s.member_indices),
+                }
+                for s in ann.combined_states
+            ]),
         })
 
     coverage_rows = [
@@ -295,7 +307,8 @@ def write_json(
 # rule columns. See write_tsv for the row-emission rules.
 TSV_COLUMNS: tuple[str, ...] = (
     'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
-    'af', 'af_bin', 'depth', 'consequence', 'in_database', 'rule_type',
+    'af', 'af_bin', 'depth', 'consequence', 'combinatorial_aa_effects',
+    'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
     'source', 'publications',
 )
@@ -387,6 +400,22 @@ def _aa_effect(ann: AnnotatedVariant) -> str:
     return ann.feature_name
 
 
+def _combinatorial_aa_effects(ann: AnnotatedVariant) -> str:
+    """Format the Fréchet-accepted combined-state AA effects for TSV export.
+
+    Each accepted state is rendered as ``<ref><pos><alt> (<lower>)`` and joined
+    with ``; ``. Returns an empty string for single-SNP annotations.
+    """
+    if not ann.combined_states:
+        return ''
+    parts: list[str] = []
+    for state in ann.combined_states:
+        if not state.accepted:
+            continue
+        parts.append(f'{ann.ref_aa}{ann.codon_pos + 1}{state.alt_aa} ({state.lower})')
+    return '; '.join(parts)
+
+
 def _build_strand_by_feature(result: ProfilingResult) -> dict[str, str]:
     """Map feature_name -> strand from all ReferenceGroup features."""
     strand_by_feature: dict[str, str] = {}
@@ -431,6 +460,7 @@ def _effect_as_resistant_tsv_rows(
             'af_bin': ann.af_bin,
             'depth': str(ann.variant.depth),
             'consequence': ann.consequence,
+            'combinatorial_aa_effects': _combinatorial_aa_effects(ann),
             'in_database': 'yes',
             'rule_type': 'single',
             'drug': drug_name,
@@ -501,6 +531,7 @@ def write_tsv(
             'af_bin': ann.af_bin,
             'depth': str(ann.variant.depth),
             'consequence': ann.consequence,
+            'combinatorial_aa_effects': _combinatorial_aa_effects(ann),
         }
 
     def _rule_row(
@@ -590,6 +621,7 @@ def write_tsv(
             'af_bin': af_bins,
             'depth': '',  # combined row spans multiple variants; no single depth
             'consequence': ';'.join(a.consequence for a in members),
+            'combinatorial_aa_effects': '',
             'in_database': 'yes',
             'rule_type': 'formula',
             'drug': rs.drug_name,

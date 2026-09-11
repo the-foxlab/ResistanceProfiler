@@ -56,6 +56,13 @@ class CliSimilarityConfig:
 
 
 @dataclass(frozen=True)
+class CliCodonConfig:
+    """Conservative same-codon SNP combination policy (Fréchet intersection)."""
+
+    min_cooccurrence_codon_fraction: float
+
+
+@dataclass(frozen=True)
 class CliAfBinsConfig:
     """Allele-frequency classification bin boundaries (lower_inclusive, upper_inclusive)."""
 
@@ -98,6 +105,7 @@ class CliConfig:
     parsing: CliParsingConfig
     matching: CliMatchingConfig
     similarity: CliSimilarityConfig
+    codon: CliCodonConfig
     af_bins: CliAfBinsConfig
     af_bins_fasta: CliAfBinsConfig
     alignment: CliAlignmentConfig
@@ -112,6 +120,7 @@ def _load_cli_config() -> CliConfig:
     parsing = payload['parsing']
     matching = payload['matching']
     similarity = payload['similarity']
+    codon = payload['codon']
 
     alignment = payload['alignment']
 
@@ -150,6 +159,9 @@ def _load_cli_config() -> CliConfig:
         similarity=CliSimilarityConfig(
             high=int(similarity['high']),
             moderate=int(similarity['moderate']),
+        ),
+        codon=CliCodonConfig(
+            min_cooccurrence_codon_fraction=float(codon['min_cooccurrence_codon_fraction']),
         ),
         af_bins=_bins(payload['af_bins']),
         af_bins_fasta=_bins(payload['af_bins_fasta']),

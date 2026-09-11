@@ -255,6 +255,40 @@ class ResistanceRuleSet:
 
 
 @dataclass
+class CodonState:
+    """One candidate codon state from Fréchet-intersection inference.
+
+    Represents a possible exact nucleotide codon arising from same-codon SNPs,
+    with the sharp Fréchet bounds on its guaranteed co-occurrence frequency.
+
+    - ``alt_codon``: the complete three-base candidate codon.
+    - ``alt_aa``: translated single-letter amino acid (``'?'`` if untranslatable).
+    - ``lower``: Fréchet lower bound — the minimum guaranteed frequency of this
+      exact codon state. This is the only frequency reported for combined events;
+      it is a conservative minimum, NOT a phase-derived point estimate.
+    - ``upper``: Fréchet upper bound — the maximum possible co-occurrence.
+    - ``forced_fraction``: ``lower / upper`` — the minimum fraction of the rarest
+      required condition forced into this codon state.
+    - ``accepted``: True when ``lower > eps`` and ``forced_fraction >= threshold``.
+    - ``member_indices``: indices (into the input variant list) of the SNPs that
+      differ from the reference in this state.
+
+    The calculation uses sharp Fréchet intersection bounds and does NOT infer
+    physical phase. The acceptance threshold is an explicit conservative
+    interpretation policy (passing means the guaranteed portion is at least
+    twice the potentially unshared portion).
+    """
+
+    alt_codon: str
+    alt_aa: str
+    lower: float
+    upper: float
+    forced_fraction: float
+    accepted: bool
+    member_indices: tuple[int, ...]
+
+
+@dataclass
 class VariantCall:
     """A single variant extracted from a VCF record (0-based internal position).
 
@@ -292,6 +326,11 @@ class AnnotatedVariant:
     consequence: str = ''
     is_combined_codon_event: bool = False
     combined_member_count: int = 1
+    combined_states: list[CodonState] = field(default_factory=list)
+    # Per matched rule, the effect frequency to display/bin in the report. Maps
+    # rule.id -> lower bound. For single-exchange hits the value is the row's own
+    # allele_freq; for combined-state hits it is the state's Fréchet ``lower``.
+    rule_effect_lower: dict[int, float] = field(default_factory=dict)
     af_bin: str = ''
     is_fasta_mode: bool = False  # True when derived from consensus FASTA, not a VCF
     rule_matches: list[ResistanceRule] = field(default_factory=list)

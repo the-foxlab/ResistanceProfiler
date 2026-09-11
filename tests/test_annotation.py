@@ -2,11 +2,15 @@
 Tests for codon-aware annotation logic.
 """
 
+import pytest
+
 from respro.cli.profile_helpers import _suppress_ruleless_overlap_annotations
 from respro.core.annotation import (
+    CodonState,
     _annotate_combined_snp_codon,
     _annotate_variant_in_feature,
     _classify_snp_consequence,
+    _compute_codon_frechet_states,
     annotate_variants,
     assign_af_bins,
     normalize_mutation,
@@ -204,7 +208,13 @@ class TestAnnotateVariantsForward:
         assert ann.consequence == 'frameshift'
 
     def test_combines_two_high_af_snps_in_same_codon(self, tiny_feature, tiny_ref_seq):
-        """Two SNPs in one codon with AF > 0.7 are annotated as one codon event."""
+        """Two SNPs in one codon emit two per-SNP rows, each with combined_states.
+
+        AAA (K) codon 1; pos3 A->G@0.90 (codon pos0), pos4 A->G@0.80 (codon pos1).
+        Fréchet both-carried GGA(G): lower=0.70 upper=0.80 forced=0.875 -> accepted.
+        Solo GAA(E): lower=0.10 forced=0.5 -> rejected. Solo AGA(R): lower=0 -> rejected.
+        Neither at 1.0 so no forced replacement; each row keeps own single-exchange.
+        """
         variants = [
             VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.90, depth=100),
             VariantCall(chrom='ref', pos=4, ref='A', alt='G', allele_freq=0.80, depth=100),
@@ -212,18 +222,32 @@ class TestAnnotateVariantsForward:
 
         results = annotate_variants(variants, [tiny_feature])
 
-        assert len(results) == 1
-        ann = results[0]
-        assert ann.codon_pos == 1
-        assert ann.ref_codon == 'AAA'
-        assert ann.alt_codon == 'GGA'
-        assert ann.ref_aa == 'K'
-        assert ann.alt_aa == 'G'
-        assert ann.consequence == 'missense'
-        assert ann.variant.allele_freq == 0.80
+        assert len(results) == 2
+        by_pos = {ann.variant.pos: ann for ann in results}
+        for ann in results:
+            assert ann.is_combined_codon_event is True
+            assert ann.combined_member_count == 2
+            assert ann.codon_pos == 1
+            assert ann.ref_codon == 'AAA'
+            assert ann.ref_aa == 'K'
+        # pos3 single-exchange: AAA->GAA = E
+        assert by_pos[3].alt_codon == 'GAA'
+        assert by_pos[3].alt_aa == 'E'
+        assert by_pos[3].variant.allele_freq == 0.90
+        # pos4 single-exchange: AAA->AGA = R
+        assert by_pos[4].alt_codon == 'AGA'
+        assert by_pos[4].alt_aa == 'R'
+        assert by_pos[4].variant.allele_freq == 0.80
+        # Both rows carry the accepted combined state GGA(G) at lower 0.70.
+        for ann in results:
+            gg = next(s for s in ann.combined_states if s.alt_codon == 'GGA')
+            assert gg.alt_aa == 'G'
+            assert gg.lower == pytest.approx(0.70)
 
     def test_does_not_combine_when_af_is_exactly_threshold(self, tiny_feature, tiny_ref_seq):
-        """AF must be strictly greater than 0.7 for codon-level SNP combination."""
+        """Co-codon SNPs at 0.90/0.70: both-carried GGA forced=0.857 > 2/3 -> accepted,
+        so the combined event IS emitted (2 per-SNP rows with combined_states).
+        The old 0.75 strict-threshold gate is gone; Fréchet decides."""
         variants = [
             VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.90, depth=100),
             VariantCall(chrom='ref', pos=4, ref='A', alt='G', allele_freq=0.70, depth=100),
@@ -231,9 +255,17 @@ class TestAnnotateVariantsForward:
 
         results = annotate_variants(variants, [tiny_feature])
         assert len(results) == 2
+        for ann in results:
+            assert ann.is_combined_codon_event is True
+            assert ann.combined_member_count == 2
+            # GGA(G) at lower 0.60 is accepted and present in combined_states.
+            assert any(s.alt_codon == 'GGA' for s in ann.combined_states)
 
     def test_does_not_combine_when_any_snp_is_low_af(self, tiny_feature, tiny_ref_seq):
-        """A single low-AF SNP keeps per-variant annotation behavior."""
+        """Co-codon SNPs at 0.90/0.20: both-carried rejected (forced=0.5), but the
+        pos3 solo GAA(E) is accepted (lower=0.70 forced=0.875) -> combined event
+        still emitted; pos4 solo AGA(R) rejected (lower=0). No member at 1.0 so no
+        forced replacement; pos4 keeps own single AGA(R)."""
         variants = [
             VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.90, depth=100),
             VariantCall(chrom='ref', pos=4, ref='A', alt='G', allele_freq=0.20, depth=100),
@@ -241,6 +273,15 @@ class TestAnnotateVariantsForward:
 
         results = annotate_variants(variants, [tiny_feature])
         assert len(results) == 2
+        by_pos = {ann.variant.pos: ann for ann in results}
+        for ann in results:
+            assert ann.is_combined_codon_event is True
+            assert ann.combined_member_count == 2
+        # pos3 solo GAA(E) accepted -> in its combined_states
+        assert any(s.alt_codon == 'GAA' for s in by_pos[3].combined_states)
+        # pos4 solo AGA(R) rejected, not forced -> single stays AGA, not in combined_states
+        assert by_pos[4].alt_codon == 'AGA'
+        assert not any(s.alt_codon == 'AGA' for s in by_pos[4].combined_states)
 
     def test_marks_annotations_as_fasta_mode_when_requested(self, tiny_feature, tiny_ref_seq):
         """All emitted annotations should carry is_fasta_mode=True in FASTA flow."""
@@ -1922,34 +1963,35 @@ class TestCombinedCodonEventDisplayFields:
 
     def test_combined_snp_codon_sets_flag_and_count(self) -> None:
         """
-        Two SNPs in the same codon produce one combined AnnotatedVariant
-        with is_combined_codon_event=True and combined_member_count=2.
+        Two SNPs in the same codon produce two per-SNP AnnotatedVariants, each with
+        is_combined_codon_event=True and combined_member_count=2.
+
+        Feature: ATG TCT AAA AAA (M S K K)
+        Codon 1 (0-based) = TCT -> S
+        Two SNPs at positions 3 (codon pos0) and 5 (codon pos2): T->A, T->G
+        Both at 0.95 -> both-carried ACG(T) accepted; solo ACT(T) accepted,
+        solo TCG(S) accepted. No member at 1.0 so no forced replacement.
         """
-        # Feature: ATG TCT AAA AAA (M S K K)
-        # Codon 1 (0-based) = TCT → S
-        # Two SNPs at positions 3 and 5: T→A, T→G
-        # Together: TCT → AGC (S → S, synonymous)
         feature = self._fwd_feature()
         variants = [
             VariantCall(chrom='c', pos=3, ref='T', alt='A', allele_freq=0.95, depth=100),
             VariantCall(chrom='c', pos=5, ref='T', alt='G', allele_freq=0.95, depth=100),
         ]
         results = annotate_variants(variants, [feature])
-        assert len(results) == 1
-        ann = results[0]
-        assert ann.is_combined_codon_event is True
-        assert ann.combined_member_count == 2
+        assert len(results) == 2
+        for ann in results:
+            assert ann.is_combined_codon_event is True
+            assert ann.combined_member_count == 2
 
     def test_combined_snp_codon_has_codon_level_fields(self) -> None:
         """
-        The combined annotation carries full ref_codon and alt_codon
-        so that display code can format codon-level nt_change (e.g. TCT2ACG).
+        Each per-SNP row carries the full ref_codon and its own single-exchange
+        alt_codon, so display code can format codon-level nt_change per member.
 
         Feature: ATG TCT AAA AAA (M S K K)
-        Codon 1 (0-based) = TCT → S
-        SNP at pos 3 (1st base): T→A → codon becomes ACT
-        SNP at pos 5 (3rd base): T→G → codon becomes ACG
-        Combined: TCT → ACG (S → T, missense)
+        Codon 1 (0-based) = TCT -> S
+        SNP at pos 3 (codon pos0): T->A -> single-exchange ACT (T)
+        SNP at pos 5 (codon pos2): T->G -> single-exchange TCG (S)
         """
         feature = self._fwd_feature()
         variants = [
@@ -1957,31 +1999,21 @@ class TestCombinedCodonEventDisplayFields:
             VariantCall(chrom='c', pos=5, ref='T', alt='G', allele_freq=0.95, depth=100),
         ]
         results = annotate_variants(variants, [feature])
-        ann = results[0]
-        assert ann.ref_codon == 'TCT'
-        assert ann.alt_codon == 'ACG'
-        assert ann.codon_pos == 1
-        # Display logic uses: f'{ann.ref_codon}{ann.codon_pos + 1}{ann.alt_codon}'
-        # This would produce 'TCT2ACG'
-        assert f'{ann.ref_codon}{ann.codon_pos + 1}{ann.alt_codon}' == 'TCT2ACG'
+        by_pos = {ann.variant.pos: ann for ann in results}
+        assert by_pos[3].ref_codon == 'TCT'
+        assert by_pos[3].alt_codon == 'ACT'
+        assert by_pos[3].codon_pos == 1
+        assert by_pos[5].ref_codon == 'TCT'
+        assert by_pos[5].alt_codon == 'TCG'
+        assert by_pos[5].codon_pos == 1
 
     def test_combined_snp_codon_uses_internal_codon_not_query_codon(self) -> None:
         """
-        Even when individual SNPs carry query_ref_codon (e.g. FASTA mode), the combined
-        annotation must always use the internal CDS reference codon as ref_codon.
-
-        Without this fix, query_ref_codon containing the ALT bases would be stored as
-        ref_codon, producing displays like ACG2ACG instead of TCT2ACG.
+        Each per-SNP row uses the internal CDS reference codon as ref_codon, even
+        when the member SNP carries a query_ref_codon (FASTA mode).
 
         Feature: ATG TCT AAA AAA (M S K K)
-        Codon 1 (0-based) = TCT → S (internal reference)
-        SNP at pos 3 (1st base): T→A → codon becomes ACT
-        SNP at pos 5 (3rd base): T→G → codon becomes ACG
-        Combined: TCT → ACG (S → T, missense)
-
-        Each SNP's query_ref_codon would be the query's codon at that position (which
-        already includes the ALT), so if both agree it would be 'ACG'. The combined
-        event must NOT use 'ACG' as ref_codon; it must use 'TCT'.
+        Codon 1 (0-based) = TCT -> S (internal reference)
         """
         feature = self._fwd_feature()
         variants = [
@@ -1997,10 +2029,9 @@ class TestCombinedCodonEventDisplayFields:
             ),
         ]
         results = annotate_variants(variants, [feature])
-        ann = results[0]
-        assert ann.is_combined_codon_event is True
-        assert ann.ref_codon == 'TCT'
-        assert ann.alt_codon == 'ACG'
+        for ann in results:
+            assert ann.is_combined_codon_event is True
+            assert ann.ref_codon == 'TCT'
 
     def test_single_snp_not_combined(self) -> None:
         """A single SNP in a codon is NOT a combined event."""
@@ -2019,7 +2050,7 @@ class TestAnnotatedVariantUserRefCoords:
     """AnnotatedVariant exposes the preserved user-reference coordinates."""
 
     def test_combined_snp_codon_carries_anchor_user_ref_coords(self) -> None:
-        """A combined codon event carries the anchor member's user-ref coords."""
+        """Each per-SNP combined row carries its own member's user-ref coords."""
         feature = TestCombinedCodonEventDisplayFields._fwd_feature()
         variants = [
             VariantCall(
@@ -2032,11 +2063,12 @@ class TestAnnotatedVariantUserRefCoords:
             ),
         ]
         results = annotate_variants(variants, [feature])
-        assert len(results) == 1
-        ann = results[0]
-        assert ann.has_user_ref_coords is True
-        # Anchor is the lowest-pos member (pos 3 → user_pos 10).
-        assert ann.user_ref_coords == ('userchr', 10, 'T', 'A')
+        assert len(results) == 2
+        by_pos = {ann.variant.pos: ann for ann in results}
+        assert by_pos[3].has_user_ref_coords is True
+        assert by_pos[3].user_ref_coords == ('userchr', 10, 'T', 'A')
+        assert by_pos[5].has_user_ref_coords is True
+        assert by_pos[5].user_ref_coords == ('userchr', 12, 'T', 'G')
 
     def test_fasta_emitted_annotation_has_no_user_ref_coords(self) -> None:
         """A FASTA-emitted annotation (empty user fields) reports no user-ref coords."""
@@ -2058,3 +2090,493 @@ class TestAnnotatedVariantUserRefCoords:
         ann = results[0]
         assert ann.has_user_ref_coords is True
         assert ann.user_ref_coords == ('userchr', 10, 'T', 'A')
+
+
+# ─── Per-SNP combined-state annotation (T2) ─────────────────────────
+
+
+class TestPerSnpCombinedStates:
+    """
+    Combined-codon SNPs emit one AnnotatedVariant per member SNP, each carrying
+    its own allele_freq and a combined_states list of Fréchet-accepted codon
+    effects. A member whose single-exchange state is Fréchet-rejected (lower<=eps)
+    gets its single alt_codon/alt_aa replaced by the forced all-carried combined
+    state (forced_fraction==1.0); that promoted state is dropped from
+    combined_states to avoid showing the same effect twice. Own-solo accepted
+    states stay in combined_states even when they equal the single.
+    """
+
+    @staticmethod
+    def _aag_feature() -> FeatureRecord:
+        # ATG AAG AAA  -> M K K ; codon 1 (0-based) = AAG -> K
+        return FeatureRecord(
+            id=1, reference_id=1, name='testf', protein='TestF',
+            start=0, end=9, strand='+', codon_start=0,
+            nt_sequence='ATGAAGAAA',
+        )
+
+    def _by_pos(self, results: list[AnnotatedVariant]) -> dict[int, AnnotatedVariant]:
+        return {ann.variant.pos: ann for ann in results}
+
+    def test_aag_atk_emits_two_per_snp_rows(self) -> None:
+        """AAG + A->T@1.0 (pos4, codon pos1) + G->T@0.5 (pos5, codon pos2) -> 2 rows."""
+        feature = self._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.5, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert len(results) == 2
+        by_pos = self._by_pos(results)
+        assert set(by_pos) == {4, 5}
+        for ann in results:
+            assert ann.is_combined_codon_event is True
+            assert ann.combined_member_count == 2
+
+    def test_high_af_member_keeps_own_single_exchange(self) -> None:
+        """A->T@1.0 row: single-exchange AAG->ATG = K20M (own solo, accepted)."""
+        feature = self._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.5, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        a_row = self._by_pos(results)[4]
+        assert a_row.alt_codon == 'ATG'
+        assert a_row.alt_aa == 'M'
+        assert a_row.ref_codon == 'AAG'
+        assert a_row.ref_aa == 'K'
+        assert a_row.codon_pos == 1
+        # Own allele_freq retained.
+        assert a_row.variant.allele_freq == 1.0
+
+    def test_low_af_member_single_replaced_by_forced_combined(self) -> None:
+        """G->T@0.5 row: solo AAG->AAT=N is Fréchet-rejected (lower=0); single
+        replaced by forced all-carried state AAG->ATT=I (forced_fraction==1.0)."""
+        feature = self._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.5, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        g_row = self._by_pos(results)[5]
+        assert g_row.alt_codon == 'ATT'
+        assert g_row.alt_aa == 'I'
+        assert g_row.ref_codon == 'AAG'
+        assert g_row.ref_aa == 'K'
+        assert g_row.variant.allele_freq == 0.5
+
+    def test_high_af_member_combined_states_includes_forced_and_own_solo(self) -> None:
+        """A->T@1.0 row: combined_states = [{ATT,I,0.5},{ATG,M,0.5}] (own solo M kept)."""
+        feature = self._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.5, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        a_row = self._by_pos(results)[4]
+        states = {s.alt_codon: s for s in a_row.combined_states}
+        assert set(states) == {'ATT', 'ATG'}
+        assert states['ATT'].alt_aa == 'I'
+        assert states['ATT'].lower == pytest.approx(0.5)
+        assert states['ATG'].alt_aa == 'M'
+        assert states['ATG'].lower == pytest.approx(0.5)
+        # All listed states must be accepted.
+        assert all(s.accepted for s in a_row.combined_states)
+
+    def test_low_af_member_combined_states_excludes_promoted_single(self) -> None:
+        """G->T@0.5 row: ATT/I promoted to single -> dropped from combined_states
+        (avoid showing twice); only accepted state including member 1 was ATT, so
+        combined_states is empty."""
+        feature = self._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.5, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        g_row = self._by_pos(results)[5]
+        assert g_row.combined_states == []
+
+    def test_no_combined_row_emitted(self) -> None:
+        """No single merged ACC1TAC-style row is emitted; each member keeps own ref/alt."""
+        feature = self._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.5, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        by_pos = self._by_pos(results)
+        # Each row carries its own variant's ref/alt, not a merged codon change.
+        assert by_pos[4].variant.ref == 'A' and by_pos[4].variant.alt == 'T'
+        assert by_pos[5].variant.ref == 'G' and by_pos[5].variant.alt == 'T'
+
+    def test_both_members_high_af_both_singles_replaced(self) -> None:
+        """A->T@1.0 + G->T@1.0: both solo states rejected (lower=0); both singles
+        replaced by forced all-carried ATT=I; combined_states empty for both."""
+        feature = self._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=1.0, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert len(results) == 2
+        for ann in results:
+            assert ann.alt_codon == 'ATT'
+            assert ann.alt_aa == 'I'
+            assert ann.combined_states == []
+            assert ann.is_combined_codon_event is True
+            assert ann.combined_member_count == 2
+
+    def test_no_forced_overlap_keeps_own_singles(self) -> None:
+        """A->T@0.8 + G->T@0.7: forced_fraction<1.0 -> exception does not apply.
+        A->T solo (ATG=M) accepted (lower=0.5); G->T solo (AAT=N) rejected
+        (lower=max(0,0.7+0.2-1)=0) but NOT replaced (forced<1.0), so keeps N.
+        combined_states carries the accepted both-carried state for each member."""
+        feature = self._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.8, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.7, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert len(results) == 2
+        by_pos = self._by_pos(results)
+        # A->T solo: AAG->ATG = M (accepted, lower=max(0,0.8+0.3-1)=0.1>0)
+        assert by_pos[4].alt_codon == 'ATG'
+        assert by_pos[4].alt_aa == 'M'
+        # G->T solo: AAG->AAT = N. q=[1-0.8=0.2, 0.7], lower=max(0,0.9-1)=0 -> rejected.
+        # forced both-carried: lower=max(0,0.8+0.7-1)=0.5, upper=0.7, forced=0.714 != 1.0
+        # -> exception does NOT apply; single stays as literal solo N.
+        assert by_pos[5].alt_codon == 'AAT'
+        assert by_pos[5].alt_aa == 'N'
+        # both-carried ATT=I accepted -> appears in each member's combined_states
+        assert any(s.alt_codon == 'ATT' and s.alt_aa == 'I' for s in by_pos[4].combined_states)
+        assert any(s.alt_codon == 'ATT' and s.alt_aa == 'I' for s in by_pos[5].combined_states)
+
+    def test_single_snp_codon_unaffected(self) -> None:
+        """A single SNP in a codon is not combined: combined_states empty,
+        is_combined_codon_event=False, single-exchange as before."""
+        feature = self._aag_feature()
+        # pos4 A->T in AAG -> ATG = M
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.9, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert len(results) == 1
+        ann = results[0]
+        assert ann.is_combined_codon_event is False
+        assert ann.combined_member_count == 1
+        assert ann.combined_states == []
+        assert ann.alt_codon == 'ATG'
+        assert ann.alt_aa == 'M'
+
+    def test_multiallelic_same_position_falls_back_to_single(self) -> None:
+        """Two ALTs at the same codon position (multiallelic) -> Fréchet returns
+        no states -> each emits as a plain single-SNP annotation (no combined_states,
+        is_combined_codon_event=False)."""
+        feature = self._aag_feature()
+        # pos4 A->T@0.5 and pos4 A->C@0.5 (same codon position 1 of AAG)
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.5, depth=100),
+            VariantCall(chrom='c', pos=4, ref='A', alt='C', allele_freq=0.5, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert len(results) == 2
+        for ann in results:
+            assert ann.is_combined_codon_event is False
+            assert ann.combined_states == []
+
+    def test_min_fraction_from_config_used(self) -> None:
+        """The acceptance threshold flows from CLI_CONFIG.codon.min_cooccurrence_codon_fraction."""
+        from respro.config.cli_settings import CLI_CONFIG
+
+        feature = self._aag_feature()
+        # 0.70/0.70: both-carried lower=0.40 upper=0.70 forced=0.571 -> rejected at 2/3.
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.70, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.70, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert len(results) == 2
+        by_pos = self._by_pos(results)
+        # No accepted combined states -> combined_states empty, singles kept.
+        assert by_pos[4].combined_states == []
+        assert by_pos[5].combined_states == []
+        assert CLI_CONFIG.codon.min_cooccurrence_codon_fraction == pytest.approx(2 / 3)
+
+
+# ─── Fréchet combined-codon bounds ──────────────────────────────────
+
+
+def _state(states: list[CodonState], alt_codon: str) -> CodonState:
+    """Pick the CodonState with the given alt_codon from a list."""
+    for s in states:
+        if s.alt_codon == alt_codon:
+            return s
+    raise AssertionError(f'no state with alt_codon {alt_codon!r} in {states}')
+
+
+def _frechet_specs(spec: list[tuple[int, str, float]]) -> list[dict]:
+    """Build the variant-spec dicts the Fréchet helper consumes."""
+    return [{'codon_pos': cp, 'alt': ab, 'freq': f} for cp, ab, f in spec]
+
+
+class TestFrechetTwoVariant:
+    """Sharp Fréchet intersection bounds for two same-codon variants.
+
+    Each variant carries (codon_position, alt_base, frequency). The reference
+    codon and the per-position alt bases define the candidate states.
+    """
+
+    def test_one_zero_seven_both_emitted(self):
+        # 1.00, 0.70 -> both: lower 0.70 upper 0.70 forced 1.0 emit
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 1.00), (1, 'T', 0.70)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        both = _state(states, 'TTA')
+        assert both.accepted is True
+        assert both.lower == pytest.approx(0.70)
+        assert both.upper == pytest.approx(0.70)
+        assert both.forced_fraction == pytest.approx(1.0)
+
+    def test_one_zero_seven_first_only_emitted(self):
+        # 1.00, 0.70 -> first only: lower 0.30 upper 0.30 forced 1.0 emit
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 1.00), (1, 'T', 0.70)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        first = _state(states, 'TAA')
+        assert first.accepted is True
+        assert first.lower == pytest.approx(0.30)
+        assert first.upper == pytest.approx(0.30)
+        assert first.forced_fraction == pytest.approx(1.0)
+
+    def test_zero_eight_zero_two_two_both_rejected(self):
+        # 0.80, 0.22 -> both: lower 0.02 upper 0.22 forced ~0.091 reject
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.80), (1, 'T', 0.22)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        both = _state(states, 'TTA')
+        assert both.accepted is False
+        assert both.lower == pytest.approx(0.02)
+        assert both.upper == pytest.approx(0.22)
+        assert both.forced_fraction == pytest.approx(0.091, abs=0.01)
+
+    def test_zero_eight_zero_two_two_first_only_emitted(self):
+        # 0.80, 0.22 -> first only: lower 0.58 upper 0.78 forced ~0.744 emit
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.80), (1, 'T', 0.22)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        first = _state(states, 'TAA')
+        assert first.accepted is True
+        assert first.lower == pytest.approx(0.58)
+        assert first.upper == pytest.approx(0.78)
+        assert first.forced_fraction == pytest.approx(0.744, abs=0.01)
+
+    def test_zero_eight_zero_seven_both_emitted(self):
+        # 0.80, 0.70 -> both: lower 0.50 upper 0.70 forced ~0.714 emit
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.80), (1, 'T', 0.70)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        both = _state(states, 'TTA')
+        assert both.accepted is True
+        assert both.lower == pytest.approx(0.50)
+        assert both.upper == pytest.approx(0.70)
+        assert both.forced_fraction == pytest.approx(0.714, abs=0.01)
+
+    def test_zero_seven_five_boundary_emitted(self):
+        # 0.75, 0.75 -> both: lower 0.50 upper 0.75 forced exactly 2/3 emit
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.75), (1, 'T', 0.75)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        both = _state(states, 'TTA')
+        assert both.accepted is True
+        assert both.lower == pytest.approx(0.50)
+        assert both.upper == pytest.approx(0.75)
+        assert both.forced_fraction == pytest.approx(2 / 3)
+
+    def test_zero_seven_zero_seven_both_rejected(self):
+        # 0.70, 0.70 -> both: lower 0.40 upper 0.70 forced ~0.571 reject
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.70), (1, 'T', 0.70)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        both = _state(states, 'TTA')
+        assert both.accepted is False
+        assert both.lower == pytest.approx(0.40)
+        assert both.upper == pytest.approx(0.70)
+        assert both.forced_fraction == pytest.approx(0.571, abs=0.01)
+
+    def test_one_zero_one_both_emitted(self):
+        # 1.00, 0.01 -> both: lower 0.01 upper 0.01 forced 1.0 emit
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 1.00), (1, 'T', 0.01)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        both = _state(states, 'TTA')
+        assert both.accepted is True
+        assert both.lower == pytest.approx(0.01)
+        assert both.upper == pytest.approx(0.01)
+        assert both.forced_fraction == pytest.approx(1.0)
+
+
+class TestFrechetThreeVariant:
+    """Sharp Fréchet intersection bounds for three same-codon variants."""
+
+    def test_one_one_zero_seven_all_emitted(self):
+        # 1.00, 1.00, 0.70 -> all three: lower 0.70 upper 0.70 forced 1.0 emit
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 1.00), (1, 'T', 1.00), (2, 'T', 0.70)]),
+            ref_codon='AAA', min_fraction=2 / 3,
+        )
+        all3 = _state(states, 'TTT')
+        assert all3.accepted is True
+        assert all3.lower == pytest.approx(0.70)
+        assert all3.upper == pytest.approx(0.70)
+        assert all3.forced_fraction == pytest.approx(1.0)
+
+    def test_one_one_zero_seven_first_second_only_emitted(self):
+        # 1.00, 1.00, 0.70 -> first and second only: lower 0.30 upper 0.30 forced 1.0 emit
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 1.00), (1, 'T', 1.00), (2, 'T', 0.70)]),
+            ref_codon='AAA', min_fraction=2 / 3,
+        )
+        fs = _state(states, 'TTA')
+        assert fs.accepted is True
+        assert fs.lower == pytest.approx(0.30)
+        assert fs.upper == pytest.approx(0.30)
+        assert fs.forced_fraction == pytest.approx(1.0)
+
+    def test_zero_nine_all_emitted(self):
+        # 0.90, 0.90, 0.90 -> all three: lower 0.70 upper 0.90 forced ~0.778 emit
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.90), (1, 'T', 0.90), (2, 'T', 0.90)]),
+            ref_codon='AAA', min_fraction=2 / 3,
+        )
+        all3 = _state(states, 'TTT')
+        assert all3.accepted is True
+        assert all3.lower == pytest.approx(0.70)
+        assert all3.upper == pytest.approx(0.90)
+        assert all3.forced_fraction == pytest.approx(0.778, abs=0.01)
+
+    def test_zero_eight_five_all_rejected(self):
+        # 0.85, 0.85, 0.85 -> all three: lower 0.55 upper 0.85 forced ~0.647 reject
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.85), (1, 'T', 0.85), (2, 'T', 0.85)]),
+            ref_codon='AAA', min_fraction=2 / 3,
+        )
+        all3 = _state(states, 'TTT')
+        assert all3.accepted is False
+        assert all3.lower == pytest.approx(0.55)
+        assert all3.upper == pytest.approx(0.85)
+        assert all3.forced_fraction == pytest.approx(0.647, abs=0.01)
+
+    def test_zero_eight_all_rejected(self):
+        # 0.80, 0.80, 0.80 -> all three: lower 0.40 upper 0.80 forced 0.50 reject
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.80), (1, 'T', 0.80), (2, 'T', 0.80)]),
+            ref_codon='AAA', min_fraction=2 / 3,
+        )
+        all3 = _state(states, 'TTT')
+        assert all3.accepted is False
+        assert all3.lower == pytest.approx(0.40)
+        assert all3.upper == pytest.approx(0.80)
+        assert all3.forced_fraction == pytest.approx(0.50)
+
+    def test_one_zero_eight_zero_six_boundary_emitted(self):
+        # 1.00, 0.80, 0.60 -> all three: lower 0.40 upper 0.60 forced exactly 2/3 emit
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 1.00), (1, 'T', 0.80), (2, 'T', 0.60)]),
+            ref_codon='AAA', min_fraction=2 / 3,
+        )
+        all3 = _state(states, 'TTT')
+        assert all3.accepted is True
+        assert all3.lower == pytest.approx(0.40)
+        assert all3.upper == pytest.approx(0.60)
+        assert all3.forced_fraction == pytest.approx(2 / 3)
+
+
+class TestFrechetProperties:
+    """Structural / metamorphic properties of the Fréchet helper."""
+
+    def test_input_order_independence(self):
+        sa = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.80), (1, 'T', 0.70)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        sb = _compute_codon_frechet_states(
+            _frechet_specs([(1, 'T', 0.70), (0, 'T', 0.80)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        assert {(s.alt_codon, s.accepted, round(s.lower, 9)) for s in sa} == \
+               {(s.alt_codon, s.accepted, round(s.lower, 9)) for s in sb}
+
+    def test_bounds_satisfy_zero_lower_upper_one(self):
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.80), (1, 'T', 0.22)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        for s in states:
+            assert 0.0 <= s.lower <= s.upper <= 1.0
+
+    def test_frequencies_zero_and_one(self):
+        # freq 0 at a position: that variant never occurs.
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 1.00), (1, 'T', 0.00)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        both = _state(states, 'TTA')
+        # lower = max(0, 1.0 + 0.0 - 1) = 0 -> rejected (lower not > eps)
+        assert both.lower == pytest.approx(0.0)
+        assert both.accepted is False
+
+    def test_multiallelic_same_position_returns_no_states(self):
+        # Two ALTs at the same codon position (IUPAC-reference / multiallelic)
+        # must not be combined into impossible codons.
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'C', 0.25), (0, 'G', 0.25), (1, 'T', 0.80)]),
+            ref_codon='AAA', min_fraction=2 / 3,
+        )
+        assert states == []
+
+    def test_single_variant_not_combined(self):
+        # A single variant-bearing position is not a combined codon.
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.80)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        assert states == []
+
+    def test_no_grouping_across_different_codons(self):
+        # Positions outside the codon length are rejected.
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.80), (3, 'T', 0.80)]), ref_codon='AAA',
+            min_fraction=2 / 3,
+        )
+        assert states == []
+
+    def test_min_fraction_loaded_from_toml(self):
+        # The threshold is configured in defaults.toml ([codon] section) and
+        # surfaced via CLI_CONFIG.codon.min_cooccurrence_codon_fraction.
+        from respro.config.cli_settings import CLI_CONFIG
+
+        assert CLI_CONFIG.codon.min_cooccurrence_codon_fraction == pytest.approx(2 / 3)
+
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.70), (1, 'T', 0.70)]), ref_codon='AAA',
+            min_fraction=CLI_CONFIG.codon.min_cooccurrence_codon_fraction,
+        )
+        # 2/3 -> forced ~0.571 -> rejected
+        assert _state(states, 'TTA').accepted is False
+
+    def test_min_fraction_is_configurable(self):
+        # Passing a looser threshold changes acceptance of a boundary case.
+        states_loose = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.70), (1, 'T', 0.70)]),
+            ref_codon='AAA', min_fraction=0.50,
+        )
+        assert _state(states_loose, 'TTA').accepted is True

@@ -22,6 +22,18 @@ doi_prefixes = ['https://doi.org/', 'http://doi.org/']
 [matching]
 combination_member_af_threshold = 0.75
 
+[codon]
+# Conservative Fréchet-intersection policy for combining same-codon SNPs into
+# one codon event. A candidate codon state is emitted only when the minimum
+# guaranteed co-occurrence fraction (Fréchet lower / upper) reaches this value.
+# Passing means the guaranteed shared portion is at least twice the potentially
+# unshared portion. This is an explicit conservative interpretation policy, NOT
+# a probability that variants are linked and NOT a phasing estimate. At 2/3,
+# two variants at 0.75/0.75 give a forced fraction of exactly 2/3 ; three-way 
+# combinations require stronger individual frequencies.
+# Independent of any minimum VCF input-frequency filter.
+min_cooccurrence_codon_fraction = 0.6666666666666666
+
 [similarity]
 # BLOSUM62 score thresholds for amino-acid similarity classification.
 # score >= high      → 'high'

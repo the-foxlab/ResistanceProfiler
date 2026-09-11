@@ -137,11 +137,24 @@ def match_rules(
     hit_count = 0
     anchor_warning_cache: set[str] = set()
     for ann in annotations:
-        if not ann.feature_name or not ann.alt_aa or ann.consequence == 'synonymous':
-            continue
-
         key = (ann.feature_name, ann.codon_pos)
         candidates = rule_index.get(key, [])
+        if not candidates:
+            continue
+
+        # Build the list of (alt_aa, effect_lower) pairs to match against.
+        # The single-exchange effect is always a candidate (unless synonymous);
+        # each Fréchet-accepted combined state adds its own alt_aa gated by lower.
+        effect_candidates: list[tuple[str, float]] = []
+        if ann.alt_aa and ann.consequence != 'synonymous':
+            effect_candidates.append((ann.alt_aa, ann.variant.allele_freq))
+        for state in ann.combined_states:
+            if state.accepted and state.alt_aa and state.alt_aa != '?':
+                effect_candidates.append((state.alt_aa, state.lower))
+
+        if not effect_candidates:
+            continue
+
         for rule in candidates:
             anchor_warning = _indel_anchor_mismatch_warning(
                 rule_reference=rule.reference,
@@ -156,14 +169,28 @@ def match_rules(
                 logger.warning(anchor_warning)
                 anchor_warning_cache.add(anchor_warning)
 
-            if _matches_rule_alleles(
-                reference=rule.reference,
-                mutation=rule.mutation,
-                ann_ref=ann.ref_aa,
-                ann_alt=ann.alt_aa,
-                ann_consequence=ann.consequence,
-            ):
+            # Match against the single-exchange effect first, then combined states.
+            # A combined-state hit takes precedence for the display frequency: the
+            # combinatorial effect's Fréchet lower bound is what the report shows.
+            matched_lower: float | None = None
+            for eff_alt, eff_lower in effect_candidates:
+                # Combined states use missense consequence for matching; the single
+                # keeps its own consequence (e.g. frameshift, insertion).
+                eff_consequence = ann.consequence if eff_alt == ann.alt_aa else 'missense'
+                if _matches_rule_alleles(
+                    reference=rule.reference,
+                    mutation=rule.mutation,
+                    ann_ref=ann.ref_aa,
+                    ann_alt=eff_alt,
+                    ann_consequence=eff_consequence,
+                ):
+                    matched_lower = eff_lower
+                    if eff_alt != ann.alt_aa:
+                        break  # combined-state hit found; stop searching
+
+            if matched_lower is not None:
                 ann.rule_matches.append(rule)
+                ann.rule_effect_lower[rule.id] = matched_lower
                 hit_count += 1
 
         # Suppress INS_any when a specific insertion rule fires for the same position+drug.

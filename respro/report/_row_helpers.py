@@ -29,15 +29,14 @@ _ACCESSION_IDENTIFIER_RE = re.compile(
 def nt_change_stored(ann: AnnotatedVariant) -> str:
     """Return the internal-reference nucleotide change for one annotation.
 
-    Combined codon events (multiple high-AF SNPs in one codon) are reported at
-    codon resolution ``ref_codon{codon_pos+1}alt_codon``; all other variants use
-    the raw VCF coordinates ``ref{pos+1}alt`` (1-based position).
+    Every annotation — including per-SNP combined-codon members — reports its
+    own VCF nucleotide change ``ref{pos+1}alt`` (1-based position). Combined
+    codon context is surfaced separately via the combinatorial-effects column
+    and the alignment partner-changes label, not by rewriting the NT change.
 
     :param ann: annotated variant
     :return: formatted NT change string
     """
-    if ann.is_combined_codon_event and ann.ref_codon and ann.alt_codon:
-        return f'{ann.ref_codon}{ann.codon_pos + 1}{ann.alt_codon}'
     return f'{ann.variant.ref}{ann.variant.pos + 1}{ann.variant.alt}'
 
 

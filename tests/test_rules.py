@@ -5,6 +5,7 @@ Tests for resistance rule loading and matching.
 import textwrap
 from pathlib import Path
 
+import pytest
 from conftest import TINY_REF_SEQ, write_genbank
 from typer.testing import CliRunner
 
@@ -16,6 +17,7 @@ from respro.core.rules import (
 )
 from respro.db.models import (
     AnnotatedVariant,
+    CodonState,
     FormulaRuleRuntime,
     ResistanceRule,
     VariantCall,
@@ -344,6 +346,105 @@ class TestMatchRules:
 
         result = match_rules([ann], [rule])
         assert len(result[0].rule_matches) == 0
+
+
+class TestMatchCombinedStates:
+    """Rule matching checks both the single-exchange alt_aa and every combined_states alt_aa."""
+
+    @staticmethod
+    def _rule(rule_id: int, mutation: str, *, position: int = 1) -> ResistanceRule:
+        return ResistanceRule(
+            id=rule_id, feature_name='testf', feature_id=1,
+            drug_name='DrugA', drug_id=1, reference_identifier='',
+            position=position, reference='K', mutation=mutation,
+            phenotype='resistant',
+        )
+
+    @staticmethod
+    def _ann(alt_aa: str, allele_freq: float, combined_states: list[CodonState] | None = None,
+             codon_pos: int = 1) -> AnnotatedVariant:
+        return AnnotatedVariant(
+            variant=VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=allele_freq, depth=100),
+            feature_name='testf', codon_pos=codon_pos,
+            ref_aa='K', alt_aa=alt_aa, consequence='missense',
+            combined_states=combined_states or [],
+        )
+
+    def test_rule_fires_via_single_on_non_combined_annotation(self) -> None:
+        """A single-SNP K20N annotation still matches a K20N rule as today."""
+        rule = self._rule(1, 'N')
+        ann = self._ann('N', 0.9)
+        result = match_rules([ann], [rule])
+        assert len(result[0].rule_matches) == 1
+        assert result[0].rule_matches[0].id == 1
+        # Single hit -> effect lower is the row's own AF.
+        assert result[0].rule_effect_lower[1] == pytest.approx(0.9)
+
+    def test_rule_fires_via_combined_state_not_single(self) -> None:
+        """A->T row (single=M, combined_states=[I@0.5, M@0.5]): K20I fires via combined only."""
+        rule_i = self._rule(10, 'I')
+        states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            CodonState(alt_codon='ATG', alt_aa='M', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0,)),
+        ]
+        ann = self._ann('M', 1.0, combined_states=states)
+        result = match_rules([ann], [rule_i])
+        assert len(result[0].rule_matches) == 1
+        assert result[0].rule_matches[0].mutation == 'I'
+        # Combined-state hit -> effect lower is the state's lower (0.5), not row AF (1.0).
+        assert result[0].rule_effect_lower[10] == pytest.approx(0.5)
+
+    def test_rule_fires_via_single_and_combined_uses_combined_lower(self) -> None:
+        """K20M fires on A->T row via both single(M) and combined(M@0.5); the combined
+        lower (0.5) is recorded since the combinatorial effect is what the report shows."""
+        rule_m = self._rule(20, 'M')
+        states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            CodonState(alt_codon='ATG', alt_aa='M', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0,)),
+        ]
+        ann = self._ann('M', 1.0, combined_states=states)
+        result = match_rules([ann], [rule_m])
+        assert len(result[0].rule_matches) == 1
+        assert result[0].rule_effect_lower[20] == pytest.approx(0.5)
+
+    def test_rule_fires_on_promoted_single_uses_row_af(self) -> None:
+        """G->T row (single=I promoted from forced combined, combined_states=[]):
+        K20I fires on single=I; effect lower is the row's own AF (0.5)."""
+        rule_i = self._rule(10, 'I')
+        ann = self._ann('I', 0.5, combined_states=[])
+        result = match_rules([ann], [rule_i])
+        assert len(result[0].rule_matches) == 1
+        assert result[0].rule_effect_lower[10] == pytest.approx(0.5)
+
+    def test_x_rule_does_not_fire(self) -> None:
+        """A K20X rule does not fire (no X state is ever emitted)."""
+        rule_x = self._rule(30, 'X')
+        states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+        ]
+        ann = self._ann('M', 1.0, combined_states=states)
+        result = match_rules([ann], [rule_x])
+        assert len(result[0].rule_matches) == 0
+
+    def test_synonymous_single_not_matched_even_with_combined(self) -> None:
+        """A synonymous single-exchange is not matched, but a non-synonymous combined
+        state on the same annotation still fires."""
+        rule = self._rule(40, 'I')
+        states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+        ]
+        ann = self._ann('K', 1.0, combined_states=states, )
+        ann.consequence = 'synonymous'
+        result = match_rules([ann], [rule])
+        # Synonymous single is skipped, but combined state I should still fire.
+        assert len(result[0].rule_matches) == 1
+        assert result[0].rule_effect_lower[40] == pytest.approx(0.5)
 
 
 class TestMatchFormulaRules:

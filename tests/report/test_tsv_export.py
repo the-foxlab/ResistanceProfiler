@@ -10,6 +10,7 @@ import pytest
 
 from respro.db.models import (
     AnnotatedVariant,
+    CodonState,
     FeatureMatch,
     FeatureRecord,
     FormulaRuleHit,
@@ -28,10 +29,11 @@ from respro.report._row_helpers import (
 )
 from respro.report.non_html_exports import export_results, write_tsv
 
-# Canonical 20-column header, in order.
+# Canonical 21-column header, in order.
 TSV_COLUMNS = [
     'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
-    'af', 'af_bin', 'depth', 'consequence', 'in_database', 'rule_type',
+    'af', 'af_bin', 'depth', 'consequence', 'combinatorial_aa_effects',
+    'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
     'source', 'publications',
 ]
@@ -43,7 +45,8 @@ _PLACEHOLDER = 'n/a'
 # publications) are dropped when no row carries a real value.
 _TSV_ALWAYS_COLUMNS = [
     'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
-    'af', 'af_bin', 'depth', 'consequence', 'in_database', 'rule_type',
+    'af', 'af_bin', 'depth', 'consequence', 'combinatorial_aa_effects',
+    'in_database', 'rule_type',
     'drug', 'source',
 ]
 _TSV_CONDITIONAL_COLUMNS = [
@@ -104,6 +107,7 @@ def _ann(
     user_chrom: str = '', user_pos: int = 0, user_ref: str = '', user_alt: str = '',
     is_combined_codon_event: bool = False, ref_codon: str = 'AAA', alt_codon: str = 'GAA',
     rule_matches: list[ResistanceRule] | None = None,
+    combined_states: list[CodonState] | None = None,
 ) -> AnnotatedVariant:
     return AnnotatedVariant(
         variant=VariantCall(
@@ -114,6 +118,7 @@ def _ann(
         ref_aa=ref_aa, alt_aa=alt_aa, consequence=consequence, af_bin=af_bin,
         is_fasta_mode=is_fasta_mode, is_combined_codon_event=is_combined_codon_event,
         rule_matches=rule_matches or [],
+        combined_states=combined_states or [],
     )
 
 
@@ -150,9 +155,15 @@ class TestRowHelpers:
         ann = _ann(pos=3, ref='A', alt='G')
         assert nt_change_stored(ann) == 'A4G'
 
-    def test_nt_change_stored_combined_codon_event(self) -> None:
-        ann = _ann(is_combined_codon_event=True, ref_codon='AAA', alt_codon='GAA', codon_pos=2)
-        assert nt_change_stored(ann) == 'AAA3GAA'
+    def test_nt_change_stored_combined_codon_event_uses_per_snp_coords(self) -> None:
+        """A per-SNP combined-codon row reports its own VCF nucleotide change,
+        not the codon-form ``ref_codon{pos}alt_codon``. Each member keeps its
+        own ref/alt/pos."""
+        ann = _ann(
+            is_combined_codon_event=True, ref_codon='AAA', alt_codon='GAA',
+            codon_pos=2, pos=3, ref='A', alt='G',
+        )
+        assert nt_change_stored(ann) == 'A4G'
 
     def test_nt_change_user_empty_in_fasta_mode(self) -> None:
         ann = _ann(is_fasta_mode=True)
@@ -176,6 +187,45 @@ class TestWriteTsvHeader:
         write_tsv(r, out)
         header, _ = _read_tsv(out)
         assert header == _expected_header(set())
+
+
+class TestCombinatorialAaEffectsColumn:
+    """The combinatorial_aa_effects column lists accepted combined-state AA effects."""
+
+    def test_combined_member_lists_effects(self, tmp_path: Path) -> None:
+        """A combined member row lists its Fréchet-accepted combined AA effects."""
+        states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            CodonState(alt_codon='ATG', alt_aa='M', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0,)),
+        ]
+        ann = _ann(
+            is_combined_codon_event=True, combined_states=states,
+            alt_aa='M', codon_pos=1, ref_aa='K',
+        )
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        assert 'combinatorial_aa_effects' in header
+        col = header.index('combinatorial_aa_effects')
+        # Non-hit variant -> one row.
+        assert len(rows) == 1
+        # Format: "K21I (0.5); K21M (0.5)" — ref+pos+aa with lower in parens.
+        effects = rows[0][col]
+        assert 'K2I (0.5)' in effects
+        assert 'K2M (0.5)' in effects
+
+    def test_single_snp_column_empty(self, tmp_path: Path) -> None:
+        """A single-SNP annotation has an empty combinatorial_aa_effects column."""
+        ann = _ann(alt_aa='E', codon_pos=2, ref_aa='K')
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('combinatorial_aa_effects')
+        assert rows[0][col] == ''
 
 
 class TestSingleRuleRows:
@@ -363,16 +413,17 @@ class TestInsAnyWildcard:
 
 
 class TestCombinedCodonEvent:
-    def test_combined_codon_uses_codon_form_nt_mut(self, tmp_path: Path) -> None:
+    def test_combined_codon_uses_per_snp_nt_mut(self, tmp_path: Path) -> None:
         rule = _rule(rid=1, drug='Acyclovir')
         ann = _ann(is_combined_codon_event=True, ref_codon='AAA', alt_codon='GAA',
-                   codon_pos=2, rule_matches=[rule])
+                   codon_pos=2, pos=3, ref='A', alt='G', rule_matches=[rule])
         r = _result([ann])
         out = tmp_path / 'r.results.tsv'
         write_tsv(r, out)
         header, rows = _read_tsv(out)
         row = [row for row in rows if row[header.index('rule_type')] == 'single'][0]
-        assert row[header.index('nt_mut')] == 'AAA3GAA'
+        # Per-SNP combined rows report their own VCF NT change, not codon form.
+        assert row[header.index('nt_mut')] == 'A4G'
 
 
 class TestEffectAsResistantRows:
