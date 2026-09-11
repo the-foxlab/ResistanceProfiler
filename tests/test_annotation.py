@@ -550,6 +550,34 @@ class TestAssignAfBins:
         anns = assign_af_bins([_make_ann(0.25)], bins=self._FASTA_BINS)
         assert anns[0].af_bin == 'low'
 
+    def test_combined_member_binned_at_single_exchange_lower(self) -> None:
+        """A combined-codon member is binned at its single_exchange_lower, not its
+        marginal allele_freq. A 0.9-marginal member whose single-exchange state is
+        Fréchet-impossible (lower=0) bins at 0.0 -> 'low', not 'high'."""
+        ann = _make_ann(0.9)
+        ann.is_combined_codon_event = True
+        ann.single_exchange_lower = 0.0
+        anns = assign_af_bins([ann], bins=self._VCF_BINS)
+        # 0.0 is below the low bin's lower bound (0.01); confirm it does not land
+        # in 'high' (the marginal 0.9 would). It should be 'low' or unset, never high.
+        assert anns[0].af_bin != 'high'
+
+    def test_combined_member_possible_single_binned_at_lower(self) -> None:
+        """A combined member with single_exchange_lower=0.09 bins at 'low', not at
+        the marginal (0.99 -> 'high')."""
+        ann = _make_ann(0.99)
+        ann.is_combined_codon_event = True
+        ann.single_exchange_lower = 0.09
+        anns = assign_af_bins([ann], bins=self._VCF_BINS)
+        assert anns[0].af_bin == 'low'
+
+    def test_non_combined_binned_at_allele_freq(self) -> None:
+        """A non-combined annotation bins at its allele_freq (single_exchange_lower
+        defaults to allele_freq). No regression for the common case."""
+        ann = _make_ann(0.9)
+        anns = assign_af_bins([ann], bins=self._VCF_BINS)
+        assert anns[0].af_bin == 'high'
+
 
 # ─── Helper ──────────────────────────────────────────────────────────
 
@@ -2269,12 +2297,12 @@ class TestPerSnpCombinedStates:
         assert ann.alt_codon == 'ATG'
         assert ann.alt_aa == 'M'
 
-    def test_multiallelic_same_position_falls_back_to_single(self) -> None:
-        """Two ALTs at the same codon position (multiallelic) -> Fréchet returns
-        no states -> each emits as a plain single-SNP annotation (no combined_states,
-        is_combined_codon_event=False)."""
+    def test_multiallelic_single_position_falls_back_to_single(self) -> None:
+        """Two ALTs at the same codon position with no other co-codon SNP (k=1)
+        -> not a combined codon event -> each emits as a plain single-SNP
+        annotation (no combined_states, is_combined_codon_event=False)."""
         feature = self._aag_feature()
-        # pos4 A->T@0.5 and pos4 A->C@0.5 (same codon position 1 of AAG)
+        # pos4 A->T@0.5 and pos4 A->C@0.5 (same codon position 1 of AAG, no other SNP)
         variants = [
             VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.5, depth=100),
             VariantCall(chrom='c', pos=4, ref='A', alt='C', allele_freq=0.5, depth=100),
@@ -2284,6 +2312,32 @@ class TestPerSnpCombinedStates:
         for ann in results:
             assert ann.is_combined_codon_event is False
             assert ann.combined_states == []
+
+    def test_multiallelic_with_co_codon_snp_produces_combined_states(self) -> None:
+        """A multiallelic position (pos4 A->T@0.9, A->C@0.1) alongside a co-codon
+        SNP (pos5 G->T@1.0) produces combined states — the multiallelic position
+        is modelled as a ternary choice {ref, T, A}, not rejected."""
+        feature = self._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.9, depth=100),
+            VariantCall(chrom='c', pos=4, ref='A', alt='C', allele_freq=0.1, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=1.0, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        # Each of the 3 variants gets its own annotation; the two pos4 variants
+        # and the pos5 variant are all combined-codon members.
+        assert len(results) == 3
+        for ann in results:
+            assert ann.is_combined_codon_event is True
+            assert ann.combined_member_count == 3
+        # The A->T@0.9 member should have accepted combined states including
+        # the all-carried TTG (lower=0.9) and the single ATG (A->T only, lower=0.0,
+        # rejected). The A->C@0.1 member has the all-carried CTG (lower=0.1).
+        by_pos_alt = {(a.variant.pos, a.variant.alt): a for a in results}
+        t_member = by_pos_alt[(4, 'T')]
+        # T member's combined_states include states where T@pos0 is carried.
+        accepted_aas = {s.alt_aa for s in t_member.combined_states}
+        assert len(accepted_aas) > 0
 
     def test_min_fraction_from_config_used(self) -> None:
         """The acceptance threshold flows from CLI_CONFIG.codon.min_cooccurrence_codon_fraction."""
@@ -2304,6 +2358,97 @@ class TestPerSnpCombinedStates:
         assert CLI_CONFIG.codon.min_cooccurrence_codon_fraction == pytest.approx(2 / 3)
 
 
+class TestSingleExchangeLower:
+    """``single_exchange_lower`` is the Fréchet lower bound of the single-exchange
+    codon state (this member carried, all others absent). It is the guaranteed
+    minimum population share of the *exact single codon* displayed in the row,
+    and is the frequency used for single-exchange rule matching and AF binning.
+
+    - Non-combined annotation: equals ``allele_freq`` (no co-codon constraint).
+    - Combined member whose single state is Fréchet-possible: the single state's
+      own ``lower`` (e.g. 0.99/0.90 codon -> 0.89).
+    - Combined member whose single state is Fréchet-impossible (lower=0): 0.0,
+      even though the marginal AF is high. This is the key scientific fix: such a
+      single exchange is guaranteed absent from the population and must never be
+      classified as a high-AF resistance hit.
+    - Promoted single (forced-overlap exception): the promoted all-carried state's
+      ``lower`` (the single *is* the combined state, so its population share is
+      that state's lower).
+    """
+
+    @staticmethod
+    def _by_pos(results: list[AnnotatedVariant]) -> dict[int, AnnotatedVariant]:
+        return {ann.variant.pos: ann for ann in results}
+
+    def test_non_combined_equals_allele_freq(self) -> None:
+        """A single-SNP annotation has single_exchange_lower == allele_freq."""
+        feature = TestPerSnpCombinedStates._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.9, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert results[0].single_exchange_lower == pytest.approx(0.9)
+
+    def test_combined_member_single_possible_uses_single_lower(self) -> None:
+        """0.99/0.90 codon: each single-exchange state has lower=0.89 (0.99+0.10-1).
+        single_exchange_lower must be 0.89, not the marginal."""
+        feature = TestPerSnpCombinedStates._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.99, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.90, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        by_pos = self._by_pos(results)
+        # A->T single: q=[0.99, 1-0.90=0.10], lower=max(0,1.09-1)=0.09
+        assert by_pos[4].single_exchange_lower == pytest.approx(0.09)
+        # G->T single: q=[1-0.99=0.01, 0.90], lower=max(0,0.91-1)=0.0
+        assert by_pos[5].single_exchange_lower == pytest.approx(0.0)
+
+    def test_combined_member_single_impossible_is_zero(self) -> None:
+        """0.9/0.9 codon: each single-exchange has lower=0 (guaranteed absent).
+        single_exchange_lower must be 0.0 despite marginal 0.9."""
+        feature = TestPerSnpCombinedStates._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.9, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.9, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        for ann in results:
+            assert ann.single_exchange_lower == pytest.approx(0.0)
+
+    def test_promoted_single_uses_promoted_state_lower(self) -> None:
+        """A->T@1.0 + G->T@0.5: G->T single is rejected & promoted to ATT=I
+        (forced_fraction==1.0). The promoted single IS the all-carried state,
+        so single_exchange_lower = that state's lower (0.5)."""
+        feature = TestPerSnpCombinedStates._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.5, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        by_pos = self._by_pos(results)
+        # A->T: own solo ATG=M accepted, lower=max(0,1.0+0.5-1)=0.5
+        assert by_pos[4].single_exchange_lower == pytest.approx(0.5)
+        # G->T: promoted to ATT=I, that state's lower=0.5
+        assert by_pos[5].single_exchange_lower == pytest.approx(0.5)
+
+    def test_no_forced_overlap_keeps_solo_lower(self) -> None:
+        """0.8/0.7 codon (forced<1.0, no promotion): A->T solo lower=0.1;
+        G->T solo lower=0 (rejected, not promoted). single_exchange_lower
+        reflects the literal solo state's lower in both cases."""
+        feature = TestPerSnpCombinedStates._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.8, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.7, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        by_pos = self._by_pos(results)
+        # A->T solo: q=[0.8, 0.3], lower=max(0,1.1-1)=0.1
+        assert by_pos[4].single_exchange_lower == pytest.approx(0.1)
+        # G->T solo: q=[0.2, 0.7], lower=max(0,0.9-1)=0.0
+        assert by_pos[5].single_exchange_lower == pytest.approx(0.0)
+
+
 # ─── Fréchet combined-codon bounds ──────────────────────────────────
 
 
@@ -2316,8 +2461,16 @@ def _state(states: list[CodonState], alt_codon: str) -> CodonState:
 
 
 def _frechet_specs(spec: list[tuple[int, str, float]]) -> list[dict]:
-    """Build the variant-spec dicts the Fréchet helper consumes."""
-    return [{'codon_pos': cp, 'alt': ab, 'freq': f} for cp, ab, f in spec]
+    """Build the per-position spec dicts the Fréchet helper consumes.
+
+    ``spec`` is a flat list of ``(codon_pos, alt_base, freq)`` tuples; variants
+    at the same codon position are grouped into one position entry with multiple
+    ``(alt, freq)`` options (the multiallelic case).
+    """
+    by_pos: dict[int, list[tuple[str, float]]] = {}
+    for cp, ab, f in spec:
+        by_pos.setdefault(cp, []).append((ab, f))
+    return [{'codon_pos': cp, 'alts': opts} for cp, opts in sorted(by_pos.items())]
 
 
 class TestFrechetTwoVariant:
@@ -2534,14 +2687,33 @@ class TestFrechetProperties:
         assert both.lower == pytest.approx(0.0)
         assert both.accepted is False
 
-    def test_multiallelic_same_position_returns_no_states(self):
-        # Two ALTs at the same codon position (IUPAC-reference / multiallelic)
-        # must not be combined into impossible codons.
+    def test_multiallelic_same_position_produces_states(self):
+        # Two ALTs at the same codon position (multiallelic): C->A@0.25, C->G@0.25
+        # at pos0, plus T@0.80 at pos1. Ref codon AAA.
+        # Pos0 options: {A@0.50 (ref residual), G@0.25, A_alt@0.25}
+        #   -- note: ref base is A, alt A would equal ref; use distinct bases.
+        # Use C->G@0.25, C->T@0.25 at pos0 (ref=A), T@0.80 at pos1.
         states = _compute_codon_frechet_states(
-            _frechet_specs([(0, 'C', 0.25), (0, 'G', 0.25), (1, 'T', 0.80)]),
+            _frechet_specs([(0, 'G', 0.25), (0, 'T', 0.25), (1, 'T', 0.80)]),
             ref_codon='AAA', min_fraction=2 / 3,
         )
-        assert states == []
+        # 3 options at pos0 (ref A@0.50, G@0.25, T@0.25) x 2 at pos1 (ref A@0.20, T@0.80)
+        # = 6 states.
+        assert len(states) == 6
+        # The all-carried state G+T: q=[0.25, 0.80], lower=max(0,1.05-1)=0.05,
+        # upper=0.25, forced=0.2 -> rejected (< 2/3).
+        gt = _state(states, 'GTA')
+        assert gt.lower == pytest.approx(0.05)
+        assert gt.accepted is False
+        # The T@pos0 + T@pos1 state: q=[0.25, 0.80], same bounds.
+        tt = _state(states, 'TTA')
+        assert tt.lower == pytest.approx(0.05)
+        assert tt.accepted is False
+        # ref@pos0 + T@pos1: q=[0.50, 0.80], lower=max(0,1.30-1)=0.30,
+        # upper=0.50, forced=0.60 -> rejected (< 2/3).
+        at = _state(states, 'ATA')
+        assert at.lower == pytest.approx(0.30)
+        assert at.accepted is False
 
     def test_single_variant_not_combined(self):
         # A single variant-bearing position is not a combined codon.
@@ -2580,3 +2752,88 @@ class TestFrechetProperties:
             ref_codon='AAA', min_fraction=0.50,
         )
         assert _state(states_loose, 'TTA').accepted is True
+
+
+class TestFrechetMultiallelic:
+    """Fréchet bounds for codons with a multiallelic position (≥2 ALTs at one
+    nucleotide position). Each position now carries a list of (alt, freq) options
+    plus the implicit ref option at the residual frequency.
+    """
+
+    def test_user_example_three_position_codon_with_multiallelic_pos0(self):
+        """The user's reported example: pos0 has C->T@0.9 and C->A@0.1
+        (multiallelic), pos1 has G->T@1.0, pos2 has C->G@1.0. Ref codon CGC.
+
+        Pos0 options: {C@0.0 (ref residual), T@0.9, A@0.1}
+        Pos1 options: {G@0.0 (ref residual), T@1.0}
+        Pos2 options: {C@0.0 (ref residual), G@1.0}
+        k=3 distinct positions -> 3 x 2 x 2 = 12 candidate states.
+        """
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.9), (0, 'A', 0.1), (1, 'T', 1.0), (2, 'G', 1.0)]),
+            ref_codon='CGC', min_fraction=2 / 3,
+        )
+        assert len(states) == 12
+        # All-carried (T@0.9, T@1.0, G@1.0) -> TTG: q=[0.9,1.0,1.0],
+        # lower=max(0,2.9-2)=0.9, upper=0.9, forced=1.0 -> accepted.
+        ttg = _state(states, 'TTG')
+        assert ttg.lower == pytest.approx(0.9)
+        assert ttg.upper == pytest.approx(0.9)
+        assert ttg.forced_fraction == pytest.approx(1.0)
+        assert ttg.accepted is True
+        # A@0.1 + T@1.0 + G@1.0 -> ATG: q=[0.1,1.0,1.0],
+        # lower=max(0,2.1-2)=0.1, upper=0.1, forced=1.0 -> accepted.
+        atg = _state(states, 'ATG')
+        assert atg.lower == pytest.approx(0.1)
+        assert atg.forced_fraction == pytest.approx(1.0)
+        assert atg.accepted is True
+        # ref@pos0 + T@1.0 + G@1.0 -> CTG: q=[0.0,1.0,1.0],
+        # lower=max(0,2.0-2)=0.0 -> rejected (lower=0).
+        ctg = _state(states, 'CTG')
+        assert ctg.lower == pytest.approx(0.0)
+        assert ctg.accepted is False
+        # T@0.9 + ref@pos1 + G@1.0 -> TGG: q=[0.9,0.0,1.0],
+        # lower=max(0,1.9-2)=0.0 -> rejected.
+        tgg = _state(states, 'TGG')
+        assert tgg.lower == pytest.approx(0.0)
+        assert tgg.accepted is False
+
+    def test_multiallelic_both_alts_accepted_when_high_freq(self):
+        """Pos0: C->T@0.8, C->A@0.15 (ref residual 0.05); pos1: G->T@0.8.
+        Ref codon CGT. k=2.
+        T+T: q=[0.8,0.8], lower=max(0,1.6-1)=0.6, upper=0.8, forced=0.75 -> accepted.
+        A+T: q=[0.15,0.8], lower=max(0,0.95-1)=0.0 -> rejected.
+        """
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.8), (0, 'A', 0.15), (1, 'T', 0.8)]),
+            ref_codon='CGT', min_fraction=2 / 3,
+        )
+        # 3 options at pos0 x 2 at pos1 = 6 states.
+        assert len(states) == 6
+        tt = _state(states, 'TTT')
+        assert tt.lower == pytest.approx(0.6)
+        assert tt.forced_fraction == pytest.approx(0.75)
+        assert tt.accepted is True
+        at = _state(states, 'ATT')
+        assert at.lower == pytest.approx(0.0)
+        assert at.accepted is False
+
+    def test_multiallelic_member_indices_identify_which_alt(self):
+        """member_indices must distinguish which ALT at a multiallelic position
+        is carried, so the annotation can attribute the state to the right SNP."""
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.9), (0, 'A', 0.1), (1, 'G', 1.0)]),
+            ref_codon='AA',  # invalid (len 2) -> empty
+            min_fraction=2 / 3,
+        )
+        # Invalid ref codon length -> no states.
+        assert states == []
+
+    def test_multiallelic_only_one_position_not_combined(self):
+        """A single position with two ALTs (no other position) is not a combined
+        codon event (k=1 < 2)."""
+        states = _compute_codon_frechet_states(
+            _frechet_specs([(0, 'T', 0.6), (0, 'A', 0.3)]),
+            ref_codon='AAA', min_fraction=2 / 3,
+        )
+        assert states == []

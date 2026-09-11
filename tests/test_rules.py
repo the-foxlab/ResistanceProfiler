@@ -446,6 +446,81 @@ class TestMatchCombinedStates:
         assert len(result[0].rule_matches) == 1
         assert result[0].rule_effect_lower[40] == pytest.approx(0.5)
 
+    def test_single_exchange_with_zero_lower_does_not_match_rule(self) -> None:
+        """A combined member whose single-exchange state is Fréchet-impossible
+        (single_exchange_lower == 0) must NOT match a rule keyed on that single
+        AA, even though its marginal allele_freq is high. The single exchange is
+        guaranteed absent from the population; only its combined states can fire.
+
+        Regression for the bug where match_rules used the marginal allele_freq
+        for the single-exchange candidate, classifying a guaranteed-absent single
+        as a high-AF resistance hit.
+        """
+        rule_single = self._rule(50, 'E')  # keys on the single-exchange AA
+        ann = self._ann('E', 0.9, combined_states=[])  # marginal 0.9
+        ann.is_combined_codon_event = True
+        ann.single_exchange_lower = 0.0  # single guaranteed absent
+        result = match_rules([ann], [rule_single])
+        # The single-exchange rule must NOT fire: its population frequency is 0.
+        assert len(result[0].rule_matches) == 0
+
+    def test_single_exchange_with_nonzero_lower_matches_at_single_lower(self) -> None:
+        """A combined member whose single-exchange is Fréchet-possible
+        (single_exchange_lower > 0) matches a single-AA rule, but the recorded
+        effect lower is single_exchange_lower, not the marginal allele_freq."""
+        rule_single = self._rule(60, 'M')
+        ann = self._ann('M', 0.99, combined_states=[])  # marginal 0.99
+        ann.is_combined_codon_event = True
+        ann.single_exchange_lower = 0.09  # Fréchet lower of the single state
+        result = match_rules([ann], [rule_single])
+        assert len(result[0].rule_matches) == 1
+        assert result[0].rule_effect_lower[60] == pytest.approx(0.09)
+
+    def test_non_combined_single_uses_allele_freq(self) -> None:
+        """A non-combined annotation (single_exchange_lower == allele_freq) still
+        matches at its allele_freq — no regression for the common case."""
+        rule = self._rule(70, 'N')
+        ann = self._ann('N', 0.9)
+        # single_exchange_lower defaults to allele_freq for non-combined
+        assert ann.single_exchange_lower == pytest.approx(0.9)
+        result = match_rules([ann], [rule])
+        assert len(result[0].rule_matches) == 1
+        assert result[0].rule_effect_lower[70] == pytest.approx(0.9)
+
+    def test_combined_state_with_zero_lower_not_accepted_does_not_match(self) -> None:
+        """A combined state whose amino-acid frequency is 0 (Fréchet lower = 0,
+        accepted = False) must NOT match a rule, even if hand-constructed on the
+        annotation. In production such states never reach ``combined_states``
+        (they are filtered out by ``accepted`` in _annotate_combined_snp_codon),
+        but match_rules must still defend against them.
+
+        Pins the invariant that every effect_candidate carries a strictly-positive
+        amino-acid frequency.
+        """
+        rule = self._rule(80, 'I')
+        # A CodonState with lower=0 and accepted=False — the Fréchet-impossible case.
+        rejected_state = CodonState(
+            alt_codon='ATT', alt_aa='I', lower=0.0, upper=0.5,
+            forced_fraction=0.0, accepted=False, member_indices=(0, 1),
+        )
+        ann = self._ann('M', 0.9, combined_states=[rejected_state])
+        ann.is_combined_codon_event = True
+        ann.single_exchange_lower = 0.0  # single also guaranteed absent
+        result = match_rules([ann], [rule])
+        # Neither the single (lower=0) nor the rejected combined state fires.
+        assert len(result[0].rule_matches) == 0
+
+    def test_non_combined_zero_allele_freq_does_not_match(self) -> None:
+        """A non-combined annotation with allele_freq = 0 (hence
+        single_exchange_lower = 0 via __post_init__ default) must not match a
+        rule. The amino acid is absent from the population."""
+        rule = self._rule(90, 'N')
+        ann = self._ann('N', 0.0)
+        # single_exchange_lower defaults to allele_freq (0.0) for non-combined.
+        assert ann.single_exchange_lower == pytest.approx(0.0)
+        result = match_rules([ann], [rule])
+        assert len(result[0].rule_matches) == 0
+
 
 class TestMatchFormulaRules:
     def _make_ann(self, feature: str, codon_pos: int, ref_aa: str, alt_aa: str) -> AnnotatedVariant:
@@ -513,6 +588,37 @@ class TestMatchFormulaRules:
         assert len(hits) == 1
         assert hits[0].rule_set.group_name == 'Formula 1'
         assert {v.alt_aa for v in hits[0].matched_variants} == {'E', 'V'}
+
+    def test_formula_member_with_zero_amino_acid_freq_does_not_contribute(self) -> None:
+        """A formula member whose amino-acid frequency is 0 (single_exchange_lower
+        = 0, e.g. a Fréchet-impossible combined single) must not contribute to a
+        formula hit, even though its nucleotide frequency (allele_freq) is high.
+
+        The gate is indirect: match_rules must not place a rule match on the
+        annotation (single_exchange_lower = 0 -> single candidate skipped), so
+        the member never enters best_ann_by_member and member_truth stays False.
+        This test pins the end-to-end invariant: a high-nucleotide-frequency /
+        zero-amino-acid-frequency member cannot satisfy an AND formula.
+        """
+        mut_a = self._atomic_rule('mut_a', 'E', position=1)
+        mut_b = self._atomic_rule('mut_b', 'V', position=5)
+        formula = self._formula('(mut_a AND mut_b)', [mut_a, mut_b])
+
+        ann_a = self._make_ann('gag', 1, 'K', 'E')
+        ann_a.is_combined_codon_event = True
+        ann_a.single_exchange_lower = 0.0  # amino-acid freq 0; nucleotide freq 0.9
+        # Run match_rules first — the single-exchange gate must skip ann_a.
+        match_rules([ann_a], [mut_a])
+        assert ann_a.rule_matches == [], (
+            'a zero-amino-acid-frequency member must not receive a rule match'
+        )
+
+        ann_b = self._make_ann('gag', 5, 'A', 'V')
+        ann_b.rule_matches = [mut_b]
+
+        hits = match_formula_rules([ann_a, ann_b], [formula], member_af_threshold=0.75)
+        # ann_a contributes nothing, so the AND formula cannot be satisfied.
+        assert hits == []
 
     def test_formula_not_uses_af_gated_presence(self) -> None:
         mut_a = self._atomic_rule('mut_a', 'E', position=1)

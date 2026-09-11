@@ -36,6 +36,7 @@ from respro.report._row_helpers import (
 )
 from respro.report.html import (
     build_report_context,
+    display_consequence,
     write_html,
 )
 from respro.report.plots import render_lollipop_plot_bytes
@@ -215,6 +216,7 @@ def write_json(
             'drug_hits': json.dumps(ann.drug_hits_json()),
             'is_combined_codon_event': ann.is_combined_codon_event,
             'combined_member_count': ann.combined_member_count,
+            'single_exchange_lower': ann.single_exchange_lower,
             'combined_states': json.dumps([
                 {
                     'alt_codon': s.alt_codon,
@@ -307,7 +309,7 @@ def write_json(
 # rule columns. See write_tsv for the row-emission rules.
 TSV_COLUMNS: tuple[str, ...] = (
     'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
-    'af', 'af_bin', 'depth', 'consequence', 'combinatorial_aa_effects',
+    'af', 'af_bin', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
     'source', 'publications',
@@ -400,15 +402,19 @@ def _aa_effect(ann: AnnotatedVariant) -> str:
     return ann.feature_name
 
 
-def _combinatorial_aa_effects(ann: AnnotatedVariant) -> str:
-    """Format the Fréchet-accepted combined-state AA effects for TSV export.
+def _aa_effects(ann: AnnotatedVariant) -> str:
+    """Format all amino-acid effects (single + combined) for TSV/JSON export.
 
-    Each accepted state is rendered as ``<ref><pos><alt> (<lower>)`` and joined
-    with ``; ``. Returns an empty string for single-SNP annotations.
+    Each effect is rendered as ``<ref><pos><alt> (<lower>)`` and joined with
+    ``; ``. The single-exchange effect is listed first (when its amino-acid
+    frequency ``single_exchange_lower`` is > 0), followed by every accepted
+    combined-state effect. For a single-SNP variant this is just the single
+    effect at the variant frequency. For a combined member whose single is
+    Fréchet-impossible (lower=0) only the combined states are shown.
     """
-    if not ann.combined_states:
-        return ''
     parts: list[str] = []
+    if ann.alt_aa and ann.single_exchange_lower > 0.0:
+        parts.append(f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa} ({ann.single_exchange_lower})')
     for state in ann.combined_states:
         if not state.accepted:
             continue
@@ -459,8 +465,8 @@ def _effect_as_resistant_tsv_rows(
             'af': repr(ann.variant.allele_freq),
             'af_bin': ann.af_bin,
             'depth': str(ann.variant.depth),
-            'consequence': ann.consequence,
-            'combinatorial_aa_effects': _combinatorial_aa_effects(ann),
+            'consequence': display_consequence(ann),
+            'aa_effects': _aa_effects(ann),
             'in_database': 'yes',
             'rule_type': 'single',
             'drug': drug_name,
@@ -530,8 +536,8 @@ def write_tsv(
             'af': repr(ann.variant.allele_freq),
             'af_bin': ann.af_bin,
             'depth': str(ann.variant.depth),
-            'consequence': ann.consequence,
-            'combinatorial_aa_effects': _combinatorial_aa_effects(ann),
+            'consequence': display_consequence(ann),
+            'aa_effects': _aa_effects(ann),
         }
 
     def _rule_row(
@@ -621,7 +627,7 @@ def write_tsv(
             'af_bin': af_bins,
             'depth': '',  # combined row spans multiple variants; no single depth
             'consequence': ';'.join(a.consequence for a in members),
-            'combinatorial_aa_effects': '',
+            'aa_effects': '',
             'in_database': 'yes',
             'rule_type': 'formula',
             'drug': rs.drug_name,

@@ -570,11 +570,16 @@ document.addEventListener('DOMContentLoaded', function () {
           function (th) { return th.textContent.trim(); }
         );
         const hasUserRefCol = headerTexts.indexOf('NT change user reference') !== -1;
+        const hasCombiCol = headerTexts.indexOf('Combined SNP codon') !== -1;
         const headers = ['Feature', 'NT change stored reference'];
         if (hasUserRefCol) {
           headers.push('NT change user reference');
         }
-        headers.push('AA change', 'Consequence', 'Variant frequency');
+        headers.push('AA change', 'Consequence');
+        if (hasCombiCol) {
+          headers.push('Combined SNP codon');
+        }
+        headers.push('Variant frequency');
         if (hasDbCol) {
           headers.push('In database');
         }
@@ -593,13 +598,20 @@ document.addEventListener('DOMContentLoaded', function () {
             : '';
           const aaChange = (row.querySelector('.mutation-aa')?.textContent || '').trim();
           const consequence = (row.querySelector('.mutation-consequence')?.textContent || '').trim();
+          const combiFlag = hasCombiCol
+            ? (row.querySelector('.mutation-combined-flag')?.textContent || '').trim()
+            : '';
           const alleleFreq = (row.querySelector('.mutation-freq')?.textContent || '').trim();
 
           const fields = [feature, ntChangeStored];
           if (hasUserRefCol) {
             fields.push(ntChangeUser);
           }
-          fields.push(aaChange, consequence, alleleFreq);
+          fields.push(aaChange, consequence);
+          if (hasCombiCol) {
+            fields.push(combiFlag);
+          }
+          fields.push(alleleFreq);
           if (hasDbCol) {
             const inDatabase = ((row.getAttribute('data-database-values') || 'None')
               .split('|')
@@ -915,7 +927,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const hasDrugClass = !!table.querySelector('thead th.db-hit-drug-class-th');
         const headers = [];
         if (hasDrugClass) { headers.push('Drug class'); }
-        headers.push('Drug', 'Mutations', 'Drug sensitivity data', 'Frequency classification', 'Source');
+        headers.push('Drug', 'Mutations', 'Drug sensitivity data', 'Amino acid frequency', 'Source');
         if (hasPubs) { headers.push('References'); }
         const lines = [headers.join('\t')];
 
@@ -965,7 +977,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const hasDrugClass = !!table.querySelector('thead th.sim-drug-class-th');
         const headers = [];
         if (hasDrugClass) { headers.push('Drug class'); }
-        headers.push('Drug', 'Mutation', 'Known Rule', 'Similarity to entry', 'Drug sensitivity data', 'Frequency classification', 'Source');
+        headers.push('Drug', 'Mutation', 'Known Rule', 'Similarity to entry', 'Drug sensitivity data', 'Amino acid frequency', 'Source');
         if (hasPubs) { headers.push('References'); }
         const lines = [headers.join('\t')];
 

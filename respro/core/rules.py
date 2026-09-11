@@ -142,12 +142,20 @@ def match_rules(
         if not candidates:
             continue
 
-        # Build the list of (alt_aa, effect_lower) pairs to match against.
-        # The single-exchange effect is always a candidate (unless synonymous);
-        # each Fréchet-accepted combined state adds its own alt_aa gated by lower.
+        # Build the list of (alt_aa, amino_acid_frequency) pairs to match
+        # against. Resistance rules key on amino-acid changes, so the relevant
+        # frequency is the amino-acid frequency (population share of the exact
+        # codon), NOT the nucleotide frequency (marginal allele frequency of the
+        # SNP). The single-exchange candidate is gated by its
+        # single_exchange_lower — the Fréchet lower bound of the single-exchange
+        # codon. A combined member whose single-exchange amino acid is
+        # Fréchet-impossible (lower=0) is guaranteed absent as a single exchange
+        # and must not match a single-AA rule — only its combined states can
+        # fire. Each Fréchet-accepted combined state adds its own alt_aa gated
+        # by its ``lower`` (also an amino-acid frequency).
         effect_candidates: list[tuple[str, float]] = []
-        if ann.alt_aa and ann.consequence != 'synonymous':
-            effect_candidates.append((ann.alt_aa, ann.variant.allele_freq))
+        if ann.alt_aa and ann.consequence != 'synonymous' and ann.single_exchange_lower > 0.0:
+            effect_candidates.append((ann.alt_aa, ann.single_exchange_lower))
         for state in ann.combined_states:
             if state.accepted and state.alt_aa and state.alt_aa != '?':
                 effect_candidates.append((state.alt_aa, state.lower))

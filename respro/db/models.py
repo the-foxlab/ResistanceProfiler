@@ -9,6 +9,11 @@ from datetime import datetime
 
 _INTERNAL_FORMULA_COMPONENT_DRUG_NAME = '__formula_component__'
 
+# Sentinel marking single_exchange_lower as unset so __post_init__ can default
+# it to allele_freq for non-combined annotations without conflating a genuine 0.0
+# (a combined member whose single state is Fréchet-impossible).
+_SINGLE_EXCHANGE_LOWER_UNSET = float('nan')
+
 
 def is_internal_formula_component_drug_name(drug_name: str) -> bool:
     """Return True when a drug name is the internal placeholder for formula members."""
@@ -327,13 +332,39 @@ class AnnotatedVariant:
     is_combined_codon_event: bool = False
     combined_member_count: int = 1
     combined_states: list[CodonState] = field(default_factory=list)
-    # Per matched rule, the effect frequency to display/bin in the report. Maps
-    # rule.id -> lower bound. For single-exchange hits the value is the row's own
-    # allele_freq; for combined-state hits it is the state's Fréchet ``lower``.
+    # Amino-acid frequency of the single-exchange codon state (this member
+    # carried, all co-codon members absent): the Fréchet lower bound on the
+    # population share of the *exact single codon* displayed in the row. This is
+    # distinct from ``variant.allele_freq`` (the nucleotide frequency): for a
+    # single-SNP codon they are equal, but for combined-codon members the
+    # single-exchange amino acid requires this SNP present AND co-codon SNPs
+    # absent, so its frequency can be 0 even when the nucleotide frequency is
+    # high. This amino-acid frequency is what single-exchange rule matching and
+    # AF binning use. A member whose single state is Fréchet-impossible
+    # (lower=0) is guaranteed absent as a single exchange and must not be
+    # classified as a high-AF resistance hit.
+    single_exchange_lower: float = _SINGLE_EXCHANGE_LOWER_UNSET
+    # Per matched rule, the amino-acid frequency to display/bin in the report.
+    # Maps rule.id -> lower bound. For single-exchange hits the value is the
+    # row's ``single_exchange_lower`` (amino-acid frequency of the single codon);
+    # for combined-state hits it is the state's Fréchet ``lower`` (amino-acid
+    # frequency of the combined codon). Never the nucleotide frequency.
     rule_effect_lower: dict[int, float] = field(default_factory=dict)
     af_bin: str = ''
     is_fasta_mode: bool = False  # True when derived from consensus FASTA, not a VCF
     rule_matches: list[ResistanceRule] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Default single_exchange_lower to the nucleotide frequency
+        # (variant.allele_freq) for non-combined annotations, where nucleotide
+        # and amino-acid frequencies coincide (one SNP -> one codon -> one AA).
+        # Combined members set it explicitly in _annotate_combined_snp_codon to
+        # the Fréchet lower bound of the single-exchange codon; the sentinel
+        # distinguishes "unset" from a genuine 0.0 (Fréchet-impossible single,
+        # i.e. the amino acid is guaranteed absent despite a high nucleotide
+        # frequency).
+        if self.single_exchange_lower != self.single_exchange_lower:  # NaN check
+            self.single_exchange_lower = self.variant.allele_freq
 
     @property
     def has_user_ref_coords(self) -> bool:

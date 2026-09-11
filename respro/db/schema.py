@@ -257,7 +257,8 @@ CREATE TABLE IF NOT EXISTS variant_result (
     drug_hits   TEXT    DEFAULT '[]',
     is_combined_codon_event INTEGER DEFAULT 0,
     combined_member_count   INTEGER DEFAULT 1,
-    combined_states         TEXT    DEFAULT '[]'
+    combined_states         TEXT    DEFAULT '[]',
+    single_exchange_lower   REAL    DEFAULT 0.0
 );
 
 CREATE INDEX IF NOT EXISTS idx_vr_run ON variant_result(run_id);
@@ -390,6 +391,7 @@ _OPTIONAL_RESULTS_COLUMN_DEFS = {
         'is_combined_codon_event': 'INTEGER DEFAULT 0',
         'combined_member_count': 'INTEGER DEFAULT 1',
         'combined_states': "TEXT DEFAULT '[]'",
+        'single_exchange_lower': 'REAL DEFAULT 0.0',
     },
     'coverage_gap': {
         'reference_name': "TEXT DEFAULT ''",

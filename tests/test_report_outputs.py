@@ -17,9 +17,12 @@ from respro.db.models import (
     FeatureMatch,
     FeatureRecord,
     FeatureSegment,
+    FormulaRuleHit,
     ProfilingResult,
     Publication,
     ResistanceRule,
+    ResistanceRuleSet,
+    ResistanceRuleSetMember,
     VariantCall,
 )
 from respro.db.report_queries import load_feature_cards
@@ -76,6 +79,7 @@ class TestCombinedStatesReport:
             ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
             consequence='missense', af_bin='high',
             is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_lower=0.5,
             combined_states=[
                 CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
                            forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
@@ -91,6 +95,7 @@ class TestCombinedStatesReport:
             ref_codon='AAG', alt_codon='ATT', ref_aa='K', alt_aa='I',
             consequence='missense', af_bin='intermediate',
             is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_lower=0.5,
             combined_states=[],
             rule_matches=[rule_i],
             rule_effect_lower={10: 0.5},
@@ -109,19 +114,20 @@ class TestCombinedStatesReport:
             ],
         )
 
-    def test_all_mutations_has_combinatorial_column(self) -> None:
-        """All Mutations table has a combinatorial_aa_effects field per row."""
+    def test_all_mutations_has_aa_effects_field(self) -> None:
+        """All Mutations table has an aa_effects field per row listing all amino-acid
+        effects (single + combined) with their amino-acid frequencies."""
         r = self._aag_result()
         ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
         rows = ctx['all_mutations']['rows']
         assert len(rows) == 2
-        # A->T row: combinatorial = K2I (0.5); K2M (0.5)
+        # A->T row: single K2M (0.5) + combined K2I (0.5); K2M (0.5)
         a_row = next(row for row in rows if row['aa_change'] == 'K2M')
-        assert 'K2I (0.5)' in a_row['combinatorial_aa_effects']
-        assert 'K2M (0.5)' in a_row['combinatorial_aa_effects']
-        # G->T row: promoted single, combined_states empty -> empty combinatorial
+        assert 'K2M (0.5)' in a_row['aa_effects']
+        assert 'K2I (0.5)' in a_row['aa_effects']
+        # G->T row: promoted single K2I (0.5), no combined states
         g_row = next(row for row in rows if row['aa_change'] == 'K2I')
-        assert g_row['combinatorial_aa_effects'] == ''
+        assert g_row['aa_effects'] == 'K2I (0.5)'
 
     def test_row_dict_exposes_combined_codon_flags(self) -> None:
         """Each row exposes is_combined_codon_event and combined_member_count so
@@ -151,40 +157,74 @@ class TestCombinedStatesReport:
 
     def test_rendered_html_marks_combined_snp_rows(self) -> None:
         """The rendered All Mutations table marks rows that participated in a
-        combined SNP codon with a visible badge and a combinatorial-effects column."""
+        combined SNP codon with a boolean column and shows all AA effects in one
+        merged column."""
         r = self._aag_result()
         html = render_html(r, similarity_high=1, similarity_moderate=0)
-        # The combinatorial-effects column header is rendered.
-        assert 'Combinatorial AA effects' in html
-        # Each combined-SNP row carries a combined-codon badge class on its row.
+        # The merged AA effects column header is rendered.
+        assert 'AA effects' in html
+        # The old separate Combinatorial AA effects column is gone.
+        assert 'Combinatorial AA effects' not in html
+        # The boolean combined-SNP-codon column header is rendered.
+        assert 'Combined SNP codon' in html
+        # Each combined-SNP row carries a combined-codon class on its row.
         assert 'mutation-row--combined' in html
-        # The badge text is rendered (visible label).
-        assert 'combined SNP codon' in html
-        # The combinatorial effects text is rendered in the cell.
+        # The boolean flag is rendered (✓ for combined members).
+        assert 'combined-codon-yes' in html
+        # The AA effects text is rendered in the cell (rounded to 3 dp).
         assert 'K2I (0.5)' in html
         assert 'K2M (0.5)' in html
 
+    def test_variant_frequency_hover_explains_nucleotide_vs_amino_acid(self) -> None:
+        """The Variant frequency hover explains it is the nucleotide frequency and
+        notes rule matching uses the amino-acid frequency."""
+        r = self._aag_result()
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        assert 'Variant frequency' in html
+        assert 'nucleotide frequency' in html
+        # The hover notes that rule matching uses the amino-acid frequency.
+        assert 'amino-acid frequency' in html
+
+    def test_alignment_row_colspan_matches_header_column_count(self) -> None:
+        """The expansion (alignment) row's colspan must equal the number of <th>
+        columns in the header, for both the combined and the single-SNP case.
+        Regression for a prior off-by-one where has_combinatorial added two
+        columns but the colspan formula counted only one."""
+        for r in (self._aag_result(), _make_result()):
+            html = render_html(r, similarity_high=1, similarity_moderate=0)
+            table = re.search(r'<table class="mutation-table">.*?</table>', html, re.DOTALL).group(0)
+            thead = re.search(r'<thead>.*?</thead>', table, re.DOTALL).group(0)
+            th_count = len(re.findall(r'<th[ >]', thead))
+            col = re.search(r'mutation-alignment-row.*?colspan="(\d+)"', table, re.DOTALL)
+            assert col is not None, 'no alignment row found'
+            assert int(col.group(1)) == th_count, (
+                f'colspan {col.group(1)} != header <th> count {th_count}'
+            )
+
     def test_rendered_html_omits_combinatorial_column_when_no_combined(self) -> None:
-        """A result with no combined-codon events omits the combinatorial column
-        and the combined-codon badge in the table body."""
+        """A result with no combined-codon events omits the combined-SNP-codon
+        column and flag in the table body."""
         r = _make_result()
         html = render_html(r, similarity_high=1, similarity_moderate=0)
-        assert 'Combinatorial AA effects' not in html
         # The combined-row class must not appear on any mutation <tr> in the body.
         body_match = re.search(r'<table class="mutation-table">.*?</table>', html, re.DOTALL)
         assert body_match is not None
-        assert 'mutation-row--combined' not in body_match.group(0)
-        assert 'combined-codon-badge' not in body_match.group(0)
+        body = body_match.group(0)
+        assert 'mutation-row--combined' not in body
+        assert 'combined-codon-yes' not in body
+        # The combined-SNP-codon column header must not appear in the table.
+        assert 'Combined SNP codon' not in body
 
-    def test_all_mutations_row_af_uses_own_snp_af(self) -> None:
-        """The AF column shows the SNP's own frequency, not the combined lower."""
+    def test_all_mutations_row_variant_freq_uses_own_snp_af(self) -> None:
+        """The Variant frequency column shows the SNP's own marginal nucleotide
+        frequency."""
         r = self._aag_result()
         ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
         rows = ctx['all_mutations']['rows']
         a_row = next(row for row in rows if row['aa_change'] == 'K2M')
-        assert a_row['allele_freq'] == 1.0
+        assert a_row['variant_freq'] == 1.0
         g_row = next(row for row in rows if row['aa_change'] == 'K2I')
-        assert g_row['allele_freq'] == 0.5
+        assert g_row['variant_freq'] == 0.5
 
     def test_database_hits_use_combined_lower_for_af_bin(self) -> None:
         """Database Hits table bins the AF using the combined state's lower (0.5),
@@ -203,12 +243,132 @@ class TestCombinedStatesReport:
         )
         assert a_drug_i['af_bin'] == 'intermediate'
 
-    def test_single_snp_row_has_empty_combinatorial(self) -> None:
-        """A single-SNP annotation has an empty combinatorial_aa_effects field."""
+    def test_single_snp_row_has_only_single_effect(self) -> None:
+        """A single-SNP annotation's aa_effects lists only the single effect at
+        the variant frequency (no combined states)."""
         r = _make_result()
         ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
         rows = ctx['all_mutations']['rows']
-        assert rows[0]['combinatorial_aa_effects'] == ''
+        # single_exchange_lower == allele_freq; no combined states.
+        assert 'K' in rows[0]['aa_effects']
+        assert ';' not in rows[0]['aa_effects']
+
+    def test_combined_member_synonymous_single_shown_as_missense(self) -> None:
+        """A combined-codon member whose single-exchange is synonymous but that
+        has accepted non-synonymous combined states is displayed as missense,
+        not synonymous (the AA effects column lists real amino-acid changes)."""
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='G', allele_freq=0.9, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='GCA', alt_codon='GCG', ref_aa='A', alt_aa='A',
+            consequence='synonymous', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_lower=0.0,
+            combined_states=[
+                CodonState(alt_codon='GGA', alt_aa='G', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+        )
+        r = make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[ann], query_sequence='ATGAAGAAA',
+        )
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        assert rows[0]['consequence'] == 'missense'
+        # The underlying ann.consequence is unchanged (used by rule matching).
+        assert ann.consequence == 'synonymous'
+
+    def test_combined_member_synonymous_single_no_nonsyn_states_stays_synonymous(self) -> None:
+        """A combined-codon member whose single is synonymous and whose combined
+        states are also synonymous (or absent) stays synonymous in the display."""
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='G', allele_freq=0.9, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='GCA', alt_codon='GCG', ref_aa='A', alt_aa='A',
+            consequence='synonymous', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_lower=0.0,
+            combined_states=[
+                CodonState(alt_codon='GCG', alt_aa='A', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+        )
+        r = make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[ann], query_sequence='ATGAAGAAA',
+        )
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        assert rows[0]['consequence'] == 'synonymous'
+
+    def test_formula_tag_propagates_to_all_combined_codon_siblings(self) -> None:
+        """A formula (combination) rule that fires via one combined-codon member
+        must tag ALL co-codon siblings with is_formula_hit, not just the matched
+        member. The single-rule tag follows each member's own rule_matches, but
+        the formula tag is shared across the combined codon."""
+        # Two co-codon members at the same (feature, codon_pos).
+        member_a = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_lower=0.5,
+            combined_states=[
+                CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+            rule_matches=[],
+        )
+        member_b = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=5, ref='G', alt='T', allele_freq=0.5, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATT', ref_aa='K', alt_aa='I',
+            consequence='missense', af_bin='intermediate',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_lower=0.5,
+            combined_states=[],
+            rule_matches=[],
+        )
+        rs = ResistanceRuleSet(
+            id=10, drug_name='DrugX', drug_id=1, phenotype='resistant',
+            clinical_phenotype='resistant', ic50='>1.0', fold_ic50='15.0', score='4.0',
+            source='LB2021', group_name='FR1', logic_expression='R1 AND R2',
+            publications=[],
+            members=[
+                ResistanceRuleSetMember(
+                    id=1, rule_set_id=10, feature_name='testf', feature_id=1,
+                    reference_identifier='ref', position=1, reference='K',
+                    mutation='M', external_id='R1',
+                ),
+                ResistanceRuleSetMember(
+                    id=2, rule_set_id=10, feature_name='testf', feature_id=1,
+                    reference_identifier='ref', position=1, reference='K',
+                    mutation='I', external_id='R2',
+                ),
+            ],
+        )
+        # Formula hit references only member_a (the best per member rule R1).
+        hit = FormulaRuleHit(rule_set=rs, matched_variants=[member_a],
+                             matched_member_ids=['R1'])
+        r = make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=2, variants_in_cds=2, resistance_hits=0,
+            annotations=[member_a, member_b], query_sequence='ATGAAGAAA',
+            formula_hits=[hit],
+        )
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        # Both co-codon members carry the formula tag.
+        assert all(row['is_formula_hit'] for row in rows), (
+            f'formula tag missing on sibling: {[r["is_formula_hit"] for r in rows]}'
+        )
 
     def test_similarity_uses_combined_states_lower_for_binning(self) -> None:
         """A non-resistance-hit combined-state annotation appears in the similarity
@@ -3756,16 +3916,17 @@ class TestAlignmentVisualization:
             "<span class='aln-cell'>C</span><span class='aln-sep'></span>"
         ) in html
 
-    def test_affected_nt_positions_combined_codon_event_highlights_all_differing_positions(self) -> None:
+    def test_affected_nt_positions_combined_codon_event_highlights_only_own_snp(self) -> None:
         """
-        For a combined codon event (two SNPs in one codon), _affected_nt_positions
-        should return all positions where ref_codon differs from alt_codon, not just
-        the anchor SNP's position.
+        For a combined codon event, _affected_nt_positions highlights only the
+        member's own reported nucleotide difference (the variant anchor), not the
+        whole codon. The partner SNP at the other codon position is a separate
+        annotation with its own alignment.
 
         Feature: ATG TCT AAA AAA (positions 0-11 on + strand)
         Codon 1 = TCT at coding positions 3,4,5
         Combined event: TCT → ACG (positions 3 and 5 differ)
-        The anchor SNP is at position 3, but position 5 must also be highlighted.
+        This member's anchor SNP is at position 3 (T→A); only pos 3 is highlighted.
         """
         feature = FeatureRecord(
             id=1,
@@ -3779,15 +3940,8 @@ class TestAlignmentVisualization:
             nt_sequence='ATGTCTAAAAAA',
         )
         match = FeatureMatch(
-            feature=feature,
-            identity=1.0,
-            cds_coverage=1.0,
-            query_coverage=1.0,
-            query_start=0,
-            query_end=12,
-            strand='+',
-            cigar='12M',
-            cds_start=0,
+            feature=feature, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
         )
         alignment = build_feature_alignments('ATGACAAAAAAA', [match])['COMB']
         ann = AnnotatedVariant(
@@ -3804,11 +3958,8 @@ class TestAlignmentVisualization:
         )
         codon_nt_start = alignment.codon_start + ann.codon_pos * 3
         affected = _affected_nt_positions(ann, alignment, codon_nt_start)
-        # On + strand, coding positions 3 and 5 differ (T→A at pos 0 of codon,
-        # T→G at pos 2 of codon). Position 4 (C→C) is unchanged.
-        assert 3 in affected
-        assert 5 in affected
-        assert 4 not in affected
+        # Only the member's own anchor at coding pos 3 is highlighted.
+        assert affected == {3}
 
     def test_affected_nt_positions_combined_codon_reverse_strand(self) -> None:
         """
@@ -3855,17 +4006,13 @@ class TestAlignmentVisualization:
         )
         codon_nt_start = alignment.codon_start + ann.codon_pos * 3
         affected = _affected_nt_positions(ann, alignment, codon_nt_start)
-        # Native positions for coding 3,4,5 on - strand feature_length=9:
-        # coding 3 → native 5, coding 4 → native 4, coding 5 → native 3
-        # CCC→CTC: C→C at idx0 (coding 3→native 5), C→T at idx1 (coding 4→native 4), C→C at idx2
-        assert 4 in affected
-        assert 5 not in affected
-        assert 3 not in affected
+        # Only the member's own anchor at native pos 5 is highlighted.
+        assert affected == {5}
 
-    def test_apply_vcf_overlay_combined_codon_event_overlays_all_differing_positions(self) -> None:
+    def test_apply_vcf_overlay_combined_codon_event_overlays_only_own_snp(self) -> None:
         """
-        For a combined codon event in VCF mode, _apply_vcf_overlay must overlay
-        all positions where ref_codon differs from alt_codon, not just the anchor SNP.
+        For a combined codon event in VCF mode, _apply_vcf_overlay overlays only
+        the member's own anchor SNP, not the whole codon.
         """
         feature = FeatureRecord(
             id=1,
@@ -3917,8 +4064,9 @@ class TestAlignmentVisualization:
             ref_window, query_window,
             coding_positions, native_positions, native_anchor_positions,
         )
-        # After overlay, positions 3 (coding) should be A, position 5 should be G
-        # Reference has TCT at coding 3,4,5; overlay should change to ACG
+        # After overlay, only the member's own anchor (coding pos 3) changes to A.
+        # The partner position (coding pos 5) is NOT overlaid — it is a separate
+        # annotation. Reference has TCT at coding 3,4,5.
         for aln_idx, cpos in enumerate(coding_positions):
             if cpos == 3:
                 assert new_query[aln_idx] == 'A', (
@@ -3927,6 +4075,10 @@ class TestAlignmentVisualization:
             elif cpos == 4:
                 assert new_query[aln_idx] == 'C', (
                     f'Coding pos 4 should stay C after overlay, got {new_query[aln_idx]}'
+                )
+            elif cpos == 5:
+                assert new_query[aln_idx] == 'T', (
+                    f'Coding pos 5 should stay T (not overlaid), got {new_query[aln_idx]}'
                 )
 
     def test_apply_vcf_overlay_combined_codon_event_reverse_strand(self) -> None:
@@ -3962,8 +4114,8 @@ class TestAlignmentVisualization:
             cds_start=0,
         )
         alignment = build_feature_alignments(query, [match])['RCOMB2']
-        # Combined event in coding: CCC → CTC at codon 1 (coding positions 3,4,5)
-        # idx=1: C→T, coding pos 4
+        # Member anchor at native pos 5 (ref=C, alt=T). On minus strand,
+        # native pos 5 maps to coding pos 3 (9-1-5=3).
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=5, ref='C', alt='T'),
             feature_name='RCOMB2',
@@ -3988,17 +4140,12 @@ class TestAlignmentVisualization:
             ref_window, query_window,
             coding_positions, native_positions, native_anchor_positions,
         )
-        # On - strand with feature_length=9:
-        # coding position 4 maps to native position 4 (9-1-4=4, same by symmetry)
-        # In native display at coding_pos=4: ref shows G (complement of coding C),
-        # alt should show A (complement of coding T), NOT T.
-        for aln_idx, cpos in enumerate(coding_positions):
-            if cpos == 4:
-                assert new_ref[aln_idx] == 'G', (
-                    f'At coding pos 4, ref should be G, got {new_ref[aln_idx]}'
-                )
-                assert new_query[aln_idx] == 'A', (
-                    f'At coding pos 4, query should be A (complement of coding T), got {new_query[aln_idx]}'
+        # The overlay writes the member's own alt (T, native orientation) at the
+        # anchor (native pos 5). Partner positions are not overlaid.
+        for aln_idx, npos in enumerate(native_positions):
+            if npos == 5:
+                assert new_query[aln_idx] == 'T', (
+                    f'At native pos 5, query should be T (own alt), got {new_query[aln_idx]}'
                 )
 
 
@@ -4060,9 +4207,10 @@ class TestCombinedMemberAlignment:
         affected = _affected_nt_positions(ann, alignment, codon_nt_start)
         assert affected == {5}
 
-    def test_partner_changes_label_present_in_alignment_html(self) -> None:
-        """The alignment HTML includes a partner-changes label listing the other
-        codon exchanges."""
+    def test_combined_member_alignment_has_no_partner_label(self) -> None:
+        """The alignment HTML highlights only the member's own nucleotide change
+        and does not carry a partner-changes label (partner SNPs are separate
+        annotations with their own alignments)."""
         alignment = self._plus_codon_alignment()
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=3, ref='T', alt='A'),
@@ -4077,9 +4225,10 @@ class TestCombinedMemberAlignment:
             ],
         )
         html = str(build_alignment_html(ann, alignment, context_codons=1))
-        assert 'partner' in html.lower()
-        # The partner exchange (T→G at the other codon position) should be surfaced.
-        assert 'G' in html
+        # No partner-changes label.
+        assert 'partner' not in html.lower()
+        # The member's own alt (A) is highlighted.
+        assert "<span class='aln-cell aln-affected'>A</span>" in html
 
     def test_single_snp_codon_has_no_partner_label(self) -> None:
         """A single-SNP (non-combined) annotation has no partner-changes label."""

@@ -32,7 +32,7 @@ from respro.report.non_html_exports import export_results, write_tsv
 # Canonical 21-column header, in order.
 TSV_COLUMNS = [
     'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
-    'af', 'af_bin', 'depth', 'consequence', 'combinatorial_aa_effects',
+    'af', 'af_bin', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
     'source', 'publications',
@@ -45,7 +45,7 @@ _PLACEHOLDER = 'n/a'
 # publications) are dropped when no row carries a real value.
 _TSV_ALWAYS_COLUMNS = [
     'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
-    'af', 'af_bin', 'depth', 'consequence', 'combinatorial_aa_effects',
+    'af', 'af_bin', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'source',
 ]
@@ -189,11 +189,13 @@ class TestWriteTsvHeader:
         assert header == _expected_header(set())
 
 
-class TestCombinatorialAaEffectsColumn:
-    """The combinatorial_aa_effects column lists accepted combined-state AA effects."""
+class TestAaEffectsColumn:
+    """The aa_effects column lists all amino-acid effects (single + combined)
+    each with its amino-acid frequency in parentheses."""
 
-    def test_combined_member_lists_effects(self, tmp_path: Path) -> None:
-        """A combined member row lists its Fréchet-accepted combined AA effects."""
+    def test_combined_member_lists_single_and_combined_effects(self, tmp_path: Path) -> None:
+        """A combined member row lists its single-exchange effect (when its
+        amino-acid frequency is > 0) followed by every accepted combined state."""
         states = [
             CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
                        forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
@@ -204,28 +206,55 @@ class TestCombinatorialAaEffectsColumn:
             is_combined_codon_event=True, combined_states=states,
             alt_aa='M', codon_pos=1, ref_aa='K',
         )
+        # single_exchange_lower defaults to allele_freq (0.95) > 0, so the single
+        # K2M (0.95) is listed first, then the combined states.
         r = _result([ann])
         out = tmp_path / 'r.results.tsv'
         write_tsv(r, out)
         header, rows = _read_tsv(out)
-        assert 'combinatorial_aa_effects' in header
-        col = header.index('combinatorial_aa_effects')
-        # Non-hit variant -> one row.
+        assert 'aa_effects' in header
+        col = header.index('aa_effects')
         assert len(rows) == 1
-        # Format: "K21I (0.5); K21M (0.5)" — ref+pos+aa with lower in parens.
         effects = rows[0][col]
+        # Single exchange first (at its amino-acid frequency = allele_freq 0.95).
+        assert 'K2M (0.95)' in effects
+        # Combined states follow.
         assert 'K2I (0.5)' in effects
         assert 'K2M (0.5)' in effects
 
-    def test_single_snp_column_empty(self, tmp_path: Path) -> None:
-        """A single-SNP annotation has an empty combinatorial_aa_effects column."""
+    def test_combined_member_zero_single_omits_single(self, tmp_path: Path) -> None:
+        """A combined member whose single-exchange is Fréchet-impossible
+        (single_exchange_lower=0) omits the single entry; only combined states."""
+        states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+        ]
+        ann = _ann(
+            is_combined_codon_event=True, combined_states=states,
+            alt_aa='M', codon_pos=1, ref_aa='K',
+        )
+        ann.single_exchange_lower = 0.0  # single guaranteed absent
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('aa_effects')
+        effects = rows[0][col]
+        # Single M is omitted (lower=0); only the combined I state.
+        assert 'K2M' not in effects
+        assert 'K2I (0.5)' in effects
+
+    def test_single_snp_lists_only_single_effect(self, tmp_path: Path) -> None:
+        """A single-SNP annotation lists only its single effect at the variant
+        frequency (no combined states)."""
         ann = _ann(alt_aa='E', codon_pos=2, ref_aa='K')
         r = _result([ann])
         out = tmp_path / 'r.results.tsv'
         write_tsv(r, out)
         header, rows = _read_tsv(out)
-        col = header.index('combinatorial_aa_effects')
-        assert rows[0][col] == ''
+        col = header.index('aa_effects')
+        # single_exchange_lower == allele_freq (0.95); no combined states.
+        assert rows[0][col] == 'K3E (0.95)'
 
 
 class TestSingleRuleRows:

@@ -32,6 +32,7 @@ from respro.db.algorithms import (
     _references_match as _algorithms_references_match,
 )
 from respro.db.models import (
+    AnnotatedVariant,
     FeatureRecord,
     ProfilingResult,
     Publication,
@@ -89,6 +90,27 @@ def _load_svg_data_url(asset_name: str) -> str:
     asset_path = Path(__file__).parent / 'static' / 'assets' / asset_name
     svg_text = asset_path.read_text(encoding='utf-8')
     return f'data:image/svg+xml,{quote(svg_text)}'
+
+
+def display_consequence(ann: AnnotatedVariant) -> str:
+    """Return the consequence label shown in reports.
+
+    A combined-codon member whose single-exchange is synonymous but that has
+    accepted non-synonymous combined states is shown as ``missense`` — its AA
+    effects column lists real amino-acid changes, so "synonymous" would be
+    misleading. The underlying ``ann.consequence`` (used by rule matching) is
+    unchanged.
+    """
+    if (
+        ann.is_combined_codon_event
+        and ann.consequence == 'synonymous'
+        and any(
+            s.accepted and s.alt_aa and s.alt_aa != ann.ref_aa
+            for s in ann.combined_states
+        )
+    ):
+        return 'missense'
+    return ann.consequence
 
 
 def build_report_context(
@@ -286,12 +308,12 @@ def build_report_context(
             'has_database_hits': any(r['is_database_hit'] for r in all_mutations_rows),
             'has_user_ref_column': not result.is_fasta_mode,
             'has_combinatorial': any(
-                r['is_combined_codon_event'] or r['combinatorial_aa_effects']
-                for r in all_mutations_rows
+                r['is_combined_codon_event'] for r in all_mutations_rows
             ),
             'is_multi_species': is_multi_species,
             'search_icon': _load_svg_data_url('search.svg'),
             'reset_icon': _load_svg_data_url('reset_filter.svg'),
+            'info_icon': _load_svg_data_url('info.svg'),
         },
         'sequence_features': {
             'cards': feature_cards,
@@ -450,36 +472,49 @@ def _build_all_mutations_rows(
 
         is_single_hit = ann.is_resistance_hit
         is_formula_hit = id(ann) in formula_hit_annotation_ids
-        display_consequence = ann.consequence
+        row_consequence = display_consequence(ann)
 
         pos_1based = ann.variant.pos + 1
         nt_change_stored_val = nt_change_stored(ann)
         nt_change_user_val = nt_change_user(ann)
 
+        # AA effects: all amino-acid outcomes this SNP participates in, each with
+        # its amino-acid frequency (Fréchet lower bound) in parentheses. The
+        # single-exchange effect is listed first (when its amino-acid frequency
+        # is > 0), followed by every accepted combined-state effect. For a
+        # non-combined variant this is just the single effect at the variant
+        # frequency. For a combined member whose single is Fréchet-impossible
+        # (lower=0) only the combined states are shown.
+        aa_effects_parts: list[str] = []
+        if ann.alt_aa and ann.single_exchange_lower > 0.0:
+            aa_effects_parts.append(
+                f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa} ({round(ann.single_exchange_lower, 3)})'
+            )
+        for s in ann.combined_states:
+            if s.accepted:
+                aa_effects_parts.append(
+                    f'{ann.ref_aa}{ann.codon_pos + 1}{s.alt_aa} ({round(s.lower, 3)})'
+                )
+        aa_effects = '; '.join(aa_effects_parts)
+
+        # The single-exchange AA change (without frequency) is still needed for
+        # the database-hits and similarity tables.
         aa_change = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             if ann.ref_aa and ann.alt_aa
             else ''
         )
 
-        combinatorial_effects = ''
-        if ann.combined_states:
-            parts = [
-                f'{ann.ref_aa}{ann.codon_pos + 1}{s.alt_aa} ({s.lower})'
-                for s in ann.combined_states if s.accepted
-            ]
-            combinatorial_effects = '; '.join(parts)
-
         rows.append({
             'feature': (display_names or {}).get(ann.feature_name, ann.feature_name),
             'nt_change_stored': nt_change_stored_val,
             'nt_change_user': nt_change_user_val,
             'nt_pos': pos_1based,
+            'aa_effects': aa_effects,
             'aa_change': aa_change,
-            'consequence': display_consequence,
-            'allele_freq': ann.variant.allele_freq,
+            'consequence': row_consequence,
+            'variant_freq': ann.variant.allele_freq,  # nucleotide frequency
             'af_bin': ann.af_bin,
-            'combinatorial_aa_effects': combinatorial_effects,
             'is_combined_codon_event': ann.is_combined_codon_event,
             'combined_member_count': ann.combined_member_count,
             'is_single_hit': is_single_hit,
@@ -906,13 +941,38 @@ def _collect_detected_drug_names(result: ProfilingResult) -> set[str]:
 
 
 def _collect_formula_hit_annotation_ids(result: ProfilingResult) -> set[int]:
-    """Collect annotation object IDs that participate in any formula hit."""
-    formula_hit_annotation_ids: set[int] = set()
+    """Collect annotation object IDs that participate in any formula hit.
+
+    A formula hit's ``matched_variants`` carries one annotation per atomic member
+    rule (the highest-AF one). When that annotation is a combined-codon member,
+    every co-codon sibling shares the same combined amino-acid outcome and must
+    also carry the formula tag — otherwise only the first member's row shows the
+    "Formula-Rule" pill while its co-codon partners do not. Siblings are
+    identified by shared ``(feature_name, codon_pos)`` among combined-codon
+    annotations.
+    """
+    direct_ids: set[int] = set()
     for formula_hit in result.formula_hits:
         for ann in formula_hit.matched_variants:
             # Formula hits reference annotation objects, not stable variant keys;
             # object identity preserves exact membership when overlaps share coordinates.
-            formula_hit_annotation_ids.add(id(ann))
+            direct_ids.add(id(ann))
+
+    # Expand to combined-codon siblings of any directly-matched annotation.
+    direct_anns = {id(ann): ann for ann in result.cds_annotations if id(ann) in direct_ids}
+    combined_sibling_keys: set[tuple[str, int]] = set()
+    for ann in direct_anns.values():
+        if ann.is_combined_codon_event:
+            combined_sibling_keys.add((ann.feature_name, ann.codon_pos))
+
+    formula_hit_annotation_ids: set[int] = set(direct_ids)
+    if combined_sibling_keys:
+        for ann in result.cds_annotations:
+            if (
+                ann.is_combined_codon_event
+                and (ann.feature_name, ann.codon_pos) in combined_sibling_keys
+            ):
+                formula_hit_annotation_ids.add(id(ann))
     return formula_hit_annotation_ids
 
 
@@ -1163,7 +1223,11 @@ def _build_potential_effects_rows(
                 (s.alt_aa, s.lower) for s in ann.combined_states if s.accepted
             ]
         else:
-            effect_variants = [(ann.alt_aa, ann.variant.allele_freq)]
+            # Single exchange: use the amino-acid frequency
+            # (single_exchange_lower — equals the nucleotide frequency for
+            # non-combined variants; 0 for a Fréchet-impossible combined single
+            # whose amino acid is guaranteed absent).
+            effect_variants = [(ann.alt_aa, ann.single_exchange_lower)]
         # Deduplicate by alt_aa, keeping the first (lowest) frequency.
         seen_alts: set[str] = set()
         deduped_effects: list[tuple[str, float]] = []

@@ -82,9 +82,11 @@ Per-feature nucleotide changes are translated into amino-acid consequences. Supp
 
 #### Multiple SNPs in one codon
 
-When two or more SNPs fall within the same codon and all have allele frequency above the combination threshold (default > 0.75, strict greater-than), they are merged into a single combined codon event. The combined codon is translated once, producing one amino-acid consequence instead of separate per-SNP consequences. The allele frequency of the combined event is set to the minimum AF among the member SNPs (conservative lower bound).
+When two or more SNPs fall within the same codon, they are evaluated together as a **combined codon event** using **Fréchet (probability) bounds**. Each member SNP is emitted as its own per-SNP annotation carrying the amino-acid outcomes it can participate in — both the single-exchange effect (this SNP alone, co-codon SNPs absent) and the combined-state effects (this SNP plus co-occurring SNPs), each with its guaranteed minimum population frequency (the Fréchet lower bound, assuming no linkage information).
 
-SNPs below the threshold are annotated individually. This prevents low-AF variants from being fused with high-AF variants at the same codon.
+A single-exchange that is Fréchet-impossible (guaranteed absent, lower bound 0) is omitted from the report and cannot match a single-amino-acid rule — only its combined states can fire. The acceptance threshold for combined states defaults to a forced fraction of 2/3 (`min_cooccurrence_codon_fraction` in the config).
+
+For the full mathematical derivation, worked examples, and the multiallelic-site generalisation, see [Technical Reference §5.3 — Multiple SNPs in one codon](technical-reference.md#53-multiple-snps-in-one-codon-frechet-bounds).
 
 ### Rule matching
 
