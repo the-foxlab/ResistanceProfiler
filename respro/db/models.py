@@ -350,6 +350,13 @@ class AnnotatedVariant:
     # for combined-state hits it is the state's Fréchet ``lower`` (amino-acid
     # frequency of the combined codon). Never the nucleotide frequency.
     rule_effect_lower: dict[int, float] = field(default_factory=dict)
+    # Per matched rule, the amino-acid allele that actually matched the rule.
+    # Maps rule.id -> alt_aa. For single-exchange hits this is ``ann.alt_aa``;
+    # for combined-state hits it is the combined state's ``alt_aa`` (which can
+    # differ from ``ann.alt_aa``). The Database Hits table uses this to display
+    # the amino-acid change that triggered the rule, not the row's single-
+    # exchange AA. Persisted so regenerated reports match the live report.
+    rule_effect_alt: dict[int, str] = field(default_factory=dict)
     af_bin: str = ''
     is_fasta_mode: bool = False  # True when derived from consensus FASTA, not a VCF
     rule_matches: list[ResistanceRule] = field(default_factory=list)

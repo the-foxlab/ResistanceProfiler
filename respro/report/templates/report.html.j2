@@ -683,7 +683,7 @@
                     AA effects
                     <span class="db-hit-freq-info">
                       <img class="db-hit-info-icon" src="{{ context.all_mutations.info_icon }}" alt="info" width="13" height="13">
-                      <div class="db-hit-info-panel">All amino-acid changes this SNP can produce, each with its guaranteed minimum population frequency in parentheses. The first is this SNP alone; later entries are combined effects with co-codon SNPs. Rule matching and AF binning use these amino-acid frequencies.</div>
+                      <div class="db-hit-info-panel">All amino-acid changes this SNP can produce, each with its guaranteed minimum population frequency in parentheses. The first is this SNP alone; later entries are combined effects with co-codon SNPs. Rule matching use these amino-acid frequencies.</div>
                     </span>
                   </th>
                   {% if context.all_mutations.has_combinatorial %}
@@ -691,7 +691,7 @@
                     Combined SNP codon
                     <span class="db-hit-freq-info">
                       <img class="db-hit-info-icon" src="{{ context.all_mutations.info_icon }}" alt="info" width="13" height="13">
-                      <div class="db-hit-info-panel">Yes when this SNP shares its codon with one or more other SNPs. The combined outcome is called only when the SNPs' minimum frequency overlap (Fréchet lower bound) clears the configured forced fraction.</div>
+                      <div class="db-hit-info-panel">Yes when this SNP shares its codon with one or more other SNPs. The combined outcome is called only when the SNPs' minimum frequency overlap (Fréchet lower bound) is high enough.</div>
                     </span>
                   </th>
                   {% endif %}

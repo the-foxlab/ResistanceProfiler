@@ -2316,7 +2316,15 @@ class TestPerSnpCombinedStates:
     def test_multiallelic_with_co_codon_snp_produces_combined_states(self) -> None:
         """A multiallelic position (pos4 A->T@0.9, A->C@0.1) alongside a co-codon
         SNP (pos5 G->T@1.0) produces combined states — the multiallelic position
-        is modelled as a ternary choice {ref, T, A}, not rejected."""
+        is modelled as a ternary choice {ref, T, A}, not rejected.
+
+        The G->T@1.0 co-member forces full overlap (forced_fraction==1.0), so
+        each member's Fréchet-rejected single is promoted to the forced state
+        carrying it: A->T -> ATT=I (lower=0.9), A->C -> ACT=T (lower=0.1),
+        G->T -> ATT=I (lower=0.9, the strongest forced state). The promoted
+        state is dropped from combined_states, so each member's combined_states
+        is empty (the only accepted state was promoted to the single).
+        """
         feature = self._aag_feature()
         variants = [
             VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.9, depth=100),
@@ -2330,14 +2338,44 @@ class TestPerSnpCombinedStates:
         for ann in results:
             assert ann.is_combined_codon_event is True
             assert ann.combined_member_count == 3
-        # The A->T@0.9 member should have accepted combined states including
-        # the all-carried TTG (lower=0.9) and the single ATG (A->T only, lower=0.0,
-        # rejected). The A->C@0.1 member has the all-carried CTG (lower=0.1).
         by_pos_alt = {(a.variant.pos, a.variant.alt): a for a in results}
         t_member = by_pos_alt[(4, 'T')]
-        # T member's combined_states include states where T@pos0 is carried.
-        accepted_aas = {s.alt_aa for s in t_member.combined_states}
-        assert len(accepted_aas) > 0
+        # A->T single (ATG=M) is Fréchet-rejected; promoted to ATT=I.
+        assert t_member.alt_codon == 'ATT'
+        assert t_member.alt_aa == 'I'
+        assert t_member.single_exchange_lower == pytest.approx(0.9)
+        # The promoted state is dropped from combined_states.
+        assert t_member.combined_states == []
+
+    def test_multiallelic_forced_overlap_promotes_rejected_single(self) -> None:
+        """A multiallelic position (pos4 A->T@0.5, A->C@0.5) with a co-codon SNP
+        (pos5 G->T@1.0): the A->T single-exchange (ATG=M, lower=0) is
+        Fréchet-rejected, but the all-carried state ATT=I (T@0.5 + T@1.0) is
+        accepted with forced_fraction==1.0 (the G->T co-member is at 1.0). The
+        forced-overlap promotion must replace A->T's single with ATT=I.
+
+        Regression for the bug where ``all_carried`` was matched by
+        ``len(member_indices) == len(members)``, which is never true for
+        multiallelic positions (len(members) counts every ALT, but
+        member_indices has at most one entry per position).
+        """
+        feature = self._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.5, depth=100),
+            VariantCall(chrom='c', pos=4, ref='A', alt='C', allele_freq=0.5, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=1.0, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        by_pos_alt = {(a.variant.pos, a.variant.alt): a for a in results}
+        t_member = by_pos_alt[(4, 'T')]
+        # The A->T single-exchange (ATG=M) has lower=0 (Fréchet-impossible:
+        # q=[0.5, 0.0], lower=max(0, 0.5-1)=0). The all-carried ATT=I
+        # (T@0.5 + T@1.0) has lower=0.5, forced_fraction=1.0 -> accepted.
+        # The promotion must replace the single with ATT=I.
+        assert t_member.alt_codon == 'ATT'
+        assert t_member.alt_aa == 'I'
+        # The promoted state's lower is the single_exchange_lower.
+        assert t_member.single_exchange_lower == pytest.approx(0.5)
 
     def test_min_fraction_from_config_used(self) -> None:
         """The acceptance threshold flows from CLI_CONFIG.codon.min_cooccurrence_codon_fraction."""

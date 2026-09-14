@@ -181,6 +181,7 @@ def match_rules(
             # A combined-state hit takes precedence for the display frequency: the
             # combinatorial effect's Fréchet lower bound is what the report shows.
             matched_lower: float | None = None
+            matched_alt: str | None = None
             for eff_alt, eff_lower in effect_candidates:
                 # Combined states use missense consequence for matching; the single
                 # keeps its own consequence (e.g. frameshift, insertion).
@@ -193,12 +194,14 @@ def match_rules(
                     ann_consequence=eff_consequence,
                 ):
                     matched_lower = eff_lower
+                    matched_alt = eff_alt
                     if eff_alt != ann.alt_aa:
                         break  # combined-state hit found; stop searching
 
             if matched_lower is not None:
                 ann.rule_matches.append(rule)
                 ann.rule_effect_lower[rule.id] = matched_lower
+                ann.rule_effect_alt[rule.id] = matched_alt if matched_alt is not None else ann.alt_aa
                 hit_count += 1
 
         # Suppress INS_any when a specific insertion rule fires for the same position+drug.

@@ -217,6 +217,8 @@ def write_json(
             'is_combined_codon_event': ann.is_combined_codon_event,
             'combined_member_count': ann.combined_member_count,
             'single_exchange_lower': ann.single_exchange_lower,
+            'rule_effect_lower': json.dumps(ann.rule_effect_lower),
+            'rule_effect_alt': json.dumps(ann.rule_effect_alt),
             'combined_states': json.dumps([
                 {
                     'alt_codon': s.alt_codon,

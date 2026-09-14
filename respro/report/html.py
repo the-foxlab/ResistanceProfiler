@@ -607,9 +607,16 @@ def _build_database_hits_rows(
     for ann in result.cds_annotations:
         for rule in ann.non_formula_component_rule_matches:
             feature = (display_names or {}).get(ann.feature_name, ann.feature_name)
+            # The amino-acid allele that actually matched the rule. For a
+            # combined-state hit this can differ from ann.alt_aa (the single-
+            # exchange AA): a rule keyed on a combined-state AA must display
+            # that combined-state AA, not the single. Falls back to ann.alt_aa
+            # when rule_effect_alt is unset (non-combined, or regenerated from
+            # an old results DB without the column).
+            eff_alt = ann.rule_effect_alt.get(rule.id, ann.alt_aa)
             aa_change = (
-                f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
-                if ann.ref_aa and ann.alt_aa
+                f'{ann.ref_aa}{ann.codon_pos + 1}{eff_alt}'
+                if ann.ref_aa and eff_alt
                 else ann.feature_name
             )
             # For wildcard insertion rules, prefix the rule label so the
@@ -956,8 +963,11 @@ def _collect_formula_hit_annotation_ids(result: ProfilingResult) -> set[int]:
     every co-codon sibling shares the same combined amino-acid outcome and must
     also carry the formula tag — otherwise only the first member's row shows the
     "Formula-Rule" pill while its co-codon partners do not. Siblings are
-    identified by shared ``(feature_name, codon_pos)`` among combined-codon
-    annotations.
+    identified by shared ``(feature_name, codon_pos, chrom)`` among combined-codon
+    annotations. The chrom scope is required for same-species multi-reference
+    runs, where two references can share a feature name (e.g. two HSV-1
+    references both carrying UL24): without it, a formula hit on one reference
+    would tag a sibling annotation on the other.
     """
     direct_ids: set[int] = set()
     for formula_hit in result.formula_hits:
@@ -968,17 +978,17 @@ def _collect_formula_hit_annotation_ids(result: ProfilingResult) -> set[int]:
 
     # Expand to combined-codon siblings of any directly-matched annotation.
     direct_anns = {id(ann): ann for ann in result.cds_annotations if id(ann) in direct_ids}
-    combined_sibling_keys: set[tuple[str, int]] = set()
+    combined_sibling_keys: set[tuple[str, int, str]] = set()
     for ann in direct_anns.values():
         if ann.is_combined_codon_event:
-            combined_sibling_keys.add((ann.feature_name, ann.codon_pos))
+            combined_sibling_keys.add((ann.feature_name, ann.codon_pos, ann.variant.chrom))
 
     formula_hit_annotation_ids: set[int] = set(direct_ids)
     if combined_sibling_keys:
         for ann in result.cds_annotations:
             if (
                 ann.is_combined_codon_event
-                and (ann.feature_name, ann.codon_pos) in combined_sibling_keys
+                and (ann.feature_name, ann.codon_pos, ann.variant.chrom) in combined_sibling_keys
             ):
                 formula_hit_annotation_ids.add(id(ann))
     return formula_hit_annotation_ids

@@ -88,6 +88,7 @@ class TestCombinedStatesReport:
             ],
             rule_matches=[rule_i, rule_m],
             rule_effect_lower={10: 0.5, 20: 0.5},
+            rule_effect_alt={10: 'I', 20: 'M'},
         )
         g_row = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=5, ref='G', alt='T', allele_freq=0.5, depth=100),
@@ -99,6 +100,7 @@ class TestCombinedStatesReport:
             combined_states=[],
             rule_matches=[rule_i],
             rule_effect_lower={10: 0.5},
+            rule_effect_alt={10: 'I'},
         )
         return make_profiling_result(
             project_name='T', reference_name='ref', reference_length_nt=1000,
@@ -242,9 +244,68 @@ class TestCombinedStatesReport:
         # The A->T row's DrugI hit (via combined I) should use lower 0.5 -> intermediate bin.
         a_drug_i = next(
             row for row in drug_i_hits
-            if any('K2M' in str(g['muts']) for g in row['mutation_groups'])
+            if any('K2I' in str(g['muts']) for g in row['mutation_groups'])
         )
         assert a_drug_i['af_bin'] == 'intermediate'
+
+    def test_database_hits_show_combined_state_aa_not_single(self) -> None:
+        """A rule that fires via a combined state whose alt_aa differs from the
+        single-exchange alt_aa must show the combined-state AA in the Database
+        Hits table, not the single-exchange AA.
+
+        Uses a dedicated fixture where only one row matches the DrugI rule, via
+        a combined state (alt_aa='I') that differs from the row's single-exchange
+        alt_aa='M'. The database-hits row must show 'K2I', not 'K2M'.
+        """
+        rule_i = ResistanceRule(
+            id=10, feature_name='testf', feature_id=1,
+            drug_name='DrugI', drug_id=1, reference_identifier='ref',
+            position=1, reference='K', mutation='I', phenotype='resistant',
+        )
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='testf', protein='TestF',
+            start=0, end=9, strand='+', codon_start=0,
+            nt_sequence='ATGAAGAAA',
+        )
+        # Single-exchange alt_aa='M', but a combined state with alt_aa='I' that
+        # matches the DrugI rule. rule_effect_alt records 'I' for rule 10.
+        a_row = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_lower=0.5,
+            combined_states=[
+                CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+            rule_matches=[rule_i],
+            rule_effect_lower={10: 0.5},
+            rule_effect_alt={10: 'I'},
+        )
+        result = make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=1,
+            annotations=[a_row],
+            query_sequence='ATGAAGAAA',
+            feature_matches=[
+                FeatureMatch(
+                    feature=feature, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                    query_start=0, query_end=9, strand='+', cigar='9M', cds_start=0,
+                ),
+            ],
+        )
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0)
+        hit_rows = ctx['database_hits']['rows']
+        drug_i_hits = [row for row in hit_rows if row['drug_key'] == 'DrugI']
+        assert len(drug_i_hits) == 1
+        muts = [m for g in drug_i_hits[0]['mutation_groups'] for m in g['muts']]
+        # The DrugI rule (mutation='I') fired via the combined state alt_aa='I',
+        # so the displayed AA must be K2I, not K2M (the single-exchange AA).
+        assert 'K2I' in muts
+        assert 'K2M' not in muts
 
     def test_single_snp_row_has_only_single_effect(self) -> None:
         """A single-SNP annotation's aa_effects lists only the single effect at
@@ -372,6 +433,87 @@ class TestCombinedStatesReport:
         assert all(row['is_formula_hit'] for row in rows), (
             f'formula tag missing on sibling: {[r["is_formula_hit"] for r in rows]}'
         )
+
+    def test_formula_tag_does_not_cross_references(self) -> None:
+        """A formula hit on one reference must not tag a combined-codon sibling on
+        a different reference that happens to share ``(feature_name, codon_pos)``.
+        Same-species multi-reference runs can share feature names; the sibling
+        expansion must be scoped by chrom to avoid cross-reference over-tagging.
+        """
+        from respro.db.models import ReferenceGroup
+
+        # ref1 combined-codon member (has a formula hit).
+        ref1_member = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_a', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_lower=0.5,
+            combined_states=[
+                CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+            rule_matches=[],
+        )
+        # ref2 combined-codon member at the SAME (feature_name, codon_pos) but on
+        # a different reference (chrom='chrom_b'). No formula hit references it.
+        ref2_member = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_b', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_lower=0.5,
+            combined_states=[
+                CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+            rule_matches=[],
+        )
+        rs = ResistanceRuleSet(
+            id=10, drug_name='DrugX', drug_id=1, phenotype='resistant',
+            clinical_phenotype='resistant', ic50='>1.0', fold_ic50='15.0', score='4.0',
+            source='LB2021', group_name='FR1', logic_expression='R1',
+            publications=[],
+            members=[
+                ResistanceRuleSetMember(
+                    id=1, rule_set_id=10, feature_name='testf', feature_id=1,
+                    reference_identifier='refA', position=1, reference='K',
+                    mutation='M', external_id='R1',
+                ),
+            ],
+        )
+        hit = FormulaRuleHit(rule_set=rs, matched_variants=[ref1_member],
+                             matched_member_ids=['R1'])
+        references = [
+            ReferenceGroup(
+                reference_name='refA', reference_id=1, organism='Organism A',
+                reference_length_nt=1000, query_name='chrom_a', query_sequence='ATGAAGAAA',
+                features=[], rule_feature_names={'testf'}, feature_matches=[],
+            ),
+            ReferenceGroup(
+                reference_name='refB', reference_id=2, organism='Organism A',
+                reference_length_nt=1000, query_name='chrom_b', query_sequence='ATGAAGAAA',
+                features=[], rule_feature_names={'testf'}, feature_matches=[],
+            ),
+        ]
+        r = ProfilingResult(
+            project_name='T', organism='Organism A',
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=2, variants_in_cds=2, resistance_hits=0,
+            annotations=[ref1_member, ref2_member],
+            formula_hits=[hit],
+            references=references,
+        )
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        by_ref = {row['reference_name']: row for row in rows}
+        # refA member is tagged (formula hit references it).
+        assert by_ref['refA']['is_formula_hit'] is True
+        # refB member must NOT be tagged: it shares (feature_name, codon_pos)
+        # but is on a different reference.
+        assert by_ref['refB']['is_formula_hit'] is False
 
     def test_similarity_uses_combined_states_lower_for_binning(self) -> None:
         """A non-resistance-hit combined-state annotation appears in the similarity

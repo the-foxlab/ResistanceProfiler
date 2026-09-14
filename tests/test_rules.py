@@ -396,6 +396,28 @@ class TestMatchCombinedStates:
         # Combined-state hit -> effect lower is the state's lower (0.5), not row AF (1.0).
         assert result[0].rule_effect_lower[10] == pytest.approx(0.5)
 
+    def test_rule_effect_alt_records_combined_state_aa(self) -> None:
+        """When a rule fires via a combined state whose alt_aa differs from the
+        single-exchange, ``rule_effect_alt`` records the combined-state alt_aa
+        so the report can display the amino acid that actually matched.
+        """
+        rule_i = self._rule(10, 'I')
+        states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+        ]
+        ann = self._ann('M', 1.0, combined_states=states)
+        result = match_rules([ann], [rule_i])
+        assert result[0].rule_effect_alt[10] == 'I'
+
+    def test_rule_effect_alt_records_single_aa_for_single_hit(self) -> None:
+        """When a rule fires via the single-exchange, ``rule_effect_alt`` records
+        the single-exchange alt_aa (== ann.alt_aa)."""
+        rule_n = self._rule(70, 'N')
+        ann = self._ann('N', 0.9)
+        result = match_rules([ann], [rule_n])
+        assert result[0].rule_effect_alt[70] == 'N'
+
     def test_rule_fires_via_single_and_combined_uses_combined_lower(self) -> None:
         """K20M fires on A->T row via both single(M) and combined(M@0.5); the combined
         lower (0.5) is recorded since the combinatorial effect is what the report shows."""

@@ -122,8 +122,8 @@ def save_run(
             'feature_name, reference_name, codon_pos, ref_codon, alt_codon, ref_aa, alt_aa, '
             'consequence, af_bin, rule_match, drug_hits, '
             'is_combined_codon_event, combined_member_count, combined_states, '
-            'single_exchange_lower) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'single_exchange_lower, rule_effect_lower, rule_effect_alt) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 run_id,
                 v.chrom,
@@ -147,6 +147,8 @@ def save_run(
                 ann.combined_member_count,
                 _serialize_combined_states(ann.combined_states),
                 ann.single_exchange_lower,
+                json.dumps(ann.rule_effect_lower),
+                json.dumps(ann.rule_effect_alt),
             ),
         )
 
@@ -448,6 +450,10 @@ def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
             combined_member_count=row.get('combined_member_count', 1) or 1,
             combined_states=_deserialize_combined_states(row.get('combined_states', '[]')),
             single_exchange_lower=row.get('single_exchange_lower', 0.0) or 0.0,
+            rule_effect_lower={int(k): float(val) for k, val in json.loads(
+                row.get('rule_effect_lower') or '{}').items()},
+            rule_effect_alt={int(k): str(val) for k, val in json.loads(
+                row.get('rule_effect_alt') or '{}').items()},
             rule_matches=rule_matches,
         )
         annotations.append(ann)

@@ -644,6 +644,41 @@ class TestResultsPersistence:
         annotations = reconstruct_annotations(variant_rows)
         assert annotations[0].combined_states == []
 
+    def test_rule_effect_lower_and_alt_round_trip(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """rule_effect_lower and rule_effect_alt are persisted on save and
+        restored on reconstruct, so regenerated reports match live reports."""
+        result = self._make_result()
+        result.annotations[0].is_combined_codon_event = True
+        result.annotations[0].rule_effect_lower = {10: 0.5, 20: 0.3}
+        result.annotations[0].rule_effect_alt = {10: 'I', 20: 'M'}
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+
+        _, variant_rows = load_run(results_conn, 1)
+        annotations = reconstruct_annotations(variant_rows)
+        ann = annotations[0]
+        assert ann.rule_effect_lower == {10: 0.5, 20: 0.3}
+        assert ann.rule_effect_alt == {10: 'I', 20: 'M'}
+
+    def test_legacy_db_without_rule_effect_columns_opens(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """An existing results DB without the rule_effect_lower/rule_effect_alt
+        columns opens after migration, defaulting to empty dicts."""
+        result = self._make_result()
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+        results_conn.close()
+        legacy_path = tmp_path / 'results.db'
+        conn = sqlite3.connect(legacy_path)
+        conn.execute('ALTER TABLE variant_result DROP COLUMN rule_effect_lower')
+        conn.execute('ALTER TABLE variant_result DROP COLUMN rule_effect_alt')
+        conn.commit()
+        conn.close()
+        init_results_db(legacy_path)
+        conn = sqlite3.connect(legacy_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute('SELECT * FROM variant_result WHERE run_id = 1').fetchone()
+        assert row['rule_effect_lower'] == '{}'
+        assert row['rule_effect_alt'] == '{}'
+        conn.close()
+
     def test_legacy_db_without_combined_states_column_opens(self, results_conn, minimal_project_conn, tmp_path) -> None:
         """An existing results DB without the combined_states column opens after migration."""
         result = self._make_result()

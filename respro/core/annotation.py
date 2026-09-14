@@ -548,14 +548,30 @@ def _annotate_combined_snp_codon(
         # No accepted combined state for any member: single-SNP fallback.
         return _combined_fallback_single_snp(variants, feature)
 
-    # The forced all-carried state (every variant member applied), if accepted
-    # and forced. With multiallelic positions the "all-carried" state picks every
-    # ALT at every position — its member_indices has one entry per variant member.
-    all_carried = next(
-        (s for s in accepted if len(s.member_indices) == len(members)
-         and abs(s.forced_fraction - 1.0) <= _FRECHET_EPS),
-        None,
-    )
+    # Forced-overlap promotion state per member: the accepted state with
+    # ``forced_fraction == 1.0`` that carries this member and the most co-members.
+    # For biallelic codons (one ALT per position) this is the unique all-carried
+    # state (every member applied). For multiallelic positions a state cannot
+    # carry two ALTs at the same position (they are mutually exclusive), so the
+    # "all-carried" concept is per-member: the state carrying this member's ALT
+    # plus one ALT at every other position. We pick the accepted forced state
+    # with the longest member_indices (maximal co-carried set) that includes
+    # this member — generalising the biallelic all-carried lookup, which matched
+    # by ``len(member_indices) == len(members)`` and silently failed for
+    # multiallelic codons (len(members) > len(positions)).
+    forced_states: dict[int, CodonState | None] = {}
+    for _, _, _, member_index in members:
+        candidates = [
+            s for s in accepted
+            if member_index in s.member_indices
+            and abs(s.forced_fraction - 1.0) <= _FRECHET_EPS
+        ]
+        # Pick the forced state carrying the most co-members (maximal co-carried
+        # set); break ties by the highest lower bound so a freq-1.0 co-member
+        # promotes to the strongest guaranteed state.
+        forced_states[member_index] = max(
+            candidates, key=lambda s: (len(s.member_indices), s.lower),
+        ) if candidates else None
 
     annotations: list[AnnotatedVariant] = []
     for var, codon_pos, alt_base, member_index in members:
@@ -573,22 +589,23 @@ def _annotate_combined_snp_codon(
         )
         single_rejected = single_state is None or single_state.lower <= _FRECHET_EPS
 
-        # Forced-overlap exception: replace single with the forced all-carried state.
+        # Forced-overlap exception: replace single with the per-member forced state.
+        forced_state = forced_states.get(member_index)
         promoted = False
-        if single_rejected and all_carried is not None:
-            single_codon = all_carried.alt_codon
-            single_aa = all_carried.alt_aa
+        if single_rejected and forced_state is not None:
+            single_codon = forced_state.alt_codon
+            single_aa = forced_state.alt_aa
             promoted = True
 
         consequence = _classify_snp_consequence(ref_aa, single_aa, codon_idx)
 
         # combined_states: accepted states that include this member, deduped by
-        # alt_aa with lower summed. Drop the promoted all-carried state (it is now
+        # alt_aa with lower summed. Drop the promoted forced state (it is now
         # the single) to avoid showing the same effect twice.
         member_states = [
             s for s in accepted
             if member_index in s.member_indices
-            and not (promoted and s is all_carried)
+            and not (promoted and s is forced_state)
         ]
         combined_states = _dedupe_states_by_aa(member_states)
 
@@ -596,12 +613,12 @@ def _annotate_combined_snp_codon(
         # codon shown in this row (the Fréchet lower bound on the population
         # share of that exact codon). This is distinct from the nucleotide
         # frequency (variant.allele_freq): when promoted, the single IS the
-        # all-carried state, so use its lower; otherwise use the solo state's
+        # forced state, so use its lower; otherwise use the solo state's
         # own Fréchet lower (0 when the single-exchange amino acid is
         # Fréchet-impossible, i.e. guaranteed absent despite a high nucleotide
         # frequency).
-        if promoted and all_carried is not None:
-            single_exchange_lower = all_carried.lower
+        if promoted and forced_state is not None:
+            single_exchange_lower = forced_state.lower
         elif single_state is not None:
             single_exchange_lower = max(0.0, single_state.lower)
         else:
