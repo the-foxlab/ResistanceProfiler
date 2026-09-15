@@ -536,6 +536,66 @@ class TestComputeCodonCooccurrence:
         assert set(by_codon.keys()) == {'TTA'}
         assert by_codon['TTA'].lower == pytest.approx(1.0)
 
+    def test_qcfail_read_excluded(self, tmp_path: Path) -> None:
+        """A read flagged QCFAIL (0x200) is excluded from the co-occurrence count."""
+        reads = [
+            {'qname': 'good1', 'seq': 'TTA' + 'A' * 27, 'start': 0, 'mapq': 60},
+            {'qname': 'good2', 'seq': 'TTA' + 'A' * 27, 'start': 0, 'mapq': 60},
+            {'qname': 'qcfail', 'seq': 'TAA' + 'A' * 27, 'start': 0, 'mapq': 60, 'flag': 0x200},
+        ]
+        bam_path = tmp_path / 'sample.bam'
+        _write_bam(bam_path, contig_len=30, reads=reads)
+
+        candidates = enumerate_candidate_codon_states(
+            [{'codon_pos': 0, 'alts': [('T', 0.8)]},
+             {'codon_pos': 1, 'alts': [('T', 0.8)]}],
+            'AAA',
+        )
+        bam = pysam.AlignmentFile(str(bam_path), 'rb')
+        try:
+            states = compute_codon_cooccurrence(
+                bam=bam, contig='ref',
+                codon_query_positions=[(0, 0), (1, 1)],
+                candidate_states=candidates, strand='+', min_mapq=20, min_depth=2,
+            )
+        finally:
+            bam.close()
+
+        by_codon = {s.alt_codon: s for s in states}
+        # Only the 2 good reads (both TTA) survive → TTA at 1.0
+        assert set(by_codon.keys()) == {'TTA'}
+        assert by_codon['TTA'].lower == pytest.approx(1.0)
+
+    def test_duplicate_read_excluded(self, tmp_path: Path) -> None:
+        """A read flagged duplicate (0x400) is excluded from the co-occurrence count."""
+        reads = [
+            {'qname': 'good1', 'seq': 'TTA' + 'A' * 27, 'start': 0, 'mapq': 60},
+            {'qname': 'good2', 'seq': 'TTA' + 'A' * 27, 'start': 0, 'mapq': 60},
+            {'qname': 'dup', 'seq': 'TAA' + 'A' * 27, 'start': 0, 'mapq': 60, 'flag': 0x400},
+        ]
+        bam_path = tmp_path / 'sample.bam'
+        _write_bam(bam_path, contig_len=30, reads=reads)
+
+        candidates = enumerate_candidate_codon_states(
+            [{'codon_pos': 0, 'alts': [('T', 0.8)]},
+             {'codon_pos': 1, 'alts': [('T', 0.8)]}],
+            'AAA',
+        )
+        bam = pysam.AlignmentFile(str(bam_path), 'rb')
+        try:
+            states = compute_codon_cooccurrence(
+                bam=bam, contig='ref',
+                codon_query_positions=[(0, 0), (1, 1)],
+                candidate_states=candidates, strand='+', min_mapq=20, min_depth=2,
+            )
+        finally:
+            bam.close()
+
+        by_codon = {s.alt_codon: s for s in states}
+        # Only the 2 good reads (both TTA) survive → TTA at 1.0
+        assert set(by_codon.keys()) == {'TTA'}
+        assert by_codon['TTA'].lower == pytest.approx(1.0)
+
 
 # ─── BAM path integration into _annotate_combined_snp_codon ────────────────
 

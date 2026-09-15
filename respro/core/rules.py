@@ -157,7 +157,7 @@ def match_rules(
         if ann.alt_aa and ann.consequence != 'synonymous' and ann.single_exchange_aa_freq > 0.0:
             effect_candidates.append((ann.alt_aa, ann.single_exchange_aa_freq))
         for state in ann.combined_states:
-            if state.accepted and state.alt_aa and state.alt_aa != '?':
+            if state.accepted and state.lower > 0.0 and state.alt_aa and state.alt_aa != '?':
                 effect_candidates.append((state.alt_aa, state.lower))
 
         if not effect_candidates:

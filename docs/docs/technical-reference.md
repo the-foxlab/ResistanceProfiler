@@ -636,19 +636,23 @@ span all variant-bearing positions of the codon:
    a single molecule is never double-counted via an alternative mapping and a
    supplementary that disagrees with its primary cannot reject a genuine
    primary observation through the paired-end agreement rule (step 3).
-2. **MAPQ filter.** Only reads with mapping quality ≥
+2. **QC filter.** Reads flagged QCFAIL (`0x200`) or duplicate (`0x400`) are
+   excluded — they do not represent independent molecules and would inflate
+   the co-occurrence frequency.
+3. **MAPQ filter.** Only reads with mapping quality ≥
    `codon.min_read_mapping_quality` (default 20) are considered.
-3. **Spanning requirement.** A read must cover every variant-bearing
-   nucleotide position of the codon; partial-span reads are discarded for that
+4. **Spanning requirement.** A read must cover every variant-bearing
+   nucleotide position of the codon; partial-span reads (including reads whose
+   codon region is soft-clipped or partly trimmed) are discarded for that
    codon's count.
-4. **Paired-end deduplication and agreement.** For a paired read whose mate
+5. **Paired-end deduplication and agreement.** For a paired read whose mate
    also spans the codon, the pair is counted once and only when both mates
    agree on the called base at every variant position; disagreements (likely
    sequencing errors) are discarded.
-5. **State frequency.** The observed frequency of a candidate state is
+6. **State frequency.** The observed frequency of a candidate state is
    `spanning molecules matching the state / total spanning molecules at the codon`
    (a *molecule* is a single-end read or a deduplicated paired-end pair; see
-   step 4).
+   step 5).
 
 Unlike the Fréchet path, the BAM path applies **no frequency threshold** to
 individual candidate states. Every candidate state with at least one observed
@@ -682,7 +686,7 @@ Each annotated variant carries a `freq_method` provenance flag:
   true frequency may be higher.
 
 The report surfaces this as a user-facing tag on every amino-acid effect:
-`K20M (0.7) (observed)` vs `K20M (0.6) (lower bound)`. The term "Fréchet" is
+`K20M | 0.7 | observed` vs `K20M | 0.6 | lower bound`. The term "Fréchet" is
 not shown in the report; the legend explains that *observed* is the frequency
 value itself, while *lower bound* is a guaranteed minimum that the true
 frequency may exceed (no linkage/phase assumption). The `freq_method` field

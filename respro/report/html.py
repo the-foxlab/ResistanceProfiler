@@ -488,21 +488,24 @@ def _build_all_mutations_rows(
         # produces the same amino acid as the single-exchange is omitted from the
         # display to avoid duplicate entries (the single-exchange is the more
         # direct interpretation of that amino-acid effect).
-        freq_tag = ' (observed)' if ann.freq_method == 'observed' else ' (lower bound)'
+        freq_tag = 'observed' if ann.freq_method == 'observed' else 'lower bound'
         aa_effects_parts: list[str] = []
         single_label = ''
-        if ann.alt_aa and ann.single_exchange_aa_freq > 0.0:
+        # Gate on the *rounded* value: a real but sub-precision frequency
+        # (e.g. 1 molecule in ~6000 -> 0.000165) must not be rendered as
+        # ``... | 0.0 | ...``. The raw value is still used for rule matching.
+        if ann.alt_aa and round(ann.single_exchange_aa_freq, 3) > 0:
             single_label = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             aa_effects_parts.append(
-                f'{single_label} ({round(ann.single_exchange_aa_freq, 3)}){freq_tag}'
+                f'{single_label} | {round(ann.single_exchange_aa_freq, 3)} | {freq_tag}'
             )
         for s in ann.combined_states:
-            if s.accepted:
+            if s.accepted and round(s.lower, 3) > 0:
                 combined_label = f'{ann.ref_aa}{ann.codon_pos + 1}{s.alt_aa}'
                 if combined_label == single_label:
                     continue
                 aa_effects_parts.append(
-                    f'{ann.ref_aa}{ann.codon_pos + 1}{s.alt_aa} ({round(s.lower, 3)}){freq_tag}'
+                    f'{ann.ref_aa}{ann.codon_pos + 1}{s.alt_aa} | {round(s.lower, 3)} | {freq_tag}'
                 )
         aa_effects = '; '.join(aa_effects_parts)
 
@@ -533,7 +536,54 @@ def _build_all_mutations_rows(
             'has_alignment': alignment_html is not None,
             'reference_name': (reference_name_by_chrom or {}).get(ann.variant.chrom, ''),
         })
+
+    _mark_combined_codon_boundaries(rows, result.cds_annotations)
     return rows
+
+
+def _mark_combined_codon_boundaries(
+    rows: list[dict],
+    annotations: list[AnnotatedVariant],
+) -> None:
+    """Mark the first and last row of each contiguous combined-codon group so the
+    template can draw an outer boundary box around the group (top border on the
+    first row, bottom border on the last) instead of a per-row left border.
+
+    A combined-codon group is a maximal run of consecutive combined annotations
+    sharing the same ``(feature_name, codon_pos)`` key. Combined members are
+    emitted atomically by the annotation pipeline, so members of one codon are
+    contiguous in ``cds_annotations``; grouping by the codon key keeps distinct
+    adjacent codons (or a combined codon next to a single SNP) in separate boxes.
+    """
+    # Default: no boundary flags.
+    for row in rows:
+        row['is_combined_codon_first'] = False
+        row['is_combined_codon_last'] = False
+
+    anns = annotations
+    n = len(rows)
+    # rows and anns are parallel (one row per CDS annotation, same order).
+    if n != len(anns):
+        return
+
+    def _group_key(ann: AnnotatedVariant) -> tuple[str, int] | None:
+        if not ann.is_combined_codon_event:
+            return None
+        return (ann.feature_name, ann.codon_pos)
+
+    i = 0
+    while i < n:
+        key = _group_key(anns[i])
+        if key is None:
+            i += 1
+            continue
+        # Find the end of this contiguous run with the same group key.
+        j = i
+        while j + 1 < n and _group_key(anns[j + 1]) == key:
+            j += 1
+        rows[i]['is_combined_codon_first'] = True
+        rows[j]['is_combined_codon_last'] = True
+        i = j + 1
 
 
 # Matches an optional qualifier (>, <, ≥, ≤, ~) followed by a leading number.

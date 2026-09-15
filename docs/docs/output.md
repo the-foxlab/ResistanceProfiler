@@ -108,7 +108,7 @@ respro vcf \
 | `af` | Allele frequency (raw float). |
 | `depth` | Read depth at the variant (VCF mode only; omitted in FASTA mode). Empty for combined formula rows. |
 | `consequence` | Consequence label (`missense`, `frameshift`, …). |
-| `aa_effects` | All amino-acid effects for the variant, as `<ref><pos><alt> (<lower>)` joined with `; `. The single-exchange effect is listed first (when its amino-acid frequency is > 0), followed by every accepted combined-codon outcome. Combined formula rows join member effects with `;`. |
+| `aa_effects` | All amino-acid effects for the variant, as `<ref><pos><alt> | <frequency> | <tag>` joined with `; `. The tag is `observed` or `lower bound`. The single-exchange effect is listed first (when its amino-acid frequency is > 0), followed by every accepted combined-codon outcome. Combined formula rows join member effects with `;`. |
 | `in_database` | `yes` when at least one rule matched (single or formula member); otherwise `no`. |
 | `rule_type` | `single`, `formula`, `formula-member`, or `n/a` for non-hits. |
 | `drug` | Drug name for the matched rule. `n/a` for non-hits. |

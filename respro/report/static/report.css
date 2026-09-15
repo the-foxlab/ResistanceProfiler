@@ -1101,9 +1101,22 @@ body {
   outline-offset: -2px;
 }
 
-/* Combined SNP codon: a row whose SNP participated in a multi-SNP codon */
+/* Combined SNP codon: a row whose SNP participated in a multi-SNP codon.
+   An outer boundary box is drawn around each contiguous combined group: the
+   first row gets the top + left + right borders, the last row gets the bottom
+   border, and middle rows (groups of 3+) get the left + right sides. This
+   visually groups the co-codon SNPs as a single combined event. */
 .mutation-row--combined > td {
   border-left: 3px solid var(--info-border);
+  border-right: 3px solid var(--info-border);
+}
+
+.mutation-row--combined--first > td {
+  border-top: 3px solid var(--info-border);
+}
+
+.mutation-row--combined--last > td {
+  border-bottom: 3px solid var(--info-border);
 }
 
 .combined-codon-yes {

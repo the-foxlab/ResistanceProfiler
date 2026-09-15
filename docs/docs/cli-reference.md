@@ -191,7 +191,7 @@ respro vcf \
 | `--results-db PATH`, `-d` | Optional results database path. Creates or appends to an existing SQLite results database. |
 | `--min-af FLOAT`, `-ma` | Minimum allele frequency filter. Default: `0.01`. |
 | `--min-depth INT`, `-md` | Minimum read depth filter (used with `--bam`). Default: `10`. |
-| `--bam PATH`, `-b` | Optional BAM aligned against the same query reference as the VCF. Used to mark non-covered codon stretches below `--min-depth`, and — when combined SNPs share a codon — to measure the **exact co-occurrence frequency** of each combined codon state directly from spanning reads (replacing the conservative lower-bound estimate used without a BAM). Combined-codon frequencies are then tagged `(observed)` in the report. |
+| `--bam PATH`, `-b` | Optional BAM aligned against the same query reference as the VCF. Used to mark non-covered codon stretches below `--min-depth`, and — when combined SNPs share a codon — to measure the **exact co-occurrence frequency** of each combined codon state directly from spanning reads (replacing the conservative lower-bound estimate used without a BAM). Combined-codon frequencies are then tagged `observed` in the report. |
 | `--threads N`, `-th` | Thread count for alignment calculations. Default: `1`. |
 | `--cache` / `--no-cache` | Reuse/store the FASTA reference mapping cache in the project database (default: off). |
 | `--export FORMAT`, `-e` | Extra export format alongside HTML (`pdf`, `json`, `tsv`). Repeatable. |

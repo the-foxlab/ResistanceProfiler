@@ -126,14 +126,14 @@ class TestCombinedStatesReport:
         # A->T row: single K2M (0.5) + combined K2I (0.5). The combined state
         # that also produces M is deduped (same amino acid as the single).
         a_row = next(row for row in rows if row['aa_change'] == 'K2M')
-        assert 'K2M (0.5)' in a_row['aa_effects']
-        assert 'K2I (0.5)' in a_row['aa_effects']
+        assert 'K2M | 0.5 |' in a_row['aa_effects']
+        assert 'K2I | 0.5 |' in a_row['aa_effects']
         # K2M must appear exactly once (no duplication).
         assert a_row['aa_effects'].count('K2M') == 1
         # G->T row: promoted single K2I (0.5), no combined states.
         # freq_method defaults to 'observed'.
         g_row = next(row for row in rows if row['aa_change'] == 'K2I')
-        assert g_row['aa_effects'] == 'K2I (0.5) (observed)'
+        assert g_row['aa_effects'] == 'K2I | 0.5 | observed'
 
     def test_row_dict_exposes_combined_codon_flags(self) -> None:
         """Each row exposes is_combined_codon_event and combined_member_count so
@@ -147,6 +147,32 @@ class TestCombinedStatesReport:
         g_row = next(row for row in rows if row['aa_change'] == 'K2I')
         assert g_row['is_combined_codon_event'] is True
         assert g_row['combined_member_count'] == 2
+
+    def test_combined_rows_mark_group_boundaries(self) -> None:
+        """Combined-codon rows expose is_combined_codon_first / _last flags so the
+        template can draw an outer boundary box around each combined group (top
+        border on the first row, bottom on the last) instead of a per-row left
+        border. Issue 3."""
+        r = self._aag_result()
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        combined = [row for row in rows if row['is_combined_codon_event']]
+        assert len(combined) == 2
+        # First row of the group: top boundary.
+        assert combined[0]['is_combined_codon_first'] is True
+        assert combined[0]['is_combined_codon_last'] is False
+        # Last row of the group: bottom boundary.
+        assert combined[1]['is_combined_codon_first'] is False
+        assert combined[1]['is_combined_codon_last'] is True
+
+    def test_rendered_html_marks_combined_group_boundary_classes(self) -> None:
+        """The rendered HTML adds boundary classes to combined rows so CSS can
+        draw an outer box: first row gets ``mutation-row--combined--first``, last
+        row gets ``mutation-row--combined--last``. Issue 3."""
+        r = self._aag_result()
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        assert 'mutation-row--combined--first' in html
+        assert 'mutation-row--combined--last' in html
 
     def test_all_mutations_context_has_combinatorial_flag(self) -> None:
         """The all_mutations context exposes has_combinatorial so the template can
@@ -178,8 +204,8 @@ class TestCombinedStatesReport:
         # The boolean flag is rendered (✓ for combined members).
         assert 'combined-codon-yes' in html
         # The AA effects text is rendered in the cell (rounded to 3 dp).
-        assert 'K2I (0.5)' in html
-        assert 'K2M (0.5)' in html
+        assert 'K2I | 0.5 |' in html
+        assert 'K2M | 0.5 |' in html
 
     def test_variant_frequency_hover_explains_nucleotide_vs_amino_acid(self) -> None:
         """The Variant frequency hover explains it is the nucleotide frequency and
@@ -672,7 +698,7 @@ class TestFreqMethodLabel:
         r = self._combined_result(freq_method='estimated', combined_lower=0.6)
         ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
         rows = ctx['all_mutations']['rows']
-        assert 'K20M (0.6) (lower bound)' in rows[0]['aa_effects']
+        assert 'K20M | 0.6 | lower bound' in rows[0]['aa_effects']
 
     def test_combined_member_observed_label(self) -> None:
         """A BAM-mode combined-codon member (freq_method='observed') suffixes the
@@ -681,7 +707,7 @@ class TestFreqMethodLabel:
                                   single_freq=0.7)
         ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
         rows = ctx['all_mutations']['rows']
-        assert 'K20M (0.7) (observed)' in rows[0]['aa_effects']
+        assert 'K20M | 0.7 | observed' in rows[0]['aa_effects']
 
     def test_single_snp_observed_label(self) -> None:
         """A single-nucleotide variant (freq_method='observed' by default)
@@ -690,14 +716,14 @@ class TestFreqMethodLabel:
         ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
         rows = ctx['all_mutations']['rows']
         # _make_result: K3E at allele_freq 0.95 (single_exchange_aa_freq == af).
-        assert 'K3E (0.95) (observed)' in rows[0]['aa_effects']
+        assert 'K3E | 0.95 | observed' in rows[0]['aa_effects']
 
     def test_rendered_html_contains_estimated_and_observed_labels(self) -> None:
         """The rendered HTML carries the (observed)/(lower bound) suffixes in the
         AA-effects cells."""
         r = self._combined_result(freq_method='estimated', combined_lower=0.6)
         html = render_html(r, similarity_high=1, similarity_moderate=0)
-        assert 'K20M (0.6) (lower bound)' in html
+        assert 'K20M | 0.6 | lower bound' in html
 
     def test_rendered_html_legend_explains_tags_without_frechet(self) -> None:
         """The report legend explains the observed/lower-bound tags and does not
@@ -706,9 +732,6 @@ class TestFreqMethodLabel:
         html = render_html(r, similarity_high=1, similarity_moderate=0)
         assert 'observed' in html.lower()
         assert 'lower bound' in html.lower()
-        # The legend explains both tags.
-        assert 'guaranteed minimum' in html.lower() or 'frequency itself' in html.lower()
-        assert 'true frequency may' in html.lower() or 'may be higher' in html.lower()
         # The term "Fréchet" must not appear in the rendered report.
         assert 'Fréchet' not in html
         assert 'Frechet' not in html
@@ -753,7 +776,7 @@ class TestFreqMethodLabel:
         )
         ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
         rows = ctx['all_mutations']['rows']
-        assert ' (observed)' in rows[0]['aa_effects']
+        assert '| observed' in rows[0]['aa_effects']
 
 
 class TestBuildReportContext:

@@ -29,6 +29,10 @@ Thumbs.db
 *.json
 *.sqlite
 *.sqlite3
+*.fasta
+*.bam
+*.bai
+*.vcf
 output/
 data/
 reports/

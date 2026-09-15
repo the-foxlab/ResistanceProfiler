@@ -217,11 +217,11 @@ class TestAaEffectsColumn:
         assert len(rows) == 1
         effects = rows[0][col]
         # Single exchange first (at its amino-acid frequency = allele_freq 0.95).
-        assert 'K2M (0.95)' in effects
+        assert 'K2M | 0.95 |' in effects
         # Combined state I follows.
-        assert 'K2I (0.5)' in effects
+        assert 'K2I | 0.5 |' in effects
         # The combined state that also produces M is deduped (same AA as single).
-        assert 'K2M (0.5)' not in effects
+        assert 'K2M | 0.5 |' not in effects
         assert effects.count('K2M') == 1
 
     def test_combined_member_zero_single_omits_single(self, tmp_path: Path) -> None:
@@ -244,7 +244,7 @@ class TestAaEffectsColumn:
         effects = rows[0][col]
         # Single M is omitted (lower=0); only the combined I state.
         assert 'K2M' not in effects
-        assert 'K2I (0.5)' in effects
+        assert 'K2I | 0.5 |' in effects
 
     def test_single_snp_lists_only_single_effect(self, tmp_path: Path) -> None:
         """A single-SNP annotation lists only its single effect at the variant
@@ -257,7 +257,7 @@ class TestAaEffectsColumn:
         col = header.index('aa_effects')
         # single_exchange_aa_freq == allele_freq (0.95); no combined states.
         # freq_method defaults to 'observed'.
-        assert rows[0][col] == 'K3E (0.95) (observed)'
+        assert rows[0][col] == 'K3E | 0.95 | observed'
 
 
 class TestFreqMethodLabel:
@@ -282,7 +282,7 @@ class TestFreqMethodLabel:
         write_tsv(r, out)
         header, rows = _read_tsv(out)
         col = header.index('aa_effects')
-        assert 'K2I (0.5) (lower bound)' in rows[0][col]
+        assert 'K2I | 0.5 | lower bound' in rows[0][col]
 
     def test_combined_member_observed_label(self, tmp_path: Path) -> None:
         """A combined-codon member with freq_method='observed' (BAM mode)
@@ -302,7 +302,58 @@ class TestFreqMethodLabel:
         write_tsv(r, out)
         header, rows = _read_tsv(out)
         col = header.index('aa_effects')
-        assert 'K2I (0.5) (observed)' in rows[0][col]
+        assert 'K2I | 0.5 | observed' in rows[0][col]
+
+    def test_combined_state_with_zero_lower_not_shown(self, tmp_path: Path) -> None:
+        """A combined state whose amino-acid frequency is 0.0 (Fréchet lower = 0
+        or a BAM count that rounds to 0.0 at 3 decimals) must NOT be rendered in
+        aa_effects, even when accepted=True. Mirrors the single-exchange gate
+        (``single_exchange_aa_freq > 0.0``). Issue 1: zero-frequency states were
+        shown as ``K2M | 0.0 | observed`` and matched rules."""
+        states = [
+            CodonState(alt_codon='ATG', alt_aa='M', lower=0.0, upper=0.0,
+                       forced_fraction=1.0, accepted=True, member_indices=(0,)),
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+        ]
+        ann = _ann(
+            is_combined_codon_event=True, combined_states=states,
+            alt_aa='M', codon_pos=1, ref_aa='K',
+        )
+        ann.freq_method = 'observed'
+        ann.single_exchange_aa_freq = 0.0
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('aa_effects')
+        effects = rows[0][col]
+        assert 'K2M | 0.0' not in effects
+        assert 'K2I | 0.5 | observed' in effects
+
+    def test_single_exchange_below_display_precision_not_shown(self, tmp_path: Path) -> None:
+        """A single-exchange whose amino-acid frequency is real but below the
+        3-decimal display precision (e.g. 1 molecule in ~6000 -> 0.000165) must
+        NOT be rendered as ``K2M | 0.0 | observed``. The raw value passes the
+        ``> 0.0`` gate but ``round(0.000165, 3) == 0.0``; the display gate must
+        use the rounded value so sub-precision frequencies are suppressed
+        consistently with combined states. Issue 1 (rounding): the user saw
+        ``L897L | 0.0 | observed`` from a 1-read observation."""
+        ann = _ann(
+            is_combined_codon_event=True, combined_states=[],
+            alt_aa='M', codon_pos=1, ref_aa='K',
+        )
+        ann.freq_method = 'observed'
+        ann.single_exchange_aa_freq = 0.000165  # real but rounds to 0.0 at 3 dp
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('aa_effects')
+        effects = rows[0][col]
+        assert 'K2M | 0.0' not in effects
+        # The entry is suppressed entirely (nothing else to show).
+        assert effects == ''
 
     def test_single_snp_observed_label_by_default(self, tmp_path: Path) -> None:
         """A single-SNP annotation with freq_method at its default ('observed')
@@ -313,7 +364,7 @@ class TestFreqMethodLabel:
         write_tsv(r, out)
         header, rows = _read_tsv(out)
         col = header.index('aa_effects')
-        assert rows[0][col] == 'K3E (0.95) (observed)'
+        assert rows[0][col] == 'K3E | 0.95 | observed'
 
 
 class TestSingleRuleRows:

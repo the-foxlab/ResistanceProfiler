@@ -683,7 +683,7 @@
                     AA effects
                     <span class="db-hit-freq-info">
                       <img class="db-hit-info-icon" src="{{ context.all_mutations.info_icon }}" alt="info" width="13" height="13">
-                      <div class="db-hit-info-panel">All amino-acid changes this SNP can produce, each with its amino-acid frequency in parentheses, tagged <em>(observed)</em> or <em>(lower bound)</em>. Rule matching uses these amino-acid frequencies. <strong>observed</strong> = the frequency value shown (variant allele frequency or for combined codons their read counts if a bam file is available); <strong>lower bound</strong> = applies only to combined-codon effects: guaranteed minimum frequency of the combined state when no bam file is available.</div>
+                      <div class="db-hit-info-panel">All amino-acid changes this SNP can produce, each with its amino-acid frequency, tagged <em>(observed)</em> or <em>(lower bound)</em>. Rule matching uses these amino-acid frequencies. <strong>observed</strong> = the frequency value shown (variant allele frequency or for combined codons their read counts if a bam file is available); <strong>lower bound</strong> = applies only to combined-codon effects: guaranteed minimum frequency of the combined state when no bam file is available.</div>
                     </span>
                   </th>
                   {% if context.all_mutations.has_combinatorial %}
@@ -709,7 +709,7 @@
               <tbody>
                 {% for r in context.all_mutations.rows %}
                   <tr
-                    class="mutation-row{% if r.is_database_hit %} mutation-row--hit{% endif %}{% if r.has_alignment %} mutation-row--expandable{% endif %}{% if r.is_combined_codon_event %} mutation-row--combined{% endif %}"
+                    class="mutation-row{% if r.is_database_hit %} mutation-row--hit{% endif %}{% if r.has_alignment %} mutation-row--expandable{% endif %}{% if r.is_combined_codon_event %} mutation-row--combined{% endif %}{% if r.is_combined_codon_first %} mutation-row--combined--first{% endif %}{% if r.is_combined_codon_last %} mutation-row--combined--last{% endif %}"
                     data-nt-pos="{{ r.nt_pos }}"
                     data-feature-value="{{ r.feature | e }}"
                     data-consequence-value="{{ r.consequence | e }}"

@@ -2487,6 +2487,44 @@ class TestSingleExchangeLower:
         assert by_pos[5].single_exchange_aa_freq == pytest.approx(0.0)
 
 
+class TestCombinedSnpFallbackNoMemberStateAccepted:
+    """When no member-carrying state passes the Fréchet overlap gate (only the
+    all-ref state is accepted), the codon must fall back to plain single-SNP
+    annotations — not be reported as a combined event with a spurious low
+    frequency from a rejected state."""
+
+    def test_low_af_pair_falls_back_to_singles(self) -> None:
+        """Two SNPs at 0.037/0.035 in one codon: the double-ALT state has
+        lower=0 (rejected), the single states have lower~0.002 but
+        forced_fraction << 2/3 (rejected). Only the ref state is accepted.
+        The codon must fall back to single-SNP annotations."""
+        feature = TestPerSnpCombinedStates._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.037, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.035, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        # Fallback: plain single-SNP annotations, NOT combined events.
+        assert all(not ann.is_combined_codon_event for ann in results)
+        assert all(ann.combined_states == [] for ann in results)
+        # Single-SNP annotations carry the nucleotide frequency as the aa freq.
+        by_pos = {ann.variant.pos: ann for ann in results}
+        assert by_pos[4].single_exchange_aa_freq == pytest.approx(0.037)
+        assert by_pos[5].single_exchange_aa_freq == pytest.approx(0.035)
+
+    def test_medium_af_pair_with_accepted_combined_stays_combined(self) -> None:
+        """Sanity check: 0.8/0.8 pair (double-ALT lower=0.6, ff=0.75 >= 2/3)
+        does NOT fall back — the combined event is reported."""
+        feature = TestPerSnpCombinedStates._aag_feature()
+        variants = [
+            VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.8, depth=100),
+            VariantCall(chrom='c', pos=5, ref='G', alt='T', allele_freq=0.8, depth=100),
+        ]
+        results = annotate_variants(variants, [feature])
+        assert all(ann.is_combined_codon_event for ann in results)
+        assert any(ann.combined_states for ann in results)
+
+
 # ─── Fréchet combined-codon bounds ──────────────────────────────────
 
 

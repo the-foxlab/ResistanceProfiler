@@ -532,6 +532,24 @@ class TestMatchCombinedStates:
         # Neither the single (lower=0) nor the rejected combined state fires.
         assert len(result[0].rule_matches) == 0
 
+    def test_combined_state_with_zero_lower_accepted_does_not_match(self) -> None:
+        """A combined state that is accepted=True but has lower=0.0 (e.g. a BAM
+        count that rounds to zero, or a hand-constructed state) must NOT match a
+        rule. Issue 1: zero-frequency accepted states produced
+        ``rule_effect_aa_freq={position: 0.0}``. The combined-state gate must
+        mirror the single-exchange gate (``lower > 0.0``)."""
+        rule = self._rule(80, 'I')
+        zero_state = CodonState(
+            alt_codon='ATT', alt_aa='I', lower=0.0, upper=0.5,
+            forced_fraction=1.0, accepted=True, member_indices=(0, 1),
+        )
+        ann = self._ann('M', 0.9, combined_states=[zero_state])
+        ann.is_combined_codon_event = True
+        ann.single_exchange_aa_freq = 0.0  # single also absent
+        result = match_rules([ann], [rule])
+        assert len(result[0].rule_matches) == 0
+        assert 80 not in result[0].rule_effect_aa_freq
+
     def test_non_combined_zero_allele_freq_does_not_match(self) -> None:
         """A non-combined annotation with allele_freq = 0 (hence
         single_exchange_aa_freq = 0 via __post_init__ default) must not match a

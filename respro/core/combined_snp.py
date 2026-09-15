@@ -353,6 +353,11 @@ def compute_codon_cooccurrence(
         # well-defined.
         if read.is_secondary or read.is_supplementary:
             continue
+        # Skip reads that failed platform/vendor quality checks (QCFAIL,
+        # 0x200) and PCR/optical duplicates (0x400). These do not represent
+        # independent molecules and would inflate the co-occurrence frequency.
+        if read.is_qcfail or read.is_duplicate:
+            continue
         if (read.mapping_quality or 0) < min_mapq:
             continue
         # Spanning check: read must cover all variant query positions.
@@ -605,8 +610,13 @@ def _annotate_combined_snp_codon(
         return _combined_fallback_single_snp(variants, feature)
 
     accepted = [s for s in states if s.accepted]
-    if not accepted:
-        # No accepted combined state for any member: single-SNP fallback.
+    # The all-ref candidate (member_indices == ()) is always accepted when the
+    # marginal ALT frequencies are low (its lower = 1 - sum(alt_freqs), and
+    # forced_fraction >= min_fraction). That does NOT justify a combined call —
+    # a combined event requires at least one accepted state that *carries* a
+    # member ALT. When none does, fall back to single-SNP annotations.
+    if not any(s.accepted and s.member_indices for s in states):
+        # No accepted state carries any member: single-SNP fallback.
         return _combined_fallback_single_snp(variants, feature)
 
     # Forced-overlap promotion state per member: the accepted state with

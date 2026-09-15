@@ -412,17 +412,22 @@ def _aa_effects(ann: AnnotatedVariant) -> str:
     """
     parts: list[str] = []
     single_label = ''
-    freq_tag = ' (observed)' if ann.freq_method == 'observed' else ' (lower bound)'
-    if ann.alt_aa and ann.single_exchange_aa_freq > 0.0:
+    freq_tag = 'observed' if ann.freq_method == 'observed' else 'lower bound'
+    # Gate on the *rounded* value: a real but sub-precision frequency
+    # (e.g. 1 molecule in ~6000 -> 0.000165) must not be rendered as
+    # ``... | 0.0 | ...``. The raw value is still used for rule matching.
+    if ann.alt_aa and round(ann.single_exchange_aa_freq, 3) > 0:
         single_label = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
-        parts.append(f'{single_label} ({round(ann.single_exchange_aa_freq, 3)}){freq_tag}')
+        parts.append(f'{single_label} | {round(ann.single_exchange_aa_freq, 3)} | {freq_tag}')
     for state in ann.combined_states:
         if not state.accepted:
+            continue
+        if round(state.lower, 3) <= 0:
             continue
         combined_label = f'{ann.ref_aa}{ann.codon_pos + 1}{state.alt_aa}'
         if combined_label == single_label:
             continue
-        parts.append(f'{combined_label} ({round(state.lower, 3)}){freq_tag}')
+        parts.append(f'{combined_label} | {round(state.lower, 3)} | {freq_tag}')
     return '; '.join(parts)
 
 
