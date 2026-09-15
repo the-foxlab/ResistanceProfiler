@@ -709,7 +709,7 @@
               <tbody>
                 {% for r in context.all_mutations.rows %}
                   <tr
-                    class="mutation-row{% if r.is_database_hit %} mutation-row--hit{% endif %}{% if r.has_alignment %} mutation-row--expandable{% endif %}{% if r.is_combined_codon_event %} mutation-row--combined{% endif %}{% if r.is_combined_codon_first %} mutation-row--combined--first{% endif %}{% if r.is_combined_codon_last %} mutation-row--combined--last{% endif %}"
+                    class="mutation-row{% if r.has_alignment %} mutation-row--expandable{% endif %}{% if r.is_combined_codon_event %} mutation-row--combined{% endif %}"
                     data-nt-pos="{{ r.nt_pos }}"
                     data-feature-value="{{ r.feature | e }}"
                     data-consequence-value="{{ r.consequence | e }}"

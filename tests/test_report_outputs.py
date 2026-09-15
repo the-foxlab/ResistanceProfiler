@@ -148,31 +148,28 @@ class TestCombinedStatesReport:
         assert g_row['is_combined_codon_event'] is True
         assert g_row['combined_member_count'] == 2
 
-    def test_combined_rows_mark_group_boundaries(self) -> None:
-        """Combined-codon rows expose is_combined_codon_first / _last flags so the
-        template can draw an outer boundary box around each combined group (top
-        border on the first row, bottom on the last) instead of a per-row left
-        border. Issue 3."""
+    def test_combined_rows_carry_combined_flag_only(self) -> None:
+        """Combined-codon rows carry ``is_combined_codon_event`` for uniform
+        highlighting. Boundary flags (``is_combined_codon_first`` / ``_last``)
+        are no longer computed — every combined row is highlighted the same."""
         r = self._aag_result()
         ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
         rows = ctx['all_mutations']['rows']
         combined = [row for row in rows if row['is_combined_codon_event']]
         assert len(combined) == 2
-        # First row of the group: top boundary.
-        assert combined[0]['is_combined_codon_first'] is True
-        assert combined[0]['is_combined_codon_last'] is False
-        # Last row of the group: bottom boundary.
-        assert combined[1]['is_combined_codon_first'] is False
-        assert combined[1]['is_combined_codon_last'] is True
+        for row in combined:
+            assert 'is_combined_codon_first' not in row
+            assert 'is_combined_codon_last' not in row
 
-    def test_rendered_html_marks_combined_group_boundary_classes(self) -> None:
-        """The rendered HTML adds boundary classes to combined rows so CSS can
-        draw an outer box: first row gets ``mutation-row--combined--first``, last
-        row gets ``mutation-row--combined--last``. Issue 3."""
+    def test_rendered_html_highlights_combined_rows(self) -> None:
+        """The rendered HTML adds the ``mutation-row--combined`` class to combined
+        rows so CSS can highlight them uniformly. Boundary classes are no longer
+        emitted."""
         r = self._aag_result()
         html = render_html(r, similarity_high=1, similarity_moderate=0)
-        assert 'mutation-row--combined--first' in html
-        assert 'mutation-row--combined--last' in html
+        assert 'mutation-row--combined' in html
+        assert 'mutation-row--combined--first' not in html
+        assert 'mutation-row--combined--last' not in html
 
     def test_all_mutations_context_has_combinatorial_flag(self) -> None:
         """The all_mutations context exposes has_combinatorial so the template can
