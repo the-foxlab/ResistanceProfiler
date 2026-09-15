@@ -82,11 +82,18 @@ Per-feature nucleotide changes are translated into amino-acid consequences. Supp
 
 #### Multiple SNPs in one codon
 
-When two or more SNPs fall within the same codon, they are evaluated together as a **combined codon event** using **Fréchet (probability) bounds**. Each member SNP is emitted as its own per-SNP annotation carrying the amino-acid outcomes it can participate in — both the single-exchange effect (this SNP alone, co-codon SNPs absent) and the combined-state effects (this SNP plus co-occurring SNPs), each with its guaranteed minimum population frequency (the Fréchet lower bound, assuming no linkage information).
+When two or more SNPs fall within the same codon, they are evaluated together as a **combined codon event**. Each member SNP is emitted as its own per-SNP annotation carrying the amino-acid outcomes it can participate in — both the single-exchange effect (this SNP alone, co-codon SNPs absent) and the combined-state effects (this SNP plus co-occurring SNPs), each with its amino-acid frequency.
 
-A single-exchange that is Fréchet-impossible (guaranteed absent, lower bound 0) is omitted from the report and cannot match a single-amino-acid rule — only its combined states can fire. The acceptance threshold for combined states defaults to a forced fraction of 2/3 (`min_cooccurrence_codon_fraction` in the config).
+There are two paths, selected by whether an alignment file is supplied:
 
-For the full mathematical derivation, worked examples, and the multiallelic-site generalisation, see [Technical Reference §5.3 — Multiple SNPs in one codon](technical-reference.md#53-multiple-snps-in-one-codon-frechet-bounds).
+- **No BAM (`--bam` omitted or the mode is fasta) — lower-bound frequencies.** ResPro uses **Fréchet (probability) bounds** to determine which combined codon states are *guaranteed* to exist, and reports the conservative lower-bound frequency (assuming no linkage information). These frequencies are tagged `(lower bound)` in the report.
+- **With BAM (`--bam` provided) — observed frequencies.** ResPro slices the BAM for each affected codon, counts the spanning reads that carry each candidate codon state (after MAPQ filtering and paired-end dedup/agreement), and reports the exact observed co-occurrence frequency. The Fréchet path is not taken at all. These frequencies are tagged `(observed)` in the report.
+
+A single-exchange that is impossible (guaranteed absent, lower bound 0 on the no-BAM path; observed frequency 0 on the BAM path) is omitted from the report and cannot match a single-amino-acid rule — only its combined states can fire. On the no-BAM (Fréchet) path, a combined state is accepted only when its forced fraction reaches 2/3 (`min_cooccurrence_codon_fraction` in the config). On the BAM path there is no per-state frequency threshold: every candidate state observed in at least one spanning molecule is accepted, and the only gate is the spanning-molecule count (`min_depth`) — below it the codon falls back to single events.
+
+The report tags each amino-acid frequency as `(observed)` (the value is the frequency itself — variant allele frequency or BAM read count) or `(lower bound)` (a guaranteed minimum that the true frequency may exceed, for combined codons without read-level data).
+
+For the full mathematical derivation, worked examples, the multiallelic-site generalisation, and the BAM co-occurrence algorithm, see [Technical Reference §5.3 — Multiple SNPs in one codon](technical-reference.md#53-multiple-snps-in-one-codon-frechet-bounds) and [§5.4 — BAM-based exact co-occurrence](technical-reference.md#54-bam-based-exact-co-occurrence).
 
 ### Rule matching
 

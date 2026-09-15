@@ -12,6 +12,7 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 from rich.console import Console
@@ -49,6 +50,9 @@ from respro.db.rules_queries import load_formula_rules, load_rules
 from respro.db.schema import init_results_db
 from respro.report.non_html_exports import export_results
 from respro.utils.files import resolve_output_file
+
+if TYPE_CHECKING:
+    from respro.core.combined_snp import BamCooccurrence
 
 logger = logging.getLogger('respro')
 
@@ -220,6 +224,7 @@ def assemble_multi_reference_result(
     total_variants: int,
     af_bins: dict[str, tuple[float, float]] | None = None,
     is_fasta_mode: bool = False,
+    bam_cooccurrence_by_chrom: dict[str, BamCooccurrence] | None = None,
 ) -> ProfilingResult:
     """
     Build one ``ReferenceGroup`` per matched query record, annotate per reference,
@@ -321,7 +326,11 @@ def assemble_multi_reference_result(
     annotations: list[AnnotatedVariant] = []
     for rg in references:
         group_variants = variants_by_chrom.get(rg.query_name, [])
-        annotations.extend(annotate_variants(group_variants, rg.features, is_fasta_mode=is_fasta_mode))
+        bam_ctx = bam_cooccurrence_by_chrom.get(rg.query_name) if bam_cooccurrence_by_chrom else None
+        annotations.extend(annotate_variants(
+            group_variants, rg.features, is_fasta_mode=is_fasta_mode,
+            bam_cooccurrence=bam_ctx,
+        ))
 
     # Rule suppression and matching must run once per DISTINCT reference, not once per
     # ReferenceGroup. In the targeted-sequencing case two records align to the same

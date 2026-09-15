@@ -33,6 +33,12 @@ combination_member_af_threshold = 0.75
 # combinations require stronger individual frequencies.
 # Independent of any minimum VCF input-frequency filter.
 min_cooccurrence_codon_fraction = 0.6666666666666666
+# Minimum read mapping quality for BAM-based codon co-occurrence counting.
+# Reads with mapping_quality below this value are excluded when measuring
+# exact same-codon SNP co-occurrence from a BAM file. 20 is the standard
+# secondary-alignment floor (MAPQ < 20 typically marks repetitive/low-confidence
+# placements). Only used when --bam is provided in VCF mode.
+min_read_mapping_quality = 20
 
 [similarity]
 # BLOSUM62 score thresholds for amino-acid similarity classification.

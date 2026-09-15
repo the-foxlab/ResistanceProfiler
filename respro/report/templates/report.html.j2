@@ -389,8 +389,8 @@
                     <span class="db-hit-freq-info">
                       <img class="db-hit-info-icon" src="{{ context.database_hits.info_icon }}" alt="info" width="13" height="13">
                       <div class="db-hit-info-panel">
-                        <p>Guaranteed minimum population frequency of the matched amino-acid change, binned as high (&ge;{{ context.thresholds.af_high_pct }}&nbsp;%), intermediate ({{ context.thresholds.af_intermediate_pct }}–{{ context.thresholds.af_high_pct }}&nbsp;%), or low ({{ context.thresholds.af_low_min_pct }}–{{ context.thresholds.af_intermediate_pct }}&nbsp;%).</p>
-                        <p>For single mutations this is the variant allele frequency. For combined-codon effects it is the Fréchet lower bound on the combined amino-acid state (no linkage assumption), which can be lower than any individual SNP's frequency.</p>
+                        <p>Frequency of the matched amino-acid change, binned as high (&ge;{{ context.thresholds.af_high_pct }}&nbsp;%), intermediate ({{ context.thresholds.af_intermediate_pct }}–{{ context.thresholds.af_high_pct }}&nbsp;%), or low ({{ context.thresholds.af_low_min_pct }}–{{ context.thresholds.af_intermediate_pct }}&nbsp;%).</p>
+                        <p>For single mutations this is the variant allele frequency. For combined-codon effects it is a guaranteed minimum (lower bound) on the combined amino-acid state, which can be lower than any individual SNP's frequency. For a vcf file for which a bam file is available, the frequency is based on the BAM read count.</p>
                       </div>
                     </span>
                   </th>
@@ -553,8 +553,8 @@
                     <span class="db-hit-freq-info">
                       <img class="db-hit-info-icon" src="{{ context.similarity_entries.info_icon }}" alt="info" width="13" height="13">
                       <div class="db-hit-info-panel">
-                        <p>Guaranteed minimum population frequency of the observed amino-acid change, binned as high (&ge;{{ context.thresholds.af_high_pct }}&nbsp;%), intermediate ({{ context.thresholds.af_intermediate_pct }}&ndash;{{ context.thresholds.af_high_pct }}&nbsp;%), or low ({{ context.thresholds.af_low_min_pct }}&ndash;{{ context.thresholds.af_intermediate_pct }}&nbsp;%).</p>
-                        <p>For combined-codon effects this is the Fréchet lower bound on the combined amino-acid state, which can be lower than any individual SNP's frequency.</p>
+                        <p>Frequency of the matched amino-acid change, binned as high (&ge;{{ context.thresholds.af_high_pct }}&nbsp;%), intermediate ({{ context.thresholds.af_intermediate_pct }}–{{ context.thresholds.af_high_pct }}&nbsp;%), or low ({{ context.thresholds.af_low_min_pct }}–{{ context.thresholds.af_intermediate_pct }}&nbsp;%).</p>
+                        <p>For single mutations this is the variant allele frequency. For combined-codon effects it is a guaranteed minimum (lower bound) on the combined amino-acid state, which can be lower than any individual SNP's frequency. For a vcf file for which a bam file is available, the frequency is based on the BAM read count.</p>
                       </div>
                     </span>
                   </th>
@@ -683,7 +683,7 @@
                     AA effects
                     <span class="db-hit-freq-info">
                       <img class="db-hit-info-icon" src="{{ context.all_mutations.info_icon }}" alt="info" width="13" height="13">
-                      <div class="db-hit-info-panel">All amino-acid changes this SNP can produce, each with its guaranteed minimum population frequency in parentheses. The first is this SNP alone; later entries are combined effects with co-codon SNPs. Rule matching use these amino-acid frequencies.</div>
+                      <div class="db-hit-info-panel">All amino-acid changes this SNP can produce, each with its amino-acid frequency in parentheses, tagged <em>(observed)</em> or <em>(lower bound)</em>. Rule matching uses these amino-acid frequencies. <strong>observed</strong> = the frequency value shown (variant allele frequency or for combined codons their read counts if a bam file is available); <strong>lower bound</strong> = applies only to combined-codon effects: guaranteed minimum frequency of the combined state when no bam file is available.</div>
                     </span>
                   </th>
                   {% if context.all_mutations.has_combinatorial %}
@@ -691,7 +691,7 @@
                     Combined SNP codon
                     <span class="db-hit-freq-info">
                       <img class="db-hit-info-icon" src="{{ context.all_mutations.info_icon }}" alt="info" width="13" height="13">
-                      <div class="db-hit-info-panel">Yes when this SNP shares its codon with one or more other SNPs. The combined outcome is called only when the SNPs' minimum frequency overlap (Fréchet lower bound) is high enough.</div>
+                      <div class="db-hit-info-panel">Yes when this SNP shares its codon with one or more other SNPs. The combined outcome is called only when the SNPs' minimum frequency overlap is high enough.</div>
                     </span>
                   </th>
                   {% endif %}

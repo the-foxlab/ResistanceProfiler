@@ -488,12 +488,13 @@ def _build_all_mutations_rows(
         # produces the same amino acid as the single-exchange is omitted from the
         # display to avoid duplicate entries (the single-exchange is the more
         # direct interpretation of that amino-acid effect).
+        freq_tag = ' (observed)' if ann.freq_method == 'observed' else ' (lower bound)'
         aa_effects_parts: list[str] = []
         single_label = ''
-        if ann.alt_aa and ann.single_exchange_lower > 0.0:
+        if ann.alt_aa and ann.single_exchange_aa_freq > 0.0:
             single_label = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             aa_effects_parts.append(
-                f'{single_label} ({round(ann.single_exchange_lower, 3)})'
+                f'{single_label} ({round(ann.single_exchange_aa_freq, 3)}){freq_tag}'
             )
         for s in ann.combined_states:
             if s.accepted:
@@ -501,7 +502,7 @@ def _build_all_mutations_rows(
                 if combined_label == single_label:
                     continue
                 aa_effects_parts.append(
-                    f'{ann.ref_aa}{ann.codon_pos + 1}{s.alt_aa} ({round(s.lower, 3)})'
+                    f'{ann.ref_aa}{ann.codon_pos + 1}{s.alt_aa} ({round(s.lower, 3)}){freq_tag}'
                 )
         aa_effects = '; '.join(aa_effects_parts)
 
@@ -624,8 +625,8 @@ def _build_database_hits_rows(
             if rule.mutation == 'INS_any':
                 aa_change = f'INS_any ({aa_change})'
             # For combined-state hits, bin the AF at the Fréchet lower bound
-            # (rule_effect_lower), not the row's own allele frequency.
-            effect_lower = ann.rule_effect_lower.get(rule.id)
+            # (rule_effect_aa_freq), not the row's own allele frequency.
+            effect_lower = ann.rule_effect_aa_freq.get(rule.id)
             if effect_lower is not None and effect_lower != ann.variant.allele_freq:
                 hit_af_bin = _bin_for_af(effect_lower, result.is_fasta_mode)
             else:
@@ -1242,10 +1243,10 @@ def _build_potential_effects_rows(
             ]
         else:
             # Single exchange: use the amino-acid frequency
-            # (single_exchange_lower — equals the nucleotide frequency for
+            # (single_exchange_aa_freq — equals the nucleotide frequency for
             # non-combined variants; 0 for a Fréchet-impossible combined single
             # whose amino acid is guaranteed absent).
-            effect_variants = [(ann.alt_aa, ann.single_exchange_lower)]
+            effect_variants = [(ann.alt_aa, ann.single_exchange_aa_freq)]
         # Deduplicate by alt_aa, keeping the first (lowest) frequency.
         seen_alts: set[str] = set()
         deduped_effects: list[tuple[str, float]] = []

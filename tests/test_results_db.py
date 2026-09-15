@@ -644,30 +644,30 @@ class TestResultsPersistence:
         annotations = reconstruct_annotations(variant_rows)
         assert annotations[0].combined_states == []
 
-    def test_rule_effect_lower_and_alt_round_trip(self, results_conn, minimal_project_conn, tmp_path) -> None:
-        """rule_effect_lower and rule_effect_alt are persisted on save and
+    def test_rule_effect_aa_freq_and_alt_round_trip(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """rule_effect_aa_freq and rule_effect_alt are persisted on save and
         restored on reconstruct, so regenerated reports match live reports."""
         result = self._make_result()
         result.annotations[0].is_combined_codon_event = True
-        result.annotations[0].rule_effect_lower = {10: 0.5, 20: 0.3}
+        result.annotations[0].rule_effect_aa_freq = {10: 0.5, 20: 0.3}
         result.annotations[0].rule_effect_alt = {10: 'I', 20: 'M'}
         save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
 
         _, variant_rows = load_run(results_conn, 1)
         annotations = reconstruct_annotations(variant_rows)
         ann = annotations[0]
-        assert ann.rule_effect_lower == {10: 0.5, 20: 0.3}
+        assert ann.rule_effect_aa_freq == {10: 0.5, 20: 0.3}
         assert ann.rule_effect_alt == {10: 'I', 20: 'M'}
 
     def test_legacy_db_without_rule_effect_columns_opens(self, results_conn, minimal_project_conn, tmp_path) -> None:
-        """An existing results DB without the rule_effect_lower/rule_effect_alt
+        """An existing results DB without the rule_effect_aa_freq/rule_effect_alt
         columns opens after migration, defaulting to empty dicts."""
         result = self._make_result()
         save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
         results_conn.close()
         legacy_path = tmp_path / 'results.db'
         conn = sqlite3.connect(legacy_path)
-        conn.execute('ALTER TABLE variant_result DROP COLUMN rule_effect_lower')
+        conn.execute('ALTER TABLE variant_result DROP COLUMN rule_effect_aa_freq')
         conn.execute('ALTER TABLE variant_result DROP COLUMN rule_effect_alt')
         conn.commit()
         conn.close()
@@ -675,7 +675,7 @@ class TestResultsPersistence:
         conn = sqlite3.connect(legacy_path)
         conn.row_factory = sqlite3.Row
         row = conn.execute('SELECT * FROM variant_result WHERE run_id = 1').fetchone()
-        assert row['rule_effect_lower'] == '{}'
+        assert row['rule_effect_aa_freq'] == '{}'
         assert row['rule_effect_alt'] == '{}'
         conn.close()
 
@@ -1049,5 +1049,101 @@ class TestDeleteRun:
         with pytest.raises(ValueError, match='No run found'):
             delete_run(conn, '999')
         conn.close()
+
+
+class TestFreqMethodProvenance:
+    """freq_method provenance field on AnnotatedVariant — persisted and
+    defaulted to 'observed' for old DBs."""
+
+    @pytest.fixture()
+    def minimal_project_conn(self, tmp_path: Path):
+        db_path = tmp_path / 'project.db'
+        conn = create_schema(db_path)
+        conn.execute(
+            'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+            ('Test Project', 1, str(uuid.uuid4())),
+        )
+        conn.execute(
+            'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
+            (1, 'ref1', 100),
+        )
+        conn.execute(
+            'INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
+            (1, 'gag', 0, 90, '+'),
+        )
+        conn.execute(
+            'INSERT INTO drug (project_id, name) VALUES (?, ?)',
+            (1, 'drugx'),
+        )
+        conn.execute(
+            'INSERT INTO resistance_rule (feature_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
+            (1, 1, 1, 'E'),
+        )
+        conn.commit()
+        return conn
+
+    @pytest.fixture()
+    def results_conn(self, tmp_path: Path):
+        conn = init_results_db(tmp_path / 'results.db')
+        yield conn
+        conn.close()
+
+    def test_freq_method_defaults_to_observed(self) -> None:
+        """A non-combined annotation defaults to freq_method='observed'."""
+        from respro.config.cli_settings import CLI_CONFIG
+        assert CLI_CONFIG.codon.min_read_mapping_quality == 20
+
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='c', pos=0, ref='A', alt='T', allele_freq=0.9),
+        )
+        assert ann.freq_method == 'observed'
+
+    def test_freq_method_round_trips(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """freq_method is persisted on save and restored on reconstruct."""
+        result = self._make_result()
+        result.annotations[0].freq_method = 'estimated'
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+
+        _, variant_rows = load_run(results_conn, 1)
+        annotations = reconstruct_annotations(variant_rows)
+        assert annotations[0].freq_method == 'estimated'
+
+    def test_legacy_db_without_freq_method_defaults_observed(
+        self, results_conn, minimal_project_conn, tmp_path,
+    ) -> None:
+        """An old results DB without the freq_method column opens with 'observed'."""
+        result = self._make_result()
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+        results_conn.close()
+        legacy_path = tmp_path / 'results.db'
+        conn = sqlite3.connect(legacy_path)
+        conn.execute('ALTER TABLE variant_result DROP COLUMN freq_method')
+        conn.commit()
+        conn.close()
+        init_results_db(legacy_path)
+        conn = sqlite3.connect(legacy_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute('SELECT * FROM variant_result WHERE run_id = 1').fetchone()
+        assert row['freq_method'] == 'observed'
+        conn.close()
+
+    def _make_result(self) -> ProfilingResult:
+        v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
+        ann = AnnotatedVariant(
+            variant=v,
+            feature_name='gag',
+            codon_pos=1,
+            ref_codon='AAA',
+            alt_codon='GAA',
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            af_bin='high',
+        )
+        return make_profiling_result(
+            reference_name='ref1',
+            reference_length_nt=100,
+            annotations=[ann],
+        )
 
 

@@ -5,23 +5,25 @@ and amino acid similarity scoring.
 
 from __future__ import annotations
 
-import itertools
 import logging
 import re
+from typing import TYPE_CHECKING
 
 from Bio.Align.substitution_matrices import load as _load_matrix
 from Bio.Seq import Seq
 
-from respro.config.cli_settings import CLI_CONFIG
 from respro.db.models import AnnotatedVariant, CodonState, FeatureRecord, VariantCall
+
+if TYPE_CHECKING:
+    from respro.core.combined_snp import BamCooccurrence
 
 logger = logging.getLogger(__name__)
 
-_BLOSUM62 = _load_matrix('BLOSUM62')
+# Re-export CodonState so existing `from respro.core.annotation import CodonState`
+# sites keep working. The combined-SNP names are re-exported via __getattr__ below.
+__all__ = ['CodonState']
 
-# Numerical tolerance for Fréchet-bound acceptance (lower > eps). Small enough
-# that mathematically exact boundary cases (lower == 0) are stable.
-_FRECHET_EPS = 1e-9
+_BLOSUM62 = _load_matrix('BLOSUM62')
 
 # Shared high-impact consequence set and human-readable labels.
 HIGH_IMPACT_CONSEQUENCES: frozenset[str] = frozenset({
@@ -50,6 +52,7 @@ def annotate_variants(
     variants: list[VariantCall],
     features: list[FeatureRecord],
     is_fasta_mode: bool = False,
+    bam_cooccurrence: BamCooccurrence | None = None,
 ) -> list[AnnotatedVariant]:
     """
     Annotate a list of variants with codon-aware amino acid consequences.
@@ -61,18 +64,28 @@ def annotate_variants(
     available (``VariantCall.query_ref_codon``).
 
     Co-codon SNPs (two or more SNPs at distinct positions of the same feature
-    codon) are evaluated as combined codon events via Fréchet bounds; each
-    member SNP is emitted as its own per-SNP annotation carrying the accepted
-    combined states.
+    codon) are evaluated as combined codon events. When ``bam_cooccurrence`` is
+    provided, exact co-occurrence frequencies are measured from the BAM reads
+    (``freq_method='observed'``); otherwise conservative Fréchet lower bounds
+    are used (``freq_method='estimated'``). Each member SNP is emitted as its
+    own per-SNP annotation carrying the accepted combined states.
 
     :param variants: parsed variant calls (0-based positions). Variants with no CDS hit are
         included with empty feature_name.
     :param features: feature annotations for the reference
     :param is_fasta_mode: mark emitted annotations as FASTA-derived
+    :param bam_cooccurrence: BAM context for exact observed co-occurrence; when
+        None the Fréchet lower-bound path is used.
     :return: list of AnnotatedVariant
     """
     results: list[AnnotatedVariant] = []
     skipped_non_snp = 0
+    # Lazy import to avoid a circular dependency: combined_snp imports
+    # low-level helpers from this module at top level.
+    from respro.core.combined_snp import (
+        _annotate_combined_snp_codon,
+        _plan_combined_snp_groups,
+    )
     group_plan = _plan_combined_snp_groups(variants, features)
 
     for var_idx, var in enumerate(variants):
@@ -87,7 +100,9 @@ def annotate_variants(
             if group is not None:
                 if var_idx == group[0]:
                     members = [variants[i] for i in group]
-                    combined_annotations = _annotate_combined_snp_codon(members, feature)
+                    combined_annotations = _annotate_combined_snp_codon(
+                        members, feature, bam_cooccurrence=bam_cooccurrence,
+                    )
                     for ann in combined_annotations:
                         ann.is_fasta_mode = is_fasta_mode
                         results.append(ann)
@@ -300,394 +315,6 @@ def _translate_indel_bases(bases: str, strand: str) -> str:
     """
     oriented = reverse_complement(bases) if strand == '-' else bases.upper()
     return str(Seq(oriented).translate())
-
-
-def _compute_codon_frechet_states(
-    variants_at_codon: list[dict],
-    ref_codon: str,
-    min_fraction: float,
-    eps: float = _FRECHET_EPS,
-) -> list[CodonState]:
-    """
-    Compute the sharp Fréchet intersection bounds for every candidate codon state.
-
-    For a codon with ``k`` distinct variant-bearing nucleotide positions (k = 2 or 3),
-    enumerate every possible exact codon state. Each position carries one or more
-    ALT bases (the multiallelic case) plus the implicit reference option at the
-    residual frequency ``1 - sum(freqs)``. The cartesian product of all per-position
-    options yields every candidate codon. For each state compute the Fréchet bounds:
-
-    - ``q_i`` = the frequency of the option chosen at position ``i`` (an ALT
-      frequency, or the residual reference frequency).
-    - ``lower = max(0.0, sum(q) - (k - 1))`` — minimum guaranteed co-occurrence.
-    - ``upper = min(q)`` — maximum possible co-occurrence.
-    - ``forced_fraction = lower / upper`` if ``upper > 0`` else ``0.0`` — the minimum
-      fraction of the rarest required condition forced into this codon state.
-
-    A state is ``accepted`` when ``lower > eps`` and ``forced_fraction >= min_fraction``.
-
-    This is a conservative codon-level inference based on the minimum guaranteed
-    intersection of the corresponding viral subpopulations. It does NOT infer
-    physical phase and is NOT a probability that variants are linked. The
-    ``min_fraction`` threshold is an explicit conservative interpretation policy:
-    passing means the guaranteed portion is at least twice the potentially unshared
-    portion (at 2/3).
-
-    Multiallelic positions (≥2 ALTs at the same codon position, e.g. VCF
-    multiallelic sites or IUPAC-reference) are handled by modelling the position
-    as a multi-way choice: the reference base at its residual frequency plus each
-    ALT at its marginal frequency. The mutual exclusivity of the ALTs at one
-    position is implicit — each candidate codon state picks exactly one option per
-    position.
-
-    :param variants_at_codon: list of ``{'codon_pos': int, 'alts': [(base, freq), ...]}``
-        dicts, one per distinct variant-bearing position. ``codon_pos`` is 0-based
-        within the codon; ``alts`` lists each ALT base (coding orientation) with its
-        marginal allele frequency. The reference option is implicit.
-    :param ref_codon: the internal reference codon (3 bases, coding orientation).
-    :param min_fraction: acceptance threshold for ``forced_fraction`` (e.g. 2/3),
-        loaded from ``defaults.toml`` ([codon] section).
-    :param eps: numerical tolerance; states with ``lower <= eps`` are rejected.
-    :return: list of :class:`CodonState` for every enumerated candidate state
-        (accepted or not), or an empty list when the input is not combinable
-        (single variant position, positions out of range, or no ALTs).
-    """
-    if len(ref_codon) != 3:
-        return []
-
-    # Validate positions and build the per-position option lists.
-    # Each position's options: [(base, freq, member_id)] where member_id identifies
-    # which ALT (or -1 for the reference option) is carried.
-    ref_bases = list(ref_codon.upper())
-    positions: list[int] = []
-    # options_by_pos_idx: list (one entry per distinct position) of option lists.
-    options_by_pos_idx: list[list[tuple[str, float, int]]] = []
-    seen_positions: dict[int, int] = {}  # codon_pos -> index into positions
-    for v in variants_at_codon:
-        cp = v['codon_pos']
-        if not isinstance(cp, int) or cp < 0 or cp >= 3:
-            return []
-        if cp not in seen_positions:
-            seen_positions[cp] = len(positions)
-            positions.append(cp)
-            options_by_pos_idx.append([])
-        pos_idx = seen_positions[cp]
-        for member_id, (alt_base, freq) in enumerate(v['alts']):
-            options_by_pos_idx[pos_idx].append(
-                (alt_base.upper(), float(freq), member_id)
-            )
-
-    k = len(positions)
-    if k < 2:
-        return []
-
-    # Add the implicit reference option (residual frequency) to each position.
-    # member_id = -1 signals the reference base (not a variant member).
-    for pos_idx, cp in enumerate(positions):
-        alt_freq_sum = sum(freq for _, freq, _ in options_by_pos_idx[pos_idx])
-        ref_freq = max(0.0, 1.0 - alt_freq_sum)
-        ref_base = ref_bases[cp]
-        options_by_pos_idx[pos_idx].append((ref_base, ref_freq, -1))
-
-    # Enumerate the cartesian product of all per-position options.
-    accepted_states: list[CodonState] = []
-    for combo in itertools.product(*options_by_pos_idx):
-        codon_bases = list(ref_bases)
-        q_values: list[float] = []
-        member_indices: list[int] = []
-        for pos_idx, (base, freq, member_id) in enumerate(combo):
-            cp = positions[pos_idx]
-            codon_bases[cp] = base
-            q_values.append(freq)
-            if member_id >= 0:
-                # Encode as (pos_idx, alt_member_id) to distinguish multiple ALTs
-                # at the same position. Use a flat encoding: pos_idx * 100 + member_id
-                # is safe because k <= 3 and ALTs per position are small.
-                member_indices.append(pos_idx * 100 + member_id)
-
-        alt_codon = ''.join(codon_bases)
-        lower = max(0.0, sum(q_values) - (k - 1))
-        upper = min(q_values)
-        forced_fraction = lower / upper if upper > 0 else 0.0
-        accepted = lower > eps and forced_fraction >= min_fraction - eps
-        alt_aa = translate_codon(alt_codon)
-
-        accepted_states.append(CodonState(
-            alt_codon=alt_codon,
-            alt_aa=alt_aa,
-            lower=lower,
-            upper=upper,
-            forced_fraction=forced_fraction,
-            accepted=accepted,
-            member_indices=tuple(member_indices),
-        ))
-
-    return accepted_states
-
-
-def _plan_combined_snp_groups(
-    variants: list[VariantCall],
-    features: list[FeatureRecord],
-) -> dict[tuple[int, int], list[int]]:
-    """
-    Return codon groups that should be evaluated as combined SNP events.
-
-    A codon with two or more SNPs at distinct codon positions is a candidate.
-    The Fréchet test in :func:`_annotate_combined_snp_codon` decides whether any
-    combined state is actually emitted; grouping here only collects co-codon SNPs.
-
-    :param variants: input variant list
-    :param features: feature records
-    :return: {(feature_id, codon_idx): [variant_index, ...]}
-    """
-    grouped: dict[tuple[int, int], list[int]] = {}
-    for idx, var in enumerate(variants):
-        if not _is_snp(var.ref, var.alt):
-            continue
-        for feature in features:
-            if not feature.contains(var.pos):
-                continue
-            codon_idx = feature.codon_index(var.pos)
-            if codon_idx is None or codon_idx < 0:
-                continue
-            key = (feature.id, codon_idx)
-            grouped.setdefault(key, []).append(idx)
-
-    planned: dict[tuple[int, int], list[int]] = {}
-    for key, member_indices in grouped.items():
-        if len(member_indices) < 2:
-            continue
-        planned[key] = sorted(member_indices)
-    return planned
-
-
-def _annotate_combined_snp_codon(
-    variants: list[VariantCall],
-    feature: FeatureRecord,
-) -> list[AnnotatedVariant]:
-    """
-    Annotate multiple SNPs in one codon as per-SNP combined-state events.
-
-    For each member SNP, emit one :class:`AnnotatedVariant` carrying its own
-    ``allele_freq``/``ref``/``alt``, a single-exchange ``alt_codon``/``alt_aa``
-    (codon with only that SNP applied), and a ``combined_states`` list of the
-    Fréchet-accepted codon states that include this member.
-
-    Forced-overlap exception: when a member's single-exchange state is
-    Fréchet-rejected (``lower <= eps``) and there is an accepted all-carried
-    state with ``forced_fraction == 1.0`` (the Fréchet overlap is 100 %, i.e.
-    a co-member is at frequency 1.0), the member's single ``alt_codon``/``alt_aa``
-    is replaced by that forced all-carried state. The promoted state is dropped
-    from ``combined_states`` to avoid showing the same effect twice. Own-solo
-    accepted states stay in ``combined_states`` even when they equal the single.
-
-    Falls back to plain single-SNP annotation (no ``combined_states``) when the
-    Fréchet helper returns no states (multiallelic same-position, or no accepted
-    state for any member).
-
-    :param variants: SNPs from the same codon (same feature)
-    :param feature: feature containing the codon
-    :return: one annotation per member SNP (combined), or per-member single-SNP
-        annotations on fallback
-    """
-    if not variants:
-        raise ValueError('Combined SNP annotation requires at least one variant')
-
-    seq_cds = feature.nt_sequence.upper()
-    anchor = sorted(variants, key=lambda v: v.pos)[0]
-    codon_idx = feature.codon_index(anchor.pos)
-    if codon_idx is None:
-        raise ValueError(
-            f'Combined SNP annotation requires coding codon index for feature {feature.name!r} '
-            f'at genomic position {anchor.pos}'
-        )
-    codon_start = feature.codon_start + (codon_idx * 3)
-    internal_codon = seq_cds[codon_start:codon_start + 3]
-    ref_aa = translate_codon(internal_codon)
-
-    # Resolve each member's coding-orientation ALT base and codon position.
-    # Group ALTs by codon position so multiallelic positions are modelled as
-    # multiple options at one position (not rejected).
-    members: list[tuple[VariantCall, int, str, int]] = []  # (var, codon_pos, alt_base, member_index)
-    alts_by_pos: dict[int, list[tuple[str, float, int]]] = {}  # codon_pos -> [(alt_base, freq, alt_idx)]
-    pos_order: list[int] = []
-    for var in sorted(variants, key=lambda v: v.pos):
-        codon_pos = feature.codon_position_in_codon(var.pos)
-        if codon_pos is None:
-            raise ValueError(
-                f'Combined SNP annotation requires coding codon position for feature {feature.name!r} '
-                f'at genomic position {var.pos}'
-            )
-        alt_base = reverse_complement(var.alt) if feature.strand == '-' else var.alt.upper()
-        if codon_pos not in alts_by_pos:
-            alts_by_pos[codon_pos] = []
-            pos_order.append(codon_pos)
-        alt_idx = len(alts_by_pos[codon_pos])
-        alts_by_pos[codon_pos].append((alt_base, float(var.allele_freq), alt_idx))
-        # Encode the member index as pos_idx * 100 + alt_idx (matches the helper's
-        # encoding so member_indices in CodonState can be matched back).
-        pos_idx = pos_order.index(codon_pos)
-        member_index = pos_idx * 100 + alt_idx
-        members.append((var, codon_pos, alt_base, member_index))
-
-    # Build the Fréchet input specs: one entry per distinct position, with a
-    # list of (alt_base, freq) options (the multiallelic case has >1 option).
-    frechet_specs = [
-        {'codon_pos': cp, 'alts': [(ab, f) for ab, f, _ in alts_by_pos[cp]]}
-        for cp in pos_order
-    ]
-    min_fraction = CLI_CONFIG.codon.min_cooccurrence_codon_fraction
-    states = _compute_codon_frechet_states(frechet_specs, internal_codon, min_fraction)
-
-    if not states:
-        # Uncombinable input (single position, or positions out of range).
-        return _combined_fallback_single_snp(variants, feature)
-
-    accepted = [s for s in states if s.accepted]
-    if not accepted:
-        # No accepted combined state for any member: single-SNP fallback.
-        return _combined_fallback_single_snp(variants, feature)
-
-    # Forced-overlap promotion state per member: the accepted state with
-    # ``forced_fraction == 1.0`` that carries this member and the most co-members.
-    # For biallelic codons (one ALT per position) this is the unique all-carried
-    # state (every member applied). For multiallelic positions a state cannot
-    # carry two ALTs at the same position (they are mutually exclusive), so the
-    # "all-carried" concept is per-member: the state carrying this member's ALT
-    # plus one ALT at every other position. We pick the accepted forced state
-    # with the longest member_indices (maximal co-carried set) that includes
-    # this member — generalising the biallelic all-carried lookup, which matched
-    # by ``len(member_indices) == len(members)`` and silently failed for
-    # multiallelic codons (len(members) > len(positions)).
-    forced_states: dict[int, CodonState | None] = {}
-    for _, _, _, member_index in members:
-        candidates = [
-            s for s in accepted
-            if member_index in s.member_indices
-            and abs(s.forced_fraction - 1.0) <= _FRECHET_EPS
-        ]
-        # Pick the forced state carrying the most co-members (maximal co-carried
-        # set); break ties by the highest lower bound so a freq-1.0 co-member
-        # promotes to the strongest guaranteed state.
-        forced_states[member_index] = max(
-            candidates, key=lambda s: (len(s.member_indices), s.lower),
-        ) if candidates else None
-
-    annotations: list[AnnotatedVariant] = []
-    for var, codon_pos, alt_base, member_index in members:
-        # Single-exchange codon: apply only this member's SNP.
-        single_bases = list(internal_codon)
-        single_bases[codon_pos] = alt_base
-        single_codon = ''.join(single_bases)
-        single_aa = translate_codon(single_codon)
-
-        # Check whether this member's single-exchange state is Fréchet-rejected.
-        single_state = next(
-            (s for s in states
-             if len(s.member_indices) == 1 and s.member_indices[0] == member_index),
-            None,
-        )
-        single_rejected = single_state is None or single_state.lower <= _FRECHET_EPS
-
-        # Forced-overlap exception: replace single with the per-member forced state.
-        forced_state = forced_states.get(member_index)
-        promoted = False
-        if single_rejected and forced_state is not None:
-            single_codon = forced_state.alt_codon
-            single_aa = forced_state.alt_aa
-            promoted = True
-
-        consequence = _classify_snp_consequence(ref_aa, single_aa, codon_idx)
-
-        # combined_states: accepted states that include this member, deduped by
-        # alt_aa with lower summed. Drop the promoted forced state (it is now
-        # the single) to avoid showing the same effect twice.
-        member_states = [
-            s for s in accepted
-            if member_index in s.member_indices
-            and not (promoted and s is forced_state)
-        ]
-        combined_states = _dedupe_states_by_aa(member_states)
-
-        # single_exchange_lower: the amino-acid frequency of the single-exchange
-        # codon shown in this row (the Fréchet lower bound on the population
-        # share of that exact codon). This is distinct from the nucleotide
-        # frequency (variant.allele_freq): when promoted, the single IS the
-        # forced state, so use its lower; otherwise use the solo state's
-        # own Fréchet lower (0 when the single-exchange amino acid is
-        # Fréchet-impossible, i.e. guaranteed absent despite a high nucleotide
-        # frequency).
-        if promoted and forced_state is not None:
-            single_exchange_lower = forced_state.lower
-        elif single_state is not None:
-            single_exchange_lower = max(0.0, single_state.lower)
-        else:
-            single_exchange_lower = 0.0
-
-        annotations.append(AnnotatedVariant(
-            variant=var,
-            feature_name=feature.name,
-            codon_pos=codon_idx,
-            ref_codon=internal_codon,
-            alt_codon=single_codon,
-            ref_aa=ref_aa,
-            alt_aa=single_aa,
-            consequence=consequence,
-            is_combined_codon_event=True,
-            combined_member_count=len(members),
-            combined_states=combined_states,
-            single_exchange_lower=single_exchange_lower,
-        ))
-
-    return annotations
-
-
-def _dedupe_states_by_aa(states: list[CodonState]) -> list[CodonState]:
-    """Deduplicate CodonStates by alt_aa, summing lower for duplicates."""
-    by_aa: dict[str, CodonState] = {}
-    for s in states:
-        if s.alt_aa in by_aa:
-            prev = by_aa[s.alt_aa]
-            by_aa[s.alt_aa] = CodonState(
-                alt_codon=prev.alt_codon,
-                alt_aa=prev.alt_aa,
-                lower=prev.lower + s.lower,
-                upper=max(prev.upper, s.upper),
-                forced_fraction=max(prev.forced_fraction, s.forced_fraction),
-                accepted=True,
-                member_indices=prev.member_indices,
-            )
-        else:
-            by_aa[s.alt_aa] = s
-    return list(by_aa.values())
-
-
-def _combined_fallback_single_snp(
-    variants: list[VariantCall],
-    feature: FeatureRecord,
-) -> list[AnnotatedVariant]:
-    """Emit plain single-SNP annotations for each member (no combined_states)."""
-    seq_cds = feature.nt_sequence.upper()
-    cds_codons = [list(seq_cds[i:i + 3]) for i in range(feature.codon_start, len(seq_cds), 3)]
-    annotations: list[AnnotatedVariant] = []
-    for var in sorted(variants, key=lambda v: v.pos):
-        cds_pos = feature.genomic_to_cds_position(var.pos)
-        if cds_pos is None:
-            annotations.append(AnnotatedVariant(variant=var, feature_name=feature.name))
-            continue
-        coding_pos = cds_pos - feature.codon_start
-        if coding_pos < 0:
-            annotations.append(AnnotatedVariant(variant=var, feature_name=feature.name))
-            continue
-        mut_codon_idx = coding_pos // 3
-        frame_offset = coding_pos % 3
-        if mut_codon_idx >= len(cds_codons):
-            annotations.append(AnnotatedVariant(variant=var, feature_name=feature.name))
-            continue
-        mut = reverse_complement(var.alt) if feature.strand == '-' else var.alt
-        ann = _annotate_snp(var, feature, cds_codons, mut_codon_idx, frame_offset, mut)
-        annotations.append(ann)
-    return annotations
 
 
 def _annotate_variant_in_feature(
@@ -1303,14 +930,51 @@ def assign_af_bins(
     for ann in annotations:
         # AF binning is derived from the amino-acid frequency, not the nucleotide
         # frequency. For non-combined annotations these coincide
-        # (single_exchange_lower == allele_freq). For combined-codon members the
+        # (single_exchange_aa_freq == allele_freq). For combined-codon members the
         # amino-acid frequency is the Fréchet lower bound of the single-exchange
-        # codon (single_exchange_lower): a 0.9-nucleotide-frequency member whose
+        # codon (single_exchange_aa_freq): a 0.9-nucleotide-frequency member whose
         # single-exchange amino acid is Fréchet-impossible (lower=0) must not be
         # classified as 'high'.
-        af = ann.single_exchange_lower if ann.is_combined_codon_event else ann.variant.allele_freq
+        af = ann.single_exchange_aa_freq if ann.is_combined_codon_event else ann.variant.allele_freq
         for label, (lo, hi) in sorted_bins:
             if lo <= af <= hi:
                 ann.af_bin = label
 
     return annotations
+
+
+# ─── Combined same-codon SNP logic ─────────────────────────────────────────
+# Extracted into respro.core.combined_snp (Fréchet path + BAM observed path).
+# To avoid a circular import (combined_snp imports low-level helpers from this
+# module at top level), the combined-SNP entry points are imported lazily inside
+# ``annotate_variants`` (the only function that calls them). The names are also
+# re-exported via module-level ``__getattr__`` (PEP 562) so existing
+# ``from respro.core.annotation import _compute_codon_frechet_states`` sites
+# keep working without triggering the cycle at import time.
+
+
+def __getattr__(name: str) -> object:
+    # PEP 562 lazy re-export: resolve combined-SNP names on first attribute
+    # access, after both modules are fully loaded. (CodonState is imported at
+    # top level from respro.db.models and is not handled here.)
+    if name in {
+        '_FRECHET_EPS',
+        '_annotate_combined_snp_codon',
+        '_combined_fallback_single_snp',
+        '_compute_codon_frechet_states',
+        '_dedupe_states_by_aa',
+        '_plan_combined_snp_groups',
+    }:
+        from respro.core import combined_snp as _cs
+        _lazy = {
+            '_FRECHET_EPS': _cs._FRECHET_EPS,
+            '_annotate_combined_snp_codon': _cs._annotate_combined_snp_codon,
+            '_combined_fallback_single_snp': _cs._combined_fallback_single_snp,
+            '_compute_codon_frechet_states': _cs._compute_codon_frechet_states,
+            '_dedupe_states_by_aa': _cs._dedupe_states_by_aa,
+            '_plan_combined_snp_groups': _cs._plan_combined_snp_groups,
+        }
+        value = _lazy[name]
+        globals()[name] = value  # cache for subsequent access
+        return value
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

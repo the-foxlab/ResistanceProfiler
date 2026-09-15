@@ -216,9 +216,10 @@ def write_json(
             'drug_hits': json.dumps(ann.drug_hits_json()),
             'is_combined_codon_event': ann.is_combined_codon_event,
             'combined_member_count': ann.combined_member_count,
-            'single_exchange_lower': ann.single_exchange_lower,
-            'rule_effect_lower': json.dumps(ann.rule_effect_lower),
+            'single_exchange_aa_freq': ann.single_exchange_aa_freq,
+            'rule_effect_aa_freq': json.dumps(ann.rule_effect_aa_freq),
             'rule_effect_alt': json.dumps(ann.rule_effect_alt),
+            'freq_method': ann.freq_method,
             'combined_states': json.dumps([
                 {
                     'alt_codon': s.alt_codon,
@@ -402,7 +403,7 @@ def _aa_effects(ann: AnnotatedVariant) -> str:
 
     Each effect is rendered as ``<ref><pos><alt> (<lower>)`` and joined with
     ``; ``. The single-exchange effect is listed first (when its amino-acid
-    frequency ``single_exchange_lower`` is > 0), followed by every accepted
+    frequency ``single_exchange_aa_freq`` is > 0), followed by every accepted
     combined-state effect. For a single-SNP variant this is just the single
     effect at the variant frequency. For a combined member whose single is
     Fréchet-impossible (lower=0) only the combined states are shown. A combined
@@ -411,16 +412,17 @@ def _aa_effects(ann: AnnotatedVariant) -> str:
     """
     parts: list[str] = []
     single_label = ''
-    if ann.alt_aa and ann.single_exchange_lower > 0.0:
+    freq_tag = ' (observed)' if ann.freq_method == 'observed' else ' (lower bound)'
+    if ann.alt_aa and ann.single_exchange_aa_freq > 0.0:
         single_label = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
-        parts.append(f'{single_label} ({round(ann.single_exchange_lower, 3)})')
+        parts.append(f'{single_label} ({round(ann.single_exchange_aa_freq, 3)}){freq_tag}')
     for state in ann.combined_states:
         if not state.accepted:
             continue
         combined_label = f'{ann.ref_aa}{ann.codon_pos + 1}{state.alt_aa}'
         if combined_label == single_label:
             continue
-        parts.append(f'{combined_label} ({round(state.lower, 3)})')
+        parts.append(f'{combined_label} ({round(state.lower, 3)}){freq_tag}')
     return '; '.join(parts)
 
 

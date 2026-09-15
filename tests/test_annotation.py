@@ -550,29 +550,29 @@ class TestAssignAfBins:
         anns = assign_af_bins([_make_ann(0.25)], bins=self._FASTA_BINS)
         assert anns[0].af_bin == 'low'
 
-    def test_combined_member_binned_at_single_exchange_lower(self) -> None:
-        """A combined-codon member is binned at its single_exchange_lower, not its
+    def test_combined_member_binned_at_single_exchange_aa_freq(self) -> None:
+        """A combined-codon member is binned at its single_exchange_aa_freq, not its
         marginal allele_freq. A 0.9-marginal member whose single-exchange state is
         Fréchet-impossible (lower=0) bins at 0.0 -> 'low', not 'high'."""
         ann = _make_ann(0.9)
         ann.is_combined_codon_event = True
-        ann.single_exchange_lower = 0.0
+        ann.single_exchange_aa_freq = 0.0
         anns = assign_af_bins([ann], bins=self._VCF_BINS)
         # 0.0 is below the low bin's lower bound (0.01); confirm it does not land
         # in 'high' (the marginal 0.9 would). It should be 'low' or unset, never high.
         assert anns[0].af_bin != 'high'
 
     def test_combined_member_possible_single_binned_at_lower(self) -> None:
-        """A combined member with single_exchange_lower=0.09 bins at 'low', not at
+        """A combined member with single_exchange_aa_freq=0.09 bins at 'low', not at
         the marginal (0.99 -> 'high')."""
         ann = _make_ann(0.99)
         ann.is_combined_codon_event = True
-        ann.single_exchange_lower = 0.09
+        ann.single_exchange_aa_freq = 0.09
         anns = assign_af_bins([ann], bins=self._VCF_BINS)
         assert anns[0].af_bin == 'low'
 
     def test_non_combined_binned_at_allele_freq(self) -> None:
-        """A non-combined annotation bins at its allele_freq (single_exchange_lower
+        """A non-combined annotation bins at its allele_freq (single_exchange_aa_freq
         defaults to allele_freq). No regression for the common case."""
         ann = _make_ann(0.9)
         anns = assign_af_bins([ann], bins=self._VCF_BINS)
@@ -2343,7 +2343,7 @@ class TestPerSnpCombinedStates:
         # A->T single (ATG=M) is Fréchet-rejected; promoted to ATT=I.
         assert t_member.alt_codon == 'ATT'
         assert t_member.alt_aa == 'I'
-        assert t_member.single_exchange_lower == pytest.approx(0.9)
+        assert t_member.single_exchange_aa_freq == pytest.approx(0.9)
         # The promoted state is dropped from combined_states.
         assert t_member.combined_states == []
 
@@ -2374,8 +2374,8 @@ class TestPerSnpCombinedStates:
         # The promotion must replace the single with ATT=I.
         assert t_member.alt_codon == 'ATT'
         assert t_member.alt_aa == 'I'
-        # The promoted state's lower is the single_exchange_lower.
-        assert t_member.single_exchange_lower == pytest.approx(0.5)
+        # The promoted state's lower is the single_exchange_aa_freq.
+        assert t_member.single_exchange_aa_freq == pytest.approx(0.5)
 
     def test_min_fraction_from_config_used(self) -> None:
         """The acceptance threshold flows from CLI_CONFIG.codon.min_cooccurrence_codon_fraction."""
@@ -2397,7 +2397,7 @@ class TestPerSnpCombinedStates:
 
 
 class TestSingleExchangeLower:
-    """``single_exchange_lower`` is the Fréchet lower bound of the single-exchange
+    """``single_exchange_aa_freq`` is the Fréchet lower bound of the single-exchange
     codon state (this member carried, all others absent). It is the guaranteed
     minimum population share of the *exact single codon* displayed in the row,
     and is the frequency used for single-exchange rule matching and AF binning.
@@ -2419,17 +2419,17 @@ class TestSingleExchangeLower:
         return {ann.variant.pos: ann for ann in results}
 
     def test_non_combined_equals_allele_freq(self) -> None:
-        """A single-SNP annotation has single_exchange_lower == allele_freq."""
+        """A single-SNP annotation has single_exchange_aa_freq == allele_freq."""
         feature = TestPerSnpCombinedStates._aag_feature()
         variants = [
             VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.9, depth=100),
         ]
         results = annotate_variants(variants, [feature])
-        assert results[0].single_exchange_lower == pytest.approx(0.9)
+        assert results[0].single_exchange_aa_freq == pytest.approx(0.9)
 
     def test_combined_member_single_possible_uses_single_lower(self) -> None:
         """0.99/0.90 codon: each single-exchange state has lower=0.89 (0.99+0.10-1).
-        single_exchange_lower must be 0.89, not the marginal."""
+        single_exchange_aa_freq must be 0.89, not the marginal."""
         feature = TestPerSnpCombinedStates._aag_feature()
         variants = [
             VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.99, depth=100),
@@ -2438,13 +2438,13 @@ class TestSingleExchangeLower:
         results = annotate_variants(variants, [feature])
         by_pos = self._by_pos(results)
         # A->T single: q=[0.99, 1-0.90=0.10], lower=max(0,1.09-1)=0.09
-        assert by_pos[4].single_exchange_lower == pytest.approx(0.09)
+        assert by_pos[4].single_exchange_aa_freq == pytest.approx(0.09)
         # G->T single: q=[1-0.99=0.01, 0.90], lower=max(0,0.91-1)=0.0
-        assert by_pos[5].single_exchange_lower == pytest.approx(0.0)
+        assert by_pos[5].single_exchange_aa_freq == pytest.approx(0.0)
 
     def test_combined_member_single_impossible_is_zero(self) -> None:
         """0.9/0.9 codon: each single-exchange has lower=0 (guaranteed absent).
-        single_exchange_lower must be 0.0 despite marginal 0.9."""
+        single_exchange_aa_freq must be 0.0 despite marginal 0.9."""
         feature = TestPerSnpCombinedStates._aag_feature()
         variants = [
             VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=0.9, depth=100),
@@ -2452,12 +2452,12 @@ class TestSingleExchangeLower:
         ]
         results = annotate_variants(variants, [feature])
         for ann in results:
-            assert ann.single_exchange_lower == pytest.approx(0.0)
+            assert ann.single_exchange_aa_freq == pytest.approx(0.0)
 
     def test_promoted_single_uses_promoted_state_lower(self) -> None:
         """A->T@1.0 + G->T@0.5: G->T single is rejected & promoted to ATT=I
         (forced_fraction==1.0). The promoted single IS the all-carried state,
-        so single_exchange_lower = that state's lower (0.5)."""
+        so single_exchange_aa_freq = that state's lower (0.5)."""
         feature = TestPerSnpCombinedStates._aag_feature()
         variants = [
             VariantCall(chrom='c', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
@@ -2466,13 +2466,13 @@ class TestSingleExchangeLower:
         results = annotate_variants(variants, [feature])
         by_pos = self._by_pos(results)
         # A->T: own solo ATG=M accepted, lower=max(0,1.0+0.5-1)=0.5
-        assert by_pos[4].single_exchange_lower == pytest.approx(0.5)
+        assert by_pos[4].single_exchange_aa_freq == pytest.approx(0.5)
         # G->T: promoted to ATT=I, that state's lower=0.5
-        assert by_pos[5].single_exchange_lower == pytest.approx(0.5)
+        assert by_pos[5].single_exchange_aa_freq == pytest.approx(0.5)
 
     def test_no_forced_overlap_keeps_solo_lower(self) -> None:
         """0.8/0.7 codon (forced<1.0, no promotion): A->T solo lower=0.1;
-        G->T solo lower=0 (rejected, not promoted). single_exchange_lower
+        G->T solo lower=0 (rejected, not promoted). single_exchange_aa_freq
         reflects the literal solo state's lower in both cases."""
         feature = TestPerSnpCombinedStates._aag_feature()
         variants = [
@@ -2482,9 +2482,9 @@ class TestSingleExchangeLower:
         results = annotate_variants(variants, [feature])
         by_pos = self._by_pos(results)
         # A->T solo: q=[0.8, 0.3], lower=max(0,1.1-1)=0.1
-        assert by_pos[4].single_exchange_lower == pytest.approx(0.1)
+        assert by_pos[4].single_exchange_aa_freq == pytest.approx(0.1)
         # G->T solo: q=[0.2, 0.7], lower=max(0,0.9-1)=0.0
-        assert by_pos[5].single_exchange_lower == pytest.approx(0.0)
+        assert by_pos[5].single_exchange_aa_freq == pytest.approx(0.0)
 
 
 # ─── Fréchet combined-codon bounds ──────────────────────────────────

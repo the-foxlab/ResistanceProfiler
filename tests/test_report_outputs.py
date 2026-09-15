@@ -79,7 +79,7 @@ class TestCombinedStatesReport:
             ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
             consequence='missense', af_bin='high',
             is_combined_codon_event=True, combined_member_count=2,
-            single_exchange_lower=0.5,
+            single_exchange_aa_freq=0.5,
             combined_states=[
                 CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
                            forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
@@ -87,7 +87,7 @@ class TestCombinedStatesReport:
                            forced_fraction=1.0, accepted=True, member_indices=(0,)),
             ],
             rule_matches=[rule_i, rule_m],
-            rule_effect_lower={10: 0.5, 20: 0.5},
+            rule_effect_aa_freq={10: 0.5, 20: 0.5},
             rule_effect_alt={10: 'I', 20: 'M'},
         )
         g_row = AnnotatedVariant(
@@ -96,10 +96,10 @@ class TestCombinedStatesReport:
             ref_codon='AAG', alt_codon='ATT', ref_aa='K', alt_aa='I',
             consequence='missense', af_bin='intermediate',
             is_combined_codon_event=True, combined_member_count=2,
-            single_exchange_lower=0.5,
+            single_exchange_aa_freq=0.5,
             combined_states=[],
             rule_matches=[rule_i],
-            rule_effect_lower={10: 0.5},
+            rule_effect_aa_freq={10: 0.5},
             rule_effect_alt={10: 'I'},
         )
         return make_profiling_result(
@@ -130,9 +130,10 @@ class TestCombinedStatesReport:
         assert 'K2I (0.5)' in a_row['aa_effects']
         # K2M must appear exactly once (no duplication).
         assert a_row['aa_effects'].count('K2M') == 1
-        # G->T row: promoted single K2I (0.5), no combined states
+        # G->T row: promoted single K2I (0.5), no combined states.
+        # freq_method defaults to 'observed'.
         g_row = next(row for row in rows if row['aa_change'] == 'K2I')
-        assert g_row['aa_effects'] == 'K2I (0.5)'
+        assert g_row['aa_effects'] == 'K2I (0.5) (observed)'
 
     def test_row_dict_exposes_combined_codon_flags(self) -> None:
         """Each row exposes is_combined_codon_event and combined_member_count so
@@ -275,13 +276,13 @@ class TestCombinedStatesReport:
             ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
             consequence='missense', af_bin='high',
             is_combined_codon_event=True, combined_member_count=2,
-            single_exchange_lower=0.5,
+            single_exchange_aa_freq=0.5,
             combined_states=[
                 CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
                            forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
             ],
             rule_matches=[rule_i],
-            rule_effect_lower={10: 0.5},
+            rule_effect_aa_freq={10: 0.5},
             rule_effect_alt={10: 'I'},
         )
         result = make_profiling_result(
@@ -313,7 +314,7 @@ class TestCombinedStatesReport:
         r = _make_result()
         ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
         rows = ctx['all_mutations']['rows']
-        # single_exchange_lower == allele_freq; no combined states.
+        # single_exchange_aa_freq == allele_freq; no combined states.
         assert 'K' in rows[0]['aa_effects']
         assert ';' not in rows[0]['aa_effects']
 
@@ -327,7 +328,7 @@ class TestCombinedStatesReport:
             ref_codon='GCA', alt_codon='GCG', ref_aa='A', alt_aa='A',
             consequence='synonymous', af_bin='high',
             is_combined_codon_event=True, combined_member_count=2,
-            single_exchange_lower=0.0,
+            single_exchange_aa_freq=0.0,
             combined_states=[
                 CodonState(alt_codon='GGA', alt_aa='G', lower=0.5, upper=0.5,
                            forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
@@ -354,7 +355,7 @@ class TestCombinedStatesReport:
             ref_codon='GCA', alt_codon='GCG', ref_aa='A', alt_aa='A',
             consequence='synonymous', af_bin='high',
             is_combined_codon_event=True, combined_member_count=2,
-            single_exchange_lower=0.0,
+            single_exchange_aa_freq=0.0,
             combined_states=[
                 CodonState(alt_codon='GCG', alt_aa='A', lower=0.5, upper=0.5,
                            forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
@@ -382,7 +383,7 @@ class TestCombinedStatesReport:
             ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
             consequence='missense', af_bin='high',
             is_combined_codon_event=True, combined_member_count=2,
-            single_exchange_lower=0.5,
+            single_exchange_aa_freq=0.5,
             combined_states=[
                 CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
                            forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
@@ -395,7 +396,7 @@ class TestCombinedStatesReport:
             ref_codon='AAG', alt_codon='ATT', ref_aa='K', alt_aa='I',
             consequence='missense', af_bin='intermediate',
             is_combined_codon_event=True, combined_member_count=2,
-            single_exchange_lower=0.5,
+            single_exchange_aa_freq=0.5,
             combined_states=[],
             rule_matches=[],
         )
@@ -449,7 +450,7 @@ class TestCombinedStatesReport:
             ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
             consequence='missense', af_bin='high',
             is_combined_codon_event=True, combined_member_count=2,
-            single_exchange_lower=0.5,
+            single_exchange_aa_freq=0.5,
             combined_states=[
                 CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
                            forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
@@ -464,7 +465,7 @@ class TestCombinedStatesReport:
             ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
             consequence='missense', af_bin='high',
             is_combined_codon_event=True, combined_member_count=2,
-            single_exchange_lower=0.5,
+            single_exchange_aa_freq=0.5,
             combined_states=[
                 CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
                            forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
@@ -617,6 +618,142 @@ def _make_result() -> ProfilingResult:
             )
         ],
     )
+
+
+class TestFreqMethodLabel:
+    """The AA-effects frequency is suffixed with a user-facing tag driven by
+    ``ann.freq_method``: `` (observed)`` for directly measured frequencies
+    (single-nt VCF AF or BAM read-backed codon) and `` (lower bound)`` for the
+    conservative lower-bound estimate used for combined codons without
+    read-level data. The term "Fréchet" is not surfaced in the report."""
+
+    @staticmethod
+    def _combined_result(freq_method: str, combined_lower: float = 0.6,
+                         single_freq: float = 0.6) -> ProfilingResult:
+        """A combined-codon member with freq_method set explicitly."""
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T',
+                                allele_freq=0.9, depth=100),
+            feature_name='testf', codon_pos=19,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_aa_freq=single_freq,
+            freq_method=freq_method,
+            combined_states=[
+                CodonState(alt_codon='ATG', alt_aa='M', lower=combined_lower,
+                           upper=combined_lower, forced_fraction=1.0,
+                           accepted=True, member_indices=(0, 1)),
+            ],
+        )
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='testf', protein='TestF',
+            start=0, end=60, strand='+', codon_start=0,
+            nt_sequence='AAA' * 20,
+        )
+        return make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[ann],
+            query_sequence='AAA' * 20,
+            feature_matches=[
+                FeatureMatch(
+                    feature=feature, identity=1.0, cds_coverage=1.0,
+                    query_coverage=1.0, query_start=0, query_end=60,
+                    strand='+', cigar='60M', cds_start=0,
+                ),
+            ],
+        )
+
+    def test_combined_member_estimated_label(self) -> None:
+        """A no-BAM combined-codon member (freq_method='estimated') suffixes the
+        frequency with `` (lower bound)``."""
+        r = self._combined_result(freq_method='estimated', combined_lower=0.6)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        assert 'K20M (0.6) (lower bound)' in rows[0]['aa_effects']
+
+    def test_combined_member_observed_label(self) -> None:
+        """A BAM-mode combined-codon member (freq_method='observed') suffixes the
+        frequency with `` (observed)``."""
+        r = self._combined_result(freq_method='observed', combined_lower=0.7,
+                                  single_freq=0.7)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        assert 'K20M (0.7) (observed)' in rows[0]['aa_effects']
+
+    def test_single_snp_observed_label(self) -> None:
+        """A single-nucleotide variant (freq_method='observed' by default)
+        suffixes its frequency with `` (observed)``."""
+        r = _make_result()  # single SNP, freq_method defaults to 'observed'
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        # _make_result: K3E at allele_freq 0.95 (single_exchange_aa_freq == af).
+        assert 'K3E (0.95) (observed)' in rows[0]['aa_effects']
+
+    def test_rendered_html_contains_estimated_and_observed_labels(self) -> None:
+        """The rendered HTML carries the (observed)/(lower bound) suffixes in the
+        AA-effects cells."""
+        r = self._combined_result(freq_method='estimated', combined_lower=0.6)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        assert 'K20M (0.6) (lower bound)' in html
+
+    def test_rendered_html_legend_explains_tags_without_frechet(self) -> None:
+        """The report legend explains the observed/lower-bound tags and does not
+        mention the term 'Fréchet'."""
+        r = self._combined_result(freq_method='estimated', combined_lower=0.6)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        assert 'observed' in html.lower()
+        assert 'lower bound' in html.lower()
+        # The legend explains both tags.
+        assert 'guaranteed minimum' in html.lower() or 'frequency itself' in html.lower()
+        assert 'true frequency may' in html.lower() or 'may be higher' in html.lower()
+        # The term "Fréchet" must not appear in the rendered report.
+        assert 'Fréchet' not in html
+        assert 'Frechet' not in html
+
+    def test_old_db_without_freq_method_defaults_observed(self) -> None:
+        """An AnnotatedVariant with freq_method left at its default ('observed')
+        — as an old results DB without the column would reconstruct — renders
+        with the `` (observed)`` label."""
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T',
+                                allele_freq=0.9, depth=100),
+            feature_name='testf', codon_pos=19,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_aa_freq=0.6,
+            # freq_method intentionally left at default 'observed'
+            combined_states=[
+                CodonState(alt_codon='ATG', alt_aa='M', lower=0.6, upper=0.6,
+                           forced_fraction=1.0, accepted=True,
+                           member_indices=(0, 1)),
+            ],
+        )
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='testf', protein='TestF',
+            start=0, end=60, strand='+', codon_start=0,
+            nt_sequence='AAA' * 20,
+        )
+        r = make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[ann],
+            query_sequence='AAA' * 20,
+            feature_matches=[
+                FeatureMatch(
+                    feature=feature, identity=1.0, cds_coverage=1.0,
+                    query_coverage=1.0, query_start=0, query_end=60,
+                    strand='+', cigar='60M', cds_start=0,
+                ),
+            ],
+        )
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        assert ' (observed)' in rows[0]['aa_effects']
 
 
 class TestBuildReportContext:

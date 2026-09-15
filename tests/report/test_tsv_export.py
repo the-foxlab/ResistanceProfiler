@@ -206,7 +206,7 @@ class TestAaEffectsColumn:
             is_combined_codon_event=True, combined_states=states,
             alt_aa='M', codon_pos=1, ref_aa='K',
         )
-        # single_exchange_lower defaults to allele_freq (0.95) > 0, so the single
+        # single_exchange_aa_freq defaults to allele_freq (0.95) > 0, so the single
         # K2M (0.95) is listed first, then the combined states.
         r = _result([ann])
         out = tmp_path / 'r.results.tsv'
@@ -226,7 +226,7 @@ class TestAaEffectsColumn:
 
     def test_combined_member_zero_single_omits_single(self, tmp_path: Path) -> None:
         """A combined member whose single-exchange is Fréchet-impossible
-        (single_exchange_lower=0) omits the single entry; only combined states."""
+        (single_exchange_aa_freq=0) omits the single entry; only combined states."""
         states = [
             CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
                        forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
@@ -235,7 +235,7 @@ class TestAaEffectsColumn:
             is_combined_codon_event=True, combined_states=states,
             alt_aa='M', codon_pos=1, ref_aa='K',
         )
-        ann.single_exchange_lower = 0.0  # single guaranteed absent
+        ann.single_exchange_aa_freq = 0.0  # single guaranteed absent
         r = _result([ann])
         out = tmp_path / 'r.results.tsv'
         write_tsv(r, out)
@@ -255,8 +255,65 @@ class TestAaEffectsColumn:
         write_tsv(r, out)
         header, rows = _read_tsv(out)
         col = header.index('aa_effects')
-        # single_exchange_lower == allele_freq (0.95); no combined states.
-        assert rows[0][col] == 'K3E (0.95)'
+        # single_exchange_aa_freq == allele_freq (0.95); no combined states.
+        # freq_method defaults to 'observed'.
+        assert rows[0][col] == 'K3E (0.95) (observed)'
+
+
+class TestFreqMethodLabel:
+    """The aa_effects frequency is suffixed with `` (observed)`` or
+    `` (lower bound)`` driven by ``ann.freq_method``."""
+
+    def test_combined_member_estimated_label(self, tmp_path: Path) -> None:
+        """A combined-codon member with freq_method='estimated' suffixes the
+        frequency with `` (lower bound)``."""
+        states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+        ]
+        ann = _ann(
+            is_combined_codon_event=True, combined_states=states,
+            alt_aa='M', codon_pos=1, ref_aa='K',
+        )
+        ann.freq_method = 'estimated'
+        ann.single_exchange_aa_freq = 0.0  # only combined state shown
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('aa_effects')
+        assert 'K2I (0.5) (lower bound)' in rows[0][col]
+
+    def test_combined_member_observed_label(self, tmp_path: Path) -> None:
+        """A combined-codon member with freq_method='observed' (BAM mode)
+        suffixes the frequency with `` (observed)``."""
+        states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+        ]
+        ann = _ann(
+            is_combined_codon_event=True, combined_states=states,
+            alt_aa='M', codon_pos=1, ref_aa='K',
+        )
+        ann.freq_method = 'observed'
+        ann.single_exchange_aa_freq = 0.0
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('aa_effects')
+        assert 'K2I (0.5) (observed)' in rows[0][col]
+
+    def test_single_snp_observed_label_by_default(self, tmp_path: Path) -> None:
+        """A single-SNP annotation with freq_method at its default ('observed')
+        suffixes the frequency with `` (observed)``."""
+        ann = _ann(alt_aa='E', codon_pos=2, ref_aa='K')
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('aa_effects')
+        assert rows[0][col] == 'K3E (0.95) (observed)'
 
 
 class TestSingleRuleRows:

@@ -495,6 +495,11 @@ uses **Fréchet (probability) bounds** to determine which combined codon states
 are guaranteed to exist in the viral population, and emits per-SNP annotations
 carrying the accepted combined states.
 
+This is the **no-BAM path**: it is taken when no alignment file is supplied
+(`--bam` omitted), so only the marginal VCF allele frequencies are available.
+When a BAM is supplied, the exact co-occurrence path of [§5.4](#54-bam-based-exact-co-occurrence)
+is used instead and the Fréchet bounds are not computed.
+
 #### 5.3.1 The mathematical problem
 
 Consider a codon with $k$ distinct variant-bearing nucleotide positions
@@ -601,6 +606,88 @@ When the Fréchet helper returns no states (multiallelic same-position inputs,
 where two ALTs at the same codon position cannot form valid combined states)
 or no accepted state exists for any member, ResPro falls back to plain
 single-SNP annotation with no `combined_states`.
+
+### 5.4 BAM-based exact co-occurrence
+
+When the user supplies an alignment file with `--bam`, the Fréchet bound path
+of §5.3 is **not taken at all**. Instead, ResPro measures the exact
+co-occurrence frequency of each combined codon state directly from the reads
+that span the codon. This replaces the conservative lower-bound estimate with
+an observed frequency.
+
+#### 5.4.1 Shared candidate-state enumeration
+
+Both paths share the same candidate-state enumeration
+(`enumerate_candidate_codon_states`). For every variant-bearing nucleotide
+position in the codon, the enumerator builds the cartesian product of
+{reference base, each ALT}. Each resulting `CandidateCodon` carries the
+combined alt codon, its amino acid, the member indices it spans, the per-base
+choice encoding, and the per-base VCF quality values. This shared state space
+keeps the two paths numerically comparable.
+
+#### 5.4.2 Spanning-molecule counting
+
+For each candidate codon state, `compute_codon_cooccurrence` counts reads that
+span all variant-bearing positions of the codon:
+
+1. **Primary-alignment filter.** Only primary alignments are assessed;
+   secondary (`0x100`) and supplementary (`0x800`) records are skipped. This
+   keeps each `query_name` group to at most the two mates of a proper pair, so
+   a single molecule is never double-counted via an alternative mapping and a
+   supplementary that disagrees with its primary cannot reject a genuine
+   primary observation through the paired-end agreement rule (step 3).
+2. **MAPQ filter.** Only reads with mapping quality ≥
+   `codon.min_read_mapping_quality` (default 20) are considered.
+3. **Spanning requirement.** A read must cover every variant-bearing
+   nucleotide position of the codon; partial-span reads are discarded for that
+   codon's count.
+4. **Paired-end deduplication and agreement.** For a paired read whose mate
+   also spans the codon, the pair is counted once and only when both mates
+   agree on the called base at every variant position; disagreements (likely
+   sequencing errors) are discarded.
+5. **State frequency.** The observed frequency of a candidate state is
+   `spanning molecules matching the state / total spanning molecules at the codon`
+   (a *molecule* is a single-end read or a deduplicated paired-end pair; see
+   step 4).
+
+Unlike the Fréchet path, the BAM path applies **no frequency threshold** to
+individual candidate states. Every candidate state with at least one observed
+spanning molecule is **accepted** and emitted as a `CodonState` with
+`lower = upper = observed frequency` and `forced_fraction = 1.0` (a point
+estimate, not a bound). The sole acceptance filter is the spanning-molecule
+count itself: when fewer than `codon.min_depth` molecules span the codon, no
+combined call is made at all (see §5.4.3). Reads whose codon matches no
+candidate (a base not present in the VCF at a variant position) are tallied as
+"other" — they contribute to the spanning-molecule denominator but produce no
+`CodonState`, so a rare off-VCF base cannot inflate a candidate's frequency.
+
+#### 5.4.3 Thin-evidence → single-event fallback
+
+When fewer than `codon.min_depth` molecules span the codon, ResPro falls back
+to plain single-SNP annotation with no `combined_states` (`freq_method` stays
+`'observed'`) — the same single-event fallback as §5.3.6. This is the intended
+reading of thin evidence: the raw reads were inspected for co-occurrence and
+found too sparse to support a combined claim, so none is made. (A codon that
+*is* spanned at or above `min_depth` but where every molecule is "other" also
+yields no `CodonState` and falls back to single events.)
+
+#### 5.4.4 Provenance: `freq_method`
+
+Each annotated variant carries a `freq_method` provenance flag:
+
+- `observed` — the amino-acid frequency value shown is the frequency itself
+  (single-nt VCF allele frequency, or a BAM read-backed codon state).
+- `estimated` — the amino-acid frequency is a guaranteed minimum (lower bound)
+  for a combined codon without read-level data (the Fréchet path of §5.3); the
+  true frequency may be higher.
+
+The report surfaces this as a user-facing tag on every amino-acid effect:
+`K20M (0.7) (observed)` vs `K20M (0.6) (lower bound)`. The term "Fréchet" is
+not shown in the report; the legend explains that *observed* is the frequency
+value itself, while *lower bound* is a guaranteed minimum that the true
+frequency may exceed (no linkage/phase assumption). The `freq_method` field
+keeps its `'observed'`/`'estimated'` values in the database; only the
+display tag differs.
 
 ---
 

@@ -60,6 +60,7 @@ class CliCodonConfig:
     """Conservative same-codon SNP combination policy (Fréchet intersection)."""
 
     min_cooccurrence_codon_fraction: float
+    min_read_mapping_quality: int
 
 
 @dataclass(frozen=True)
@@ -162,6 +163,7 @@ def _load_cli_config() -> CliConfig:
         ),
         codon=CliCodonConfig(
             min_cooccurrence_codon_fraction=float(codon['min_cooccurrence_codon_fraction']),
+            min_read_mapping_quality=int(codon['min_read_mapping_quality']),
         ),
         af_bins=_bins(payload['af_bins']),
         af_bins_fasta=_bins(payload['af_bins_fasta']),

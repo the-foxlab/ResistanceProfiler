@@ -20,18 +20,88 @@ from respro.cli.profile_helpers import (
     assemble_multi_reference_result,
 )
 from respro.config.cli_settings import CLI_CONFIG
+from respro.core.combined_snp import BamCooccurrence
 from respro.core.query import (
     pick_best_reference_id,
     resolve_fasta_query_multi,
     select_matches_for_reference,
 )
 from respro.core.vcf_coverage import compute_coverage_gaps_from_bam_multi
-from respro.core.vcf_remap import route_and_remap_variants
+from respro.core.vcf_remap import _build_query_to_cds_map, route_and_remap_variants
 from respro.db.schema import open_project_db
 from respro.io.reference import read_fasta
 from respro.io.vcf import collect_vcf_chroms, parse_vcf
 from respro.utils.cli_errors import cli_error, render_click_exception
 from respro.utils.logging import err_console
+
+
+def _build_bam_cooccurrence_by_chrom(
+    bam_path: Path,
+    per_chrom: dict[str, tuple[str, str, list]],
+    min_mapq: int,
+    min_depth: int,
+) -> dict[str, BamCooccurrence]:
+    """Build a per-CHROM BamCooccurrence context for exact codon co-occurrence.
+
+    Opens the BAM once and, for each CHROM's narrowed feature matches, builds the
+    per-feature ``{cds_pos: query_pos}`` map via ``_build_query_to_cds_map``. The
+    returned dict is keyed by CHROM (== query_name) and passed through
+    ``assemble_multi_reference_result`` into ``annotate_variants``.
+
+    The caller is responsible for closing the BAM handles (each context holds an
+    open ``pysam.AlignmentFile``); use :func:`_close_bam_cooccurrence_handles`.
+    """
+    import pysam
+
+    by_chrom: dict[str, BamCooccurrence] = {}
+    for chrom, (query_name, query_sequence, matches) in per_chrom.items():
+        query_len = len(query_sequence)
+        if query_len == 0 or not matches:
+            continue
+        cds_to_query_by_feature: dict[str, dict[int, int]] = {}
+        for match in matches:
+            q2c = _build_query_to_cds_map(
+                match.cigar,
+                match.query_start,
+                match.query_end,
+                match.strand,
+                query_len,
+                match.cds_start,
+                match.intron_intervals,
+            )
+            cds_to_query = {cds_pos: query_pos for query_pos, cds_pos in q2c.items()}
+            cds_to_query_by_feature[match.feature.name] = cds_to_query
+        bam = pysam.AlignmentFile(str(bam_path), 'rb')
+        # Resolve the BAM contig name for this query reference.
+        references = list(bam.references)
+        if query_name in references:
+            contig = query_name
+        elif len(references) == 1:
+            contig = references[0]
+        else:
+            bam.close()
+            raise ValueError(
+                f'BAM reference {query_name!r} not found and BAM contains multiple references: {references}'
+            )
+        by_chrom[chrom] = BamCooccurrence(
+            bam=bam,
+            contig=contig,
+            cds_to_query_by_feature=cds_to_query_by_feature,
+            min_mapq=min_mapq,
+            min_depth=min_depth,
+        )
+    return by_chrom
+
+
+def _close_bam_cooccurrence_handles(by_chrom: dict[str, BamCooccurrence] | None) -> None:
+    """Close the BAM handles held by a BamCooccurrence dict."""
+    if not by_chrom:
+        return
+    for ctx in by_chrom.values():
+        try:
+            ctx.bam.close()
+        except Exception:
+            pass
 
 
 def _profile_vcf_command(
@@ -169,6 +239,7 @@ def _profile_vcf_command(
         logger.info('%d variant(s) after FASTA remapping', len(variants))
 
         coverage_gaps = []
+        bam_cooccurrence_by_chrom: dict[str, BamCooccurrence] | None = None
         if bam is not None:
             with err_console.status('[dim]Projecting BAM depth to internal CDS coordinates…[/dim]'):
                 # Narrow each query record's matches to its best reference (same narrowing
@@ -193,18 +264,31 @@ def _profile_vcf_command(
                     len(coverage_gaps),
                     min_depth,
                 )
+            # Build the BAM co-occurrence context for exact same-codon SNP
+            # co-occurrence measurement (replaces Fréchet lower bounds when a
+            # BAM is provided). Uses the same narrowed per-CHROM matches.
+            bam_cooccurrence_by_chrom = _build_bam_cooccurrence_by_chrom(
+                bam_path=bam,
+                per_chrom=per_chrom,
+                min_mapq=CLI_CONFIG.codon.min_read_mapping_quality,
+                min_depth=min_depth,
+            )
 
-        result = assemble_multi_reference_result(
-            project_conn=project_conn,
-            query_records=query_records,
-            remapped_variants=variants,
-            coverage_gaps=coverage_gaps or [],
-            project_name=project_row['name'],
-            sample=sample,
-            vcf_name=input_display_name or vcf.name,
-            total_variants=len(variants),
-            af_bins=CLI_CONFIG.af_bins.as_dict(),
-        )
+        try:
+            result = assemble_multi_reference_result(
+                project_conn=project_conn,
+                query_records=query_records,
+                remapped_variants=variants,
+                coverage_gaps=coverage_gaps or [],
+                project_name=project_row['name'],
+                sample=sample,
+                vcf_name=input_display_name or vcf.name,
+                total_variants=len(variants),
+                af_bins=CLI_CONFIG.af_bins.as_dict(),
+                bam_cooccurrence_by_chrom=bam_cooccurrence_by_chrom,
+            )
+        finally:
+            _close_bam_cooccurrence_handles(bam_cooccurrence_by_chrom)
 
         result, outputs = _finalize_and_export_multi(
             result=result,
