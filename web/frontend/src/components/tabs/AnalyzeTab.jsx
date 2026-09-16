@@ -22,6 +22,7 @@ export function AnalyzeTab({
   uploadBamFile,
   uploadJsonFile,
   uploadProgress,
+  isUploading,
   activeProfileMode,
   setActiveProfileMode,
   analyzeSubMode,
@@ -45,6 +46,7 @@ export function AnalyzeTab({
   batchJsonFiles,
   batchReferenceFasta,
   batchSamples,
+  isBatchUploading,
   batchSubmitting,
   isBatchDownloadBusy,
   batchError,
@@ -527,11 +529,12 @@ export function AnalyzeTab({
                   runSelectedProfile();
                 }}
                 disabled={
-                  activeProfileMode === 'regenerate' 
-                    ? (isRegenerateBusy || !jsonInputId) 
+                  isUploading ||
+                  (activeProfileMode === 'regenerate'
+                    ? (isRegenerateBusy || !jsonInputId)
                     : activeProfileMode === 'vcf'
                       ? (isProfileBusy || !vcfInput.vcf_id || !vcfInput.reference_id)
-                      : (isProfileBusy || !fastaInput.fasta_id)
+                      : (isProfileBusy || !fastaInput.fasta_id))
                 }
               >
                 {(activeProfileMode === 'regenerate' ? isRegenerateBusy : isProfileBusy) ? (
@@ -854,7 +857,8 @@ export function AnalyzeTab({
                   className="analyze-primary"
                   onClick={() => submitBatch()}
                   disabled={
-                    batchSubmitting
+                    isBatchUploading
+                    || batchSubmitting
                     || batchRateLimitCooldown > 0
                     || (batchMode === 'vcf' ? batchVcfFiles : batchMode === 'fasta' ? batchFastaFiles : batchJsonFiles).length === 0
                     || (batchMode === 'vcf' && !batchReferenceFasta)

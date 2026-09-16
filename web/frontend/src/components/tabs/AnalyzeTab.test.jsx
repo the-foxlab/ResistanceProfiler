@@ -23,6 +23,8 @@ function minimalProps(overrides = {}) {
     uploadBamFile: () => {},
     uploadJsonFile: () => {},
     uploadProgress: { percent: 0, name: '' },
+    isUploading: false,
+    isBatchUploading: false,
     activeProfileMode: '',
     setActiveProfileMode: () => {},
     analyzeSubMode: 'single',
@@ -225,5 +227,67 @@ describe('AnalyzeTab embedded report messaging', () => {
     expect(screen.getByRole('dialog', { name: /feature sequence/i })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: /feature sequence/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('AnalyzeTab submit gating during upload', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('disables the single Analyze button while an upload is in flight', () => {
+    render(<AnalyzeTab {...minimalProps({
+      analyzeSubMode: 'single',
+      activeProfileMode: 'fasta',
+      fastaInput: { fasta_id: 'up-1', input_display_name: 'a.fasta' },
+      isProfileBusy: false,
+      isUploading: true,
+    })} />);
+
+    const button = screen.getByRole('button', { name: 'Analyze' });
+    expect(button).toBeDisabled();
+  });
+
+  it('re-enables the single Analyze button once the upload completes', () => {
+    render(<AnalyzeTab {...minimalProps({
+      analyzeSubMode: 'single',
+      activeProfileMode: 'fasta',
+      fastaInput: { fasta_id: 'up-1', input_display_name: 'a.fasta' },
+      isProfileBusy: false,
+      isUploading: false,
+    })} />);
+
+    const button = screen.getByRole('button', { name: 'Analyze' });
+    expect(button).not.toBeDisabled();
+  });
+
+  it('disables the batch Submit button while an upload is in flight', () => {
+    render(<AnalyzeTab {...minimalProps({
+      analyzeSubMode: 'batch',
+      batchSubmitted: false,
+      batchMode: 'fasta',
+      batchFastaFiles: [{ uploadId: 'up-1', name: 'a.fasta', size: 1 }],
+      batchSubmitting: false,
+      batchRateLimitCooldown: 0,
+      isBatchUploading: true,
+    })} />);
+
+    const button = screen.getByRole('button', { name: 'Submit batch' });
+    expect(button).toBeDisabled();
+  });
+
+  it('re-enables the batch Submit button once the upload completes', () => {
+    render(<AnalyzeTab {...minimalProps({
+      analyzeSubMode: 'batch',
+      batchSubmitted: false,
+      batchMode: 'fasta',
+      batchFastaFiles: [{ uploadId: 'up-1', name: 'a.fasta', size: 1 }],
+      batchSubmitting: false,
+      batchRateLimitCooldown: 0,
+      isBatchUploading: false,
+    })} />);
+
+    const button = screen.getByRole('button', { name: 'Submit batch' });
+    expect(button).not.toBeDisabled();
   });
 });

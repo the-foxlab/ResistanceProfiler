@@ -16,6 +16,8 @@ export function useProfileSubmit({
   activeProfileMode,
   analyzeSubMode,
   setUploadProgress,
+  beginUpload,
+  endUpload,
 }) {
   const [vcfInput, setVcfInput] = useState({
     vcf_id: '',
@@ -193,6 +195,7 @@ export function useProfileSubmit({
 
   const uploadFile = async (file, fileType, onSuccess) => {
     // Shared upload path for FASTA/VCF/reference/BAM inputs.
+    beginUpload();
     setUploadProgress({
       percent: 0,
       fileName: `${fileType.toUpperCase()} - ${file.name}`,
@@ -212,6 +215,8 @@ export function useProfileSubmit({
       }));
     } catch (error) {
       setStatusError(formatUserError(error.message));
+    } finally {
+      endUpload();
     }
   };
 

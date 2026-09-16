@@ -264,6 +264,7 @@ def _profile_vcf_command(
                     bam_path=bam,
                     per_chrom=per_chrom,
                     min_depth=min_depth,
+                    bam_base_quality_threshold=cfg.codon.bam_base_quality_threshold,
                 )
             if coverage_gaps:
                 total_non_covered = sum(gap.codon_end - gap.codon_start + 1 for gap in coverage_gaps)

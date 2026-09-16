@@ -473,3 +473,47 @@ describe('useBatchManager — JSON regenerate batch', () => {
     expect(result.current.batchJsonFiles).toHaveLength(0);
   });
 });
+
+describe('useBatchManager — upload in-flight gating', () => {
+  beforeEach(() => {
+    setupXhrStub();
+    vi.clearAllMocks();
+    global.fetch.mockReset();
+    mockXHRInstances.length = 0;
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('clears isBatchUploading after a multi-file loop completes', async () => {
+    const stubs = makeStubs();
+    const { result } = renderHook(() => useBatchManager(stubs));
+
+    const file1 = new File(['##VCF'], 'sample1.vcf', { type: 'application/octet-stream' });
+    const file2 = new File(['##VCF'], 'sample2.vcf', { type: 'application/octet-stream' });
+    const startCount = mockXHRInstances.length;
+    let promise;
+    await act(async () => {
+      promise = result.current.addBatchVcfFiles([file1, file2]);
+      // Resolve the first file so the loop advances to the second.
+      await flushPromises();
+      mockXHRInstances[startCount].triggerSuccess({ upload_id: 'up-vcf-1', file_type: 'vcf', size_bytes: 5 });
+      // Resolve the second file so the loop finishes.
+      await flushPromises();
+      mockXHRInstances[startCount + 1].triggerSuccess({ upload_id: 'up-vcf-2', file_type: 'vcf', size_bytes: 5 });
+      await promise;
+    });
+
+    // After every file in the loop has completed the in-flight flag is cleared.
+    expect(result.current.isBatchUploading).toBe(false);
+    expect(result.current.batchVcfFiles).toHaveLength(2);
+  });
+
+  it('isBatchUploading is false when no batch upload has run', () => {
+    const stubs = makeStubs();
+    const { result } = renderHook(() => useBatchManager(stubs));
+
+    expect(result.current.isBatchUploading).toBe(false);
+  });
+});

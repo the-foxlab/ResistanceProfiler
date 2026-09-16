@@ -24,6 +24,16 @@ export function useBatchManager({
   const [batchSubmitted, setBatchSubmitted] = useState(false);
   const [batchMaxSamples, setBatchMaxSamples] = useState(25);
   const [sampleLimitPerMinute, setSampleLimitPerMinute] = useState(25);
+  // In-flight counter (not a boolean) so a multi-file batch upload keeps the flag
+  // true until every file in the loop has finished, gating submit against partial
+  // submissions. Owned here because the batch manager is exercised in isolation.
+  const [activeBatchUploads, setActiveBatchUploads] = useState(0);
+  const beginBatchUpload = () => {
+    setActiveBatchUploads((count) => count + 1);
+  };
+  const endBatchUpload = () => {
+    setActiveBatchUploads((count) => (count > 0 ? count - 1 : 0));
+  };
   const [batchVcfCutoffs, setBatchVcfCutoffs] = useState({
     min_af: FRONTEND_CONFIG.profile.vcf.minAf,
     min_depth: FRONTEND_CONFIG.profile.vcf.minDepth,
@@ -32,6 +42,7 @@ export function useBatchManager({
   const addBatchVcfFiles = async (files) => {
     const toUpload = Array.from(files).slice(0, batchMaxSamples - batchVcfFiles.length);
     for (const file of toUpload) {
+      beginBatchUpload();
       try {
         setUploadProgress({
           percent: 0,
@@ -55,6 +66,8 @@ export function useBatchManager({
         addUploadedPath(response.upload_id);
       } catch (error) {
         setBatchError(formatUserError(error.message));
+      } finally {
+        endBatchUpload();
       }
     }
   };
@@ -77,6 +90,7 @@ export function useBatchManager({
     // overwrite it. This local set sees claims made earlier in the same call synchronously.
     const claimedIndices = new Set();
     for (const file of toUpload) {
+      beginBatchUpload();
       try {
         setUploadProgress({
           percent: 0,
@@ -114,6 +128,8 @@ export function useBatchManager({
         paired.push(file.name);
       } catch (error) {
         setBatchError(formatUserError(error.message));
+      } finally {
+        endBatchUpload();
       }
     }
     // Report only the cases that need user action (unmatched / collisions). Successful pairings
@@ -134,6 +150,7 @@ export function useBatchManager({
   };
 
   const attachBatchBam = async (vcfIndex, file) => {
+    beginBatchUpload();
     try {
       setUploadProgress({
         percent: 0,
@@ -155,6 +172,8 @@ export function useBatchManager({
       )));
     } catch (error) {
       setBatchError(formatUserError(error.message));
+    } finally {
+      endBatchUpload();
     }
   };
 
@@ -169,6 +188,7 @@ export function useBatchManager({
   const addBatchFastaFiles = async (files) => {
     const toUpload = Array.from(files).slice(0, batchMaxSamples - batchFastaFiles.length);
     for (const file of toUpload) {
+      beginBatchUpload();
       try {
         setUploadProgress({
           percent: 0,
@@ -185,6 +205,8 @@ export function useBatchManager({
         addUploadedPath(response.upload_id);
       } catch (error) {
         setBatchError(formatUserError(error.message));
+      } finally {
+        endBatchUpload();
       }
     }
   };
@@ -192,6 +214,7 @@ export function useBatchManager({
   const addBatchJsonFiles = async (files) => {
     const toUpload = Array.from(files).slice(0, batchMaxSamples - batchJsonFiles.length);
     for (const file of toUpload) {
+      beginBatchUpload();
       try {
         setUploadProgress({
           percent: 0,
@@ -208,6 +231,8 @@ export function useBatchManager({
         addUploadedPath(response.upload_id);
       } catch (error) {
         setBatchError(formatUserError(error.message));
+      } finally {
+        endBatchUpload();
       }
     }
   };
@@ -223,6 +248,7 @@ export function useBatchManager({
   };
 
   const uploadBatchReferenceFasta = async (file) => {
+    beginBatchUpload();
     try {
       setUploadProgress({
         percent: 0,
@@ -239,6 +265,8 @@ export function useBatchManager({
       addUploadedPath(response.upload_id);
     } catch (error) {
       setBatchError(formatUserError(error.message));
+    } finally {
+      endBatchUpload();
     }
   };
 
@@ -440,6 +468,7 @@ export function useBatchManager({
     batchJsonFiles,
     batchReferenceFasta,
     batchSamples,
+    isBatchUploading: activeBatchUploads > 0,
     batchSubmitting,
     isBatchDownloadBusy,
     batchError,
