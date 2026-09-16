@@ -1550,3 +1550,76 @@ class TestFastaExampleFlag:
         ])
 
         assert result.exit_code != 0
+
+
+class TestFastaConfigFlag:
+    """Tests for the --config override flag on `respro fasta` (U3)."""
+
+    def test_help_lists_config_flag(self) -> None:
+        """`respro fasta --help` should list the --config flag."""
+        result = CliRunner().invoke(app, ['fasta', '--help'])
+        assert result.exit_code == 0
+        assert '--config' in result.output
+
+    def test_invalid_override_toml_exits_with_error_naming_bad_key(
+        self, fasta_db: Path, tmp_path: Path,
+    ) -> None:
+        """An override TOML with an unknown key should exit 1 naming the bad key, not traceback."""
+        override = tmp_path / 'override.toml'
+        override.write_text('[codon]\nbar = 1\n', encoding='utf-8')
+        fasta_path = tmp_path / 'consensus.fasta'
+        fasta_path.write_text(f'>consensus\n{TINY_REF_SEQ}\n')
+        result = CliRunner().invoke(app, [
+            'fasta',
+            '--project', str(fasta_db),
+            '--fasta', str(fasta_path),
+            '--output', str(tmp_path / 'out'),
+            '--config', str(override),
+        ])
+        assert result.exit_code == 1
+        assert 'bar' in result.output
+        # Should be a clean Typer error, not a Python traceback.
+        assert 'Traceback' not in result.output
+
+    def test_valid_override_toml_is_accepted(
+        self, fasta_db: Path, tmp_path: Path,
+    ) -> None:
+        """A valid override TOML should be accepted (exit 0)."""
+        override = tmp_path / 'override.toml'
+        override.write_text('[codon]\nmin_read_mapping_quality = 30\n', encoding='utf-8')
+        fasta_path = tmp_path / 'consensus.fasta'
+        fasta_path.write_text(f'>consensus\n{TINY_REF_SEQ}\n')
+        result = CliRunner().invoke(app, [
+            'fasta',
+            '--project', str(fasta_db),
+            '--fasta', str(fasta_path),
+            '--output', str(tmp_path / 'out'),
+            '--config', str(override),
+        ])
+        assert result.exit_code == 0, result.output
+
+    def test_override_changes_visible_report_value(
+        self, fasta_db: Path, tmp_path: Path,
+    ) -> None:
+        """An override [af_bins_fasta] high = [0.8, 1.0] surfaces as 80% in the
+        rendered report's AF-bin legend (end-to-end U6 acceptance)."""
+        mutant = 'ATG' + 'GAA' + TINY_REF_SEQ[6:]  # K→E at codon 1 → resistance hit
+        fasta_path = tmp_path / 'consensus.fasta'
+        fasta_path.write_text(f'>consensus\n{mutant}\n')
+        override = tmp_path / 'override.toml'
+        override.write_text(
+            '[af_bins_fasta]\nhigh = [0.8, 1.0]\nintermediate = [0.35, 0.8]\nlow = [0.01, 0.34]\n',
+            encoding='utf-8',
+        )
+        output_dir = tmp_path / 'out'
+        result = CliRunner().invoke(app, [
+            'fasta',
+            '--project', str(fasta_db),
+            '--fasta', str(fasta_path),
+            '--output', str(output_dir),
+            '--config', str(override),
+        ])
+        assert result.exit_code == 0, result.output
+        html = next(output_dir.glob('*.html')).read_text()
+        assert '&ge;80&nbsp;%' in html
+        assert '&ge;75&nbsp;%' not in html

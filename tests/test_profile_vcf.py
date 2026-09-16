@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 
 import pytest
 
@@ -457,3 +458,43 @@ def test_fasta_emitted_variant_has_empty_user_ref_coords() -> None:
     assert var.user_pos == 0
     assert var.user_ref == ''
     assert var.user_alt == ''
+
+
+class TestVcfConfigFlag:
+    """Tests for the --config override flag on `respro vcf` (U3)."""
+
+    def test_help_lists_config_flag(self) -> None:
+        """`respro vcf --help` should list the --config flag."""
+        from typer.testing import CliRunner
+
+        from respro.cli.main import app
+
+        result = CliRunner().invoke(app, ['vcf', '--help'])
+        assert result.exit_code == 0
+        assert '--config' in result.output
+
+    def test_invalid_override_toml_exits_with_error_naming_bad_key(
+        self, project_db: Path, tmp_path: Path,
+    ) -> None:
+        """An override TOML with an unknown key should exit 1 naming the bad key."""
+        from typer.testing import CliRunner
+
+        from respro.cli.main import app
+
+        override = tmp_path / 'override.toml'
+        override.write_text('[codon]\nbogus = 1\n', encoding='utf-8')
+        vcf_path = tmp_path / 'in.vcf'
+        vcf_path.write_text('##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n', encoding='utf-8')
+        ref_fasta = tmp_path / 'ref.fasta'
+        ref_fasta.write_text('>tiny_ref\nACGTACGTAC\n', encoding='utf-8')
+        result = CliRunner().invoke(app, [
+            'vcf',
+            '--project', str(project_db),
+            '--vcf', str(vcf_path),
+            '--ref-fasta', str(ref_fasta),
+            '--output', str(tmp_path / 'out'),
+            '--config', str(override),
+        ])
+        assert result.exit_code == 1
+        assert 'bogus' in result.output
+        assert 'Traceback' not in result.output

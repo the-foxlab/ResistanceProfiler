@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import pysam
 
-from respro.config.cli_settings import CLI_CONFIG
+from respro.config.cli_settings import CLI_CONFIG, CliConfig
 from respro.core.annotation import (
     _annotate_snp,
     _classify_snp_consequence,
@@ -30,8 +30,11 @@ from respro.db.models import AnnotatedVariant, CodonState, FeatureRecord, Varian
 logger = logging.getLogger(__name__)
 
 # Numerical tolerance for Fréchet-bound acceptance (lower > eps). Small enough
-# that mathematically exact boundary cases (lower == 0) are stable.
-_FRECHET_EPS = 1e-9
+# that mathematically exact boundary cases (lower == 0) are stable. Sourced from
+# CLI_CONFIG.codon.frechet_epsilon (promoted by feature magic-numbers-to-toml);
+# the module-level alias is kept for backward-compat with annotation.py's
+# re-export and any tests importing it.
+_FRECHET_EPS = CLI_CONFIG.codon.frechet_epsilon
 
 
 @dataclass(frozen=True)
@@ -480,6 +483,7 @@ def _annotate_combined_snp_codon(
     variants: list[VariantCall],
     feature: FeatureRecord,
     bam_cooccurrence: BamCooccurrence | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> list[AnnotatedVariant]:
     """
     Annotate multiple SNPs in one codon as per-SNP combined-state events.
@@ -601,7 +605,7 @@ def _annotate_combined_snp_codon(
             )
     else:
         freq_method = 'estimated'
-        min_fraction = CLI_CONFIG.codon.min_cooccurrence_codon_fraction
+        min_fraction = cfg.codon.min_cooccurrence_codon_fraction
         states = _compute_codon_frechet_states(member_specs, internal_codon, min_fraction)
 
     if not states:
@@ -631,11 +635,12 @@ def _annotate_combined_snp_codon(
     # by ``len(member_indices) == len(members)`` and silently failed for
     # multiallelic codons (len(members) > len(positions)).
     forced_states: dict[int, CodonState | None] = {}
+    eps = cfg.codon.frechet_epsilon
     for _, _, _, member_index in members:
         forced_candidates = [
             s for s in accepted
             if member_index in s.member_indices
-            and abs(s.forced_fraction - 1.0) <= _FRECHET_EPS
+            and abs(s.forced_fraction - 1.0) <= eps
         ]
         # Pick the forced state carrying the most co-members (maximal co-carried
         # set); break ties by the highest lower bound so a freq-1.0 co-member
@@ -658,7 +663,7 @@ def _annotate_combined_snp_codon(
              if len(s.member_indices) == 1 and s.member_indices[0] == member_index),
             None,
         )
-        single_rejected = single_state is None or single_state.lower <= _FRECHET_EPS
+        single_rejected = single_state is None or single_state.lower <= eps
 
         # Forced-overlap exception: replace single with the per-member forced state.
         forced_state = forced_states.get(member_index)

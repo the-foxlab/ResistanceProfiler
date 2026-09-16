@@ -1108,3 +1108,163 @@ class TestExploreRules:
         assert 'Single rules' in single_only.output
         assert 'Combination rules' not in single_only.output
 
+
+class TestRegenerateConfigFlag:
+    """Tests for the --config override flag on `respro regenerate` (U3/U5)."""
+
+    def test_help_lists_config_flag(self) -> None:
+        """`respro regenerate --help` should list the --config flag."""
+        result = CliRunner().invoke(app, ['regenerate', '--help'])
+        assert result.exit_code == 0
+        assert '--config' in result.output
+
+    def test_invalid_override_toml_exits_with_error_naming_bad_key(
+        self, project_db: Path, tmp_path: Path,
+    ) -> None:
+        """An override TOML with an unknown key should exit 1 naming the bad key."""
+        from respro.db.schema import init_results_db
+
+        override = tmp_path / 'override.toml'
+        override.write_text('[af_bins]\nbogus = 1\n', encoding='utf-8')
+        results_db = tmp_path / 'results.db'
+        conn = init_results_db(results_db)
+        conn.close()
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(project_db),
+            '--output', str(tmp_path / 'out'),
+            '--config', str(override),
+        ])
+        assert result.exit_code == 1
+        assert 'bogus' in result.output
+        assert 'Traceback' not in result.output
+
+    def test_valid_override_toml_is_accepted(
+        self, project_db: Path, tmp_path: Path,
+    ) -> None:
+        """A valid override TOML should be accepted by regenerate (exit 0)."""
+        # Produce a stored run by profiling a one-SNP consensus FASTA.
+        query_seq = list(TINY_REF_SEQ)
+        query_seq[4] = 'G' if query_seq[4] != 'G' else 'C'
+        query_fasta = tmp_path / 'query.fasta'
+        query_fasta.write_text(f'>tiny_ref\n{"".join(query_seq)}\n')
+
+        results_db = tmp_path / 'results.db'
+        run_result = CliRunner().invoke(app, [
+            'fasta',
+            '--project', str(project_db),
+            '--fasta', str(query_fasta),
+            '--results-db', str(results_db),
+            '--output', str(tmp_path / 'fasta_out'),
+        ])
+        assert run_result.exit_code == 0, run_result.output
+
+        override = tmp_path / 'override.toml'
+        override.write_text('[af_bins]\nhigh = [0.8, 1.0]\n', encoding='utf-8')
+
+        out_dir = tmp_path / 'regenerated'
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(project_db),
+            '--output', str(out_dir),
+            '--config', str(override),
+        ])
+        assert result.exit_code == 0, result.output
+
+
+def _run_fasta_then_regenerate(
+    project_db: Path, tmp_path: Path, override: Path | None = None,
+) -> tuple[int, str]:
+    """Profile a one-SNP consensus FASTA (producing a resistance hit), then regenerate.
+
+    Returns (regenerate_exit_code, regenerated_html). The hit ensures the AF-bin
+    legend (which carries the af_high_pct label) is rendered.
+    """
+    query_seq = list(TINY_REF_SEQ)
+    query_seq[4] = 'G' if query_seq[4] != 'G' else 'C'
+    query_fasta = tmp_path / 'query.fasta'
+    query_fasta.write_text(f'>tiny_ref\n{"".join(query_seq)}\n')
+
+    results_db = tmp_path / 'results.db'
+    run_result = CliRunner().invoke(app, [
+        'fasta',
+        '--project', str(project_db),
+        '--fasta', str(query_fasta),
+        '--results-db', str(results_db),
+        '--output', str(tmp_path / 'fasta_out'),
+    ])
+    assert run_result.exit_code == 0, run_result.output
+
+    out_dir = tmp_path / 'regenerated'
+    cmd = [
+        'regenerate',
+        '--results-db', str(results_db),
+        '--run-id', '1',
+        '--project', str(project_db),
+        '--output', str(out_dir),
+    ]
+    if override is not None:
+        cmd += ['--config', str(override)]
+    result = CliRunner().invoke(app, cmd)
+    html = list(out_dir.glob('*.html'))[0].read_text() if result.exit_code == 0 else ''
+    return result.exit_code, html
+
+
+class TestRegenerateConfigParity:
+    """U5: a regenerated report honours the same --config override as a live run."""
+
+    def test_override_af_bins_high_shows_80_pct_label(
+        self, project_db: Path, tmp_path: Path,
+    ) -> None:
+        """Regenerating with [af_bins_fasta] high = [0.8, 1.0] shows the high-AF label at 80%."""
+        override = tmp_path / 'override.toml'
+        override.write_text(
+            '[af_bins_fasta]\nhigh = [0.8, 1.0]\nintermediate = [0.25, 0.8]\nlow = [0.0, 0.25]\n',
+            encoding='utf-8',
+        )
+        exit_code, html = _run_fasta_then_regenerate(project_db, tmp_path, override=override)
+        assert exit_code == 0
+        assert '&ge;80&nbsp;%' in html
+        assert '&ge;75&nbsp;%' not in html
+
+    def test_no_override_reproduces_original_labels(
+        self, project_db: Path, tmp_path: Path,
+    ) -> None:
+        """Regenerating without --config reproduces the original 75% label."""
+        exit_code, html = _run_fasta_then_regenerate(project_db, tmp_path, override=None)
+        assert exit_code == 0
+        assert '&ge;75&nbsp;%' in html
+
+    def test_alignment_only_override_is_noop_on_regenerate(
+        self, project_db: Path, tmp_path: Path,
+    ) -> None:
+        """An override containing only [alignment] keys leaves the report-stage
+        labels unchanged (alignment overrides have no effect on regenerate). The
+        embedded plot SVG carries a non-deterministic creation timestamp, so we
+        compare the AF-threshold legend text rather than the full HTML."""
+        import re
+
+        def af_legend(html: str) -> str:
+            # Extract the "binned as high ... low (...–...%)" legend paragraph.
+            m = re.search(r'binned as high.*?low \([\d.]+–[\d.]+&nbsp;%\)\.', html, re.S)
+            assert m is not None, 'AF-bin legend not found in regenerated report'
+            return m.group()
+
+        exit_code_none, html_none = _run_fasta_then_regenerate(project_db, tmp_path, override=None)
+        assert exit_code_none == 0
+        legend_none = af_legend(html_none)
+
+        override = tmp_path / 'align_override.toml'
+        override.write_text(
+            '[alignment]\npreset = "asm5"\nbest_n = 2\n', encoding='utf-8',
+        )
+        exit_code_align, html_align = _run_fasta_then_regenerate(project_db, tmp_path, override=override)
+        assert exit_code_align == 0
+        legend_align = af_legend(html_align)
+
+        assert legend_align == legend_none
+

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from Bio.Align.substitution_matrices import load as _load_matrix
 from Bio.Seq import Seq
 
+from respro.config.cli_settings import CLI_CONFIG, CliConfig
 from respro.db.models import AnnotatedVariant, CodonState, FeatureRecord, VariantCall
 
 if TYPE_CHECKING:
@@ -53,6 +54,7 @@ def annotate_variants(
     features: list[FeatureRecord],
     is_fasta_mode: bool = False,
     bam_cooccurrence: BamCooccurrence | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> list[AnnotatedVariant]:
     """
     Annotate a list of variants with codon-aware amino acid consequences.
@@ -101,7 +103,7 @@ def annotate_variants(
                 if var_idx == group[0]:
                     members = [variants[i] for i in group]
                     combined_annotations = _annotate_combined_snp_codon(
-                        members, feature, bam_cooccurrence=bam_cooccurrence,
+                        members, feature, bam_cooccurrence=bam_cooccurrence, cfg=cfg,
                     )
                     for ann in combined_annotations:
                         ann.is_fasta_mode = is_fasta_mode

@@ -5,10 +5,12 @@ Tests for BAM-to-internal-reference coverage projection in VCF mode.
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
-from respro.core.vcf_coverage import _ensure_bam_index, compute_coverage_gaps_from_depth
+from respro.config.cli_settings import CLI_CONFIG
+from respro.core.vcf_coverage import _ensure_bam_index, _depth_array_from_bam, compute_coverage_gaps_from_depth
 from respro.db.models import FeatureMatch, FeatureRecord
 
 
@@ -158,3 +160,41 @@ class TestBamIndexHandling:
 
         with pytest.raises(ValueError, match='coordinate-sorted'):
             _ensure_bam_index(bam_path)
+
+
+class TestBamBaseQualityThreshold:
+    """Tests for the bam_base_quality_threshold config wiring (feature magic-numbers-to-toml M2)."""
+
+    @staticmethod
+    def _fake_bam(count_coverage_kwargs: dict) -> MagicMock:
+        """Build a fake pysam AlignmentFile capturing count_coverage kwargs."""
+        bam = MagicMock()
+        # count_coverage returns a 4-tuple of array-like per-base counts.
+        bam.count_coverage.return_value = (
+            [0], [0], [0], [0],
+        )
+        return bam
+
+    def test_depth_array_uses_configured_quality_threshold(self) -> None:
+        """_depth_array_from_bam should pass the configured quality_threshold to count_coverage."""
+        bam = self._fake_bam({})
+        _depth_array_from_bam(bam, contig='chr1', query_len=1, bam_base_quality_threshold=20)
+        _, kwargs = bam.count_coverage.call_args
+        assert kwargs['quality_threshold'] == 20
+
+    def test_depth_array_default_quality_threshold_is_config_default(self) -> None:
+        """Default bam_base_quality_threshold should equal CLI_CONFIG.codon.bam_base_quality_threshold (0)."""
+        bam = self._fake_bam({})
+        _depth_array_from_bam(bam, contig='chr1', query_len=1)
+        _, kwargs = bam.count_coverage.call_args
+        assert kwargs['quality_threshold'] == CLI_CONFIG.codon.bam_base_quality_threshold
+        assert kwargs['quality_threshold'] == 0
+
+    def test_depth_array_sums_per_base_counts(self) -> None:
+        """_depth_array_from_bam should sum the four base counts per position."""
+        bam = MagicMock()
+        bam.count_coverage.return_value = (
+            [2, 0], [1, 3], [0, 1], [0, 0],
+        )
+        depths = _depth_array_from_bam(bam, contig='chr1', query_len=2, bam_base_quality_threshold=0)
+        assert depths == [3, 4]

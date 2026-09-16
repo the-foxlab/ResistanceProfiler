@@ -15,7 +15,7 @@ from jinja2 import BaseLoader, Environment
 from markupsafe import Markup, escape
 
 from respro import __version__
-from respro.config.cli_settings import CLI_CONFIG
+from respro.config.cli_settings import CLI_CONFIG, CliConfig
 from respro.core.annotation import (
     CONSEQUENCE_LABELS,
     HIGH_IMPACT_CONSEQUENCES,
@@ -71,13 +71,13 @@ logger = logging.getLogger(__name__)
 _SYNONYMOUS_CONSEQUENCES: frozenset[str] = frozenset({'synonymous_variant', 'synonymous'})
 
 
-def _bin_for_af(af: float, is_fasta_mode: bool = False) -> str:
+def _bin_for_af(af: float, is_fasta_mode: bool = False, cfg: CliConfig = CLI_CONFIG) -> str:
     """Return the AF-bin label for a given frequency, using the configured bins.
 
     Used to re-bin combined-state effects at their Fréchet ``lower`` bound rather
     than the row's own allele frequency.
     """
-    bins = (CLI_CONFIG.af_bins_fasta if is_fasta_mode else CLI_CONFIG.af_bins).as_dict()
+    bins = (cfg.af_bins_fasta if is_fasta_mode else cfg.af_bins).as_dict()
     sorted_bins = sorted(bins.items(), key=lambda x: -x[1][0])
     for label, (lo, hi) in sorted_bins:
         if lo <= af <= hi:
@@ -120,10 +120,11 @@ def build_report_context(
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
     features: list[FeatureRecord] | None = None,
-    af_high_pct_source_threshold: float = 0.75,
-    af_intermediate_pct_source_threshold: float = 0.25,
-    af_low_min_pct_source_threshold: float = 0.01,
-    combination_member_af_pct_source_threshold: float = 0.75,
+    af_high_pct_source_threshold: float | None = None,
+    af_intermediate_pct_source_threshold: float | None = None,
+    af_low_min_pct_source_threshold: float | None = None,
+    combination_member_af_pct_source_threshold: float | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> dict:
     """
     Build all data structures needed to render the report.
@@ -134,6 +135,18 @@ def build_report_context(
     :param features: optional feature records for display names
     :return: dictionary of context variables for Jinja2 template
     """
+    # Source AF-threshold labels from config so the report and the TOML cannot drift.
+    # Explicit kwargs still win (backward compatibility for direct callers/tests).
+    af_bins = cfg.af_bins_fasta if result.is_fasta_mode else cfg.af_bins
+    if af_high_pct_source_threshold is None:
+        af_high_pct_source_threshold = af_bins.high[0]
+    if af_intermediate_pct_source_threshold is None:
+        af_intermediate_pct_source_threshold = af_bins.intermediate[0]
+    if af_low_min_pct_source_threshold is None:
+        af_low_min_pct_source_threshold = af_bins.low[0]
+    if combination_member_af_pct_source_threshold is None:
+        combination_member_af_pct_source_threshold = cfg.matching.combination_member_af_threshold
+
     summary = result.summary_dict()
     has_database_hit = result.database_hit_count > 0
 
@@ -219,6 +232,7 @@ def build_report_context(
         drug_class_map,
         drug_alias_map,
         reference_name_by_chrom=reference_name_by_chrom,
+        cfg=cfg,
     )
     similarity_entries = _build_potential_effects_rows(
         result,
@@ -229,6 +243,7 @@ def build_report_context(
         metric_thresholds=metric_thresholds,
         drug_class_map=drug_class_map,
         drug_alias_map=drug_alias_map,
+        cfg=cfg,
     )
 
     summary_context = _build_summary_context(
@@ -339,10 +354,11 @@ def render_html(
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
     features: list[FeatureRecord] | None = None,
-    af_high_pct_source_threshold: float = 0.75,
-    af_intermediate_pct_source_threshold: float = 0.25,
-    af_low_min_pct_source_threshold: float = 0.01,
-    combination_member_af_pct_source_threshold: float = 0.75,
+    af_high_pct_source_threshold: float | None = None,
+    af_intermediate_pct_source_threshold: float | None = None,
+    af_low_min_pct_source_threshold: float | None = None,
+    combination_member_af_pct_source_threshold: float | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> str:
     """
     Render the complete HTML report.
@@ -370,6 +386,7 @@ def render_html(
         af_intermediate_pct_source_threshold=af_intermediate_pct_source_threshold,
         af_low_min_pct_source_threshold=af_low_min_pct_source_threshold,
         combination_member_af_pct_source_threshold=combination_member_af_pct_source_threshold,
+        cfg=cfg,
     )
     context['plot'] = {
         'has_plot': bool(plot_data_url),
@@ -406,10 +423,11 @@ def write_html(
     plot_svg_data: bytes | None = None,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
-    af_high_pct_source_threshold: float = 0.75,
-    af_intermediate_pct_source_threshold: float = 0.25,
-    af_low_min_pct_source_threshold: float = 0.01,
-    combination_member_af_pct_source_threshold: float = 0.75,
+    af_high_pct_source_threshold: float | None = None,
+    af_intermediate_pct_source_threshold: float | None = None,
+    af_low_min_pct_source_threshold: float | None = None,
+    combination_member_af_pct_source_threshold: float | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> Path:
     """
     Render and write the HTML report to a file.
@@ -436,6 +454,7 @@ def write_html(
         af_intermediate_pct_source_threshold=af_intermediate_pct_source_threshold,
         af_low_min_pct_source_threshold=af_low_min_pct_source_threshold,
         combination_member_af_pct_source_threshold=combination_member_af_pct_source_threshold,
+        cfg=cfg,
     )
     output_path.write_text(html_content, encoding='utf-8')
     return output_path
@@ -589,6 +608,7 @@ def _build_database_hits_rows(
     drug_class_map: dict[str, str] | None = None,
     drug_alias_map: dict[str, str] | None = None,
     reference_name_by_chrom: dict[str, str] | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> dict:
     """
     Build one row per database hit for the Database Hits table.
@@ -632,7 +652,7 @@ def _build_database_hits_rows(
             # (rule_effect_aa_freq), not the row's own allele frequency.
             effect_lower = ann.rule_effect_aa_freq.get(rule.id)
             if effect_lower is not None and effect_lower != ann.variant.allele_freq:
-                hit_af_bin = _bin_for_af(effect_lower, result.is_fasta_mode)
+                hit_af_bin = _bin_for_af(effect_lower, result.is_fasta_mode, cfg=cfg)
             else:
                 hit_af_bin = ann.af_bin
             rows.append({
@@ -1181,6 +1201,7 @@ def _build_potential_effects_rows(
     metric_thresholds: dict[str, tuple[float, float] | None] | None = None,
     drug_class_map: dict[str, str] | None = None,
     drug_alias_map: dict[str, str] | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> dict:
     """
     Build the Similarity to Database Entries context.
@@ -1300,7 +1321,7 @@ def _build_potential_effects_rows(
                 # Re-bin the AF when the effect frequency differs from the row's own AF
                 # (combined-state effects use the Fréchet lower bound).
                 if eff_af != ann.variant.allele_freq:
-                    sim_af_bin = _bin_for_af(eff_af, result.is_fasta_mode)
+                    sim_af_bin = _bin_for_af(eff_af, result.is_fasta_mode, cfg=cfg)
                 else:
                     sim_af_bin = ann.af_bin
                 rows.append({

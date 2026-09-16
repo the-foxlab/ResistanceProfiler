@@ -13,6 +13,8 @@ import tomllib
 from importlib.resources import files
 from urllib.parse import urlparse
 
+import pytest
+
 from respro.config.cli_settings import (
     CliConfig,
     _load_cli_config,
@@ -344,3 +346,136 @@ class TestDefaultsTomlStructure:
         payload = tomllib.loads(defaults_path.read_text(encoding='utf-8'))
         alignment = payload['alignment']
         assert 'intron_junction_tolerance' in alignment
+
+
+class TestPromotedMagicNumbers:
+    """Tests for magic-number values promoted into defaults.toml (feature magic-numbers-to-toml)."""
+
+    def test_codon_bam_base_quality_threshold_default(self):
+        """Should load bam_base_quality_threshold with documented default 0 (accept all bases)."""
+        config = _load_cli_config()
+        assert config.codon.bam_base_quality_threshold == 0
+        assert isinstance(config.codon.bam_base_quality_threshold, int)
+
+    def test_codon_frechet_epsilon_default(self):
+        """Should load frechet_epsilon with documented default 1e-9."""
+        config = _load_cli_config()
+        assert config.codon.frechet_epsilon == 1e-9
+        assert isinstance(config.codon.frechet_epsilon, float)
+
+    def test_genbank_timeout_default(self):
+        """Should load genbank_timeout with documented default 30."""
+        config = _load_cli_config()
+        assert config.timeouts.genbank_timeout == 30
+        assert isinstance(config.timeouts.genbank_timeout, int)
+
+    def test_genbank_max_retries_default(self):
+        """Should load genbank_max_retries with documented default 3."""
+        config = _load_cli_config()
+        assert config.timeouts.genbank_max_retries == 3
+        assert isinstance(config.timeouts.genbank_max_retries, int)
+
+    def test_genbank_backoff_base_default(self):
+        """Should load genbank_backoff_base with documented default 1.0."""
+        config = _load_cli_config()
+        assert config.timeouts.genbank_backoff_base == 1.0
+        assert isinstance(config.timeouts.genbank_backoff_base, float)
+
+    def test_defaults_toml_has_codon_promoted_keys(self):
+        """defaults.toml should expose the promoted codon keys with inline comments."""
+        defaults_path = files('respro.config').joinpath('defaults.toml')
+        payload = tomllib.loads(defaults_path.read_text(encoding='utf-8'))
+        codon = payload['codon']
+        assert 'bam_base_quality_threshold' in codon
+        assert 'frechet_epsilon' in codon
+
+    def test_defaults_toml_has_genbank_timeout_keys(self):
+        """defaults.toml should expose the promoted genbank timeout keys."""
+        defaults_path = files('respro.config').joinpath('defaults.toml')
+        payload = tomllib.loads(defaults_path.read_text(encoding='utf-8'))
+        timeouts = payload['timeouts']
+        assert 'genbank_timeout' in timeouts
+        assert 'genbank_max_retries' in timeouts
+        assert 'genbank_backoff_base' in timeouts
+
+
+class TestLoadConfigWithOverrides:
+    """Tests for load_config_with_overrides() — U1 deep-merge + strict-validate loader."""
+
+    @staticmethod
+    def _write_override(tmp_path, text: str):
+        p = tmp_path / 'override.toml'
+        p.write_text(text, encoding='utf-8')
+        return p
+
+    def test_none_override_equals_bundled(self):
+        """load_config_with_overrides(None) should be field-equal to CLI_CONFIG."""
+        from respro.config.cli_settings import CLI_CONFIG, load_config_with_overrides
+        cfg = load_config_with_overrides(None)
+        assert cfg == CLI_CONFIG
+
+    def test_codon_override_applies(self, tmp_path):
+        """An override [codon] min_read_mapping_quality = 30 should apply, others stay default."""
+        from respro.config.cli_settings import CLI_CONFIG, load_config_with_overrides
+        p = self._write_override(tmp_path, '[codon]\nmin_read_mapping_quality = 30\n')
+        cfg = load_config_with_overrides(p)
+        assert cfg.codon.min_read_mapping_quality == 30
+        # Other codon keys stay at bundled defaults.
+        assert cfg.codon.min_cooccurrence_codon_fraction == CLI_CONFIG.codon.min_cooccurrence_codon_fraction
+        assert cfg.codon.bam_base_quality_threshold == CLI_CONFIG.codon.bam_base_quality_threshold
+        # Other sections untouched.
+        assert cfg.matching == CLI_CONFIG.matching
+
+    def test_matching_override_applies(self, tmp_path):
+        """An override [matching] combination_member_af_threshold = 0.8 should apply."""
+        from respro.config.cli_settings import load_config_with_overrides
+        p = self._write_override(tmp_path, '[matching]\ncombination_member_af_threshold = 0.8\n')
+        cfg = load_config_with_overrides(p)
+        assert cfg.matching.combination_member_af_threshold == 0.8
+
+    def test_unknown_section_rejected(self, tmp_path):
+        """An override with an unknown section [foo] should raise ValueError naming it."""
+        from respro.config.cli_settings import load_config_with_overrides
+        p = self._write_override(tmp_path, '[foo]\nbar = 1\n')
+        with pytest.raises(ValueError, match='foo'):
+            load_config_with_overrides(p)
+
+    def test_unknown_key_rejected(self, tmp_path):
+        """An override with an unknown key [codon] bar = 1 should raise ValueError naming it."""
+        from respro.config.cli_settings import load_config_with_overrides
+        p = self._write_override(tmp_path, '[codon]\nbar = 1\n')
+        with pytest.raises(ValueError, match='bar'):
+            load_config_with_overrides(p)
+
+    def test_type_mismatch_rejected(self, tmp_path):
+        """A type mismatch ([codon] min_read_mapping_quality = 'twenty') should raise ValueError."""
+        from respro.config.cli_settings import load_config_with_overrides
+        p = self._write_override(tmp_path, '[codon]\nmin_read_mapping_quality = "twenty"\n')
+        with pytest.raises(ValueError, match='min_read_mapping_quality'):
+            load_config_with_overrides(p)
+
+    def test_list_valued_override_replaces_bundled_list(self, tmp_path):
+        """A list-valued override ([af_bins] high = [0.8, 1.0]) should replace the bundled list."""
+        from respro.config.cli_settings import load_config_with_overrides
+        p = self._write_override(tmp_path, '[af_bins]\nhigh = [0.8, 1.0]\n')
+        cfg = load_config_with_overrides(p)
+        assert cfg.af_bins.high == (0.8, 1.0)
+        # Other af_bins keys stay default.
+        assert cfg.af_bins.intermediate == (0.25, 0.7499)
+
+    def test_deep_merge_nested_sections(self, tmp_path):
+        """A partial section override should deep-merge, keeping un-overridden keys."""
+        from respro.config.cli_settings import CLI_CONFIG, load_config_with_overrides
+        p = self._write_override(tmp_path, '[timeouts]\ngenbank_timeout = 60\n')
+        cfg = load_config_with_overrides(p)
+        assert cfg.timeouts.genbank_timeout == 60
+        assert cfg.timeouts.pubchem == CLI_CONFIG.timeouts.pubchem
+        assert cfg.timeouts.genbank_max_retries == CLI_CONFIG.timeouts.genbank_max_retries
+
+    def test_override_does_not_mutate_bundled_singleton(self, tmp_path):
+        """An override must not mutate the module-level CLI_CONFIG singleton."""
+        from respro.config.cli_settings import CLI_CONFIG, load_config_with_overrides
+        original = CLI_CONFIG.codon.min_read_mapping_quality
+        p = self._write_override(tmp_path, '[codon]\nmin_read_mapping_quality = 99\n')
+        load_config_with_overrides(p)
+        assert CLI_CONFIG.codon.min_read_mapping_quality == original

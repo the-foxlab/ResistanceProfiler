@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pysam
 
+from respro.config.cli_settings import CLI_CONFIG
 from respro.core.vcf_remap import _build_query_to_cds_map
 from respro.db.models import CoverageGap, FeatureMatch
 
@@ -21,6 +22,7 @@ def compute_coverage_gaps_from_bam(
     query_sequence: str,
     matches: list[FeatureMatch],
     min_depth: int,
+    bam_base_quality_threshold: int = CLI_CONFIG.codon.bam_base_quality_threshold,
 ) -> list[CoverageGap]:
     """
     Compute non-covered codon stretches by projecting BAM depth to internal CDS coordinates.
@@ -33,12 +35,15 @@ def compute_coverage_gaps_from_bam(
     :param query_sequence: full query sequence
     :param matches: selected feature matches for the resolved internal reference
     :param min_depth: per-base minimum depth threshold
+    :param bam_base_quality_threshold: minimum base quality for a read to contribute to
+        depth counts (0 = accept all bases); sourced from ``CLI_CONFIG.codon`` by default
     :return: merged non-covered codon stretches
     """
     return compute_coverage_gaps_from_bam_multi(
         bam_path=bam_path,
         per_chrom={query_name: (query_name, query_sequence, matches)},
         min_depth=min_depth,
+        bam_base_quality_threshold=bam_base_quality_threshold,
     )
 
 
@@ -46,6 +51,7 @@ def compute_coverage_gaps_from_bam_multi(
     bam_path: Path,
     per_chrom: dict[str, tuple[str, str, list[FeatureMatch]]],
     min_depth: int,
+    bam_base_quality_threshold: int = CLI_CONFIG.codon.bam_base_quality_threshold,
 ) -> list[CoverageGap]:
     """
     Compute non-covered codon stretches across multiple CHROMs in one BAM.
@@ -61,6 +67,8 @@ def compute_coverage_gaps_from_bam_multi(
     :param per_chrom: mapping of CHROM → ``(query_name, query_sequence, matches)``;
         one entry per matched FASTA record
     :param min_depth: per-base minimum depth threshold
+    :param bam_base_quality_threshold: minimum base quality for a read to contribute to
+        depth counts (0 = accept all bases); sourced from ``CLI_CONFIG.codon`` by default
     :return: concatenated merged non-covered codon stretches across all CHROMs
     """
     if not per_chrom:
@@ -80,7 +88,10 @@ def compute_coverage_gaps_from_bam_multi(
                 )
                 continue
             contig = _resolve_bam_contig(bam, query_name)
-            depths = _depth_array_from_bam(bam, contig, query_len)
+            depths = _depth_array_from_bam(
+                bam, contig, query_len,
+                bam_base_quality_threshold=bam_base_quality_threshold,
+            )
             all_gaps.extend(
                 compute_coverage_gaps_from_depth(
                     depths, matches, min_depth=min_depth, query_len=query_len, chrom=chrom,
@@ -173,13 +184,24 @@ def _resolve_bam_contig(bam: pysam.AlignmentFile, query_name: str) -> str:
     )
 
 
-def _depth_array_from_bam(bam: pysam.AlignmentFile, contig: str, query_len: int) -> list[int]:
-    """Return per-base depth for one BAM contig across the query span."""
+def _depth_array_from_bam(
+    bam: pysam.AlignmentFile,
+    contig: str,
+    query_len: int,
+    bam_base_quality_threshold: int = CLI_CONFIG.codon.bam_base_quality_threshold,
+) -> list[int]:
+    """Return per-base depth for one BAM contig across the query span.
+
+    :param bam_base_quality_threshold: minimum base quality for a read to contribute
+        to the depth count (0 = accept all bases). Sourced from
+        ``CLI_CONFIG.codon.bam_base_quality_threshold`` by default; raising it drops
+        low-quality bases from depth counts.
+    """
     counts = bam.count_coverage(
         contig,
         start=0,
         stop=query_len,
-        quality_threshold=0,
+        quality_threshold=bam_base_quality_threshold,
         read_callback='all',
     )
     return [int(counts[0][i] + counts[1][i] + counts[2][i] + counts[3][i]) for i in range(query_len)]

@@ -19,7 +19,7 @@ from respro.cli.profile_helpers import (
     _print_completion_panel,
     assemble_multi_reference_result,
 )
-from respro.config.cli_settings import CLI_CONFIG
+from respro.config.cli_settings import load_config_with_overrides
 from respro.core.combined_snp import BamCooccurrence
 from respro.core.query import (
     pick_best_reference_id,
@@ -170,6 +170,13 @@ def _profile_vcf_command(
             help='Optional display filename shown in exported reports.',
         ),
     ] = None,
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            '--config', '-c', exists=True,
+            help='User TOML overriding bundled defaults (scientific thresholds, alignment, AF bins, timeouts).',
+        ),
+    ] = None,
 ) -> None:
     """
     Run resistance profiling on a VCF file.
@@ -186,6 +193,9 @@ def _profile_vcf_command(
 
         export_formats = _parse_export_formats(export)
 
+        cfg = load_config_with_overrides(config)
+        if config is not None:
+            logger.info('Loaded configuration overrides from %s', config)
         project_conn = open_project_db(project)
         project_row = project_conn.execute('SELECT name FROM project LIMIT 1').fetchone()
         if project_row is None:
@@ -214,7 +224,7 @@ def _profile_vcf_command(
         with err_console.status('[dim]Aligning reference to internal references…[/dim]'):
             query_records = resolve_fasta_query_multi(
                 project_conn, ref_fasta, use_cache=use_cache, threads=threads,
-                selected_query_names=observed_chroms,
+                selected_query_names=observed_chroms, cfg=cfg,
             )
 
         # Parse all CHROMs (expected_query_name=None) so multi-chrom VCFs are retained;
@@ -270,7 +280,7 @@ def _profile_vcf_command(
             bam_cooccurrence_by_chrom = _build_bam_cooccurrence_by_chrom(
                 bam_path=bam,
                 per_chrom=per_chrom,
-                min_mapq=CLI_CONFIG.codon.min_read_mapping_quality,
+                min_mapq=cfg.codon.min_read_mapping_quality,
                 min_depth=min_depth,
             )
 
@@ -284,8 +294,9 @@ def _profile_vcf_command(
                 sample=sample,
                 vcf_name=input_display_name or vcf.name,
                 total_variants=len(variants),
-                af_bins=CLI_CONFIG.af_bins.as_dict(),
+                af_bins=cfg.af_bins.as_dict(),
                 bam_cooccurrence_by_chrom=bam_cooccurrence_by_chrom,
+                cfg=cfg,
             )
         finally:
             _close_bam_cooccurrence_handles(bam_cooccurrence_by_chrom)
@@ -300,6 +311,7 @@ def _profile_vcf_command(
             project_path=project,
             logger=logger,
             extra_export_formats=export_formats,
+            cfg=cfg,
         )
 
         _print_completion_panel(console, '✓ Profiling complete', result, outputs)

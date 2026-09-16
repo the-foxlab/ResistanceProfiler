@@ -17,6 +17,7 @@ except ImportError:
     HTML = None
 
 from respro import __version__
+from respro.config.cli_settings import CLI_CONFIG, CliConfig
 from respro.db.models import (
     AnnotatedVariant,
     FeatureRecord,
@@ -56,6 +57,7 @@ def export_results(
     output_html_path: Path | None = None,
     similarity_high: int = 1,
     similarity_moderate: int = 0,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> dict[str, Path]:
     """
     Write all report outputs to a directory and return a format-to-path mapping.
@@ -110,6 +112,7 @@ def export_results(
         rules=rules,
         similarity_high=similarity_high,
         similarity_moderate=similarity_moderate,
+        cfg=cfg,
     )
 
     outputs: dict[str, Path] = {'html': html_path}

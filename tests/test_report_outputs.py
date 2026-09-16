@@ -6011,3 +6011,64 @@ class TestMultiSpeciesSequenceFeatureCardReferencePlacement:
         card = html[card_start:card_end]
         assert '<strong>Reference:</strong>' not in card
 
+
+class TestReportAfThresholdsFromConfig:
+    """U4: report AF-threshold labels must derive from cfg, not hardcoded literals."""
+
+    def test_bundled_defaults_match_previous_literals(self) -> None:
+        """With bundled CLI_CONFIG, thresholds are 75/25/1 (the previous hardcoded values)."""
+        r = _make_result()
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        assert ctx['thresholds']['af_high_pct'] == 75
+        assert ctx['thresholds']['af_intermediate_pct'] == 25
+        assert ctx['thresholds']['af_low_min_pct'] == 1
+        assert ctx['thresholds']['combination_member_af_pct'] == 75
+
+    def test_override_af_bins_high_changes_high_label(self) -> None:
+        """An override [af_bins] high = [0.8, 1.0] surfaces as 80% in the report thresholds."""
+        import dataclasses
+
+        from respro.config.cli_settings import CLI_CONFIG, CliAfBinsConfig
+
+        r = _make_result()  # is_fasta_mode=False -> uses cfg.af_bins
+        override_bins = CliAfBinsConfig(high=(0.8, 1.0), intermediate=(0.25, 0.8), low=(0.0, 0.25))
+        cfg = dataclasses.replace(CLI_CONFIG, af_bins=override_bins)
+        ctx = build_report_context(
+            r, similarity_high=1, similarity_moderate=0, cfg=cfg,
+        )
+        assert ctx['thresholds']['af_high_pct'] == 80
+        # Untouched bins keep their configured values.
+        assert ctx['thresholds']['af_intermediate_pct'] == 25
+        assert ctx['thresholds']['af_low_min_pct'] == 0
+
+    def test_override_combination_member_threshold_changes_label(self) -> None:
+        """An override [matching] combination_member_af_threshold surfaces in the report."""
+        import dataclasses
+
+        from respro.config.cli_settings import CLI_CONFIG
+
+        r = _make_result()
+        override_matching = dataclasses.replace(
+            CLI_CONFIG.matching, combination_member_af_threshold=0.9,
+        )
+        cfg = dataclasses.replace(CLI_CONFIG, matching=override_matching)
+        ctx = build_report_context(
+            r, similarity_high=1, similarity_moderate=0, cfg=cfg,
+        )
+        assert ctx['thresholds']['combination_member_af_pct'] == 90
+
+    def test_fasta_mode_uses_af_bins_fasta(self) -> None:
+        """In FASTA mode the high-AF label derives from cfg.af_bins_fasta, not cfg.af_bins."""
+        import dataclasses
+
+        from respro.config.cli_settings import CLI_CONFIG, CliAfBinsConfig
+
+        r = _make_result()
+        r = dataclasses.replace(r, is_fasta_mode=True)
+        override_fasta_bins = CliAfBinsConfig(high=(0.9, 1.0), intermediate=(0.3, 0.9), low=(0.0, 0.3))
+        cfg = dataclasses.replace(CLI_CONFIG, af_bins_fasta=override_fasta_bins)
+        ctx = build_report_context(
+            r, similarity_high=1, similarity_moderate=0, cfg=cfg,
+        )
+        assert ctx['thresholds']['af_high_pct'] == 90
+
