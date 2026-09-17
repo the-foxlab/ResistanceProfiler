@@ -41,6 +41,10 @@ export function useProfileSubmit({
   const [activeJobStatus, setActiveJobStatus] = useState('');
   const [isCancelingJob, setIsCancelingJob] = useState(false);
   const isCancellationRequested = useRef(false);
+  // The in-flight upload XHR, so a cancel can abort it mid-transfer.
+  const currentUploadRef = useRef(null);
+  // True while an upload is being canceled, so the abort error is not surfaced.
+  const isUploadCanceledRef = useRef(false);
 
   const selectedDatabase = databases.find((item) => item.id === selectedDatabaseId) || null;
 
@@ -195,18 +199,26 @@ export function useProfileSubmit({
 
   const uploadFile = async (file, fileType, onSuccess) => {
     // Shared upload path for FASTA/VCF/reference/BAM inputs.
+    isUploadCanceledRef.current = false;
     beginUpload();
     setUploadProgress({
       percent: 0,
       fileName: `${fileType.toUpperCase()} - ${file.name}`,
     });
     try {
-      const response = await apiUpload(`/api/upload/${fileType}`, file, (percent) => {
-        setUploadProgress((prev) => ({
-          ...prev,
-          percent,
-        }));
-      });
+      const response = await apiUpload(
+        `/api/upload/${fileType}`,
+        file,
+        (percent) => {
+          setUploadProgress((prev) => ({
+            ...prev,
+            percent,
+          }));
+        },
+        (request) => {
+          currentUploadRef.current = request;
+        },
+      );
       onSuccess(response.upload_id);
       addUploadedPath(response.upload_id);
       setUploadProgress((prev) => ({
@@ -214,9 +226,23 @@ export function useProfileSubmit({
         percent: 100,
       }));
     } catch (error) {
-      setStatusError(formatUserError(error.message));
+      // A canceled upload aborts the XHR (surfacing as a network error); do not
+      // report it as a failure since the user explicitly stopped it.
+      if (!isUploadCanceledRef.current) {
+        setStatusError(formatUserError(error.message));
+      }
     } finally {
+      currentUploadRef.current = null;
       endUpload();
+    }
+  };
+
+  const cancelUpload = () => {
+    // Abort the in-flight upload; its onerror rejects the promise and the
+    // finally block clears the in-flight flag so the submit button re-enables.
+    if (currentUploadRef.current) {
+      isUploadCanceledRef.current = true;
+      currentUploadRef.current.abort();
     }
   };
 
@@ -322,6 +348,7 @@ export function useProfileSubmit({
     uploadBamFile,
     uploadJsonFile,
     runRegenerateFromJson,
+    cancelUpload,
     isProfileBusy,
     canCancelJob,
   };

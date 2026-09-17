@@ -244,8 +244,10 @@ export function useDashboardLogic() {
     downloadFormulaRulesAsTsv: mutations.downloadFormulaRulesAsTsv,
     uploadProgress: upload.uploadProgress,
     isUploading: upload.isUploading,
+    cancelUpload: profile.cancelUpload,
     // Batch
     isBatchUploading: batch.isBatchUploading,
+    cancelBatchUpload: batch.cancelBatchUpload,
     batchMode: batch.batchMode,
     setBatchMode: batch.setBatchMode,
     batchVcfFiles: batch.batchVcfFiles,

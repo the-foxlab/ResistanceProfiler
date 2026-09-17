@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { FRONTEND_CONFIG } from '../config';
 import { apiGet, apiPostRaw, apiUpload, formatUserError, formatPathStem, downloadArtifactBundle } from '../api';
 
@@ -38,8 +38,31 @@ export function useBatchManager({
     min_af: FRONTEND_CONFIG.profile.vcf.minAf,
     min_depth: FRONTEND_CONFIG.profile.vcf.minDepth,
   });
+  // The in-flight upload XHR, so a cancel can abort it mid-transfer.
+  const currentBatchUploadRef = useRef(null);
+  // True while an upload is being canceled, so the abort is not reported as an
+  // error and the multi-file loop stops. Reset at the START of every upload
+  // operation (not only at loop end): a cancel must never leak into later
+  // operations, or genuine failures there would be silently suppressed.
+  const isBatchUploadCanceledRef = useRef(false);
+
+  // Wrap apiUpload so every batch upload captures its XHR for cancellation and
+  // surfaces progress. A canceled upload aborts the XHR; the caller's catch
+  // suppresses the resulting error via isBatchUploadCanceledRef.
+  const uploadBatchFile = (path, file, onProgress) =>
+    apiUpload(path, file, onProgress, (request) => {
+      currentBatchUploadRef.current = request;
+    });
+
+  const cancelBatchUpload = () => {
+    if (currentBatchUploadRef.current) {
+      isBatchUploadCanceledRef.current = true;
+      currentBatchUploadRef.current.abort();
+    }
+  };
 
   const addBatchVcfFiles = async (files) => {
+    isBatchUploadCanceledRef.current = false;
     const toUpload = Array.from(files).slice(0, batchMaxSamples - batchVcfFiles.length);
     for (const file of toUpload) {
       beginBatchUpload();
@@ -48,7 +71,7 @@ export function useBatchManager({
           percent: 0,
           fileName: `BATCH VCF - ${file.name}`,
         });
-        const response = await apiUpload('/api/upload/vcf', file, (percent) => {
+        const response = await uploadBatchFile('/api/upload/vcf', file, (percent) => {
           setUploadProgress((prev) => ({
             ...prev,
             percent,
@@ -65,11 +88,20 @@ export function useBatchManager({
         }]);
         addUploadedPath(response.upload_id);
       } catch (error) {
-        setBatchError(formatUserError(error.message));
+        if (!isBatchUploadCanceledRef.current) {
+          setBatchError(formatUserError(error.message));
+        }
       } finally {
         endBatchUpload();
       }
+      // A cancel aborts the current XHR and must stop the remaining files;
+      // continuing would re-disable the submit button and upload files the
+      // user asked not to upload.
+      if (isBatchUploadCanceledRef.current) {
+        break;
+      }
     }
+    isBatchUploadCanceledRef.current = false;
   };
 
   // ── Per-sample BAM ─────────────────────────────────────────────────
@@ -79,6 +111,7 @@ export function useBatchManager({
   // the user to resolve them with the per-row attach control.
 
   const addBatchBamFiles = async (files) => {
+    isBatchUploadCanceledRef.current = false;
     const toUpload = Array.from(files);
     const paired = [];
     const unmatched = [];
@@ -96,7 +129,7 @@ export function useBatchManager({
           percent: 0,
           fileName: `BATCH BAM - ${file.name}`,
         });
-        const response = await apiUpload('/api/upload/bam', file, (percent) => {
+        const response = await uploadBatchFile('/api/upload/bam', file, (percent) => {
           setUploadProgress((prev) => ({
             ...prev,
             percent,
@@ -127,9 +160,15 @@ export function useBatchManager({
         )));
         paired.push(file.name);
       } catch (error) {
-        setBatchError(formatUserError(error.message));
+        if (!isBatchUploadCanceledRef.current) {
+          setBatchError(formatUserError(error.message));
+        }
       } finally {
         endBatchUpload();
+      }
+      // A cancel aborts the current XHR and must stop the remaining files.
+      if (isBatchUploadCanceledRef.current) {
+        break;
       }
     }
     // Report only the cases that need user action (unmatched / collisions). Successful pairings
@@ -150,13 +189,14 @@ export function useBatchManager({
   };
 
   const attachBatchBam = async (vcfIndex, file) => {
+    isBatchUploadCanceledRef.current = false;
     beginBatchUpload();
     try {
       setUploadProgress({
         percent: 0,
         fileName: `BATCH BAM - ${file.name}`,
       });
-      const response = await apiUpload('/api/upload/bam', file, (percent) => {
+      const response = await uploadBatchFile('/api/upload/bam', file, (percent) => {
         setUploadProgress((prev) => ({
           ...prev,
           percent,
@@ -171,7 +211,9 @@ export function useBatchManager({
           : entry
       )));
     } catch (error) {
-      setBatchError(formatUserError(error.message));
+      if (!isBatchUploadCanceledRef.current) {
+        setBatchError(formatUserError(error.message));
+      }
     } finally {
       endBatchUpload();
     }
@@ -186,6 +228,7 @@ export function useBatchManager({
   };
 
   const addBatchFastaFiles = async (files) => {
+    isBatchUploadCanceledRef.current = false;
     const toUpload = Array.from(files).slice(0, batchMaxSamples - batchFastaFiles.length);
     for (const file of toUpload) {
       beginBatchUpload();
@@ -194,7 +237,7 @@ export function useBatchManager({
           percent: 0,
           fileName: `BATCH FASTA - ${file.name}`,
         });
-        const response = await apiUpload('/api/upload/fasta', file, (percent) => {
+        const response = await uploadBatchFile('/api/upload/fasta', file, (percent) => {
           setUploadProgress((prev) => ({
             ...prev,
             percent,
@@ -204,14 +247,22 @@ export function useBatchManager({
         setBatchFastaFiles((prev) => [...prev, { uploadId: response.upload_id, name: file.name, size: file.size }]);
         addUploadedPath(response.upload_id);
       } catch (error) {
-        setBatchError(formatUserError(error.message));
+        if (!isBatchUploadCanceledRef.current) {
+          setBatchError(formatUserError(error.message));
+        }
       } finally {
         endBatchUpload();
       }
+      // A cancel aborts the current XHR and must stop the remaining files.
+      if (isBatchUploadCanceledRef.current) {
+        break;
+      }
     }
+    isBatchUploadCanceledRef.current = false;
   };
 
   const addBatchJsonFiles = async (files) => {
+    isBatchUploadCanceledRef.current = false;
     const toUpload = Array.from(files).slice(0, batchMaxSamples - batchJsonFiles.length);
     for (const file of toUpload) {
       beginBatchUpload();
@@ -220,7 +271,7 @@ export function useBatchManager({
           percent: 0,
           fileName: `BATCH JSON - ${file.name}`,
         });
-        const response = await apiUpload('/api/upload/json', file, (percent) => {
+        const response = await uploadBatchFile('/api/upload/json', file, (percent) => {
           setUploadProgress((prev) => ({
             ...prev,
             percent,
@@ -230,11 +281,18 @@ export function useBatchManager({
         setBatchJsonFiles((prev) => [...prev, { uploadId: response.upload_id, name: file.name, size: file.size }]);
         addUploadedPath(response.upload_id);
       } catch (error) {
-        setBatchError(formatUserError(error.message));
+        if (!isBatchUploadCanceledRef.current) {
+          setBatchError(formatUserError(error.message));
+        }
       } finally {
         endBatchUpload();
       }
+      // A cancel aborts the current XHR and must stop the remaining files.
+      if (isBatchUploadCanceledRef.current) {
+        break;
+      }
     }
+    isBatchUploadCanceledRef.current = false;
   };
 
   const removeBatchFile = (index) => {
@@ -248,13 +306,14 @@ export function useBatchManager({
   };
 
   const uploadBatchReferenceFasta = async (file) => {
+    isBatchUploadCanceledRef.current = false;
     beginBatchUpload();
     try {
       setUploadProgress({
         percent: 0,
         fileName: `BATCH REF - ${file.name}`,
       });
-      const response = await apiUpload('/api/upload/fasta', file, (percent) => {
+      const response = await uploadBatchFile('/api/upload/fasta', file, (percent) => {
         setUploadProgress((prev) => ({
           ...prev,
           percent,
@@ -264,7 +323,9 @@ export function useBatchManager({
       setBatchReferenceFastaState({ uploadId: response.upload_id, name: file.name });
       addUploadedPath(response.upload_id);
     } catch (error) {
-      setBatchError(formatUserError(error.message));
+      if (!isBatchUploadCanceledRef.current) {
+        setBatchError(formatUserError(error.message));
+      }
     } finally {
       endBatchUpload();
     }
@@ -421,6 +482,13 @@ export function useBatchManager({
       }));
       setBatchSamples(initialSamples);
       setBatchSubmitted(true);
+      // The batch has been analyzed: clear the upload overview (files) but keep
+      // the analysis results in batchSamples. The uploaded files are no longer
+      // needed once they are being analyzed.
+      setBatchVcfFiles([]);
+      setBatchFastaFiles([]);
+      setBatchJsonFiles([]);
+      setBatchReferenceFastaState(null);
       await pollBatchJobs(initialSamples);
     } catch (error) {
       setBatchError(formatUserError(error.message));
@@ -490,6 +558,7 @@ export function useBatchManager({
     removeBatchFile,
     uploadBatchReferenceFasta,
     submitBatch,
+    cancelBatchUpload,
     downloadAllBatchArtifacts,
     resetBatch,
   };

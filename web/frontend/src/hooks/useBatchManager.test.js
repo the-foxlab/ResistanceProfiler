@@ -11,8 +11,16 @@ class MockXHR {
     this.upload = { onprogress: null };
     this.onload = null;
     this.onerror = null;
+    this.onabort = null;
     this.status = 200;
     this.responseText = '';
+  }
+
+  // A real browser fires the ``abort`` event (not ``error``) on abort.
+  abort() {
+    if (this.onabort) {
+      this.onabort({});
+    }
   }
 
   triggerSuccess(response) {
@@ -515,5 +523,182 @@ describe('useBatchManager — upload in-flight gating', () => {
     const { result } = renderHook(() => useBatchManager(stubs));
 
     expect(result.current.isBatchUploading).toBe(false);
+  });
+
+  it('cancelBatchUpload aborts an in-flight batch upload and clears isBatchUploading', async () => {
+    // apiUpload assigns its own onload/onerror handlers on the XHR, so aborting
+    // must fire the handler apiUpload installed. A real browser's xhr.abort()
+    // fires the ``abort`` event, not ``error``; the stub mirrors that so the
+    // test fails if apiUpload does not settle its promise on abort (which
+    // would leave the in-flight flag stuck on).
+    // A real browser's xhr.abort() fires the ``abort`` event, not ``error``.
+    // The stub mirrors that so the test fails if apiUpload does not settle its
+    // promise on abort (which would leave the in-flight flag stuck on).
+    const xhr = {
+      open: () => {},
+      send: () => {},
+      setRequestHeader: () => {},
+      upload: { onprogress: null },
+      abort: () => {
+        xhr.onabort();
+      },
+    };
+    vi.stubGlobal('XMLHttpRequest', class {
+      constructor() {
+        return xhr;
+      }
+    });
+
+    const stubs = makeStubs();
+    const { result } = renderHook(() => useBatchManager(stubs));
+
+    const file = new File(['##VCF'], 'sample1.vcf', { type: 'application/octet-stream' });
+    // apiUpload creates the XHR and captures it via onAbort synchronously, so the
+    // cancel ref is set before this act returns.
+    let uploadPromise;
+    act(() => {
+      uploadPromise = result.current.addBatchVcfFiles([file]);
+    });
+    expect(result.current.isBatchUploading).toBe(true);
+
+    await act(async () => {
+      result.current.cancelBatchUpload();
+      await uploadPromise;
+    });
+    expect(result.current.isBatchUploading).toBe(false);
+    // A canceled upload is not a batch error.
+    expect(result.current.batchError).toBeNull();
+  });
+
+  it('cancelBatchUpload stops the remaining files in a multi-file loop', async () => {
+    const stubs = makeStubs();
+    const { result } = renderHook(() => useBatchManager(stubs));
+
+    const file1 = new File(['##VCF'], 'sample1.vcf', { type: 'application/octet-stream' });
+    const file2 = new File(['##VCF'], 'sample2.vcf', { type: 'application/octet-stream' });
+    // Start the loop without resolving the first upload; the first XHR is
+    // created synchronously before the first await.
+    let loopPromise;
+    act(() => {
+      loopPromise = result.current.addBatchVcfFiles([file1, file2]);
+    });
+    expect(mockXHRInstances).toHaveLength(1);
+    expect(result.current.isBatchUploading).toBe(true);
+
+    await act(async () => {
+      result.current.cancelBatchUpload();
+      await loopPromise;
+    });
+
+    // Canceling must stop the loop: no second XHR is created for file2, the
+    // in-flight flag clears, nothing is added to the overview, and the cancel
+    // is not reported as a batch error.
+    expect(mockXHRInstances).toHaveLength(1);
+    expect(result.current.isBatchUploading).toBe(false);
+    expect(result.current.batchVcfFiles).toHaveLength(0);
+    expect(result.current.batchError).toBeNull();
+  });
+
+  it('a canceled BAM upload does not suppress later genuine batch errors', async () => {
+    const stubs = makeStubs();
+    const { result } = renderHook(() => useBatchManager(stubs));
+
+    // 1. Cancel an in-flight BAM upload (attachBatchBam) — no error surfaced.
+    const bamFile = new File(['BAM'], 'sample1.bam', { type: 'application/octet-stream' });
+    let bamPromise;
+    act(() => {
+      bamPromise = result.current.attachBatchBam(0, bamFile);
+    });
+    await act(async () => {
+      result.current.cancelBatchUpload();
+      await bamPromise;
+    });
+    expect(result.current.batchError).toBeNull();
+
+    // 2. Trigger a genuine failure afterwards; it must still be reported.
+    // attachBatchBam uploads via XHR, so fail the new MockXHR directly. The
+    // status must be set after attachBatchBam creates its XHR (a fresh
+    // MockXHR defaults to status 200).
+    const failFile = new File(['BAM'], 'broken.bam', { type: 'application/octet-stream' });
+    await act(async () => {
+      const failPromise = result.current.attachBatchBam(0, failFile);
+      mockXHRInstance.status = 500;
+      mockXHRInstance.responseText = JSON.stringify({ detail: 'Upload failed: 500' });
+      mockXHRInstance.onload({});
+      await failPromise;
+    });
+    expect(result.current.batchError).not.toBeNull();
+  });
+
+  it('a canceled reference upload does not suppress later genuine batch errors', async () => {
+    const stubs = makeStubs();
+    const { result } = renderHook(() => useBatchManager(stubs));
+
+    // 1. Cancel an in-flight reference FASTA upload — no error surfaced.
+    const refFile = new File(['>r\nACGT'], 'ref.fasta', { type: 'application/octet-stream' });
+    let refPromise;
+    act(() => {
+      refPromise = result.current.uploadBatchReferenceFasta(refFile);
+    });
+    await act(async () => {
+      result.current.cancelBatchUpload();
+      await refPromise;
+    });
+    expect(result.current.batchError).toBeNull();
+
+    // 2. Trigger a genuine failure afterwards; it must still be reported.
+    // uploadBatchReferenceFasta uploads via XHR, so fail the new MockXHR
+    // directly. The status must be set after the XHR is created (a fresh
+    // MockXHR defaults to status 200).
+    const failFile = new File(['>r\nGGGG'], 'broken-ref.fasta', { type: 'application/octet-stream' });
+    await act(async () => {
+      const failPromise = result.current.uploadBatchReferenceFasta(failFile);
+      mockXHRInstance.status = 500;
+      mockXHRInstance.responseText = JSON.stringify({ detail: 'Upload failed: 500' });
+      mockXHRInstance.onload({});
+      await failPromise;
+    });
+    expect(result.current.batchError).not.toBeNull();
+  });
+
+  it('submitBatch clears the uploaded files once the batch is analyzed', async () => {
+    const stubs = makeStubs();
+    const { result } = renderHook(() => useBatchManager(stubs));
+
+    await uploadVcf(result, 'sample1.vcf', 'up-vcf-1');
+    // VCF mode requires a shared reference FASTA; upload one so submitBatch does
+    // not throw reading batchReferenceFasta.uploadId.
+    const refFile = new File(['>r\nACGT'], 'ref.fasta', { type: 'application/octet-stream' });
+    await act(async () => {
+      const refPromise = result.current.uploadBatchReferenceFasta(refFile);
+      mockXHRInstance.triggerSuccess({ upload_id: 'up-ref-1', file_type: 'fasta', size_bytes: 8 });
+      await refPromise;
+    });
+    await waitFor(() => {
+      expect(result.current.batchReferenceFasta).not.toBeNull();
+    });
+
+    global.fetch.mockImplementation(async (_url, options) => {
+      if (options && options.body) {
+        JSON.parse(options.body);
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          samples: [{ job_id: 'j1', sample_name: 'sample1', status: 'succeeded' }],
+          total: 1,
+        }),
+      };
+    });
+
+    await act(async () => {
+      await result.current.submitBatch();
+    });
+
+    // After the batch is analyzed the upload overview is cleared (files gone, but
+    // the analysis results in batchSamples remain).
+    expect(result.current.batchVcfFiles).toHaveLength(0);
+    expect(result.current.batchSamples).toHaveLength(1);
   });
 });
