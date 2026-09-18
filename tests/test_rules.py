@@ -436,6 +436,34 @@ class TestMatchCombinedStates:
         assert len(result[0].rule_matches) == 1
         assert result[0].rule_effect_aa_freq[20] == pytest.approx(0.5)
 
+    def test_same_combined_codon_effect_matches_direct_rule_once(self) -> None:
+        """A shared AA effect emitted by two codon members fires one direct rule once.
+
+        A two-SNP codon can require both nucleotide substitutions to produce one
+        amino-acid effect. Each member annotation carries the promoted combined
+        effect, but a rule for that effect must not be reported or scored twice.
+        """
+        rule_y = self._rule(25, 'Y')
+        first_member = self._ann('Y', 1.0)
+        first_member.is_combined_codon_event = True
+        first_member.combined_member_count = 2
+        first_member.variant.pos = 100
+        second_member = self._ann('Y', 1.0)
+        second_member.is_combined_codon_event = True
+        second_member.combined_member_count = 2
+        second_member.variant.pos = 101
+
+        result = match_rules([first_member, second_member], [rule_y])
+
+        matched_rule_ids = [
+            rule.id
+            for ann in result
+            for rule in ann.rule_matches
+        ]
+        assert matched_rule_ids == [25]
+        assert result[0].rule_effect_alt[25] == 'Y'
+        assert result[0].rule_effect_aa_freq[25] == pytest.approx(1.0)
+
     def test_rule_fires_on_promoted_single_uses_row_af(self) -> None:
         """G->T row (single=I promoted from forced combined, combined_states=[]):
         K20I fires on single=I; effect lower is the row's own AF (0.5)."""
@@ -1480,6 +1508,37 @@ class TestFrechetFormulaMatching:
         hits = match_formula_rules([ann_a], [formula], min_fraction=self.MIN_FRACTION)
         assert len(hits) == 1
         assert hits[0].frechet_lower == 0.0
+        assert hits[0].matched_variants == []
+
+    def test_and_of_absent_not_members_fires_without_frequency(self) -> None:
+        """A true AND consisting only of NOT operands has no positive
+        contributors, so it fires with a zero reported frequency."""
+        mut_a = self._atomic_rule('a', 'E', rule_id=1)
+        mut_b = self._atomic_rule('b', 'V', rule_id=2)
+        formula = self._formula('(NOT a AND NOT b)', [mut_a, mut_b])
+
+        hits = match_formula_rules([], [formula], min_fraction=self.MIN_FRACTION)
+
+        assert len(hits) == 1
+        assert hits[0].frechet_lower == 0.0
+        assert hits[0].forced_fraction == 0.0
+        assert hits[0].matched_member_ids == []
+        assert hits[0].matched_variants == []
+
+    def test_odd_xor_of_absent_not_members_fires_without_frequency(self) -> None:
+        """An odd XOR chain of true NOT operands fires with no positive
+        contributors and therefore a zero reported frequency."""
+        mut_a = self._atomic_rule('a', 'E', rule_id=1)
+        mut_b = self._atomic_rule('b', 'V', rule_id=2)
+        mut_c = self._atomic_rule('c', 'I', rule_id=3)
+        formula = self._formula('(NOT a XOR NOT b XOR NOT c)', [mut_a, mut_b, mut_c])
+
+        hits = match_formula_rules([], [formula], min_fraction=self.MIN_FRACTION)
+
+        assert len(hits) == 1
+        assert hits[0].frechet_lower == 0.0
+        assert hits[0].forced_fraction == 0.0
+        assert hits[0].matched_member_ids == []
         assert hits[0].matched_variants == []
 
     def test_formula_firing_only_via_not_reports_zero_lower(self) -> None:

@@ -182,6 +182,12 @@ def match_rules(
 
     hit_count = 0
     anchor_warning_cache: set[str] = set()
+    # A combined-codon state is emitted on every member-SNP annotation so each
+    # SNP can display its possible effects. When two members emit the same
+    # amino-acid effect, a direct rule against that effect must still fire once.
+    # Track rule/effect identities per combined codon independently of the
+    # annotation which carried the effect.
+    matched_combined_effects: set[tuple[str, int, int, str, int]] = set()
     for ann in annotations:
         key = (ann.feature_name, ann.codon_pos)
         candidates = rule_index.get(key, [])
@@ -245,9 +251,20 @@ def match_rules(
                         break  # combined-state hit found; stop searching
 
             if matched_lower is not None:
+                combined_effect_key = (
+                    ann.variant.chrom,
+                    ann.variant.pos // 3,
+                    ann.feature_name,
+                    matched_alt if matched_alt is not None else ann.alt_aa,
+                    rule.id,
+                )
+                if ann.is_combined_codon_event and combined_effect_key in matched_combined_effects:
+                    continue
                 ann.rule_matches.append(rule)
                 ann.rule_effect_aa_freq[rule.id] = matched_lower
                 ann.rule_effect_alt[rule.id] = matched_alt if matched_alt is not None else ann.alt_aa
+                if ann.is_combined_codon_event:
+                    matched_combined_effects.add(combined_effect_key)
                 hit_count += 1
 
         # Suppress INS_any when a specific insertion rule fires for the same position+drug.
