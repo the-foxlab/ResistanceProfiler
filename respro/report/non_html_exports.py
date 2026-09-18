@@ -315,7 +315,7 @@ def write_json(
 # rule columns. See write_tsv for the row-emission rules.
 TSV_COLUMNS: tuple[str, ...] = (
     'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
-    'af', 'depth', 'consequence', 'aa_effects',
+    'aa_frequency', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
     'source', 'publications',
@@ -473,7 +473,7 @@ def _effect_as_resistant_tsv_rows(
             'nt_mut': nt_change_stored(ann),
             'nt_mut_user': nt_change_user(ann),
             'strand': strand_by_feature.get(ann.feature_name, ''),
-            'af': repr(round(ann.variant.allele_freq, 3)),
+            'aa_frequency': repr(round(ann.variant.allele_freq, 3)),
             'depth': str(ann.variant.depth),
             'consequence': display_consequence(ann),
             'aa_effects': _aa_effects(ann),
@@ -542,7 +542,7 @@ def write_tsv(
             'nt_mut': nt_change_stored(ann),
             'nt_mut_user': nt_change_user(ann),
             'strand': strand_by_feature.get(ann.feature_name, ''),
-            'af': repr(round(ann.variant.allele_freq, 3)),
+            'aa_frequency': repr(round(ann.variant.allele_freq, 3)),
             'depth': str(ann.variant.depth),
             'consequence': display_consequence(ann),
             'aa_effects': _aa_effects(ann),
@@ -625,7 +625,7 @@ def write_tsv(
             'nt_mut': nt_muts,
             'nt_mut_user': nt_users,
             'strand': strands,
-            'af': repr(round(hit.frechet_lower, 3)),
+            'aa_frequency': repr(round(hit.frechet_lower, 3)),
             'depth': '',  # combined row spans multiple variants; no single depth
             'consequence': ';'.join(a.consequence for a in members),
             'aa_effects': aa_effects,

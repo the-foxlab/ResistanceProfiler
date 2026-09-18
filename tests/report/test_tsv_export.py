@@ -32,7 +32,7 @@ from respro.report.non_html_exports import export_results, write_tsv
 # Canonical 19-column header, in order.
 TSV_COLUMNS = [
     'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
-    'af', 'depth', 'consequence', 'aa_effects',
+    'aa_frequency', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
     'source', 'publications',
@@ -45,7 +45,7 @@ _PLACEHOLDER = 'n/a'
 # publications) are dropped when no row carries a real value.
 _TSV_ALWAYS_COLUMNS = [
     'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
-    'af', 'depth', 'consequence', 'aa_effects',
+    'aa_frequency', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'source',
 ]
@@ -463,9 +463,9 @@ class TestFormulaRows:
         assert ';' in row[header.index('nt_mut')]
         assert 'K3E' in row[header.index('aa_effects')]
         assert 'A5T' in row[header.index('aa_effects')]
-        # 'af' is the formula hit's Fréchet lower bound (a single value, not
+        # aa_frequency is the formula hit's Fréchet lower bound (a single value, not
         # the members' joined variant allele frequencies).
-        assert ';' not in row[header.index('af')]
+        assert ';' not in row[header.index('aa_frequency')]
         assert row[header.index('strand')] == '+;+'
         # Metrics come from the combined rule set, not members.
         assert row[header.index('drug')] == 'Brincidofovir'
@@ -529,7 +529,7 @@ class TestNonHitAndFastaRows:
         row = rows[0]
         assert row[header.index('strand')] == '+'
         # The remaining structural columns are still present.
-        for col in ('gene', 'nt_mut', 'aa_effects', 'af',
+        for col in ('gene', 'nt_mut', 'aa_effects', 'aa_frequency',
                     'consequence', 'in_database', 'rule_type', 'drug', 'source'):
             assert col in header
 
@@ -876,7 +876,7 @@ class TestEmptyColumnDropping:
         out = tmp_path / 'r.results.tsv'
         write_tsv(r, out)
         header, _ = _read_tsv(out)
-        for col in ('reference', 'gene', 'nt_mut', 'strand', 'af',
+        for col in ('reference', 'gene', 'nt_mut', 'strand', 'aa_frequency',
                     'depth', 'consequence', 'aa_effects', 'in_database', 'rule_type',
                     'drug', 'source'):
             assert col in header, f'{col} should always be present'
@@ -910,7 +910,7 @@ class TestFormulaFrechetLowerTsv:
     """TSV formula rows report the Fréchet lower bound as the hit frequency."""
 
     def test_formula_row_af_is_frechet_lower(self, tmp_path: Path) -> None:
-        """The 'af' cell of a formula row is the Fréchet lower bound, not the
+        """The aa_frequency cell of a formula row is the Fréchet lower bound, not the
         members' variant allele frequencies."""
         member_a = _ann(chrom='ref', pos=3, af=0.88, feature='gag', codon_pos=2,
                         alt_aa='E', af_bin='high')
@@ -943,4 +943,4 @@ class TestFormulaFrechetLowerTsv:
         header, rows = _read_tsv(out)
         formula_rows = [row for row in rows if row[header.index('rule_type')] == 'formula']
         assert len(formula_rows) == 1
-        assert formula_rows[0][header.index('af')] == '0.6'
+        assert formula_rows[0][header.index('aa_frequency')] == '0.6'

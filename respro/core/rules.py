@@ -452,10 +452,16 @@ def _evaluate_formula_expression(
             right_value, right_contributors, right_lower, right_ff = parse_not_expression()
             if value and right_value:
                 # Joint Fréchet bound over the accumulated positive members.
-                q_values = [member_lower.get(mid, 0.0) for mid in contributors | right_contributors]
+                positive_contributors = contributors | right_contributors
+                if not positive_contributors:
+                    # A true conjunction of only NOT operands has no positive
+                    # evidence and therefore reports a zero frequency.
+                    value, contributors, lower, ff = True, set(), 0.0, 0.0
+                    continue
+                q_values = [member_lower.get(mid, 0.0) for mid in positive_contributors]
                 new_lower, _upper, new_ff, accepted = _frechet_and_bound(q_values, min_fraction, eps)
                 value = accepted
-                contributors = contributors | right_contributors if accepted else set()
+                contributors = positive_contributors if accepted else set()
                 lower, ff = new_lower, new_ff
             else:
                 value = False
@@ -489,6 +495,10 @@ def _evaluate_formula_expression(
         union: set[str] = set()
         for c, _l, _f in accepted_nodes:
             union |= c
+        if not union:
+            # An odd chain of true NOT operands has no positive evidence and
+            # therefore reports a zero frequency.
+            return True, set(), 0.0, 0.0
         q_values = [member_lower.get(mid, 0.0) for mid in union]
         new_lower, _upper, new_ff, accepted = _frechet_and_bound(q_values, min_fraction, eps)
         if not accepted:
