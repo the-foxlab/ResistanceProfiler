@@ -389,7 +389,8 @@ def assemble_multi_reference_result(
         formula_hits = match_formula_rules(
             ref_annotations,
             rg.formula_rules,
-            member_af_threshold=float(cfg.matching.combination_member_af_threshold),
+            min_fraction=float(cfg.matching.min_cooccurrence_combination_fraction),
+            eps=float(cfg.matching.frechet_epsilon),
         )
         all_formula_hits.extend(formula_hits)
 
@@ -530,7 +531,8 @@ def _finalize_and_export(
     formula_hits = match_formula_rules(
         annotations,
         ctx.formula_rules,
-        member_af_threshold=float(cfg.matching.combination_member_af_threshold),
+        min_fraction=float(cfg.matching.min_cooccurrence_combination_fraction),
+        eps=float(cfg.matching.frechet_epsilon),
     )
     annotations = assign_af_bins(annotations, bins=ctx.af_bins)
 

@@ -143,15 +143,15 @@ class TestCliParsingConfig:
 class TestCliMatchingConfig:
     """Tests for CliMatchingConfig."""
 
-    def test_af_threshold_is_float(self):
-        """Should have float AF threshold."""
+    def test_combination_fraction_is_float(self):
+        """Should have float combination fraction threshold."""
         config = _load_cli_config()
-        assert isinstance(config.matching.combination_member_af_threshold, float)
+        assert isinstance(config.matching.min_cooccurrence_combination_fraction, float)
 
-    def test_af_threshold_in_valid_range(self):
+    def test_combination_fraction_in_valid_range(self):
         """Should be between 0 and 1."""
         config = _load_cli_config()
-        assert 0 < config.matching.combination_member_af_threshold < 1
+        assert 0 < config.matching.min_cooccurrence_combination_fraction < 1
 
 
 class TestCliSimilarityConfig:
@@ -427,11 +427,13 @@ class TestLoadConfigWithOverrides:
         assert cfg.matching == CLI_CONFIG.matching
 
     def test_matching_override_applies(self, tmp_path):
-        """An override [matching] combination_member_af_threshold = 0.8 should apply."""
+        """An override [matching] min_cooccurrence_combination_fraction should apply."""
         from respro.config.cli_settings import load_config_with_overrides
-        p = self._write_override(tmp_path, '[matching]\ncombination_member_af_threshold = 0.8\n')
+        p = self._write_override(
+            tmp_path, '[matching]\nmin_cooccurrence_combination_fraction = 0.8\n'
+        )
         cfg = load_config_with_overrides(p)
-        assert cfg.matching.combination_member_af_threshold == 0.8
+        assert cfg.matching.min_cooccurrence_combination_fraction == 0.8
 
     def test_unknown_section_rejected(self, tmp_path):
         """An override with an unknown section [foo] should raise ValueError naming it."""
@@ -479,3 +481,74 @@ class TestLoadConfigWithOverrides:
         p = self._write_override(tmp_path, '[codon]\nmin_read_mapping_quality = 99\n')
         load_config_with_overrides(p)
         assert CLI_CONFIG.codon.min_read_mapping_quality == original
+
+
+class TestMatchingFrechetEpsilon:
+    """The decoupled [matching] frechet_epsilon key for formula-member gating."""
+
+    @staticmethod
+    def _write_override(tmp_path, text: str):
+        p = tmp_path / 'override.toml'
+        p.write_text(text, encoding='utf-8')
+        return p
+
+    def test_default_is_1e_9(self):
+        """The bundled default equals the codon-path default."""
+        config = _load_cli_config()
+        assert config.matching.frechet_epsilon == 1e-9
+        assert isinstance(config.matching.frechet_epsilon, float)
+
+    def test_override_applies(self, tmp_path):
+        """An override [matching] frechet_epsilon applies to the loaded config."""
+        from respro.config.cli_settings import load_config_with_overrides
+        p = self._write_override(tmp_path, '[matching]\nfrechet_epsilon = 1e-6\n')
+        cfg = load_config_with_overrides(p)
+        assert cfg.matching.frechet_epsilon == 1e-6
+
+    def test_codon_key_stays_independent(self, tmp_path):
+        """Overriding the matching epsilon must not touch the codon epsilon."""
+        from respro.config.cli_settings import load_config_with_overrides
+        p = self._write_override(tmp_path, '[matching]\nfrechet_epsilon = 1e-6\n')
+        cfg = load_config_with_overrides(p)
+        assert cfg.codon.frechet_epsilon == 1e-9
+
+    def test_codon_override_leaves_matching_key(self, tmp_path):
+        """Overriding the codon epsilon must not touch the matching epsilon."""
+        from respro.config.cli_settings import load_config_with_overrides
+        p = self._write_override(tmp_path, '[codon]\nfrechet_epsilon = 1e-7\n')
+        cfg = load_config_with_overrides(p)
+        assert cfg.matching.frechet_epsilon == 1e-9
+        assert cfg.codon.frechet_epsilon == 1e-7
+
+
+class TestMatchingCombinationFraction:
+    """F1: the decoupled [matching] min_cooccurrence_combination_fraction key."""
+
+    @staticmethod
+    def _write_override(tmp_path, text: str):
+        p = tmp_path / 'override.toml'
+        p.write_text(text, encoding='utf-8')
+        return p
+
+    def test_default_is_two_thirds(self):
+        """The bundled default equals 2/3, mirroring the codon default."""
+        config = _load_cli_config()
+        assert config.matching.min_cooccurrence_combination_fraction == pytest.approx(2 / 3)
+
+    def test_override_applies(self, tmp_path):
+        """An override [matching] min_cooccurrence_combination_fraction applies."""
+        from respro.config.cli_settings import load_config_with_overrides
+        p = self._write_override(
+            tmp_path, '[matching]\nmin_cooccurrence_combination_fraction = 0.5\n'
+        )
+        cfg = load_config_with_overrides(p)
+        assert cfg.matching.min_cooccurrence_combination_fraction == 0.5
+
+    def test_codon_key_stays_independent(self, tmp_path):
+        """Overriding the combination key must not touch the codon key (decoupled)."""
+        from respro.config.cli_settings import load_config_with_overrides
+        p = self._write_override(
+            tmp_path, '[matching]\nmin_cooccurrence_combination_fraction = 0.5\n'
+        )
+        cfg = load_config_with_overrides(p)
+        assert cfg.codon.min_cooccurrence_codon_fraction == pytest.approx(2 / 3)

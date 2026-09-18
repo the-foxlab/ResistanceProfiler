@@ -14,6 +14,10 @@ export function DatabasePositionPlot({ plot }) {
 
     setPlotError('');
 
+    // Legend labels come from the annotations observed in the database
+    // (plot.toneLabels); the canonical map is only a fallback.
+    const labelFor = (tone) => plot.toneLabels?.[tone] || CLASSIFICATION_LABELS[tone] || 'Rules';
+
     try {
       const xLabels = plot.positions.map((p) => p.label);
 
@@ -21,12 +25,12 @@ export function DatabasePositionPlot({ plot }) {
         type: 'bar',
         x: xLabels,
         y: plot.positions.map((p) => p[tone] || 0),
-        name: CLASSIFICATION_LABELS[tone] || 'Rules',
+        name: labelFor(tone),
         marker: {
           color: CLASSIFICATION_COLORS[tone] || CLASSIFICATION_COLORS.count,
         },
         customdata: plot.positions.map((p) => [p.rangeStart, p.rangeEnd]),
-        hovertemplate: 'Range: %{customdata[0]}-%{customdata[1]}<br>' + (CLASSIFICATION_LABELS[tone] || 'Rules') + ': %{y}<extra></extra>',
+        hovertemplate: 'Range: %{customdata[0]}-%{customdata[1]}<br>' + labelFor(tone) + ': %{y}<extra></extra>',
       }));
 
       const positionsLength = plot.positions.length;
@@ -114,7 +118,7 @@ export function DatabasePositionPlot({ plot }) {
         {plot.tones.map((tone) => (
           <span key={tone} className="database-legend-item">
             <span className="database-legend-dot" style={{ backgroundColor: CLASSIFICATION_COLORS[tone] }} aria-hidden="true" />
-            {CLASSIFICATION_LABELS[tone]}
+            {plot.toneLabels?.[tone] || CLASSIFICATION_LABELS[tone]}
           </span>
         ))}
       </div>

@@ -391,6 +391,7 @@
                       <div class="db-hit-info-panel">
                         <p>Frequency of the matched amino-acid change, binned as high (&ge;{{ context.thresholds.af_high_pct }}&nbsp;%), intermediate ({{ context.thresholds.af_intermediate_pct }}–{{ context.thresholds.af_high_pct }}&nbsp;%), or low ({{ context.thresholds.af_low_min_pct }}–{{ context.thresholds.af_intermediate_pct }}&nbsp;%).</p>
                         <p>For single mutations this is the variant allele frequency. For combined-codon effects it is a guaranteed minimum (lower bound) on the combined amino-acid state, which can be lower than any individual SNP's frequency. For a vcf file for which a bam file is available, the frequency is based on the BAM read count.</p>
+                        <p>For a formula (combination rule) hit, the frequency is a guaranteed minimum on how often the members of a combination rule co-occur (Fréchet lower bound) and can be lower than any individual member's frequency.</p>
                       </div>
                     </span>
                   </th>
@@ -555,6 +556,7 @@
                       <div class="db-hit-info-panel">
                         <p>Frequency of the matched amino-acid change, binned as high (&ge;{{ context.thresholds.af_high_pct }}&nbsp;%), intermediate ({{ context.thresholds.af_intermediate_pct }}–{{ context.thresholds.af_high_pct }}&nbsp;%), or low ({{ context.thresholds.af_low_min_pct }}–{{ context.thresholds.af_intermediate_pct }}&nbsp;%).</p>
                         <p>For single mutations this is the variant allele frequency. For combined-codon effects it is a guaranteed minimum (lower bound) on the combined amino-acid state, which can be lower than any individual SNP's frequency. For a vcf file for which a bam file is available, the frequency is based on the BAM read count.</p>
+                        <p>For a formula (combination rule) hit, the frequency is a guaranteed minimum on how often the members of a combination rule co-occur (Fréchet lower bound) and can be lower than any individual member's frequency.</p>
                       </div>
                     </span>
                   </th>

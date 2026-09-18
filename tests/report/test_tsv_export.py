@@ -458,12 +458,14 @@ class TestFormulaRows:
         formula_rows = [row for row in rows if row[header.index('rule_type')] == 'formula']
         assert len(formula_rows) == 1
         row = formula_rows[0]
-        # Members joined with ';' in gene/nt_mut/aa_effects/af/strand.
+        # Members joined with ';' in gene/nt_mut/aa_effects/strand.
         assert row[header.index('gene')] == 'gag;gag'
         assert ';' in row[header.index('nt_mut')]
         assert 'K3E' in row[header.index('aa_effects')]
         assert 'A5T' in row[header.index('aa_effects')]
-        assert ';' in row[header.index('af')]
+        # 'af' is the formula hit's Fréchet lower bound (a single value, not
+        # the members' joined variant allele frequencies).
+        assert ';' not in row[header.index('af')]
         assert row[header.index('strand')] == '+;+'
         # Metrics come from the combined rule set, not members.
         assert row[header.index('drug')] == 'Brincidofovir'
@@ -902,3 +904,43 @@ class TestEmptyColumnDropping:
         header, _ = _read_tsv(out)
         assert 'phenotype' not in header
         assert 'clinical_phenotype' not in header
+
+
+class TestFormulaFrechetLowerTsv:
+    """TSV formula rows report the Fréchet lower bound as the hit frequency."""
+
+    def test_formula_row_af_is_frechet_lower(self, tmp_path: Path) -> None:
+        """The 'af' cell of a formula row is the Fréchet lower bound, not the
+        members' variant allele frequencies."""
+        member_a = _ann(chrom='ref', pos=3, af=0.88, feature='gag', codon_pos=2,
+                        alt_aa='E', af_bin='high')
+        member_b = _ann(chrom='ref', pos=9, af=0.97, feature='gag', codon_pos=4,
+                        ref_aa='A', alt_aa='T', af_bin='high')
+        rs = ResistanceRuleSet(
+            id=10, drug_name='Brincidofovir', drug_id=1, phenotype='resistant',
+            group_name='FR1', logic_expression='R1 AND R2',
+            members=[
+                ResistanceRuleSetMember(
+                    id=1, rule_set_id=10, feature_name='gag', feature_id=1,
+                    reference_identifier='ref', position=2, reference='K',
+                    mutation='E', external_id='R1',
+                ),
+                ResistanceRuleSetMember(
+                    id=2, rule_set_id=10, feature_name='gag', feature_id=1,
+                    reference_identifier='ref', position=4, reference='A',
+                    mutation='T', external_id='R2',
+                ),
+            ],
+        )
+        hit = FormulaRuleHit(
+            rule_set=rs, matched_variants=[member_a, member_b],
+            matched_member_ids=['R1', 'R2'],
+            frechet_lower=0.6, forced_fraction=0.9, member_count=2,
+        )
+        r = _result([member_a, member_b], formula_hits=[hit])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        formula_rows = [row for row in rows if row[header.index('rule_type')] == 'formula']
+        assert len(formula_rows) == 1
+        assert formula_rows[0][header.index('af')] == '0.6'

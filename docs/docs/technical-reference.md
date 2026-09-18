@@ -744,10 +744,7 @@ uniqueness constraint on `(drug_id, normalised_expression)`.
 
 ### 6.3 Runtime evaluation
 
-At profiling time, each formula rule is evaluated against the set of matched
-atomic members. The evaluation re-parses the canonical expression and walks the
-AST with the same recursive descent structure, but each function returns a
-`(truth, contributors)` pair instead of a node:
+At profiling time, each formula rule is evaluated against the set of matched atomic members. The evaluation re-parses the canonical expression and walks the AST with the same recursive descent structure, but each function returns a `(truth, contributors)` pair instead of a node:
 
 | Operator | Truth logic | Contributor logic |
 |---|---|---|
@@ -757,17 +754,28 @@ AST with the same recursive descent structure, but each function returns a
 | `XOR` | `left ⊕ right` | the true side's contributors |
 | `OR` | `left ∨ right` | deterministic branch selection (see below) |
 
-**AF gating.** A member contributes only when its annotation's allele frequency
-**exceeds** the member AF threshold (default $> 0.75$, strict greater-than).
-Borderline-equal variants are excluded. When multiple annotations match the
-same member ID, the one with the highest AF is selected (lexical tiebreak on
-`(feature_name, codon_pos, alt_aa)` for determinism).
+**Member gating (Fréchet).** A member contributes only when its matched effect's amino-acid frequency lower bound (`rule_effect_aa_freq`) exceeds eps (`[matching] frechet_epsilon`, default $10^{-9}$) — the same amino-acid-frequency basis single rules use, not the nucleotide allele frequency. When multiple annotations match the same member ID, the one with the highest effect lower bound is selected (lexical tiebreak on `(feature_name, codon_pos, alt_aa)` for determinism).
 
-**OR branch selection.** When both branches of an OR are true, the branch with
-the **highest member AF** is selected as the contributor. Ties are broken
-lexicographically by the sorted tuple of member IDs. This ensures deterministic
-output across process invocations (Python set iteration order is otherwise
-hash-seed dependent).
+**AND gating (Fréchet joint bound).** An AND clause fires only when the joint Fréchet lower bound over its positive members is accepted at `[matching] min_cooccurrence_combination_fraction` (default $2/3$): with member lower bounds $q_1,\dots,q_k$, the guaranteed co-occurrence lower bound is $\max(0, \sum q_i - (k-1))$, the upper bound is $\min(q_i)$, and the forced fraction is $\text{lower}/\text{upper}$. The hit frequency reported for the combination is the joint lower bound — a guaranteed minimum, not a point estimate.
+
+**OR branch selection.** When multiple OR branches are accepted, the branch with the **highest member lower bound** is selected as the contributor; ties are broken lexicographically by the sorted tuple of member IDs. The reported frequency is that branch's lower bound.
+
+**XOR parity.** XOR chains fire when an odd number of operands are accepted. With exactly one accepted operand the frequency is that operand's lower bound; with three or more it is the Fréchet AND-bound over all accepted operands' lower bounds.
+
+**NOT.** NOT is a pure boolean inversion over presence (including compound operands); it never carries a frequency. A formula that fires only via a NOT branch reports a frequency of 0.
+
+**Worked examples** (AND of two members, min fraction $2/3$):
+
+| Member lower bounds | Joint lower | Upper | Forced fraction | Result |
+|---|---|---|---|---|
+| 0.95, 0.95 | 0.90 | 0.95 | 0.947 | fires, frequency 0.90 (`high` bin) |
+| 0.95, 0.30 | 0.25 | 0.30 | 0.833 | fires, frequency 0.25 (`intermediate` bin) |
+| 0.60, 0.60 | 0.20 | 0.60 | 0.333 | rejected (0.333 < 2/3) |
+| 0.95, 0.02 | 0.00 | 0.02 | 0.000 | rejected (lower bound 0) |
+
+**Equivalence with the codon policy.** The formula AND bound is the same Fréchet-intersection computation the combined-codon path uses (`_compute_codon_frechet_states`): at equal thresholds both paths accept exactly the same q-vectors (asserted by cross-validation test). The thresholds and numerical tolerances are decoupled — the codon policy uses `[codon] min_cooccurrence_codon_fraction` with `[codon] frechet_epsilon`, formula gating uses `[matching] min_cooccurrence_combination_fraction` with `[matching] frechet_epsilon` — so the two sensitivities can be tuned independently.
+
+**Reported-frequency semantics.** The frequency reported for a formula hit is the joint Fréchet lower bound — a guaranteed minimum on how often the members co-occur, not a point estimate of the true combination frequency. The AF bin shown in the report reflects this lower bound, so a fired formula can show an `intermediate` or `low` bin even though every member individually fired at a `high` frequency.
 
 ---
 

@@ -57,11 +57,12 @@ These are URL templates containing `{placeholder}` segments. Override only if yo
 |---|---|---|---|
 | `doi_prefixes` | list[str] | `['https://doi.org/', 'http://doi.org/']` | URL prefixes stripped/recognised when parsing DOI references. |
 
-### `[matching]` — combined-codon matching policy
+### `[matching]` — combination (formula) rule gating
 
 | Key | Type | Default | Effect |
 |---|---|---|---|
-| `combination_member_af_threshold` | float | `0.75` | Minimum allele frequency a single SNP must reach to be eligible for a combined-codon event. Also drives the `combination_member_af_pct` label shown in the report. |
+| `min_cooccurrence_combination_fraction` | float | `0.6666666666666666` | Formula (combination) rule gating: an AND clause fires only when the joint Fréchet lower bound's forced fraction (`lower / min(member frequencies)`) reaches this value. Decoupled from the codon policy (`[codon] min_cooccurrence_codon_fraction`). Also drives the `combination_fraction_pct` label shown in the report's frequency hover. |
+| `frechet_epsilon` | float | `1e-9` | Numerical tolerance for Fréchet-bound acceptance on the formula path (member lower bound > eps, forced fraction ≥ min_fraction − eps). Independent of the codon-path `[codon] frechet_epsilon`. |
 
 ### `[codon]` — codon-level scientific thresholds
 
@@ -121,12 +122,12 @@ These are passed to mappy for CDS-to-query mapping. The defaults are tuned for s
 
 ## Example override file
 
-A short TOML listing only the keys you want to change — here lowering the combination-member AF threshold and tightening the high-AF bin label to 80% for a VCF run:
+A short TOML listing only the keys you want to change — here raising the combination-rule co-occurrence fraction and tightening the high-AF bin label to 80% for a VCF run:
 
 ```toml
 # my_overrides.toml
 [matching]
-combination_member_af_threshold = 0.8
+min_cooccurrence_combination_fraction = 0.8
 
 [af_bins]
 high         = [0.8, 1.0]
@@ -145,7 +146,7 @@ The report's AF-bin legend will read "high (≥80%)" instead of the default "hig
 `respro regenerate` rebuilds a report from a **stored run** — it does not re-run alignment or annotation. Consequently only **report-stage** config keys affect regenerate:
 
 - `[af_bins]` / `[af_bins_fasta]` — AF-bin labels
-- `[matching]` — `combination_member_af_pct` label
+- `[matching]` — `combination_fraction_pct` label only; `[matching] frechet_epsilon` is a match-stage key with no effect on a regenerated report
 - `[similarity]` — similarity classification thresholds
 
 Overrides to `[alignment]`, `[codon]`, `[timeouts]`, `[urls]`, or `[parsing]` are **accepted** by the loader (so a single override file is portable across `fasta`/`vcf`/`regenerate`) but have **no effect** on a regenerated report, because those stages already ran when the run was first profiled and their results are persisted in the results database. To change alignment or codon behaviour, re-profile the sample with `respro fasta` / `respro vcf` and the desired `--config`.

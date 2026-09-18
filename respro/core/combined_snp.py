@@ -29,11 +29,10 @@ from respro.db.models import AnnotatedVariant, CodonState, FeatureRecord, Varian
 
 logger = logging.getLogger(__name__)
 
-# Numerical tolerance for Fréchet-bound acceptance (lower > eps). Small enough
-# that mathematically exact boundary cases (lower == 0) are stable. Sourced from
-# CLI_CONFIG.codon.frechet_epsilon (promoted by feature magic-numbers-to-toml);
-# the module-level alias is kept for backward-compat with annotation.py's
-# re-export and any tests importing it.
+# Import-time default for the Fréchet-bound acceptance tolerance (lower > eps).
+# The annotation path threads the per-invocation value ([codon] frechet_epsilon)
+# into _compute_codon_frechet_states via cfg; this alias is the fallback default
+# and is kept for backward-compat with annotation.py's re-export and tests.
 _FRECHET_EPS = CLI_CONFIG.codon.frechet_epsilon
 
 
@@ -606,7 +605,9 @@ def _annotate_combined_snp_codon(
     else:
         freq_method = 'estimated'
         min_fraction = cfg.codon.min_cooccurrence_codon_fraction
-        states = _compute_codon_frechet_states(member_specs, internal_codon, min_fraction)
+        states = _compute_codon_frechet_states(
+            member_specs, internal_codon, min_fraction, eps=cfg.codon.frechet_epsilon,
+        )
 
     if not states:
         # Uncombinable input, or BAM thin evidence (spanning molecules < min_depth).

@@ -52,7 +52,18 @@ class CliParsingConfig:
 class CliMatchingConfig:
     """Matching defaults shared by combination evaluation paths."""
 
-    combination_member_af_threshold: float
+    # Fréchet forced-fraction acceptance threshold for formula (combination)
+    # rules. Numerically equal to the codon-path default but a separate,
+    # independently tunable policy knob: the codon path infers nucleotide
+    # states within one codon, the formula path gates curated member rules
+    # (potentially across features). Decoupled so one policy can be relaxed
+    # or tightened without touching the other.
+    min_cooccurrence_combination_fraction: float
+    # Numerical tolerance for Fréchet-bound acceptance on the formula
+    # (combination) path (member lower > eps, forced_fraction >=
+    # min_fraction - eps). Independent of [codon] frechet_epsilon so the two
+    # paths can be tuned separately.
+    frechet_epsilon: float
 
 
 @dataclass(frozen=True)
@@ -179,7 +190,10 @@ def _build_cli_config(payload: dict) -> CliConfig:
             doi_prefixes=tuple(str(item) for item in parsing['doi_prefixes']),
         ),
         matching=CliMatchingConfig(
-            combination_member_af_threshold=float(matching['combination_member_af_threshold']),
+            min_cooccurrence_combination_fraction=float(
+                matching['min_cooccurrence_combination_fraction']
+            ),
+            frechet_epsilon=float(matching['frechet_epsilon']),
         ),
         similarity=CliSimilarityConfig(
             high=int(similarity['high']),

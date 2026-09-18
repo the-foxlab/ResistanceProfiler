@@ -459,6 +459,15 @@ class FormulaRuleHit:
     rule_set: ResistanceRuleSet
     matched_variants: list[AnnotatedVariant] = field(default_factory=list)
     matched_member_ids: list[str] = field(default_factory=list)
+    # Fréchet guarantee of the firing clause: the lower bound on the guaranteed
+    # minimum co-occurrence of the contributing members (amino-acid frequency
+    # scale). Equals the winning member's effect lower for OR/XOR/single-member.
+    frechet_lower: float = 0.0
+    # forced_fraction of the firing clause (lower / upper); 1.0 for
+    # OR/XOR/single-member winners.
+    forced_fraction: float = 0.0
+    # Number of contributing members of the firing clause.
+    member_count: int = 1
 
     def to_dict(self) -> dict:
         """
@@ -493,6 +502,9 @@ class FormulaRuleHit:
                 for m in rs.members
             ],
             'matched_member_ids': list(self.matched_member_ids),
+            'frechet_lower': self.frechet_lower,
+            'forced_fraction': self.forced_fraction,
+            'member_count': self.member_count,
             'matched_variants': [
                 {
                     'feature': v.feature_name,

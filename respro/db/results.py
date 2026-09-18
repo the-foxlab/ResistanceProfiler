@@ -486,6 +486,9 @@ def reconstruct_formula_rule_hits(
                 rule_set=rule_set,
                 matched_variants=matched_variants,
                 matched_member_ids=list(payload.get('matched_member_ids', [])),
+                frechet_lower=float(payload.get('frechet_lower', 0.0)),
+                forced_fraction=float(payload.get('forced_fraction', 0.0)),
+                member_count=int(payload.get('member_count', 1)),
             )
         )
     return hits

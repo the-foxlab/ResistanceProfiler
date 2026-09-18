@@ -6022,7 +6022,8 @@ class TestReportAfThresholdsFromConfig:
         assert ctx['thresholds']['af_high_pct'] == 75
         assert ctx['thresholds']['af_intermediate_pct'] == 25
         assert ctx['thresholds']['af_low_min_pct'] == 1
-        assert ctx['thresholds']['combination_member_af_pct'] == 75
+        # 2/3 default, truncated to an integer percent label.
+        assert ctx['thresholds']['combination_fraction_pct'] == 66
 
     def test_override_af_bins_high_changes_high_label(self) -> None:
         """An override [af_bins] high = [0.8, 1.0] surfaces as 80% in the report thresholds."""
@@ -6041,21 +6042,21 @@ class TestReportAfThresholdsFromConfig:
         assert ctx['thresholds']['af_intermediate_pct'] == 25
         assert ctx['thresholds']['af_low_min_pct'] == 0
 
-    def test_override_combination_member_threshold_changes_label(self) -> None:
-        """An override [matching] combination_member_af_threshold surfaces in the report."""
+    def test_override_combination_fraction_changes_label(self) -> None:
+        """An override [matching] min_cooccurrence_combination_fraction surfaces in the report."""
         import dataclasses
 
         from respro.config.cli_settings import CLI_CONFIG
 
         r = _make_result()
         override_matching = dataclasses.replace(
-            CLI_CONFIG.matching, combination_member_af_threshold=0.9,
+            CLI_CONFIG.matching, min_cooccurrence_combination_fraction=0.9,
         )
         cfg = dataclasses.replace(CLI_CONFIG, matching=override_matching)
         ctx = build_report_context(
             r, similarity_high=1, similarity_moderate=0, cfg=cfg,
         )
-        assert ctx['thresholds']['combination_member_af_pct'] == 90
+        assert ctx['thresholds']['combination_fraction_pct'] == 90
 
     def test_fasta_mode_uses_af_bins_fasta(self) -> None:
         """In FASTA mode the high-AF label derives from cfg.af_bins_fasta, not cfg.af_bins."""
@@ -6072,3 +6073,85 @@ class TestReportAfThresholdsFromConfig:
         )
         assert ctx['thresholds']['af_high_pct'] == 90
 
+
+
+class TestFormulaHitFrechetReporting:
+    """F4: formula-hit frequency + AF bin come from frechet_lower; hover text
+    documents the guaranteed-minimum semantics."""
+
+    def _formula_hit(self, *, frechet_lower: float, forced_fraction: float = 1.0,
+                     member_count: int = 2) -> tuple[FormulaRuleHit, AnnotatedVariant]:
+        member = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T', allele_freq=0.9, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+        )
+        rs = ResistanceRuleSet(
+            id=10, drug_name='DrugX', drug_id=1, phenotype='resistant',
+            clinical_phenotype='resistant', ic50='>1.0', fold_ic50='15.0', score='4.0',
+            source='LB2021', group_name='FR1', logic_expression='R1 AND R2',
+            publications=[],
+            members=[
+                ResistanceRuleSetMember(
+                    id=1, rule_set_id=10, feature_name='testf', feature_id=1,
+                    reference_identifier='ref', position=1, reference='K',
+                    mutation='M', external_id='R1',
+                ),
+            ],
+        )
+        hit = FormulaRuleHit(
+            rule_set=rs, matched_variants=[member], matched_member_ids=['R1'],
+            frechet_lower=frechet_lower, forced_fraction=forced_fraction,
+            member_count=member_count,
+        )
+        return hit, member
+
+    def _result(self, hit: FormulaRuleHit, member: AnnotatedVariant):
+        return make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[member], query_sequence='ATGAAGAAA',
+            formula_hits=[hit],
+        )
+
+    def test_formula_row_af_bin_from_frechet_lower(self) -> None:
+        """A formula hit with frechet_lower = 0.3 bins 'intermediate' (not the
+        hardcoded 'high')."""
+        hit, member = self._formula_hit(frechet_lower=0.3)
+        r = self._result(hit, member)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        db_rows = [row for row in ctx['database_hits']['rows'] if row['drug_key'] == 'DrugX']
+        assert len(db_rows) == 1
+        assert db_rows[0]['af_bin'] == 'intermediate'
+
+    def test_formula_row_low_bin(self) -> None:
+        """A formula hit with frechet_lower = 0.1 bins 'low'."""
+        hit, member = self._formula_hit(frechet_lower=0.1)
+        r = self._result(hit, member)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        db_rows = [row for row in ctx['database_hits']['rows'] if row['drug_key'] == 'DrugX']
+        assert db_rows[0]['af_bin'] == 'low'
+
+    def test_formula_row_high_bin_when_lower_is_high(self) -> None:
+        """A formula hit with frechet_lower = 0.9 still bins 'high'."""
+        hit, member = self._formula_hit(frechet_lower=0.9)
+        r = self._result(hit, member)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        db_rows = [row for row in ctx['database_hits']['rows'] if row['drug_key'] == 'DrugX']
+        assert db_rows[0]['af_bin'] == 'high'
+
+    def test_hover_mentions_guaranteed_minimum_for_formula_hits(self) -> None:
+        """The rendered Database Hits frequency-column hover explains formula-hit
+        guaranteed-minimum semantics, keeping the existing wording intact."""
+        hit, member = self._formula_hit(frechet_lower=0.3)
+        r = self._result(hit, member)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        # Formula-specific wording (not present before F4) — unique to the
+        # frequency hover panel's new formula sentence.
+        assert 'members of a combination rule' in html
+        # Existing wording retained.
+        assert 'guaranteed minimum' in html
+        assert 'combined-codon' in html
+        assert 'variant allele frequency' in html

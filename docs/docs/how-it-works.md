@@ -98,7 +98,7 @@ For the full mathematical derivation, worked examples, the multiallelic-site gen
 ### Rule matching
 
 - **Single-mutation rules** are matched directly against the observed amino-acid events.
-- **Combination rules** evaluate boolean expressions (AND, OR, NOT, XOR) over their atomic member IDs. A member is considered present only when its matched variant has allele frequency **above the member AF threshold** (default > 0.75). This means a partial combination where some members are below threshold does **not** fire the combination rule. When multiple OR branches match, the branch with the highest member AF is selected deterministically (lexical tiebreak on member IDs).
+- **Combination rules** evaluate boolean expressions (AND, OR, NOT, XOR) over their atomic member IDs. A member is considered present only when its matched effect's amino-acid frequency lower bound exceeds eps. An AND clause fires only when the joint Fréchet lower bound's forced fraction reaches `min_cooccurrence_combination_fraction` (default 2/3) — a partial combination whose members do not co-occur often enough does **not** fire. The reported hit frequency is the joint Fréchet lower bound: a guaranteed minimum on how often the members co-occur, which can be lower than any individual member's frequency. When multiple OR branches match, the branch with the highest member lower bound is selected deterministically (lexical tiebreak on member IDs).
 - **Interpretation algorithms** extend rule evaluation with additional logic such as phenotype counting, score-based thresholds, and IC50-based drug interpretation. See [Interpretation Algorithms](algorithms.md) for details.
 
 !!! caution "Reference consistency matters"

@@ -14,7 +14,7 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
-from conftest import TINY_REF_SEQ, make_profiling_result, write_genbank
+from conftest import TINY_REF_NAME, TINY_REF_SEQ, make_profiling_result, write_genbank
 from typer.testing import CliRunner
 
 from respro.cli.init import init_project
@@ -546,6 +546,141 @@ class TestRegenerate:
         assert 'TestDrug' in regen_json_html
         assert 'OtherDrug' in regen_json_html
         assert 'susceptibility to 1 drug' in regen_json_html
+
+
+    def test_regenerate_preserves_frechet_formula_frequency_and_bin(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Regenerated reports reproduce the live Database Hits row's Fréchet
+        frequency + AF bin for a formula hit — including a sub-'high' bin.
+
+        The live path computes frechet_lower at match time; regenerate must
+        recover it from the persisted hit_json (results DB / JSON export),
+        never from a cache, so the rendered frequency chip and bin are
+        bit-identical to the live report.
+        """
+        import re as _re
+
+        # Project: two member rules on gag (formula components) plus a formula
+        # rule over them. Codon 1 K->E (member A, af=0.95), codon 2 A->T
+        # (member B, af=0.30). AND bound: lower = 0.95+0.30-1 = 0.25,
+        # ff = 0.25/0.30 = 0.833 >= 2/3 -> fires with frechet_lower = 0.25
+        # ('intermediate' bin, not 'high').
+        gb_path = tmp_path / 'tiny.gb'
+        record = SeqRecord(
+            Seq(TINY_REF_SEQ), id='tiny_ref', name='tiny_ref', description='',
+        )
+        record.annotations['molecule_type'] = 'DNA'
+        record.annotations['accessions'] = ['tiny_ref']
+        record.features = [
+            SeqFeature(
+                FeatureLocation(0, 87, strand=1),
+                type='CDS',
+                qualifiers={'gene': ['gag'], 'product': ['DNA polymerase'],
+                            'codon_start': ['1']},
+            )
+        ]
+        with open(gb_path, 'w') as handle:
+            SeqIO.write([record], handle, 'genbank')
+
+        rules_tsv = tmp_path / 'rules.tsv'
+        rules_tsv.write_text(
+            textwrap.dedent("""\
+                feature\treference_identifier\tposition\treference\tmutation\tphenotype\tmember_id
+                gag\ttiny_ref\t1\tK\tE\tunknown\tmut_a
+                gag\ttiny_ref\t2\tA\tT\tunknown\tmut_b
+                """),
+            encoding='utf-8',
+        )
+        formula_tsv = tmp_path / 'formula.tsv'
+        formula_tsv.write_text(
+            textwrap.dedent("""\
+                group_id\tantiviral\texpression\tphenotype
+                formula_1\tComboDrug\tmut_a AND mut_b\tresistant
+                """),
+            encoding='utf-8',
+        )
+        project_db = tmp_path / 'proj.db'
+        init_project(
+            db_path=project_db,
+            name='frechet-parity',
+            genbank_paths=[gb_path],
+            rules_tsv=rules_tsv,
+            formula_rules_tsv=formula_tsv,
+            additional_info=False,
+        )
+
+        vcf_path = tmp_path / 'sample.vcf'
+        vcf_path.write_text(textwrap.dedent("""\
+            ##fileformat=VCFv4.2
+            ##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">
+            ##INFO=<ID=DP,Number=1,Type=Integer,Description="Read Depth">
+            #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO
+            tiny_ref\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500
+            tiny_ref\t7\t.\tG\tA\t80\tPASS\tAF=0.30;DP=200
+            """), encoding='utf-8')
+        ref_fasta = tmp_path / 'ref.fasta'
+        ref_fasta.write_text(f'>{TINY_REF_NAME}\n{TINY_REF_SEQ}\n', encoding='utf-8')
+
+        # Live profile with both results DB and JSON export.
+        profile_out = tmp_path / 'profile_out'
+        results_db = tmp_path / 'results.db'
+        profile_result = CliRunner().invoke(app, [
+            'vcf',
+            '--project', str(project_db),
+            '--vcf', str(vcf_path),
+            '--ref-fasta', str(ref_fasta),
+            '--results-db', str(results_db),
+            '--output', str(profile_out),
+            '--min-af', '0.01',
+            '--min-depth', '0',
+            '--export', 'json',
+        ])
+        assert profile_result.exit_code == 0, profile_result.output
+        live_html = list(profile_out.glob('*.html'))[0].read_text()
+
+        def _formula_db_hit_row(html: str) -> str:
+            """Extract the Database Hits row for the formula drug."""
+            rows = _re.findall(r'<tr[^>]*db-hit-row.*?</tr>', html, _re.DOTALL)
+            combo_rows = [r for r in rows if 'combodrug' in r.lower()]
+            assert len(combo_rows) == 1, f'expected 1 ComboDrug row, got {len(combo_rows)}'
+            return combo_rows[0]
+
+        live_row = _formula_db_hit_row(live_html)
+        # The formula hit must fire with a sub-'high' bin (0.25 -> intermediate).
+        live_bin = _re.search(r'db-hit-af--(\w+)', live_row).group(1)
+        assert live_bin == 'intermediate', live_bin
+
+        # Regenerate from the results DB.
+        regen_db_dir = tmp_path / 'regen_db'
+        regen_db_result = CliRunner().invoke(app, [
+            'regenerate',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(project_db),
+            '--output', str(regen_db_dir),
+        ])
+        assert regen_db_result.exit_code == 0, regen_db_result.output
+        regen_db_html = list(regen_db_dir.glob('*.html'))[0].read_text()
+        regen_db_row = _formula_db_hit_row(regen_db_html)
+        # The full row (frequency chip + bin + metrics) is bit-identical.
+        assert regen_db_row == live_row
+
+        # Regenerate from the JSON export.
+        json_files = list(profile_out.glob('*.results.json'))
+        assert len(json_files) == 1
+        regen_json_dir = tmp_path / 'regen_json'
+        regen_json_result = CliRunner().invoke(app, [
+            'regenerate',
+            '--json', str(json_files[0]),
+            '--project', str(project_db),
+            '--output', str(regen_json_dir),
+        ])
+        assert regen_json_result.exit_code == 0, regen_json_result.output
+        regen_json_html = list(regen_json_dir.glob('*.html'))[0].read_text()
+        regen_json_row = _formula_db_hit_row(regen_json_html)
+        assert regen_json_row == live_row
 
     def test_regenerate_from_json_rejects_invalid_json(
         self,

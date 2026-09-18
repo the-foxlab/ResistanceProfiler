@@ -123,7 +123,7 @@ def build_report_context(
     af_high_pct_source_threshold: float | None = None,
     af_intermediate_pct_source_threshold: float | None = None,
     af_low_min_pct_source_threshold: float | None = None,
-    combination_member_af_pct_source_threshold: float | None = None,
+    combination_fraction_source_threshold: float | None = None,
     cfg: CliConfig = CLI_CONFIG,
 ) -> dict:
     """
@@ -144,8 +144,10 @@ def build_report_context(
         af_intermediate_pct_source_threshold = af_bins.intermediate[0]
     if af_low_min_pct_source_threshold is None:
         af_low_min_pct_source_threshold = af_bins.low[0]
-    if combination_member_af_pct_source_threshold is None:
-        combination_member_af_pct_source_threshold = cfg.matching.combination_member_af_threshold
+    if combination_fraction_source_threshold is None:
+        combination_fraction_source_threshold = (
+            cfg.matching.min_cooccurrence_combination_fraction
+        )
 
     summary = result.summary_dict()
     has_database_hit = result.database_hit_count > 0
@@ -312,7 +314,7 @@ def build_report_context(
             'af_high_pct': int(af_high_pct_source_threshold * 100),
             'af_intermediate_pct': int(af_intermediate_pct_source_threshold * 100),
             'af_low_min_pct': int(af_low_min_pct_source_threshold * 100),
-            'combination_member_af_pct': int(combination_member_af_pct_source_threshold * 100),
+            'combination_fraction_pct': int(combination_fraction_source_threshold * 100),
         },
         'database_hits': {**database_hits, 'is_multi_species': is_multi_species},
         'similarity_entries': similarity_entries,
@@ -357,7 +359,7 @@ def render_html(
     af_high_pct_source_threshold: float | None = None,
     af_intermediate_pct_source_threshold: float | None = None,
     af_low_min_pct_source_threshold: float | None = None,
-    combination_member_af_pct_source_threshold: float | None = None,
+    combination_fraction_source_threshold: float | None = None,
     cfg: CliConfig = CLI_CONFIG,
 ) -> str:
     """
@@ -385,7 +387,7 @@ def render_html(
         af_high_pct_source_threshold=af_high_pct_source_threshold,
         af_intermediate_pct_source_threshold=af_intermediate_pct_source_threshold,
         af_low_min_pct_source_threshold=af_low_min_pct_source_threshold,
-        combination_member_af_pct_source_threshold=combination_member_af_pct_source_threshold,
+        combination_fraction_source_threshold=combination_fraction_source_threshold,
         cfg=cfg,
     )
     context['plot'] = {
@@ -426,7 +428,7 @@ def write_html(
     af_high_pct_source_threshold: float | None = None,
     af_intermediate_pct_source_threshold: float | None = None,
     af_low_min_pct_source_threshold: float | None = None,
-    combination_member_af_pct_source_threshold: float | None = None,
+    combination_fraction_source_threshold: float | None = None,
     cfg: CliConfig = CLI_CONFIG,
 ) -> Path:
     """
@@ -453,7 +455,7 @@ def write_html(
         af_high_pct_source_threshold=af_high_pct_source_threshold,
         af_intermediate_pct_source_threshold=af_intermediate_pct_source_threshold,
         af_low_min_pct_source_threshold=af_low_min_pct_source_threshold,
-        combination_member_af_pct_source_threshold=combination_member_af_pct_source_threshold,
+        combination_fraction_source_threshold=combination_fraction_source_threshold,
         cfg=cfg,
     )
     output_path.write_text(html_content, encoding='utf-8')
@@ -613,8 +615,9 @@ def _build_database_hits_rows(
     """
     Build one row per database hit for the Database Hits table.
 
-    Single rules and formula rules each produce one row. Formula-rule frequency is
-    always 'high' since they only fire when allele_freq > 0.75 for every member.
+    Single rules and formula rules each produce one row. A formula-rule row's
+    frequency bin comes from the Fréchet lower bound (frechet_lower), the
+    guaranteed-minimum co-occurrence frequency of the combination.
     Publications are deduplicated globally and referenced by citation number.
 
     :param result: profiling result
@@ -697,7 +700,10 @@ def _build_database_hits_rows(
                 rs.ic50, rs.fold_ic50, rs.score,
                 thresholds=metric_thresholds,
             ),
-            'af_bin': 'high',  # formula rules only fire at allele_freq > 0.75
+            # Bin the formula hit at the Fréchet lower bound: the guaranteed
+            # minimum co-occurrence frequency, which can fall below the
+            # per-member 'high' bin even though every member fired at > 0.75.
+            'af_bin': _bin_for_af(formula_hit.frechet_lower, result.is_fasta_mode, cfg=cfg),
             'source': rs.source,
             'comment': rs.comment,
             'reference_name': ref_by_chrom.get(first_chrom, ''),

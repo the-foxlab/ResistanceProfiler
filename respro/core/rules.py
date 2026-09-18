@@ -8,6 +8,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from respro.config.cli_settings import CLI_CONFIG
 from respro.db._rules_formula import _tokenize_formula_expression
 from respro.db._rules_publication import _report_publication_lookup_failures
 from respro.db.models import (
@@ -26,6 +27,51 @@ from respro.db.rules_import import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Import-time default for the Fréchet-bound acceptance tolerance on the formula
+# path. Callers thread the per-invocation value ([matching] frechet_epsilon)
+# through match_formula_rules(eps=...); this alias is the fallback default and
+# is kept for backward-compat with annotation.py's re-export and tests.
+_FRECHET_EPS = CLI_CONFIG.codon.frechet_epsilon
+
+
+def _frechet_and_bound(
+    q_values: list[float],
+    min_fraction: float,
+    eps: float = _FRECHET_EPS,
+) -> tuple[float, float, float, bool]:
+    """
+    Compute the sharp Fréchet intersection bounds for an AND clause of members.
+
+    Uses the identical formula as the same-codon policy in
+    ``respro.core.combined_snp._compute_codon_frechet_states``:
+
+    - ``lower = max(0, sum(q) - (k-1))`` — minimum guaranteed co-occurrence.
+    - ``upper = min(q)`` — maximum possible co-occurrence.
+    - ``forced_fraction = lower / upper`` (0 when ``upper == 0``) — the minimum
+      fraction of the rarest member's carriers that must carry all other members.
+
+    A clause is ``accepted`` when ``lower > eps`` and
+    ``forced_fraction >= min_fraction - eps``.
+
+    :param q_values: member frequencies (matched effect lower bounds), length >= 1
+    :param min_fraction: forced-fraction acceptance threshold (policy knob,
+        ``[matching] min_cooccurrence_combination_fraction``)
+    :param eps: numerical tolerance shared with the codon path
+    :return: ``(lower, upper, forced_fraction, accepted)``
+    :raises ValueError: when ``q_values`` is empty
+    """
+    if not q_values:
+        raise ValueError('AND clause requires at least one member frequency')
+    k = len(q_values)
+    lower = max(0.0, sum(q_values) - (k - 1))
+    upper = min(q_values)
+    # Clamp: lower <= upper always holds in exact arithmetic, but float
+    # summation (e.g. 0.6 + 0.6) can push lower above upper by 1 ULP.
+    lower = min(lower, upper)
+    forced_fraction = lower / upper if upper > 0 else 0.0
+    accepted = lower > eps and forced_fraction >= min_fraction - eps
+    return lower, upper, forced_fraction, accepted
 
 
 def import_rules_with_summary(
@@ -214,51 +260,60 @@ def match_rules(
 def match_formula_rules(
     annotations: list[AnnotatedVariant],
     formula_rules: list[FormulaRuleRuntime],
-    member_af_threshold: float | None = None,
+    min_fraction: float,
+    eps: float = _FRECHET_EPS,
 ) -> list[FormulaRuleHit]:
     """
-    Evaluate formula rules over AF-gated matched atomic member_ids.
+    Evaluate formula rules over Fréchet-gated matched atomic member_ids.
 
-    The AF gate uses strict ``>`` semantics: a member rule contributes only when
-    its annotation's allele frequency exceeds the threshold, so borderline-equal
-    variants are excluded from formula evaluation.
+    A member contributes when its matched effect lower bound
+    (``rule_effect_aa_freq``) exceeds eps — the same amino-acid-frequency basis
+    single rules use, not the nucleotide ``allele_freq``. An AND clause of
+    members fires when the joint Fréchet bound (``_frechet_and_bound``) is
+    accepted at ``min_fraction``; OR/XOR/NOT follow the operator semantics in
+    ``_evaluate_formula_expression``. Each hit records the firing clause's
+    guaranteed lower bound (``frechet_lower``), its ``forced_fraction``, and the
+    number of contributing members.
+
+    :param eps: numerical tolerance for Fréchet-bound acceptance; callers load
+        it from the per-invocation config (``[matching] frechet_epsilon``)
+        rather than relying on the import-time module default.
     """
     if not formula_rules:
         return []
 
-    threshold = float(member_af_threshold) if member_af_threshold is not None else 0.75
-
     best_ann_by_member: dict[str, AnnotatedVariant] = {}
+    member_lower: dict[str, float] = {}
     for ann in annotations:
-        if ann.variant.allele_freq <= threshold:
-            continue
         for rule in ann.rule_matches:
             if not rule.external_id:
+                continue
+            effect_lower = ann.rule_effect_aa_freq.get(rule.id, 0.0)
+            if effect_lower <= eps:
                 continue
             existing = best_ann_by_member.get(rule.external_id)
             if existing is None:
                 best_ann_by_member[rule.external_id] = ann
+                member_lower[rule.external_id] = effect_lower
                 continue
-            if ann.variant.allele_freq > existing.variant.allele_freq:
+            existing_lower = member_lower[rule.external_id]
+            if effect_lower > existing_lower:
                 best_ann_by_member[rule.external_id] = ann
+                member_lower[rule.external_id] = effect_lower
                 continue
-            if ann.variant.allele_freq == existing.variant.allele_freq:
+            if effect_lower == existing_lower:
                 ann_key = (ann.feature_name, ann.codon_pos, ann.alt_aa)
                 existing_key = (existing.feature_name, existing.codon_pos, existing.alt_aa)
                 if ann_key < existing_key:
                     best_ann_by_member[rule.external_id] = ann
-
-    member_truth = {member_id: True for member_id in best_ann_by_member}
-    member_af_map = {
-        member_id: ann.variant.allele_freq for member_id, ann in best_ann_by_member.items()
-    }
+                    member_lower[rule.external_id] = effect_lower
 
     hits: list[FormulaRuleHit] = []
     for formula in formula_rules:
-        is_true, contributing_ids = _evaluate_formula_expression(
-            formula.normalized_expression,
-            member_truth,
-            member_af_map,
+        is_true, contributing_ids, frechet_lower, forced_fraction = (
+            _evaluate_formula_expression(
+                formula.normalized_expression, member_lower, min_fraction, eps,
+            )
         )
         if not is_true:
             continue
@@ -306,6 +361,9 @@ def match_formula_rules(
                 rule_set=rule_set,
                 matched_variants=matched_variants,
                 matched_member_ids=matched_ids,
+                frechet_lower=frechet_lower,
+                forced_fraction=forced_fraction,
+                member_count=len(matched_ids),
             )
         )
 
@@ -315,98 +373,138 @@ def match_formula_rules(
 
 def _evaluate_formula_expression(
     expression: str,
-    member_truth: dict[str, bool],
-    member_af_map: dict[str, float],
-) -> tuple[bool, set[str]]:
-    """Evaluate one normalized expression and return (truth, contributing member_ids)."""
+    member_lower: dict[str, float],
+    min_fraction: float,
+    eps: float,
+) -> tuple[bool, set[str], float, float]:
+    """Evaluate one normalized expression under Fréchet gating.
+
+    Nodes return ``(accepted, contributors, lower, forced_fraction)``:
+
+    - AND: Fréchet joint bound over positive members (``_frechet_and_bound``).
+      NOT sub-branches invert presence only and contribute no frequency.
+    - OR: the accepted child with the highest ``lower`` (lexical tie-break).
+    - XOR: parity fold — fires when an odd number of operands are accepted;
+      frequency = the winning operand's ``lower`` when exactly one, else the
+      Fréchet AND-bound over all accepted operands' lowers.
+    - NOT: pure boolean inversion, never carries a frequency.
+    """
     tokens = _tokenize_formula_expression(expression)
     index = 0
 
     def _score(contributors: set[str]) -> tuple[float, tuple[str, ...]]:
         if not contributors:
             return (0.0, tuple())
-        max_af = max(member_af_map.get(member_id, 0.0) for member_id in contributors)
+        max_lower = max(member_lower.get(member_id, 0.0) for member_id in contributors)
         lexical = tuple(sorted(contributors))
-        return (max_af, lexical)
+        return (max_lower, lexical)
 
-    def parse_primary() -> tuple[bool, set[str]]:
+    def parse_primary() -> tuple[bool, set[str], float, float]:
         nonlocal index
         if index >= len(tokens):
             raise ValueError('unexpected end of expression')
         token = tokens[index]
         if token == '(':
             index += 1
-            value, contributors = parse_or_expression()
+            value, contributors, lower, ff = parse_or_expression()
             if index >= len(tokens) or tokens[index] != ')':
                 raise ValueError('unbalanced parentheses')
             index += 1
-            return value, contributors
+            return value, contributors, lower, ff
         if token.upper() in {'AND', 'OR', 'NOT', 'XOR', ')'}:
             raise ValueError(f'unexpected token {token!r}')
         index += 1
-        is_true = bool(member_truth.get(token, False))
-        return is_true, ({token} if is_true else set())
+        lower = member_lower.get(token, 0.0)
+        is_true = lower > eps
+        return is_true, ({token} if is_true else set()), lower, 1.0
 
-    def parse_not_expression() -> tuple[bool, set[str]]:
+    def parse_not_expression() -> tuple[bool, set[str], float, float]:
         nonlocal index
         if index < len(tokens) and tokens[index].upper() == 'NOT':
             index += 1
-            value, _contributors = parse_not_expression()
-            # NOT contributes no positive evidence ids by design.
-            return (not value), set()
+            value, _contributors, _lower, _ff = parse_not_expression()
+            # NOT contributes no positive evidence ids or frequency by design.
+            return (not value), set(), 0.0, 0.0
         return parse_primary()
 
-    def parse_and_expression() -> tuple[bool, set[str]]:
+    def parse_and_expression() -> tuple[bool, set[str], float, float]:
         nonlocal index
-        value, contributors = parse_not_expression()
+        value, contributors, lower, ff = parse_not_expression()
         while index < len(tokens) and tokens[index].upper() == 'AND':
             index += 1
-            right_value, right_contributors = parse_not_expression()
-            value = value and right_value
-            contributors = contributors | right_contributors if value else set()
-        return value, contributors
+            right_value, right_contributors, right_lower, right_ff = parse_not_expression()
+            if value and right_value:
+                # Joint Fréchet bound over the accumulated positive members.
+                q_values = [member_lower.get(mid, 0.0) for mid in contributors | right_contributors]
+                new_lower, _upper, new_ff, accepted = _frechet_and_bound(q_values, min_fraction, eps)
+                value = accepted
+                contributors = contributors | right_contributors if accepted else set()
+                lower, ff = new_lower, new_ff
+            else:
+                value = False
+                contributors = set()
+                lower, ff = 0.0, 0.0
+        return value, contributors, lower, ff
 
-    def parse_xor_expression() -> tuple[bool, set[str]]:
+    def parse_xor_expression() -> tuple[bool, set[str], float, float]:
         nonlocal index
-        value, contributors = parse_and_expression()
+        # XOR folds with parity: fires when an ODD number of operands are
+        # accepted. The accepted operands are accumulated across the chain so
+        # a 3-present chain (even, then odd again) still reports the full
+        # present set, not just the last operand.
+        value, contributors, lower, ff = parse_and_expression()
+        accepted_nodes: list[tuple[set[str], float, float]] = (
+            [(contributors, lower, ff)] if value else []
+        )
         while index < len(tokens) and tokens[index].upper() == 'XOR':
             index += 1
-            right_value, right_contributors = parse_and_expression()
-            xor_true = (value and not right_value) or (right_value and not value)
-            if xor_true:
-                contributors = contributors if value else right_contributors
-            else:
-                contributors = set()
-            value = xor_true
-        return value, contributors
+            right_value, right_contributors, right_lower, right_ff = parse_and_expression()
+            if right_value:
+                accepted_nodes.append((right_contributors, right_lower, right_ff))
+        n = len(accepted_nodes)
+        if n % 2 == 0:
+            return False, set(), 0.0, 0.0
+        if n == 1:
+            only_contribs, only_lower, only_ff = accepted_nodes[0]
+            return True, only_contribs, only_lower, only_ff
+        # Odd with >= 3 accepted: fire on the Fréchet AND-bound over the union
+        # of accepted members (conservative guaranteed co-occurrence).
+        union: set[str] = set()
+        for c, _l, _f in accepted_nodes:
+            union |= c
+        q_values = [member_lower.get(mid, 0.0) for mid in union]
+        new_lower, _upper, new_ff, accepted = _frechet_and_bound(q_values, min_fraction, eps)
+        if not accepted:
+            return False, set(), 0.0, 0.0
+        return True, union, new_lower, new_ff
 
-    def parse_or_expression() -> tuple[bool, set[str]]:
+    def parse_or_expression() -> tuple[bool, set[str], float, float]:
         nonlocal index
-        value, contributors = parse_xor_expression()
+        value, contributors, lower, ff = parse_xor_expression()
         while index < len(tokens) and tokens[index].upper() == 'OR':
             index += 1
-            right_value, right_contributors = parse_xor_expression()
+            right_value, right_contributors, right_lower, right_ff = parse_xor_expression()
             if value and right_value:
-                # Deterministic branch preference by AF and lexical member_id order.
+                # Deterministic branch preference by lower and lexical order.
                 left_score = _score(contributors)
                 right_score = _score(right_contributors)
                 if left_score[0] > right_score[0]:
-                    contributors = contributors
+                    pass
                 elif right_score[0] > left_score[0]:
-                    contributors = right_contributors
+                    contributors, lower, ff = right_contributors, right_lower, right_ff
                 else:
-                    contributors = contributors if left_score[1] <= right_score[1] else right_contributors
+                    if right_score[1] < left_score[1]:
+                        contributors, lower, ff = right_contributors, right_lower, right_ff
                 value = True
             elif right_value:
-                value = True
-                contributors = right_contributors
+                value, contributors, lower, ff = True, right_contributors, right_lower, right_ff
             # else: keep left side as-is
-        return value, contributors
+        return value, contributors, lower, ff
 
-    result, contributors = parse_or_expression()
+    result, contributors, lower, ff = parse_or_expression()
     if index != len(tokens):
         raise ValueError('unexpected trailing tokens')
-    return result, contributors
+    return result, contributors, lower, ff
 
 
 def _suppress_ins_any_when_specific_fires(rule_matches: list[ResistanceRule]) -> None:

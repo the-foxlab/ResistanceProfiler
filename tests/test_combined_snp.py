@@ -731,6 +731,52 @@ class TestBamPathAnnotation:
 
 # ─── Fréchet epsilon config wiring (M4) ──────────────────────────────────────
 
+# ─── Codon-path cfg threading (two-epsilon wiring) ──────────────────────────
+
+
+class TestCodonPathCfgEpsilonThreading:
+    """_annotate_combined_snp_codon must pass cfg.codon.frechet_epsilon into
+    _compute_codon_frechet_states instead of silently using the module
+    constant, so a TOML override affects the codon path."""
+
+    def test_cfg_codon_epsilon_gates_frechet_state(self) -> None:
+        """A state with a tiny positive lower is accepted under the default
+        eps but rejected when cfg.codon.frechet_epsilon is raised.
+
+        q1 = 1.0, q2 = 1e-7 → lower = 1e-7, upper = 1e-7, ff = 1.0.
+        eps=1e-9: lower (1e-7) > eps → accepted.
+        eps=1e-6: lower (1e-7) <= eps → rejected.
+        """
+        import dataclasses
+
+        from respro.config.cli_settings import CLI_CONFIG
+
+        feature = _make_feature()
+        variants = [
+            VariantCall(chrom='ref', pos=0, ref='A', alt='T', allele_freq=1.0, depth=100),
+            VariantCall(chrom='ref', pos=1, ref='A', alt='T', allele_freq=1e-7, depth=100),
+        ]
+
+        anns_default = _annotate_combined_snp_codon(variants, feature)
+        accepted_default = [
+            s for s in anns_default[0].combined_states
+            if s.accepted and s.member_indices == (0, 100)
+        ]
+        assert accepted_default, 'both-member state must be accepted under default eps'
+        assert all(s.lower == pytest.approx(1e-7) for s in accepted_default)
+
+        codon_cfg = dataclasses.replace(
+            CLI_CONFIG.codon, frechet_epsilon=1e-6,
+        )
+        cfg = dataclasses.replace(CLI_CONFIG, codon=codon_cfg)
+        anns_large = _annotate_combined_snp_codon(variants, feature, cfg=cfg)
+        accepted_large = [
+            s for s in anns_large[0].combined_states
+            if s.accepted and s.member_indices == (0, 100)
+        ]
+        assert not accepted_large, 'raising cfg codon eps must reject the state'
+
+
 
 class TestFrechetEpsilonConfig:
     """Tests that the Fréchet epsilon is sourced from CLI_CONFIG.codon.frechet_epsilon (M4)."""
@@ -744,10 +790,10 @@ class TestFrechetEpsilonConfig:
 
     def test_annotation_reexport_still_works(self) -> None:
         """from respro.core.annotation import _FRECHET_EPS should still succeed (backward-compat)."""
-        from respro.core.annotation import _FRECHET_EPS  # noqa: F401
-        from respro.core import combined_snp
         # The re-exported name should match the combined_snp module constant.
         import respro.core.annotation as annotation_mod
+        from respro.core import combined_snp
+        from respro.core.annotation import _FRECHET_EPS  # noqa: F401
         assert annotation_mod._FRECHET_EPS is combined_snp._FRECHET_EPS or \
             annotation_mod._FRECHET_EPS == combined_snp._FRECHET_EPS
 

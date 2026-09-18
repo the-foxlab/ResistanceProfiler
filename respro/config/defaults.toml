@@ -27,7 +27,16 @@ github_respro_db_raw = 'https://raw.githubusercontent.com/the-foxlab/respro-data
 doi_prefixes = ['https://doi.org/', 'http://doi.org/']
 
 [matching]
-combination_member_af_threshold = 0.75
+# Fréchet forced-fraction acceptance threshold for formula (combination) rules.
+# A formula AND clause fires only when the guaranteed minimum co-occurrence
+# fraction of its members (Fréchet lower / upper) reaches this value. Same
+# formula as the codon path; numerically equal default but an independent
+# policy knob — change here without touching [codon].
+min_cooccurrence_combination_fraction = 0.6666666666666666
+# Numerical tolerance for Fréchet-bound acceptance on the formula
+# (combination) path (member lower > eps, forced_fraction >=
+# min_fraction - eps). Independent of the codon-path [codon] frechet_epsilon.
+frechet_epsilon = 1e-9
 
 [codon]
 # Conservative Fréchet-intersection policy for combining same-codon SNPs into

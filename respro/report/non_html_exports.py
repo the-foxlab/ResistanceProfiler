@@ -615,15 +615,17 @@ def write_tsv(
         nt_users = ';'.join(nt_change_user(a) for a in members)
         aa_effects = ';'.join(_aa_effects(a) for a in members)
         strands = ';'.join(strand_by_feature.get(a.feature_name, '') for a in members)
-        afs = ';'.join(repr(round(a.variant.allele_freq, 3)) for a in members)
         first_chrom = members[0].variant.chrom
+        # The hit frequency of a formula row is the Fréchet lower bound: the
+        # guaranteed minimum co-occurrence frequency of the combination, not
+        # the individual members' variant allele frequencies.
         rows.append({
             'reference': ref_by_chrom.get(first_chrom, ''),
             'gene': genes,
             'nt_mut': nt_muts,
             'nt_mut_user': nt_users,
             'strand': strands,
-            'af': afs,
+            'af': repr(round(hit.frechet_lower, 3)),
             'depth': '',  # combined row spans multiple variants; no single depth
             'consequence': ';'.join(a.consequence for a in members),
             'aa_effects': aa_effects,

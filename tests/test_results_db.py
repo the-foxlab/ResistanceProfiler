@@ -1147,3 +1147,139 @@ class TestFreqMethodProvenance:
         )
 
 
+@pytest.fixture()
+def _persist_results_conn(tmp_path: Path):
+    conn = init_results_db(tmp_path / 'results.db')
+    yield conn
+    conn.close()
+
+
+@pytest.fixture()
+def _persist_project_conn(tmp_path: Path):
+    db_path = tmp_path / 'project.db'
+    conn = create_schema(db_path)
+    conn.execute(
+        'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+        ('Test Project', 1, str(uuid.uuid4())),
+    )
+    conn.execute(
+        'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
+        (1, 'ref1', 100),
+    )
+    conn.execute(
+        'INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
+        (1, 'gag', 0, 90, '+'),
+    )
+    conn.execute(
+        'INSERT INTO drug (project_id, name) VALUES (?, ?)',
+        (1, 'drugx'),
+    )
+    conn.execute(
+        'INSERT INTO resistance_rule (feature_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
+        (1, 1, 1, 'E'),
+    )
+    conn.commit()
+    return conn
+
+class TestFormulaHitFrechetPersistence:
+    """Frechet_lower round-trips through the results DB hit_json."""
+
+    def test_frechet_fields_round_trip(
+        self, _persist_results_conn, _persist_project_conn, tmp_path: Path,
+    ) -> None:
+        """save_run -> load_formula_rule_hits -> reconstruct preserves the
+        Fréchet fields bit-exactly."""
+        v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
+        rule = ResistanceRule(
+            id=1, feature_name='gag', feature_id=1, drug_name='drugx', drug_id=1,
+            reference_identifier='', position=1, reference='K', mutation='E',
+            phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=v, feature_name='gag', codon_pos=1,
+            ref_codon='AAA', alt_codon='GAA', ref_aa='K', alt_aa='E',
+            consequence='missense', af_bin='high', rule_matches=[rule],
+        )
+        rule_set = ResistanceRuleSet(
+            id=1, drug_name='drugx', drug_id=1, phenotype='resistant',
+            group_name='combo_1',
+        )
+        rule_set.members = [
+            ResistanceRuleSetMember(
+                id=1, rule_set_id=1, feature_name='gag', feature_id=1,
+                reference_identifier='ref1', position=1, reference='K',
+                mutation='E', external_id='R1',
+            ),
+        ]
+        hit = FormulaRuleHit(
+            rule_set=rule_set, matched_variants=[ann], matched_member_ids=['R1'],
+            frechet_lower=0.8, forced_fraction=0.889, member_count=2,
+        )
+        result = make_profiling_result(
+            project_name='Test Project', reference_name='ref1',
+            sample_name='sample01', vcf_name='sample.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=1,
+            annotations=[ann], formula_hits=[hit],
+        )
+        save_run(_persist_results_conn, tmp_path / 'project.db', _persist_project_conn, result)
+
+        _, variant_rows = load_run(_persist_results_conn, 1)
+        annotations = reconstruct_annotations(variant_rows)
+        combo_rows = load_formula_rule_hits(_persist_results_conn, 1)
+        restored = reconstruct_formula_rule_hits(combo_rows, annotations)
+
+        assert len(restored) == 1
+        assert restored[0].frechet_lower == 0.8
+        assert restored[0].forced_fraction == pytest.approx(0.889)
+        assert restored[0].member_count == 2
+
+    def test_legacy_payload_defaults_to_zero(
+        self, _persist_results_conn, _persist_project_conn, tmp_path: Path,
+    ) -> None:
+        """A legacy hit_json without the Fréchet keys loads without error (0.0)."""
+        v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
+        ann = AnnotatedVariant(
+            variant=v, feature_name='gag', codon_pos=1,
+            ref_codon='AAA', alt_codon='GAA', ref_aa='K', alt_aa='E',
+            consequence='missense', af_bin='high',
+        )
+        rule_set = ResistanceRuleSet(
+            id=1, drug_name='drugx', drug_id=1, phenotype='resistant',
+            group_name='combo_1',
+        )
+        rule_set.members = [
+            ResistanceRuleSetMember(
+                id=1, rule_set_id=1, feature_name='gag', feature_id=1,
+                reference_identifier='ref1', position=1, reference='K',
+                mutation='E', external_id='R1',
+            ),
+        ]
+        result = make_profiling_result(
+            project_name='Test Project', reference_name='ref1',
+            sample_name='sample01', vcf_name='sample.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[ann],
+            formula_hits=[FormulaRuleHit(rule_set=rule_set, matched_variants=[ann])],
+        )
+        save_run(_persist_results_conn, tmp_path / 'project.db', _persist_project_conn, result)
+        # Simulate a legacy DB by stripping the new keys from the stored JSON.
+        _persist_results_conn.execute(
+            "UPDATE formula_rule_hit SET hit_json = ? WHERE run_id = 1",
+            (json.dumps({k: val for k, val in json.loads(
+                _persist_results_conn.execute(
+                    'SELECT hit_json FROM formula_rule_hit WHERE run_id = 1'
+                ).fetchone()[0]
+            ).items() if k not in ('frechet_lower', 'forced_fraction', 'member_count')}),
+            ),
+        )
+        _persist_results_conn.commit()
+
+        _, variant_rows = load_run(_persist_results_conn, 1)
+        annotations = reconstruct_annotations(variant_rows)
+        combo_rows = load_formula_rule_hits(_persist_results_conn, 1)
+        restored = reconstruct_formula_rule_hits(combo_rows, annotations)
+
+        assert len(restored) == 1
+        assert restored[0].frechet_lower == 0.0
+        assert restored[0].forced_fraction == 0.0
+        assert restored[0].member_count == 1
