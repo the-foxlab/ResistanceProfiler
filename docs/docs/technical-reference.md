@@ -22,24 +22,60 @@ sequences are stored and manipulated in the **coding (5'→3') orientation**.
 
 ```mermaid
 flowchart TD
-    DB["Project database<br/>(references, CDS, rules)"]
-    IN["Input: FASTA consensus<br/>or VCF + reference FASTA"]
-    ALIGN["Reference matching<br/>(minimap2 / mappy)"]
-    CIGAR["CIGAR parsing &<br/>coordinate mapping"]
-    EMIT["Variant emission<br/>(FASTA) or remap (VCF)"]
-    ANN["Codon-aware annotation<br/>(Fréchet, frameshifts, indels)"]
-    RULES["Rule matching<br/>(single + formula AST)"]
-    ALGO["Interpretation algorithms"]
-    REPORT["Report & exports"]
+  subgraph PROJECT["Project database"]
+    GB["GenBank references"]
+    FEAT["Features<br/>CDS, mature peptides, frame, strand"]
+    CURATED["Atomic rules, formula rules,<br/>interpretation configuration"]
+    GB --> FEAT
+    FEAT --> CURATED
+  end
 
-    DB --> ALIGN
-    IN --> ALIGN
-    ALIGN --> CIGAR
-    CIGAR --> EMIT
-    EMIT --> ANN
-    ANN --> RULES
-    RULES --> ALGO
-    ALGO --> REPORT
+  subgraph FASTA["FASTA mode"]
+    F_IN["Consensus FASTA"]
+    F_ALIGN["Align internal CDS features<br/>and select best reference"]
+    F_MAP["CIGAR map<br/>query ↔ internal CDS"]
+    F_VAR["Emit variants from alignment<br/>including IUPAC ambiguity"]
+    F_COV["Coverage gaps:<br/>NNN codons / unaligned tails"]
+    F_IN --> F_ALIGN --> F_MAP --> F_VAR
+    F_MAP --> F_COV
+  end
+
+  subgraph VCF["VCF mode"]
+    V_IN["VCF + reference FASTA"]
+    V_CHECK["Match CHROM to FASTA record<br/>and validate REF alleles"]
+    V_ALIGN["Align reference FASTA records<br/>and select best reference"]
+    V_MAP["CIGAR map<br/>query → internal CDS"]
+    V_VAR["Filter and remap VCF calls<br/>including strand-aware indels"]
+    V_BAM{"BAM available?"}
+    V_COV["Coverage gaps from projected depth"]
+    V_NO_COV["No depth-based coverage assessment"]
+    V_IN --> V_CHECK --> V_ALIGN --> V_MAP --> V_VAR
+    V_MAP --> V_BAM
+    V_BAM -->|yes| V_COV
+    V_BAM -->|no| V_NO_COV
+  end
+
+  SHARED["Normalized variant calls<br/>in internal coding coordinates"]
+  COV["Coverage gaps"]
+  ANN["Codon-aware annotation<br/>including combined codon states"]
+  SINGLE["Atomic rule matching"]
+  FORMULA["Formula evaluation<br/>AND / OR / NOT / XOR"]
+  ALGO["Drug interpretation"]
+  REPORT["Report and exports"]
+
+  CURATED --> F_ALIGN
+  CURATED --> V_ALIGN
+  GB --> F_ALIGN
+  GB --> V_ALIGN
+  F_VAR --> SHARED
+  V_VAR --> SHARED
+  F_COV --> COV
+  V_COV --> COV
+  SHARED --> ANN --> SINGLE --> FORMULA --> ALGO --> REPORT
+  COV --> REPORT
+  CURATED --> SINGLE
+  CURATED --> FORMULA
+  CURATED --> ALGO
 ```
 
 ---
