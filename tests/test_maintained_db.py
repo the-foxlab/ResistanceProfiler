@@ -565,7 +565,6 @@ class TestGenbankConfigWiring:
     def test_timeout_tracks_overridden_config(self, tmp_path: Path) -> None:
         """Patching CLI_CONFIG.timeouts.genbank_timeout should change the urlopen timeout."""
         from respro.config import cli_settings
-        from respro.config.cli_settings import CliTimeoutConfig
         original = cli_settings.CLI_CONFIG
         patched = dataclasses.replace(
             original,
