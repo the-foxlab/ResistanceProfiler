@@ -251,10 +251,14 @@ def match_rules(
                         break  # combined-state hit found; stop searching
 
             if matched_lower is not None:
+                # Group by the feature's codon index, not `pos // 3` — raw
+                # genomic/reference position is not frame-aligned, so two SNPs
+                # of the same codon can floor-divide into different buckets
+                # (e.g. positions 4193 and 4195 of the same codon: 1397 vs 1398).
                 combined_effect_key = (
                     ann.variant.chrom,
-                    ann.variant.pos // 3,
                     ann.feature_name,
+                    ann.codon_pos,
                     matched_alt if matched_alt is not None else ann.alt_aa,
                     rule.id,
                 )
@@ -300,6 +304,7 @@ def match_formula_rules(
         return []
 
     best_ann_by_member: dict[str, AnnotatedVariant] = {}
+    best_rule_by_member: dict[str, ResistanceRule] = {}
     member_lower: dict[str, float] = {}
     for ann in annotations:
         for rule in ann.rule_matches:
@@ -311,11 +316,13 @@ def match_formula_rules(
             existing = best_ann_by_member.get(rule.external_id)
             if existing is None:
                 best_ann_by_member[rule.external_id] = ann
+                best_rule_by_member[rule.external_id] = rule
                 member_lower[rule.external_id] = effect_lower
                 continue
             existing_lower = member_lower[rule.external_id]
             if effect_lower > existing_lower:
                 best_ann_by_member[rule.external_id] = ann
+                best_rule_by_member[rule.external_id] = rule
                 member_lower[rule.external_id] = effect_lower
                 continue
             if effect_lower == existing_lower:
@@ -323,6 +330,7 @@ def match_formula_rules(
                 existing_key = (existing.feature_name, existing.codon_pos, existing.alt_aa)
                 if ann_key < existing_key:
                     best_ann_by_member[rule.external_id] = ann
+                    best_rule_by_member[rule.external_id] = rule
                     member_lower[rule.external_id] = effect_lower
 
     hits: list[FormulaRuleHit] = []
@@ -336,6 +344,24 @@ def match_formula_rules(
             continue
 
         matched_ids = sorted(contributing_ids)
+        if len(matched_ids) == 1 and _is_pure_or_expression(formula.normalized_expression):
+            # A pure-OR formula (no AND/XOR/NOT) that fires through exactly one
+            # member is logically equivalent to that member's own atomic rule
+            # — but only when that atomic rule actually fired independently.
+            # A member is not required to have its own single rule for this
+            # drug at all (e.g. a formula-only member with no matching
+            # antiviral row): fired_rule is None in that case, or its own
+            # rule_matches never gained an entry, so no suppression happens.
+            fired_rule = best_rule_by_member.get(matched_ids[0])
+            if (
+                fired_rule is not None
+                and not fired_rule.is_internal_formula_component
+                and fired_rule.drug_id == formula.drug_id
+            ):
+                # The atomic rule already reports this exact hit via
+                # match_rules; firing the formula too would double-count it.
+                continue
+
         members = []
         for idx, member_id in enumerate(sorted(formula.member_rules), start=1):
             member_rule = formula.member_rules[member_id]
@@ -386,6 +412,18 @@ def match_formula_rules(
 
     logger.info('Matched %d formula rule hit(s) across %d annotation(s)', len(hits), len(annotations))
     return hits
+
+
+def _is_pure_or_expression(expression: str) -> bool:
+    """Return True when a normalized formula expression is a plain OR of atoms.
+
+    Used to scope the single-member-duplicate guardrail (see
+    ``match_formula_rules``) to formulas whose only operator is OR — AND/XOR/NOT
+    change the claim's meaning (e.g. co-occurrence or absence), so a single
+    contributing member there is not equivalent to that member's atomic rule.
+    """
+    tokens = _tokenize_formula_expression(expression)
+    return not any(token.upper() in {'AND', 'XOR', 'NOT'} for token in tokens)
 
 
 def _evaluate_formula_expression(

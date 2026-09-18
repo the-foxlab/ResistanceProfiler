@@ -464,6 +464,34 @@ class TestMatchCombinedStates:
         assert result[0].rule_effect_alt[25] == 'Y'
         assert result[0].rule_effect_aa_freq[25] == pytest.approx(1.0)
 
+    def test_same_combined_codon_effect_dedup_is_frame_independent(self) -> None:
+        """The dedup key must use ``codon_pos``, not ``variant.pos // 3``.
+
+        Real genomic positions are not codon-frame-aligned: two SNPs of the
+        same codon (e.g. 4193 and 4195) can floor-divide into different
+        buckets (1397 vs 1398) while sharing the same ``codon_pos``. Using the
+        raw position let the same rule fire twice for one physical codon
+        (reported bug: cabotegravir G140S counted twice).
+        """
+        rule_s = self._rule(30, 'S', position=139)
+        first_member = self._ann('S', 1.0, codon_pos=139)
+        first_member.is_combined_codon_event = True
+        first_member.combined_member_count = 2
+        first_member.variant.pos = 4193
+        second_member = self._ann('S', 1.0, codon_pos=139)
+        second_member.is_combined_codon_event = True
+        second_member.combined_member_count = 2
+        second_member.variant.pos = 4195
+
+        result = match_rules([first_member, second_member], [rule_s])
+
+        matched_rule_ids = [
+            rule.id
+            for ann in result
+            for rule in ann.rule_matches
+        ]
+        assert matched_rule_ids == [30]
+
     def test_rule_fires_on_promoted_single_uses_row_af(self) -> None:
         """G->T row (single=I promoted from forced combined, combined_states=[]):
         K20I fires on single=I; effect lower is the row's own AF (0.5)."""
@@ -612,6 +640,9 @@ class TestMatchFormulaRules:
         )
 
     def _atomic_rule(self, external_id: str, mutation: str, *, position: int = 1) -> ResistanceRule:
+        # Pure formula-member fixture (not an independently-reported atomic
+        # rule) so the single-member-duplicate guardrail in match_formula_rules
+        # doesn't suppress these OR/AND/NOT logic tests.
         return ResistanceRule(
             id=1,
             feature_name='gag',
@@ -624,6 +655,7 @@ class TestMatchFormulaRules:
             mutation=mutation,
             phenotype='resistant',
             external_id=external_id,
+            is_internal_formula_component=True,
         )
 
     def _formula(self, expression: str, members: list[ResistanceRule]) -> FormulaRuleRuntime:
@@ -750,6 +782,89 @@ class TestMatchFormulaRules:
         assert len(hits[0].matched_variants) == 1
         assert hits[0].matched_variants[0].alt_aa == 'V'
         assert hits[0].frechet_lower == pytest.approx(0.95)
+
+    def _real_atomic_rule(self, external_id: str, mutation: str, *, drug_id: int = 1) -> ResistanceRule:
+        """An independently-curated atomic rule (real drug, not a formula placeholder)."""
+        return ResistanceRule(
+            id=1, feature_name='gag', feature_id=1,
+            drug_name='DrugA' if drug_id == 1 else 'DrugB', drug_id=drug_id,
+            reference_identifier='', position=1,
+            reference='K', mutation=mutation, phenotype='resistant',
+            external_id=external_id,
+        )
+
+    def test_pure_or_single_member_suppressed_when_real_atomic_rule_matches_same_drug(self) -> None:
+        """Degenerate single-arm OR duplicates a real atomic rule for the same
+        drug (the exact bug reported by the user) — the formula hit must be
+        suppressed; only the atomic hit (in ann.rule_matches) stands."""
+        mut_a = self._real_atomic_rule('mut_a', 'E')
+        mut_b = self._real_atomic_rule('mut_b', 'V')
+        formula = self._formula('(mut_a OR mut_b OR mut_c)', [mut_a, mut_b])
+
+        ann_a = self._make_ann('gag', 1, 'K', 'E')
+        ann_a.rule_matches = [mut_a]
+        ann_a.rule_effect_aa_freq[mut_a.id] = 0.9
+
+        hits = match_formula_rules([ann_a], [formula], min_fraction=2 / 3)
+
+        assert hits == []
+
+    def test_pure_or_single_member_fires_when_atomic_rule_is_different_drug(self) -> None:
+        """A real atomic rule for a DIFFERENT drug than the formula is not a
+        duplicate — the formula must still fire."""
+        mut_a = self._real_atomic_rule('mut_a', 'E', drug_id=2)
+        mut_b = self._real_atomic_rule('mut_b', 'V', drug_id=2)
+        formula = self._formula('(mut_a OR mut_b)', [mut_a, mut_b])
+
+        ann_a = self._make_ann('gag', 1, 'K', 'E')
+        ann_a.rule_matches = [mut_a]
+        ann_a.rule_effect_aa_freq[mut_a.id] = 0.9
+
+        hits = match_formula_rules([ann_a], [formula], min_fraction=2 / 3)
+
+        assert len(hits) == 1
+
+    def test_and_single_contributor_not_suppressed_by_or_guardrail(self) -> None:
+        """The guardrail is scoped to pure-OR formulas: an AND/NOT clause that
+        degenerates to one contributor (e.g. ``A AND (NOT B)``) is a distinct
+        claim from A's atomic rule (it also requires B's absence) and must
+        still fire even when A is a real, same-drug atomic rule."""
+        mut_a = self._real_atomic_rule('mut_a', 'E')
+        mut_b = self._real_atomic_rule('mut_b', 'V')
+        formula = self._formula('(mut_a AND (NOT mut_b))', [mut_a, mut_b])
+
+        ann_a = self._make_ann('gag', 1, 'K', 'E')
+        ann_a.rule_matches = [mut_a]
+        ann_a.rule_effect_aa_freq[mut_a.id] = 0.9
+
+        hits = match_formula_rules([ann_a], [formula], min_fraction=2 / 3)
+
+        assert len(hits) == 1
+
+    def test_pure_or_single_member_fires_when_member_has_no_single_rule(self) -> None:
+        """A combinatorial member is not required to have its own single rule
+        for the drug at all (e.g. MUT_A3 in ``MUT_A1 OR MUT_A2 OR MUT_A3``
+        with no atomic entry for MUT_A3). The guardrail must only look at the
+        member that actually fired (``mut_c`` here); the declared-but-unfired
+        ``mut_a``/``mut_b`` members must not affect the outcome."""
+        mut_a = self._real_atomic_rule('mut_a', 'E')
+        mut_b = self._real_atomic_rule('mut_b', 'V')
+        mut_c = ResistanceRule(
+            id=3, feature_name='gag', feature_id=1,
+            drug_name='__formula_component__', drug_id=1,
+            reference_identifier='', position=9,
+            reference='K', mutation='Q', phenotype='resistant',
+            external_id='mut_c', is_internal_formula_component=True,
+        )
+        formula = self._formula('(mut_a OR mut_b OR mut_c)', [mut_a, mut_b, mut_c])
+
+        ann_c = self._make_ann('gag', 9, 'K', 'Q')
+        ann_c.rule_matches = [mut_c]
+        ann_c.rule_effect_aa_freq[mut_c.id] = 0.9
+
+        hits = match_formula_rules([ann_c], [formula], min_fraction=2 / 3)
+
+        assert len(hits) == 1
 
 
 class TestInsAnyRuleMatching:
@@ -1237,6 +1352,7 @@ class TestFrechetEpsilonParameter:
 
     def _atomic_rule(self, external_id: str, mutation: str, *, rule_id: int = 1,
                      position: int = 1) -> ResistanceRule:
+        # Pure formula-member fixture; see TestMatchFormulaRules._atomic_rule.
         return ResistanceRule(
             id=rule_id,
             feature_name='gag', feature_id=1,
@@ -1244,6 +1360,7 @@ class TestFrechetEpsilonParameter:
             reference_identifier='', position=position,
             reference='K', mutation=mutation,
             phenotype='resistant', external_id=external_id,
+            is_internal_formula_component=True,
         )
 
     def _formula(self, expression: str, members: list[ResistanceRule]) -> FormulaRuleRuntime:
@@ -1332,6 +1449,7 @@ class TestFrechetFormulaMatching:
 
     def _atomic_rule(self, external_id: str, mutation: str, *, rule_id: int = 1,
                      position: int = 1) -> ResistanceRule:
+        # Pure formula-member fixture; see TestMatchFormulaRules._atomic_rule.
         return ResistanceRule(
             id=rule_id,
             feature_name='gag', feature_id=1,
@@ -1339,6 +1457,7 @@ class TestFrechetFormulaMatching:
             reference_identifier='', position=position,
             reference='K', mutation=mutation,
             phenotype='resistant', external_id=external_id,
+            is_internal_formula_component=True,
         )
 
     def _formula(self, expression: str, members: list[ResistanceRule]) -> FormulaRuleRuntime:
