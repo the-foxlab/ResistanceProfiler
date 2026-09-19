@@ -1251,7 +1251,7 @@ class TestRegenerateConfigFlag:
         """`respro regenerate --help` should list the --config flag."""
         result = CliRunner().invoke(app, ['regenerate', '--help'])
         assert result.exit_code == 0
-        assert '--config' in result.output
+        assert '--config' in _strip_ansi(result.output)
 
     def test_invalid_override_toml_exits_with_error_naming_bad_key(
         self, project_db: Path, tmp_path: Path,

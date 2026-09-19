@@ -187,7 +187,7 @@ def match_rules(
     # amino-acid effect, a direct rule against that effect must still fire once.
     # Track rule/effect identities per combined codon independently of the
     # annotation which carried the effect.
-    matched_combined_effects: set[tuple[str, int, int, str, int]] = set()
+    matched_combined_effects: set[tuple[str, str, int, str, int]] = set()
     for ann in annotations:
         key = (ann.feature_name, ann.codon_pos)
         candidates = rule_index.get(key, [])

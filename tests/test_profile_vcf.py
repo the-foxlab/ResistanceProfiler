@@ -17,6 +17,11 @@ from respro.core.vcf_remap import _transform_allele, remap_variants
 from respro.db.models import FeatureMatch, FeatureRecord, FeatureSegment, VariantCall
 
 
+def _strip_ansi(text: str) -> str:
+    """Return text with ANSI escape sequences removed."""
+    return re.sub(r'\x1b\[[0-9;]*m', '', text)
+
+
 def _make_feature(*, strand: str) -> FeatureRecord:
     """Build the shared 18-nt test feature (MQVGN* coding sequence)."""
     return FeatureRecord(
@@ -473,7 +478,7 @@ class TestVcfConfigFlag:
 
         result = CliRunner().invoke(app, ['vcf', '--help'])
         assert result.exit_code == 0
-        assert '--config' in result.output
+        assert '--config' in _strip_ansi(result.output)
 
     def test_invalid_override_toml_exits_with_error_naming_bad_key(
         self, project_db: Path, tmp_path: Path,
