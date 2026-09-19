@@ -10,6 +10,7 @@ from pathlib import Path
 
 from respro.db.models import (
     AnnotatedVariant,
+    CodonState,
     CoverageGap,
     FormulaRuleHit,
     ProfilingResult,
@@ -20,6 +21,41 @@ from respro.db.models import (
     VariantCall,
     is_internal_formula_component_drug_name,
 )
+
+
+def _serialize_combined_states(states: list[CodonState]) -> str:
+    """Serialize Fréchet combined codon states to a JSON blob for storage."""
+    return json.dumps([
+        {
+            'alt_codon': s.alt_codon,
+            'alt_aa': s.alt_aa,
+            'lower': s.lower,
+            'upper': s.upper,
+            'forced_fraction': s.forced_fraction,
+            'accepted': s.accepted,
+            'member_indices': list(s.member_indices),
+        }
+        for s in states
+    ])
+
+
+def _deserialize_combined_states(blob: str) -> list[CodonState]:
+    """Deserialize a combined_states JSON blob back to CodonState objects."""
+    if not blob:
+        return []
+    raw = json.loads(blob)
+    return [
+        CodonState(
+            alt_codon=item['alt_codon'],
+            alt_aa=item['alt_aa'],
+            lower=item['lower'],
+            upper=item['upper'],
+            forced_fraction=item['forced_fraction'],
+            accepted=bool(item['accepted']),
+            member_indices=tuple(item.get('member_indices', [])),
+        )
+        for item in raw
+    ]
 
 
 def save_run(
@@ -85,8 +121,9 @@ def save_run(
             '(run_id, chrom, pos, ref, alt, allele_freq, depth, '
             'feature_name, reference_name, codon_pos, ref_codon, alt_codon, ref_aa, alt_aa, '
             'consequence, af_bin, rule_match, drug_hits, '
-            'is_combined_codon_event, combined_member_count) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'is_combined_codon_event, combined_member_count, combined_states, '
+            'single_exchange_aa_freq, rule_effect_aa_freq, rule_effect_alt, freq_method) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 run_id,
                 v.chrom,
@@ -108,6 +145,11 @@ def save_run(
                 json.dumps(ann.drug_hits_json()),
                 int(ann.is_combined_codon_event),
                 ann.combined_member_count,
+                _serialize_combined_states(ann.combined_states),
+                ann.single_exchange_aa_freq,
+                json.dumps(ann.rule_effect_aa_freq),
+                json.dumps(ann.rule_effect_alt),
+                ann.freq_method,
             ),
         )
 
@@ -407,6 +449,13 @@ def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
             af_bin=row.get('af_bin', ''),
             is_combined_codon_event=bool(row.get('is_combined_codon_event', 0)),
             combined_member_count=row.get('combined_member_count', 1) or 1,
+            combined_states=_deserialize_combined_states(row.get('combined_states', '[]')),
+            single_exchange_aa_freq=row.get('single_exchange_aa_freq', 0.0) or 0.0,
+            rule_effect_aa_freq={int(k): float(val) for k, val in json.loads(
+                row.get('rule_effect_aa_freq') or '{}').items()},
+            rule_effect_alt={int(k): str(val) for k, val in json.loads(
+                row.get('rule_effect_alt') or '{}').items()},
+            freq_method=row.get('freq_method', 'observed') or 'observed',
             rule_matches=rule_matches,
         )
         annotations.append(ann)
@@ -437,6 +486,9 @@ def reconstruct_formula_rule_hits(
                 rule_set=rule_set,
                 matched_variants=matched_variants,
                 matched_member_ids=list(payload.get('matched_member_ids', [])),
+                frechet_lower=float(payload.get('frechet_lower', 0.0)),
+                forced_fraction=float(payload.get('forced_fraction', 0.0)),
+                member_count=int(payload.get('member_count', 1)),
             )
         )
     return hits

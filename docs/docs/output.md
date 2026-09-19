@@ -104,12 +104,11 @@ respro vcf \
 | `gene` | Feature / gene name (display name applied when configured). |
 | `nt_mut` | Nucleotide change on the internal reference, `ref{pos}alt` (1-based). Combined codon events use `ref_codon{codon_pos}alt_codon`. |
 | `nt_mut_user` | Nucleotide change on the user-supplied reference (VCF coords before remap). VCF mode only; omitted in FASTA mode. |
-| `aa_effect` | Amino-acid change `ref_aa{codon_pos}alt_aa` (1-based). `INS_any (...)` prefix for wildcard insertion rules. |
 | `strand` | Coding strand of the feature (`+`/`-`), sourced from the feature record. |
 | `af` | Allele frequency (raw float). |
-| `af_bin` | AF bin label (e.g. `low`/`moderate`/`high`). |
 | `depth` | Read depth at the variant (VCF mode only; omitted in FASTA mode). Empty for combined formula rows. |
 | `consequence` | Consequence label (`missense`, `frameshift`, …). |
+| `aa_effects` | All amino-acid effects for the variant, as `<ref><pos><alt> | <frequency> | <tag>` joined with `; `. The tag is `observed` or `lower bound`. The single-exchange effect is listed first (when its amino-acid frequency is > 0), followed by every accepted combined-codon outcome. Combined formula rows join member effects with `;`. |
 | `in_database` | `yes` when at least one rule matched (single or formula member); otherwise `no`. |
 | `rule_type` | `single`, `formula`, `formula-member`, or `n/a` for non-hits. |
 | `drug` | Drug name for the matched rule. `n/a` for non-hits. |
@@ -128,7 +127,7 @@ respro vcf \
   phenotype/IC50/fold-IC50/score.
 - **Formula (combinatorial) rules**: one **combined row** per fired formula rule.
   Member mutations are joined with `;` in `gene`, `nt_mut`, `nt_mut_user`,
-  `aa_effect`, `af`, `af_bin`, and `strand`. The phenotype/IC50/fold-IC50/score
+  `aa_effects`, `af`, and `strand`. The phenotype/IC50/fold-IC50/score
   come from the formula rule set (the combined call), not the individual members.
 - **Formula-member-only variants**: a variant that is only a formula member (no
   single rule of its own) gets a `rule_type=formula-member` row with

@@ -14,7 +14,7 @@ from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature
 from Bio.SeqRecord import SeqRecord
-from conftest import TINY_REF_SEQ, make_profiling_result, write_genbank
+from conftest import TINY_REF_NAME, TINY_REF_SEQ, make_profiling_result, write_genbank
 from typer.testing import CliRunner
 
 from respro.cli.init import init_project
@@ -546,6 +546,141 @@ class TestRegenerate:
         assert 'TestDrug' in regen_json_html
         assert 'OtherDrug' in regen_json_html
         assert 'susceptibility to 1 drug' in regen_json_html
+
+
+    def test_regenerate_preserves_frechet_formula_frequency_and_bin(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Regenerated reports reproduce the live Database Hits row's Fréchet
+        frequency + AF bin for a formula hit — including a sub-'high' bin.
+
+        The live path computes frechet_lower at match time; regenerate must
+        recover it from the persisted hit_json (results DB / JSON export),
+        never from a cache, so the rendered frequency chip and bin are
+        bit-identical to the live report.
+        """
+        import re as _re
+
+        # Project: two member rules on gag (formula components) plus a formula
+        # rule over them. Codon 1 K->E (member A, af=0.95), codon 2 A->T
+        # (member B, af=0.30). AND bound: lower = 0.95+0.30-1 = 0.25,
+        # ff = 0.25/0.30 = 0.833 >= 2/3 -> fires with frechet_lower = 0.25
+        # ('intermediate' bin, not 'high').
+        gb_path = tmp_path / 'tiny.gb'
+        record = SeqRecord(
+            Seq(TINY_REF_SEQ), id='tiny_ref', name='tiny_ref', description='',
+        )
+        record.annotations['molecule_type'] = 'DNA'
+        record.annotations['accessions'] = ['tiny_ref']
+        record.features = [
+            SeqFeature(
+                FeatureLocation(0, 87, strand=1),
+                type='CDS',
+                qualifiers={'gene': ['gag'], 'product': ['DNA polymerase'],
+                            'codon_start': ['1']},
+            )
+        ]
+        with open(gb_path, 'w') as handle:
+            SeqIO.write([record], handle, 'genbank')
+
+        rules_tsv = tmp_path / 'rules.tsv'
+        rules_tsv.write_text(
+            textwrap.dedent("""\
+                feature\treference_identifier\tposition\treference\tmutation\tphenotype\tmember_id
+                gag\ttiny_ref\t1\tK\tE\tunknown\tmut_a
+                gag\ttiny_ref\t2\tA\tT\tunknown\tmut_b
+                """),
+            encoding='utf-8',
+        )
+        formula_tsv = tmp_path / 'formula.tsv'
+        formula_tsv.write_text(
+            textwrap.dedent("""\
+                group_id\tantiviral\texpression\tphenotype
+                formula_1\tComboDrug\tmut_a AND mut_b\tresistant
+                """),
+            encoding='utf-8',
+        )
+        project_db = tmp_path / 'proj.db'
+        init_project(
+            db_path=project_db,
+            name='frechet-parity',
+            genbank_paths=[gb_path],
+            rules_tsv=rules_tsv,
+            formula_rules_tsv=formula_tsv,
+            additional_info=False,
+        )
+
+        vcf_path = tmp_path / 'sample.vcf'
+        vcf_path.write_text(textwrap.dedent("""\
+            ##fileformat=VCFv4.2
+            ##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">
+            ##INFO=<ID=DP,Number=1,Type=Integer,Description="Read Depth">
+            #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO
+            tiny_ref\t4\t.\tA\tG\t100\tPASS\tAF=0.95;DP=500
+            tiny_ref\t7\t.\tG\tA\t80\tPASS\tAF=0.30;DP=200
+            """), encoding='utf-8')
+        ref_fasta = tmp_path / 'ref.fasta'
+        ref_fasta.write_text(f'>{TINY_REF_NAME}\n{TINY_REF_SEQ}\n', encoding='utf-8')
+
+        # Live profile with both results DB and JSON export.
+        profile_out = tmp_path / 'profile_out'
+        results_db = tmp_path / 'results.db'
+        profile_result = CliRunner().invoke(app, [
+            'vcf',
+            '--project', str(project_db),
+            '--vcf', str(vcf_path),
+            '--ref-fasta', str(ref_fasta),
+            '--results-db', str(results_db),
+            '--output', str(profile_out),
+            '--min-af', '0.01',
+            '--min-depth', '0',
+            '--export', 'json',
+        ])
+        assert profile_result.exit_code == 0, profile_result.output
+        live_html = list(profile_out.glob('*.html'))[0].read_text()
+
+        def _formula_db_hit_row(html: str) -> str:
+            """Extract the Database Hits row for the formula drug."""
+            rows = _re.findall(r'<tr[^>]*db-hit-row.*?</tr>', html, _re.DOTALL)
+            combo_rows = [r for r in rows if 'combodrug' in r.lower()]
+            assert len(combo_rows) == 1, f'expected 1 ComboDrug row, got {len(combo_rows)}'
+            return combo_rows[0]
+
+        live_row = _formula_db_hit_row(live_html)
+        # The formula hit must fire with a sub-'high' bin (0.25 -> intermediate).
+        live_bin = _re.search(r'db-hit-af--(\w+)', live_row).group(1)
+        assert live_bin == 'intermediate', live_bin
+
+        # Regenerate from the results DB.
+        regen_db_dir = tmp_path / 'regen_db'
+        regen_db_result = CliRunner().invoke(app, [
+            'regenerate',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(project_db),
+            '--output', str(regen_db_dir),
+        ])
+        assert regen_db_result.exit_code == 0, regen_db_result.output
+        regen_db_html = list(regen_db_dir.glob('*.html'))[0].read_text()
+        regen_db_row = _formula_db_hit_row(regen_db_html)
+        # The full row (frequency chip + bin + metrics) is bit-identical.
+        assert regen_db_row == live_row
+
+        # Regenerate from the JSON export.
+        json_files = list(profile_out.glob('*.results.json'))
+        assert len(json_files) == 1
+        regen_json_dir = tmp_path / 'regen_json'
+        regen_json_result = CliRunner().invoke(app, [
+            'regenerate',
+            '--json', str(json_files[0]),
+            '--project', str(project_db),
+            '--output', str(regen_json_dir),
+        ])
+        assert regen_json_result.exit_code == 0, regen_json_result.output
+        regen_json_html = list(regen_json_dir.glob('*.html'))[0].read_text()
+        regen_json_row = _formula_db_hit_row(regen_json_html)
+        assert regen_json_row == live_row
 
     def test_regenerate_from_json_rejects_invalid_json(
         self,
@@ -1107,4 +1242,164 @@ class TestExploreRules:
         assert single_only.exit_code == 0, single_only.output
         assert 'Single rules' in single_only.output
         assert 'Combination rules' not in single_only.output
+
+
+class TestRegenerateConfigFlag:
+    """Tests for the --config override flag on `respro regenerate` (U3/U5)."""
+
+    def test_help_lists_config_flag(self) -> None:
+        """`respro regenerate --help` should list the --config flag."""
+        result = CliRunner().invoke(app, ['regenerate', '--help'])
+        assert result.exit_code == 0
+        assert '--config' in _strip_ansi(result.output)
+
+    def test_invalid_override_toml_exits_with_error_naming_bad_key(
+        self, project_db: Path, tmp_path: Path,
+    ) -> None:
+        """An override TOML with an unknown key should exit 1 naming the bad key."""
+        from respro.db.schema import init_results_db
+
+        override = tmp_path / 'override.toml'
+        override.write_text('[af_bins]\nbogus = 1\n', encoding='utf-8')
+        results_db = tmp_path / 'results.db'
+        conn = init_results_db(results_db)
+        conn.close()
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(project_db),
+            '--output', str(tmp_path / 'out'),
+            '--config', str(override),
+        ])
+        assert result.exit_code == 1
+        assert 'bogus' in result.output
+        assert 'Traceback' not in result.output
+
+    def test_valid_override_toml_is_accepted(
+        self, project_db: Path, tmp_path: Path,
+    ) -> None:
+        """A valid override TOML should be accepted by regenerate (exit 0)."""
+        # Produce a stored run by profiling a one-SNP consensus FASTA.
+        query_seq = list(TINY_REF_SEQ)
+        query_seq[4] = 'G' if query_seq[4] != 'G' else 'C'
+        query_fasta = tmp_path / 'query.fasta'
+        query_fasta.write_text(f'>tiny_ref\n{"".join(query_seq)}\n')
+
+        results_db = tmp_path / 'results.db'
+        run_result = CliRunner().invoke(app, [
+            'fasta',
+            '--project', str(project_db),
+            '--fasta', str(query_fasta),
+            '--results-db', str(results_db),
+            '--output', str(tmp_path / 'fasta_out'),
+        ])
+        assert run_result.exit_code == 0, run_result.output
+
+        override = tmp_path / 'override.toml'
+        override.write_text('[af_bins]\nhigh = [0.8, 1.0]\n', encoding='utf-8')
+
+        out_dir = tmp_path / 'regenerated'
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(project_db),
+            '--output', str(out_dir),
+            '--config', str(override),
+        ])
+        assert result.exit_code == 0, result.output
+
+
+def _run_fasta_then_regenerate(
+    project_db: Path, tmp_path: Path, override: Path | None = None,
+) -> tuple[int, str]:
+    """Profile a one-SNP consensus FASTA (producing a resistance hit), then regenerate.
+
+    Returns (regenerate_exit_code, regenerated_html). The hit ensures the AF-bin
+    legend (which carries the af_high_pct label) is rendered.
+    """
+    query_seq = list(TINY_REF_SEQ)
+    query_seq[4] = 'G' if query_seq[4] != 'G' else 'C'
+    query_fasta = tmp_path / 'query.fasta'
+    query_fasta.write_text(f'>tiny_ref\n{"".join(query_seq)}\n')
+
+    results_db = tmp_path / 'results.db'
+    run_result = CliRunner().invoke(app, [
+        'fasta',
+        '--project', str(project_db),
+        '--fasta', str(query_fasta),
+        '--results-db', str(results_db),
+        '--output', str(tmp_path / 'fasta_out'),
+    ])
+    assert run_result.exit_code == 0, run_result.output
+
+    out_dir = tmp_path / 'regenerated'
+    cmd = [
+        'regenerate',
+        '--results-db', str(results_db),
+        '--run-id', '1',
+        '--project', str(project_db),
+        '--output', str(out_dir),
+    ]
+    if override is not None:
+        cmd += ['--config', str(override)]
+    result = CliRunner().invoke(app, cmd)
+    html = list(out_dir.glob('*.html'))[0].read_text() if result.exit_code == 0 else ''
+    return result.exit_code, html
+
+
+class TestRegenerateConfigParity:
+    """U5: a regenerated report honours the same --config override as a live run."""
+
+    def test_override_af_bins_high_shows_80_pct_label(
+        self, project_db: Path, tmp_path: Path,
+    ) -> None:
+        """Regenerating with [af_bins_fasta] high = [0.8, 1.0] shows the high-AF label at 80%."""
+        override = tmp_path / 'override.toml'
+        override.write_text(
+            '[af_bins_fasta]\nhigh = [0.8, 1.0]\nintermediate = [0.25, 0.8]\nlow = [0.0, 0.25]\n',
+            encoding='utf-8',
+        )
+        exit_code, html = _run_fasta_then_regenerate(project_db, tmp_path, override=override)
+        assert exit_code == 0
+        assert '&ge;80&nbsp;%' in html
+        assert '&ge;75&nbsp;%' not in html
+
+    def test_no_override_reproduces_original_labels(
+        self, project_db: Path, tmp_path: Path,
+    ) -> None:
+        """Regenerating without --config reproduces the original 75% label."""
+        exit_code, html = _run_fasta_then_regenerate(project_db, tmp_path, override=None)
+        assert exit_code == 0
+        assert '&ge;75&nbsp;%' in html
+
+    def test_alignment_only_override_is_noop_on_regenerate(
+        self, project_db: Path, tmp_path: Path,
+    ) -> None:
+        """An override containing only [alignment] keys leaves the report-stage
+        labels unchanged (alignment overrides have no effect on regenerate). The
+        embedded plot SVG carries a non-deterministic creation timestamp, so we
+        compare the AF-threshold legend text rather than the full HTML."""
+        import re
+
+        def af_legend(html: str) -> str:
+            # Extract the "binned as high ... low (...–...%)" legend paragraph.
+            m = re.search(r'binned as high.*?low \([\d.]+–[\d.]+&nbsp;%\)\.', html, re.S)
+            assert m is not None, 'AF-bin legend not found in regenerated report'
+            return m.group()
+
+        exit_code_none, html_none = _run_fasta_then_regenerate(project_db, tmp_path, override=None)
+        assert exit_code_none == 0
+        legend_none = af_legend(html_none)
+
+        override = tmp_path / 'align_override.toml'
+        override.write_text(
+            '[alignment]\npreset = "asm5"\nbest_n = 2\n', encoding='utf-8',
+        )
+        exit_code_align, html_align = _run_fasta_then_regenerate(project_db, tmp_path, override=override)
+        assert exit_code_align == 0
+        legend_align = af_legend(html_align)
+
+        assert legend_align == legend_none
 

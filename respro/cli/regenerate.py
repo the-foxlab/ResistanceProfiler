@@ -12,7 +12,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from respro.config.cli_settings import CLI_CONFIG
+from respro.config.cli_settings import load_config_with_overrides
 from respro.db.features import load_features_for_reference
 from respro.db.models import FeatureMatch, ProfilingResult, ReferenceGroup
 from respro.db.results import (
@@ -87,6 +87,15 @@ def regenerate(
             help='Optional extra export format in addition to HTML (pdf, json, tsv). Pdfs are summaries only. Can be provided multiple times.',
         ),
     ] = None,
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            '--config', '-c', exists=True,
+            help='User TOML overriding bundled defaults (scientific thresholds, alignment, AF bins, timeouts). '
+                 'Only report-stage keys (AF bins, similarity, AF-threshold labels) affect regenerate; '
+                 'alignment/codon overrides are accepted but have no effect.',
+        ),
+    ] = None,
 ) -> None:
     """Regenerate a report from a stored run."""
     logger = logging.getLogger('respro')
@@ -103,6 +112,10 @@ def regenerate(
                     'Invalid --export value. Choose one of: json, pdf, tsv.'
                 )
             extra_export_formats.add(export_value)
+
+        cfg = load_config_with_overrides(config)
+        if config is not None:
+            logger.info('Loaded configuration overrides from %s', config)
 
         if json_input is not None and (result_db is not None or run_id is not None):
             cli_error(
@@ -315,8 +328,9 @@ def regenerate(
                 rules=all_rules,
                 extra_export_formats=extra_export_formats,
                 output_html_path=html_output_path,
-                similarity_high=CLI_CONFIG.similarity.high,
-                similarity_moderate=CLI_CONFIG.similarity.moderate,
+                similarity_high=cfg.similarity.high,
+                similarity_moderate=cfg.similarity.moderate,
+                cfg=cfg,
             )
 
         console.print(Panel(

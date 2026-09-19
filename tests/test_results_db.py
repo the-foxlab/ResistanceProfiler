@@ -21,6 +21,7 @@ from respro.cli.init import init_project
 from respro.db.features import load_features_for_reference
 from respro.db.models import (
     AnnotatedVariant,
+    CodonState,
     CoverageGap,
     FormulaRuleHit,
     ProfilingResult,
@@ -600,6 +601,104 @@ class TestResultsPersistence:
         assert ann.is_resistance_hit
         assert ann.rule_matches[0].drug_name == 'drugx'
 
+    def test_combined_states_round_trip_through_results_db(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """combined_states are serialized to JSON on save and deserialized on load."""
+        result = self._make_result()
+        result.annotations[0].combined_states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            CodonState(alt_codon='ATG', alt_aa='M', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0,)),
+        ]
+        result.annotations[0].is_combined_codon_event = True
+        result.annotations[0].combined_member_count = 2
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+
+        row = results_conn.execute(
+            'SELECT combined_states FROM variant_result WHERE run_id = 1'
+        ).fetchone()
+        blob = json.loads(row['combined_states'])
+        assert len(blob) == 2
+        assert blob[0]['alt_codon'] == 'ATT'
+        assert blob[0]['alt_aa'] == 'I'
+        assert blob[0]['lower'] == 0.5
+
+        _, variant_rows = load_run(results_conn, 1)
+        annotations = reconstruct_annotations(variant_rows)
+        ann = annotations[0]
+        assert ann.is_combined_codon_event is True
+        assert ann.combined_member_count == 2
+        assert len(ann.combined_states) == 2
+        assert ann.combined_states[0].alt_codon == 'ATT'
+        assert ann.combined_states[0].alt_aa == 'I'
+        assert ann.combined_states[0].lower == 0.5
+        assert ann.combined_states[0].accepted is True
+        assert ann.combined_states[1].alt_codon == 'ATG'
+        assert ann.combined_states[1].member_indices == (0,)
+
+    def test_empty_combined_states_round_trip(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """A single-SNP annotation with no combined_states round-trips as empty."""
+        result = self._make_result()
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+        _, variant_rows = load_run(results_conn, 1)
+        annotations = reconstruct_annotations(variant_rows)
+        assert annotations[0].combined_states == []
+
+    def test_rule_effect_aa_freq_and_alt_round_trip(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """rule_effect_aa_freq and rule_effect_alt are persisted on save and
+        restored on reconstruct, so regenerated reports match live reports."""
+        result = self._make_result()
+        result.annotations[0].is_combined_codon_event = True
+        result.annotations[0].rule_effect_aa_freq = {10: 0.5, 20: 0.3}
+        result.annotations[0].rule_effect_alt = {10: 'I', 20: 'M'}
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+
+        _, variant_rows = load_run(results_conn, 1)
+        annotations = reconstruct_annotations(variant_rows)
+        ann = annotations[0]
+        assert ann.rule_effect_aa_freq == {10: 0.5, 20: 0.3}
+        assert ann.rule_effect_alt == {10: 'I', 20: 'M'}
+
+    def test_legacy_db_without_rule_effect_columns_opens(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """An existing results DB without the rule_effect_aa_freq/rule_effect_alt
+        columns opens after migration, defaulting to empty dicts."""
+        result = self._make_result()
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+        results_conn.close()
+        legacy_path = tmp_path / 'results.db'
+        conn = sqlite3.connect(legacy_path)
+        conn.execute('ALTER TABLE variant_result DROP COLUMN rule_effect_aa_freq')
+        conn.execute('ALTER TABLE variant_result DROP COLUMN rule_effect_alt')
+        conn.commit()
+        conn.close()
+        init_results_db(legacy_path)
+        conn = sqlite3.connect(legacy_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute('SELECT * FROM variant_result WHERE run_id = 1').fetchone()
+        assert row['rule_effect_aa_freq'] == '{}'
+        assert row['rule_effect_alt'] == '{}'
+        conn.close()
+
+    def test_legacy_db_without_combined_states_column_opens(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """An existing results DB without the combined_states column opens after migration."""
+        result = self._make_result()
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+        results_conn.close()
+        # Simulate a legacy DB by dropping the column.
+        legacy_path = tmp_path / 'results.db'
+        conn = sqlite3.connect(legacy_path)
+        conn.execute('ALTER TABLE variant_result DROP COLUMN combined_states')
+        conn.commit()
+        conn.close()
+        # Re-init adds the missing column.
+        init_results_db(legacy_path)
+        # The DB opens and loads without error.
+        conn = sqlite3.connect(legacy_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute('SELECT * FROM variant_result WHERE run_id = 1').fetchone()
+        assert row['combined_states'] == '[]'
+        conn.close()
+
     def test_save_run_persists_formula_rule_hits(self, results_conn, minimal_project_conn, tmp_path) -> None:
         save_run(
             results_conn,
@@ -952,3 +1051,235 @@ class TestDeleteRun:
         conn.close()
 
 
+class TestFreqMethodProvenance:
+    """freq_method provenance field on AnnotatedVariant — persisted and
+    defaulted to 'observed' for old DBs."""
+
+    @pytest.fixture()
+    def minimal_project_conn(self, tmp_path: Path):
+        db_path = tmp_path / 'project.db'
+        conn = create_schema(db_path)
+        conn.execute(
+            'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+            ('Test Project', 1, str(uuid.uuid4())),
+        )
+        conn.execute(
+            'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
+            (1, 'ref1', 100),
+        )
+        conn.execute(
+            'INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
+            (1, 'gag', 0, 90, '+'),
+        )
+        conn.execute(
+            'INSERT INTO drug (project_id, name) VALUES (?, ?)',
+            (1, 'drugx'),
+        )
+        conn.execute(
+            'INSERT INTO resistance_rule (feature_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
+            (1, 1, 1, 'E'),
+        )
+        conn.commit()
+        return conn
+
+    @pytest.fixture()
+    def results_conn(self, tmp_path: Path):
+        conn = init_results_db(tmp_path / 'results.db')
+        yield conn
+        conn.close()
+
+    def test_freq_method_defaults_to_observed(self) -> None:
+        """A non-combined annotation defaults to freq_method='observed'."""
+        from respro.config.cli_settings import CLI_CONFIG
+        assert CLI_CONFIG.codon.min_read_mapping_quality == 20
+
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='c', pos=0, ref='A', alt='T', allele_freq=0.9),
+        )
+        assert ann.freq_method == 'observed'
+
+    def test_freq_method_round_trips(self, results_conn, minimal_project_conn, tmp_path) -> None:
+        """freq_method is persisted on save and restored on reconstruct."""
+        result = self._make_result()
+        result.annotations[0].freq_method = 'estimated'
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+
+        _, variant_rows = load_run(results_conn, 1)
+        annotations = reconstruct_annotations(variant_rows)
+        assert annotations[0].freq_method == 'estimated'
+
+    def test_legacy_db_without_freq_method_defaults_observed(
+        self, results_conn, minimal_project_conn, tmp_path,
+    ) -> None:
+        """An old results DB without the freq_method column opens with 'observed'."""
+        result = self._make_result()
+        save_run(results_conn, tmp_path / 'project.db', minimal_project_conn, result)
+        results_conn.close()
+        legacy_path = tmp_path / 'results.db'
+        conn = sqlite3.connect(legacy_path)
+        conn.execute('ALTER TABLE variant_result DROP COLUMN freq_method')
+        conn.commit()
+        conn.close()
+        init_results_db(legacy_path)
+        conn = sqlite3.connect(legacy_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute('SELECT * FROM variant_result WHERE run_id = 1').fetchone()
+        assert row['freq_method'] == 'observed'
+        conn.close()
+
+    def _make_result(self) -> ProfilingResult:
+        v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
+        ann = AnnotatedVariant(
+            variant=v,
+            feature_name='gag',
+            codon_pos=1,
+            ref_codon='AAA',
+            alt_codon='GAA',
+            ref_aa='K',
+            alt_aa='E',
+            consequence='missense',
+            af_bin='high',
+        )
+        return make_profiling_result(
+            reference_name='ref1',
+            reference_length_nt=100,
+            annotations=[ann],
+        )
+
+
+@pytest.fixture()
+def _persist_results_conn(tmp_path: Path):
+    conn = init_results_db(tmp_path / 'results.db')
+    yield conn
+    conn.close()
+
+
+@pytest.fixture()
+def _persist_project_conn(tmp_path: Path):
+    db_path = tmp_path / 'project.db'
+    conn = create_schema(db_path)
+    conn.execute(
+        'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+        ('Test Project', 1, str(uuid.uuid4())),
+    )
+    conn.execute(
+        'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
+        (1, 'ref1', 100),
+    )
+    conn.execute(
+        'INSERT INTO feature (reference_id, name, start, end, strand) VALUES (?, ?, ?, ?, ?)',
+        (1, 'gag', 0, 90, '+'),
+    )
+    conn.execute(
+        'INSERT INTO drug (project_id, name) VALUES (?, ?)',
+        (1, 'drugx'),
+    )
+    conn.execute(
+        'INSERT INTO resistance_rule (feature_id, drug_id, position, mutation) VALUES (?, ?, ?, ?)',
+        (1, 1, 1, 'E'),
+    )
+    conn.commit()
+    return conn
+
+class TestFormulaHitFrechetPersistence:
+    """Frechet_lower round-trips through the results DB hit_json."""
+
+    def test_frechet_fields_round_trip(
+        self, _persist_results_conn, _persist_project_conn, tmp_path: Path,
+    ) -> None:
+        """save_run -> load_formula_rule_hits -> reconstruct preserves the
+        Fréchet fields bit-exactly."""
+        v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
+        rule = ResistanceRule(
+            id=1, feature_name='gag', feature_id=1, drug_name='drugx', drug_id=1,
+            reference_identifier='', position=1, reference='K', mutation='E',
+            phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=v, feature_name='gag', codon_pos=1,
+            ref_codon='AAA', alt_codon='GAA', ref_aa='K', alt_aa='E',
+            consequence='missense', af_bin='high', rule_matches=[rule],
+        )
+        rule_set = ResistanceRuleSet(
+            id=1, drug_name='drugx', drug_id=1, phenotype='resistant',
+            group_name='combo_1',
+        )
+        rule_set.members = [
+            ResistanceRuleSetMember(
+                id=1, rule_set_id=1, feature_name='gag', feature_id=1,
+                reference_identifier='ref1', position=1, reference='K',
+                mutation='E', external_id='R1',
+            ),
+        ]
+        hit = FormulaRuleHit(
+            rule_set=rule_set, matched_variants=[ann], matched_member_ids=['R1'],
+            frechet_lower=0.8, forced_fraction=0.889, member_count=2,
+        )
+        result = make_profiling_result(
+            project_name='Test Project', reference_name='ref1',
+            sample_name='sample01', vcf_name='sample.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=1,
+            annotations=[ann], formula_hits=[hit],
+        )
+        save_run(_persist_results_conn, tmp_path / 'project.db', _persist_project_conn, result)
+
+        _, variant_rows = load_run(_persist_results_conn, 1)
+        annotations = reconstruct_annotations(variant_rows)
+        combo_rows = load_formula_rule_hits(_persist_results_conn, 1)
+        restored = reconstruct_formula_rule_hits(combo_rows, annotations)
+
+        assert len(restored) == 1
+        assert restored[0].frechet_lower == 0.8
+        assert restored[0].forced_fraction == pytest.approx(0.889)
+        assert restored[0].member_count == 2
+
+    def test_legacy_payload_defaults_to_zero(
+        self, _persist_results_conn, _persist_project_conn, tmp_path: Path,
+    ) -> None:
+        """A legacy hit_json without the Fréchet keys loads without error (0.0)."""
+        v = VariantCall(chrom='ref1', pos=3, ref='A', alt='G', allele_freq=0.9, depth=100)
+        ann = AnnotatedVariant(
+            variant=v, feature_name='gag', codon_pos=1,
+            ref_codon='AAA', alt_codon='GAA', ref_aa='K', alt_aa='E',
+            consequence='missense', af_bin='high',
+        )
+        rule_set = ResistanceRuleSet(
+            id=1, drug_name='drugx', drug_id=1, phenotype='resistant',
+            group_name='combo_1',
+        )
+        rule_set.members = [
+            ResistanceRuleSetMember(
+                id=1, rule_set_id=1, feature_name='gag', feature_id=1,
+                reference_identifier='ref1', position=1, reference='K',
+                mutation='E', external_id='R1',
+            ),
+        ]
+        result = make_profiling_result(
+            project_name='Test Project', reference_name='ref1',
+            sample_name='sample01', vcf_name='sample.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[ann],
+            formula_hits=[FormulaRuleHit(rule_set=rule_set, matched_variants=[ann])],
+        )
+        save_run(_persist_results_conn, tmp_path / 'project.db', _persist_project_conn, result)
+        # Simulate a legacy DB by stripping the new keys from the stored JSON.
+        _persist_results_conn.execute(
+            "UPDATE formula_rule_hit SET hit_json = ? WHERE run_id = 1",
+            (json.dumps({k: val for k, val in json.loads(
+                _persist_results_conn.execute(
+                    'SELECT hit_json FROM formula_rule_hit WHERE run_id = 1'
+                ).fetchone()[0]
+            ).items() if k not in ('frechet_lower', 'forced_fraction', 'member_count')}),
+            ),
+        )
+        _persist_results_conn.commit()
+
+        _, variant_rows = load_run(_persist_results_conn, 1)
+        annotations = reconstruct_annotations(variant_rows)
+        combo_rows = load_formula_rule_hits(_persist_results_conn, 1)
+        restored = reconstruct_formula_rule_hits(combo_rows, annotations)
+
+        assert len(restored) == 1
+        assert restored[0].frechet_lower == 0.0
+        assert restored[0].forced_fraction == 0.0
+        assert restored[0].member_count == 1

@@ -7,13 +7,22 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import TYPE_CHECKING
 
 from Bio.Align.substitution_matrices import load as _load_matrix
 from Bio.Seq import Seq
 
-from respro.db.models import AnnotatedVariant, FeatureRecord, VariantCall
+from respro.config.cli_settings import CLI_CONFIG, CliConfig
+from respro.db.models import AnnotatedVariant, CodonState, FeatureRecord, VariantCall
+
+if TYPE_CHECKING:
+    from respro.core.combined_snp import BamCooccurrence
 
 logger = logging.getLogger(__name__)
+
+# Re-export CodonState so existing `from respro.core.annotation import CodonState`
+# sites keep working. The combined-SNP names are re-exported via __getattr__ below.
+__all__ = ['CodonState']
 
 _BLOSUM62 = _load_matrix('BLOSUM62')
 
@@ -43,8 +52,9 @@ _RE_BARE_AA = re.compile(r'^[A-Z]$', re.IGNORECASE)
 def annotate_variants(
     variants: list[VariantCall],
     features: list[FeatureRecord],
-    snp_combine_af_threshold: float = 0.75,
     is_fasta_mode: bool = False,
+    bam_cooccurrence: BamCooccurrence | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> list[AnnotatedVariant]:
     """
     Annotate a list of variants with codon-aware amino acid consequences.
@@ -55,19 +65,30 @@ def annotate_variants(
     SNP consequences can use a query codon from FASTA-based remapping when
     available (``VariantCall.query_ref_codon``).
 
-    :param variants: parsed variant calls (0-based positions). Variants with no CDS hit are
-        included with empty feature_name. If two or more SNPs in the same feature codon all have
-        AF > threshold, they are annotated as one combined codon event.
-    :param features: feature annotations for the reference
+    Co-codon SNPs (two or more SNPs at distinct positions of the same feature
+    codon) are evaluated as combined codon events. When ``bam_cooccurrence`` is
+    provided, exact co-occurrence frequencies are measured from the BAM reads
+    (``freq_method='observed'``); otherwise conservative Fréchet lower bounds
+    are used (``freq_method='estimated'``). Each member SNP is emitted as its
+    own per-SNP annotation carrying the accepted combined states.
 
-    :param snp_combine_af_threshold: strict AF threshold for combining SNPs
-        within one codon (must be greater than this value)
+    :param variants: parsed variant calls (0-based positions). Variants with no CDS hit are
+        included with empty feature_name.
+    :param features: feature annotations for the reference
     :param is_fasta_mode: mark emitted annotations as FASTA-derived
+    :param bam_cooccurrence: BAM context for exact observed co-occurrence; when
+        None the Fréchet lower-bound path is used.
     :return: list of AnnotatedVariant
     """
     results: list[AnnotatedVariant] = []
     skipped_non_snp = 0
-    group_plan = _plan_combined_snp_groups(variants, features, snp_combine_af_threshold)
+    # Lazy import to avoid a circular dependency: combined_snp imports
+    # low-level helpers from this module at top level.
+    from respro.core.combined_snp import (
+        _annotate_combined_snp_codon,
+        _plan_combined_snp_groups,
+    )
+    group_plan = _plan_combined_snp_groups(variants, features)
 
     for var_idx, var in enumerate(variants):
         matching_features = [f for f in features if f.contains(var.pos)]
@@ -81,9 +102,12 @@ def annotate_variants(
             if group is not None:
                 if var_idx == group[0]:
                     members = [variants[i] for i in group]
-                    combined_annotation = _annotate_combined_snp_codon(members, feature)
-                    combined_annotation.is_fasta_mode = is_fasta_mode
-                    results.append(combined_annotation)
+                    combined_annotations = _annotate_combined_snp_codon(
+                        members, feature, bam_cooccurrence=bam_cooccurrence, cfg=cfg,
+                    )
+                    for ann in combined_annotations:
+                        ann.is_fasta_mode = is_fasta_mode
+                        results.append(ann)
                 continue
             anns = _annotate_variant_in_feature(var, feature)
             if not anns:
@@ -293,124 +317,6 @@ def _translate_indel_bases(bases: str, strand: str) -> str:
     """
     oriented = reverse_complement(bases) if strand == '-' else bases.upper()
     return str(Seq(oriented).translate())
-
-
-def _plan_combined_snp_groups(
-    variants: list[VariantCall],
-    features: list[FeatureRecord],
-    threshold: float,
-) -> dict[tuple[int, int], list[int]]:
-    """
-    Return codon groups that should be annotated as one combined SNP event.
-
-    :param variants: input variant list
-    :param features: feature records
-    :param threshold: strict AF threshold for SNP combination
-    :return: {(feature_id, codon_idx): [variant_index, ...]}
-    """
-    grouped: dict[tuple[int, int], list[int]] = {}
-    for idx, var in enumerate(variants):
-        if not _is_snp(var.ref, var.alt):
-            continue
-        for feature in features:
-            if not feature.contains(var.pos):
-                continue
-            # Group SNPs per feature-codon so linked high-AF changes can be evaluated jointly.
-            codon_idx = feature.codon_index(var.pos)
-            if codon_idx is None or codon_idx < 0:
-                continue
-            key = (feature.id, codon_idx)
-            grouped.setdefault(key, []).append(idx)
-
-    planned: dict[tuple[int, int], list[int]] = {}
-    for key, member_indices in grouped.items():
-        if len(member_indices) < 2:
-            continue
-        members = [variants[i] for i in member_indices]
-        # Strict threshold: only treat as one codon event when all SNPs are high-AF.
-        if not all(v.allele_freq > threshold for v in members):
-            continue
-        planned[key] = sorted(member_indices)
-    return planned
-
-
-def _annotate_combined_snp_codon(
-    variants: list[VariantCall],
-    feature: FeatureRecord,
-) -> AnnotatedVariant:
-    """
-    Annotate multiple SNPs in one codon as a single codon event. Ref codon is taken from the internal reference.
-
-    :param variants: SNPs from the same codon (same feature)
-    :param feature: feature containing the codon
-    :return: one combined annotation
-    """
-    if not variants:
-        raise ValueError('Combined SNP annotation requires at least one variant')
-
-    seq_cds = feature.nt_sequence.upper()
-    anchor = sorted(variants, key=lambda v: v.pos)[0]
-    codon_idx = feature.codon_index(anchor.pos)
-    if codon_idx is None:
-        raise ValueError(
-            f'Combined SNP annotation requires coding codon index for feature {feature.name!r} '
-            f'at genomic position {anchor.pos}'
-        )
-    codon_start = feature.codon_start + (codon_idx * 3)
-    internal_codon = seq_cds[codon_start:codon_start + 3]
-    ref_aa = translate_codon(internal_codon)
-    alt_codon_bases = list(internal_codon)
-    seen: dict[int, str] = {}
-    for var in sorted(variants, key=lambda v: v.pos):
-        codon_pos = feature.codon_position_in_codon(var.pos)
-        if codon_pos is None:
-            raise ValueError(
-                f'Combined SNP annotation requires coding codon position for feature {feature.name!r} '
-                f'at genomic position {var.pos}'
-            )
-        alt_base = reverse_complement(var.alt) if feature.strand == '-' else var.alt.upper()
-        # Conflicting ALTs at the same codon base indicate inconsistent input; fail fast.
-        if codon_pos in seen and seen[codon_pos] != alt_base:
-            raise ValueError(
-                f'Conflicting SNPs in same codon for feature {feature.name!r} at codon {codon_idx + 1}'
-            )
-        seen[codon_pos] = alt_base
-        alt_codon_bases[codon_pos] = alt_base
-
-    alt_codon = ''.join(alt_codon_bases)
-    alt_aa = translate_codon(alt_codon)
-    consequence = _classify_snp_consequence(ref_aa, alt_aa, codon_idx)
-
-    # Conservative combined AF: lower bound of the linked SNP set.
-    combined_var = VariantCall(
-        chrom=anchor.chrom,
-        pos=anchor.pos,
-        ref=anchor.ref,
-        alt=anchor.alt,
-        allele_freq=min(v.allele_freq for v in variants),
-        depth=anchor.depth,
-        filter_status=anchor.filter_status,
-        query_ref_codon=internal_codon if len(internal_codon) == 3 and '-' not in internal_codon else '',
-        # Carry the anchor member's user-reference coords so the combined event
-        # can display the original user-reference NT change.
-        user_chrom=anchor.user_chrom,
-        user_pos=anchor.user_pos,
-        user_ref=anchor.user_ref,
-        user_alt=anchor.user_alt,
-    )
-
-    return AnnotatedVariant(
-        variant=combined_var,
-        feature_name=feature.name,
-        codon_pos=codon_idx,
-        ref_codon=internal_codon,
-        alt_codon=alt_codon,
-        ref_aa=ref_aa,
-        alt_aa=alt_aa,
-        consequence=consequence,
-        is_combined_codon_event=True,
-        combined_member_count=len(variants),
-    )
 
 
 def _annotate_variant_in_feature(
@@ -1024,9 +930,53 @@ def assign_af_bins(
     sorted_bins = sorted(bins.items(), key=lambda x: -x[1][0])
 
     for ann in annotations:
-        af = ann.variant.allele_freq
+        # AF binning is derived from the amino-acid frequency, not the nucleotide
+        # frequency. For non-combined annotations these coincide
+        # (single_exchange_aa_freq == allele_freq). For combined-codon members the
+        # amino-acid frequency is the Fréchet lower bound of the single-exchange
+        # codon (single_exchange_aa_freq): a 0.9-nucleotide-frequency member whose
+        # single-exchange amino acid is Fréchet-impossible (lower=0) must not be
+        # classified as 'high'.
+        af = ann.single_exchange_aa_freq if ann.is_combined_codon_event else ann.variant.allele_freq
         for label, (lo, hi) in sorted_bins:
             if lo <= af <= hi:
                 ann.af_bin = label
 
     return annotations
+
+
+# ─── Combined same-codon SNP logic ─────────────────────────────────────────
+# Extracted into respro.core.combined_snp (Fréchet path + BAM observed path).
+# To avoid a circular import (combined_snp imports low-level helpers from this
+# module at top level), the combined-SNP entry points are imported lazily inside
+# ``annotate_variants`` (the only function that calls them). The names are also
+# re-exported via module-level ``__getattr__`` (PEP 562) so existing
+# ``from respro.core.annotation import _compute_codon_frechet_states`` sites
+# keep working without triggering the cycle at import time.
+
+
+def __getattr__(name: str) -> object:
+    # PEP 562 lazy re-export: resolve combined-SNP names on first attribute
+    # access, after both modules are fully loaded. (CodonState is imported at
+    # top level from respro.db.models and is not handled here.)
+    if name in {
+        '_FRECHET_EPS',
+        '_annotate_combined_snp_codon',
+        '_combined_fallback_single_snp',
+        '_compute_codon_frechet_states',
+        '_dedupe_states_by_aa',
+        '_plan_combined_snp_groups',
+    }:
+        from respro.core import combined_snp as _cs
+        _lazy = {
+            '_FRECHET_EPS': _cs._FRECHET_EPS,
+            '_annotate_combined_snp_codon': _cs._annotate_combined_snp_codon,
+            '_combined_fallback_single_snp': _cs._combined_fallback_single_snp,
+            '_compute_codon_frechet_states': _cs._compute_codon_frechet_states,
+            '_dedupe_states_by_aa': _cs._dedupe_states_by_aa,
+            '_plan_combined_snp_groups': _cs._plan_combined_snp_groups,
+        }
+        value = _lazy[name]
+        globals()[name] = value  # cache for subsequent access
+        return value
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

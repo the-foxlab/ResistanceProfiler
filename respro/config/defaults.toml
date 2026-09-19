@@ -2,6 +2,13 @@
 pubchem = 7
 pubmed = 7
 crossref = 7
+# NCBI nuccore efetch (GenBank) network policy. NCBI eutils is rate-limited and
+# intermittently resets connections or returns truncated chunked responses, so
+# transient failures are retried with exponential backoff before giving up.
+# Promoted from respro/io/maintained_db.py module constants.
+genbank_timeout = 30        # seconds; urlopen timeout for a single efetch attempt
+genbank_max_retries = 3     # max attempts before raising RuntimeError
+genbank_backoff_base = 1.0  # seconds; doubled each retry (1, 2, 4)
 
 [urls]
 pubchem_compound_page = 'https://pubchem.ncbi.nlm.nih.gov/compound/{cid}'
@@ -20,7 +27,46 @@ github_respro_db_raw = 'https://raw.githubusercontent.com/the-foxlab/respro-data
 doi_prefixes = ['https://doi.org/', 'http://doi.org/']
 
 [matching]
-combination_member_af_threshold = 0.75
+# Fréchet forced-fraction acceptance threshold for formula (combination) rules.
+# A formula AND clause fires only when the guaranteed minimum co-occurrence
+# fraction of its members (Fréchet lower / upper) reaches this value. Same
+# formula as the codon path; numerically equal default but an independent
+# policy knob — change here without touching [codon].
+min_cooccurrence_combination_fraction = 0.6666666666666666
+# Numerical tolerance for Fréchet-bound acceptance on the formula
+# (combination) path (member lower > eps, forced_fraction >=
+# min_fraction - eps). Independent of the codon-path [codon] frechet_epsilon.
+frechet_epsilon = 1e-9
+
+[codon]
+# Conservative Fréchet-intersection policy for combining same-codon SNPs into
+# one codon event. A candidate codon state is emitted only when the minimum
+# guaranteed co-occurrence fraction (Fréchet lower / upper) reaches this value.
+# Passing means the guaranteed shared portion is at least twice the potentially
+# unshared portion. This is an explicit conservative interpretation policy, NOT
+# a probability that variants are linked and NOT a phasing estimate. At 2/3,
+# two variants at 0.75/0.75 give a forced fraction of exactly 2/3 ; three-way 
+# combinations require stronger individual frequencies.
+# Independent of any minimum VCF input-frequency filter.
+min_cooccurrence_codon_fraction = 0.6666666666666666
+# Minimum read mapping quality for BAM-based codon co-occurrence counting.
+# Reads with mapping_quality below this value are excluded when measuring
+# exact same-codon SNP co-occurrence from a BAM file. 20 is the standard
+# secondary-alignment floor (MAPQ < 20 typically marks repetitive/low-confidence
+# placements). Only used when --bam is provided in VCF mode.
+min_read_mapping_quality = 20
+# Minimum base quality for a read to contribute to BAM per-position depth
+# counts (bam.count_coverage quality_threshold). 0 means accept all bases
+# (preserves the pre-promotion behaviour where depth counted every read
+# regardless of base quality). Raising it drops low-quality bases from depth,
+# which affects coverage-gap detection and codon co-occurrence. Promoted from
+# respro/core/vcf_coverage.py (hardcoded quality_threshold=0).
+bam_base_quality_threshold = 0
+# Numerical tolerance for Fréchet-bound acceptance (lower > eps). Small enough
+# that mathematically exact boundary cases (lower == 0) are stable. Promoted
+# from respro/core/combined_snp.py module constant _FRECHET_EPS. A user in a
+# noisy regime may loosen it; tightening below 1e-12 risks float instability.
+frechet_epsilon = 1e-9
 
 [similarity]
 # BLOSUM62 score thresholds for amino-acid similarity classification.

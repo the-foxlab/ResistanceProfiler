@@ -12,12 +12,13 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 from rich.console import Console
 from rich.panel import Panel
 
-from respro.config.cli_settings import CLI_CONFIG
+from respro.config.cli_settings import CLI_CONFIG, CliConfig
 from respro.core.annotation import (
     _suppress_ruleless_overlap_annotations,
     annotate_variants,
@@ -49,6 +50,9 @@ from respro.db.rules_queries import load_formula_rules, load_rules
 from respro.db.schema import init_results_db
 from respro.report.non_html_exports import export_results
 from respro.utils.files import resolve_output_file
+
+if TYPE_CHECKING:
+    from respro.core.combined_snp import BamCooccurrence
 
 logger = logging.getLogger('respro')
 
@@ -220,6 +224,8 @@ def assemble_multi_reference_result(
     total_variants: int,
     af_bins: dict[str, tuple[float, float]] | None = None,
     is_fasta_mode: bool = False,
+    bam_cooccurrence_by_chrom: dict[str, BamCooccurrence] | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> ProfilingResult:
     """
     Build one ``ReferenceGroup`` per matched query record, annotate per reference,
@@ -256,7 +262,7 @@ def assemble_multi_reference_result(
     :return: assembled :class:`ProfilingResult` with ``references`` populated
     :raises click.ClickException: if no matched reference has resistance rules
     """
-    bins = af_bins if af_bins is not None else CLI_CONFIG.af_bins.as_dict()
+    bins = af_bins if af_bins is not None else cfg.af_bins.as_dict()
 
     references: list[ReferenceGroup] = []
     for record in query_records:
@@ -321,7 +327,11 @@ def assemble_multi_reference_result(
     annotations: list[AnnotatedVariant] = []
     for rg in references:
         group_variants = variants_by_chrom.get(rg.query_name, [])
-        annotations.extend(annotate_variants(group_variants, rg.features, is_fasta_mode=is_fasta_mode))
+        bam_ctx = bam_cooccurrence_by_chrom.get(rg.query_name) if bam_cooccurrence_by_chrom else None
+        annotations.extend(annotate_variants(
+            group_variants, rg.features, is_fasta_mode=is_fasta_mode,
+            bam_cooccurrence=bam_ctx, cfg=cfg,
+        ))
 
     # Rule suppression and matching must run once per DISTINCT reference, not once per
     # ReferenceGroup. In the targeted-sequencing case two records align to the same
@@ -379,7 +389,8 @@ def assemble_multi_reference_result(
         formula_hits = match_formula_rules(
             ref_annotations,
             rg.formula_rules,
-            member_af_threshold=float(CLI_CONFIG.matching.combination_member_af_threshold),
+            min_fraction=float(cfg.matching.min_cooccurrence_combination_fraction),
+            eps=float(cfg.matching.frechet_epsilon),
         )
         all_formula_hits.extend(formula_hits)
 
@@ -431,6 +442,7 @@ def _export_and_persist(
     project_path: Path,
     logger: logging.Logger,
     extra_export_formats: set[str] | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> tuple[ProfilingResult, dict]:
     """Export a profiling result to disk and optionally persist its run record.
 
@@ -468,8 +480,9 @@ def _export_and_persist(
         extra_export_formats=extra_export_formats,
         project_db_path=project_path.resolve(),
         output_html_path=html_output_path,
-        similarity_high=CLI_CONFIG.similarity.high,
-        similarity_moderate=CLI_CONFIG.similarity.moderate,
+        similarity_high=cfg.similarity.high,
+        similarity_moderate=cfg.similarity.moderate,
+        cfg=cfg,
     )
 
     if results_conn is not None:
@@ -492,6 +505,7 @@ def _finalize_and_export(
     project_path: Path,
     logger: logging.Logger,
     extra_export_formats: set[str] | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> tuple[ProfilingResult, dict]:
     """
     Apply rule matching and AF binning, build the result object, export, and optionally persist.
@@ -517,7 +531,8 @@ def _finalize_and_export(
     formula_hits = match_formula_rules(
         annotations,
         ctx.formula_rules,
-        member_af_threshold=float(CLI_CONFIG.matching.combination_member_af_threshold),
+        min_fraction=float(cfg.matching.min_cooccurrence_combination_fraction),
+        eps=float(cfg.matching.frechet_epsilon),
     )
     annotations = assign_af_bins(annotations, bins=ctx.af_bins)
 
@@ -564,6 +579,7 @@ def _finalize_and_export(
         project_path=project_path,
         logger=logger,
         extra_export_formats=extra_export_formats,
+        cfg=cfg,
     )
 
 
@@ -578,6 +594,7 @@ def _finalize_and_export_multi(
     project_path: Path,
     logger: logging.Logger,
     extra_export_formats: set[str] | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> tuple[ProfilingResult, dict]:
     """
     Export and persist an already-assembled multi-reference :class:`ProfilingResult`.
@@ -618,6 +635,7 @@ def _finalize_and_export_multi(
         project_path=project_path,
         logger=logger,
         extra_export_formats=extra_export_formats,
+        cfg=cfg,
     )
 
 

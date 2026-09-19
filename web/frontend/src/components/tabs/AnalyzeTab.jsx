@@ -22,6 +22,8 @@ export function AnalyzeTab({
   uploadBamFile,
   uploadJsonFile,
   uploadProgress,
+  isUploading,
+  cancelUpload,
   activeProfileMode,
   setActiveProfileMode,
   analyzeSubMode,
@@ -45,6 +47,8 @@ export function AnalyzeTab({
   batchJsonFiles,
   batchReferenceFasta,
   batchSamples,
+  isBatchUploading,
+  cancelBatchUpload,
   batchSubmitting,
   isBatchDownloadBusy,
   batchError,
@@ -89,13 +93,19 @@ export function AnalyzeTab({
 
   // Derive the origin the embedded report is served from, so we can validate
   // incoming postMessage events against it. In production the report is
-  // same-origin (apiBase === ''); in dev it is served from the API host
-  // (e.g. http://127.0.0.1:8000). We read it from the iframe's own src so
-  // the check stays correct regardless of deployment topology.
+  // same-origin (apiBase === ''), so buildReportUrl returns a RELATIVE URL;
+  // in dev it is served from the API host (e.g. http://127.0.0.1:8000).
+  // Relative URLs must be resolved against window.location.href — bare
+  // new URL(src) throws on them, which would silently yield reportOrigin=''
+  // and reject every report message. This matters on remount: when the
+  // single/batch submode switch remounts the iframe, reportFrameRef.current
+  // is still null during that render (refs are nulled on unmount), so the
+  // relative fallback path is taken and no later re-render may occur to
+  // recompute the origin from the mounted iframe's resolved src.
   const reportOrigin = (() => {
     try {
       const src = reportFrameRef.current?.src || (inlineReportPath ? buildReportUrl(inlineReportPath) : '');
-      return src ? new URL(src).origin : '';
+      return src ? new URL(src, window.location.href).origin : '';
     } catch {
       return '';
     }
@@ -257,7 +267,7 @@ export function AnalyzeTab({
       <article className="card profile-input-card tab-primary-tile">
         <div className="analyze-shell-header section-header">
           <div>
-            <h2>{analyzeSubMode === 'batch' ? 'Analyze multiple samples' : 'Analyze'}</h2>
+            <h2>Analyze</h2>
             {selectedDatabase?.has_example ? (
               <button
                 type="button"
@@ -279,19 +289,39 @@ export function AnalyzeTab({
               BAM files are optional and can be used for coverage analysis.
             </p>
           </div>
-          {analyzeSubMode === 'single' || !batchSubmitted ? (
-            <div className="analyze-submode-progress">
-              <div className="upload-progress" aria-label="Upload progress">
-                <div className="upload-progress-head">
-                  <span>Upload progress</span>
-                  <span>{uploadProgress.percent}%</span>
-                </div>
-                <div className="upload-progress-track" aria-hidden="true">
-                  <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
-                </div>
+          {/* The upload progress bar stays visible in every view (input forms
+              and results), so the last upload's outcome remains readable. */}
+          <div className="analyze-submode-progress">
+            <div className="upload-progress" aria-label="Upload progress">
+              <div className="upload-progress-head">
+                <span>Upload progress</span>
+                <span>{uploadProgress.percent}%</span>
+                {/* Cancel the in-flight upload (single or batch). Single and batch
+                    uploads are mutually exclusive submodes, so the active flag
+                    determines which cancel handler to call. */}
+                {(isUploading || isBatchUploading) ? (
+                  <button
+                    type="button"
+                    className="upload-cancel-btn"
+                    onClick={() => {
+                      if (isUploading) {
+                        cancelUpload();
+                      } else {
+                        cancelBatchUpload();
+                      }
+                    }}
+                    title="Cancel"
+                    aria-label="Cancel"
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+              <div className="upload-progress-track" aria-hidden="true">
+                <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
               </div>
             </div>
-          ) : null}
+          </div>
           <div className="analyze-submode-row" role="group" aria-label="Analysis workflow" ref={analyzeSubmodeRowRef}>
             <div className="analyze-submode-controls">
               <div
@@ -318,7 +348,6 @@ export function AnalyzeTab({
                   className={`analyze-submode-switch-option ${analyzeSubMode === 'batch' ? 'active' : ''}`}
                   onClick={() => {
                     setBatchMode('vcf');
-                    resetBatch();
                     setAnalyzeSubMode('batch');
                   }}
                   disabled={isAnalyzeScopeLocked}
@@ -527,11 +556,12 @@ export function AnalyzeTab({
                   runSelectedProfile();
                 }}
                 disabled={
-                  activeProfileMode === 'regenerate' 
-                    ? (isRegenerateBusy || !jsonInputId) 
+                  isUploading ||
+                  (activeProfileMode === 'regenerate'
+                    ? (isRegenerateBusy || !jsonInputId)
                     : activeProfileMode === 'vcf'
                       ? (isProfileBusy || !vcfInput.vcf_id || !vcfInput.reference_id)
-                      : (isProfileBusy || !fastaInput.fasta_id)
+                      : (isProfileBusy || !fastaInput.fasta_id))
                 }
               >
                 {(activeProfileMode === 'regenerate' ? isRegenerateBusy : isProfileBusy) ? (
@@ -771,12 +801,24 @@ export function AnalyzeTab({
                 const fileColumnLabel = batchMode === 'vcf' ? 'VCF file' : batchMode === 'fasta' ? 'FASTA file' : 'JSON file';
                 return batchFiles.length > 0 ? (
                 <div className="profile-upload-row profile-upload-row-batch-files">
-                  <p className="field-optional">
-                    {batchFiles.length} / {batchMaxSamples} files
-                    {batchFiles.length >= batchMaxSamples ? (
-                      <span style={{ color: 'var(--color-error, #c2410c)', marginLeft: '0.4em' }}>Limit reached</span>
-                    ) : null}
-                  </p>
+                  <div className="batch-files-count-row">
+                    <p className="field-optional">
+                      {batchFiles.length} / {batchMaxSamples} files
+                      {batchFiles.length >= batchMaxSamples ? (
+                        <span style={{ color: 'var(--color-error, #c2410c)', marginLeft: '0.4em' }}>Limit reached</span>
+                      ) : null}
+                    </p>
+                    <button
+                      type="button"
+                      className="button-link batch-clear-all-btn"
+                      onClick={() => resetBatch()}
+                      disabled={batchSubmitting}
+                      aria-label="Clear all uploaded batch files"
+                      title="Clear all"
+                    >
+                      Clear all
+                    </button>
+                  </div>
                   <div className="table-wrap batch-uploaded-table-wrap">
                     <table className="batch-uploaded-table">
                       <thead>
@@ -854,7 +896,8 @@ export function AnalyzeTab({
                   className="analyze-primary"
                   onClick={() => submitBatch()}
                   disabled={
-                    batchSubmitting
+                    isBatchUploading
+                    || batchSubmitting
                     || batchRateLimitCooldown > 0
                     || (batchMode === 'vcf' ? batchVcfFiles : batchMode === 'fasta' ? batchFastaFiles : batchJsonFiles).length === 0
                     || (batchMode === 'vcf' && !batchReferenceFasta)

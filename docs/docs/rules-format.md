@@ -321,6 +321,8 @@ The optional formula TSV defines higher-order resistance rules over atomic `memb
 - Each `group_id` in the formula TSV must be unique.
 - Duplicate atomic ids inside one formula are rejected.
 
+**Single-member OR de-duplication**: a pure-`OR` formula (no `AND`/`XOR`/`NOT`) that fires through exactly one present member is logically equivalent to that member's own atomic rule. If the member also has an independently-curated atomic rule for the **same drug** (i.e. it is not a formula-only placeholder), the formula hit is suppressed so the exact match isn't reported twice — only the atomic hit stands. Members intended to fire *only* through the formula (never independently) should be curated with a placeholder drug, not the formula's own drug. `AND`/`XOR`/`NOT` clauses are never suppressed this way, since a single surviving contributor there still encodes a distinct claim (e.g. co-occurrence or absence of other members).
+
 See [Interpretation Algorithms](algorithms.md) for a visual overview of the boolean operators.
 
 ### Minimal combination-rule example

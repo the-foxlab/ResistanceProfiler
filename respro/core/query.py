@@ -10,6 +10,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
+from respro.config.cli_settings import CLI_CONFIG, CliConfig
 from respro.core.alignment import (
     load_features,
     match_query_to_features,
@@ -43,6 +44,7 @@ def resolve_fasta_query_multi(
     threads: int = 1,
     with_rules_only: bool = False,
     selected_query_names: set[str] | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> list[QueryRecord]:
     """
     Read a (possibly multi-record) user FASTA and align each record to internal CDS.
@@ -101,7 +103,7 @@ def resolve_fasta_query_multi(
                 logger.info('Using cached feature mappings for %r', query_name)
 
         if matches is None:
-            matches = match_query_to_features(query_seq, features, threads=threads)
+            matches = match_query_to_features(query_seq, features, threads=threads, cfg=cfg)
             if not matches:
                 logger.warning(
                     'No CDS matches found for FASTA record %r in %s; dropping record',
@@ -130,6 +132,7 @@ def resolve_fasta_query(
     *,
     use_cache: bool = True,
     threads: int = 1,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> tuple[str, str, list[FeatureMatch]]:
     """
     Read a single-record user FASTA and align to internal CDS annotations.
@@ -155,7 +158,7 @@ def resolve_fasta_query(
         )
 
     records = resolve_fasta_query_multi(
-        conn, fasta_path, use_cache=use_cache, threads=threads, with_rules_only=True,
+        conn, fasta_path, use_cache=use_cache, threads=threads, with_rules_only=True, cfg=cfg,
     )
     record = records[0]
     return record.query_name, record.query_sequence, record.feature_matches

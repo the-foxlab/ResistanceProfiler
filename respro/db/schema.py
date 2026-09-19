@@ -256,7 +256,12 @@ CREATE TABLE IF NOT EXISTS variant_result (
     rule_match  INTEGER DEFAULT 0,
     drug_hits   TEXT    DEFAULT '[]',
     is_combined_codon_event INTEGER DEFAULT 0,
-    combined_member_count   INTEGER DEFAULT 1
+    combined_member_count   INTEGER DEFAULT 1,
+    combined_states         TEXT    DEFAULT '[]',
+    single_exchange_aa_freq REAL    DEFAULT 0.0,
+    rule_effect_aa_freq     TEXT    DEFAULT '{}',
+    rule_effect_alt         TEXT    DEFAULT '{}',
+    freq_method             TEXT    DEFAULT 'observed'
 );
 
 CREATE INDEX IF NOT EXISTS idx_vr_run ON variant_result(run_id);
@@ -388,6 +393,11 @@ _OPTIONAL_RESULTS_COLUMN_DEFS = {
         'drug_hits': "TEXT DEFAULT '[]'",
         'is_combined_codon_event': 'INTEGER DEFAULT 0',
         'combined_member_count': 'INTEGER DEFAULT 1',
+        'combined_states': "TEXT DEFAULT '[]'",
+        'single_exchange_aa_freq': 'REAL DEFAULT 0.0',
+        'rule_effect_aa_freq': "TEXT DEFAULT '{}'",
+        'rule_effect_alt': "TEXT DEFAULT '{}'",
+        'freq_method': "TEXT DEFAULT 'observed'",
     },
     'coverage_gap': {
         'reference_name': "TEXT DEFAULT ''",

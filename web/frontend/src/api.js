@@ -141,8 +141,9 @@ export async function apiDelete(path) {
   }
 }
 
-export async function apiUpload(path, file, onProgress = null) {
-  // Use XHR so upload progress events can be surfaced in the UI.
+export async function apiUpload(path, file, onProgress = null, onAbort = null) {
+  // Use XHR so upload progress events can be surfaced in the UI. ``onAbort``
+  // lets the caller capture the request so it can be aborted mid-flight.
   const formData = new FormData();
   formData.append('file', file);
 
@@ -184,6 +185,17 @@ export async function apiUpload(path, file, onProgress = null) {
     request.onerror = () => {
       reject(new Error('Upload failed: network error'));
     };
+
+    // A real browser fires the ``abort`` event (not ``error``) when the XHR is
+    // aborted. Settling the promise here is what lets callers' finally blocks
+    // run and clear their in-flight flags after a cancel.
+    request.onabort = () => {
+      reject(new Error('Upload canceled'));
+    };
+
+    if (onAbort) {
+      onAbort(request);
+    }
 
     request.send(formData);
   });

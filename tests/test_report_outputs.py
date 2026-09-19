@@ -12,13 +12,17 @@ from conftest import make_profiling_result
 
 from respro.db.models import (
     AnnotatedVariant,
+    CodonState,
     CoverageGap,
     FeatureMatch,
     FeatureRecord,
     FeatureSegment,
+    FormulaRuleHit,
     ProfilingResult,
     Publication,
     ResistanceRule,
+    ResistanceRuleSet,
+    ResistanceRuleSetMember,
     VariantCall,
 )
 from respro.db.report_queries import load_feature_cards
@@ -42,6 +46,543 @@ def _make_combined_result() -> ProfilingResult:
     r.annotations[0].is_combined_codon_event = True
     r.annotations[0].combined_member_count = 2
     return r
+
+
+class TestCombinedStatesReport:
+    """Report rendering of per-SNP combined-state effects (T5)."""
+
+    @staticmethod
+    def _aag_result() -> ProfilingResult:
+        """AAG codon: A->T@1.0 (pos4) + G->T@0.5 (pos5).
+
+        A->T row: single=M (ATG), combined_states=[ATT/I@0.5, ATG/M@0.5].
+        G->T row: single=I (ATT, promoted), combined_states=[].
+        """
+        rule_i = ResistanceRule(
+            id=10, feature_name='testf', feature_id=1,
+            drug_name='DrugI', drug_id=1, reference_identifier='ref',
+            position=1, reference='K', mutation='I', phenotype='resistant',
+        )
+        rule_m = ResistanceRule(
+            id=20, feature_name='testf', feature_id=1,
+            drug_name='DrugM', drug_id=2, reference_identifier='ref',
+            position=1, reference='K', mutation='M', phenotype='resistant',
+        )
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='testf', protein='TestF',
+            start=0, end=9, strand='+', codon_start=0,
+            nt_sequence='ATGAAGAAA',
+        )
+        a_row = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_aa_freq=0.5,
+            combined_states=[
+                CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+                CodonState(alt_codon='ATG', alt_aa='M', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0,)),
+            ],
+            rule_matches=[rule_i, rule_m],
+            rule_effect_aa_freq={10: 0.5, 20: 0.5},
+            rule_effect_alt={10: 'I', 20: 'M'},
+        )
+        g_row = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=5, ref='G', alt='T', allele_freq=0.5, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATT', ref_aa='K', alt_aa='I',
+            consequence='missense', af_bin='intermediate',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_aa_freq=0.5,
+            combined_states=[],
+            rule_matches=[rule_i],
+            rule_effect_aa_freq={10: 0.5},
+            rule_effect_alt={10: 'I'},
+        )
+        return make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=2, variants_in_cds=2, resistance_hits=3,
+            annotations=[a_row, g_row],
+            query_sequence='ATGAAGAAA',
+            feature_matches=[
+                FeatureMatch(
+                    feature=feature, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                    query_start=0, query_end=9, strand='+', cigar='9M', cds_start=0,
+                ),
+            ],
+        )
+
+    def test_all_mutations_has_aa_effects_field(self) -> None:
+        """All Mutations table has an aa_effects field per row listing all amino-acid
+        effects (single + combined) with their amino-acid frequencies."""
+        r = self._aag_result()
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        assert len(rows) == 2
+        # A->T row: single K2M (0.5) + combined K2I (0.5). The combined state
+        # that also produces M is deduped (same amino acid as the single).
+        a_row = next(row for row in rows if row['aa_change'] == 'K2M')
+        assert 'K2M | 0.5 |' in a_row['aa_effects']
+        assert 'K2I | 0.5 |' in a_row['aa_effects']
+        # K2M must appear exactly once (no duplication).
+        assert a_row['aa_effects'].count('K2M') == 1
+        # G->T row: promoted single K2I (0.5), no combined states.
+        # freq_method defaults to 'observed'.
+        g_row = next(row for row in rows if row['aa_change'] == 'K2I')
+        assert g_row['aa_effects'] == 'K2I | 0.5 | observed'
+
+    def test_row_dict_exposes_combined_codon_flags(self) -> None:
+        """Each row exposes is_combined_codon_event and combined_member_count so
+        the template can mark combined-SNP participation."""
+        r = self._aag_result()
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        a_row = next(row for row in rows if row['aa_change'] == 'K2M')
+        assert a_row['is_combined_codon_event'] is True
+        assert a_row['combined_member_count'] == 2
+        g_row = next(row for row in rows if row['aa_change'] == 'K2I')
+        assert g_row['is_combined_codon_event'] is True
+        assert g_row['combined_member_count'] == 2
+
+    def test_combined_rows_carry_combined_flag_only(self) -> None:
+        """Combined-codon rows carry ``is_combined_codon_event`` for uniform
+        highlighting. Boundary flags (``is_combined_codon_first`` / ``_last``)
+        are no longer computed — every combined row is highlighted the same."""
+        r = self._aag_result()
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        combined = [row for row in rows if row['is_combined_codon_event']]
+        assert len(combined) == 2
+        for row in combined:
+            assert 'is_combined_codon_first' not in row
+            assert 'is_combined_codon_last' not in row
+
+    def test_rendered_html_highlights_combined_rows(self) -> None:
+        """The rendered HTML adds the ``mutation-row--combined`` class to combined
+        rows so CSS can highlight them uniformly. Boundary classes are no longer
+        emitted."""
+        r = self._aag_result()
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        assert 'mutation-row--combined' in html
+        assert 'mutation-row--combined--first' not in html
+        assert 'mutation-row--combined--last' not in html
+
+    def test_all_mutations_context_has_combinatorial_flag(self) -> None:
+        """The all_mutations context exposes has_combinatorial so the template can
+        conditionally render the combinatorial-effects column header."""
+        r = self._aag_result()
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        assert ctx['all_mutations']['has_combinatorial'] is True
+
+    def test_single_snp_result_has_combinatorial_flag_false(self) -> None:
+        """A result with no combined-codon events has has_combinatorial == False."""
+        r = _make_result()
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        assert ctx['all_mutations']['has_combinatorial'] is False
+
+    def test_rendered_html_marks_combined_snp_rows(self) -> None:
+        """The rendered All Mutations table marks rows that participated in a
+        combined SNP codon with a boolean column and shows all AA effects in one
+        merged column."""
+        r = self._aag_result()
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        # The merged AA effects column header is rendered.
+        assert 'AA effects' in html
+        # The old separate Combinatorial AA effects column is gone.
+        assert 'Combinatorial AA effects' not in html
+        # The boolean combined-SNP-codon column header is rendered.
+        assert 'Combined SNP codon' in html
+        # Each combined-SNP row carries a combined-codon class on its row.
+        assert 'mutation-row--combined' in html
+        # The boolean flag is rendered (✓ for combined members).
+        assert 'combined-codon-yes' in html
+        # The AA effects text is rendered in the cell (rounded to 3 dp).
+        assert 'K2I | 0.5 |' in html
+        assert 'K2M | 0.5 |' in html
+
+    def test_variant_frequency_hover_explains_nucleotide_vs_amino_acid(self) -> None:
+        """The Variant frequency hover explains it is the nucleotide frequency and
+        notes rule matching uses the amino-acid frequency."""
+        r = self._aag_result()
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        assert 'Variant frequency' in html
+        assert 'nucleotide frequency' in html
+        # The hover notes that rule matching uses the amino-acid frequency.
+        assert 'amino-acid frequency' in html
+
+    def test_alignment_row_colspan_matches_header_column_count(self) -> None:
+        """The expansion (alignment) row's colspan must equal the number of <th>
+        columns in the header, for both the combined and the single-SNP case.
+        Regression for a prior off-by-one where has_combinatorial added two
+        columns but the colspan formula counted only one."""
+        for r in (self._aag_result(), _make_result()):
+            html = render_html(r, similarity_high=1, similarity_moderate=0)
+            table = re.search(r'<table class="mutation-table">.*?</table>', html, re.DOTALL).group(0)
+            thead = re.search(r'<thead>.*?</thead>', table, re.DOTALL).group(0)
+            th_count = len(re.findall(r'<th[ >]', thead))
+            col = re.search(r'mutation-alignment-row.*?colspan="(\d+)"', table, re.DOTALL)
+            assert col is not None, 'no alignment row found'
+            assert int(col.group(1)) == th_count, (
+                f'colspan {col.group(1)} != header <th> count {th_count}'
+            )
+
+    def test_rendered_html_omits_combinatorial_column_when_no_combined(self) -> None:
+        """A result with no combined-codon events omits the combined-SNP-codon
+        column and flag in the table body."""
+        r = _make_result()
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        # The combined-row class must not appear on any mutation <tr> in the body.
+        body_match = re.search(r'<table class="mutation-table">.*?</table>', html, re.DOTALL)
+        assert body_match is not None
+        body = body_match.group(0)
+        assert 'mutation-row--combined' not in body
+        assert 'combined-codon-yes' not in body
+        # The combined-SNP-codon column header must not appear in the table.
+        assert 'Combined SNP codon' not in body
+
+    def test_all_mutations_row_variant_freq_uses_own_snp_af(self) -> None:
+        """The Variant frequency column shows the SNP's own marginal nucleotide
+        frequency."""
+        r = self._aag_result()
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        a_row = next(row for row in rows if row['aa_change'] == 'K2M')
+        assert a_row['variant_freq'] == 1.0
+        g_row = next(row for row in rows if row['aa_change'] == 'K2I')
+        assert g_row['variant_freq'] == 0.5
+
+    def test_database_hits_use_combined_lower_for_af_bin(self) -> None:
+        """Database Hits table bins the AF using the combined state's lower (0.5),
+        not the row's own AF (1.0 for the A->T row)."""
+        r = self._aag_result()
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        hit_rows = ctx['database_hits']['rows']
+        # The A->T row has two rule hits: DrugI (via combined I@0.5) and DrugM (via combined M@0.5).
+        # Both should be binned at 0.5 (intermediate), not 1.0 (high).
+        drug_i_hits = [row for row in hit_rows if row['drug_key'] == 'DrugI']
+        assert len(drug_i_hits) >= 1
+        # The A->T row's DrugI hit (via combined I) should use lower 0.5 -> intermediate bin.
+        a_drug_i = next(
+            row for row in drug_i_hits
+            if any('K2I' in str(g['muts']) for g in row['mutation_groups'])
+        )
+        assert a_drug_i['af_bin'] == 'intermediate'
+
+    def test_database_hits_show_combined_state_aa_not_single(self) -> None:
+        """A rule that fires via a combined state whose alt_aa differs from the
+        single-exchange alt_aa must show the combined-state AA in the Database
+        Hits table, not the single-exchange AA.
+
+        Uses a dedicated fixture where only one row matches the DrugI rule, via
+        a combined state (alt_aa='I') that differs from the row's single-exchange
+        alt_aa='M'. The database-hits row must show 'K2I', not 'K2M'.
+        """
+        rule_i = ResistanceRule(
+            id=10, feature_name='testf', feature_id=1,
+            drug_name='DrugI', drug_id=1, reference_identifier='ref',
+            position=1, reference='K', mutation='I', phenotype='resistant',
+        )
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='testf', protein='TestF',
+            start=0, end=9, strand='+', codon_start=0,
+            nt_sequence='ATGAAGAAA',
+        )
+        # Single-exchange alt_aa='M', but a combined state with alt_aa='I' that
+        # matches the DrugI rule. rule_effect_alt records 'I' for rule 10.
+        a_row = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_aa_freq=0.5,
+            combined_states=[
+                CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+            rule_matches=[rule_i],
+            rule_effect_aa_freq={10: 0.5},
+            rule_effect_alt={10: 'I'},
+        )
+        result = make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=1,
+            annotations=[a_row],
+            query_sequence='ATGAAGAAA',
+            feature_matches=[
+                FeatureMatch(
+                    feature=feature, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                    query_start=0, query_end=9, strand='+', cigar='9M', cds_start=0,
+                ),
+            ],
+        )
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0)
+        hit_rows = ctx['database_hits']['rows']
+        drug_i_hits = [row for row in hit_rows if row['drug_key'] == 'DrugI']
+        assert len(drug_i_hits) == 1
+        muts = [m for g in drug_i_hits[0]['mutation_groups'] for m in g['muts']]
+        # The DrugI rule (mutation='I') fired via the combined state alt_aa='I',
+        # so the displayed AA must be K2I, not K2M (the single-exchange AA).
+        assert 'K2I' in muts
+        assert 'K2M' not in muts
+
+    def test_single_snp_row_has_only_single_effect(self) -> None:
+        """A single-SNP annotation's aa_effects lists only the single effect at
+        the variant frequency (no combined states)."""
+        r = _make_result()
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        # single_exchange_aa_freq == allele_freq; no combined states.
+        assert 'K' in rows[0]['aa_effects']
+        assert ';' not in rows[0]['aa_effects']
+
+    def test_combined_member_synonymous_single_shown_as_missense(self) -> None:
+        """A combined-codon member whose single-exchange is synonymous but that
+        has accepted non-synonymous combined states is displayed as missense,
+        not synonymous (the AA effects column lists real amino-acid changes)."""
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='G', allele_freq=0.9, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='GCA', alt_codon='GCG', ref_aa='A', alt_aa='A',
+            consequence='synonymous', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_aa_freq=0.0,
+            combined_states=[
+                CodonState(alt_codon='GGA', alt_aa='G', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+        )
+        r = make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[ann], query_sequence='ATGAAGAAA',
+        )
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        assert rows[0]['consequence'] == 'missense'
+        # The underlying ann.consequence is unchanged (used by rule matching).
+        assert ann.consequence == 'synonymous'
+
+    def test_combined_member_synonymous_single_no_nonsyn_states_stays_synonymous(self) -> None:
+        """A combined-codon member whose single is synonymous and whose combined
+        states are also synonymous (or absent) stays synonymous in the display."""
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='G', allele_freq=0.9, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='GCA', alt_codon='GCG', ref_aa='A', alt_aa='A',
+            consequence='synonymous', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_aa_freq=0.0,
+            combined_states=[
+                CodonState(alt_codon='GCG', alt_aa='A', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+        )
+        r = make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[ann], query_sequence='ATGAAGAAA',
+        )
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        assert rows[0]['consequence'] == 'synonymous'
+
+    def test_formula_tag_propagates_to_all_combined_codon_siblings(self) -> None:
+        """A formula (combination) rule that fires via one combined-codon member
+        must tag ALL co-codon siblings with is_formula_hit, not just the matched
+        member. The single-rule tag follows each member's own rule_matches, but
+        the formula tag is shared across the combined codon."""
+        # Two co-codon members at the same (feature, codon_pos).
+        member_a = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_aa_freq=0.5,
+            combined_states=[
+                CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+            rule_matches=[],
+        )
+        member_b = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=5, ref='G', alt='T', allele_freq=0.5, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATT', ref_aa='K', alt_aa='I',
+            consequence='missense', af_bin='intermediate',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_aa_freq=0.5,
+            combined_states=[],
+            rule_matches=[],
+        )
+        rs = ResistanceRuleSet(
+            id=10, drug_name='DrugX', drug_id=1, phenotype='resistant',
+            clinical_phenotype='resistant', ic50='>1.0', fold_ic50='15.0', score='4.0',
+            source='LB2021', group_name='FR1', logic_expression='R1 AND R2',
+            publications=[],
+            members=[
+                ResistanceRuleSetMember(
+                    id=1, rule_set_id=10, feature_name='testf', feature_id=1,
+                    reference_identifier='ref', position=1, reference='K',
+                    mutation='M', external_id='R1',
+                ),
+                ResistanceRuleSetMember(
+                    id=2, rule_set_id=10, feature_name='testf', feature_id=1,
+                    reference_identifier='ref', position=1, reference='K',
+                    mutation='I', external_id='R2',
+                ),
+            ],
+        )
+        # Formula hit references only member_a (the best per member rule R1).
+        hit = FormulaRuleHit(rule_set=rs, matched_variants=[member_a],
+                             matched_member_ids=['R1'])
+        r = make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=2, variants_in_cds=2, resistance_hits=0,
+            annotations=[member_a, member_b], query_sequence='ATGAAGAAA',
+            formula_hits=[hit],
+        )
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        # Both co-codon members carry the formula tag.
+        assert all(row['is_formula_hit'] for row in rows), (
+            f'formula tag missing on sibling: {[r["is_formula_hit"] for r in rows]}'
+        )
+
+    def test_formula_tag_does_not_cross_references(self) -> None:
+        """A formula hit on one reference must not tag a combined-codon sibling on
+        a different reference that happens to share ``(feature_name, codon_pos)``.
+        Same-species multi-reference runs can share feature names; the sibling
+        expansion must be scoped by chrom to avoid cross-reference over-tagging.
+        """
+        from respro.db.models import ReferenceGroup
+
+        # ref1 combined-codon member (has a formula hit).
+        ref1_member = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_a', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_aa_freq=0.5,
+            combined_states=[
+                CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+            rule_matches=[],
+        )
+        # ref2 combined-codon member at the SAME (feature_name, codon_pos) but on
+        # a different reference (chrom='chrom_b'). No formula hit references it.
+        ref2_member = AnnotatedVariant(
+            variant=VariantCall(chrom='chrom_b', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_aa_freq=0.5,
+            combined_states=[
+                CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+            rule_matches=[],
+        )
+        rs = ResistanceRuleSet(
+            id=10, drug_name='DrugX', drug_id=1, phenotype='resistant',
+            clinical_phenotype='resistant', ic50='>1.0', fold_ic50='15.0', score='4.0',
+            source='LB2021', group_name='FR1', logic_expression='R1',
+            publications=[],
+            members=[
+                ResistanceRuleSetMember(
+                    id=1, rule_set_id=10, feature_name='testf', feature_id=1,
+                    reference_identifier='refA', position=1, reference='K',
+                    mutation='M', external_id='R1',
+                ),
+            ],
+        )
+        hit = FormulaRuleHit(rule_set=rs, matched_variants=[ref1_member],
+                             matched_member_ids=['R1'])
+        references = [
+            ReferenceGroup(
+                reference_name='refA', reference_id=1, organism='Organism A',
+                reference_length_nt=1000, query_name='chrom_a', query_sequence='ATGAAGAAA',
+                features=[], rule_feature_names={'testf'}, feature_matches=[],
+            ),
+            ReferenceGroup(
+                reference_name='refB', reference_id=2, organism='Organism A',
+                reference_length_nt=1000, query_name='chrom_b', query_sequence='ATGAAGAAA',
+                features=[], rule_feature_names={'testf'}, feature_matches=[],
+            ),
+        ]
+        r = ProfilingResult(
+            project_name='T', organism='Organism A',
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=2, variants_in_cds=2, resistance_hits=0,
+            annotations=[ref1_member, ref2_member],
+            formula_hits=[hit],
+            references=references,
+        )
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        by_ref = {row['reference_name']: row for row in rows}
+        # refA member is tagged (formula hit references it).
+        assert by_ref['refA']['is_formula_hit'] is True
+        # refB member must NOT be tagged: it shares (feature_name, codon_pos)
+        # but is on a different reference.
+        assert by_ref['refB']['is_formula_hit'] is False
+
+    def test_similarity_uses_combined_states_lower_for_binning(self) -> None:
+        """A non-resistance-hit combined-state annotation appears in the similarity
+        table once per accepted combined state, binned at the state's lower."""
+        rule_i = ResistanceRule(
+            id=10, feature_name='testf', feature_id=1,
+            drug_name='DrugI', drug_id=1, reference_identifier='ref',
+            position=1, reference='K', mutation='I', phenotype='resistant',
+        )
+        rule_m = ResistanceRule(
+            id=20, feature_name='testf', feature_id=1,
+            drug_name='DrugM', drug_id=2, reference_identifier='ref',
+            position=1, reference='K', mutation='M', phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T', allele_freq=1.0, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            combined_states=[
+                CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+                CodonState(alt_codon='ATG', alt_aa='M', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0,)),
+            ],
+            rule_matches=[],  # not a resistance hit
+        )
+        r = make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[ann],
+        )
+        ctx = build_report_context(
+            r, similarity_high=1, similarity_moderate=0, rules=[rule_i, rule_m],
+        )
+        sim_rows = ctx['similarity_entries']['rows']
+        # One row per (combined state, rule) → 2 states × 2 rules = 4 rows.
+        assert len(sim_rows) == 4
+        # Each row binned at 0.5 (intermediate), not 1.0 (high).
+        assert all(row['af_bin'] == 'intermediate' for row in sim_rows)
+        # Both combined-state alt_aas appear as observed mutations.
+        observed = {row['mutation'] for row in sim_rows}
+        assert 'K2I' in observed
+        assert 'K2M' in observed
 
 
 def _make_result() -> ProfilingResult:
@@ -100,6 +641,139 @@ def _make_result() -> ProfilingResult:
             )
         ],
     )
+
+
+class TestFreqMethodLabel:
+    """The AA-effects frequency is suffixed with a user-facing tag driven by
+    ``ann.freq_method``: `` (observed)`` for directly measured frequencies
+    (single-nt VCF AF or BAM read-backed codon) and `` (lower bound)`` for the
+    conservative lower-bound estimate used for combined codons without
+    read-level data. The term "Fréchet" is not surfaced in the report."""
+
+    @staticmethod
+    def _combined_result(freq_method: str, combined_lower: float = 0.6,
+                         single_freq: float = 0.6) -> ProfilingResult:
+        """A combined-codon member with freq_method set explicitly."""
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T',
+                                allele_freq=0.9, depth=100),
+            feature_name='testf', codon_pos=19,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_aa_freq=single_freq,
+            freq_method=freq_method,
+            combined_states=[
+                CodonState(alt_codon='ATG', alt_aa='M', lower=combined_lower,
+                           upper=combined_lower, forced_fraction=1.0,
+                           accepted=True, member_indices=(0, 1)),
+            ],
+        )
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='testf', protein='TestF',
+            start=0, end=60, strand='+', codon_start=0,
+            nt_sequence='AAA' * 20,
+        )
+        return make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[ann],
+            query_sequence='AAA' * 20,
+            feature_matches=[
+                FeatureMatch(
+                    feature=feature, identity=1.0, cds_coverage=1.0,
+                    query_coverage=1.0, query_start=0, query_end=60,
+                    strand='+', cigar='60M', cds_start=0,
+                ),
+            ],
+        )
+
+    def test_combined_member_estimated_label(self) -> None:
+        """A no-BAM combined-codon member (freq_method='estimated') suffixes the
+        frequency with `` (lower bound)``."""
+        r = self._combined_result(freq_method='estimated', combined_lower=0.6)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        assert 'K20M | 0.6 | lower bound' in rows[0]['aa_effects']
+
+    def test_combined_member_observed_label(self) -> None:
+        """A BAM-mode combined-codon member (freq_method='observed') suffixes the
+        frequency with `` (observed)``."""
+        r = self._combined_result(freq_method='observed', combined_lower=0.7,
+                                  single_freq=0.7)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        assert 'K20M | 0.7 | observed' in rows[0]['aa_effects']
+
+    def test_single_snp_observed_label(self) -> None:
+        """A single-nucleotide variant (freq_method='observed' by default)
+        suffixes its frequency with `` (observed)``."""
+        r = _make_result()  # single SNP, freq_method defaults to 'observed'
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        # _make_result: K3E at allele_freq 0.95 (single_exchange_aa_freq == af).
+        assert 'K3E | 0.95 | observed' in rows[0]['aa_effects']
+
+    def test_rendered_html_contains_estimated_and_observed_labels(self) -> None:
+        """The rendered HTML carries the (observed)/(lower bound) suffixes in the
+        AA-effects cells."""
+        r = self._combined_result(freq_method='estimated', combined_lower=0.6)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        assert 'K20M | 0.6 | lower bound' in html
+
+    def test_rendered_html_legend_explains_tags_without_frechet(self) -> None:
+        """The report legend explains the observed/lower-bound tags and does not
+        mention the term 'Fréchet'."""
+        r = self._combined_result(freq_method='estimated', combined_lower=0.6)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        assert 'observed' in html.lower()
+        assert 'lower bound' in html.lower()
+        # The term "Fréchet" must not appear in the rendered report.
+        assert 'Fréchet' not in html
+        assert 'Frechet' not in html
+
+    def test_old_db_without_freq_method_defaults_observed(self) -> None:
+        """An AnnotatedVariant with freq_method left at its default ('observed')
+        — as an old results DB without the column would reconstruct — renders
+        with the `` (observed)`` label."""
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T',
+                                allele_freq=0.9, depth=100),
+            feature_name='testf', codon_pos=19,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+            is_combined_codon_event=True, combined_member_count=2,
+            single_exchange_aa_freq=0.6,
+            # freq_method intentionally left at default 'observed'
+            combined_states=[
+                CodonState(alt_codon='ATG', alt_aa='M', lower=0.6, upper=0.6,
+                           forced_fraction=1.0, accepted=True,
+                           member_indices=(0, 1)),
+            ],
+        )
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='testf', protein='TestF',
+            start=0, end=60, strand='+', codon_start=0,
+            nt_sequence='AAA' * 20,
+        )
+        r = make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[ann],
+            query_sequence='AAA' * 20,
+            feature_matches=[
+                FeatureMatch(
+                    feature=feature, identity=1.0, cds_coverage=1.0,
+                    query_coverage=1.0, query_start=0, query_end=60,
+                    strand='+', cigar='60M', cds_start=0,
+                ),
+            ],
+        )
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        rows = ctx['all_mutations']['rows']
+        assert '| observed' in rows[0]['aa_effects']
 
 
 class TestBuildReportContext:
@@ -3544,16 +4218,17 @@ class TestAlignmentVisualization:
             "<span class='aln-cell'>C</span><span class='aln-sep'></span>"
         ) in html
 
-    def test_affected_nt_positions_combined_codon_event_highlights_all_differing_positions(self) -> None:
+    def test_affected_nt_positions_combined_codon_event_highlights_only_own_snp(self) -> None:
         """
-        For a combined codon event (two SNPs in one codon), _affected_nt_positions
-        should return all positions where ref_codon differs from alt_codon, not just
-        the anchor SNP's position.
+        For a combined codon event, _affected_nt_positions highlights only the
+        member's own reported nucleotide difference (the variant anchor), not the
+        whole codon. The partner SNP at the other codon position is a separate
+        annotation with its own alignment.
 
         Feature: ATG TCT AAA AAA (positions 0-11 on + strand)
         Codon 1 = TCT at coding positions 3,4,5
         Combined event: TCT → ACG (positions 3 and 5 differ)
-        The anchor SNP is at position 3, but position 5 must also be highlighted.
+        This member's anchor SNP is at position 3 (T→A); only pos 3 is highlighted.
         """
         feature = FeatureRecord(
             id=1,
@@ -3567,15 +4242,8 @@ class TestAlignmentVisualization:
             nt_sequence='ATGTCTAAAAAA',
         )
         match = FeatureMatch(
-            feature=feature,
-            identity=1.0,
-            cds_coverage=1.0,
-            query_coverage=1.0,
-            query_start=0,
-            query_end=12,
-            strand='+',
-            cigar='12M',
-            cds_start=0,
+            feature=feature, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
         )
         alignment = build_feature_alignments('ATGACAAAAAAA', [match])['COMB']
         ann = AnnotatedVariant(
@@ -3592,11 +4260,8 @@ class TestAlignmentVisualization:
         )
         codon_nt_start = alignment.codon_start + ann.codon_pos * 3
         affected = _affected_nt_positions(ann, alignment, codon_nt_start)
-        # On + strand, coding positions 3 and 5 differ (T→A at pos 0 of codon,
-        # T→G at pos 2 of codon). Position 4 (C→C) is unchanged.
-        assert 3 in affected
-        assert 5 in affected
-        assert 4 not in affected
+        # Only the member's own anchor at coding pos 3 is highlighted.
+        assert affected == {3}
 
     def test_affected_nt_positions_combined_codon_reverse_strand(self) -> None:
         """
@@ -3643,17 +4308,13 @@ class TestAlignmentVisualization:
         )
         codon_nt_start = alignment.codon_start + ann.codon_pos * 3
         affected = _affected_nt_positions(ann, alignment, codon_nt_start)
-        # Native positions for coding 3,4,5 on - strand feature_length=9:
-        # coding 3 → native 5, coding 4 → native 4, coding 5 → native 3
-        # CCC→CTC: C→C at idx0 (coding 3→native 5), C→T at idx1 (coding 4→native 4), C→C at idx2
-        assert 4 in affected
-        assert 5 not in affected
-        assert 3 not in affected
+        # Only the member's own anchor at native pos 5 is highlighted.
+        assert affected == {5}
 
-    def test_apply_vcf_overlay_combined_codon_event_overlays_all_differing_positions(self) -> None:
+    def test_apply_vcf_overlay_combined_codon_event_overlays_only_own_snp(self) -> None:
         """
-        For a combined codon event in VCF mode, _apply_vcf_overlay must overlay
-        all positions where ref_codon differs from alt_codon, not just the anchor SNP.
+        For a combined codon event in VCF mode, _apply_vcf_overlay overlays only
+        the member's own anchor SNP, not the whole codon.
         """
         feature = FeatureRecord(
             id=1,
@@ -3705,8 +4366,9 @@ class TestAlignmentVisualization:
             ref_window, query_window,
             coding_positions, native_positions, native_anchor_positions,
         )
-        # After overlay, positions 3 (coding) should be A, position 5 should be G
-        # Reference has TCT at coding 3,4,5; overlay should change to ACG
+        # After overlay, only the member's own anchor (coding pos 3) changes to A.
+        # The partner position (coding pos 5) is NOT overlaid — it is a separate
+        # annotation. Reference has TCT at coding 3,4,5.
         for aln_idx, cpos in enumerate(coding_positions):
             if cpos == 3:
                 assert new_query[aln_idx] == 'A', (
@@ -3715,6 +4377,10 @@ class TestAlignmentVisualization:
             elif cpos == 4:
                 assert new_query[aln_idx] == 'C', (
                     f'Coding pos 4 should stay C after overlay, got {new_query[aln_idx]}'
+                )
+            elif cpos == 5:
+                assert new_query[aln_idx] == 'T', (
+                    f'Coding pos 5 should stay T (not overlaid), got {new_query[aln_idx]}'
                 )
 
     def test_apply_vcf_overlay_combined_codon_event_reverse_strand(self) -> None:
@@ -3750,8 +4416,8 @@ class TestAlignmentVisualization:
             cds_start=0,
         )
         alignment = build_feature_alignments(query, [match])['RCOMB2']
-        # Combined event in coding: CCC → CTC at codon 1 (coding positions 3,4,5)
-        # idx=1: C→T, coding pos 4
+        # Member anchor at native pos 5 (ref=C, alt=T). On minus strand,
+        # native pos 5 maps to coding pos 3 (9-1-5=3).
         ann = AnnotatedVariant(
             variant=VariantCall(chrom='ref', pos=5, ref='C', alt='T'),
             feature_name='RCOMB2',
@@ -3776,18 +4442,117 @@ class TestAlignmentVisualization:
             ref_window, query_window,
             coding_positions, native_positions, native_anchor_positions,
         )
-        # On - strand with feature_length=9:
-        # coding position 4 maps to native position 4 (9-1-4=4, same by symmetry)
-        # In native display at coding_pos=4: ref shows G (complement of coding C),
-        # alt should show A (complement of coding T), NOT T.
-        for aln_idx, cpos in enumerate(coding_positions):
-            if cpos == 4:
-                assert new_ref[aln_idx] == 'G', (
-                    f'At coding pos 4, ref should be G, got {new_ref[aln_idx]}'
+        # The overlay writes the member's own alt (T, native orientation) at the
+        # anchor (native pos 5). Partner positions are not overlaid.
+        for aln_idx, npos in enumerate(native_positions):
+            if npos == 5:
+                assert new_query[aln_idx] == 'T', (
+                    f'At native pos 5, query should be T (own alt), got {new_query[aln_idx]}'
                 )
-                assert new_query[aln_idx] == 'A', (
-                    f'At coding pos 4, query should be A (complement of coding T), got {new_query[aln_idx]}'
-                )
+
+
+class TestCombinedMemberAlignment:
+    """T6: per-member single-exchange highlight + partner-changes label."""
+
+    @staticmethod
+    def _plus_codon_alignment():
+        """Feature ATG TCT AAA; combined codon 1 (TCT) with two SNPs at pos3 and pos5."""
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='COMB2', protein='C',
+            start=0, end=12, strand='+', codon_start=0,
+            nt_sequence='ATGTCTAAAAAA',
+        )
+        match = FeatureMatch(
+            feature=feature, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=12, strand='+', cigar='12M', cds_start=0,
+        )
+        return build_feature_alignments('ATGTCTAAAAAA', [match])['COMB2']
+
+    def test_member_highlights_only_own_single_exchange(self) -> None:
+        """A combined member highlights exactly one base (its own SNP), not the whole codon."""
+        alignment = self._plus_codon_alignment()
+        # Member 1: anchor at pos3 (T→A). Its alt_codon reflects the full combined state ACG,
+        # but the highlight must be only the member's own exchange at coding pos 3.
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='T', alt='A'),
+            feature_name='COMB2', codon_pos=1,
+            ref_codon='TCT', alt_codon='ACG',
+            ref_aa='S', alt_aa='T',
+            consequence='missense',
+            is_combined_codon_event=True, combined_member_count=2,
+            combined_states=[
+                CodonState(alt_codon='ACG', alt_aa='T', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+        )
+        codon_nt_start = alignment.codon_start + ann.codon_pos * 3
+        affected = _affected_nt_positions(ann, alignment, codon_nt_start)
+        # Only the member's own exchange at coding pos 3 is highlighted.
+        assert affected == {3}
+
+    def test_partner_member_highlights_only_own_exchange(self) -> None:
+        """The partner member (pos5, T→G) highlights only coding pos 5."""
+        alignment = self._plus_codon_alignment()
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=5, ref='T', alt='G'),
+            feature_name='COMB2', codon_pos=1,
+            ref_codon='TCT', alt_codon='ACG',
+            ref_aa='S', alt_aa='T',
+            consequence='missense',
+            is_combined_codon_event=True, combined_member_count=2,
+            combined_states=[
+                CodonState(alt_codon='ACG', alt_aa='T', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+        )
+        codon_nt_start = alignment.codon_start + ann.codon_pos * 3
+        affected = _affected_nt_positions(ann, alignment, codon_nt_start)
+        assert affected == {5}
+
+    def test_combined_member_alignment_has_no_partner_label(self) -> None:
+        """The alignment HTML highlights only the member's own nucleotide change
+        and does not carry a partner-changes label (partner SNPs are separate
+        annotations with their own alignments)."""
+        alignment = self._plus_codon_alignment()
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='T', alt='A'),
+            feature_name='COMB2', codon_pos=1,
+            ref_codon='TCT', alt_codon='ACG',
+            ref_aa='S', alt_aa='T',
+            consequence='missense',
+            is_combined_codon_event=True, combined_member_count=2,
+            combined_states=[
+                CodonState(alt_codon='ACG', alt_aa='T', lower=0.5, upper=0.5,
+                           forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            ],
+        )
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        # No partner-changes label.
+        assert 'partner' not in html.lower()
+        # The member's own alt (A) is highlighted.
+        assert "<span class='aln-cell aln-affected'>A</span>" in html
+
+    def test_single_snp_codon_has_no_partner_label(self) -> None:
+        """A single-SNP (non-combined) annotation has no partner-changes label."""
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='SINGLE', protein='S',
+            start=0, end=9, strand='+', codon_start=0,
+            nt_sequence='ATGAAAGCT',
+        )
+        match = FeatureMatch(
+            feature=feature, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=9, strand='+', cigar='9M', cds_start=0,
+        )
+        alignment = build_feature_alignments('ATGAAAGCT', [match])['SINGLE']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G'),
+            feature_name='SINGLE', codon_pos=1,
+            ref_codon='AAA', alt_codon='GAA',
+            ref_aa='K', alt_aa='E',
+            consequence='missense',
+        )
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        assert 'partner' not in html.lower()
 
 
 class TestCoverageGapPlotBounds:
@@ -5246,3 +6011,147 @@ class TestMultiSpeciesSequenceFeatureCardReferencePlacement:
         card = html[card_start:card_end]
         assert '<strong>Reference:</strong>' not in card
 
+
+class TestReportAfThresholdsFromConfig:
+    """U4: report AF-threshold labels must derive from cfg, not hardcoded literals."""
+
+    def test_bundled_defaults_match_previous_literals(self) -> None:
+        """With bundled CLI_CONFIG, thresholds are 75/25/1 (the previous hardcoded values)."""
+        r = _make_result()
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        assert ctx['thresholds']['af_high_pct'] == 75
+        assert ctx['thresholds']['af_intermediate_pct'] == 25
+        assert ctx['thresholds']['af_low_min_pct'] == 1
+        # 2/3 default, truncated to an integer percent label.
+        assert ctx['thresholds']['combination_fraction_pct'] == 66
+
+    def test_override_af_bins_high_changes_high_label(self) -> None:
+        """An override [af_bins] high = [0.8, 1.0] surfaces as 80% in the report thresholds."""
+        import dataclasses
+
+        from respro.config.cli_settings import CLI_CONFIG, CliAfBinsConfig
+
+        r = _make_result()  # is_fasta_mode=False -> uses cfg.af_bins
+        override_bins = CliAfBinsConfig(high=(0.8, 1.0), intermediate=(0.25, 0.8), low=(0.0, 0.25))
+        cfg = dataclasses.replace(CLI_CONFIG, af_bins=override_bins)
+        ctx = build_report_context(
+            r, similarity_high=1, similarity_moderate=0, cfg=cfg,
+        )
+        assert ctx['thresholds']['af_high_pct'] == 80
+        # Untouched bins keep their configured values.
+        assert ctx['thresholds']['af_intermediate_pct'] == 25
+        assert ctx['thresholds']['af_low_min_pct'] == 0
+
+    def test_override_combination_fraction_changes_label(self) -> None:
+        """An override [matching] min_cooccurrence_combination_fraction surfaces in the report."""
+        import dataclasses
+
+        from respro.config.cli_settings import CLI_CONFIG
+
+        r = _make_result()
+        override_matching = dataclasses.replace(
+            CLI_CONFIG.matching, min_cooccurrence_combination_fraction=0.9,
+        )
+        cfg = dataclasses.replace(CLI_CONFIG, matching=override_matching)
+        ctx = build_report_context(
+            r, similarity_high=1, similarity_moderate=0, cfg=cfg,
+        )
+        assert ctx['thresholds']['combination_fraction_pct'] == 90
+
+    def test_fasta_mode_uses_af_bins_fasta(self) -> None:
+        """In FASTA mode the high-AF label derives from cfg.af_bins_fasta, not cfg.af_bins."""
+        import dataclasses
+
+        from respro.config.cli_settings import CLI_CONFIG, CliAfBinsConfig
+
+        r = _make_result()
+        r = dataclasses.replace(r, is_fasta_mode=True)
+        override_fasta_bins = CliAfBinsConfig(high=(0.9, 1.0), intermediate=(0.3, 0.9), low=(0.0, 0.3))
+        cfg = dataclasses.replace(CLI_CONFIG, af_bins_fasta=override_fasta_bins)
+        ctx = build_report_context(
+            r, similarity_high=1, similarity_moderate=0, cfg=cfg,
+        )
+        assert ctx['thresholds']['af_high_pct'] == 90
+
+
+
+class TestFormulaHitFrechetReporting:
+    """F4: formula-hit frequency + AF bin come from frechet_lower; hover text
+    documents the guaranteed-minimum semantics."""
+
+    def _formula_hit(self, *, frechet_lower: float, forced_fraction: float = 1.0,
+                     member_count: int = 2) -> tuple[FormulaRuleHit, AnnotatedVariant]:
+        member = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=4, ref='A', alt='T', allele_freq=0.9, depth=100),
+            feature_name='testf', codon_pos=1,
+            ref_codon='AAG', alt_codon='ATG', ref_aa='K', alt_aa='M',
+            consequence='missense', af_bin='high',
+        )
+        rs = ResistanceRuleSet(
+            id=10, drug_name='DrugX', drug_id=1, phenotype='resistant',
+            clinical_phenotype='resistant', ic50='>1.0', fold_ic50='15.0', score='4.0',
+            source='LB2021', group_name='FR1', logic_expression='R1 AND R2',
+            publications=[],
+            members=[
+                ResistanceRuleSetMember(
+                    id=1, rule_set_id=10, feature_name='testf', feature_id=1,
+                    reference_identifier='ref', position=1, reference='K',
+                    mutation='M', external_id='R1',
+                ),
+            ],
+        )
+        hit = FormulaRuleHit(
+            rule_set=rs, matched_variants=[member], matched_member_ids=['R1'],
+            frechet_lower=frechet_lower, forced_fraction=forced_fraction,
+            member_count=member_count,
+        )
+        return hit, member
+
+    def _result(self, hit: FormulaRuleHit, member: AnnotatedVariant):
+        return make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=1000,
+            sample_name='S1', vcf_name='test.vcf',
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[member], query_sequence='ATGAAGAAA',
+            formula_hits=[hit],
+        )
+
+    def test_formula_row_af_bin_from_frechet_lower(self) -> None:
+        """A formula hit with frechet_lower = 0.3 bins 'intermediate' (not the
+        hardcoded 'high')."""
+        hit, member = self._formula_hit(frechet_lower=0.3)
+        r = self._result(hit, member)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        db_rows = [row for row in ctx['database_hits']['rows'] if row['drug_key'] == 'DrugX']
+        assert len(db_rows) == 1
+        assert db_rows[0]['af_bin'] == 'intermediate'
+
+    def test_formula_row_low_bin(self) -> None:
+        """A formula hit with frechet_lower = 0.1 bins 'low'."""
+        hit, member = self._formula_hit(frechet_lower=0.1)
+        r = self._result(hit, member)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        db_rows = [row for row in ctx['database_hits']['rows'] if row['drug_key'] == 'DrugX']
+        assert db_rows[0]['af_bin'] == 'low'
+
+    def test_formula_row_high_bin_when_lower_is_high(self) -> None:
+        """A formula hit with frechet_lower = 0.9 still bins 'high'."""
+        hit, member = self._formula_hit(frechet_lower=0.9)
+        r = self._result(hit, member)
+        ctx = build_report_context(r, similarity_high=1, similarity_moderate=0)
+        db_rows = [row for row in ctx['database_hits']['rows'] if row['drug_key'] == 'DrugX']
+        assert db_rows[0]['af_bin'] == 'high'
+
+    def test_hover_mentions_guaranteed_minimum_for_formula_hits(self) -> None:
+        """The rendered Database Hits frequency-column hover explains formula-hit
+        guaranteed-minimum semantics, keeping the existing wording intact."""
+        hit, member = self._formula_hit(frechet_lower=0.3)
+        r = self._result(hit, member)
+        html = render_html(r, similarity_high=1, similarity_moderate=0)
+        # Formula-specific wording (not present before F4) — unique to the
+        # frequency hover panel's new formula sentence.
+        assert 'members of a combination rule' in html
+        # Existing wording retained.
+        assert 'guaranteed minimum' in html
+        assert 'combined-codon' in html
+        assert 'variant allele frequency' in html

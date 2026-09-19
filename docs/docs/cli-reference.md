@@ -152,6 +152,7 @@ respro fasta \
 | `--threads N`, `-th` | Thread count for alignment calculations. Default: `1`. |
 | `--cache` / `--no-cache` | Cache the FASTA reference mapping in the project database for report regeneration (default: off). |
 | `--export FORMAT`, `-e` | Extra export format alongside HTML (`pdf`, `json`, `tsv`). Repeatable. |
+| `--config PATH`, `-c` | User TOML overriding bundled defaults (scientific thresholds, alignment, AF bins, timeouts). See [Configuration](configuration.md). |
 
 To profile the example consensus FASTA stored in the project database (set via
 `respro init --example` or `respro add --example`), use `--example` instead of
@@ -191,10 +192,11 @@ respro vcf \
 | `--results-db PATH`, `-d` | Optional results database path. Creates or appends to an existing SQLite results database. |
 | `--min-af FLOAT`, `-ma` | Minimum allele frequency filter. Default: `0.01`. |
 | `--min-depth INT`, `-md` | Minimum read depth filter (used with `--bam`). Default: `10`. |
-| `--bam PATH`, `-b` | Optional BAM aligned against the same query reference as the VCF. Used to mark non-covered codon stretches below `--min-depth`. |
+| `--bam PATH`, `-b` | Optional BAM aligned against the same query reference as the VCF. Used to mark non-covered codon stretches below `--min-depth`, and — when combined SNPs share a codon — to measure the **exact co-occurrence frequency** of each combined codon state directly from spanning reads (replacing the conservative lower-bound estimate used without a BAM). Combined-codon frequencies are then tagged `observed` in the report. |
 | `--threads N`, `-th` | Thread count for alignment calculations. Default: `1`. |
 | `--cache` / `--no-cache` | Reuse/store the FASTA reference mapping cache in the project database (default: off). |
 | `--export FORMAT`, `-e` | Extra export format alongside HTML (`pdf`, `json`, `tsv`). Repeatable. |
+| `--config PATH`, `-c` | User TOML overriding bundled defaults (scientific thresholds, alignment, AF bins, timeouts). See [Configuration](configuration.md). |
 
 The VCF may be **multi-chrom** and the reference FASTA **multi-record**: each VCF
 `CHROM` is matched to one FASTA record by header name. This supports targeted
@@ -418,6 +420,7 @@ respro regenerate \
 | `--run-id INT`, `-i` | Run ID to regenerate. Use with `--results-db`. |
 | `--json PATH`, `-j` | Results JSON export to regenerate from. |
 | `--export FORMAT`, `-e` | Extra export format alongside HTML (`pdf`, `json`, `tsv`). Repeatable. |
+| `--config PATH`, `-c` | User TOML overriding bundled defaults (scientific thresholds, alignment, AF bins, timeouts). See [Configuration](configuration.md). |
 
 !!! tip "Regenerate from JSON"
     Regenerating from a JSON file is useful for archival and deterministic reproduction without needing the original results database.

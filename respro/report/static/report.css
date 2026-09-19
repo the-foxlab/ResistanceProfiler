@@ -1080,14 +1080,6 @@ body {
   background: var(--paper-soft);
 }
 
-.mutation-row--hit > td {
-  background: var(--accent-tint);
-}
-
-.mutation-row--hit:hover > td {
-  background: var(--accent-soft);
-}
-
 .mutation-row--expandable {
   cursor: pointer;
 }
@@ -1099,6 +1091,32 @@ body {
 .mutation-row--expandable:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+/* Combined SNP codon: highlight every row whose SNP participated in a
+   multi-SNP codon so co-codon members are visually grouped together. */
+.mutation-row--combined > td {
+  background: var(--info-tint, var(--paper-soft));
+}
+
+.combined-codon-yes {
+  font-weight: 700;
+  color: var(--info-text);
+  cursor: help;
+}
+
+.combined-codon-no {
+  color: var(--muted);
+}
+
+.mutation-combined-flag {
+  text-align: center;
+}
+
+.mutation-combinatorial {
+  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
 }
 
 .mutation-table-action-col {

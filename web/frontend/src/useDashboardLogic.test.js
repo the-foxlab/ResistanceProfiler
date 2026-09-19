@@ -241,6 +241,72 @@ describe('useDashboardLogic - File Upload Flow', () => {
 
     expect(result.current.statusError).toMatch(/upload failed|network error/i);
   });
+
+  it('clears isUploading once a single upload completes', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        data: {
+          items: [{
+            id: 'db1',
+            display_name: 'Test DB',
+          }],
+        },
+      }),
+    });
+
+    const { result } = renderHook(() => useDashboardLogic());
+
+    await waitFor(() => {
+      expect(result.current.databases.length).toBeGreaterThan(0);
+    });
+
+    const file = new File(['ATCG'], 'gating.fasta', { type: 'application/octet-stream' });
+
+    await act(async () => {
+      const uploadPromise = result.current.uploadFastaFile(file);
+      mockXHRInstance.triggerSuccess({ upload_id: 'up-gating-1' });
+      await uploadPromise;
+    });
+
+    expect(result.current.fastaInput.fasta_id).toBe('up-gating-1');
+    // Once the upload resolves the in-flight flag is cleared so submit re-enables.
+    expect(result.current.isUploading).toBe(false);
+  });
+
+  it('clears isUploading when a single upload errors', async () => {
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        data: {
+          items: [{
+            id: 'db1',
+            display_name: 'Test DB',
+          }],
+        },
+      }),
+    });
+
+    const { result } = renderHook(() => useDashboardLogic());
+
+    await waitFor(() => {
+      expect(result.current.databases.length).toBeGreaterThan(0);
+    });
+
+    const file = new File(['bad'], 'bad.fasta');
+
+    await act(async () => {
+      const uploadPromise = result.current.uploadFastaFile(file);
+      mockXHRInstance.triggerError();
+      await uploadPromise.catch(() => {
+        // Expected error
+      });
+    });
+
+    expect(result.current.statusError).toMatch(/upload failed|network error/i);
+    // The in-flight flag is cleared even when the upload errors, so submit re-enables.
+    expect(result.current.isUploading).toBe(false);
+  });
 });
 
 describe('useDashboardLogic - Job Polling Flow', () => {

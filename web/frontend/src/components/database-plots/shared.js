@@ -1,9 +1,14 @@
 // Shared color tokens so all chart components use the same phenotype semantics.
+// Ranks 1-5 mirror the severity ladder in `respro/db/phenotype_ranks.py`
+// (1 susceptible → 5 resistant). Sentinels: unknown (grey), contradictory (slate).
 export const CLASSIFICATION_COLORS = {
   count: '#0f766e',
-  resistant: '#c2410c',
-  intermediate: '#b7791f',
-  susceptible: '#6b7280',
+  rank1: '#27ae60',
+  rank2: '#f1c40f',
+  rank3: '#f39c12',
+  rank4: '#e67e22',
+  rank5: '#e74c3c',
+  contradictory: '#64748b',
   unknown: '#c3ccd6',
 };
 
@@ -13,9 +18,12 @@ export const PIE_COLORS = ['#27978e', '#5c79ca', '#be6e4e', '#8d5ddf', '#d1a034'
 // Human-readable legend labels for stacked bars and summary plots.
 export const CLASSIFICATION_LABELS = {
   count: 'Mutations',
-  resistant: 'Resistant',
-  intermediate: 'Intermediate',
-  susceptible: 'Susceptible',
+  rank1: 'Susceptible',
+  rank2: 'Potential low-level resistance',
+  rank3: 'Low-level resistance',
+  rank4: 'Intermediate',
+  rank5: 'Resistant',
+  contradictory: 'Contradictory',
   unknown: 'Unknown',
 };
 
