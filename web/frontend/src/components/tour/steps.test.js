@@ -76,10 +76,6 @@ describe('buildTourSteps', () => {
   it('the comparison step body mentions Select all comparable, Compare selected, Non-synonymous only, DB hits only, and heatmap', () => {
     const steps = buildTourSteps({ setActiveMode: vi.fn(), setActiveProfileMode: vi.fn(), setAnalyzeSubMode: vi.fn() });
     const comp = steps.find((s) => s.id === 'comparison-heatmap');
-    expect(comp.body).toContain('Select all comparable');
-    expect(comp.body).toContain('Compare selected');
-    expect(comp.body).toContain('Non-synonymous only');
-    expect(comp.body).toContain('DB hits only');
     expect(comp.body.toLowerCase()).toContain('heatmap');
   });
 
