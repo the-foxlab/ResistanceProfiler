@@ -1,15 +1,25 @@
-<img src="docs/docs/assets/logo.svg" alt="ResistanceProfiler" width="220" />
+### Simplify your antiviral resistance genotyping with
+<img src="docs/docs/assets/logo.svg" alt="ResistanceProfiler" width="220" />  
+
+#### WebApp ([Online and Free](https://resistanceprofiler.uniklinik-freiburg.de) - hosted by us): 
+
+[![ResPro Monitoring](https://badge.uptimerobot.com/psp/a81c420a6c4a59010930a82298d004e0.svg?style=logo&theme=light)](https://resistanceprofiler.uniklinik-freiburg.de)
+
+#### Command-line tool (available via [docker](https://quay.io/biocontainers/respro) and [bioconda](https://anaconda.org/channels/bioconda/packages/respro/overview)): 
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0) [![Supported Python versions](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-2f6db3)](https://www.python.org/) [![codecov](https://codecov.io/gh/the-foxlab/ResistanceProfiler/branch/master/graph/badge.svg)](https://codecov.io/gh/the-foxlab/ResistanceProfiler) [![Conda Update](https://anaconda.org/bioconda/respro/badges/latest_release_date.svg)](https://anaconda.org/channels/bioconda/packages/respro/overview) [![Conda version](https://anaconda.org/bioconda/respro/badges/version.svg)](https://anaconda.org/channels/bioconda/packages/respro/overview) [![Conda downloads](https://anaconda.org/bioconda/respro/badges/downloads.svg)](https://anaconda.org/channels/bioconda/packages/respro/overview)
 
-Pathogen-agnostic antiviral resistance profiling from consensus sequences or VCF-derived variants.  
+
+## What is ResPro?
+
+It's a pathogen-agnostic antiviral resistance profiling engine that allows resistance database creation for any virus and antiviral. Next generation sequencing and sanger derieved sequencing results can profiled against this database. By design a module. Plug it into your existing viral reconstruction pipeline.  
 
 > [!TIP]
 > Built your own database. Its really simple.
 
 One harmonized report that classifies mutations and assists diagnostic interpretation against curated project databases. Comes as a CLI or a WebApp. Everything is open-source. Contributions are welcome!
 
-### [Dokumentation](https://the-foxlab.github.io/ResistanceProfiler/cli-reference/) · [WebApp (live)](https://resistanceprofiler.uniklinik-freiburg.de) · [Installation](https://the-foxlab.github.io/ResistanceProfiler/install/) · [Databases](https://github.com/the-foxlab/respro-databases)
+### [Dokumentation](https://the-foxlab.github.io/ResistanceProfiler/cli-reference/) · [Databases](https://github.com/the-foxlab/respro-databases)
 
 ## Highlights
 
@@ -64,9 +74,10 @@ respro vcf --project my_folder/herpesdrg.db --vcf sample.vcf --ref-fasta ref.fas
 
 → **Full guide: [Installation](https://the-foxlab.github.io/ResistanceProfiler/install/) · [Quickstart](https://the-foxlab.github.io/ResistanceProfiler/quickstart/) · [CLI Reference](https://the-foxlab.github.io/ResistanceProfiler/cli-reference/)**
 
-## Web app (host the complete WebApp via docker)
+## WebApp (host it yourself!)
 
-![ResPro on desktop, tablet, and mobile](docs/docs/assets/formats.png)
+<img src="docs/docs/assets/formats.png" alt="ResistanceProfiler" width="1000" />  
+
 
 ```bash
 git clone https://github.com/the-foxlab/ResistanceProfiler
