@@ -140,8 +140,7 @@ export function TourOverlay({ steps: stepsProp }) {
             <h3 className="tour-tooltip-title">Take a quick tour?</h3>
           </div>
           <div className="tour-tooltip-body">
-            A short guided tour will walk you through the core features — analysis modes, reports, and the
-            comparison heatmap. You can restart it any time from the About tab.
+            ResPro is a pathogen-agnostic antiviral resistance analysis framework. You can analyze and visualize antiviral resistance data from sanger and next-generation sequencing data. The short guided tour will walk you through the core features.
           </div>
           <div className="tour-tooltip-actions">
             <button type="button" className="tour-btn tour-btn-skip" onClick={declineTour}>
