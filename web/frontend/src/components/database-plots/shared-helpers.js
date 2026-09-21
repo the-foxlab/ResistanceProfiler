@@ -3,7 +3,7 @@
  */
 
 import { PIE_COLORS } from './shared';
-import { isPopulated, buildDrugAliasLookup } from '../../utils';
+import { isPopulated, buildDrugAliasLookup, labelToRank } from '../../utils';
 
 export function displayValue(value, fallback = 'n/a') {
   return isPopulated(value) ? String(value) : fallback;
@@ -75,39 +75,22 @@ export function getRuleAnnotationByMode(rule, mode) {
 }
 
 export function classificationTone(label) {
-  // Normalize free-text phenotypes into a small color/legend vocabulary.
-  const lowered = String(label || '').toLowerCase();
-  if (!lowered) {
+  // Normalize free-text phenotypes into the 5-rank severity vocabulary that
+  // mirrors `respro/db/phenotype_ranks.py` (see `labelToRank` in utils.js).
+  // Keeping low-level resistance distinct from high-level resistance and
+  // intermediate avoids painting weaker severity classes as fully resistant.
+  const rank = labelToRank(label);
+  if (rank === null || rank === 0) {
     return 'unknown';
   }
-  if (
-    lowered.includes('resist') ||
-    lowered.includes('decreased susceptibility') ||
-    lowered.includes('reduced susceptibility') ||
-    lowered.includes('non-susceptible')
-  ) {
-    return 'resistant';
+  if (rank < 0) {
+    return 'contradictory';
   }
-  if (
-    lowered.includes('intermediate') ||
-    lowered.includes('partial') ||
-    lowered.includes('reduced') ||
-    lowered.includes('borderline')
-  ) {
-    return 'intermediate';
-  }
-  if (
-    lowered.includes('susceptible') ||
-    lowered.includes('sensitive') ||
-    lowered.includes('wildtype')
-  ) {
-    return 'susceptible';
-  }
-  return 'unknown';
+  return `rank${rank}`;
 }
 
 export function hasTypedClassification(toneCounts) {
-  return ['resistant', 'intermediate', 'susceptible'].some((tone) => (toneCounts.get(tone) || 0) > 0);
+  return ['rank1', 'rank2', 'rank3', 'rank4', 'rank5'].some((tone) => (toneCounts.get(tone) || 0) > 0);
 }
 
 export function limitPieSlices(entries) {
@@ -132,7 +115,16 @@ export function limitPieSlices(entries) {
 
 export function dominantTone(toneCounts) {
   // Used for a quick dominant-color hint when multiple tones occur in one bin.
-  const priority = { resistant: 4, intermediate: 3, susceptible: 2, unknown: 1 };
+  // Higher rank = more severe, so ties resolve toward the stronger class.
+  const priority = {
+    rank5: 8,
+    rank4: 7,
+    rank3: 6,
+    rank2: 5,
+    rank1: 4,
+    contradictory: 2,
+    unknown: 1,
+  };
   const entries = Array.from(toneCounts.entries());
   if (entries.length === 0) {
     return 'unknown';
@@ -141,7 +133,7 @@ export function dominantTone(toneCounts) {
     if (b[1] !== a[1]) {
       return b[1] - a[1];
     }
-    return priority[b[0]] - priority[a[0]];
+    return (priority[b[0]] || 0) - (priority[a[0]] || 0);
   });
   return entries[0][0];
 }

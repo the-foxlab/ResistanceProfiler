@@ -57,6 +57,8 @@ export function useDashboardLogic() {
     activeProfileMode,
     analyzeSubMode,
     setUploadProgress: upload.setUploadProgress,
+    beginUpload: upload.beginUpload,
+    endUpload: upload.endUpload,
   });
   const batch = useBatchManager({
     selectedDatabaseId,
@@ -241,7 +243,11 @@ export function useDashboardLogic() {
     downloadMutationsAsTsv: mutations.downloadMutationsAsTsv,
     downloadFormulaRulesAsTsv: mutations.downloadFormulaRulesAsTsv,
     uploadProgress: upload.uploadProgress,
+    isUploading: upload.isUploading,
+    cancelUpload: profile.cancelUpload,
     // Batch
+    isBatchUploading: batch.isBatchUploading,
+    cancelBatchUpload: batch.cancelBatchUpload,
     batchMode: batch.batchMode,
     setBatchMode: batch.setBatchMode,
     batchVcfFiles: batch.batchVcfFiles,

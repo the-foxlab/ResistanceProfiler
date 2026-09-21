@@ -82,14 +82,23 @@ Per-feature nucleotide changes are translated into amino-acid consequences. Supp
 
 #### Multiple SNPs in one codon
 
-When two or more SNPs fall within the same codon and all have allele frequency above the combination threshold (default > 0.75, strict greater-than), they are merged into a single combined codon event. The combined codon is translated once, producing one amino-acid consequence instead of separate per-SNP consequences. The allele frequency of the combined event is set to the minimum AF among the member SNPs (conservative lower bound).
+When two or more SNPs fall within the same codon, they are evaluated together as a **combined codon event**. Each member SNP is emitted as its own per-SNP annotation carrying the amino-acid outcomes it can participate in — both the single-exchange effect (this SNP alone, co-codon SNPs absent) and the combined-state effects (this SNP plus co-occurring SNPs), each with its amino-acid frequency.
 
-SNPs below the threshold are annotated individually. This prevents low-AF variants from being fused with high-AF variants at the same codon.
+There are two paths, selected by whether an alignment file is supplied:
+
+- **No BAM (`--bam` omitted or the mode is fasta) — lower-bound frequencies.** ResPro uses **Fréchet (probability) bounds** to determine which combined codon states are *guaranteed* to exist, and reports the conservative lower-bound frequency (assuming no linkage information). These frequencies are tagged `lower bound` in the report.
+- **With BAM (`--bam` provided) — observed frequencies.** ResPro slices the BAM for each affected codon, counts the spanning reads that carry each candidate codon state (after MAPQ filtering and paired-end dedup/agreement), and reports the exact observed co-occurrence frequency. The Fréchet path is not taken at all. These frequencies are tagged `observed` in the report.
+
+A single-exchange that is impossible (guaranteed absent, lower bound 0 on the no-BAM path; observed frequency 0 on the BAM path) is omitted from the report and cannot match a single-amino-acid rule — only its combined states can fire. On the no-BAM (Fréchet) path, a combined state is accepted only when its forced fraction reaches 2/3 (`min_cooccurrence_codon_fraction` in the config). On the BAM path there is no per-state frequency threshold: every candidate state observed in at least one spanning molecule is accepted, and the only gate is the spanning-molecule count (`min_depth`) — below it the codon falls back to single events.
+
+The report formats each amino-acid effect as `<mutation> | <frequency> | <tag>`, where the tag is `observed` (the value is the frequency itself — variant allele frequency or BAM read count) or `lower bound` (a guaranteed minimum that the true frequency may exceed, for combined codons without read-level data).
+
+For the full mathematical derivation, worked examples, the multiallelic-site generalisation, and the BAM co-occurrence algorithm, see [Technical Reference §5.3 — Multiple SNPs in one codon](technical-reference.md#53-multiple-snps-in-one-codon-frechet-bounds) and [§5.4 — BAM-based exact co-occurrence](technical-reference.md#54-bam-based-exact-co-occurrence).
 
 ### Rule matching
 
 - **Single-mutation rules** are matched directly against the observed amino-acid events.
-- **Combination rules** evaluate boolean expressions (AND, OR, NOT, XOR) over their atomic member IDs. A member is considered present only when its matched variant has allele frequency **above the member AF threshold** (default > 0.75). This means a partial combination where some members are below threshold does **not** fire the combination rule. When multiple OR branches match, the branch with the highest member AF is selected deterministically (lexical tiebreak on member IDs).
+- **Combination rules** evaluate boolean expressions (AND, OR, NOT, XOR) over their atomic member IDs. A member is considered present only when its matched effect's amino-acid frequency lower bound exceeds eps. An AND clause fires only when the joint Fréchet lower bound's forced fraction reaches `min_cooccurrence_combination_fraction` (default 2/3) — a partial combination whose members do not co-occur often enough does **not** fire. The reported hit frequency is the joint Fréchet lower bound: a guaranteed minimum on how often the members co-occur, which can be lower than any individual member's frequency. When multiple OR branches match, the branch with the highest member lower bound is selected deterministically (lexical tiebreak on member IDs).
 - **Interpretation algorithms** extend rule evaluation with additional logic such as phenotype counting, score-based thresholds, and IC50-based drug interpretation. See [Interpretation Algorithms](algorithms.md) for details.
 
 !!! caution "Reference consistency matters"

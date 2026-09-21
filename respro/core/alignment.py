@@ -14,7 +14,7 @@ import sqlite3
 
 import mappy
 
-from respro.config.cli_settings import CLI_CONFIG
+from respro.config.cli_settings import CLI_CONFIG, CliConfig
 from respro.db.features import load_feature_segments_by_feature_id
 from respro.db.models import FeatureMatch, FeatureRecord, FeatureSegment, IntronInterval
 
@@ -41,6 +41,7 @@ def match_query_to_features(
     features: list[FeatureRecord],
     *,
     threads: int = 1,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> list[FeatureMatch]:
     """
     Match a query nucleotide sequence against internal feature sequences.
@@ -51,9 +52,10 @@ def match_query_to_features(
     :param query_sequence: user-provided nucleotide sequence
     :param features: feature records to screen (typically only those with rules)
     :param threads: number of mapper threads forwarded to mappy as ``n_threads``
+    :param cfg: CLI/core configuration; the ``alignment`` section configures mappy
     :return: accepted FeatureMatch list sorted by identity descending
     """
-    matches = _match_with_mappy(query_sequence, features, threads)
+    matches = _match_with_mappy(query_sequence, features, threads, cfg=cfg)
 
     for m in matches:
         ref = m.feature.reference_accession or str(m.feature.reference_id)
@@ -144,11 +146,12 @@ def _match_with_mappy(
     query_sequence: str,
     features: list[FeatureRecord],
     threads: int,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> list[FeatureMatch]:
     """
     Run mappy (minimap2) feature matching.
 
-    Indexes the query with settings from ``CLI_CONFIG.alignment``, then maps
+    Indexes the query with settings from ``cfg.alignment``, then maps
     each CDS against the index. The mappy CIGAR (feature=query,
     genome=reference) is converted to the pipeline convention (genome=query,
     CDS=reference) by swapping I and D. Coordinate fields use mappy's
@@ -157,23 +160,23 @@ def _match_with_mappy(
     strand orientations.
     """
     query_upper = query_sequence.upper()
-    cfg = CLI_CONFIG.alignment
+    align_cfg = cfg.alignment
     aligner_kwargs: dict[str, int | str | tuple[int, ...]] = {
         'seq': query_upper,
-        'preset': cfg.preset,
-        'k': cfg.k,
-        'w': cfg.w,
-        'best_n': cfg.best_n,
+        'preset': align_cfg.preset,
+        'k': align_cfg.k,
+        'w': align_cfg.w,
+        'best_n': align_cfg.best_n,
         'n_threads': max(1, threads),
     }
     # Build scoring tuple: (A, B, O1, E1, O2, E2).
     aligner_kwargs['scoring'] = (
-        cfg.match_score,
-        cfg.mismatch_penalty,
-        cfg.gap_open_penalty,
-        cfg.gap_extension_penalty_1,
-        cfg.gap_open_penalty_2,
-        cfg.gap_extension_penalty_2,
+        align_cfg.match_score,
+        align_cfg.mismatch_penalty,
+        align_cfg.gap_open_penalty,
+        align_cfg.gap_extension_penalty_1,
+        align_cfg.gap_open_penalty_2,
+        align_cfg.gap_extension_penalty_2,
     )
     aligner = mappy.Aligner(**aligner_kwargs)
     if not aligner:
@@ -206,7 +209,7 @@ def _match_with_mappy(
         # (i.e. relative to the first base the CIGAR consumes in the query);
         # downstream strand-aware consumers convert to forward-strand coords.
         junctions = exon_junction_cds_offsets(feature)
-        intron_tolerance = cfg.intron_junction_tolerance
+        intron_tolerance = align_cfg.intron_junction_tolerance
         cigar, intron_intervals = classify_introns(cigar, junctions, intron_tolerance)
         intron_lengths = [iv.length for iv in intron_intervals]
 

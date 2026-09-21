@@ -73,6 +73,7 @@ class WebDefaults:
     upload_max_fasta_size: int
     upload_max_vcf_size: int
     upload_max_bam_size: int
+    upload_max_json_size: int
     upload_chunk_size: int
     upload_max_fasta_line_length: int
     upload_max_vcf_line_length: int
@@ -162,6 +163,7 @@ def _load_web_backend_config() -> WebBackendConfig:
         upload_max_fasta_size=int(upload_payload['max_fasta_size']),
         upload_max_vcf_size=int(upload_payload['max_vcf_size']),
         upload_max_bam_size=int(upload_payload['max_bam_size']),
+        upload_max_json_size=int(upload_payload['max_json_size']),
         upload_chunk_size=int(upload_payload['chunk_size']),
         upload_max_fasta_line_length=int(upload_payload['max_fasta_line_length']),
         upload_max_vcf_line_length=int(upload_payload['max_vcf_line_length']),

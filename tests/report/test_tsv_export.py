@@ -10,6 +10,7 @@ import pytest
 
 from respro.db.models import (
     AnnotatedVariant,
+    CodonState,
     FeatureMatch,
     FeatureRecord,
     FormulaRuleHit,
@@ -28,10 +29,11 @@ from respro.report._row_helpers import (
 )
 from respro.report.non_html_exports import export_results, write_tsv
 
-# Canonical 20-column header, in order.
+# Canonical 19-column header, in order.
 TSV_COLUMNS = [
-    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
-    'af', 'af_bin', 'depth', 'consequence', 'in_database', 'rule_type',
+    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
+    'aa_frequency', 'depth', 'consequence', 'aa_effects',
+    'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
     'source', 'publications',
 ]
@@ -42,8 +44,9 @@ _PLACEHOLDER = 'n/a'
 # Hits table). Conditional columns (phenotype group, ic50, fold_ic50, score,
 # publications) are dropped when no row carries a real value.
 _TSV_ALWAYS_COLUMNS = [
-    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
-    'af', 'af_bin', 'depth', 'consequence', 'in_database', 'rule_type',
+    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
+    'aa_frequency', 'depth', 'consequence', 'aa_effects',
+    'in_database', 'rule_type',
     'drug', 'source',
 ]
 _TSV_CONDITIONAL_COLUMNS = [
@@ -104,6 +107,7 @@ def _ann(
     user_chrom: str = '', user_pos: int = 0, user_ref: str = '', user_alt: str = '',
     is_combined_codon_event: bool = False, ref_codon: str = 'AAA', alt_codon: str = 'GAA',
     rule_matches: list[ResistanceRule] | None = None,
+    combined_states: list[CodonState] | None = None,
 ) -> AnnotatedVariant:
     return AnnotatedVariant(
         variant=VariantCall(
@@ -114,6 +118,7 @@ def _ann(
         ref_aa=ref_aa, alt_aa=alt_aa, consequence=consequence, af_bin=af_bin,
         is_fasta_mode=is_fasta_mode, is_combined_codon_event=is_combined_codon_event,
         rule_matches=rule_matches or [],
+        combined_states=combined_states or [],
     )
 
 
@@ -150,9 +155,15 @@ class TestRowHelpers:
         ann = _ann(pos=3, ref='A', alt='G')
         assert nt_change_stored(ann) == 'A4G'
 
-    def test_nt_change_stored_combined_codon_event(self) -> None:
-        ann = _ann(is_combined_codon_event=True, ref_codon='AAA', alt_codon='GAA', codon_pos=2)
-        assert nt_change_stored(ann) == 'AAA3GAA'
+    def test_nt_change_stored_combined_codon_event_uses_per_snp_coords(self) -> None:
+        """A per-SNP combined-codon row reports its own VCF nucleotide change,
+        not the codon-form ``ref_codon{pos}alt_codon``. Each member keeps its
+        own ref/alt/pos."""
+        ann = _ann(
+            is_combined_codon_event=True, ref_codon='AAA', alt_codon='GAA',
+            codon_pos=2, pos=3, ref='A', alt='G',
+        )
+        assert nt_change_stored(ann) == 'A4G'
 
     def test_nt_change_user_empty_in_fasta_mode(self) -> None:
         ann = _ann(is_fasta_mode=True)
@@ -176,6 +187,184 @@ class TestWriteTsvHeader:
         write_tsv(r, out)
         header, _ = _read_tsv(out)
         assert header == _expected_header(set())
+
+
+class TestAaEffectsColumn:
+    """The aa_effects column lists all amino-acid effects (single + combined)
+    each with its amino-acid frequency in parentheses."""
+
+    def test_combined_member_lists_single_and_combined_effects(self, tmp_path: Path) -> None:
+        """A combined member row lists its single-exchange effect (when its
+        amino-acid frequency is > 0) followed by every accepted combined state."""
+        states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+            CodonState(alt_codon='ATG', alt_aa='M', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0,)),
+        ]
+        ann = _ann(
+            is_combined_codon_event=True, combined_states=states,
+            alt_aa='M', codon_pos=1, ref_aa='K',
+        )
+        # single_exchange_aa_freq defaults to allele_freq (0.95) > 0, so the single
+        # K2M (0.95) is listed first, then the combined states.
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        assert 'aa_effects' in header
+        col = header.index('aa_effects')
+        assert len(rows) == 1
+        effects = rows[0][col]
+        # Single exchange first (at its amino-acid frequency = allele_freq 0.95).
+        assert 'K2M | 0.95 |' in effects
+        # Combined state I follows.
+        assert 'K2I | 0.5 |' in effects
+        # The combined state that also produces M is deduped (same AA as single).
+        assert 'K2M | 0.5 |' not in effects
+        assert effects.count('K2M') == 1
+
+    def test_combined_member_zero_single_omits_single(self, tmp_path: Path) -> None:
+        """A combined member whose single-exchange is Fréchet-impossible
+        (single_exchange_aa_freq=0) omits the single entry; only combined states."""
+        states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+        ]
+        ann = _ann(
+            is_combined_codon_event=True, combined_states=states,
+            alt_aa='M', codon_pos=1, ref_aa='K',
+        )
+        ann.single_exchange_aa_freq = 0.0  # single guaranteed absent
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('aa_effects')
+        effects = rows[0][col]
+        # Single M is omitted (lower=0); only the combined I state.
+        assert 'K2M' not in effects
+        assert 'K2I | 0.5 |' in effects
+
+    def test_single_snp_lists_only_single_effect(self, tmp_path: Path) -> None:
+        """A single-SNP annotation lists only its single effect at the variant
+        frequency (no combined states)."""
+        ann = _ann(alt_aa='E', codon_pos=2, ref_aa='K')
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('aa_effects')
+        # single_exchange_aa_freq == allele_freq (0.95); no combined states.
+        # freq_method defaults to 'observed'.
+        assert rows[0][col] == 'K3E | 0.95 | observed'
+
+
+class TestFreqMethodLabel:
+    """The aa_effects frequency is suffixed with `` (observed)`` or
+    `` (lower bound)`` driven by ``ann.freq_method``."""
+
+    def test_combined_member_estimated_label(self, tmp_path: Path) -> None:
+        """A combined-codon member with freq_method='estimated' suffixes the
+        frequency with `` (lower bound)``."""
+        states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+        ]
+        ann = _ann(
+            is_combined_codon_event=True, combined_states=states,
+            alt_aa='M', codon_pos=1, ref_aa='K',
+        )
+        ann.freq_method = 'estimated'
+        ann.single_exchange_aa_freq = 0.0  # only combined state shown
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('aa_effects')
+        assert 'K2I | 0.5 | lower bound' in rows[0][col]
+
+    def test_combined_member_observed_label(self, tmp_path: Path) -> None:
+        """A combined-codon member with freq_method='observed' (BAM mode)
+        suffixes the frequency with `` (observed)``."""
+        states = [
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+        ]
+        ann = _ann(
+            is_combined_codon_event=True, combined_states=states,
+            alt_aa='M', codon_pos=1, ref_aa='K',
+        )
+        ann.freq_method = 'observed'
+        ann.single_exchange_aa_freq = 0.0
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('aa_effects')
+        assert 'K2I | 0.5 | observed' in rows[0][col]
+
+    def test_combined_state_with_zero_lower_not_shown(self, tmp_path: Path) -> None:
+        """A combined state whose amino-acid frequency is 0.0 (Fréchet lower = 0
+        or a BAM count that rounds to 0.0 at 3 decimals) must NOT be rendered in
+        aa_effects, even when accepted=True. Mirrors the single-exchange gate
+        (``single_exchange_aa_freq > 0.0``). Issue 1: zero-frequency states were
+        shown as ``K2M | 0.0 | observed`` and matched rules."""
+        states = [
+            CodonState(alt_codon='ATG', alt_aa='M', lower=0.0, upper=0.0,
+                       forced_fraction=1.0, accepted=True, member_indices=(0,)),
+            CodonState(alt_codon='ATT', alt_aa='I', lower=0.5, upper=0.5,
+                       forced_fraction=1.0, accepted=True, member_indices=(0, 1)),
+        ]
+        ann = _ann(
+            is_combined_codon_event=True, combined_states=states,
+            alt_aa='M', codon_pos=1, ref_aa='K',
+        )
+        ann.freq_method = 'observed'
+        ann.single_exchange_aa_freq = 0.0
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('aa_effects')
+        effects = rows[0][col]
+        assert 'K2M | 0.0' not in effects
+        assert 'K2I | 0.5 | observed' in effects
+
+    def test_single_exchange_below_display_precision_not_shown(self, tmp_path: Path) -> None:
+        """A single-exchange whose amino-acid frequency is real but below the
+        3-decimal display precision (e.g. 1 molecule in ~6000 -> 0.000165) must
+        NOT be rendered as ``K2M | 0.0 | observed``. The raw value passes the
+        ``> 0.0`` gate but ``round(0.000165, 3) == 0.0``; the display gate must
+        use the rounded value so sub-precision frequencies are suppressed
+        consistently with combined states. Issue 1 (rounding): the user saw
+        ``L897L | 0.0 | observed`` from a 1-read observation."""
+        ann = _ann(
+            is_combined_codon_event=True, combined_states=[],
+            alt_aa='M', codon_pos=1, ref_aa='K',
+        )
+        ann.freq_method = 'observed'
+        ann.single_exchange_aa_freq = 0.000165  # real but rounds to 0.0 at 3 dp
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('aa_effects')
+        effects = rows[0][col]
+        assert 'K2M | 0.0' not in effects
+        # The entry is suppressed entirely (nothing else to show).
+        assert effects == ''
+
+    def test_single_snp_observed_label_by_default(self, tmp_path: Path) -> None:
+        """A single-SNP annotation with freq_method at its default ('observed')
+        suffixes the frequency with `` (observed)``."""
+        ann = _ann(alt_aa='E', codon_pos=2, ref_aa='K')
+        r = _result([ann])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        col = header.index('aa_effects')
+        assert rows[0][col] == 'K3E | 0.95 | observed'
 
 
 class TestSingleRuleRows:
@@ -208,7 +397,7 @@ class TestSingleRuleRows:
         assert fos[header.index('publications')] == '99'  # pubmed_id fallback
         # Shared variant columns identical across both rows.
         assert acy[header.index('gene')] == fos[header.index('gene')] == 'gag'
-        assert acy[header.index('aa_effect')] == fos[header.index('aa_effect')] == 'K3E'
+        assert acy[header.index('aa_effects')] == fos[header.index('aa_effects')]
         assert acy[header.index('in_database')] == fos[header.index('in_database')] == 'yes'
         assert acy[header.index('strand')] == fos[header.index('strand')] == '+'
 
@@ -269,11 +458,14 @@ class TestFormulaRows:
         formula_rows = [row for row in rows if row[header.index('rule_type')] == 'formula']
         assert len(formula_rows) == 1
         row = formula_rows[0]
-        # Members joined with ';' in gene/nt_mut/aa_effect/af/strand.
+        # Members joined with ';' in gene/nt_mut/aa_effects/strand.
         assert row[header.index('gene')] == 'gag;gag'
         assert ';' in row[header.index('nt_mut')]
-        assert row[header.index('aa_effect')] == 'K3E;A5T'
-        assert ';' in row[header.index('af')]
+        assert 'K3E' in row[header.index('aa_effects')]
+        assert 'A5T' in row[header.index('aa_effects')]
+        # aa_frequency is the formula hit's Fréchet lower bound (a single value, not
+        # the members' joined variant allele frequencies).
+        assert ';' not in row[header.index('aa_frequency')]
         assert row[header.index('strand')] == '+;+'
         # Metrics come from the combined rule set, not members.
         assert row[header.index('drug')] == 'Brincidofovir'
@@ -337,7 +529,7 @@ class TestNonHitAndFastaRows:
         row = rows[0]
         assert row[header.index('strand')] == '+'
         # The remaining structural columns are still present.
-        for col in ('gene', 'nt_mut', 'aa_effect', 'af', 'af_bin',
+        for col in ('gene', 'nt_mut', 'aa_effects', 'aa_frequency',
                     'consequence', 'in_database', 'rule_type', 'drug', 'source'):
             assert col in header
 
@@ -351,7 +543,7 @@ class TestNonHitAndFastaRows:
 
 
 class TestInsAnyWildcard:
-    def test_ins_any_prefixes_aa_effect(self, tmp_path: Path) -> None:
+    def test_ins_any_rule_row_emitted(self, tmp_path: Path) -> None:
         rule = _rule(rid=1, drug='Acyclovir', mutation='INS_any')
         ann = _ann(alt_aa='E', rule_matches=[rule])
         r = _result([ann])
@@ -359,20 +551,22 @@ class TestInsAnyWildcard:
         write_tsv(r, out)
         header, rows = _read_tsv(out)
         row = [row for row in rows if row[header.index('rule_type')] == 'single'][0]
-        assert row[header.index('aa_effect')] == 'INS_any (K3E)'
+        # The aa_effects column carries the amino-acid change.
+        assert 'K3E' in row[header.index('aa_effects')]
 
 
 class TestCombinedCodonEvent:
-    def test_combined_codon_uses_codon_form_nt_mut(self, tmp_path: Path) -> None:
+    def test_combined_codon_uses_per_snp_nt_mut(self, tmp_path: Path) -> None:
         rule = _rule(rid=1, drug='Acyclovir')
         ann = _ann(is_combined_codon_event=True, ref_codon='AAA', alt_codon='GAA',
-                   codon_pos=2, rule_matches=[rule])
+                   codon_pos=2, pos=3, ref='A', alt='G', rule_matches=[rule])
         r = _result([ann])
         out = tmp_path / 'r.results.tsv'
         write_tsv(r, out)
         header, rows = _read_tsv(out)
         row = [row for row in rows if row[header.index('rule_type')] == 'single'][0]
-        assert row[header.index('nt_mut')] == 'AAA3GAA'
+        # Per-SNP combined rows report their own VCF NT change, not codon form.
+        assert row[header.index('nt_mut')] == 'A4G'
 
 
 class TestEffectAsResistantRows:
@@ -451,7 +645,7 @@ class TestEffectAsResistantRows:
         assert row[header.index('source')] == 'Metadata algorithm'
         assert row[header.index('in_database')] == 'yes'
         assert row[header.index('gene')] == 'UL23'
-        assert row[header.index('aa_effect')] == 'P7PfsX'
+        assert 'P7PfsX' in row[header.index('aa_effects')]
         # Effect-as-resistant rows carry no numeric metrics or clinical
         # phenotype, so those conditional columns are dropped (no real value in any
         # row). phenotype is kept because phenotype='resistant' is a real value.
@@ -682,8 +876,8 @@ class TestEmptyColumnDropping:
         out = tmp_path / 'r.results.tsv'
         write_tsv(r, out)
         header, _ = _read_tsv(out)
-        for col in ('reference', 'gene', 'nt_mut', 'aa_effect', 'strand', 'af',
-                    'af_bin', 'depth', 'consequence', 'in_database', 'rule_type',
+        for col in ('reference', 'gene', 'nt_mut', 'strand', 'aa_frequency',
+                    'depth', 'consequence', 'aa_effects', 'in_database', 'rule_type',
                     'drug', 'source'):
             assert col in header, f'{col} should always be present'
 
@@ -710,3 +904,43 @@ class TestEmptyColumnDropping:
         header, _ = _read_tsv(out)
         assert 'phenotype' not in header
         assert 'clinical_phenotype' not in header
+
+
+class TestFormulaFrechetLowerTsv:
+    """TSV formula rows report the Fréchet lower bound as the hit frequency."""
+
+    def test_formula_row_af_is_frechet_lower(self, tmp_path: Path) -> None:
+        """The aa_frequency cell of a formula row is the Fréchet lower bound, not the
+        members' variant allele frequencies."""
+        member_a = _ann(chrom='ref', pos=3, af=0.88, feature='gag', codon_pos=2,
+                        alt_aa='E', af_bin='high')
+        member_b = _ann(chrom='ref', pos=9, af=0.97, feature='gag', codon_pos=4,
+                        ref_aa='A', alt_aa='T', af_bin='high')
+        rs = ResistanceRuleSet(
+            id=10, drug_name='Brincidofovir', drug_id=1, phenotype='resistant',
+            group_name='FR1', logic_expression='R1 AND R2',
+            members=[
+                ResistanceRuleSetMember(
+                    id=1, rule_set_id=10, feature_name='gag', feature_id=1,
+                    reference_identifier='ref', position=2, reference='K',
+                    mutation='E', external_id='R1',
+                ),
+                ResistanceRuleSetMember(
+                    id=2, rule_set_id=10, feature_name='gag', feature_id=1,
+                    reference_identifier='ref', position=4, reference='A',
+                    mutation='T', external_id='R2',
+                ),
+            ],
+        )
+        hit = FormulaRuleHit(
+            rule_set=rs, matched_variants=[member_a, member_b],
+            matched_member_ids=['R1', 'R2'],
+            frechet_lower=0.6, forced_fraction=0.9, member_count=2,
+        )
+        r = _result([member_a, member_b], formula_hits=[hit])
+        out = tmp_path / 'r.results.tsv'
+        write_tsv(r, out)
+        header, rows = _read_tsv(out)
+        formula_rows = [row for row in rows if row[header.index('rule_type')] == 'formula']
+        assert len(formula_rows) == 1
+        assert formula_rows[0][header.index('aa_frequency')] == '0.6'

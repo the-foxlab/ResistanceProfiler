@@ -17,6 +17,7 @@ except ImportError:
     HTML = None
 
 from respro import __version__
+from respro.config.cli_settings import CLI_CONFIG, CliConfig
 from respro.db.models import (
     AnnotatedVariant,
     FeatureRecord,
@@ -36,6 +37,7 @@ from respro.report._row_helpers import (
 )
 from respro.report.html import (
     build_report_context,
+    display_consequence,
     write_html,
 )
 from respro.report.plots import render_lollipop_plot_bytes
@@ -55,6 +57,7 @@ def export_results(
     output_html_path: Path | None = None,
     similarity_high: int = 1,
     similarity_moderate: int = 0,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> dict[str, Path]:
     """
     Write all report outputs to a directory and return a format-to-path mapping.
@@ -109,6 +112,7 @@ def export_results(
         rules=rules,
         similarity_high=similarity_high,
         similarity_moderate=similarity_moderate,
+        cfg=cfg,
     )
 
     outputs: dict[str, Path] = {'html': html_path}
@@ -215,6 +219,22 @@ def write_json(
             'drug_hits': json.dumps(ann.drug_hits_json()),
             'is_combined_codon_event': ann.is_combined_codon_event,
             'combined_member_count': ann.combined_member_count,
+            'single_exchange_aa_freq': ann.single_exchange_aa_freq,
+            'rule_effect_aa_freq': json.dumps(ann.rule_effect_aa_freq),
+            'rule_effect_alt': json.dumps(ann.rule_effect_alt),
+            'freq_method': ann.freq_method,
+            'combined_states': json.dumps([
+                {
+                    'alt_codon': s.alt_codon,
+                    'alt_aa': s.alt_aa,
+                    'lower': s.lower,
+                    'upper': s.upper,
+                    'forced_fraction': s.forced_fraction,
+                    'accepted': s.accepted,
+                    'member_indices': list(s.member_indices),
+                }
+                for s in ann.combined_states
+            ]),
         })
 
     coverage_rows = [
@@ -294,8 +314,9 @@ def write_json(
 # (annotated variant × matched rule); non-hit variants also appear with empty
 # rule columns. See write_tsv for the row-emission rules.
 TSV_COLUMNS: tuple[str, ...] = (
-    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'aa_effect', 'strand',
-    'af', 'af_bin', 'depth', 'consequence', 'in_database', 'rule_type',
+    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
+    'aa_frequency', 'depth', 'consequence', 'aa_effects',
+    'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
     'source', 'publications',
 )
@@ -380,11 +401,37 @@ def _format_publications_tsv(publications: list[Publication]) -> str:
     return '|'.join(ids)
 
 
-def _aa_effect(ann: AnnotatedVariant) -> str:
-    """Return the amino-acid change string (or the feature name when AA is missing)."""
-    if ann.ref_aa and ann.alt_aa:
-        return f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
-    return ann.feature_name
+def _aa_effects(ann: AnnotatedVariant) -> str:
+    """Format all amino-acid effects (single + combined) for TSV/JSON export.
+
+    Each effect is rendered as ``<ref><pos><alt> (<lower>)`` and joined with
+    ``; ``. The single-exchange effect is listed first (when its amino-acid
+    frequency ``single_exchange_aa_freq`` is > 0), followed by every accepted
+    combined-state effect. For a single-SNP variant this is just the single
+    effect at the variant frequency. For a combined member whose single is
+    Fréchet-impossible (lower=0) only the combined states are shown. A combined
+    state that produces the same amino acid as the single-exchange is omitted to
+    avoid duplicate entries.
+    """
+    parts: list[str] = []
+    single_label = ''
+    freq_tag = 'observed' if ann.freq_method == 'observed' else 'lower bound'
+    # Gate on the *rounded* value: a real but sub-precision frequency
+    # (e.g. 1 molecule in ~6000 -> 0.000165) must not be rendered as
+    # ``... | 0.0 | ...``. The raw value is still used for rule matching.
+    if ann.alt_aa and round(ann.single_exchange_aa_freq, 3) > 0:
+        single_label = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+        parts.append(f'{single_label} | {round(ann.single_exchange_aa_freq, 3)} | {freq_tag}')
+    for state in ann.combined_states:
+        if not state.accepted:
+            continue
+        if round(state.lower, 3) <= 0:
+            continue
+        combined_label = f'{ann.ref_aa}{ann.codon_pos + 1}{state.alt_aa}'
+        if combined_label == single_label:
+            continue
+        parts.append(f'{combined_label} | {round(state.lower, 3)} | {freq_tag}')
+    return '; '.join(parts)
 
 
 def _build_strand_by_feature(result: ProfilingResult) -> dict[str, str]:
@@ -425,12 +472,11 @@ def _effect_as_resistant_tsv_rows(
             'gene': gene,
             'nt_mut': nt_change_stored(ann),
             'nt_mut_user': nt_change_user(ann),
-            'aa_effect': _aa_effect(ann),
             'strand': strand_by_feature.get(ann.feature_name, ''),
-            'af': repr(ann.variant.allele_freq),
-            'af_bin': ann.af_bin,
+            'aa_frequency': repr(round(ann.variant.allele_freq, 3)),
             'depth': str(ann.variant.depth),
-            'consequence': ann.consequence,
+            'consequence': display_consequence(ann),
+            'aa_effects': _aa_effects(ann),
             'in_database': 'yes',
             'rule_type': 'single',
             'drug': drug_name,
@@ -495,20 +541,18 @@ def write_tsv(
             'gene': _gene(ann),
             'nt_mut': nt_change_stored(ann),
             'nt_mut_user': nt_change_user(ann),
-            'aa_effect': _aa_effect(ann),
             'strand': strand_by_feature.get(ann.feature_name, ''),
-            'af': repr(ann.variant.allele_freq),
-            'af_bin': ann.af_bin,
+            'aa_frequency': repr(round(ann.variant.allele_freq, 3)),
             'depth': str(ann.variant.depth),
-            'consequence': ann.consequence,
+            'consequence': display_consequence(ann),
+            'aa_effects': _aa_effects(ann),
         }
 
     def _rule_row(
-        ann: AnnotatedVariant, rule: ResistanceRule, aa_effect: str
+        ann: AnnotatedVariant, rule: ResistanceRule
     ) -> dict[str, str]:
         row = _base_row(ann)
         row.update({
-            'aa_effect': aa_effect,
             'in_database': 'yes',
             'rule_type': 'single',
             'drug': rule.drug_name,
@@ -526,12 +570,7 @@ def write_tsv(
         matches = ann.non_formula_component_rule_matches
         if matches:
             for rule in matches:
-                # Wildcard insertion rules prefix the AA change so the rule type and
-                # the actual allele are both visible (mirrors _build_database_hits_rows).
-                aa = _aa_effect(ann)
-                if rule.mutation == 'INS_any':
-                    aa = f'INS_any ({aa})'
-                rows.append(_rule_row(ann, rule, aa))
+                rows.append(_rule_row(ann, rule))
         elif id(ann) in formula_member_ann_ids:
             # Member-only variant (no single rule of its own) but part of a fired formula.
             row = _base_row(ann)
@@ -574,22 +613,22 @@ def write_tsv(
         genes = ';'.join(_gene(a) for a in members)
         nt_muts = ';'.join(nt_change_stored(a) for a in members)
         nt_users = ';'.join(nt_change_user(a) for a in members)
-        aa_effects = ';'.join(_aa_effect(a) for a in members)
+        aa_effects = ';'.join(_aa_effects(a) for a in members)
         strands = ';'.join(strand_by_feature.get(a.feature_name, '') for a in members)
-        afs = ';'.join(repr(a.variant.allele_freq) for a in members)
-        af_bins = ';'.join(a.af_bin for a in members)
         first_chrom = members[0].variant.chrom
+        # The hit frequency of a formula row is the Fréchet lower bound: the
+        # guaranteed minimum co-occurrence frequency of the combination, not
+        # the individual members' variant allele frequencies.
         rows.append({
             'reference': ref_by_chrom.get(first_chrom, ''),
             'gene': genes,
             'nt_mut': nt_muts,
             'nt_mut_user': nt_users,
-            'aa_effect': aa_effects,
             'strand': strands,
-            'af': afs,
-            'af_bin': af_bins,
+            'aa_frequency': repr(round(hit.frechet_lower, 3)),
             'depth': '',  # combined row spans multiple variants; no single depth
             'consequence': ';'.join(a.consequence for a in members),
+            'aa_effects': aa_effects,
             'in_database': 'yes',
             'rule_type': 'formula',
             'drug': rs.drug_name,

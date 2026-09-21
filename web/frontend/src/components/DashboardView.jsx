@@ -93,7 +93,11 @@ export function DashboardView({
   downloadMutationsAsTsv,
   downloadFormulaRulesAsTsv,
   uploadProgress,
+  isUploading,
+  cancelUpload,
   // Batch
+  isBatchUploading,
+  cancelBatchUpload,
   batchMode,
   setBatchMode,
   batchVcfFiles,
@@ -262,6 +266,8 @@ export function DashboardView({
               uploadBamFile={uploadBamFile}
               uploadJsonFile={uploadJsonFile}
               uploadProgress={uploadProgress}
+              isUploading={isUploading}
+              cancelUpload={cancelUpload}
               activeProfileMode={activeProfileMode}
               setActiveProfileMode={setActiveProfileMode}
               analyzeSubMode={analyzeSubMode}
@@ -285,6 +291,8 @@ export function DashboardView({
               batchJsonFiles={batchJsonFiles}
               batchReferenceFasta={batchReferenceFasta}
               batchSamples={batchSamples}
+              isBatchUploading={isBatchUploading}
+              cancelBatchUpload={cancelBatchUpload}
               batchSubmitting={batchSubmitting}
               isBatchDownloadBusy={isBatchDownloadBusy}
               batchError={batchError}

@@ -11,10 +11,10 @@ MUTATION_COLOURS = {
     'synonymous': '#27ae60',
     'stop_gained': '#1d1e1f',
     'stop_loss': '#3e0c8d',
-    'start_loss': '#9e821d',
-    'frameshift': '#e74c3c',
-    'insertion': '#16a085',
-    'deletion': '#2980b9',
+    'start_loss': "#352E2E",
+    'frameshift': "#5e2520",
+    'insertion': "#ad0da5",
+    'deletion': "#ff0800",
     'unknown': '#bdc3c7',
 }
 

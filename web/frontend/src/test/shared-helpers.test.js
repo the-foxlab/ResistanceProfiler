@@ -160,68 +160,6 @@ describe('getRuleAnnotationByMode', () => {
   });
 });
 
-describe('classificationTone', () => {
-  it('returns "resistant" for resistant keywords', () => {
-    expect(classificationTone('resistant')).toBe('resistant');
-    expect(classificationTone('Resistant')).toBe('resistant');
-    expect(classificationTone('decreased susceptibility')).toBe('resistant');
-    expect(classificationTone('reduced susceptibility')).toBe('resistant');
-    expect(classificationTone('non-susceptible')).toBe('resistant');
-  });
-
-  it('returns "intermediate" for intermediate keywords', () => {
-    expect(classificationTone('intermediate')).toBe('intermediate');
-    expect(classificationTone('Intermediate')).toBe('intermediate');
-    expect(classificationTone('partial')).toBe('intermediate');
-    expect(classificationTone('borderline susceptible')).toBe('intermediate');
-  });
-
-  it('returns "susceptible" for susceptible keywords', () => {
-    expect(classificationTone('susceptible')).toBe('susceptible');
-    expect(classificationTone('Susceptible')).toBe('susceptible');
-    expect(classificationTone('sensitive')).toBe('susceptible');
-    expect(classificationTone('wildtype')).toBe('susceptible');
-  });
-
-  it('returns "unknown" for empty or unrecognized labels', () => {
-    expect(classificationTone('')).toBe('unknown');
-    expect(classificationTone(null)).toBe('unknown');
-    expect(classificationTone(undefined)).toBe('unknown');
-    expect(classificationTone('something else')).toBe('unknown');
-    expect(classificationTone('Wild type')).toBe('unknown');
-  });
-
-  it('detects resistant before intermediate due to priority ordering', () => {
-    expect(classificationTone('partial resistance')).toBe('resistant');
-  });
-});
-
-describe('hasTypedClassification', () => {
-  it('returns true when resistant count > 0', () => {
-    const counts = new Map([['resistant', 3], ['intermediate', 0], ['susceptible', 0]]);
-    expect(hasTypedClassification(counts)).toBe(true);
-  });
-
-  it('returns true when intermediate count > 0', () => {
-    const counts = new Map([['resistant', 0], ['intermediate', 1], ['susceptible', 0]]);
-    expect(hasTypedClassification(counts)).toBe(true);
-  });
-
-  it('returns true when susceptible count > 0', () => {
-    const counts = new Map([['resistant', 0], ['intermediate', 0], ['susceptible', 5]]);
-    expect(hasTypedClassification(counts)).toBe(true);
-  });
-
-  it('returns false for empty Map', () => {
-    expect(hasTypedClassification(new Map())).toBe(false);
-  });
-
-  it('returns false for Map with only unknown entries', () => {
-    const counts = new Map([['unknown', 10]]);
-    expect(hasTypedClassification(counts)).toBe(false);
-  });
-});
-
 describe('limitPieSlices', () => {
   it('returns all entries when fewer than 6', () => {
     const entries = [['A', 10], ['B', 5], ['C', 3]];
@@ -261,20 +199,87 @@ describe('limitPieSlices', () => {
   });
 });
 
+describe('classificationTone', () => {
+  it('maps susceptible-family labels to rank1', () => {
+    expect(classificationTone('susceptible')).toBe('rank1');
+    expect(classificationTone('Susceptible')).toBe('rank1');
+    expect(classificationTone('sensitive')).toBe('rank1');
+  });
+
+  it('maps potential low-level resistance to rank2', () => {
+    expect(classificationTone('potential low-level resistance')).toBe('rank2');
+    expect(classificationTone('possibly resistant')).toBe('rank2');
+  });
+
+  it('maps low-level resistance to rank3, distinct from high-level', () => {
+    expect(classificationTone('low-level resistance')).toBe('rank3');
+    expect(classificationTone('reduced susceptibility')).toBe('rank3');
+  });
+
+  it('maps intermediate to rank4', () => {
+    expect(classificationTone('intermediate')).toBe('rank4');
+    expect(classificationTone('Intermediate')).toBe('rank4');
+    expect(classificationTone('intermediate resistance')).toBe('rank4');
+  });
+
+  it('maps high-level resistance and resistant to rank5', () => {
+    expect(classificationTone('resistant')).toBe('rank5');
+    expect(classificationTone('Resistant')).toBe('rank5');
+    expect(classificationTone('high-level resistance')).toBe('rank5');
+  });
+
+  it('returns "unknown" for empty, sentinel, or unrecognized labels', () => {
+    expect(classificationTone('')).toBe('unknown');
+    expect(classificationTone(null)).toBe('unknown');
+    expect(classificationTone(undefined)).toBe('unknown');
+    expect(classificationTone('unknown')).toBe('unknown');
+    expect(classificationTone('not analysed')).toBe('unknown');
+    expect(classificationTone('something else')).toBe('unknown');
+    expect(classificationTone('Wild type')).toBe('unknown');
+  });
+
+  it('returns "contradictory" for conflicting labels', () => {
+    expect(classificationTone('contradictory')).toBe('contradictory');
+    expect(classificationTone('conflicting')).toBe('contradictory');
+  });
+
+  it('is whitespace-tolerant', () => {
+    expect(classificationTone('  low-level resistance  ')).toBe('rank3');
+  });
+});
+
+describe('hasTypedClassification', () => {
+  it('returns true when a rank tone count > 0', () => {
+    const counts = new Map([['rank1', 3], ['rank3', 0], ['rank5', 0]]);
+    expect(hasTypedClassification(counts)).toBe(true);
+    const counts5 = new Map([['rank1', 0], ['rank3', 0], ['rank5', 1]]);
+    expect(hasTypedClassification(counts5)).toBe(true);
+  });
+
+  it('returns false for empty Map', () => {
+    expect(hasTypedClassification(new Map())).toBe(false);
+  });
+
+  it('returns false for Map with only unknown entries', () => {
+    const counts = new Map([['unknown', 10]]);
+    expect(hasTypedClassification(counts)).toBe(false);
+  });
+});
+
 describe('dominantTone', () => {
   it('returns the tone with highest count', () => {
-    const counts = new Map([['resistant', 5], ['intermediate', 2], ['susceptible', 1]]);
-    expect(dominantTone(counts)).toBe('resistant');
+    const counts = new Map([['rank5', 5], ['rank4', 2], ['rank1', 1]]);
+    expect(dominantTone(counts)).toBe('rank5');
   });
 
-  it('breaks ties by priority (resistant > intermediate > susceptible > unknown)', () => {
-    const counts = new Map([['susceptible', 3], ['intermediate', 3], ['resistant', 3]]);
-    expect(dominantTone(counts)).toBe('resistant');
+  it('breaks ties by severity (rank5 > rank4 > rank3 > rank2 > rank1)', () => {
+    const counts = new Map([['rank1', 3], ['rank3', 3], ['rank5', 3]]);
+    expect(dominantTone(counts)).toBe('rank5');
   });
 
-  it('breaks tie between intermediate and susceptible', () => {
-    const counts = new Map([['susceptible', 4], ['intermediate', 4]]);
-    expect(dominantTone(counts)).toBe('intermediate');
+  it('breaks tie between rank2 and rank3 toward rank3', () => {
+    const counts = new Map([['rank2', 4], ['rank3', 4]]);
+    expect(dominantTone(counts)).toBe('rank3');
   });
 
   it('returns "unknown" for empty Map', () => {

@@ -206,7 +206,8 @@ class TestBuildDatabaseHitsRows:
         assert 'Fold IC50' in metric_labels
         assert 'Score' in metric_labels
 
-    def test_formula_rule_af_bin_is_always_high(self) -> None:
+    def test_formula_rule_af_bin_from_frechet_lower(self) -> None:
+        """A formula hit's AF bin comes from frechet_lower, not a hardcoded 'high'."""
         internal_rule = ResistanceRule(
             id=1, feature_name='UL23', feature_id=1, drug_name='__formula_component__',
             drug_id=1, reference_identifier='HSV1', position=1,
@@ -219,12 +220,14 @@ class TestBuildDatabaseHitsRows:
         )
         result = ProfilingResult(
             annotations=[ann],
-            formula_hits=[FormulaRuleHit(rule_set=rule_set, matched_variants=[ann])],
+            formula_hits=[FormulaRuleHit(
+                rule_set=rule_set, matched_variants=[ann], frechet_lower=0.3,
+            )],
         )
 
         row = _build_database_hits_rows(result)['rows'][0]
 
-        assert row['af_bin'] == 'high'
+        assert row['af_bin'] == 'intermediate'
 
     def test_formula_rule_mutations_joined_as_list(self) -> None:
         internal_a = ResistanceRule(

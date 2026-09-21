@@ -53,7 +53,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       id: 'vcf-bam',
       targetSelector: '[data-tour-target="vcf-bam"]',
       title: 'VCF mode — BAM (optional)',
-      body: 'An optional sorted BAM file for coverage evaluation. A BAM index is generated automatically. This is only needed when you want coverage-annotation and filtering.',
+      body: 'An optional sorted BAM file for coverage evaluation. A BAM index is generated automatically. This is only needed when you want coverage-annotation and combined SNP codon analysis.',
       before: () => {
         setActiveMode('analyze');
         setAnalyzeSubMode('single');
@@ -65,7 +65,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       id: 'vcf-sample-name',
       targetSelector: '[data-tour-target="vcf-sample-name"]',
       title: 'VCF mode — sample name',
-      body: 'Give your sample a name. This label appears on the report so you can identify which run produced which output.',
+      body: 'Give your sample a name. This label appears on the report.',
       before: () => {
         setActiveMode('analyze');
         setAnalyzeSubMode('single');
@@ -101,7 +101,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       id: 'fasta-mode',
       targetSelector: '.profile-upload-row-fasta',
       title: 'FASTA mode',
-      body: 'Switch to FASTA mode to upload a consensus FASTA sequence. The reference is matched automatically by sequence identity, so no reference FASTA is needed here. Provide a sample name for your report.',
+      body: 'Switch to FASTA mode to upload a consensus FASTA sequence. The reference is matched automatically by sequence identity.',
       before: () => {
         setActiveMode('analyze');
         setAnalyzeSubMode('single');
@@ -149,7 +149,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       id: 'analyze-submode',
       targetSelector: '.analyze-submode-row',
       title: 'One sample or many',
-      body: 'Use this toggle to switch between "One Sample" (what you just saw) and "Multiple Samples". The batch mode lets you submit multiple VCF or FASTA files at once with a shared reference, per-sample BAMs, and a single set of cutoffs — ideal when you have a plate or folder of samples to profile together.',
+      body: 'Use this toggle to switch between "One Sample" and "Multiple Samples". The batch mode lets you submit multiple VCF or FASTA files at once with a shared reference, per-sample BAMs, and a single set of cutoffs — ideal when you have a plate or folder of samples to profile together.',
       before: () => {
         setActiveMode('analyze');
         setAnalyzeSubMode('single');
@@ -168,7 +168,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       id: 'comparison-heatmap',
       targetSelector: '[data-tour-target="sidebar-results"]',
       title: 'Compare samples as a heatmap',
-      body: 'As soon as you have results, you can select two or more comparable results (same database and reference), then "Compare selected" to build a mutation heatmap. Use "Select all comparable" to pick everything that matches, toggle "Non-synonymous only" or "DB hits only" to filter, and "Clear comparison" to start over. This view lives below the results table.',
+      body: 'As soon as you have results, you can select two or more comparable results (same database and reference), then "Compare selected" to build a mutation heatmap.',
       before: () => setActiveMode('results'),
     },
     // 15. Database Dashboard — highlight the Database tile in the sidebar.

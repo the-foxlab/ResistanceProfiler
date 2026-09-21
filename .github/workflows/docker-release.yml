@@ -1,8 +1,25 @@
 name: Publish Docker Image
 
+# Publish the web Docker image (Dockerfile.web) to GHCR.
+#
+# Release triggers — both tag types publish the image:
+#   - web-v* tag  →  web app release
+#   - v* tag      →  CLI/core release (also ships the web image)
+#
+# workflow_dispatch lets you manually republish or backfill the image,
+# e.g. when a release build failed or you need to backport a hotfix image.
+# Provide an optional `tag` input to control the published tag; otherwise
+# the image is tagged with the short commit SHA.
+
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Docker tag to publish (e.g. web-v0.2.1, hotfix-2026-09). Leave empty to use the short SHA.'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -14,9 +31,11 @@ concurrency:
 
 jobs:
   build-and-push:
-    name: Build and publish image to GHCR
+    name: Build and publish web image to GHCR
     runs-on: ubuntu-latest
-    if: startsWith(github.event.release.tag_name, 'web-v')
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'v')
 
     steps:
       - name: Checkout repository
@@ -28,7 +47,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -38,12 +57,12 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           flavor: |
-            latest=true
+            latest=${{ github.event_name == 'release' }}
           tags: |
             type=ref,event=tag
-            type=ref,event=branch
             type=semver,pattern={{version}}
             type=sha
+            type=raw,value=${{ inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.tag != '' }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v7

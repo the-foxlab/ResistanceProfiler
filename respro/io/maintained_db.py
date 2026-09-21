@@ -384,6 +384,12 @@ def _fetch_genbank_records(accessions: list[str], dest_dir: Path) -> list[Path]:
     :raises ValueError: on an invalid accession (via ``_validate_accession``)
     """
     paths: list[Path] = []
+    # Read the network policy from CLI_CONFIG at call time so it tracks any
+    # future per-invocation override (maintained_db is out of scope for the
+    # --config flag, but reading at call time is the consistent pattern).
+    genbank_timeout = CLI_CONFIG.timeouts.genbank_timeout
+    genbank_max_retries = CLI_CONFIG.timeouts.genbank_max_retries
+    genbank_backoff_base = CLI_CONFIG.timeouts.genbank_backoff_base
     for accession in accessions:
         _validate_accession(accession)
         url = CLI_CONFIG.urls.ncbi_nuccore_efetch.format(accession=urllib.parse.quote(accession))
@@ -391,9 +397,9 @@ def _fetch_genbank_records(accessions: list[str], dest_dir: Path) -> list[Path]:
 
         content: bytes | None = None
         last_exc: Exception | None = None
-        for attempt in range(1, _GENBANK_MAX_RETRIES + 1):
+        for attempt in range(1, genbank_max_retries + 1):
             try:
-                with urllib.request.urlopen(url, timeout=_GENBANK_TIMEOUT) as resp:
+                with urllib.request.urlopen(url, timeout=genbank_timeout) as resp:
                     content = resp.read()
                 break  # success
             except urllib.error.HTTPError as exc:
@@ -406,15 +412,15 @@ def _fetch_genbank_records(accessions: list[str], dest_dir: Path) -> list[Path]:
                 last_exc = exc
                 logger.warning(
                     'Transient error fetching GenBank record %r (attempt %d/%d): %s',
-                    accession, attempt, _GENBANK_MAX_RETRIES, exc,
+                    accession, attempt, genbank_max_retries, exc,
                 )
-                if attempt < _GENBANK_MAX_RETRIES:
-                    time.sleep(_GENBANK_BACKOFF_BASE * (2 ** (attempt - 1)))
+                if attempt < genbank_max_retries:
+                    time.sleep(genbank_backoff_base * (2 ** (attempt - 1)))
 
         if content is None:
             raise RuntimeError(
                 f'Network error fetching GenBank record for {accession!r} '
-                f'after {_GENBANK_MAX_RETRIES} attempts: {last_exc}'
+                f'after {genbank_max_retries} attempts: {last_exc}'
             ) from last_exc
 
         if b'LOCUS' not in content:

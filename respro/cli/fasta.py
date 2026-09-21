@@ -23,7 +23,7 @@ from respro.cli.profile_helpers import (
     _ProfilingRunContext,
     _resolve_reference,
 )
-from respro.config.cli_settings import CLI_CONFIG
+from respro.config.cli_settings import load_config_with_overrides
 from respro.core.annotation import annotate_variants
 from respro.core.fasta_to_vcf import fasta_to_vcf
 from respro.core.query import resolve_fasta_query
@@ -88,6 +88,13 @@ def _profile_fasta_command(
             help='Optional display filename shown in exported reports.',
         ),
     ] = None,
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            '--config', '-c', exists=True,
+            help='User TOML overriding bundled defaults (scientific thresholds, alignment, AF bins, timeouts).',
+        ),
+    ] = None,
 ) -> None:
     """
     Run resistance profiling on a consensus FASTA sequence.
@@ -106,6 +113,9 @@ def _profile_fasta_command(
     try:
         export_formats = _parse_export_formats(export)
 
+        cfg = load_config_with_overrides(config)
+        if config is not None:
+            logger.info('Loaded configuration overrides from %s', config)
         project_conn = open_project_db(project)
         project_row = project_conn.execute('SELECT name FROM project LIMIT 1').fetchone()
         if project_row is None:
@@ -136,7 +146,7 @@ def _profile_fasta_command(
 
         with err_console.status('[dim]Aligning fasta sequence to internal references…[/dim]'):
             query_name, query_seq, fasta_matches = resolve_fasta_query(
-                project_conn, consensus_fasta, use_cache=cache, threads=threads,
+                project_conn, consensus_fasta, use_cache=cache, threads=threads, cfg=cfg,
             )
 
         ref_id, ref_name, fasta_matches = _resolve_reference(
@@ -145,7 +155,7 @@ def _profile_fasta_command(
         features, rules, formula_rules, rule_feature_names = _load_reference_data(project_conn, ref_id)
 
         variants, coverage_gaps = fasta_to_vcf(query_seq, fasta_matches)
-        annotations = annotate_variants(variants, features, is_fasta_mode=True)
+        annotations = annotate_variants(variants, features, is_fasta_mode=True, cfg=cfg)
 
         if coverage_gaps:
             total_non_covered = sum(gap.codon_end - gap.codon_start + 1 for gap in coverage_gaps)
@@ -157,7 +167,7 @@ def _profile_fasta_command(
 
         # FASTA mode frequencies are discrete (1.0, 0.5, 0.33, 0.25) from IUPAC expansion.
         # Bin thresholds are adjusted to reflect these values cleanly.
-        fasta_af_bins = CLI_CONFIG.af_bins_fasta.as_dict()
+        fasta_af_bins = cfg.af_bins_fasta.as_dict()
 
         ctx = _ProfilingRunContext(
             annotations=annotations,
@@ -185,6 +195,7 @@ def _profile_fasta_command(
             project_path=project,
             logger=logger,
             extra_export_formats=export_formats,
+            cfg=cfg,
         )
 
         _print_completion_panel(console, '✓ Profiling complete', result, outputs)

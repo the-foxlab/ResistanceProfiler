@@ -15,7 +15,7 @@ from jinja2 import BaseLoader, Environment
 from markupsafe import Markup, escape
 
 from respro import __version__
-from respro.config.cli_settings import CLI_CONFIG
+from respro.config.cli_settings import CLI_CONFIG, CliConfig
 from respro.core.annotation import (
     CONSEQUENCE_LABELS,
     HIGH_IMPACT_CONSEQUENCES,
@@ -32,6 +32,7 @@ from respro.db.algorithms import (
     _references_match as _algorithms_references_match,
 )
 from respro.db.models import (
+    AnnotatedVariant,
     FeatureRecord,
     ProfilingResult,
     Publication,
@@ -70,11 +71,46 @@ logger = logging.getLogger(__name__)
 _SYNONYMOUS_CONSEQUENCES: frozenset[str] = frozenset({'synonymous_variant', 'synonymous'})
 
 
+def _bin_for_af(af: float, is_fasta_mode: bool = False, cfg: CliConfig = CLI_CONFIG) -> str:
+    """Return the AF-bin label for a given frequency, using the configured bins.
+
+    Used to re-bin combined-state effects at their Fréchet ``lower`` bound rather
+    than the row's own allele frequency.
+    """
+    bins = (cfg.af_bins_fasta if is_fasta_mode else cfg.af_bins).as_dict()
+    sorted_bins = sorted(bins.items(), key=lambda x: -x[1][0])
+    for label, (lo, hi) in sorted_bins:
+        if lo <= af <= hi:
+            return label
+    return ''
+
+
 def _load_svg_data_url(asset_name: str) -> str:
     """Load an SVG asset and return it as a data URL."""
     asset_path = Path(__file__).parent / 'static' / 'assets' / asset_name
     svg_text = asset_path.read_text(encoding='utf-8')
     return f'data:image/svg+xml,{quote(svg_text)}'
+
+
+def display_consequence(ann: AnnotatedVariant) -> str:
+    """Return the consequence label shown in reports.
+
+    A combined-codon member whose single-exchange is synonymous but that has
+    accepted non-synonymous combined states is shown as ``missense`` — its AA
+    effects column lists real amino-acid changes, so "synonymous" would be
+    misleading. The underlying ``ann.consequence`` (used by rule matching) is
+    unchanged.
+    """
+    if (
+        ann.is_combined_codon_event
+        and ann.consequence == 'synonymous'
+        and any(
+            s.accepted and s.alt_aa and s.alt_aa != ann.ref_aa
+            for s in ann.combined_states
+        )
+    ):
+        return 'missense'
+    return ann.consequence
 
 
 def build_report_context(
@@ -84,10 +120,11 @@ def build_report_context(
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
     features: list[FeatureRecord] | None = None,
-    af_high_pct_source_threshold: float = 0.75,
-    af_intermediate_pct_source_threshold: float = 0.25,
-    af_low_min_pct_source_threshold: float = 0.01,
-    combination_member_af_pct_source_threshold: float = 0.75,
+    af_high_pct_source_threshold: float | None = None,
+    af_intermediate_pct_source_threshold: float | None = None,
+    af_low_min_pct_source_threshold: float | None = None,
+    combination_fraction_source_threshold: float | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> dict:
     """
     Build all data structures needed to render the report.
@@ -98,6 +135,20 @@ def build_report_context(
     :param features: optional feature records for display names
     :return: dictionary of context variables for Jinja2 template
     """
+    # Source AF-threshold labels from config so the report and the TOML cannot drift.
+    # Explicit kwargs still win (backward compatibility for direct callers/tests).
+    af_bins = cfg.af_bins_fasta if result.is_fasta_mode else cfg.af_bins
+    if af_high_pct_source_threshold is None:
+        af_high_pct_source_threshold = af_bins.high[0]
+    if af_intermediate_pct_source_threshold is None:
+        af_intermediate_pct_source_threshold = af_bins.intermediate[0]
+    if af_low_min_pct_source_threshold is None:
+        af_low_min_pct_source_threshold = af_bins.low[0]
+    if combination_fraction_source_threshold is None:
+        combination_fraction_source_threshold = (
+            cfg.matching.min_cooccurrence_combination_fraction
+        )
+
     summary = result.summary_dict()
     has_database_hit = result.database_hit_count > 0
 
@@ -183,6 +234,7 @@ def build_report_context(
         drug_class_map,
         drug_alias_map,
         reference_name_by_chrom=reference_name_by_chrom,
+        cfg=cfg,
     )
     similarity_entries = _build_potential_effects_rows(
         result,
@@ -193,6 +245,7 @@ def build_report_context(
         metric_thresholds=metric_thresholds,
         drug_class_map=drug_class_map,
         drug_alias_map=drug_alias_map,
+        cfg=cfg,
     )
 
     summary_context = _build_summary_context(
@@ -261,7 +314,7 @@ def build_report_context(
             'af_high_pct': int(af_high_pct_source_threshold * 100),
             'af_intermediate_pct': int(af_intermediate_pct_source_threshold * 100),
             'af_low_min_pct': int(af_low_min_pct_source_threshold * 100),
-            'combination_member_af_pct': int(combination_member_af_pct_source_threshold * 100),
+            'combination_fraction_pct': int(combination_fraction_source_threshold * 100),
         },
         'database_hits': {**database_hits, 'is_multi_species': is_multi_species},
         'similarity_entries': similarity_entries,
@@ -271,9 +324,13 @@ def build_report_context(
             'count': len(all_mutations_rows),
             'has_database_hits': any(r['is_database_hit'] for r in all_mutations_rows),
             'has_user_ref_column': not result.is_fasta_mode,
+            'has_combinatorial': any(
+                r['is_combined_codon_event'] for r in all_mutations_rows
+            ),
             'is_multi_species': is_multi_species,
             'search_icon': _load_svg_data_url('search.svg'),
             'reset_icon': _load_svg_data_url('reset_filter.svg'),
+            'info_icon': _load_svg_data_url('info.svg'),
         },
         'sequence_features': {
             'cards': feature_cards,
@@ -299,10 +356,11 @@ def render_html(
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
     features: list[FeatureRecord] | None = None,
-    af_high_pct_source_threshold: float = 0.75,
-    af_intermediate_pct_source_threshold: float = 0.25,
-    af_low_min_pct_source_threshold: float = 0.01,
-    combination_member_af_pct_source_threshold: float = 0.75,
+    af_high_pct_source_threshold: float | None = None,
+    af_intermediate_pct_source_threshold: float | None = None,
+    af_low_min_pct_source_threshold: float | None = None,
+    combination_fraction_source_threshold: float | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> str:
     """
     Render the complete HTML report.
@@ -329,7 +387,8 @@ def render_html(
         af_high_pct_source_threshold=af_high_pct_source_threshold,
         af_intermediate_pct_source_threshold=af_intermediate_pct_source_threshold,
         af_low_min_pct_source_threshold=af_low_min_pct_source_threshold,
-        combination_member_af_pct_source_threshold=combination_member_af_pct_source_threshold,
+        combination_fraction_source_threshold=combination_fraction_source_threshold,
+        cfg=cfg,
     )
     context['plot'] = {
         'has_plot': bool(plot_data_url),
@@ -366,10 +425,11 @@ def write_html(
     plot_svg_data: bytes | None = None,
     project_conn: sqlite3.Connection | None = None,
     rules: list[ResistanceRule] | None = None,
-    af_high_pct_source_threshold: float = 0.75,
-    af_intermediate_pct_source_threshold: float = 0.25,
-    af_low_min_pct_source_threshold: float = 0.01,
-    combination_member_af_pct_source_threshold: float = 0.75,
+    af_high_pct_source_threshold: float | None = None,
+    af_intermediate_pct_source_threshold: float | None = None,
+    af_low_min_pct_source_threshold: float | None = None,
+    combination_fraction_source_threshold: float | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> Path:
     """
     Render and write the HTML report to a file.
@@ -395,7 +455,8 @@ def write_html(
         af_high_pct_source_threshold=af_high_pct_source_threshold,
         af_intermediate_pct_source_threshold=af_intermediate_pct_source_threshold,
         af_low_min_pct_source_threshold=af_low_min_pct_source_threshold,
-        combination_member_af_pct_source_threshold=combination_member_af_pct_source_threshold,
+        combination_fraction_source_threshold=combination_fraction_source_threshold,
+        cfg=cfg,
     )
     output_path.write_text(html_content, encoding='utf-8')
     return output_path
@@ -432,12 +493,45 @@ def _build_all_mutations_rows(
 
         is_single_hit = ann.is_resistance_hit
         is_formula_hit = id(ann) in formula_hit_annotation_ids
-        display_consequence = ann.consequence
+        row_consequence = display_consequence(ann)
 
         pos_1based = ann.variant.pos + 1
         nt_change_stored_val = nt_change_stored(ann)
         nt_change_user_val = nt_change_user(ann)
 
+        # AA effects: all amino-acid outcomes this SNP participates in, each with
+        # its amino-acid frequency (Fréchet lower bound) in parentheses. The
+        # single-exchange effect is listed first (when its amino-acid frequency
+        # is > 0), followed by every accepted combined-state effect. For a
+        # non-combined variant this is just the single effect at the variant
+        # frequency. For a combined member whose single is Fréchet-impossible
+        # (lower=0) only the combined states are shown. A combined state that
+        # produces the same amino acid as the single-exchange is omitted from the
+        # display to avoid duplicate entries (the single-exchange is the more
+        # direct interpretation of that amino-acid effect).
+        freq_tag = 'observed' if ann.freq_method == 'observed' else 'lower bound'
+        aa_effects_parts: list[str] = []
+        single_label = ''
+        # Gate on the *rounded* value: a real but sub-precision frequency
+        # (e.g. 1 molecule in ~6000 -> 0.000165) must not be rendered as
+        # ``... | 0.0 | ...``. The raw value is still used for rule matching.
+        if ann.alt_aa and round(ann.single_exchange_aa_freq, 3) > 0:
+            single_label = f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
+            aa_effects_parts.append(
+                f'{single_label} | {round(ann.single_exchange_aa_freq, 3)} | {freq_tag}'
+            )
+        for s in ann.combined_states:
+            if s.accepted and round(s.lower, 3) > 0:
+                combined_label = f'{ann.ref_aa}{ann.codon_pos + 1}{s.alt_aa}'
+                if combined_label == single_label:
+                    continue
+                aa_effects_parts.append(
+                    f'{ann.ref_aa}{ann.codon_pos + 1}{s.alt_aa} | {round(s.lower, 3)} | {freq_tag}'
+                )
+        aa_effects = '; '.join(aa_effects_parts)
+
+        # The single-exchange AA change (without frequency) is still needed for
+        # the database-hits and similarity tables.
         aa_change = (
             f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
             if ann.ref_aa and ann.alt_aa
@@ -449,10 +543,13 @@ def _build_all_mutations_rows(
             'nt_change_stored': nt_change_stored_val,
             'nt_change_user': nt_change_user_val,
             'nt_pos': pos_1based,
+            'aa_effects': aa_effects,
             'aa_change': aa_change,
-            'consequence': display_consequence,
-            'allele_freq': ann.variant.allele_freq,
+            'consequence': row_consequence,
+            'variant_freq': ann.variant.allele_freq,  # nucleotide frequency
             'af_bin': ann.af_bin,
+            'is_combined_codon_event': ann.is_combined_codon_event,
+            'combined_member_count': ann.combined_member_count,
             'is_single_hit': is_single_hit,
             'is_formula_hit': is_formula_hit,
             'is_database_hit': is_single_hit or is_formula_hit,
@@ -460,6 +557,7 @@ def _build_all_mutations_rows(
             'has_alignment': alignment_html is not None,
             'reference_name': (reference_name_by_chrom or {}).get(ann.variant.chrom, ''),
         })
+
     return rows
 
 
@@ -512,12 +610,14 @@ def _build_database_hits_rows(
     drug_class_map: dict[str, str] | None = None,
     drug_alias_map: dict[str, str] | None = None,
     reference_name_by_chrom: dict[str, str] | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> dict:
     """
     Build one row per database hit for the Database Hits table.
 
-    Single rules and formula rules each produce one row. Formula-rule frequency is
-    always 'high' since they only fire when allele_freq > 0.75 for every member.
+    Single rules and formula rules each produce one row. A formula-rule row's
+    frequency bin comes from the Fréchet lower bound (frechet_lower), the
+    guaranteed-minimum co-occurrence frequency of the combination.
     Publications are deduplicated globally and referenced by citation number.
 
     :param result: profiling result
@@ -535,15 +635,29 @@ def _build_database_hits_rows(
     for ann in result.cds_annotations:
         for rule in ann.non_formula_component_rule_matches:
             feature = (display_names or {}).get(ann.feature_name, ann.feature_name)
+            # The amino-acid allele that actually matched the rule. For a
+            # combined-state hit this can differ from ann.alt_aa (the single-
+            # exchange AA): a rule keyed on a combined-state AA must display
+            # that combined-state AA, not the single. Falls back to ann.alt_aa
+            # when rule_effect_alt is unset (non-combined, or regenerated from
+            # an old results DB without the column).
+            eff_alt = ann.rule_effect_alt.get(rule.id, ann.alt_aa)
             aa_change = (
-                f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
-                if ann.ref_aa and ann.alt_aa
+                f'{ann.ref_aa}{ann.codon_pos + 1}{eff_alt}'
+                if ann.ref_aa and eff_alt
                 else ann.feature_name
             )
             # For wildcard insertion rules, prefix the rule label so the
             # database-hits table shows both the rule type and actual allele.
             if rule.mutation == 'INS_any':
                 aa_change = f'INS_any ({aa_change})'
+            # For combined-state hits, bin the AF at the Fréchet lower bound
+            # (rule_effect_aa_freq), not the row's own allele frequency.
+            effect_lower = ann.rule_effect_aa_freq.get(rule.id)
+            if effect_lower is not None and effect_lower != ann.variant.allele_freq:
+                hit_af_bin = _bin_for_af(effect_lower, result.is_fasta_mode, cfg=cfg)
+            else:
+                hit_af_bin = ann.af_bin
             rows.append({
                 'drug_key': rule.drug_name,
                 'drug': _format_drug_name_with_alias(rule.drug_name, drug_alias_map or {}),
@@ -554,7 +668,7 @@ def _build_database_hits_rows(
                     rule.ic50, rule.fold_ic50, rule.score,
                     thresholds=metric_thresholds,
                 ),
-                'af_bin': ann.af_bin,
+                'af_bin': hit_af_bin,
                 'source': rule.source,
                 'comment': rule.comment,
                 'reference_name': ref_by_chrom.get(ann.variant.chrom, ''),
@@ -586,7 +700,10 @@ def _build_database_hits_rows(
                 rs.ic50, rs.fold_ic50, rs.score,
                 thresholds=metric_thresholds,
             ),
-            'af_bin': 'high',  # formula rules only fire at allele_freq > 0.75
+            # Bin the formula hit at the Fréchet lower bound: the guaranteed
+            # minimum co-occurrence frequency, which can fall below the
+            # per-member 'high' bin even though every member fired at > 0.75.
+            'af_bin': _bin_for_af(formula_hit.frechet_lower, result.is_fasta_mode, cfg=cfg),
             'source': rs.source,
             'comment': rs.comment,
             'reference_name': ref_by_chrom.get(first_chrom, ''),
@@ -870,13 +987,41 @@ def _collect_detected_drug_names(result: ProfilingResult) -> set[str]:
 
 
 def _collect_formula_hit_annotation_ids(result: ProfilingResult) -> set[int]:
-    """Collect annotation object IDs that participate in any formula hit."""
-    formula_hit_annotation_ids: set[int] = set()
+    """Collect annotation object IDs that participate in any formula hit.
+
+    A formula hit's ``matched_variants`` carries one annotation per atomic member
+    rule (the highest-AF one). When that annotation is a combined-codon member,
+    every co-codon sibling shares the same combined amino-acid outcome and must
+    also carry the formula tag — otherwise only the first member's row shows the
+    "Formula-Rule" pill while its co-codon partners do not. Siblings are
+    identified by shared ``(feature_name, codon_pos, chrom)`` among combined-codon
+    annotations. The chrom scope is required for same-species multi-reference
+    runs, where two references can share a feature name (e.g. two HSV-1
+    references both carrying UL24): without it, a formula hit on one reference
+    would tag a sibling annotation on the other.
+    """
+    direct_ids: set[int] = set()
     for formula_hit in result.formula_hits:
         for ann in formula_hit.matched_variants:
             # Formula hits reference annotation objects, not stable variant keys;
             # object identity preserves exact membership when overlaps share coordinates.
-            formula_hit_annotation_ids.add(id(ann))
+            direct_ids.add(id(ann))
+
+    # Expand to combined-codon siblings of any directly-matched annotation.
+    direct_anns = {id(ann): ann for ann in result.cds_annotations if id(ann) in direct_ids}
+    combined_sibling_keys: set[tuple[str, int, str]] = set()
+    for ann in direct_anns.values():
+        if ann.is_combined_codon_event:
+            combined_sibling_keys.add((ann.feature_name, ann.codon_pos, ann.variant.chrom))
+
+    formula_hit_annotation_ids: set[int] = set(direct_ids)
+    if combined_sibling_keys:
+        for ann in result.cds_annotations:
+            if (
+                ann.is_combined_codon_event
+                and (ann.feature_name, ann.codon_pos, ann.variant.chrom) in combined_sibling_keys
+            ):
+                formula_hit_annotation_ids.add(id(ann))
     return formula_hit_annotation_ids
 
 
@@ -1062,6 +1207,7 @@ def _build_potential_effects_rows(
     metric_thresholds: dict[str, tuple[float, float] | None] | None = None,
     drug_class_map: dict[str, str] | None = None,
     drug_alias_map: dict[str, str] | None = None,
+    cfg: CliConfig = CLI_CONFIG,
 ) -> dict:
     """
     Build the Similarity to Database Entries context.
@@ -1118,55 +1264,88 @@ def _build_potential_effects_rows(
 
         ann_is_indel = ann.consequence in ('insertion', 'deletion') or len(ann.alt_aa) != 1
 
-        for rule in rules_by_pos[pos_key]:
-            if rule.drug_name == '__formula_component__':
+        # For combined-state annotations, evaluate similarity against each accepted
+        # combined state (using the state's alt_aa and lower for binning). The single
+        # exchange is only used when there are no combined states (e.g. a forced-
+        # overlap-promoted single with an empty combined_states list).
+        if ann.combined_states:
+            effect_variants: list[tuple[str, float]] = [
+                (s.alt_aa, s.lower) for s in ann.combined_states if s.accepted
+            ]
+        else:
+            # Single exchange: use the amino-acid frequency
+            # (single_exchange_aa_freq — equals the nucleotide frequency for
+            # non-combined variants; 0 for a Fréchet-impossible combined single
+            # whose amino acid is guaranteed absent).
+            effect_variants = [(ann.alt_aa, ann.single_exchange_aa_freq)]
+        # Deduplicate by alt_aa, keeping the first (lowest) frequency.
+        seen_alts: set[str] = set()
+        deduped_effects: list[tuple[str, float]] = []
+        for alt, af in effect_variants:
+            if alt in seen_alts:
                 continue
-            rule_is_indel = rule.mutation.lower() == 'fsx' or any(ch.isdigit() for ch in rule.mutation)
-            if ann_is_indel and not rule_is_indel:
-                continue
+            seen_alts.add(alt)
+            deduped_effects.append((alt, af))
+        effect_variants = deduped_effects
 
-            dedup_key = (ann.feature_name, ann.codon_pos, ann.alt_aa, rule.drug_name)
-            if dedup_key in seen:
+        for eff_alt, eff_af in effect_variants:
+            if len(eff_alt) != 1 and not ann_is_indel:
                 continue
-            seen.add(dedup_key)
+            for rule in rules_by_pos[pos_key]:
+                if rule.drug_name == '__formula_component__':
+                    continue
+                rule_is_indel = rule.mutation.lower() == 'fsx' or any(ch.isdigit() for ch in rule.mutation)
+                if ann_is_indel and not rule_is_indel:
+                    continue
 
-            observed_change = (
-                f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
-                if ann.ref_aa and ann.alt_aa
-                else ann.alt_aa or ''
-            )
-            rule_change = (
-                f'{rule.reference}{rule.position + 1}{rule.mutation}'
-                if rule.reference and rule.mutation
-                else rule.mutation or ''
-            )
-            similarity = (
-                'moderate' if ann_is_indel
-                else classify_similarity(
-                    ann.alt_aa,
-                    rule.mutation,
-                    high_threshold=similarity_high,
-                    moderate_threshold=similarity_moderate,
+                dedup_key = (ann.feature_name, ann.codon_pos, eff_alt, rule.drug_name)
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+
+                observed_change = (
+                    f'{ann.ref_aa}{ann.codon_pos + 1}{eff_alt}'
+                    if ann.ref_aa and eff_alt
+                    else eff_alt or ''
                 )
-            )
+                rule_change = (
+                    f'{rule.reference}{rule.position + 1}{rule.mutation}'
+                    if rule.reference and rule.mutation
+                    else rule.mutation or ''
+                )
+                similarity = (
+                    'moderate' if ann_is_indel
+                    else classify_similarity(
+                        eff_alt,
+                        rule.mutation,
+                        high_threshold=similarity_high,
+                        moderate_threshold=similarity_moderate,
+                    )
+                )
 
-            feature_name = (display_names or {}).get(ann.feature_name, ann.feature_name)
-            rows.append({
-                'feature': feature_name,
-                'drug': _format_drug_name_with_alias(rule.drug_name, drug_alias_map or {}),
-                'drug_class': (drug_class_map or {}).get(rule.drug_name.strip().lower(), ''),
-                'mutation': observed_change,
-                'rule_change': rule_change,
-                'similarity': similarity,
-                'metrics': _build_rule_metrics(
-                    rule.phenotype, rule.clinical_phenotype,
-                    rule.ic50, rule.fold_ic50, rule.score,
-                    thresholds=metric_thresholds,
-                ),
-                'af_bin': ann.af_bin,
-                'source': rule.source or '',
-                '_raw_pubs': list(rule.publications),
-            })
+                feature_name = (display_names or {}).get(ann.feature_name, ann.feature_name)
+                # Re-bin the AF when the effect frequency differs from the row's own AF
+                # (combined-state effects use the Fréchet lower bound).
+                if eff_af != ann.variant.allele_freq:
+                    sim_af_bin = _bin_for_af(eff_af, result.is_fasta_mode, cfg=cfg)
+                else:
+                    sim_af_bin = ann.af_bin
+                rows.append({
+                    'feature': feature_name,
+                    'drug': _format_drug_name_with_alias(rule.drug_name, drug_alias_map or {}),
+                    'drug_class': (drug_class_map or {}).get(rule.drug_name.strip().lower(), ''),
+                    'mutation': observed_change,
+                    'rule_change': rule_change,
+                    'similarity': similarity,
+                    'metrics': _build_rule_metrics(
+                        rule.phenotype, rule.clinical_phenotype,
+                        rule.ic50, rule.fold_ic50, rule.score,
+                        thresholds=metric_thresholds,
+                    ),
+                    'af_bin': sim_af_bin,
+                    'source': rule.source or '',
+                    '_raw_pubs': list(rule.publications),
+                })
 
     rows.sort(key=lambda r: (r['drug'].lower(), r['mutation']))
 

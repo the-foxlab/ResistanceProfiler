@@ -9,6 +9,11 @@ from datetime import datetime
 
 _INTERNAL_FORMULA_COMPONENT_DRUG_NAME = '__formula_component__'
 
+# Sentinel marking single_exchange_aa_freq as unset so __post_init__ can default
+# it to allele_freq for non-combined annotations without conflating a genuine 0.0
+# (a combined member whose single state is Fréchet-impossible).
+_SINGLE_EXCHANGE_AA_FREQ_UNSET = float('nan')
+
 
 def is_internal_formula_component_drug_name(drug_name: str) -> bool:
     """Return True when a drug name is the internal placeholder for formula members."""
@@ -255,6 +260,40 @@ class ResistanceRuleSet:
 
 
 @dataclass
+class CodonState:
+    """One candidate codon state from Fréchet-intersection inference.
+
+    Represents a possible exact nucleotide codon arising from same-codon SNPs,
+    with the sharp Fréchet bounds on its guaranteed co-occurrence frequency.
+
+    - ``alt_codon``: the complete three-base candidate codon.
+    - ``alt_aa``: translated single-letter amino acid (``'?'`` if untranslatable).
+    - ``lower``: Fréchet lower bound — the minimum guaranteed frequency of this
+      exact codon state. This is the only frequency reported for combined events;
+      it is a conservative minimum, NOT a phase-derived point estimate.
+    - ``upper``: Fréchet upper bound — the maximum possible co-occurrence.
+    - ``forced_fraction``: ``lower / upper`` — the minimum fraction of the rarest
+      required condition forced into this codon state.
+    - ``accepted``: True when ``lower > eps`` and ``forced_fraction >= threshold``.
+    - ``member_indices``: indices (into the input variant list) of the SNPs that
+      differ from the reference in this state.
+
+    The calculation uses sharp Fréchet intersection bounds and does NOT infer
+    physical phase. The acceptance threshold is an explicit conservative
+    interpretation policy (passing means the guaranteed portion is at least
+    twice the potentially unshared portion).
+    """
+
+    alt_codon: str
+    alt_aa: str
+    lower: float
+    upper: float
+    forced_fraction: float
+    accepted: bool
+    member_indices: tuple[int, ...]
+
+
+@dataclass
 class VariantCall:
     """A single variant extracted from a VCF record (0-based internal position).
 
@@ -292,9 +331,58 @@ class AnnotatedVariant:
     consequence: str = ''
     is_combined_codon_event: bool = False
     combined_member_count: int = 1
+    combined_states: list[CodonState] = field(default_factory=list)
+    # Amino-acid frequency of the single-exchange codon state (this member
+    # carried, all co-codon members absent). Method-agnostic: for non-combined
+    # annotations and BAM-backed combined codons this is a directly measured
+    # frequency (``freq_method='observed'``); for Fréchet-combined codons it is
+    # the Fréchet lower bound (``freq_method='estimated'``). This is distinct
+    # from ``variant.allele_freq`` (the nucleotide frequency): for a single-SNP
+    # codon they are equal, but for combined-codon members the single-exchange
+    # amino acid requires this SNP present AND co-codon SNPs absent, so its
+    # frequency can be 0 even when the nucleotide frequency is high. This
+    # amino-acid frequency is what single-exchange rule matching and AF binning
+    # use. A member whose single state is Fréchet-impossible (lower=0) is
+    # guaranteed absent as a single exchange and must not be classified as a
+    # high-AF resistance hit.
+    single_exchange_aa_freq: float = _SINGLE_EXCHANGE_AA_FREQ_UNSET
+    # Per matched rule, the amino-acid frequency to display/bin in the report.
+    # Maps rule.id -> frequency. For single-exchange hits the value is the
+    # row's ``single_exchange_aa_freq`` (amino-acid frequency of the single
+    # codon); for combined-state hits it is the state's ``lower`` (amino-acid
+    # frequency of the combined codon). Never the nucleotide frequency.
+    rule_effect_aa_freq: dict[int, float] = field(default_factory=dict)
+    # Per matched rule, the amino-acid allele that actually matched the rule.
+    # Maps rule.id -> alt_aa. For single-exchange hits this is ``ann.alt_aa``;
+    # for combined-state hits it is the combined state's ``alt_aa`` (which can
+    # differ from ``ann.alt_aa``). The Database Hits table uses this to display
+    # the amino-acid change that triggered the rule, not the row's single-
+    # exchange AA. Persisted so regenerated reports match the live report.
+    rule_effect_alt: dict[int, str] = field(default_factory=dict)
+    # Provenance: how the amino-acid frequencies on this annotation were derived.
+    # 'observed' = directly measured (single-nucleotide VCF allele frequency for
+    #   non-combined annotations, or BAM read-backed codon co-occurrence for
+    #   combined codons with a BAM).
+    # 'estimated' = conservative Fréchet lower-bound inference (combined codons
+    #   without raw read data, i.e. no BAM).
+    # All ``combined_states`` on one annotation share the same method. The
+    # report label (observed/estimated) reads this field alone.
+    freq_method: str = 'observed'
     af_bin: str = ''
     is_fasta_mode: bool = False  # True when derived from consensus FASTA, not a VCF
     rule_matches: list[ResistanceRule] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Default single_exchange_aa_freq to the nucleotide frequency
+        # (variant.allele_freq) for non-combined annotations, where nucleotide
+        # and amino-acid frequencies coincide (one SNP -> one codon -> one AA).
+        # Combined members set it explicitly in _annotate_combined_snp_codon to
+        # the amino-acid frequency of the single-exchange codon; the sentinel
+        # distinguishes "unset" from a genuine 0.0 (Fréchet-impossible single,
+        # i.e. the amino acid is guaranteed absent despite a high nucleotide
+        # frequency).
+        if self.single_exchange_aa_freq != self.single_exchange_aa_freq:  # NaN check
+            self.single_exchange_aa_freq = self.variant.allele_freq
 
     @property
     def has_user_ref_coords(self) -> bool:
@@ -371,6 +459,15 @@ class FormulaRuleHit:
     rule_set: ResistanceRuleSet
     matched_variants: list[AnnotatedVariant] = field(default_factory=list)
     matched_member_ids: list[str] = field(default_factory=list)
+    # Fréchet guarantee of the firing clause: the lower bound on the guaranteed
+    # minimum co-occurrence of the contributing members (amino-acid frequency
+    # scale). Equals the winning member's effect lower for OR/XOR/single-member.
+    frechet_lower: float = 0.0
+    # forced_fraction of the firing clause (lower / upper); 1.0 for
+    # OR/XOR/single-member winners.
+    forced_fraction: float = 0.0
+    # Number of contributing members of the firing clause.
+    member_count: int = 1
 
     def to_dict(self) -> dict:
         """
@@ -405,6 +502,9 @@ class FormulaRuleHit:
                 for m in rs.members
             ],
             'matched_member_ids': list(self.matched_member_ids),
+            'frechet_lower': self.frechet_lower,
+            'forced_fraction': self.forced_fraction,
+            'member_count': self.member_count,
             'matched_variants': [
                 {
                     'feature': v.feature_name,

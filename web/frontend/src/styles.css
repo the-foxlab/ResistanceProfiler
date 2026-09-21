@@ -1993,6 +1993,30 @@ th {
   color: var(--muted-strong);
 }
 
+/* Small × button on the right of the upload progress head; cancels the
+   in-flight upload. Stays in the same row on mobile (flex head). */
+.upload-cancel-btn {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted-strong);
+  font-size: var(--font-size-md);
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upload-cancel-btn:hover {
+  background: var(--line);
+  color: var(--fg, inherit);
+}
+
 .upload-progress-track {
   width: 100%;
   height: 9px;
@@ -2226,6 +2250,32 @@ th {
   justify-content: center;
   font-size: var(--font-size-md);
   line-height: 1;
+}
+
+/* Clear-all control next to the batch file count; resets the whole batch
+   upload overview without touching single-sample uploads. */
+.batch-clear-all-btn {
+  border: none;
+  background: none;
+  color: var(--muted-strong);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  padding: 0;
+  margin: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.batch-clear-all-btn:hover {
+  background: none;
+  color: var(--color-error, #c2410c);
+}
+
+.batch-files-count-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .report-actions {

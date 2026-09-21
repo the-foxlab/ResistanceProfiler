@@ -242,8 +242,8 @@ export function AboutTab({ setActiveMode, onStartTour, contactEmail }) {
             are defined separately from single rules and evaluated with operators such as and, or, not, and xor.
           </p>
           <p className="about-threshold-note">
-            Combination members are evaluated based on a fixed member allele-frequency
-            (<span className="about-inline-pill">AF &gt; 0.75</span> by default).
+            Combination members if they reach a minimum guranteed co-occurrence threshold 
+            (<span className="about-inline-pill">&gt; 0.66</span> by default).
           </p>
           <div className="about-operator-list">
             <div className="about-operator-row">

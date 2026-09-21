@@ -4,6 +4,7 @@ Tests for the maintained-db IO client and databases CLI command.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 import urllib.error
@@ -528,6 +529,68 @@ class TestFetchGenbankRecords:
         with patch('urllib.request.urlopen', side_effect=se), patch('time.sleep'):
             with pytest.raises(RuntimeError, match='HTTP 500'):
                 _fetch_genbank_records(['X04770'], tmp_path)
+
+
+class TestGenbankConfigWiring:
+    """Tests that GenBank timeout/retry/backoff are sourced from CLI_CONFIG (M3)."""
+
+    def test_urlopen_receives_configured_timeout(self, tmp_path: Path) -> None:
+        """The timeout passed to urlopen should equal CLI_CONFIG.timeouts.genbank_timeout."""
+        with patch('urllib.request.urlopen', return_value=_bytes_mock(_GENBANK_CONTENT)) as mock_open:
+            _fetch_genbank_records(['X04770'], tmp_path)
+        _, kwargs = mock_open.call_args
+        from respro.config.cli_settings import CLI_CONFIG
+        assert kwargs['timeout'] == CLI_CONFIG.timeouts.genbank_timeout
+
+    def test_retry_count_matches_configured_max_retries(self, tmp_path: Path) -> None:
+        """Exhausting retries should make exactly genbank_max_retries urlopen attempts."""
+        from respro.config.cli_settings import CLI_CONFIG
+        with patch('urllib.request.urlopen',
+                   side_effect=ConnectionResetError('reset')), patch('time.sleep') as mock_sleep:
+            with pytest.raises(RuntimeError, match='Network error fetching GenBank record'):
+                _fetch_genbank_records(['X04770'], tmp_path)
+        # urlopen is called once per attempt; the number of attempts equals max_retries.
+        assert mock_sleep.call_count == CLI_CONFIG.timeouts.genbank_max_retries - 1
+
+    def test_backoff_base_matches_configured_value(self, tmp_path: Path) -> None:
+        """The first backoff sleep should use CLI_CONFIG.timeouts.genbank_backoff_base."""
+        from respro.config.cli_settings import CLI_CONFIG
+        with patch('urllib.request.urlopen',
+                   side_effect=ConnectionResetError('reset')), patch('time.sleep') as mock_sleep:
+            with pytest.raises(RuntimeError):
+                _fetch_genbank_records(['X04770'], tmp_path)
+        first_sleep_arg = mock_sleep.call_args_list[0].args[0]
+        assert first_sleep_arg == CLI_CONFIG.timeouts.genbank_backoff_base
+
+    def test_timeout_tracks_overridden_config(self, tmp_path: Path) -> None:
+        """Patching CLI_CONFIG.timeouts.genbank_timeout should change the urlopen timeout."""
+        from respro.config import cli_settings
+        original = cli_settings.CLI_CONFIG
+        patched = dataclasses.replace(
+            original,
+            timeouts=dataclasses.replace(original.timeouts, genbank_timeout=99),
+        )
+        with patch.object(cli_settings, 'CLI_CONFIG', patched), \
+             patch('respro.io.maintained_db.CLI_CONFIG', patched), \
+             patch('urllib.request.urlopen', return_value=_bytes_mock(_GENBANK_CONTENT)) as mock_open:
+            _fetch_genbank_records(['X04770'], tmp_path)
+        _, kwargs = mock_open.call_args
+        assert kwargs['timeout'] == 99
+
+    def test_retry_count_tracks_overridden_config(self, tmp_path: Path) -> None:
+        """Patching genbank_max_retries should change the number of urlopen attempts."""
+        from respro.config import cli_settings
+        patched = dataclasses.replace(
+            cli_settings.CLI_CONFIG,
+            timeouts=dataclasses.replace(cli_settings.CLI_CONFIG.timeouts, genbank_max_retries=5),
+        )
+        with patch.object(cli_settings, 'CLI_CONFIG', patched), \
+             patch('respro.io.maintained_db.CLI_CONFIG', patched), \
+             patch('urllib.request.urlopen', side_effect=ConnectionResetError('reset')), \
+             patch('time.sleep') as mock_sleep:
+            with pytest.raises(RuntimeError):
+                _fetch_genbank_records(['X04770'], tmp_path)
+        assert mock_sleep.call_count == 4  # 5 retries → 4 backoff sleeps
 
 
 # ── download_database_files ───────────────────────────────────────────────────

@@ -67,6 +67,7 @@ export function buildGenePositionSections(rules, plotMeta, phenotypeMode, binSiz
         positions: new Map(),
         mutationTokens: new Set(),
         classifiedRules: 0,
+        toneLabels: new Map(),
       });
     }
 
@@ -93,6 +94,14 @@ export function buildGenePositionSections(rules, plotMeta, phenotypeMode, binSiz
       bucket.toneMutationSets.set(tone, new Set());
     }
     bucket.toneMutationSets.get(tone).add(mutationToken);
+    // Remember the annotation labels actually observed for this tone so the
+    // legend can show database wording (e.g. "sensitive") instead of the
+    // canonical rank label.
+    if (!group.toneLabels.has(tone)) {
+      group.toneLabels.set(tone, new Map());
+    }
+    const labelCounts = group.toneLabels.get(tone);
+    labelCounts.set(classification, (labelCounts.get(classification) || 0) + 1);
     group.mutationTokens.add(`${aaPosition}:${mutationToken}`);
     group.classifiedRules += 1;
     group.aaLength = Math.max(group.aaLength, aaPosition);
@@ -132,7 +141,7 @@ export function buildGenePositionSections(rules, plotMeta, phenotypeMode, binSiz
 
     const binnedPositions = positions.map((entry) => {
       const toneCounts = new Map();
-      ['resistant', 'intermediate', 'susceptible'].forEach((tone) => {
+      ['rank1', 'rank2', 'rank3', 'rank4', 'rank5'].forEach((tone) => {
         const toneSet = entry.toneMutationSets.get(tone);
         toneCounts.set(tone, toneSet ? toneSet.size : 0);
       });
@@ -144,9 +153,11 @@ export function buildGenePositionSections(rules, plotMeta, phenotypeMode, binSiz
         rangeEnd: entry.binEnd,
         count: entry.mutationSet.size,
         tone: dominantTone(toneCounts),
-        resistant: toneCounts.get('resistant') || 0,
-        intermediate: toneCounts.get('intermediate') || 0,
-        susceptible: toneCounts.get('susceptible') || 0,
+        rank1: toneCounts.get('rank1') || 0,
+        rank2: toneCounts.get('rank2') || 0,
+        rank3: toneCounts.get('rank3') || 0,
+        rank4: toneCounts.get('rank4') || 0,
+        rank5: toneCounts.get('rank5') || 0,
       };
     });
 
@@ -157,15 +168,35 @@ export function buildGenePositionSections(rules, plotMeta, phenotypeMode, binSiz
 
     const hasTyped = binnedPositions.some((entry) => hasTypedClassification(
       new Map([
-        ['resistant', entry.resistant],
-        ['intermediate', entry.intermediate],
-        ['susceptible', entry.susceptible],
+        ['rank1', entry.rank1],
+        ['rank2', entry.rank2],
+        ['rank3', entry.rank3],
+        ['rank4', entry.rank4],
+        ['rank5', entry.rank5],
       ])
     ));
 
     const tones = hasTyped
-      ? ['resistant', 'intermediate', 'susceptible'].filter((tone) => binnedPositions.some((item) => item[tone] > 0))
+      ? ['rank1', 'rank2', 'rank3', 'rank4', 'rank5'].filter((tone) => binnedPositions.some((item) => item[tone] > 0))
       : ['count'];
+
+    // Derive legend labels from the annotations observed in the database.
+    // Multiple distinct labels may share a tone (e.g. "sensitive" and
+    // "susceptible" are both rank1); they are shown together, most common first.
+    const toneLabels = {};
+    tones.forEach((tone) => {
+      if (tone === 'count') {
+        return;
+      }
+      const labelCounts = group.toneLabels.get(tone);
+      if (!labelCounts) {
+        return;
+      }
+      toneLabels[tone] = Array.from(labelCounts.entries())
+        .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))
+        .map(([label]) => label)
+        .join(' / ');
+    });
 
     return {
       kind: 'positions',
@@ -179,6 +210,7 @@ export function buildGenePositionSections(rules, plotMeta, phenotypeMode, binSiz
         : `No ${phenotypeMode} annotation available`,
       xAxisLabel: `Amino-acid bin end (${binSize} aa)`,
       tones,
+      toneLabels,
       hasTypedClassification: hasTyped,
       positions: binnedPositions,
     };
