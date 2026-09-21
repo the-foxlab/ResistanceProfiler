@@ -1,7 +1,19 @@
-"""File upload handling with validation."""
+"""File upload handling with validation.
+
+Validation runs in two stages for every upload type:
+
+| Stage            | FASTA                          | VCF                            | BAM              | Results JSON                             |
+|------------------|--------------------------------|--------------------------------|------------------|------------------------------------------|
+| During streaming | text/chars/line structure      | text/header/row limits         | BGZF signature   | strict incremental UTF-8, non-empty      |
+| After write      | —                              | —                              | downstream pysam | ``load_run_from_json`` schema validation |
+
+All types stream to disk with an $O(\\texttt{chunk\\_size})$ validation-state
+memory footprint; no type accumulates the full request body in memory.
+"""
 
 from __future__ import annotations
 
+import codecs
 import os
 import tempfile
 from pathlib import Path
@@ -48,7 +60,7 @@ def _max_size_for_type(file_type: Literal['fasta', 'vcf', 'bam', 'json']) -> int
     if file_type == 'vcf':
         return defaults.upload_max_vcf_size
     if file_type == 'json':
-        return defaults.upload_max_vcf_size
+        return defaults.upload_max_json_size
     return defaults.upload_max_bam_size
 
 
@@ -84,9 +96,14 @@ def _validate_stream_chunk(
     if file_type == 'json':
         if b'\x00' in chunk:
             raise ValueError('JSON upload must be valid UTF-8 text')
+        decoder = state['decoder']
+        assert isinstance(decoder, codecs.IncrementalDecoder)
+        try:
+            decoder.decode(chunk)
+        except UnicodeDecodeError as exc:
+            raise ValueError('JSON upload must be valid UTF-8 text') from exc
         if chunk.strip():
             state['has_non_whitespace'] = True
-        state['chunks'].append(chunk)
         return
 
     bgzf_header_bytes = WEB_BACKEND_CONFIG.defaults.upload_bgzf_header_bytes
@@ -118,12 +135,14 @@ def _validate_stream_complete(
         return
 
     if file_type == 'json':
-        if not state['has_non_whitespace']:
-            raise ValueError('JSON upload is empty')
+        decoder = state['decoder']
+        assert isinstance(decoder, codecs.IncrementalDecoder)
         try:
-            b''.join(state['chunks']).decode('utf-8')
+            decoder.decode(b'', final=True)
         except UnicodeDecodeError as exc:
             raise ValueError('JSON upload must be valid UTF-8 text') from exc
+        if not state['has_non_whitespace']:
+            raise ValueError('JSON upload is empty')
         return
 
     if len(state['first_bytes']) < WEB_BACKEND_CONFIG.defaults.upload_bgzf_header_bytes:
@@ -154,7 +173,7 @@ def _new_stream_validation_state(file_type: Literal['fasta', 'vcf', 'bam', 'json
     if file_type == 'json':
         return {
             'has_non_whitespace': False,
-            'chunks': [],
+            'decoder': codecs.getincrementaldecoder('utf-8')(),
         }
     return {
         'first_bytes': b'',

@@ -76,6 +76,7 @@ min_depth = 10
 max_fasta_size = 5242880
 max_vcf_size = 1048576
 max_bam_size = 1073741824
+max_json_size = 1048576
 chunk_size = 1048576
 max_fasta_line_length = 500000
 max_vcf_line_length = 100000

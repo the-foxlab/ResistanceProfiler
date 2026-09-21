@@ -788,14 +788,13 @@ class TestFrechetEpsilonConfig:
         assert _FRECHET_EPS == CLI_CONFIG.codon.frechet_epsilon
         assert _FRECHET_EPS == 1e-9
 
-    def test_annotation_reexport_still_works(self) -> None:
-        """from respro.core.annotation import _FRECHET_EPS should still succeed (backward-compat)."""
-        # The re-exported name should match the combined_snp module constant.
+    def test_annotation_reexport_removed(self) -> None:
+        """respro.core.annotation no longer re-exports private combined-SNP names."""
         import respro.core.annotation as annotation_mod
-        from respro.core import combined_snp
-        from respro.core.annotation import _FRECHET_EPS  # noqa: F401
-        assert annotation_mod._FRECHET_EPS is combined_snp._FRECHET_EPS or \
-            annotation_mod._FRECHET_EPS == combined_snp._FRECHET_EPS
+
+        assert not hasattr(annotation_mod, '_FRECHET_EPS')
+        assert not hasattr(annotation_mod, '_annotate_combined_snp_codon')
+        assert not hasattr(annotation_mod, '_compute_codon_frechet_states')
 
     def test_eps_parameter_controls_lower_gate(self) -> None:
         """A larger eps should reject a state whose lower is below eps but above the default.

@@ -13,16 +13,12 @@ from Bio.Align.substitution_matrices import load as _load_matrix
 from Bio.Seq import Seq
 
 from respro.config.cli_settings import CLI_CONFIG, CliConfig
-from respro.db.models import AnnotatedVariant, CodonState, FeatureRecord, VariantCall
+from respro.db.models import AnnotatedVariant, FeatureRecord, VariantCall
 
 if TYPE_CHECKING:
     from respro.core.combined_snp import BamCooccurrence
 
 logger = logging.getLogger(__name__)
-
-# Re-export CodonState so existing `from respro.core.annotation import CodonState`
-# sites keep working. The combined-SNP names are re-exported via __getattr__ below.
-__all__ = ['CodonState']
 
 _BLOSUM62 = _load_matrix('BLOSUM62')
 
@@ -943,40 +939,3 @@ def assign_af_bins(
                 ann.af_bin = label
 
     return annotations
-
-
-# ─── Combined same-codon SNP logic ─────────────────────────────────────────
-# Extracted into respro.core.combined_snp (Fréchet path + BAM observed path).
-# To avoid a circular import (combined_snp imports low-level helpers from this
-# module at top level), the combined-SNP entry points are imported lazily inside
-# ``annotate_variants`` (the only function that calls them). The names are also
-# re-exported via module-level ``__getattr__`` (PEP 562) so existing
-# ``from respro.core.annotation import _compute_codon_frechet_states`` sites
-# keep working without triggering the cycle at import time.
-
-
-def __getattr__(name: str) -> object:
-    # PEP 562 lazy re-export: resolve combined-SNP names on first attribute
-    # access, after both modules are fully loaded. (CodonState is imported at
-    # top level from respro.db.models and is not handled here.)
-    if name in {
-        '_FRECHET_EPS',
-        '_annotate_combined_snp_codon',
-        '_combined_fallback_single_snp',
-        '_compute_codon_frechet_states',
-        '_dedupe_states_by_aa',
-        '_plan_combined_snp_groups',
-    }:
-        from respro.core import combined_snp as _cs
-        _lazy = {
-            '_FRECHET_EPS': _cs._FRECHET_EPS,
-            '_annotate_combined_snp_codon': _cs._annotate_combined_snp_codon,
-            '_combined_fallback_single_snp': _cs._combined_fallback_single_snp,
-            '_compute_codon_frechet_states': _cs._compute_codon_frechet_states,
-            '_dedupe_states_by_aa': _cs._dedupe_states_by_aa,
-            '_plan_combined_snp_groups': _cs._plan_combined_snp_groups,
-        }
-        value = _lazy[name]
-        globals()[name] = value  # cache for subsequent access
-        return value
-    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

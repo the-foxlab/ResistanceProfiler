@@ -6,18 +6,19 @@ import pytest
 
 from respro.cli.profile_helpers import _suppress_ruleless_overlap_annotations
 from respro.core.annotation import (
-    CodonState,
-    _annotate_combined_snp_codon,
     _annotate_variant_in_feature,
     _classify_snp_consequence,
-    _compute_codon_frechet_states,
     annotate_variants,
     assign_af_bins,
     normalize_mutation,
     reverse_complement,
     translate_codon,
 )
-from respro.db.models import AnnotatedVariant, FeatureRecord, VariantCall
+from respro.core.combined_snp import (
+    _annotate_combined_snp_codon,
+    _compute_codon_frechet_states,
+)
+from respro.db.models import AnnotatedVariant, CodonState, FeatureRecord, VariantCall
 
 # ─── translate_codon ──────────────────────────────────────────────────
 
