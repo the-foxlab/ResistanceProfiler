@@ -270,14 +270,14 @@ For each CDS-to-query alignment, ResPro computes three metrics:
 
 - **CDS coverage** — the fraction of the CDS coding span that is aligned:
 
-    $$\text{cds\_coverage} = \frac{\text{aligned\_exon\_length}}{\sum_{\text{segments}} (e_j - s_j)}$$
+    $$\text{cds_coverage} = \frac{\text{aligned_exon_length}}{\sum_{\text{segments}} (e_j - s_j)}$$
 
     clamped to $[0, 1]$.
 
 - **Query coverage** — the fraction of the query sequence spanned by the
     alignment:
 
-    $$\text{query\_coverage} = \frac{r_{\text{en}} - r_{\text{st}}}{|Q|}$$
+    $$\text{query_coverage} = \frac{r_{\text{en}} - r_{\text{st}}}{|Q|}$$
 
 The **best reference** for a query is selected as the reference of the
 single best feature match, ranked by identity (descending), then CDS coverage
@@ -462,8 +462,8 @@ representation is identical by design.
 
 For a SNP at CDS position $c$ within a feature:
 
-1. The **codon index** is $i = \lfloor (c - \text{codon\_start}) / 3 \rfloor$
-   and the **position within the codon** is $p = (c - \text{codon\_start}) \bmod 3$.
+1. The **codon index** is $i = \lfloor (c - \text{codon_start}) / 3 \rfloor$
+   and the **position within the codon** is $p = (c - \text{codon_start}) \bmod 3$.
 2. The **reference codon** is extracted from the internal CDS. If a valid
    query codon context is available (from VCF remap), it is used as the
    reference for amino-acid derivation; otherwise the internal CDS codon is used.
@@ -741,11 +741,11 @@ operator precedence to build an abstract syntax tree (AST). The grammar is:
 
 $$
 \begin{aligned}
-\text{or\_expr} &::= \text{xor\_expr} \;\;(\texttt{OR}\;\; \text{xor\_expr})^* \\
-\text{xor\_expr} &::= \text{and\_expr} \;\;(\texttt{XOR}\;\; \text{and\_expr})^* \\
-\text{and\_expr} &::= \text{not\_expr} \;\;(\texttt{AND}\;\; \text{not\_expr})^* \\
-\text{not\_expr} &::= \texttt{NOT}\;\; \text{not\_expr} \;\;|\;\; \text{primary} \\
-\text{primary} &::= \texttt{(}\;\text{or\_expr}\;\texttt{)} \;\;|\;\; \text{ATOM}
+\text{or_expr} &::= \text{xor_expr} \;\;(\texttt{OR}\;\; \text{xor_expr})^* \\
+\text{xor_expr} &::= \text{and_expr} \;\;(\texttt{XOR}\;\; \text{and_expr})^* \\
+\text{and_expr} &::= \text{not_expr} \;\;(\texttt{AND}\;\; \text{not_expr})^* \\
+\text{not_expr} &::= \texttt{NOT}\;\; \text{not_expr} \;\;|\;\; \text{primary} \\
+\text{primary} &::= \texttt{(}\;\text{or_expr}\;\texttt{)} \;\;|\;\; \text{ATOM}
 \end{aligned}
 $$
 
@@ -904,7 +904,7 @@ background frequencies. The score is rounded to the nearest integer.
 
 ### 8.3 Classification thresholds
 
-The BLOSUM62 score $s = B(\text{observed\_aa}, \text{rule\_aa})$ is classified
+The BLOSUM62 score $s = B(\text{observed_aa}, \text{rule_aa})$ is classified
 into three tiers using two configurable thresholds (from `defaults.toml`,
 `[similarity]` section):
 
@@ -1021,9 +1021,9 @@ extracted and projected through the CIGAR map onto internal CDS coordinates.
 A codon is reported as a coverage gap when **any** of its three nucleotides
 has depth below the minimum depth threshold (default 10):
 
-$$\exists\, j \in \{0, 1, 2\} : \text{depth}(\text{query\_pos}(c + j)) < d_{\min}$$
+$$\exists\, j \in \{0, 1, 2\} : \text{depth}(\text{query_pos}(c + j)) < d_{\min}$$
 
-where $c$ is the codon's CDS start position and $\text{query\_pos}$ is the
+where $c$ is the codon's CDS start position and $\text{query_pos}$ is the
 CDS-to-query coordinate map. CDS positions that map to `None` (deletions in the
 query) are treated as non-covered.
 
