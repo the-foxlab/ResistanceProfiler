@@ -1,0 +1,2937 @@
+<!DOCTYPE html>
+<html class="no-js" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width,initial-scale=1" name="viewport"/>
+<meta content="Mathematical foundations and internal logic of the ResistanceProfiler pipeline" name="description"/>
+<link href="https://the-foxlab.github.io/ResistanceProfiler/technical-reference/" rel="canonical"/>
+<link href="../how-it-works/" rel="prev"/>
+<link href="../database-preparation/" rel="next"/>
+<link href="../assets/favicon.svg" rel="icon"/>
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.7" name="generator"/>
+<title>Technical Reference - ResistanceProfiler</title>
+<link href="../assets/stylesheets/main.ec1eaa64.min.css" rel="stylesheet"/>
+<link href="../assets/stylesheets/palette.ab4e12ef.min.css" rel="stylesheet"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css?family=Source+Sans+3:300,300i,400,400i,700,700i%7CFira+Code:400,400i,700,700i&amp;display=fallback" rel="stylesheet"/>
+<style>:root{--md-text-font:"Source Sans 3";--md-code-font:"Fira Code"}</style>
+<link href="../stylesheets/extra.css" rel="stylesheet"/>
+<script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+<link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"/><script src="../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+<body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
+<input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox"/>
+<input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox"/>
+<label class="md-overlay" for="__drawer"></label>
+<div data-md-component="skip">
+<a class="md-skip" href="#technical-reference">
+          Skip to content
+        </a>
+</div>
+<div data-md-component="announce">
+</div>
+<header class="md-header md-header--shadow" data-md-component="header">
+<nav aria-label="Header" class="md-header__inner md-grid">
+<a aria-label="ResistanceProfiler" class="md-header__button md-logo" data-md-component="logo" href=".." title="ResistanceProfiler">
+<img alt="logo" src="../assets/favicon.svg"/>
+</a>
+<label class="md-header__button md-icon" for="__drawer">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+</label>
+<div class="md-header__title" data-md-component="header-title">
+<div class="md-header__ellipsis">
+<div class="md-header__topic">
+<span class="md-ellipsis">
+            ResistanceProfiler
+          </span>
+</div>
+<div class="md-header__topic" data-md-component="header-topic">
+<span class="md-ellipsis">
+            
+              Technical Reference
+            
+          </span>
+</div>
+</div>
+</div>
+<form class="md-header__option" data-md-component="palette">
+<input aria-label="Switch to dark mode" class="md-option" data-md-color-accent="custom" data-md-color-media="(prefers-color-scheme: light)" data-md-color-primary="custom" data-md-color-scheme="default" id="__palette_0" name="__palette" type="radio"/>
+<label class="md-header__button md-icon" for="__palette_1" hidden="" title="Switch to dark mode">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"></path></svg>
+</label>
+<input aria-label="Switch to light mode" class="md-option" data-md-color-accent="custom" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-primary="custom" data-md-color-scheme="slate" id="__palette_1" name="__palette" type="radio"/>
+<label class="md-header__button md-icon" for="__palette_0" hidden="" title="Switch to light mode">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"></path></svg>
+</label>
+</form>
+<script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+<label class="md-header__button md-icon" for="__search">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+</label>
+<div class="md-search" data-md-component="search" role="dialog">
+<label class="md-search__overlay" for="__search"></label>
+<div class="md-search__inner" role="search">
+<form class="md-search__form" name="search">
+<input aria-label="Search" autocapitalize="off" autocomplete="off" autocorrect="off" class="md-search__input" data-md-component="search-query" name="query" placeholder="Search" required="" spellcheck="false" type="text"/>
+<label class="md-search__icon md-icon" for="__search">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+</label>
+<nav aria-label="Search" class="md-search__options">
+<button aria-label="Clear" class="md-search__icon md-icon" tabindex="-1" title="Clear" type="reset">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+</button>
+</nav>
+<div class="md-search__suggest" data-md-component="search-suggest"></div>
+</form>
+<div class="md-search__output">
+<div class="md-search__scrollwrap" data-md-scrollfix="" tabindex="0">
+<div class="md-search-result" data-md-component="search-result">
+<div class="md-search-result__meta">
+            Initializing search
+          </div>
+<ol class="md-search-result__list" role="presentation"></ol>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="md-header__source">
+<a class="md-source" data-md-component="source" href="https://github.com/the-foxlab/ResistanceProfiler" title="Go to repository">
+<div class="md-source__icon md-icon">
+<svg viewbox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+</div>
+<div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+</div>
+</nav>
+</header>
+<div class="md-container" data-md-component="container">
+<main class="md-main" data-md-component="main">
+<div class="md-main__inner md-grid">
+<div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Navigation" class="md-nav md-nav--primary" data-md-level="0">
+<label class="md-nav__title" for="__drawer">
+<a aria-label="ResistanceProfiler" class="md-nav__button md-logo" data-md-component="logo" href=".." title="ResistanceProfiler">
+<img alt="logo" src="../assets/favicon.svg"/>
+</a>
+    ResistanceProfiler
+  </label>
+<div class="md-nav__source">
+<a class="md-source" data-md-component="source" href="https://github.com/the-foxlab/ResistanceProfiler" title="Go to repository">
+<div class="md-source__icon md-icon">
+<svg viewbox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+</div>
+<div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+</div>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="..">
+<span class="md-ellipsis">
+    
+  
+    Manual
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../install/">
+<span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../quickstart/">
+<span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../how-it-works/">
+<span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--active">
+<input class="md-nav__toggle md-toggle" id="__toc" type="checkbox"/>
+<label class="md-nav__link md-nav__link--active" for="__toc">
+<span class="md-ellipsis">
+    
+  
+    Technical reference
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<a class="md-nav__link md-nav__link--active" href="./">
+<span class="md-ellipsis">
+    
+  
+    Technical reference
+  
+
+    
+  </span>
+</a>
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipeline-at-a-glance">
+<span class="md-ellipsis">
+      
+        Pipeline at a glance
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#1-database-construction-representation-choices">
+<span class="md-ellipsis">
+      
+        1. Database construction &amp; representation choices
+      
+    </span>
+</a>
+<nav aria-label="1. Database construction &amp; representation choices" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#11-genbank-as-the-source-of-truth">
+<span class="md-ellipsis">
+      
+        1.1 GenBank as the source of truth
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#12-coordinate-spaces">
+<span class="md-ellipsis">
+      
+        1.2 Coordinate spaces
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#13-rule-storage">
+<span class="md-ellipsis">
+      
+        1.3 Rule storage
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#14-mutation-token-normalisation">
+<span class="md-ellipsis">
+      
+        1.4 Mutation token normalisation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#15-coordinate-base-detection">
+<span class="md-ellipsis">
+      
+        1.5 Coordinate-base detection
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#16-mat_peptide-features">
+<span class="md-ellipsis">
+      
+        1.6 mat_peptide features
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#2-reference-matching-via-minimap2">
+<span class="md-ellipsis">
+      
+        2. Reference matching via minimap2
+      
+    </span>
+</a>
+<nav aria-label="2. Reference matching via minimap2" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#21-alignment-strategy">
+<span class="md-ellipsis">
+      
+        2.1 Alignment strategy
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#22-identity-and-coverage-metrics">
+<span class="md-ellipsis">
+      
+        2.2 Identity and coverage metrics
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#3-cigar-parsing-coordinate-mapping">
+<span class="md-ellipsis">
+      
+        3. CIGAR parsing &amp; coordinate mapping
+      
+    </span>
+</a>
+<nav aria-label="3. CIGAR parsing &amp; coordinate mapping" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#31-cigar-convention">
+<span class="md-ellipsis">
+      
+        3.1 CIGAR convention
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#32-bidirectional-coordinate-map">
+<span class="md-ellipsis">
+      
+        3.2 Bidirectional coordinate map
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#33-intron-classification-for-spliced-genes">
+<span class="md-ellipsis">
+      
+        3.3 Intron classification for spliced genes
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#4-variant-emission-remapping">
+<span class="md-ellipsis">
+      
+        4. Variant emission &amp; remapping
+      
+    </span>
+</a>
+<nav aria-label="4. Variant emission &amp; remapping" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#41-fasta-mode-consensus-variant-calls">
+<span class="md-ellipsis">
+      
+        4.1 FASTA mode: consensus → variant calls
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#42-vcf-mode-coordinate-remapping">
+<span class="md-ellipsis">
+      
+        4.2 VCF mode: coordinate remapping
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#43-anchor-changed-indel-splitting">
+<span class="md-ellipsis">
+      
+        4.3 Anchor-changed indel splitting
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#5-codon-aware-annotation">
+<span class="md-ellipsis">
+      
+        5. Codon-aware annotation
+      
+    </span>
+</a>
+<nav aria-label="5. Codon-aware annotation" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#51-single-snp-annotation">
+<span class="md-ellipsis">
+      
+        5.1 Single-SNP annotation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#52-indel-annotation">
+<span class="md-ellipsis">
+      
+        5.2 Indel annotation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#53-multiple-snps-in-one-codon-frechet-bounds">
+<span class="md-ellipsis">
+      
+        5.3 Multiple SNPs in one codon — Fréchet bounds
+      
+    </span>
+</a>
+<nav aria-label="5.3 Multiple SNPs in one codon — Fréchet bounds" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#531-the-mathematical-problem">
+<span class="md-ellipsis">
+      
+        5.3.1 The mathematical problem
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#532-state-enumeration">
+<span class="md-ellipsis">
+      
+        5.3.2 State enumeration
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#533-the-acceptance-threshold">
+<span class="md-ellipsis">
+      
+        5.3.3 The acceptance threshold
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#534-per-snp-emission-with-combined-states">
+<span class="md-ellipsis">
+      
+        5.3.4 Per-SNP emission with combined states
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#535-forced-overlap-exception">
+<span class="md-ellipsis">
+      
+        5.3.5 Forced-overlap exception
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#536-fallback">
+<span class="md-ellipsis">
+      
+        5.3.6 Fallback
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#54-bam-based-exact-co-occurrence">
+<span class="md-ellipsis">
+      
+        5.4 BAM-based exact co-occurrence
+      
+    </span>
+</a>
+<nav aria-label="5.4 BAM-based exact co-occurrence" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#541-shared-candidate-state-enumeration">
+<span class="md-ellipsis">
+      
+        5.4.1 Shared candidate-state enumeration
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#542-spanning-molecule-counting">
+<span class="md-ellipsis">
+      
+        5.4.2 Spanning-molecule counting
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#543-thin-evidence-single-event-fallback">
+<span class="md-ellipsis">
+      
+        5.4.3 Thin-evidence → single-event fallback
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#544-provenance-freq_method">
+<span class="md-ellipsis">
+      
+        5.4.4 Provenance: freq_method
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#6-boolean-formula-evaluation-ast">
+<span class="md-ellipsis">
+      
+        6. Boolean formula evaluation (AST)
+      
+    </span>
+</a>
+<nav aria-label="6. Boolean formula evaluation (AST)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#61-grammar-parser">
+<span class="md-ellipsis">
+      
+        6.1 Grammar &amp; parser
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#62-canonicalisation">
+<span class="md-ellipsis">
+      
+        6.2 Canonicalisation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#63-runtime-evaluation">
+<span class="md-ellipsis">
+      
+        6.3 Runtime evaluation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#7-rule-matching">
+<span class="md-ellipsis">
+      
+        7. Rule matching
+      
+    </span>
+</a>
+<nav aria-label="7. Rule matching" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#71-single-rule-matching">
+<span class="md-ellipsis">
+      
+        7.1 Single-rule matching
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#72-ruleless-feature-suppression">
+<span class="md-ellipsis">
+      
+        7.2 Ruleless feature suppression
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#8-amino-acid-similarity-scoring-blosum62">
+<span class="md-ellipsis">
+      
+        8. Amino-acid similarity scoring (BLOSUM62)
+      
+    </span>
+</a>
+<nav aria-label="8. Amino-acid similarity scoring (BLOSUM62)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#81-purpose">
+<span class="md-ellipsis">
+      
+        8.1 Purpose
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#82-the-blosum62-substitution-matrix">
+<span class="md-ellipsis">
+      
+        8.2 The BLOSUM62 substitution matrix
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#83-classification-thresholds">
+<span class="md-ellipsis">
+      
+        8.3 Classification thresholds
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#84-special-cases">
+<span class="md-ellipsis">
+      
+        8.4 Special cases
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#9-allele-frequency-bins">
+<span class="md-ellipsis">
+      
+        9. Allele-frequency bins
+      
+    </span>
+</a>
+<nav aria-label="9. Allele-frequency bins" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#vcf-af-source-resolution">
+<span class="md-ellipsis">
+      
+        VCF AF source resolution
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#10-coverage-assessment">
+<span class="md-ellipsis">
+      
+        10. Coverage assessment
+      
+    </span>
+</a>
+<nav aria-label="10. Coverage assessment" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#101-fasta-mode">
+<span class="md-ellipsis">
+      
+        10.1 FASTA mode
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#102-vcf-mode-with-bam">
+<span class="md-ellipsis">
+      
+        10.2 VCF mode with BAM
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#11-interpretation-algorithms">
+<span class="md-ellipsis">
+      
+        11. Interpretation algorithms
+      
+    </span>
+</a>
+<nav aria-label="11. Interpretation algorithms" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#111-phenotype-rank-system">
+<span class="md-ellipsis">
+      
+        11.1 Phenotype rank system
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#112-drug_interpretation-methods">
+<span class="md-ellipsis">
+      
+        11.2 drug_interpretation methods
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#113-effect_as_resistant">
+<span class="md-ellipsis">
+      
+        11.3 effect_as_resistant
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#114-per-drug-per-reference-threshold-overrides">
+<span class="md-ellipsis">
+      
+        11.4 Per-drug / per-reference threshold overrides
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#115-drug_groups">
+<span class="md-ellipsis">
+      
+        11.5 drug_groups
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#116-drug_alias">
+<span class="md-ellipsis">
+      
+        11.6 drug_alias
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#12-results-persistence-regeneration">
+<span class="md-ellipsis">
+      
+        12. Results persistence &amp; regeneration
+      
+    </span>
+</a>
+<nav aria-label="12. Results persistence &amp; regeneration" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#121-results-database">
+<span class="md-ellipsis">
+      
+        12.1 Results database
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#122-project-fingerprint">
+<span class="md-ellipsis">
+      
+        12.2 Project fingerprint
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#123-deterministic-regeneration">
+<span class="md-ellipsis">
+      
+        12.3 Deterministic regeneration
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#13-determinism-guarantees">
+<span class="md-ellipsis">
+      
+        13. Determinism guarantees
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#further-reading">
+<span class="md-ellipsis">
+      
+        Further reading
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../database-preparation/">
+<span class="md-ellipsis">
+    
+  
+    Database preparation
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../rules-format/">
+<span class="md-ellipsis">
+    
+  
+    Rules TSV format
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../algorithms/">
+<span class="md-ellipsis">
+    
+  
+    Interpretation algorithms
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../cli-reference/">
+<span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../configuration/">
+<span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../output/">
+<span class="md-ellipsis">
+    
+  
+    Output interpretation
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../webapp/">
+<span class="md-ellipsis">
+    
+  
+    Web app
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../contributing/">
+<span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../license/">
+<span class="md-ellipsis">
+    
+  
+    License
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pipeline-at-a-glance">
+<span class="md-ellipsis">
+      
+        Pipeline at a glance
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#1-database-construction-representation-choices">
+<span class="md-ellipsis">
+      
+        1. Database construction &amp; representation choices
+      
+    </span>
+</a>
+<nav aria-label="1. Database construction &amp; representation choices" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#11-genbank-as-the-source-of-truth">
+<span class="md-ellipsis">
+      
+        1.1 GenBank as the source of truth
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#12-coordinate-spaces">
+<span class="md-ellipsis">
+      
+        1.2 Coordinate spaces
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#13-rule-storage">
+<span class="md-ellipsis">
+      
+        1.3 Rule storage
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#14-mutation-token-normalisation">
+<span class="md-ellipsis">
+      
+        1.4 Mutation token normalisation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#15-coordinate-base-detection">
+<span class="md-ellipsis">
+      
+        1.5 Coordinate-base detection
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#16-mat_peptide-features">
+<span class="md-ellipsis">
+      
+        1.6 mat_peptide features
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#2-reference-matching-via-minimap2">
+<span class="md-ellipsis">
+      
+        2. Reference matching via minimap2
+      
+    </span>
+</a>
+<nav aria-label="2. Reference matching via minimap2" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#21-alignment-strategy">
+<span class="md-ellipsis">
+      
+        2.1 Alignment strategy
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#22-identity-and-coverage-metrics">
+<span class="md-ellipsis">
+      
+        2.2 Identity and coverage metrics
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#3-cigar-parsing-coordinate-mapping">
+<span class="md-ellipsis">
+      
+        3. CIGAR parsing &amp; coordinate mapping
+      
+    </span>
+</a>
+<nav aria-label="3. CIGAR parsing &amp; coordinate mapping" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#31-cigar-convention">
+<span class="md-ellipsis">
+      
+        3.1 CIGAR convention
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#32-bidirectional-coordinate-map">
+<span class="md-ellipsis">
+      
+        3.2 Bidirectional coordinate map
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#33-intron-classification-for-spliced-genes">
+<span class="md-ellipsis">
+      
+        3.3 Intron classification for spliced genes
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#4-variant-emission-remapping">
+<span class="md-ellipsis">
+      
+        4. Variant emission &amp; remapping
+      
+    </span>
+</a>
+<nav aria-label="4. Variant emission &amp; remapping" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#41-fasta-mode-consensus-variant-calls">
+<span class="md-ellipsis">
+      
+        4.1 FASTA mode: consensus → variant calls
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#42-vcf-mode-coordinate-remapping">
+<span class="md-ellipsis">
+      
+        4.2 VCF mode: coordinate remapping
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#43-anchor-changed-indel-splitting">
+<span class="md-ellipsis">
+      
+        4.3 Anchor-changed indel splitting
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#5-codon-aware-annotation">
+<span class="md-ellipsis">
+      
+        5. Codon-aware annotation
+      
+    </span>
+</a>
+<nav aria-label="5. Codon-aware annotation" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#51-single-snp-annotation">
+<span class="md-ellipsis">
+      
+        5.1 Single-SNP annotation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#52-indel-annotation">
+<span class="md-ellipsis">
+      
+        5.2 Indel annotation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#53-multiple-snps-in-one-codon-frechet-bounds">
+<span class="md-ellipsis">
+      
+        5.3 Multiple SNPs in one codon — Fréchet bounds
+      
+    </span>
+</a>
+<nav aria-label="5.3 Multiple SNPs in one codon — Fréchet bounds" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#531-the-mathematical-problem">
+<span class="md-ellipsis">
+      
+        5.3.1 The mathematical problem
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#532-state-enumeration">
+<span class="md-ellipsis">
+      
+        5.3.2 State enumeration
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#533-the-acceptance-threshold">
+<span class="md-ellipsis">
+      
+        5.3.3 The acceptance threshold
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#534-per-snp-emission-with-combined-states">
+<span class="md-ellipsis">
+      
+        5.3.4 Per-SNP emission with combined states
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#535-forced-overlap-exception">
+<span class="md-ellipsis">
+      
+        5.3.5 Forced-overlap exception
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#536-fallback">
+<span class="md-ellipsis">
+      
+        5.3.6 Fallback
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#54-bam-based-exact-co-occurrence">
+<span class="md-ellipsis">
+      
+        5.4 BAM-based exact co-occurrence
+      
+    </span>
+</a>
+<nav aria-label="5.4 BAM-based exact co-occurrence" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#541-shared-candidate-state-enumeration">
+<span class="md-ellipsis">
+      
+        5.4.1 Shared candidate-state enumeration
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#542-spanning-molecule-counting">
+<span class="md-ellipsis">
+      
+        5.4.2 Spanning-molecule counting
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#543-thin-evidence-single-event-fallback">
+<span class="md-ellipsis">
+      
+        5.4.3 Thin-evidence → single-event fallback
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#544-provenance-freq_method">
+<span class="md-ellipsis">
+      
+        5.4.4 Provenance: freq_method
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#6-boolean-formula-evaluation-ast">
+<span class="md-ellipsis">
+      
+        6. Boolean formula evaluation (AST)
+      
+    </span>
+</a>
+<nav aria-label="6. Boolean formula evaluation (AST)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#61-grammar-parser">
+<span class="md-ellipsis">
+      
+        6.1 Grammar &amp; parser
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#62-canonicalisation">
+<span class="md-ellipsis">
+      
+        6.2 Canonicalisation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#63-runtime-evaluation">
+<span class="md-ellipsis">
+      
+        6.3 Runtime evaluation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#7-rule-matching">
+<span class="md-ellipsis">
+      
+        7. Rule matching
+      
+    </span>
+</a>
+<nav aria-label="7. Rule matching" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#71-single-rule-matching">
+<span class="md-ellipsis">
+      
+        7.1 Single-rule matching
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#72-ruleless-feature-suppression">
+<span class="md-ellipsis">
+      
+        7.2 Ruleless feature suppression
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#8-amino-acid-similarity-scoring-blosum62">
+<span class="md-ellipsis">
+      
+        8. Amino-acid similarity scoring (BLOSUM62)
+      
+    </span>
+</a>
+<nav aria-label="8. Amino-acid similarity scoring (BLOSUM62)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#81-purpose">
+<span class="md-ellipsis">
+      
+        8.1 Purpose
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#82-the-blosum62-substitution-matrix">
+<span class="md-ellipsis">
+      
+        8.2 The BLOSUM62 substitution matrix
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#83-classification-thresholds">
+<span class="md-ellipsis">
+      
+        8.3 Classification thresholds
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#84-special-cases">
+<span class="md-ellipsis">
+      
+        8.4 Special cases
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#9-allele-frequency-bins">
+<span class="md-ellipsis">
+      
+        9. Allele-frequency bins
+      
+    </span>
+</a>
+<nav aria-label="9. Allele-frequency bins" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#vcf-af-source-resolution">
+<span class="md-ellipsis">
+      
+        VCF AF source resolution
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#10-coverage-assessment">
+<span class="md-ellipsis">
+      
+        10. Coverage assessment
+      
+    </span>
+</a>
+<nav aria-label="10. Coverage assessment" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#101-fasta-mode">
+<span class="md-ellipsis">
+      
+        10.1 FASTA mode
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#102-vcf-mode-with-bam">
+<span class="md-ellipsis">
+      
+        10.2 VCF mode with BAM
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#11-interpretation-algorithms">
+<span class="md-ellipsis">
+      
+        11. Interpretation algorithms
+      
+    </span>
+</a>
+<nav aria-label="11. Interpretation algorithms" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#111-phenotype-rank-system">
+<span class="md-ellipsis">
+      
+        11.1 Phenotype rank system
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#112-drug_interpretation-methods">
+<span class="md-ellipsis">
+      
+        11.2 drug_interpretation methods
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#113-effect_as_resistant">
+<span class="md-ellipsis">
+      
+        11.3 effect_as_resistant
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#114-per-drug-per-reference-threshold-overrides">
+<span class="md-ellipsis">
+      
+        11.4 Per-drug / per-reference threshold overrides
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#115-drug_groups">
+<span class="md-ellipsis">
+      
+        11.5 drug_groups
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#116-drug_alias">
+<span class="md-ellipsis">
+      
+        11.6 drug_alias
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#12-results-persistence-regeneration">
+<span class="md-ellipsis">
+      
+        12. Results persistence &amp; regeneration
+      
+    </span>
+</a>
+<nav aria-label="12. Results persistence &amp; regeneration" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#121-results-database">
+<span class="md-ellipsis">
+      
+        12.1 Results database
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#122-project-fingerprint">
+<span class="md-ellipsis">
+      
+        12.2 Project fingerprint
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#123-deterministic-regeneration">
+<span class="md-ellipsis">
+      
+        12.3 Deterministic regeneration
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#13-determinism-guarantees">
+<span class="md-ellipsis">
+      
+        13. Determinism guarantees
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#further-reading">
+<span class="md-ellipsis">
+      
+        Further reading
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-content" data-md-component="content">
+<article class="md-content__inner md-typeset">
+<h1 id="technical-reference">Technical Reference<a class="headerlink" href="#technical-reference" title="Permanent link">¶</a></h1>
+<p>This document describes the non-trivial scientific and mathematical logic behind
+ResistanceProfiler (ResPro). It is intended as a methods-level reference — the
+analogue of a "Methods" section in a scientific publication — and complements the
+higher-level <a href="../how-it-works/">How It Works</a> page. User-facing concerns (CLI flags,
+report layout, web app interaction) are intentionally omitted; the focus is on the
+internal algorithms, mathematical assumptions, and representation choices that make
+the tool scientifically sound.</p>
+<p>Throughout, positions are <strong>0-based</strong> unless stated otherwise, and all nucleotide
+sequences are stored and manipulated in the <strong>coding (5'→3') orientation</strong>.</p>
+<hr/>
+<h2 id="pipeline-at-a-glance">Pipeline at a glance<a class="headerlink" href="#pipeline-at-a-glance" title="Permanent link">¶</a></h2>
+<pre class="mermaid"><code>flowchart TD
+  subgraph PROJECT["Project database"]
+    GB["GenBank references"]
+    FEAT["Features&lt;br/&gt;CDS, mature peptides, frame, strand"]
+    CURATED["Atomic rules, formula rules,&lt;br/&gt;interpretation configuration"]
+    GB --&gt; FEAT
+    FEAT --&gt; CURATED
+  end
+
+  subgraph FASTA["FASTA mode"]
+    F_IN["Consensus FASTA"]
+    F_ALIGN["Align internal CDS features&lt;br/&gt;and select best reference"]
+    F_MAP["CIGAR map&lt;br/&gt;query ↔ internal CDS"]
+    F_VAR["Emit variants from alignment&lt;br/&gt;including IUPAC ambiguity"]
+    F_COV["Coverage gaps:&lt;br/&gt;NNN codons / unaligned tails"]
+    F_IN --&gt; F_ALIGN --&gt; F_MAP --&gt; F_VAR
+    F_MAP --&gt; F_COV
+  end
+
+  subgraph VCF["VCF mode"]
+    V_IN["VCF + reference FASTA"]
+    V_CHECK["Match CHROM to FASTA record&lt;br/&gt;and validate REF alleles"]
+    V_ALIGN["Align reference FASTA records&lt;br/&gt;and select best reference"]
+    V_MAP["CIGAR map&lt;br/&gt;query → internal CDS"]
+    V_VAR["Filter and remap VCF calls&lt;br/&gt;including strand-aware indels"]
+    V_BAM{"BAM available?"}
+    V_COV["Coverage gaps from projected depth"]
+    V_NO_COV["No depth-based coverage assessment"]
+    V_IN --&gt; V_CHECK --&gt; V_ALIGN --&gt; V_MAP --&gt; V_VAR
+    V_MAP --&gt; V_BAM
+    V_BAM --&gt;|yes| V_COV
+    V_BAM --&gt;|no| V_NO_COV
+  end
+
+  SHARED["Normalized variant calls&lt;br/&gt;in internal coding coordinates"]
+  COV["Coverage gaps"]
+  ANN["Codon-aware annotation&lt;br/&gt;including combined codon states"]
+  SINGLE["Atomic rule matching"]
+  FORMULA["Formula evaluation&lt;br/&gt;AND / OR / NOT / XOR"]
+  ALGO["Drug interpretation"]
+  REPORT["Report and exports"]
+
+  CURATED --&gt; F_ALIGN
+  CURATED --&gt; V_ALIGN
+  GB --&gt; F_ALIGN
+  GB --&gt; V_ALIGN
+  F_VAR --&gt; SHARED
+  V_VAR --&gt; SHARED
+  F_COV --&gt; COV
+  V_COV --&gt; COV
+  SHARED --&gt; ANN --&gt; SINGLE --&gt; FORMULA --&gt; ALGO --&gt; REPORT
+  COV --&gt; REPORT
+  CURATED --&gt; SINGLE
+  CURATED --&gt; FORMULA
+  CURATED --&gt; ALGO</code></pre>
+<hr/>
+<h2 id="1-database-construction-representation-choices">1. Database construction &amp; representation choices<a class="headerlink" href="#1-database-construction-representation-choices" title="Permanent link">¶</a></h2>
+<h3 id="11-genbank-as-the-source-of-truth">1.1 GenBank as the source of truth<a class="headerlink" href="#11-genbank-as-the-source-of-truth" title="Permanent link">¶</a></h3>
+<p>The project database is built from one or more <a href="https://www.ncbi.nlm.nih.gov/genbank/">GenBank</a>
+flat files. Each GenBank record becomes one <strong>internal reference</strong>; each CDS feature
+within it becomes one <strong>feature</strong> record. The database is the single coordinate space
+against which all subsequent profiling is anchored.</p>
+<p>Key representation choices made at import time:</p>
+<table>
+<thead>
+<tr>
+<th>Stored field</th>
+<th>Convention</th>
+<th>Rationale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>feature.start</code>, <code>feature.end</code></td>
+<td>0-based, half-open <code>[start, end)</code> on the <strong>genomic</strong> forward strand</td>
+<td>Unambiguous interval algebra; matches Python slicing</td>
+</tr>
+<tr>
+<td><code>feature.strand</code></td>
+<td><code>'+'</code> or <code>'-'</code></td>
+<td>GenBank strand normalised to a binary token</td>
+</tr>
+<tr>
+<td><code>feature.codon_start</code></td>
+<td>GenBank <code>codon_start</code> qualifier <strong>minus 1</strong> (0-based offset)</td>
+<td>Translates the 1-based GenBank convention to 0-based</td>
+</tr>
+<tr>
+<td><code>feature.nt_sequence</code></td>
+<td>CDS nucleotide slice in <strong>coding orientation</strong> (reverse-complemented for <code>'-'</code> strand features)</td>
+<td>All downstream translation operates on a single orientation</td>
+</tr>
+<tr>
+<td><code>feature.aa_sequence</code></td>
+<td>Pre-translated protein (stop codon excluded)</td>
+<td>Avoids repeated translation; the stored sequence is the reference protein</td>
+</tr>
+<tr>
+<td><code>feature_segment</code></td>
+<td>Ordered genomic <code>[start, end)</code> segments per feature</td>
+<td>Supports spliced CDS (multi-exon) features</td>
+</tr>
+</tbody>
+</table>
+<h3 id="12-coordinate-spaces">1.2 Coordinate spaces<a class="headerlink" href="#12-coordinate-spaces" title="Permanent link">¶</a></h3>
+<p>ResPro maintains three coordinate spaces and converts between them:</p>
+<ol>
+<li><strong>Genomic coordinates</strong> — 0-based positions on the internal reference's forward
+   strand. These are what the database stores for feature boundaries.</li>
+<li><strong>CDS coordinates</strong> — 0-based offsets along the coding sequence (concatenated exons
+   in coding orientation). The first coding nucleotide after <code>codon_start</code> is CDS
+   position 0.</li>
+<li><strong>Query coordinates</strong> — 0-based positions on the user-supplied input sequence
+   (FASTA consensus or VCF reference).</li>
+</ol>
+<p>The conversion between genomic and CDS coordinates is governed by the feature's
+strand and segment structure:</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio"/><input id="__tabbed_1_2" name="__tabbed_1" type="radio"/><div class="tabbed-labels"><label for="__tabbed_1_1">Forward strand (<code>'+'</code>)</label><label for="__tabbed_1_2">Reverse strand (<code>'-'</code>)</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p>For a single-segment feature spanning genomic <code>[s, e)</code>:</p>
+<div class="arithmatex">\[\text{CDS}(g) = g - s\]</div>
+<p>For multi-segment (spliced) features, CDS offsets accumulate across segments
+in genomic order:</p>
+<div class="arithmatex">\[\text{CDS}(g) = \sum_{j &lt; i} (e_j - s_j) + (g - s_i) \quad \text{where } g \in [s_i, e_i)\]</div>
+</div>
+<div class="tabbed-block">
+<p>For a single-segment feature spanning genomic <code>[s, e)</code>:</p>
+<div class="arithmatex">\[\text{CDS}(g) = (e - 1) - g\]</div>
+<p>The coding orientation reads right-to-left on the genomic forward strand, so
+the highest genomic position in the feature maps to CDS position 0. For
+multi-segment features, segments are processed in <strong>reversed genomic order</strong>
+(last segment first), and within each segment the same <span class="arithmatex">\((e-1)-g\)</span> mapping applies.</p>
+</div>
+</div>
+</div>
+<p>The inverse mapping <span class="arithmatex">\(\text{Genomic}(c)\)</span> follows by inverting these formulae segment
+by segment.</p>
+<h3 id="13-rule-storage">1.3 Rule storage<a class="headerlink" href="#13-rule-storage" title="Permanent link">¶</a></h3>
+<p>Resistance rules are stored as amino-acid-centric records keyed by
+<code>(feature_name, position)</code> where <code>position</code> is a 0-based codon index within the
+feature's protein. Each rule carries a <code>reference</code> (reference amino acid) and
+<code>mutation</code> (alternate amino acid or indel token), plus optional phenotype, IC50,
+fold-IC50, score, and publication metadata.</p>
+<p>Formula (combination) rules are stored separately with a normalised boolean
+expression string and a link table to their atomic member rules. The expression
+is stored in a <strong>canonical form</strong> (see <a href="#6-boolean-formula-evaluation-ast">§6</a>)
+for duplicate detection.</p>
+<h3 id="14-mutation-token-normalisation">1.4 Mutation token normalisation<a class="headerlink" href="#14-mutation-token-normalisation" title="Permanent link">¶</a></h3>
+<p>Rules TSV files accept a variety of notation styles. At import time, every
+mutation token is normalised to one of five <strong>canonical forms</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Canonical form</th>
+<th>Meaning</th>
+<th>Example input → output</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>V</code></td>
+<td>Specific alt amino acid (missense, synonymous, stop-loss target)</td>
+<td><code>F67L</code> → <code>L</code></td>
+</tr>
+<tr>
+<td><code>*</code></td>
+<td>Stop gained</td>
+<td><code>F67stop</code>, <code>*</code> → <code>*</code></td>
+</tr>
+<tr>
+<td><code>fsX</code></td>
+<td>Frameshift at this codon</td>
+<td><code>F67fs</code>, <code>frameshift</code> → <code>fsX</code></td>
+</tr>
+<tr>
+<td><code>F50FGG</code></td>
+<td>Insertion: insertion after F50 resulting in <code>FGG</code></td>
+<td><code>F50insGG</code> → <code>F50FGG</code></td>
+</tr>
+<tr>
+<td><code>FGG50F</code></td>
+<td>Deletion: deletion from <code>FGG</code> to <code>F</code> at anchor position 50</td>
+<td><code>F50delGG</code> → <code>FGG50F</code></td>
+</tr>
+</tbody>
+</table>
+<p>The normaliser accepts:</p>
+<ul>
+<li><strong>HGVS-like insertion notation</strong>: <code>X&lt;pos&gt;ins&lt;AA&gt;</code> or <code>X&lt;pos&gt;_Y&lt;pos+1&gt;ins&lt;AA&gt;</code>
+  → <code>X&lt;pos&gt;X&lt;AA&gt;</code> (anchor + inserted amino acids).</li>
+<li><strong>HGVS-like deletion notation</strong>: <code>X&lt;pos&gt;del&lt;AA&gt;</code> → <code>X&lt;AA&gt;&lt;pos&gt;X</code> (anchor +
+  deleted block + anchor position).</li>
+<li><strong>Rewrite notation</strong>: <code>X&lt;pos&gt;Y</code> where X and Y are amino-acid strings. If
+  <code>len(X) == len(Y) == 1</code>, it is a substitution (stored as <code>Y</code>). If
+  <code>Y.startswith(X)</code> and <code>len(Y) &gt; len(X)</code>, it is an insertion. If
+  <code>X.startswith(Y)</code> and <code>len(X) &gt; len(Y)</code>, it is a deletion.</li>
+<li><strong>Bare tokens</strong>: a single amino-acid letter (substitution), <code>*</code> / <code>stop</code>
+  (stop gained), <code>fs</code> / <code>frameshift</code> (frameshift), <code>INS_any</code> (wildcard
+  insertion matching any in-frame insertion at this position).</li>
+<li><strong>Anchor-less deletion</strong>: tokens like <code>Q35del</code> (no anchor residue) are
+  resolved by fetching the preceding amino acid from the feature's stored
+  protein sequence and constructing the canonical anchored form.</li>
+</ul>
+<p><strong>Anchor-changed indel rule splitting.</strong> A rule like <code>GY50A</code> encodes both an
+anchor substitution (G→A at position 50) and an indel (deletion of Y). At import
+time, such tokens are <strong>split</strong> into two separate rule rows: a substitution
+(<code>G50A</code>) and a canonical indel (<code>G50G</code>), each with a derived <code>member_id</code> suffixed
+<code>__sub</code> and <code>__indel</code>. This mirrors the VCF-mode anchor-changed indel splitting
+(see <a href="#43-anchor-changed-indel-splitting">§4.3</a>) and ensures both events are
+independently matchable.</p>
+<h3 id="15-coordinate-base-detection">1.5 Coordinate-base detection<a class="headerlink" href="#15-coordinate-base-detection" title="Permanent link">¶</a></h3>
+<p>Rules TSV files may use either 0-based or 1-based amino-acid positions. ResPro
+<strong>auto-detects</strong> the coordinate base by comparing the <code>reference</code> column against
+the pre-translated <code>aa_sequence</code> stored for each feature:</p>
+<ul>
+<li>For each verifiable row (one with a reference AA, a position, and a matching
+  feature), check whether the reference AA matches <code>aa_seq[pos - 1]</code> (1-based)
+  or <code>aa_seq[pos]</code> (0-based).</li>
+<li>The coordinate base with more matches wins. Ties default to 1-based (the
+  standard biochemistry convention).</li>
+<li>If neither system matches any verifiable row, a <code>ValueError</code> is raised — the
+  rules file's reference AAs do not match the GenBank sequences.</li>
+</ul>
+<p>After detection, all positions are converted to 0-based for storage, and every
+rule's reference AA is <strong>validated</strong> against the feature's protein sequence.
+Mismatches and out-of-range positions are logged as warnings and the offending
+rules are skipped.</p>
+<h3 id="16-mat_peptide-features">1.6 mat_peptide features<a class="headerlink" href="#16-mat_peptide-features" title="Permanent link">¶</a></h3>
+<p>In addition to CDS features, ResPro imports GenBank <code>mat_peptide</code> (mature
+peptide) annotations as first-class features. Each mat_peptide is linked to its
+parent CDS via <code>parent_feature_name</code> (the containing CDS determined by genomic
+containment on the same strand). This allows rules to target specific proteolytic
+cleavage products rather than the full polyprotein — important for viruses like
+HIV or HCV where resistance mutations are defined in the context of mature
+protein domains.</p>
+<p>mat_peptide features carry their own <code>nt_sequence</code>, <code>aa_sequence</code>, <code>codon_start</code>,
+and segment structure, extracted and translated independently of the parent CDS.
+In the report, mat_peptide features display their <code>protein</code> name (the GenBank
+<code>product</code> qualifier) rather than their feature <code>name</code>, so the user sees
+biologically meaningful domain names.</p>
+<hr/>
+<h2 id="2-reference-matching-via-minimap2">2. Reference matching via minimap2<a class="headerlink" href="#2-reference-matching-via-minimap2" title="Permanent link">¶</a></h2>
+<h3 id="21-alignment-strategy">2.1 Alignment strategy<a class="headerlink" href="#21-alignment-strategy" title="Permanent link">¶</a></h3>
+<p>ResPro does not re-invent sequence alignment. It delegates to
+<a href="https://github.com/lh3/minimap2"><strong>minimap2</strong></a> via its Python binding
+<a href="https://github.com/lh3/minimap2/tree/master/python"><code>mappy</code></a>. The alignment
+strategy is inverted from the typical use case: instead of mapping reads against
+a reference genome, ResPro <strong>indexes the user's query sequence</strong> and then maps
+each <strong>internal CDS</strong> against that index as a query.</p>
+<p>This inversion is deliberate:</p>
+<ul>
+<li>The query (consensus or whole-genome) is typically much longer than any
+  individual CDS, so indexing the query and mapping short CDS queries against it
+  is efficient.</li>
+<li>Each CDS is aligned independently, allowing per-feature identity and coverage
+  assessment.</li>
+<li>The best-scoring primary alignment for each CDS determines the feature match.</li>
+</ul>
+<p>The alignment preset is <code>map-ont</code> (optimised for Oxford Nanopore reads, but
+effective for divergent consensus sequences at ~60–75% identity), with a reduced
+seed length (<span class="arithmatex">\(k=6\)</span>, <span class="arithmatex">\(w=3\)</span>) for sensitivity on short, divergent CDS sequences.
+The gap-open penalty is raised from the <code>map-ont</code> default (4 → 6) to suppress
+compensating indel pairs — adjacent <code>I</code>/<code>D</code> operations in the CIGAR that
+represent a single divergence event — without losing real indels.</p>
+<h3 id="22-identity-and-coverage-metrics">2.2 Identity and coverage metrics<a class="headerlink" href="#22-identity-and-coverage-metrics" title="Permanent link">¶</a></h3>
+<p>For each CDS-to-query alignment, ResPro computes three metrics:</p>
+<ul>
+<li>
+<p><strong>Identity</strong> — the fraction of matching bases over the aligned block length:</p>
+<div class="arithmatex">\[\text{identity} = \frac{\text{mlen}}{\text{blen}}\]</div>
+<p>where <code>mlen</code> is the number of matching bases (mappy's match count) and
+<code>blen</code> is the alignment block length (excluding soft-clipping). For spliced
+features with classified introns, identity is recomputed over exons only
+(see <a href="#33-intron-classification-for-spliced-genes">§3.3</a>).</p>
+</li>
+<li>
+<p><strong>CDS coverage</strong> — the fraction of the CDS coding span that is aligned:</p>
+<div class="arithmatex">\[\text{cds_coverage} = \frac{\text{aligned_exon_length}}{\sum_{\text{segments}} (e_j - s_j)}\]</div>
+<p>clamped to <span class="arithmatex">\([0, 1]\)</span>.</p>
+</li>
+<li>
+<p><strong>Query coverage</strong> — the fraction of the query sequence spanned by the
+    alignment:</p>
+<div class="arithmatex">\[\text{query_coverage} = \frac{r_{\text{en}} - r_{\text{st}}}{|Q|}\]</div>
+</li>
+</ul>
+<p>The <strong>best reference</strong> for a query is selected as the reference of the
+single best feature match, ranked by identity (descending), then CDS coverage
+(descending), then query coverage (descending), then feature name
+(lexicographic, ascending) as a deterministic tiebreaker.</p>
+<hr/>
+<h2 id="3-cigar-parsing-coordinate-mapping">3. CIGAR parsing &amp; coordinate mapping<a class="headerlink" href="#3-cigar-parsing-coordinate-mapping" title="Permanent link">¶</a></h2>
+<h3 id="31-cigar-convention">3.1 CIGAR convention<a class="headerlink" href="#31-cigar-convention" title="Permanent link">¶</a></h3>
+<p>A <a href="https://samtools.github.io/hts-specs/SAMv1.pdf">CIGAR</a> string encodes the
+alignment between two sequences as a sequence of <code>(length, operation)</code> pairs.
+ResPro uses the standard SAM operations:</p>
+<table>
+<thead>
+<tr>
+<th>Op</th>
+<th>Meaning</th>
+<th style="text-align: center;">Consumes CDS</th>
+<th style="text-align: center;">Consumes query</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>M</code></td>
+<td>Match/mismatch</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✓</td>
+</tr>
+<tr>
+<td><code>I</code></td>
+<td>Insertion in query (gap in CDS)</td>
+<td style="text-align: center;">✗</td>
+<td style="text-align: center;">✓</td>
+</tr>
+<tr>
+<td><code>D</code></td>
+<td>Deletion in query (gap in CDS)</td>
+<td style="text-align: center;">✓</td>
+<td style="text-align: center;">✗</td>
+</tr>
+</tbody>
+</table>
+<p>(<code>S</code>, <code>H</code>, <code>N</code>, <code>P</code>, <code>=</code>, <code>X</code> are not emitted by the mappy pipeline path.)</p>
+<p><strong>Convention swap.</strong> Mappy reports CIGAR in the orientation
+<em>feature = query, genome = reference</em>. ResPro's pipeline uses the opposite
+convention — <em>CDS = reference, genome = query</em> — so <code>I</code> and <code>D</code> are swapped
+upon import. For reverse-strand alignments, the CIGAR operation order is also
+reversed so that it walks the coding sequence in 5'→3' order.</p>
+<h3 id="32-bidirectional-coordinate-map">3.2 Bidirectional coordinate map<a class="headerlink" href="#32-bidirectional-coordinate-map" title="Permanent link">¶</a></h3>
+<p>The CIGAR is walked to build a <strong>CDS-position → query-position</strong> map. For each
+<code>M</code> operation of length <span class="arithmatex">\(L\)</span>, <span class="arithmatex">\(L\)</span> consecutive CDS positions are paired with
+consecutive query positions. <code>I</code> operations advance only the query position
+(those CDS positions have no query counterpart). <code>D</code> operations advance only the
+CDS position (those CDS positions map to <code>None</code>, indicating a deletion in the
+query).</p>
+<p>This map is <strong>inverted</strong> for VCF-mode remapping (query-position → CDS-position),
+allowing variant positions defined on the user's reference to be projected into
+internal CDS coordinates.</p>
+<p>For spliced features, the exon-only CIGAR (introns removed, see below) produces
+a map that ignores intron query spans. Each mapped query position is then
+<strong>shifted past</strong> the cumulative length of all introns whose coding-orientation
+start precedes it, so that exon-2 (and later) CDS positions land at the correct
+offset in the full unspliced query. Positions that fall inside an intron span
+after shifting are excluded (<code>None</code>), so variants inside introns are never
+remapped.</p>
+<h3 id="33-intron-classification-for-spliced-genes">3.3 Intron classification for spliced genes<a class="headerlink" href="#33-intron-classification-for-spliced-genes" title="Permanent link">¶</a></h3>
+<p>When a project feature is a spliced CDS (multiple segments in <code>feature_segment</code>)
+and the user supplies an unspliced whole-genome query, minimap2 reports the
+inter-exon intron as a single large <code>I</code> operation (in the swapped convention:
+the intron bases appear as an insertion in the query). Without special handling,
+this intron would be misinterpreted as a giant coding insertion — a
+multi-kilobase frameshift — and would crash per-exon identity.</p>
+<p>ResPro classifies each <code>I</code> op as an <strong>intron</strong> when <strong>both</strong> conditions hold:</p>
+<ol>
+<li><strong>Junction proximity</strong>: the <code>I</code> op's CDS position coincides with a known
+   exon-junction offset within a tolerance <span class="arithmatex">\(\tau\)</span> (default 5 nt).</li>
+<li><strong>Length guard</strong>: the <code>I</code> op's length is strictly greater than <span class="arithmatex">\(\tau\)</span>.</li>
+</ol>
+<p>Exon-junction offsets are derived from <code>feature.segments</code> in <strong>genomic 5'→3'
+order</strong> (not coding order), matching the normalised CIGAR's walking direction
+for both strands. The junction offset after exon <span class="arithmatex">\(j\)</span> is:</p>
+<div class="arithmatex">\[J_j = \sum_{i \le j} (e_i - s_i)\]</div>
+<p>Classified intron <code>I</code> ops are <strong>removed</strong> from the CIGAR (producing an
+exon-only CIGAR) and recorded as <code>IntronInterval</code> entries carrying the CDS
+junction position, the query span, and the length. Real coding insertions —
+any <code>I</code> op not near a junction within tolerance, or of length <span class="arithmatex">\(\le \tau\)</span> — are
+kept and emitted as variants.</p>
+<p>The length guard being derived from <span class="arithmatex">\(\tau\)</span> (rather than a separate parameter)
+ensures that an insertion of length <span class="arithmatex">\(\le \tau\)</span> can <strong>never</strong> be misclassified as
+an intron, regardless of where it lands, while real introns (typically hundreds
+or thousands of nucleotides) always satisfy the guard.</p>
+<hr/>
+<h2 id="4-variant-emission-remapping">4. Variant emission &amp; remapping<a class="headerlink" href="#4-variant-emission-remapping" title="Permanent link">¶</a></h2>
+<h3 id="41-fasta-mode-consensus-variant-calls">4.1 FASTA mode: consensus → variant calls<a class="headerlink" href="#41-fasta-mode-consensus-variant-calls" title="Permanent link">¶</a></h3>
+<p>In FASTA mode, the user supplies a consensus sequence. ResPro reconstructs a
+gapped pairwise alignment between the internal CDS and the query region using
+the CIGAR, then walks the alignment codon by codon to emit nucleotide-level
+<code>VariantCall</code> records.</p>
+<p><strong>Gapped string reconstruction.</strong> The CIGAR is expanded into two equal-length
+strings (<code>aligned_ref</code> and <code>aligned_query</code>) with <code>-</code> gap characters. Leading
+and trailing unaligned CDS bases (when coverage &lt; 100%) are represented as
+query gaps, so the codon walk covers the full CDS.</p>
+<p><strong>SNP emission with IUPAC expansion.</strong> When the query base differs from the
+reference base, <a href="https://en.wikipedia.org/wiki/Nucleic_acid_notation#IUPAC_nucleotide_code">IUPAC ambiguity codes</a>
+are expanded into all possible alternative bases. Each mutation ALT receives a
+<strong>fractional allele frequency</strong> of <span class="arithmatex">\(1 / |O|\)</span> where <span class="arithmatex">\(O\)</span> is the full IUPAC option
+set (including the reference base as one equally-likely possibility):</p>
+<div class="arithmatex">\[f_{\text{alt}} = \frac{1}{|O|}\]</div>
+<p>For example, <code>ref=A, query=R</code> (R = {A, G}) yields <code>G</code> at AF 0.5; <code>ref=A,
+query=N</code> (N = {A, C, G, T}) yields <code>C</code>, <code>G</code>, <code>T</code> each at AF 0.25. The
+reference base is included in the denominator because it is one of the
+equally-likely possibilities (= no mutation), but it is not emitted as an ALT.</p>
+<p><strong>Coverage gaps.</strong> A codon consisting entirely of <code>N</code> characters (<code>NNN</code>) is
+treated as a non-covered position and reported as a <code>CoverageGap</code> rather than
+emitting variants. Partial-N codons (1–2 N bases) remain assessable: the non-N
+positions emit expanded IUPAC variants normally.</p>
+<p><strong>Indel emission.</strong> Insertions (query bases with no CDS counterpart, i.e. <code>I</code>
+ops) and deletions (CDS bases with no query counterpart, i.e. <code>D</code> ops) are
+accumulated into single variant records using VCF anchor-base convention (the
+base preceding the indel is included in both REF and ALT).</p>
+<h3 id="42-vcf-mode-coordinate-remapping">4.2 VCF mode: coordinate remapping<a class="headerlink" href="#42-vcf-mode-coordinate-remapping" title="Permanent link">¶</a></h3>
+<p>In VCF mode, variants are already called by an external variant caller and
+defined in the user's reference coordinates. ResPro <strong>remaps</strong> each variant into
+internal CDS coordinates using the inverted CIGAR map.</p>
+<p>The remap pipeline performs, per variant:</p>
+<ol>
+<li>
+<p><strong>Position projection.</strong> The variant's query position is looked up in the
+   query-to-CDS map. Positions outside any matched CDS region are skipped.</p>
+</li>
+<li>
+<p><strong>REF sanity check.</strong> The VCF <code>REF</code> anchor base is compared to the
+   corresponding base in the user's query FASTA. A mismatch produces a warning
+   and the variant is skipped — this catches VCF/FASTA reference mismatches
+   early.</p>
+</li>
+<li>
+<p><strong>Strand transformation.</strong> When the alignment strand differs from the
+   feature strand, REF and ALT alleles are transformed to the internal forward
+   strand:</p>
+</li>
+<li><strong>SNPs</strong>: the single base is complemented.</li>
+<li>
+<p><strong>Indels</strong>: the anchor base is complemented and the payload is
+     reverse-complemented. The anchor also <strong>switches side</strong> (from leftmost to
+     rightmost or vice versa) because the VCF convention anchors the leftmost
+     base in genomic 5'→3' order, but the internal forward reference needs the
+     coding-preceding base as anchor.</p>
+</li>
+<li>
+<p><strong>CDS-to-genomic conversion.</strong> The CDS position is converted to an internal
+   genomic position via <span class="arithmatex">\(\text{Genomic}(c)\)</span>.</p>
+</li>
+<li>
+<p><strong>Query codon context.</strong> The three-base query codon surrounding the variant
+   is extracted and stored on the remapped variant. For reverse-strand
+   alignments, the codon is complemented to coding orientation. This context
+   allows downstream annotation to use the <strong>query</strong> codon (which may carry
+   co-occurring variants) rather than the internal reference codon alone.</p>
+</li>
+</ol>
+<h3 id="43-anchor-changed-indel-splitting">4.3 Anchor-changed indel splitting<a class="headerlink" href="#43-anchor-changed-indel-splitting" title="Permanent link">¶</a></h3>
+<p>Some variant callers encode a base substitution at the VCF anchor together with
+an indel, e.g. <code>ATTT → G</code> (anchor <code>A</code> changed to <code>G</code>, plus a deletion of
+<code>TTT</code>). Left as one event, the anchor substitution signal would be lost during
+strand-aware remap. ResPro <strong>splits</strong> such records deterministically into two
+events:</p>
+<ol>
+<li><strong>Anchor SNP</strong>: <code>A → G</code> at the same query position.</li>
+<li><strong>Canonical indel</strong>: <code>ATTT → A</code> (anchor reset to the REF anchor base).</li>
+</ol>
+<p>Both split events inherit the original record's allele frequency, depth, and
+filter status, and preserve the original user-reference coordinates for display.</p>
+<hr/>
+<h2 id="5-codon-aware-annotation">5. Codon-aware annotation<a class="headerlink" href="#5-codon-aware-annotation" title="Permanent link">¶</a></h2>
+<p>The annotation module is the scientific heart of ResPro. It takes
+nucleotide-level variant calls and produces amino-acid-level consequences. Both
+FASTA and VCF modes converge on the same annotation function — the input
+representation is identical by design.</p>
+<h3 id="51-single-snp-annotation">5.1 Single-SNP annotation<a class="headerlink" href="#51-single-snp-annotation" title="Permanent link">¶</a></h3>
+<p>For a SNP at CDS position <span class="arithmatex">\(c\)</span> within a feature:</p>
+<ol>
+<li>The <strong>codon index</strong> is <span class="arithmatex">\(i = \lfloor (c - \text{codon_start}) / 3 \rfloor\)</span>
+   and the <strong>position within the codon</strong> is <span class="arithmatex">\(p = (c - \text{codon_start}) \bmod 3\)</span>.</li>
+<li>The <strong>reference codon</strong> is extracted from the internal CDS. If a valid
+   query codon context is available (from VCF remap), it is used as the
+   reference for amino-acid derivation; otherwise the internal CDS codon is used.</li>
+<li>The <strong>alternate codon</strong> is constructed by replacing position <span class="arithmatex">\(p\)</span> with the
+   ALT base (in coding orientation — reverse-complemented for <code>'-'</code> strand
+   features).</li>
+<li>
+<p>Both codons are translated via the <a href="https://en.wikipedia.org/wiki/DNA_codon_table">standard genetic code</a>
+   (Biopython's <code>Seq.translate</code>), and the consequence is classified:</p>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th>Consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ref_aa == alt_aa</code></td>
+<td>synonymous</td>
+</tr>
+<tr>
+<td><code>codon_idx == 0</code> and <code>ref_aa == 'M'</code></td>
+<td>start_lost</td>
+</tr>
+<tr>
+<td><code>alt_aa == '*'</code> and <code>ref_aa != '*'</code></td>
+<td>stop_gained</td>
+</tr>
+<tr>
+<td><code>ref_aa == '*'</code></td>
+<td>stop_loss</td>
+</tr>
+<tr>
+<td>otherwise</td>
+<td>missense</td>
+</tr>
+</tbody>
+</table>
+</li>
+</ol>
+<h3 id="52-indel-annotation">5.2 Indel annotation<a class="headerlink" href="#52-indel-annotation" title="Permanent link">¶</a></h3>
+<p>Indels use the <a href="https://samtools.github.io/hts-specs/VCFv4.2.pdf">VCF anchor-base convention</a>:
+the nucleotide immediately preceding the indel is included in both REF and ALT.
+For example, a 3-bp insertion after position 100 is encoded as <code>REF=A,
+ALT=ATTT</code>.</p>
+<p><strong>Frame check.</strong> If <span class="arithmatex">\(|\text{len(ALT)} - \text{len(REF)}| \bmod 3 \ne 0\)</span>, the
+indel is not a multiple of 3 and is annotated as a <strong>frameshift</strong>. The
+annotation records the anchor codon's amino acid and produces the canonical
+frameshift token <code>XfsX</code> (e.g. <code>KfsX</code> for a frameshift after a lysine).</p>
+<p><strong>In-frame indels at codon boundaries.</strong> When the indel length is a multiple of
+3 and the VCF anchor sits at a codon boundary (frame offset 2 in coding
+orientation), the annotation is straightforward:</p>
+<ul>
+<li><strong>Insertion</strong>: <code>alt_aa = anchor_aa + translate(inserted_bases)</code></li>
+<li><strong>Deletion</strong>: <code>ref_aa = anchor_aa + translate(deleted_bases)</code>,
+  <code>alt_aa = anchor_aa</code></li>
+</ul>
+<p>For <code>'-'</code> strand features, the inserted/deleted bases are reverse-complemented
+before translation to ensure coding orientation.</p>
+<p><strong>Mid-codon in-frame indels.</strong> When an in-frame indel starts mid-codon (frame
+offset 0 or 1), the anchor codon is partially rewritten. ResPro splits the
+event into two annotations:</p>
+<ol>
+<li>A <strong>missense</strong> (or synonymous/stop) annotation for the anchor codon change,
+   reconstructed from the preserved reference bases plus the first few
+   inserted/deleted bases.</li>
+<li>An <strong>insertion</strong> or <strong>deletion</strong> annotation for the remaining payload.</li>
+</ol>
+<p>This splitting ensures that both the codon rewrite and the indel payload are
+visible to rule matching.</p>
+<p><strong>Reverse-strand indel anchor switching.</strong> On <code>'-'</code> strand features, the VCF
+leftmost anchor in genomic space corresponds to the <strong>rightmost</strong> base in
+coding orientation. The coding anchor position is shifted by the REF length to
+realign to the coding-preceding nucleotide:</p>
+<div class="arithmatex">\[c_{\text{anchor}} = c_{\text{variant}} - \text{len(REF)} \quad \text{('−' strand)}\]</div>
+<h3 id="53-multiple-snps-in-one-codon-frechet-bounds">5.3 Multiple SNPs in one codon — Fréchet bounds<a class="headerlink" href="#53-multiple-snps-in-one-codon-frechet-bounds" title="Permanent link">¶</a></h3>
+<p>When two or more SNPs fall within the same codon at distinct nucleotide
+positions, ResPro does not simply translate each SNP independently. Instead, it
+uses <strong>Fréchet (probability) bounds</strong> to determine which combined codon states
+are guaranteed to exist in the viral population, and emits per-SNP annotations
+carrying the accepted combined states.</p>
+<p>This is the <strong>no-BAM path</strong>: it is taken when no alignment file is supplied
+(<code>--bam</code> omitted), so only the marginal VCF allele frequencies are available.
+When a BAM is supplied, the exact co-occurrence path of <a href="#54-bam-based-exact-co-occurrence">§5.4</a>
+is used instead and the Fréchet bounds are not computed.</p>
+<h4 id="531-the-mathematical-problem">5.3.1 The mathematical problem<a class="headerlink" href="#531-the-mathematical-problem" title="Permanent link">¶</a></h4>
+<p>Consider a codon with <span class="arithmatex">\(k\)</span> distinct variant-bearing nucleotide positions
+(<span class="arithmatex">\(k = 2\)</span> or <span class="arithmatex">\(3\)</span>). At each position <span class="arithmatex">\(i\)</span>, a variant is observed at marginal
+allele frequency <span class="arithmatex">\(f_i\)</span>. The question is: <strong>which exact codon states are
+guaranteed to co-exist in the population</strong>, given only the marginal
+frequencies?</p>
+<p>This is a problem of bounding the intersection of events from their marginal
+probabilities. The <a href="https://en.wikipedia.org/wiki/Fr%C3%A9chet_inequalities">Fréchet inequalities</a>
+provide sharp bounds on the probability of a joint event given the marginal
+probabilities, without any assumption of independence or linkage.</p>
+<p>For a candidate codon state <span class="arithmatex">\(S\)</span> that carries variant <span class="arithmatex">\(i\)</span> at a subset of the <span class="arithmatex">\(k\)</span>
+positions, define:</p>
+<div class="arithmatex">\[q_i = \begin{cases} f_i &amp; \text{if } S \text{ carries variant } i \\ 1 - f_i &amp; \text{otherwise} \end{cases}\]</div>
+<p>The <strong>Fréchet lower bound</strong> (minimum guaranteed co-occurrence) is:</p>
+<div class="arithmatex">\[\boxed{L(S) = \max\!\left(0,\; \sum_{i=1}^{k} q_i - (k - 1)\right)}\]</div>
+<p>The <strong>Fréchet upper bound</strong> (maximum possible co-occurrence) is:</p>
+<div class="arithmatex">\[\boxed{U(S) = \min_{i=1}^{k} q_i}\]</div>
+<p>These bounds are <strong>sharp</strong>: there exist joint distributions achieving both
+extremes, so no tighter bounds can be derived from the marginals alone.</p>
+<h4 id="532-state-enumeration">5.3.2 State enumeration<a class="headerlink" href="#532-state-enumeration" title="Permanent link">¶</a></h4>
+<p>ResPro enumerates all <span class="arithmatex">\(2^k\)</span> candidate codon states (the Cartesian product of
+{reference, ALT} at each variant-bearing position). For each state <span class="arithmatex">\(S\)</span>:</p>
+<ol>
+<li>Build the candidate codon by applying the chosen ALT bases.</li>
+<li>Compute <span class="arithmatex">\(L(S)\)</span> and <span class="arithmatex">\(U(S)\)</span>.</li>
+<li>
+<p>Compute the <strong>forced fraction</strong> — the minimum fraction of the rarest
+   required condition forced into this state:</p>
+<div class="arithmatex">\[F(S) = \begin{cases} \dfrac{L(S)}{U(S)} &amp; \text{if } U(S) &gt; 0 \\[6pt] 0 &amp; \text{otherwise} \end{cases}\]</div>
+</li>
+<li>
+<p>The state is <strong>accepted</strong> when <span class="arithmatex">\(L(S) &gt; \varepsilon\)</span> (numerical tolerance,
+   <span class="arithmatex">\(10^{-9}\)</span>) and <span class="arithmatex">\(F(S) \ge \mu\)</span>, where <span class="arithmatex">\(\mu\)</span> is the minimum co-occurrence
+   fraction (default <span class="arithmatex">\(2/3\)</span>, see below).</p>
+</li>
+</ol>
+<h4 id="533-the-acceptance-threshold">5.3.3 The acceptance threshold<a class="headerlink" href="#533-the-acceptance-threshold" title="Permanent link">¶</a></h4>
+<p>The threshold <span class="arithmatex">\(\mu = 2/3\)</span> is an <strong>explicit conservative interpretation policy</strong>.
+Passing means the guaranteed shared portion is at least twice the potentially
+unshared portion:</p>
+<div class="arithmatex">\[\frac{L}{U} \ge \frac{2}{3} \implies L \ge 2(1 - F_{\text{unshared}})\]</div>
+<p>At <span class="arithmatex">\(\mu = 2/3\)</span>, two variants each at <span class="arithmatex">\(f = 0.75\)</span> give:</p>
+<div class="arithmatex">\[L = \max(0, 0.75 + 0.75 - 1) = 0.5, \quad U = 0.75, \quad F = \frac{0.5}{0.75} = \frac{2}{3}\]</div>
+<p>This is exactly at the acceptance boundary. Three-way combinations require
+stronger individual frequencies; for example, three variants at <span class="arithmatex">\(f = 0.75\)</span>
+each give <span class="arithmatex">\(L = \max(0, 3 \times 0.75 - 2) = 0.25\)</span>, <span class="arithmatex">\(U = 0.75\)</span>,
+<span class="arithmatex">\(F = 1/3 &lt; 2/3\)</span>, which is <strong>rejected</strong>.</p>
+<div class="admonition important">
+<p class="admonition-title">What Fréchet bounds do and do not mean</p>
+<p>The Fréchet lower bound is the <strong>minimum guaranteed</strong> population share of
+the exact codon state, derived purely from marginal frequencies. It is:</p>
+<ul>
+<li><strong>Not</strong> a probability that the variants are physically linked (phase is
+  unknown).</li>
+<li><strong>Not</strong> a phasing estimate.</li>
+<li><strong>Not</strong> an independence assumption (independence would give a different,
+  non-sharp bound).</li>
+</ul>
+<p>It is the tightest statement that can be made from the marginals alone.</p>
+</div>
+<h4 id="534-per-snp-emission-with-combined-states">5.3.4 Per-SNP emission with combined states<a class="headerlink" href="#534-per-snp-emission-with-combined-states" title="Permanent link">¶</a></h4>
+<p>For each member SNP, ResPro emits one annotation carrying:</p>
+<ul>
+<li>Its own <code>allele_freq</code>, <code>ref</code>, and <code>alt</code>.</li>
+<li>A <strong>single-exchange</strong> <code>alt_codon</code>/<code>alt_aa</code> — the codon with only that SNP
+  applied.</li>
+<li>A <code>combined_states</code> list of the Fréchet-accepted codon states that include
+  this member, deduplicated by amino acid (summing <code>lower</code> for duplicates).</li>
+</ul>
+<p>The <code>single_exchange_lower</code> field records the guaranteed minimum population
+share of the exact single codon displayed in that row. When the single state is
+Fréchet-impossible (<span class="arithmatex">\(L = 0\)</span>), the single-exchange effect is gated to zero in
+rule matching — only combined states can fire.</p>
+<h4 id="535-forced-overlap-exception">5.3.5 Forced-overlap exception<a class="headerlink" href="#535-forced-overlap-exception" title="Permanent link">¶</a></h4>
+<p>When a member's single-exchange state is Fréchet-rejected (<span class="arithmatex">\(L \le \varepsilon\)</span>)
+but there exists an accepted <strong>all-carried</strong> state with <span class="arithmatex">\(F = 1.0\)</span> (meaning the
+Fréchet overlap is 100%, which occurs when a co-member is at frequency 1.0),
+the member's single <code>alt_codon</code>/<code>alt_aa</code> is <strong>promoted</strong> to the forced
+all-carried state. This reflects the biological reality that a variant at
+frequency 1.0 is present in every genome, so any co-occurring variant is
+guaranteed to sit on the same background. The promoted state is dropped from
+<code>combined_states</code> to avoid showing the same effect twice.</p>
+<h4 id="536-fallback">5.3.6 Fallback<a class="headerlink" href="#536-fallback" title="Permanent link">¶</a></h4>
+<p>When the Fréchet helper returns no states (multiallelic same-position inputs,
+where two ALTs at the same codon position cannot form valid combined states)
+or no accepted state exists for any member, ResPro falls back to plain
+single-SNP annotation with no <code>combined_states</code>.</p>
+<h3 id="54-bam-based-exact-co-occurrence">5.4 BAM-based exact co-occurrence<a class="headerlink" href="#54-bam-based-exact-co-occurrence" title="Permanent link">¶</a></h3>
+<p>When the user supplies an alignment file with <code>--bam</code>, the Fréchet bound path
+of §5.3 is <strong>not taken at all</strong>. Instead, ResPro measures the exact
+co-occurrence frequency of each combined codon state directly from the reads
+that span the codon. This replaces the conservative lower-bound estimate with
+an observed frequency.</p>
+<h4 id="541-shared-candidate-state-enumeration">5.4.1 Shared candidate-state enumeration<a class="headerlink" href="#541-shared-candidate-state-enumeration" title="Permanent link">¶</a></h4>
+<p>Both paths share the same candidate-state enumeration
+(<code>enumerate_candidate_codon_states</code>). For every variant-bearing nucleotide
+position in the codon, the enumerator builds the cartesian product of
+{reference base, each ALT}. Each resulting <code>CandidateCodon</code> carries the
+combined alt codon, its amino acid, the member indices it spans, the per-base
+choice encoding, and the per-base VCF quality values. This shared state space
+keeps the two paths numerically comparable.</p>
+<h4 id="542-spanning-molecule-counting">5.4.2 Spanning-molecule counting<a class="headerlink" href="#542-spanning-molecule-counting" title="Permanent link">¶</a></h4>
+<p>For each candidate codon state, <code>compute_codon_cooccurrence</code> counts reads that
+span all variant-bearing positions of the codon:</p>
+<ol>
+<li><strong>Primary-alignment filter.</strong> Only primary alignments are assessed;
+   secondary (<code>0x100</code>) and supplementary (<code>0x800</code>) records are skipped. This
+   keeps each <code>query_name</code> group to at most the two mates of a proper pair, so
+   a single molecule is never double-counted via an alternative mapping and a
+   supplementary that disagrees with its primary cannot reject a genuine
+   primary observation through the paired-end agreement rule (step 3).</li>
+<li><strong>QC filter.</strong> Reads flagged QCFAIL (<code>0x200</code>) or duplicate (<code>0x400</code>) are
+   excluded — they do not represent independent molecules and would inflate
+   the co-occurrence frequency.</li>
+<li><strong>MAPQ filter.</strong> Only reads with mapping quality ≥
+   <code>codon.min_read_mapping_quality</code> (default 20) are considered.</li>
+<li><strong>Spanning requirement.</strong> A read must cover every variant-bearing
+   nucleotide position of the codon; partial-span reads (including reads whose
+   codon region is soft-clipped or partly trimmed) are discarded for that
+   codon's count.</li>
+<li><strong>Paired-end deduplication and agreement.</strong> For a paired read whose mate
+   also spans the codon, the pair is counted once and only when both mates
+   agree on the called base at every variant position; disagreements (likely
+   sequencing errors) are discarded.</li>
+<li><strong>State frequency.</strong> The observed frequency of a candidate state is
+   <code>spanning molecules matching the state / total spanning molecules at the codon</code>
+   (a <em>molecule</em> is a single-end read or a deduplicated paired-end pair; see
+   step 5).</li>
+</ol>
+<p>Unlike the Fréchet path, the BAM path applies <strong>no frequency threshold</strong> to
+individual candidate states. Every candidate state with at least one observed
+spanning molecule is <strong>accepted</strong> and emitted as a <code>CodonState</code> with
+<code>lower = upper = observed frequency</code> and <code>forced_fraction = 1.0</code> (a point
+estimate, not a bound). The sole acceptance filter is the spanning-molecule
+count itself: when fewer than <code>codon.min_depth</code> molecules span the codon, no
+combined call is made at all (see §5.4.3). Reads whose codon matches no
+candidate (a base not present in the VCF at a variant position) are tallied as
+"other" — they contribute to the spanning-molecule denominator but produce no
+<code>CodonState</code>, so a rare off-VCF base cannot inflate a candidate's frequency.</p>
+<h4 id="543-thin-evidence-single-event-fallback">5.4.3 Thin-evidence → single-event fallback<a class="headerlink" href="#543-thin-evidence-single-event-fallback" title="Permanent link">¶</a></h4>
+<p>When fewer than <code>codon.min_depth</code> molecules span the codon, ResPro falls back
+to plain single-SNP annotation with no <code>combined_states</code> (<code>freq_method</code> stays
+<code>'observed'</code>) — the same single-event fallback as §5.3.6. This is the intended
+reading of thin evidence: the raw reads were inspected for co-occurrence and
+found too sparse to support a combined claim, so none is made. (A codon that
+<em>is</em> spanned at or above <code>min_depth</code> but where every molecule is "other" also
+yields no <code>CodonState</code> and falls back to single events.)</p>
+<h4 id="544-provenance-freq_method">5.4.4 Provenance: <code>freq_method</code><a class="headerlink" href="#544-provenance-freq_method" title="Permanent link">¶</a></h4>
+<p>Each annotated variant carries a <code>freq_method</code> provenance flag:</p>
+<ul>
+<li><code>observed</code> — the amino-acid frequency value shown is the frequency itself
+  (single-nt VCF allele frequency, or a BAM read-backed codon state).</li>
+<li><code>estimated</code> — the amino-acid frequency is a guaranteed minimum (lower bound)
+  for a combined codon without read-level data (the Fréchet path of §5.3); the
+  true frequency may be higher.</li>
+</ul>
+<p>The report surfaces this as a user-facing tag on every amino-acid effect:
+<code>K20M | 0.7 | observed</code> vs <code>K20M | 0.6 | lower bound</code>. The term "Fréchet" is
+not shown in the report; the legend explains that <em>observed</em> is the frequency
+value itself, while <em>lower bound</em> is a guaranteed minimum that the true
+frequency may exceed (no linkage/phase assumption). The <code>freq_method</code> field
+keeps its <code>'observed'</code>/<code>'estimated'</code> values in the database; only the
+display tag differs.</p>
+<hr/>
+<h2 id="6-boolean-formula-evaluation-ast">6. Boolean formula evaluation (AST)<a class="headerlink" href="#6-boolean-formula-evaluation-ast" title="Permanent link">¶</a></h2>
+<h3 id="61-grammar-parser">6.1 Grammar &amp; parser<a class="headerlink" href="#61-grammar-parser" title="Permanent link">¶</a></h3>
+<p>Combination rules are boolean expressions over atomic rule IDs (external IDs of
+single rules). ResPro implements a <strong>recursive descent parser</strong> with explicit
+operator precedence to build an abstract syntax tree (AST). The grammar is:</p>
+<div class="arithmatex">\[
+\begin{aligned}
+\text{or_expr} &amp;::= \text{xor_expr} \;\;(\texttt{OR}\;\; \text{xor_expr})^* \\
+\text{xor_expr} &amp;::= \text{and_expr} \;\;(\texttt{XOR}\;\; \text{and_expr})^* \\
+\text{and_expr} &amp;::= \text{not_expr} \;\;(\texttt{AND}\;\; \text{not_expr})^* \\
+\text{not_expr} &amp;::= \texttt{NOT}\;\; \text{not_expr} \;\;|\;\; \text{primary} \\
+\text{primary} &amp;::= \texttt{(}\;\text{or_expr}\;\texttt{)} \;\;|\;\; \text{ATOM}
+\end{aligned}
+\]</div>
+<p><strong>Precedence</strong> (lowest to highest):</p>
+<div class="arithmatex">\[\texttt{OR} &lt; \texttt{XOR} &lt; \texttt{AND} &lt; \texttt{NOT} &lt; \text{parentheses/atoms}\]</div>
+<p>This means <code>A AND B OR C</code> is parsed as <code>(A AND B) OR C</code>, and <code>NOT A AND B</code> is
+parsed as <code>(NOT A) AND B</code>.</p>
+<p>Each precedence level has its own parsing function that calls the next
+higher-precedence function for its operands, building the tree bottom-up. The
+parser produces:</p>
+<ol>
+<li>A <strong>canonical normalised string</strong> (for duplicate detection and stable
+   storage).</li>
+<li>A list of all referenced atomic rule IDs.</li>
+</ol>
+<h3 id="62-canonicalisation">6.2 Canonicalisation<a class="headerlink" href="#62-canonicalisation" title="Permanent link">¶</a></h3>
+<p>The AST is canonicalised for deterministic storage and duplicate detection:</p>
+<ul>
+<li><strong>Flattening</strong>: nested same-operator nodes are merged into a single node with
+  a list of children. <code>A AND (B AND C)</code> becomes <code>AND(A, B, C)</code>.</li>
+<li><strong>Sorting</strong>: children are sorted by a stable key that keeps positive branches
+  before negated branches, then by lexical order of the serialised subtree.</li>
+<li><strong>Serialisation</strong>: the canonical AST is serialised with explicit parentheses,
+  e.g. <code>(A AND B) OR C</code>.</li>
+</ul>
+<p>This canonical form is what is stored in the database and used for the
+uniqueness constraint on <code>(drug_id, normalised_expression)</code>.</p>
+<h3 id="63-runtime-evaluation">6.3 Runtime evaluation<a class="headerlink" href="#63-runtime-evaluation" title="Permanent link">¶</a></h3>
+<p>At profiling time, each formula rule is evaluated against the set of matched atomic members. The evaluation re-parses the canonical expression and walks the AST with the same recursive descent structure, but each function returns a <code>(truth, contributors)</code> pair instead of a node:</p>
+<table>
+<thead>
+<tr>
+<th>Operator</th>
+<th>Truth logic</th>
+<th>Contributor logic</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ATOM</code></td>
+<td><code>member_truth[id]</code></td>
+<td><code>{id}</code> if true, else <code>∅</code></td>
+</tr>
+<tr>
+<td><code>NOT</code></td>
+<td><code>¬operand</code></td>
+<td><code>∅</code> (NOT contributes no positive evidence)</td>
+</tr>
+<tr>
+<td><code>AND</code></td>
+<td><code>left ∧ right</code></td>
+<td><code>left ∪ right</code> if both true, else <code>∅</code></td>
+</tr>
+<tr>
+<td><code>XOR</code></td>
+<td><code>left ⊕ right</code></td>
+<td>the true side's contributors</td>
+</tr>
+<tr>
+<td><code>OR</code></td>
+<td><code>left ∨ right</code></td>
+<td>deterministic branch selection (see below)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Member gating (Fréchet).</strong> A member contributes only when its matched effect's amino-acid frequency lower bound (<code>rule_effect_aa_freq</code>) exceeds eps (<code>[matching] frechet_epsilon</code>, default <span class="arithmatex">\(10^{-9}\)</span>) — the same amino-acid-frequency basis single rules use, not the nucleotide allele frequency. When multiple annotations match the same member ID, the one with the highest effect lower bound is selected (lexical tiebreak on <code>(feature_name, codon_pos, alt_aa)</code> for determinism).</p>
+<p><strong>AND gating (Fréchet joint bound).</strong> An AND clause fires only when the joint Fréchet lower bound over its positive members is accepted at <code>[matching] min_cooccurrence_combination_fraction</code> (default <span class="arithmatex">\(2/3\)</span>): with member lower bounds <span class="arithmatex">\(q_1,\dots,q_k\)</span>, the guaranteed co-occurrence lower bound is <span class="arithmatex">\(\max(0, \sum q_i - (k-1))\)</span>, the upper bound is <span class="arithmatex">\(\min(q_i)\)</span>, and the forced fraction is <span class="arithmatex">\(\text{lower}/\text{upper}\)</span>. The hit frequency reported for the combination is the joint lower bound — a guaranteed minimum, not a point estimate.</p>
+<p><strong>OR branch selection.</strong> When multiple OR branches are accepted, the branch with the <strong>highest member lower bound</strong> is selected as the contributor; ties are broken lexicographically by the sorted tuple of member IDs. The reported frequency is that branch's lower bound.</p>
+<p><strong>XOR parity.</strong> XOR chains fire when an odd number of operands are accepted. With exactly one accepted operand the frequency is that operand's lower bound; with three or more it is the Fréchet AND-bound over all accepted operands' lower bounds.</p>
+<p><strong>NOT.</strong> NOT is a pure boolean inversion over presence (including compound operands); it never carries a frequency. A formula that fires only via a NOT branch reports a frequency of 0.</p>
+<p><strong>Worked examples</strong> (AND of two members, min fraction <span class="arithmatex">\(2/3\)</span>):</p>
+<table>
+<thead>
+<tr>
+<th>Member lower bounds</th>
+<th>Joint lower</th>
+<th>Upper</th>
+<th>Forced fraction</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.95, 0.95</td>
+<td>0.90</td>
+<td>0.95</td>
+<td>0.947</td>
+<td>fires, frequency 0.90 (<code>high</code> bin)</td>
+</tr>
+<tr>
+<td>0.95, 0.30</td>
+<td>0.25</td>
+<td>0.30</td>
+<td>0.833</td>
+<td>fires, frequency 0.25 (<code>intermediate</code> bin)</td>
+</tr>
+<tr>
+<td>0.60, 0.60</td>
+<td>0.20</td>
+<td>0.60</td>
+<td>0.333</td>
+<td>rejected (0.333 &lt; 2/3)</td>
+</tr>
+<tr>
+<td>0.95, 0.02</td>
+<td>0.00</td>
+<td>0.02</td>
+<td>0.000</td>
+<td>rejected (lower bound 0)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Equivalence with the codon policy.</strong> The formula AND bound is the same Fréchet-intersection computation the combined-codon path uses (<code>_compute_codon_frechet_states</code>): at equal thresholds both paths accept exactly the same q-vectors (asserted by cross-validation test). The thresholds and numerical tolerances are decoupled — the codon policy uses <code>[codon] min_cooccurrence_codon_fraction</code> with <code>[codon] frechet_epsilon</code>, formula gating uses <code>[matching] min_cooccurrence_combination_fraction</code> with <code>[matching] frechet_epsilon</code> — so the two sensitivities can be tuned independently.</p>
+<p><strong>Reported-frequency semantics.</strong> The frequency reported for a formula hit is the joint Fréchet lower bound — a guaranteed minimum on how often the members co-occur, not a point estimate of the true combination frequency. The AF bin shown in the report reflects this lower bound, so a fired formula can show an <code>intermediate</code> or <code>low</code> bin even though every member individually fired at a <code>high</code> frequency.</p>
+<hr/>
+<h2 id="7-rule-matching">7. Rule matching<a class="headerlink" href="#7-rule-matching" title="Permanent link">¶</a></h2>
+<h3 id="71-single-rule-matching">7.1 Single-rule matching<a class="headerlink" href="#71-single-rule-matching" title="Permanent link">¶</a></h3>
+<p>Single rules are indexed by <code>(feature_name, codon_pos)</code> and matched against
+annotated variants at the same key. The matching logic depends on the
+consequence type:</p>
+<table>
+<thead>
+<tr>
+<th>Rule type</th>
+<th>Match condition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SNP (1-letter ref, 1-letter mut)</td>
+<td><code>ann.alt_aa == rule.mutation</code></td>
+</tr>
+<tr>
+<td>Insertion (mut longer than ref)</td>
+<td>inserted payload matches (anchor-agnostic)</td>
+</tr>
+<tr>
+<td>Deletion (ref longer than mut)</td>
+<td>deleted payload matches (anchor-agnostic)</td>
+</tr>
+<tr>
+<td>Frameshift</td>
+<td>both rule and annotation are frameshift tokens</td>
+</tr>
+<tr>
+<td><code>INS_any</code> wildcard</td>
+<td><code>ann.consequence == 'insertion'</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Fréchet gating.</strong> For combined codon events, the single-exchange effect is
+gated by <code>single_exchange_lower &gt; 0</code>. A combined member whose single state is
+Fréchet-impossible cannot match a single-amino-acid rule — only its
+Fréchet-accepted combined states can fire. Each accepted combined state adds
+its own <code>alt_aa</code> candidate, gated by its Fréchet <code>lower</code> bound. A
+combined-state hit takes precedence for the display frequency: the
+combinatorial effect's Fréchet lower bound is what the report shows.</p>
+<p><strong>Indel anchor agnosticism.</strong> Insertion and deletion rules are matched by
+<strong>payload only</strong>, not by the anchor amino acid. This makes rules robust to
+anchor-frame differences between the rule curator's reference and the sample.
+A warning is emitted when the anchor amino acids differ.</p>
+<p><strong><code>INS_any</code> suppression.</strong> When a specific insertion rule fires at the same
+position and drug as an <code>INS_any</code> wildcard rule, the wildcard is suppressed to
+avoid redundant hits.</p>
+<h3 id="72-ruleless-feature-suppression">7.2 Ruleless feature suppression<a class="headerlink" href="#72-ruleless-feature-suppression" title="Permanent link">¶</a></h3>
+<p>Features without resistance rules that overlap a ruled feature on the same
+reference are <strong>suppressed</strong> — their annotations are dropped. This prevents
+ruleless features (e.g. an overlapping upstream ORF) from shadowing variants
+that belong to the ruled feature. Overlap is evaluated per reference using
+half-open interval algebra: <span class="arithmatex">\([s_1, e_1) \cap [s_2, e_2) \ne \emptyset\)</span> when
+<span class="arithmatex">\(s_1 &lt; e_2 \wedge s_2 &lt; e_1\)</span>.</p>
+<p>A second locus-group suppression handles the case where a single variant lands
+inside both a ruled and a ruleless feature: only the ruled-feature annotation
+is kept.</p>
+<hr/>
+<h2 id="8-amino-acid-similarity-scoring-blosum62">8. Amino-acid similarity scoring (BLOSUM62)<a class="headerlink" href="#8-amino-acid-similarity-scoring-blosum62" title="Permanent link">¶</a></h2>
+<h3 id="81-purpose">8.1 Purpose<a class="headerlink" href="#81-purpose" title="Permanent link">¶</a></h3>
+<p>When a variant produces an amino-acid change at a codon position that carries
+one or more curated resistance rules, but the observed alternate amino acid
+does <strong>not</strong> match any of those rules exactly, ResPro reports a <strong>similarity
+estimate</strong>: how biochemically close the observed substitution is to the known
+resistance mutation. This helps the user assess whether a novel variant at a
+known resistance locus might have a comparable functional effect.</p>
+<p>The similarity is computed only for <strong>non-hit</strong> variants — annotations that
+already matched a resistance rule directly are excluded, since they carry
+curated phenotype information and do not need an estimate.</p>
+<h3 id="82-the-blosum62-substitution-matrix">8.2 The BLOSUM62 substitution matrix<a class="headerlink" href="#82-the-blosum62-substitution-matrix" title="Permanent link">¶</a></h3>
+<p>Similarity is scored using the <a href="https://en.wikipedia.org/wiki/BLOSUM">BLOSUM62</a>
+substitution matrix, the standard amino-acid scoring matrix derived from
+conserved protein blocks in the <a href="https://blocks.fhcrc.org/">BLOCKS database</a>.
+BLOSUM62 is built from alignments of protein sequences with ≤ 62% identity,
+making it suitable for detecting similarity across moderately divergent
+proteins. Each entry <span class="arithmatex">\(B(a, b)\)</span> is a log-odds score:</p>
+<div class="arithmatex">\[B(a, b) = 2 \log_2\!\left(\frac{p_{ab}}{q_a \, q_b}\right)\]</div>
+<p>where <span class="arithmatex">\(p_{ab}\)</span> is the observed frequency of amino acids <span class="arithmatex">\(a\)</span> and <span class="arithmatex">\(b\)</span> being
+aligned in homologous proteins, and <span class="arithmatex">\(q_a\)</span>, <span class="arithmatex">\(q_b\)</span> are their individual
+background frequencies. The score is rounded to the nearest integer.</p>
+<ul>
+<li><strong>Positive scores</strong> (<span class="arithmatex">\(B &gt; 0\)</span>): the substitution occurs more often than
+  expected by chance — the amino acids are biochemically similar (conservative
+  substitution).</li>
+<li><strong>Zero score</strong> (<span class="arithmatex">\(B = 0\)</span>): the substitution occurs at the background rate —
+  neutral.</li>
+<li><strong>Negative scores</strong> (<span class="arithmatex">\(B &lt; 0\)</span>): the substitution occurs less often than
+  expected — the amino acids are biochemically dissimilar
+  (non-conservative substitution).</li>
+</ul>
+<h3 id="83-classification-thresholds">8.3 Classification thresholds<a class="headerlink" href="#83-classification-thresholds" title="Permanent link">¶</a></h3>
+<p>The BLOSUM62 score <span class="arithmatex">\(s = B(\text{observed_aa}, \text{rule_aa})\)</span> is classified
+into three tiers using two configurable thresholds (from <code>defaults.toml</code>,
+<code>[similarity]</code> section):</p>
+<div class="arithmatex">\[\text{similarity} = \begin{cases}
+\texttt{high} &amp; \text{if } s \ge s_{\text{high}} \\
+\texttt{moderate} &amp; \text{if } s_{\text{moderate}} \le s &lt; s_{\text{high}} \\
+\texttt{low} &amp; \text{if } s &lt; s_{\text{moderate}}
+\end{cases}\]</div>
+<table>
+<thead>
+<tr>
+<th>Threshold</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="arithmatex">\(s_{\text{high}}\)</span></td>
+<td>1</td>
+<td>Substitution score at or above this is "high" similarity</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(s_{\text{moderate}}\)</span></td>
+<td>0</td>
+<td>Substitution score at or above this (but below high) is "moderate"</td>
+</tr>
+</tbody>
+</table>
+<p>With the defaults (<span class="arithmatex">\(s_{\text{high}} = 1\)</span>, <span class="arithmatex">\(s_{\text{moderate}} = 0\)</span>):</p>
+<table>
+<thead>
+<tr>
+<th>BLOSUM62 score</th>
+<th>Classification</th>
+<th>Interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><span class="arithmatex">\(\ge 1\)</span></td>
+<td>high</td>
+<td>Conservative substitution — biochemically similar amino acids</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(0\)</span></td>
+<td>moderate</td>
+<td>Neutral substitution — occurs at background rate</td>
+</tr>
+<tr>
+<td><span class="arithmatex">\(&lt; 0\)</span></td>
+<td>low</td>
+<td>Non-conservative substitution — biochemically dissimilar</td>
+</tr>
+</tbody>
+</table>
+<p>For example, a valine-to-isoleucine substitution (<span class="arithmatex">\(B = 3\)</span>) is classified as
+<strong>high</strong>; a valine-to-alanine substitution (<span class="arithmatex">\(B = 0\)</span>) is <strong>moderate</strong>; a
+valine-to-proline substitution (<span class="arithmatex">\(B = -4\)</span>) is <strong>low</strong>.</p>
+<h3 id="84-special-cases">8.4 Special cases<a class="headerlink" href="#84-special-cases" title="Permanent link">¶</a></h3>
+<p><strong>Non-standard tokens.</strong> Amino-acid tokens not present in the BLOSUM62 matrix
+(e.g. <code>*</code> for stop codons, <code>X</code> for unknown, <code>fsX</code> for frameshifts) default to
+<strong>low</strong> similarity, since a numerical score cannot be computed.</p>
+<p><strong>Indels.</strong> Insertions and deletions at positions that carry indel resistance
+rules are reported with <strong>moderate</strong> similarity, reflecting that an in-frame
+indel at a known resistance locus is structurally related to the curated indel
+rule even though a BLOSUM62 score is not defined for length changes.</p>
+<p><strong>Excluded consequences.</strong> Frameshifts, stop gains, and synonymous changes are
+<strong>excluded</strong> from similarity reporting entirely, because amino-acid-level
+similarity is not meaningful for these consequence types — they are either
+disruptive (frameshift, stop), a no-op (synonymous), or not representable as a
+single amino-acid substitution.</p>
+<p><strong>Combined codon events.</strong> For annotations carrying Fréchet-accepted combined
+states, similarity is evaluated <strong>per combined state</strong>: each state's <code>alt_aa</code>
+is scored independently against the rule's <code>mutation</code>, and the state's Fréchet
+<code>lower</code> bound is used for AF binning in the similarity row. This ensures that
+a combined codon effect is compared to the curated rule using the actual
+translated amino acid of that combinatorial state, not just the single-exchange
+substitution.</p>
+<hr/>
+<h2 id="9-allele-frequency-bins">9. Allele-frequency bins<a class="headerlink" href="#9-allele-frequency-bins" title="Permanent link">¶</a></h2>
+<p>Variant allele frequencies are classified into three bins for reporting. The
+bin boundaries differ between modes because FASTA-mode frequencies are discrete
+(derived from IUPAC expansion: 1.0, 0.5, 0.33, 0.25, …) while VCF-mode
+frequencies are continuous.</p>
+<table>
+<thead>
+<tr>
+<th>Bin</th>
+<th>VCF mode</th>
+<th>FASTA mode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>high</td>
+<td><span class="arithmatex">\([0.75, 1.0]\)</span></td>
+<td><span class="arithmatex">\([0.75, 1.0]\)</span></td>
+</tr>
+<tr>
+<td>intermediate</td>
+<td><span class="arithmatex">\([0.25, 0.7499]\)</span></td>
+<td><span class="arithmatex">\([0.35, 0.74]\)</span></td>
+</tr>
+<tr>
+<td>low</td>
+<td><span class="arithmatex">\([0.01, 0.2499]\)</span></td>
+<td><span class="arithmatex">\([0.01, 0.34]\)</span></td>
+</tr>
+</tbody>
+</table>
+<p>The FASTA-mode intermediate lower bound is raised to 0.35 so that the discrete
+value 0.33 (from a 3-way IUPAC expansion, e.g. <code>B</code> = {C, G, T}) falls into the
+low bin rather than intermediate, reflecting the lower confidence of a
+one-in-three ambiguity.</p>
+<h3 id="vcf-af-source-resolution">VCF AF source resolution<a class="headerlink" href="#vcf-af-source-resolution" title="Permanent link">¶</a></h3>
+<p>For VCF input, per-allele allele frequency is resolved from a fixed precedence
+chain (first non-missing per allele wins):</p>
+<div class="arithmatex">\[\text{INFO/AF} \to \text{INFO/VAF} \to \text{INFO/FREQ} \to \text{FORMAT/AF} \to \text{FORMAT/AD-derived}\]</div>
+<p>FORMAT-level values read only the first sample. The AD-derived frequency is:</p>
+<div class="arithmatex">\[f_i = \frac{\text{AD}_i}{\sum_{j} \text{AD}_j}\]</div>
+<p>where AD is the REF + per-ALT depth array (AD<span class="arithmatex">\(_0\)</span> is REF depth, AD<span class="arithmatex">\(_{i+1}\)</span> is
+ALT<span class="arithmatex">\(_i\)</span> depth).</p>
+<p><strong>Residual fallback.</strong> Missing entries and short allele-specific arrays do not
+silently clamp to the last available value. Instead, a residual fallback is
+applied:</p>
+<div class="arithmatex">\[f_{\text{missing}} = \frac{\max(0,\; 1 - \sum_{\text{known}} f_i)}{n_{\text{missing}}}\]</div>
+<p>The residual is split equally among the missing alleles, rather than assuming a
+missing allele is fully present.</p>
+<hr/>
+<h2 id="10-coverage-assessment">10. Coverage assessment<a class="headerlink" href="#10-coverage-assessment" title="Permanent link">¶</a></h2>
+<h3 id="101-fasta-mode">10.1 FASTA mode<a class="headerlink" href="#101-fasta-mode" title="Permanent link">¶</a></h3>
+<p>Any stretch of <code>N</code> characters spanning a full codon (<code>NNN</code>) is treated as a
+coverage gap. Each contiguous N-run is reported as a <code>CoverageGap</code> entry with
+the affected feature, codon start, and codon end. Rule positions that fall
+within a gap are not evaluated.</p>
+<p>Partial-N codons (1–2 N bases) are <strong>not</strong> coverage gaps; the non-N positions
+emit expanded IUPAC variants normally.</p>
+<h3 id="102-vcf-mode-with-bam">10.2 VCF mode with BAM<a class="headerlink" href="#102-vcf-mode-with-bam" title="Permanent link">¶</a></h3>
+<p>When a <a href="https://samtools.github.io/hts-specs/SAMv1.pdf">BAM</a> file is provided
+(aligned against the same query reference as the VCF), per-base depth is
+extracted and projected through the CIGAR map onto internal CDS coordinates.
+A codon is reported as a coverage gap when <strong>any</strong> of its three nucleotides
+has depth below the minimum depth threshold (default 10):</p>
+<div class="arithmatex">\[\exists\, j \in \{0, 1, 2\} : \text{depth}(\text{query_pos}(c + j)) &lt; d_{\min}\]</div>
+<p>where <span class="arithmatex">\(c\)</span> is the codon's CDS start position and <span class="arithmatex">\(\text{query_pos}\)</span> is the
+CDS-to-query coordinate map. CDS positions that map to <code>None</code> (deletions in the
+query) are treated as non-covered.</p>
+<p>Contiguous non-covered codons are merged into single <code>CoverageGap</code> entries.</p>
+<hr/>
+<h2 id="11-interpretation-algorithms">11. Interpretation algorithms<a class="headerlink" href="#11-interpretation-algorithms" title="Permanent link">¶</a></h2>
+<p>Interpretation algorithms are project-level configurations that aggregate
+matched rules into per-drug results. They are stored in the project metadata
+and validated at database creation time. See <a href="../algorithms/">Interpretation Algorithms</a>
+for the user-facing configuration reference; the mathematical logic is
+summarised here.</p>
+<h3 id="111-phenotype-rank-system">11.1 Phenotype rank system<a class="headerlink" href="#111-phenotype-rank-system" title="Permanent link">¶</a></h3>
+<p>Phenotype labels are resolved to integer ranks via a fixed vocabulary:</p>
+<table>
+<thead>
+<tr>
+<th>Rank</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>5</td>
+<td>resistant</td>
+</tr>
+<tr>
+<td>4</td>
+<td>high-level resistance</td>
+</tr>
+<tr>
+<td>3</td>
+<td>intermediate resistance</td>
+</tr>
+<tr>
+<td>2</td>
+<td>potential low-level resistance</td>
+</tr>
+<tr>
+<td>1</td>
+<td>susceptible</td>
+</tr>
+<tr>
+<td>0</td>
+<td>unknown</td>
+</tr>
+<tr>
+<td>−1</td>
+<td>contradictory</td>
+</tr>
+</tbody>
+</table>
+<p>The rank system enables ordinal comparison across heterogeneous vocabularies.
+Labels are lowercased and whitespace-stripped at import time; bare integer ranks
+(1–5) are accepted as shorthand.</p>
+<h3 id="112-drug_interpretation-methods">11.2 <code>drug_interpretation</code> methods<a class="headerlink" href="#112-drug_interpretation-methods" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Decision rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>by_phenotype</code></td>
+<td>Highest-rank phenotype label among the drug's hits wins. <code>contradictory</code> (rank −1) wins over <code>susceptible</code> (rank 1) but loses to any rank ≥ 2.</td>
+</tr>
+<tr>
+<td><code>by_score</code></td>
+<td><span class="arithmatex">\(\text{total} = \sum_{\text{hits}} \text{score}_i\)</span>; compare against thresholds.</td>
+</tr>
+<tr>
+<td><code>by_ic50</code></td>
+<td>For each hit, the highest-rank label whose breakpoint <span class="arithmatex">\(\le\)</span> IC50 wins; otherwise rank 1.</td>
+</tr>
+<tr>
+<td><code>by_fold_ic50</code></td>
+<td>Same as <code>by_ic50</code> using fold-IC50 values.</td>
+</tr>
+</tbody>
+</table>
+<p>For <code>by_ic50</code> / <code>by_fold_ic50</code>, thresholds must be <strong>non-decreasing</strong> with
+severity rank. The algorithm iterates from the highest-rank threshold downward;
+the first threshold satisfied by the value determines the label. If no
+threshold is met, the rank-1 label (susceptible) is returned.</p>
+<p><strong>Final assessment</strong> (when multiple methods are configured) is
+strongest-wins by rank: rank 5 &gt; … &gt; rank 2 &gt; contradictory (−1) &gt; susceptible
+(1), with unknown (0) weakest.</p>
+<h3 id="113-effect_as_resistant">11.3 <code>effect_as_resistant</code><a class="headerlink" href="#113-effect_as_resistant" title="Permanent link">¶</a></h3>
+<p>Produces report-only metadata hits when a variant has a high-impact consequence
+(frameshift, stop_gained, stop_lost, start_lost, insertion, deletion) in a
+configured feature/reference pair. This does not create curated rule hits — it
+only adds a resistant metadata row for the configured drug. The algorithm
+fires only when the project database has at least one curated rule with a known
+phenotype, ensuring it augments rather than replaces curated knowledge.</p>
+<h3 id="114-per-drug-per-reference-threshold-overrides">11.4 Per-drug / per-reference threshold overrides<a class="headerlink" href="#114-per-drug-per-reference-threshold-overrides" title="Permanent link">¶</a></h3>
+<p><code>drug_interpretation</code> accepts optional <code>drug_thresholds</code> overrides scoped to
+specific drugs and optionally to specific references. Resolution precedence
+(most specific wins):</p>
+<ol>
+<li>Override matching <code>(reference, drug)</code></li>
+<li>Override matching <code>(drug)</code> only</li>
+<li>Global <code>thresholds</code></li>
+</ol>
+<p>Reference matching is accession-version tolerant: <code>NC_001345.1</code> matches
+<code>NC_001345</code>. When a drug has hits under multiple references, the reference used
+for per-<code>(reference, drug)</code> override resolution is the <strong>alphabetically first</strong>
+reference name, ensuring stable output across invocations.</p>
+<h3 id="115-drug_groups">11.5 <code>drug_groups</code><a class="headerlink" href="#115-drug_groups" title="Permanent link">¶</a></h3>
+<p>Assigns drugs to named groups (e.g. drug classes) for display in the report.
+Each drug may appear in at most one group; ungrouped drugs are displayed
+without a group label. This is a display-only transformation — it does not
+affect rule matching or interpretation.</p>
+<h3 id="116-drug_alias">11.6 <code>drug_alias</code><a class="headerlink" href="#116-drug_alias" title="Permanent link">¶</a></h3>
+<p>Maps a drug's canonical name to an alias for display. When an alias is
+configured, the report shows the alias alongside or instead of the canonical
+name. This is a display-only transformation — the canonical name is used for all
+internal matching and storage.</p>
+<hr/>
+<h2 id="12-results-persistence-regeneration">12. Results persistence &amp; regeneration<a class="headerlink" href="#12-results-persistence-regeneration" title="Permanent link">¶</a></h2>
+<h3 id="121-results-database">12.1 Results database<a class="headerlink" href="#121-results-database" title="Permanent link">¶</a></h3>
+<p>Each profiling run is persisted to a separate <strong>results database</strong> (SQLite),
+distinct from the project database. The results DB stores:</p>
+<ul>
+<li><strong>Run metadata</strong>: project name, project DB path, project fingerprint (UUID),
+  project last-updated timestamp, sample name, VCF path, variant counts, hit
+  counts, and FASTA/VCF mode flag.</li>
+<li><strong>Variant results</strong>: one row per annotated variant, including the remapped
+  internal coordinates, user-reference coordinates (for VCF mode), amino-acid
+  consequence, AF bin, rule match flag, drug hits (JSON), and the full
+  serialised Fréchet combined states.</li>
+<li><strong>Coverage gaps</strong>: one row per non-covered codon stretch.</li>
+<li><strong>Formula rule hits</strong>: one row per matched combination rule (serialised JSON).</li>
+<li><strong>Profiled features</strong>: the set of feature names evaluated for this run, so
+  regeneration can reconstruct the summary drug table (including zero-hit /
+  susceptible drugs) without the project DB's feature-mapping cache.</li>
+</ul>
+<h3 id="122-project-fingerprint">12.2 Project fingerprint<a class="headerlink" href="#122-project-fingerprint" title="Permanent link">¶</a></h3>
+<p>The <strong>project fingerprint</strong> is a stable UUID assigned once at project creation
+and never changed. It is stored in the <code>project</code> table and copied into every
+results run row. Regeneration validates that the stored fingerprint matches the
+current project DB's fingerprint before reproducing a report — if the project
+DB has been modified (rules added, features changed), the fingerprint still
+matches (it is immutable), but the <code>project_updated_at</code> timestamp provides a
+secondary consistency check.</p>
+<h3 id="123-deterministic-regeneration">12.3 Deterministic regeneration<a class="headerlink" href="#123-deterministic-regeneration" title="Permanent link">¶</a></h3>
+<p>Regeneration reads a stored run from the results DB and reproduces the HTML
+report (and optional exports) from the persisted annotations — <strong>without</strong>
+re-running alignment, variant emission, annotation, or rule matching. This
+guarantees that the regenerated report is byte-identical to the original, as
+long as the project DB's rules and features have not changed. The project
+fingerprint and updated-at timestamp provide a compatibility guard: if the
+project DB has been modified since the run was stored, regeneration warns but
+proceeds (the stored annotations are self-contained).</p>
+<hr/>
+<h2 id="13-determinism-guarantees">13. Determinism guarantees<a class="headerlink" href="#13-determinism-guarantees" title="Permanent link">¶</a></h2>
+<p>Several design choices ensure that ResPro's output is <strong>deterministic</strong> — the
+same inputs always produce the same report:</p>
+<ul>
+<li><strong>CIGAR normalisation</strong>: I/D swap and operation-order reversal are applied
+  consistently per strand.</li>
+<li><strong>Canonical formula storage</strong>: boolean expressions are canonicalised
+  (flattened + sorted) before storage and evaluation.</li>
+<li><strong>OR branch selection</strong>: the highest-AF branch wins, with lexical member-ID
+  tiebreak.</li>
+<li><strong>Reference selection</strong>: the best reference is chosen by a fixed sort key
+  (identity, coverage, name).</li>
+<li><strong>Multi-reference override resolution</strong>: alphabetically first reference name.</li>
+<li><strong>Project fingerprint</strong>: an immutable UUID guards regeneration compatibility.</li>
+<li><strong>Query mapping cache</strong>: mappings are cached by sequence checksum (SHA-256),
+  so repeated runs with the same query reuse stored alignments.</li>
+<li><strong>Mutation token canonicalisation</strong>: all rule notation variants are normalised
+  to five canonical forms at import time, ensuring consistent matching regardless
+  of the curator's notation style.</li>
+</ul>
+<hr/>
+<h2 id="further-reading">Further reading<a class="headerlink" href="#further-reading" title="Permanent link">¶</a></h2>
+<ul>
+<li><a href="https://github.com/lh3/minimap2">minimap2 / mappy</a> — the alignment backend</li>
+<li><a href="https://samtools.github.io/hts-specs/SAMv1.pdf">CIGAR specification (SAM format)</a></li>
+<li><a href="https://samtools.github.io/hts-specs/VCFv4.2.pdf">VCF specification</a></li>
+<li><a href="https://en.wikipedia.org/wiki/Fr%C3%A9chet_inequalities">Fréchet inequalities — Wikipedia</a></li>
+<li><a href="https://en.wikipedia.org/wiki/Nucleic_acid_notation#IUPAC_nucleotide_code">IUPAC nucleotide codes — Wikipedia</a></li>
+<li><a href="https://en.wikipedia.org/wiki/DNA_codon_table">Standard genetic code — Wikipedia</a></li>
+<li><a href="https://en.wikipedia.org/wiki/Recursive_descent_parser">Recursive descent parsing — Wikipedia</a></li>
+<li><a href="https://en.wikipedia.org/wiki/Boolean_algebra">Boolean algebra — Wikipedia</a></li>
+<li><a href="https://en.wikipedia.org/wiki/BLOSUM">BLOSUM62 substitution matrix — Wikipedia</a></li>
+<li><a href="https://en.wikipedia.org/wiki/HGVS_nomenclature">HGVS nomenclature — Wikipedia</a></li>
+<li><a href="https://en.wikipedia.org/wiki/GenBank">GenBank format — Wikipedia</a></li>
+</ul>
+</article>
+</div>
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+</div>
+<button class="md-top md-icon" data-md-component="top" hidden="" type="button">
+<svg viewbox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+</main>
+<div class="md-footer">
+<div class="md-footer-meta md-typeset">
+<div class="md-footer-meta__inner md-grid">
+<div class="md-footer-copyright">
+        
+          © 2026 Jonas Fuchs, University Medical Center Freiburg — Licensed under AGPL-3.0
+        
+      </div>
+<div class="md-footer-social">
+<a href="https://github.com/the-foxlab/ResistanceProfiler" rel="noopener" target="_blank" title="GitHub">
+<svg viewbox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
+</a>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="md-dialog" data-md-component="dialog">
+<div class="md-dialog__inner md-typeset"></div>
+</div>
+<script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.indexes", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.tooltips"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+<script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+<script src="../javascripts/mathjax.js"></script>
+<script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg width="100%" height="100%" viewBox="0 0 2363 709" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" xmlns:serif="http://www.serif.com/" style="fill-rule:evenodd;clip-rule:evenodd;">
+    <g transform="matrix(1,0,0,1,17.8436,-13.4356)">
+        <path d="M2319.39,258.109L2319.39,511.186C2319.39,581.025 2262.69,637.725 2192.85,637.725L805.196,637.725C735.357,637.725 678.657,581.025 678.657,511.186L678.657,258.109C678.657,188.271 735.357,131.571 805.196,131.571L2192.85,131.571C2262.69,131.571 2319.39,188.271 2319.39,258.109Z" style="fill:rgb(15,118,110);"/>
+    </g>
+    <g transform="matrix(0.458406,0,0,1,385.4,-13.4356)">
+        <path d="M2319.39,258.109L2319.39,511.186C2319.39,581.025 2195.7,637.725 2043.35,637.725L954.698,637.725C802.347,637.725 678.657,581.025 678.657,511.186L678.657,258.109C678.657,188.271 802.347,131.571 954.698,131.571L2043.35,131.571C2195.7,131.571 2319.39,188.271 2319.39,258.109Z" style="fill:rgb(69,87,126);"/>
+    </g>
+    <g transform="matrix(0.222016,0,0,1,948.239,-13.4356)">
+        <rect x="678.657" y="131.571" width="1640.74" height="506.154" style="fill:rgb(69,87,126);"/>
+    </g>
+    <g transform="matrix(9.53928,0,0,9.53928,807.467,476.542)">
+        <text x="0px" y="0px" style="font-family:'ArialMT', 'Arial';font-size:34.07px;fill:white;">Res</text>
+    </g>
+    <g transform="matrix(1.21774,0,0,1.21774,-590.021,160.216)">
+        <g transform="matrix(266.887,0,0,266.887,2316.95,265.882)">
+        </g>
+        <text x="1738.61px" y="265.882px" style="font-family:'ArialMT', 'Arial';font-size:266.887px;fill:white;">PRO</text>
+    </g>
+    <g transform="matrix(10.8559,0,0,10.8559,-890.773,312.728)">
+        <g transform="matrix(1,0,0,1,83.2234,2.2188)">
+            <rect x="0" y="-18" width="40" height="8" style="fill:rgb(69,87,126);stroke:white;stroke-width:1px;"/>
+        </g>
+        <g transform="matrix(1,0,0,1,83.2234,2.2188)">
+            <rect x="10" y="-6" width="40" height="8" style="fill:rgb(15,118,110);stroke:white;stroke-width:1px;"/>
+        </g>
+        <g transform="matrix(1,0,0,1,83.2234,2.2188)">
+            <rect x="5" y="6" width="40" height="8" style="fill:rgb(69,87,126);stroke:white;stroke-width:1px;"/>
+        </g>
+        <g transform="matrix(1,0,0,1,83.2234,2.2188)">
+            <rect x="15" y="18" width="40" height="8" style="fill:rgb(69,87,126);stroke:white;stroke-width:1px;"/>
+        </g>
+    </g>
+</svg>

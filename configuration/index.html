@@ -1,0 +1,1483 @@
+<!DOCTYPE html><html lang="en" class="no-js"><head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Pathogen-agnostic antiviral resistance profiling — documentation">
+      
+      
+      
+        <link rel="canonical" href="https://the-foxlab.github.io/ResistanceProfiler/configuration/">
+      
+      
+        <link rel="prev" href="../cli-reference/">
+      
+      
+        <link rel="next" href="../output/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Configuration - ResistanceProfiler</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+3:300,300i,400,400i,700,700i%7CFira+Code:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Source Sans 3";--md-code-font:"Fira Code"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  <link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#configuration" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="ResistanceProfiler" class="md-header__button md-logo" aria-label="ResistanceProfiler" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ResistanceProfiler
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Configuration
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom" aria-label="Switch to dark mode" type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom" aria-label="Switch to light mode" type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden="">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"></path></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required="">
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix="">
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/the-foxlab/ResistanceProfiler" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="ResistanceProfiler" class="md-nav__button md-logo" aria-label="ResistanceProfiler" data-md-component="logo">
+      
+  <img src="../assets/favicon.svg" alt="logo">
+
+    </a>
+    ResistanceProfiler
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/the-foxlab/ResistanceProfiler" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix="">
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manual
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-it-works/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../technical-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Technical reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../database-preparation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Database preparation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../rules-format/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rules TSV format
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../algorithms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interpretation algorithms
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#the-config-flag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The --config flag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#overridable-sections-and-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overridable sections and keys
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Overridable sections and keys">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#timeouts-network-timeouts-seconds-and-retry-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [timeouts] — network timeouts (seconds) and retry policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#urls-external-service-url-templates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [urls] — external service URL templates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#parsing-publication-identifier-parsing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [parsing] — publication-identifier parsing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#matching-combination-formula-rule-gating" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [matching] — combination (formula) rule gating
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#codon-codon-level-scientific-thresholds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [codon] — codon-level scientific thresholds
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#similarity-amino-acid-similarity-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [similarity] — amino-acid similarity classification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#af_bins-allele-frequency-bins-vcf-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [af_bins] — allele-frequency bins (VCF mode)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#af_bins_fasta-allele-frequency-bins-fasta-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [af_bins_fasta] — allele-frequency bins (FASTA mode)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#alignment-minimap2mappy-alignment-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [alignment] — minimap2/mappy alignment settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-override-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example override file
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regenerate-caveat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerate caveat
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../output/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Output interpretation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../webapp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Web app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../license/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    License
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+      
+        <li class="md-nav__item">
+  <a href="#the-config-flag" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The --config flag
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#overridable-sections-and-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overridable sections and keys
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Overridable sections and keys">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#timeouts-network-timeouts-seconds-and-retry-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [timeouts] — network timeouts (seconds) and retry policy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#urls-external-service-url-templates" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [urls] — external service URL templates
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#parsing-publication-identifier-parsing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [parsing] — publication-identifier parsing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#matching-combination-formula-rule-gating" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [matching] — combination (formula) rule gating
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#codon-codon-level-scientific-thresholds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [codon] — codon-level scientific thresholds
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#similarity-amino-acid-similarity-classification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [similarity] — amino-acid similarity classification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#af_bins-allele-frequency-bins-vcf-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [af_bins] — allele-frequency bins (VCF mode)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#af_bins_fasta-allele-frequency-bins-fasta-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [af_bins_fasta] — allele-frequency bins (FASTA mode)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#alignment-minimap2mappy-alignment-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        [alignment] — minimap2/mappy alignment settings
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-override-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example override file
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#regenerate-caveat" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerate caveat
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">¶</a></h1>
+<p><code>respro</code> ships with a bundled default configuration (<code>respro/config/defaults.toml</code>) that defines every scientific threshold, alignment parameter, allele-frequency bin, network timeout, and external URL the pipeline uses. You can override any of these values per-invocation with a user TOML file passed via the <code>--config</code> flag, without modifying the installed package.</p>
+<h2 id="the-config-flag">The <code>--config</code> flag<a class="headerlink" href="#the-config-flag" title="Permanent link">¶</a></h2>
+<p>All three profiling/reporting commands accept <code>--config PATH</code> (<code>-c</code> for short):</p>
+<div class="highlight"><pre><span></span><code>respro<span class="w"> </span>fasta<span class="w">  </span>--project<span class="w"> </span>my.db<span class="w"> </span>--fasta<span class="w"> </span>consensus.fasta<span class="w"> </span>--output<span class="w"> </span>out<span class="w"> </span>--config<span class="w"> </span>my_overrides.toml
+respro<span class="w"> </span>vcf<span class="w">    </span>--project<span class="w"> </span>my.db<span class="w"> </span>--vcf<span class="w"> </span>calls.vcf<span class="w"> </span>--ref-fasta<span class="w"> </span>ref.fasta<span class="w"> </span>--output<span class="w"> </span>out<span class="w"> </span>--config<span class="w"> </span>my_overrides.toml
+respro<span class="w"> </span>regenerate<span class="w"> </span>--project<span class="w"> </span>my.db<span class="w"> </span>--results-db<span class="w"> </span>runs.db<span class="w"> </span>--run-id<span class="w"> </span><span class="m">1</span><span class="w"> </span>--output<span class="w"> </span>out<span class="w"> </span>--config<span class="w"> </span>my_overrides.toml
+</code></pre></div>
+<p>The override file is a TOML document. Your values <strong>overwrite</strong> the bundled defaults for the keys you list; every key you omit keeps its bundled value. You only need to specify what you want to change.</p>
+<p>Unknown sections, unknown keys, and type mismatches (e.g. a string where an integer is expected) are rejected — the command exits with an error naming the offending key and the allowed values, rather than silently producing a report built on unintended assumptions.</p>
+<p>When an override is applied, <code>respro</code> logs an <code>INFO</code> message confirming the file was loaded (visible with <code>-v</code>).</p>
+<h2 id="overridable-sections-and-keys">Overridable sections and keys<a class="headerlink" href="#overridable-sections-and-keys" title="Permanent link">¶</a></h2>
+<p>Every key below corresponds to an entry in <code>respro/config/defaults.toml</code>, where the bundled value and an inline rationale comment can be found.</p>
+<h3 id="timeouts-network-timeouts-seconds-and-retry-policy"><code>[timeouts]</code> — network timeouts (seconds) and retry policy<a class="headerlink" href="#timeouts-network-timeouts-seconds-and-retry-policy" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pubchem</code></td>
+<td>int</td>
+<td><code>7</code></td>
+<td>Per-request timeout for PubChem lookups.</td>
+</tr>
+<tr>
+<td><code>pubmed</code></td>
+<td>int</td>
+<td><code>7</code></td>
+<td>Per-request timeout for PubMed esummary.</td>
+</tr>
+<tr>
+<td><code>crossref</code></td>
+<td>int</td>
+<td><code>7</code></td>
+<td>Per-request timeout for Crossref.</td>
+</tr>
+<tr>
+<td><code>genbank_timeout</code></td>
+<td>int</td>
+<td><code>30</code></td>
+<td><code>urlopen</code> timeout (seconds) for a single NCBI nuccore efetch attempt.</td>
+</tr>
+<tr>
+<td><code>genbank_max_retries</code></td>
+<td>int</td>
+<td><code>3</code></td>
+<td>Max efetch attempts before raising <code>RuntimeError</code>.</td>
+</tr>
+<tr>
+<td><code>genbank_backoff_base</code></td>
+<td>float</td>
+<td><code>1.0</code></td>
+<td>Exponential backoff base (seconds); doubled each retry (1, 2, 4).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="urls-external-service-url-templates"><code>[urls]</code> — external service URL templates<a class="headerlink" href="#urls-external-service-url-templates" title="Permanent link">¶</a></h3>
+<p>These are URL templates containing <code>{placeholder}</code> segments. Override only if you need to point at a mirror or a local proxy.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pubchem_compound_page</code></td>
+<td><code>https://pubchem.ncbi.nlm.nih.gov/compound/{cid}</code></td>
+</tr>
+<tr>
+<td><code>pubchem_structure_png</code></td>
+<td><code>https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/PNG</code></td>
+</tr>
+<tr>
+<td><code>pubchem_cid_lookup</code></td>
+<td><code>https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{name}/cids/JSON</code></td>
+</tr>
+<tr>
+<td><code>pubchem_description</code></td>
+<td><code>https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/description/JSON</code></td>
+</tr>
+<tr>
+<td><code>pubchem_title</code></td>
+<td><code>https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/property/Title/JSON</code></td>
+</tr>
+<tr>
+<td><code>ncbi_pubmed_esummary</code></td>
+<td><code>https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&amp;id={pmid}&amp;retmode=json</code></td>
+</tr>
+<tr>
+<td><code>ncbi_pmc_idconv</code></td>
+<td><code>https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/?ids={identifier}&amp;format=json</code></td>
+</tr>
+<tr>
+<td><code>crossref_works</code></td>
+<td><code>https://api.crossref.org/works/{doi}</code></td>
+</tr>
+<tr>
+<td><code>ncbi_protein_page</code></td>
+<td><code>https://www.ncbi.nlm.nih.gov/protein/{protein_id}/</code></td>
+</tr>
+<tr>
+<td><code>ncbi_nuccore_efetch</code></td>
+<td><code>https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nuccore&amp;id={accession}&amp;rettype=gb&amp;retmode=text</code></td>
+</tr>
+<tr>
+<td><code>github_respro_db_raw</code></td>
+<td><code>https://raw.githubusercontent.com/the-foxlab/respro-databases/main/databases</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="parsing-publication-identifier-parsing"><code>[parsing]</code> — publication-identifier parsing<a class="headerlink" href="#parsing-publication-identifier-parsing" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>doi_prefixes</code></td>
+<td>list[str]</td>
+<td><code>['https://doi.org/', 'http://doi.org/']</code></td>
+<td>URL prefixes stripped/recognised when parsing DOI references.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="matching-combination-formula-rule-gating"><code>[matching]</code> — combination (formula) rule gating<a class="headerlink" href="#matching-combination-formula-rule-gating" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>min_cooccurrence_combination_fraction</code></td>
+<td>float</td>
+<td><code>0.6666666666666666</code></td>
+<td>Formula (combination) rule gating: an AND clause fires only when the joint Fréchet lower bound's forced fraction (<code>lower / min(member frequencies)</code>) reaches this value. Decoupled from the codon policy (<code>[codon] min_cooccurrence_codon_fraction</code>). Also drives the <code>combination_fraction_pct</code> label shown in the report's frequency hover.</td>
+</tr>
+<tr>
+<td><code>frechet_epsilon</code></td>
+<td>float</td>
+<td><code>1e-9</code></td>
+<td>Numerical tolerance for Fréchet-bound acceptance on the formula path (member lower bound &gt; eps, forced fraction ≥ min_fraction − eps). Independent of the codon-path <code>[codon] frechet_epsilon</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="codon-codon-level-scientific-thresholds"><code>[codon]</code> — codon-level scientific thresholds<a class="headerlink" href="#codon-codon-level-scientific-thresholds" title="Permanent link">¶</a></h3>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>min_cooccurrence_codon_fraction</code></td>
+<td>float</td>
+<td><code>0.6666666666666666</code></td>
+<td>Conservative Fréchet-intersection policy: a candidate codon state is emitted only when the minimum guaranteed co-occurrence fraction reaches this value.</td>
+</tr>
+<tr>
+<td><code>min_read_mapping_quality</code></td>
+<td>int</td>
+<td><code>20</code></td>
+<td>Minimum MAPQ for a read to count toward BAM-based same-codon SNP co-occurrence (VCF mode with <code>--bam</code> only).</td>
+</tr>
+<tr>
+<td><code>bam_base_quality_threshold</code></td>
+<td>int</td>
+<td><code>0</code></td>
+<td>Minimum base quality for a read to contribute to BAM per-position depth (<code>count_coverage</code>). <code>0</code> accepts all bases.</td>
+</tr>
+<tr>
+<td><code>frechet_epsilon</code></td>
+<td>float</td>
+<td><code>1e-9</code></td>
+<td>Numerical tolerance for Fréchet-bound acceptance (<code>lower &gt; eps</code>). Loosen in noisy regimes; tightening below <code>1e-12</code> risks float instability.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="similarity-amino-acid-similarity-classification"><code>[similarity]</code> — amino-acid similarity classification<a class="headerlink" href="#similarity-amino-acid-similarity-classification" title="Permanent link">¶</a></h3>
+<p>BLOSUM62 score thresholds. <code>score &gt;= high</code> → <code>high</code>; <code>score &gt;= moderate</code> → <code>moderate</code>; else <code>low</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>high</code></td>
+<td>int</td>
+<td><code>1</code></td>
+</tr>
+<tr>
+<td><code>moderate</code></td>
+<td>int</td>
+<td><code>0</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="af_bins-allele-frequency-bins-vcf-mode"><code>[af_bins]</code> — allele-frequency bins (VCF mode)<a class="headerlink" href="#af_bins-allele-frequency-bins-vcf-mode" title="Permanent link">¶</a></h3>
+<p>Each value is <code>[lower_inclusive, upper_inclusive]</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>high</code></td>
+<td>list[float]</td>
+<td><code>[0.75, 1.0]</code></td>
+</tr>
+<tr>
+<td><code>intermediate</code></td>
+<td>list[float]</td>
+<td><code>[0.25, 0.7499]</code></td>
+</tr>
+<tr>
+<td><code>low</code></td>
+<td>list[float]</td>
+<td><code>[0.01, 0.2499]</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="af_bins_fasta-allele-frequency-bins-fasta-mode"><code>[af_bins_fasta]</code> — allele-frequency bins (FASTA mode)<a class="headerlink" href="#af_bins_fasta-allele-frequency-bins-fasta-mode" title="Permanent link">¶</a></h3>
+<p>FASTA frequencies are discrete (1.0, 0.5, 0.33, 0.25) due to IUPAC base expansion, so bin boundaries differ from VCF mode.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>high</code></td>
+<td>list[float]</td>
+<td><code>[0.75, 1.0]</code></td>
+</tr>
+<tr>
+<td><code>intermediate</code></td>
+<td>list[float]</td>
+<td><code>[0.35, 0.74]</code></td>
+</tr>
+<tr>
+<td><code>low</code></td>
+<td>list[float]</td>
+<td><code>[0.01, 0.34]</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="alignment-minimap2mappy-alignment-settings"><code>[alignment]</code> — minimap2/mappy alignment settings<a class="headerlink" href="#alignment-minimap2mappy-alignment-settings" title="Permanent link">¶</a></h3>
+<p>These are passed to mappy for CDS-to-query mapping. The defaults are tuned for sensitivity across divergent sequences (~60–75% identity). Only change the scoring keys if you understand minimap2 scoring — wrong values can degrade alignment quality for divergent sequences.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>preset</code></td>
+<td>str</td>
+<td><code>'map-ont'</code></td>
+<td>Minimap2 preset.</td>
+</tr>
+<tr>
+<td><code>k</code></td>
+<td>int</td>
+<td><code>6</code></td>
+<td>Minimizer k-mer size.</td>
+</tr>
+<tr>
+<td><code>w</code></td>
+<td>int</td>
+<td><code>3</code></td>
+<td>Minimizer window size.</td>
+</tr>
+<tr>
+<td><code>best_n</code></td>
+<td>int</td>
+<td><code>1</code></td>
+<td>Keep best N alignments.</td>
+</tr>
+<tr>
+<td><code>gap_open_penalty</code></td>
+<td>int</td>
+<td><code>6</code></td>
+<td>Short-gap open penalty (O1 component of the scoring tuple).</td>
+</tr>
+<tr>
+<td><code>match_score</code></td>
+<td>int</td>
+<td><code>2</code></td>
+<td>Scoring tuple A component.</td>
+</tr>
+<tr>
+<td><code>mismatch_penalty</code></td>
+<td>int</td>
+<td><code>4</code></td>
+<td>Scoring tuple B component.</td>
+</tr>
+<tr>
+<td><code>gap_extension_penalty_1</code></td>
+<td>int</td>
+<td><code>2</code></td>
+<td>Scoring tuple E1 component.</td>
+</tr>
+<tr>
+<td><code>gap_open_penalty_2</code></td>
+<td>int</td>
+<td><code>24</code></td>
+<td>Scoring tuple O2 component.</td>
+</tr>
+<tr>
+<td><code>gap_extension_penalty_2</code></td>
+<td>int</td>
+<td><code>1</code></td>
+<td>Scoring tuple E2 component.</td>
+</tr>
+<tr>
+<td><code>intron_junction_tolerance</code></td>
+<td>int</td>
+<td><code>5</code></td>
+<td>Max CDS-position distance (nt) between a CIGAR <code>I</code> op and a known exon-junction offset for the <code>I</code> to be classified as an intron. Only applies to spliced (multi-segment) CDS.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="example-override-file">Example override file<a class="headerlink" href="#example-override-file" title="Permanent link">¶</a></h2>
+<p>A short TOML listing only the keys you want to change — here raising the combination-rule co-occurrence fraction and tightening the high-AF bin label to 80% for a VCF run:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># my_overrides.toml</span>
+<span class="k">[matching]</span>
+<span class="n">min_cooccurrence_combination_fraction</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.8</span>
+
+<span class="k">[af_bins]</span>
+<span class="n">high</span><span class="w">         </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="mf">0.8</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">]</span>
+<span class="n">intermediate</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="mf">0.25</span><span class="p">,</span><span class="w"> </span><span class="mf">0.8</span><span class="p">]</span>
+<span class="n">low</span><span class="w">          </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">0.25</span><span class="p">]</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code>respro<span class="w"> </span>vcf<span class="w"> </span>--project<span class="w"> </span>my.db<span class="w"> </span>--vcf<span class="w"> </span>calls.vcf<span class="w"> </span>--ref-fasta<span class="w"> </span>ref.fasta<span class="w"> </span>--output<span class="w"> </span>out<span class="w"> </span>--config<span class="w"> </span>my_overrides.toml
+</code></pre></div>
+<p>The report's AF-bin legend will read "high (≥80%)" instead of the default "high (≥75%)".</p>
+<h2 id="regenerate-caveat">Regenerate caveat<a class="headerlink" href="#regenerate-caveat" title="Permanent link">¶</a></h2>
+<p><code>respro regenerate</code> rebuilds a report from a <strong>stored run</strong> — it does not re-run alignment or annotation. Consequently only <strong>report-stage</strong> config keys affect regenerate:</p>
+<ul>
+<li><code>[af_bins]</code> / <code>[af_bins_fasta]</code> — AF-bin labels</li>
+<li><code>[matching]</code> — <code>combination_fraction_pct</code> label only; <code>[matching] frechet_epsilon</code> is a match-stage key with no effect on a regenerated report</li>
+<li><code>[similarity]</code> — similarity classification thresholds</li>
+</ul>
+<p>Overrides to <code>[alignment]</code>, <code>[codon]</code>, <code>[timeouts]</code>, <code>[urls]</code>, or <code>[parsing]</code> are <strong>accepted</strong> by the loader (so a single override file is portable across <code>fasta</code>/<code>vcf</code>/<code>regenerate</code>) but have <strong>no effect</strong> on a regenerated report, because those stages already ran when the run was first profiled and their results are persisted in the results database. To change alignment or codon behaviour, re-profile the sample with <code>respro fasta</code> / <code>respro vcf</code> and the desired <code>--config</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden="">
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+<div class="md-footer">
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-footer-copyright">
+        
+          © 2026 Jonas Fuchs, University Medical Center Freiburg — Licensed under AGPL-3.0
+        
+      </div>
+      <div class="md-footer-social">
+        <a href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noopener" title="GitHub">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.indexes", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.tooltips"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+        <script src="../javascripts/mathjax.js"></script>
+      
+        <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>
