@@ -4,7 +4,6 @@ Tests for codon-aware annotation logic.
 
 import pytest
 
-from respro.cli.profile_helpers import _suppress_ruleless_overlap_annotations
 from respro.core.annotation import (
     _annotate_variant_in_feature,
     _classify_snp_consequence,
@@ -890,400 +889,148 @@ class TestFrameshiftAnnotation:
         assert ann.consequence == 'frameshift'
 
 
-# ─── _suppress_ruleless_overlap_annotations ───────────────────────────
+# ─── query codon source-feature binding ───────────────────────────────
 
-class TestSuppressRulelessOverlapAnnotations:
-    """Test filtering of spurious annotations from overlapping ruleless features."""
+class TestQueryCodonSourceBinding:
+    """
+    A query_ref_codon is only trusted when the annotating feature is the
+    feature that produced it during remap. A codon extracted from an
+    overlapping second feature's frame must never leak into another
+    feature's annotation (UL23/UL24 frame-mixup bug).
+    """
 
-    def test_overlapping_features_removes_ruleless_when_ruled_exists(self) -> None:
-        """
-        Variant at overlap of two features: one with rules, one without.
-        Result: only the ruled feature annotation survives.
-        """
-        # feature A: positions 0–29, with rules
-        feature_a = FeatureRecord(
-            id=1,
-            reference_id=1,
-            name='FeatureA',
-            protein='ProteinA',
-            start=0,
-            end=30,
-            strand='+',
-            codon_start=0,
-            nt_sequence='ATG' + 'AAA' * 9,
+    def _fwd_feature(self, feature_id: int = 1) -> FeatureRecord:
+        # ATG GGG TTT → M G F (9 nt, forward strand)
+        return FeatureRecord(
+            id=feature_id, reference_id=1, name='feature', protein='P',
+            start=0, end=9, strand='+', codon_start=0, nt_sequence='ATGGGGTTT',
         )
 
-        # feature B: positions 10–40, no rules
-        feature_b = FeatureRecord(
-            id=2,
-            reference_id=1,
-            name='FeatureB',
-            protein='ProteinB',
-            start=10,
-            end=40,
-            strand='+',
-            codon_start=0,
-            nt_sequence='ATG' + 'GGG' * 10,
+    def test_query_codon_trusted_when_feature_id_matches(self) -> None:
+        """Codon bound to this feature's id is used as codon context.
+
+        SNP-path semantics: ref_aa always derives from the internal CDS; the
+        query codon supplies ref_codon/alt_codon context.
+        """
+        feature = self._fwd_feature(feature_id=1)
+        # Internal codon 1 = 'GGG' → G; query codon 'AGG' → R (same AA here).
+        # Mutate base 2: internal 'GGG'→'GAG' (E); query 'AGG'→'AAG' (K).
+        var = VariantCall(
+            chrom='c', pos=4, ref='G', alt='A', allele_freq=0.9, depth=100,
+            query_ref_codon='AGG', query_codon_feature_id=1,
         )
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        # Variant at position 15, falls in both features
-        var = VariantCall(chrom='ref', pos=15, ref='A', alt='G', allele_freq=0.9, depth=100)
-        annotations = annotate_variants([var], [feature_a, feature_b])
+        assert ann.ref_aa == 'G'          # internal CDS
+        assert ann.ref_codon == 'AGG'     # query codon (bound)
+        assert ann.alt_codon == 'AAG'     # mutation applied to query codon
+        assert ann.alt_aa == 'K'
 
-        # Should have two annotations (one per feature)
-        assert len(annotations) == 2
-        feature_names = {ann.feature_name for ann in annotations}
-        assert feature_names == {'FeatureA', 'FeatureB'}
-
-        # Filter with FeatureA in rule_feature_names
-        rule_feature_names = {'FeatureA'}
-        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_feature_names)
-
-        # Only FeatureA should survive
-        assert len(filtered) == 1
-        assert filtered[0].feature_name == 'FeatureA'
-
-    def test_overlapping_features_keeps_both_when_neither_has_rules(self) -> None:
-        """
-        Variant at overlap of two features, neither with rules.
-        Result: both annotations survive (no ruled features to filter against).
-        """
-        # feature A: positions 0–30, no rules
-        feature_a = FeatureRecord(
-            id=1,
-            reference_id=1,
-            name='FeatureA',
-            protein='ProteinA',
-            start=0,
-            end=30,
-            strand='+',
-            codon_start=0,
-            nt_sequence='ATG' + 'AAA' * 9,
+    def test_query_codon_rejected_when_feature_id_differs(self) -> None:
+        """Codon from a different feature falls back to the internal CDS codon."""
+        feature = self._fwd_feature(feature_id=1)
+        # query_codon_feature_id=2 (e.g. an overlapping second feature's frame):
+        # internal codon 'GGG' → G must win over the foreign 'AGG' → R.
+        var = VariantCall(
+            chrom='c', pos=4, ref='G', alt='A', allele_freq=0.9, depth=100,
+            query_ref_codon='AGG', query_codon_feature_id=2,
         )
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        # feature B: positions 10–40, no rules
-        feature_b = FeatureRecord(
-            id=2,
-            reference_id=1,
-            name='FeatureB',
-            protein='ProteinB',
-            start=10,
-            end=40,
-            strand='+',
-            codon_start=0,
-            nt_sequence='ATG' + 'GGG' * 10,
+        assert ann.ref_aa == 'G'
+        assert ann.ref_codon == 'GGG'
+        assert ann.alt_codon == 'GAG'
+        assert ann.alt_aa == 'E'
+
+    def test_legacy_variant_without_feature_id_still_uses_query_codon(self) -> None:
+        """Default feature id (0) preserves the legacy single-source behaviour."""
+        feature = self._fwd_feature(feature_id=1)
+        var = VariantCall(
+            chrom='c', pos=4, ref='G', alt='A', allele_freq=0.9, depth=100,
+            query_ref_codon='AGG',
         )
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        # Variant at position 15, falls in both features
-        var = VariantCall(chrom='ref', pos=15, ref='A', alt='G', allele_freq=0.9, depth=100)
-        annotations = annotate_variants([var], [feature_a, feature_b])
+        assert ann.ref_aa == 'G'
+        assert ann.ref_codon == 'AGG'
+        assert ann.alt_codon == 'AAG'
+        assert ann.alt_aa == 'K'
 
-        # Should have two annotations
-        assert len(annotations) == 2
+    def test_snp_annotation_uses_internal_codon_for_foreign_query_codon(self) -> None:
+        """SNP path: foreign codon falls back to internal CDS for ref and alt codon."""
+        feature = self._fwd_feature(feature_id=1)
+        # Internal codon 1 = 'GGG'; mutation G→A at first base gives 'AGG' → R either way,
+        # so use a position where the frames differ: mutate base 2 (G→A → 'GAG' → E from
+        # internal 'GGG', but foreign codon 'AGG' with same mutation gives 'AAG' → K).
+        var = VariantCall(
+            chrom='c', pos=4, ref='G', alt='A', allele_freq=0.9, depth=100,
+            query_ref_codon='AGG', query_codon_feature_id=2,
+        )
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        # Filter with empty rule_feature_names (neither feature has rules)
-        rule_feature_names: set[str] = set()
-        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_feature_names)
+        assert ann.ref_aa == 'G'
+        assert ann.alt_aa == 'E'
+        assert ann.ref_codon == 'GGG'
+        assert ann.alt_codon == 'GAG'
 
-        # Both should survive since neither has rules
-        assert len(filtered) == 2
-        feature_names = {ann.feature_name for ann in filtered}
-        assert feature_names == {'FeatureA', 'FeatureB'}
+    def test_insertion_rejects_foreign_query_codon(self) -> None:
+        """Insertion anchor AA falls back to internal CDS for a foreign codon."""
+        feature = self._fwd_feature(feature_id=1)
+        var = VariantCall(
+            chrom='c', pos=5, ref='G', alt='GGGG', allele_freq=0.9, depth=100,
+            query_ref_codon='AGG', query_codon_feature_id=2,
+        )
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-    def test_single_feature_annotation_always_passes(self) -> None:
+        assert ann.ref_aa == 'G'   # internal, not R
+        assert ann.alt_aa == 'GG'
+
+    def test_frameshift_rejects_foreign_query_codon(self) -> None:
+        """Frameshift anchor AA falls back to internal CDS for a foreign codon."""
+        feature = self._fwd_feature(feature_id=1)
+        var = VariantCall(
+            chrom='c', pos=3, ref='GG', alt='G', allele_freq=0.9, depth=100,
+            query_ref_codon='AGG', query_codon_feature_id=2,
+        )
+        ann = _annotate_variant_in_feature(var, feature)[0]
+
+        assert ann.ref_aa == 'G'   # internal, not R
+        assert ann.alt_aa == 'GfsX'
+
+    def test_ul23_ul24_frame_mixup_falls_back_to_internal_codon(self) -> None:
+        """The real bug shape: a reverse-strand ruled feature annotated with a codon
+        extracted in an overlapping forward-strand feature's frame.
+
+        Remap emitted the same variant twice with identical (chrom, pos, ref, alt)
+        but different query codons, one per feature's reading frame; before codon
+        source binding, the UL24-frame codon leaked into the UL23 annotation and
+        produced a bogus ref AA next to the correct one.
         """
-        Single-feature annotations should always pass through unchanged,
-        regardless of rule_feature_names.
-        """
+        # UL23-like: reverse-strand ruled feature. Internal CDS codons:
+        # ATG GGG TTT AAA CCC GGG TTT AAA CCC GGG. Genomic = revcomp(nt_coding);
+        # genomic pos 13 → cds pos 16 → codon 5 ('GGG' → G), base 2.
+        nt_coding = 'ATGGGGTTTAAACCCGGGTTTAAACCCGGG'
         feature = FeatureRecord(
-            id=1,
-            reference_id=1,
-            name='FeatureX',
-            protein='ProteinX',
-            start=0,
-            end=30,
-            strand='+',
-            codon_start=0,
-            nt_sequence='ATG' + 'AAA' * 9,
+            id=1, reference_id=1, name='UL23', protein='UL23',
+            start=0, end=30, strand='-', codon_start=0,
+            nt_sequence=nt_coding,
         )
-
-        # Variant within single feature
-        var = VariantCall(chrom='ref', pos=5, ref='A', alt='G', allele_freq=0.9, depth=100)
-        annotations = annotate_variants([var], [feature])
-
-        # Should have one annotation
-        assert len(annotations) == 1
-
-        # Filter with FeatureX not in rule_feature_names
-        rule_feature_names: set[str] = set()
-        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_feature_names)
-
-        # Should survive unchanged
-        assert len(filtered) == 1
-        assert filtered[0].feature_name == 'FeatureX'
-
-    def test_variant_outside_all_features_passes(self) -> None:
-        """
-        Variants outside all features (feature_name='') should pass through unchanged.
-        """
-        feature = FeatureRecord(
-            id=1,
-            reference_id=1,
-            name='FeatureA',
-            protein='ProteinA',
-            start=0,
-            end=30,
-            strand='+',
-            codon_start=0,
-            nt_sequence='ATG' + 'AAA' * 9,
+        # The UL24-frame codon that leaked in during remap (forward-strand frame
+        # over the same genomic position). Its AA differs from the internal G.
+        var = VariantCall(
+            chrom='HSV_1_UL23', pos=13, ref='C', alt='T', allele_freq=0.97, depth=500,
+            query_ref_codon='GCA',   # UL24 frame, would translate to A (bogus ref AA)
+            query_codon_feature_id=2,  # bound to the UL24-like feature, not UL23
         )
+        ann = _annotate_variant_in_feature(var, feature)[0]
 
-        # Variant far outside the feature
-        var = VariantCall(chrom='ref', pos=100, ref='A', alt='G', allele_freq=0.9, depth=100)
-        annotations = annotate_variants([var], [feature])
-
-        # Should have one annotation with empty feature_name
-        assert len(annotations) == 1
-        assert annotations[0].feature_name == ''
-
-        # Filter with any rule_feature_names
-        rule_feature_names = {'FeatureA'}
-        filtered = _suppress_ruleless_overlap_annotations(annotations, rule_feature_names)
-
-        # Should survive unchanged
-        assert len(filtered) == 1
-        assert filtered[0].feature_name == ''
-
-    def test_overlapping_with_copied_variant_objects_keeps_only_ruled(self) -> None:
-        """
-        Overlapping annotations may carry copied VariantCall instances for one locus.
-        Result: suppression must still keep only ruled features.
-        """
-        ruled_variant = VariantCall(
-            chrom='ref', pos=2299, ref='A', alt='G', allele_freq=0.9, depth=100,
-        )
-        ruleless_variant = VariantCall(
-            chrom='ref', pos=2299, ref='A', alt='G', allele_freq=0.9, depth=100,
-        )
-
-        annotations = [
-            AnnotatedVariant(variant=ruled_variant, feature_name='gag-pol_5'),
-            AnnotatedVariant(variant=ruleless_variant, feature_name='gag-pol_6'),
-        ]
-
-        filtered = _suppress_ruleless_overlap_annotations(annotations, {'gag-pol_5'})
-
-        assert len(filtered) == 1
-        assert filtered[0].feature_name == 'gag-pol_5'
-
-    def test_ruleless_feature_overlapping_ruled_is_suppressed_across_distinct_loci(self) -> None:
-        """
-        A ruleless feature that overlaps a ruled feature must be suppressed entirely,
-        even when its variants land at loci the ruled feature does not cover.
-
-        This is the UL23/UL24 leak: UL23 (ruled, 46672-47803) and UL24 (ruleless,
-        47737-48547) overlap on 47737-47803. VCF variants in UL24's non-overlapping
-        tail (e.g. 47823, 47827) sit at loci no UL23 variant shares, so the old
-        locus-grouping suppression left them in the report. Feature-overlap-aware
-        suppression must drop every UL24 annotation because UL24 overlaps a ruled
-        feature on the same reference.
-        """
-        # Ruled feature: positions 0-30 (end exclusive).
-        ruled_feature = FeatureRecord(
-            id=1,
-            reference_id=1,
-            name='UL23',
-            protein='TK',
-            start=0,
-            end=30,
-            strand='+',
-            codon_start=0,
-            nt_sequence='ATG' + 'AAA' * 9,
-        )
-        # Ruleless feature: positions 20-60 — overlaps ruled_feature on 20-30 and
-        # extends beyond it, so a variant at position 40 is inside ruleless only.
-        ruleless_feature = FeatureRecord(
-            id=2,
-            reference_id=1,
-            name='UL24',
-            protein='UL24',
-            start=20,
-            end=60,
-            strand='+',
-            codon_start=0,
-            nt_sequence='ATG' + 'GGG' * 19,
-        )
-
-        # Variant inside the ruled feature (pos 5) and a variant inside the ruleless
-        # feature's non-overlapping tail (pos 40) — distinct loci, no shared group.
-        ruled_var = VariantCall(chrom='ref', pos=5, ref='A', alt='G', allele_freq=0.9, depth=100)
-        ruleless_var = VariantCall(chrom='ref', pos=40, ref='G', alt='A', allele_freq=0.9, depth=100)
-        annotations = annotate_variants([ruled_var, ruleless_var], [ruled_feature, ruleless_feature])
-
-        # One annotation per variant/feature hit; the ruleless variant only hits UL24.
-        feature_names = {ann.feature_name for ann in annotations}
-        assert feature_names == {'UL23', 'UL24'}
-
-        filtered = _suppress_ruleless_overlap_annotations(
-            annotations, {'UL23'}, features=[ruled_feature, ruleless_feature],
-        )
-
-        # UL24 must be suppressed entirely because it overlaps the ruled UL23.
-        surviving = {ann.feature_name for ann in filtered}
-        assert surviving == {'UL23'}
-        assert 'UL24' not in surviving
-
-    def test_ruleless_feature_not_overlapping_ruled_is_kept(self) -> None:
-        """
-        A ruleless feature that does NOT overlap any ruled feature is retained.
-
-        Feature-overlap-aware suppression must only drop ruleless features that
-        actually overlap a ruled feature on the same reference; isolated ruleless
-        features stay so their mutations still appear in the report.
-        """
-        # Ruled feature: positions 0-30.
-        ruled_feature = FeatureRecord(
-            id=1,
-            reference_id=1,
-            name='UL23',
-            protein='TK',
-            start=0,
-            end=30,
-            strand='+',
-            codon_start=0,
-            nt_sequence='ATG' + 'AAA' * 9,
-        )
-        # Ruleless feature: positions 100-130 — disjoint from the ruled feature.
-        ruleless_feature = FeatureRecord(
-            id=2,
-            reference_id=1,
-            name='UL30',
-            protein='Pol',
-            start=100,
-            end=130,
-            strand='+',
-            codon_start=0,
-            nt_sequence='ATG' + 'GGG' * 9,
-        )
-
-        ruled_var = VariantCall(chrom='ref', pos=5, ref='A', alt='G', allele_freq=0.9, depth=100)
-        ruleless_var = VariantCall(chrom='ref', pos=110, ref='G', alt='A', allele_freq=0.9, depth=100)
-        annotations = annotate_variants([ruled_var, ruleless_var], [ruled_feature, ruleless_feature])
-
-        filtered = _suppress_ruleless_overlap_annotations(
-            annotations, {'UL23'}, features=[ruled_feature, ruleless_feature],
-        )
-
-        surviving = {ann.feature_name for ann in filtered}
-        assert surviving == {'UL23', 'UL30'}
-
-    def test_ruleless_overlap_scoped_per_reference_by_chrom(self) -> None:
-        """
-        Feature-overlap suppression is scoped per reference via chrom.
-
-        Two references share no coordinate space, so a ruled feature on refA must not
-        suppress a ruleless feature on refB even if their genomic spans happen to
-        coincide numerically. The scope key is the annotation's chrom (== query_name),
-        unique per reference.
-        """
-        # refA: ruled feature 0-30.
-        ruled_feature_a = FeatureRecord(
-            id=1, reference_id=1, name='gagA', protein='GagA',
-            start=0, end=30, strand='+', codon_start=0, nt_sequence='ATG' + 'AAA' * 9,
-        )
-        # refB: ruleless feature 0-30 — same numeric span, different reference.
-        ruleless_feature_b = FeatureRecord(
-            id=2, reference_id=2, name='gagB', protein='GagB',
-            start=0, end=30, strand='+', codon_start=0, nt_sequence='ATG' + 'GGG' * 9,
-        )
-
-        ann_a = annotate_variants(
-            [VariantCall(chrom='chrom_a', pos=5, ref='A', alt='G', allele_freq=0.9, depth=100)],
-            [ruled_feature_a],
-        )
-        ann_b = annotate_variants(
-            [VariantCall(chrom='chrom_b', pos=5, ref='G', alt='A', allele_freq=0.9, depth=100)],
-            [ruleless_feature_b],
-        )
-        annotations = ann_a + ann_b
-
-        filtered = _suppress_ruleless_overlap_annotations(
-            annotations, {'gagA'},
-            features=[ruled_feature_a, ruleless_feature_b],
-        )
-
-        surviving = {ann.feature_name for ann in filtered}
-        # gagB is ruleless but on a different reference (different chrom) — must survive.
-        assert surviving == {'gagA', 'gagB'}
-
-    def test_same_name_ruleless_feature_on_other_reference_not_suppressed(self) -> None:
-        """
-        A ruleless feature name suppressed on refA must not be suppressed on refB.
-
-        The VCF multi-reference path calls ``_suppress_ruleless_overlap_annotations``
-        once per reference, passing only that reference's features plus the chroms
-        belonging to that reference as ``scope_chroms``. When refA has a ruled UL23
-        overlapping a ruleless UL24, the name ``UL24`` is suppressed — but only for
-        annotations on refA's chroms. A standalone ruleless UL24 on refB (same name,
-        no ruled overlap on refB) must survive, because dropping it by name globally
-        would silently erase a legitimate feature's mutations from a multi-pathogen
-        report (the HSV-1 UL23 + HCMV UL24 panel case).
-        """
-        # refA: ruled UL23 (0-30) + ruleless UL24 (20-60) overlapping UL23.
-        ruled_ul23_a = FeatureRecord(
-            id=1, reference_id=1, name='UL23', protein='TK',
-            start=0, end=30, strand='+', codon_start=0, nt_sequence='ATG' + 'AAA' * 9,
-        )
-        ruleless_ul24_a = FeatureRecord(
-            id=2, reference_id=1, name='UL24', protein='UL24',
-            start=20, end=60, strand='+', codon_start=0, nt_sequence='ATG' + 'GGG' * 19,
-        )
-        # refA UL24 annotation (chrom_a) — should be suppressed (overlaps ruled UL23).
-        # refB UL24 annotation (chrom_b) — should survive (standalone on refB).
-        ann_a = AnnotatedVariant(
-            variant=VariantCall(chrom='chrom_a', pos=25, ref='G', alt='A', allele_freq=0.9, depth=100),
-            feature_name='UL24',
-        )
-        ann_b = AnnotatedVariant(
-            variant=VariantCall(chrom='chrom_b', pos=5, ref='G', alt='A', allele_freq=0.9, depth=100),
-            feature_name='UL24',
-        )
-        annotations = [ann_a, ann_b]
-
-        # Simulate the VCF loop's refA iteration: refA features + refA rule names +
-        # refA chroms as the scope.
-        filtered = _suppress_ruleless_overlap_annotations(
-            annotations, {'UL23'},
-            features=[ruled_ul23_a, ruleless_ul24_a],
-            scope_chroms={'chrom_a'},
-        )
-
-        surviving_by_chrom = {(ann.feature_name, ann.variant.chrom) for ann in filtered}
-        # refA's UL24 dropped; refB's UL24 retained.
-        assert surviving_by_chrom == {('UL24', 'chrom_b')}
-
-    def test_scope_chroms_none_suppresses_globally_by_name(self) -> None:
-        """
-        When ``scope_chroms`` is None (FASTA single-reference path), feature-overlap
-        suppression applies by feature name across all annotations — the legacy
-        behaviour, since a single reference cannot have cross-reference collisions.
-        """
-        ruled_ul23 = FeatureRecord(
-            id=1, reference_id=1, name='UL23', protein='TK',
-            start=0, end=30, strand='+', codon_start=0, nt_sequence='ATG' + 'AAA' * 9,
-        )
-        ruleless_ul24 = FeatureRecord(
-            id=2, reference_id=1, name='UL24', protein='UL24',
-            start=20, end=60, strand='+', codon_start=0, nt_sequence='ATG' + 'GGG' * 19,
-        )
-        ann = AnnotatedVariant(
-            variant=VariantCall(chrom='ref', pos=25, ref='G', alt='A', allele_freq=0.9, depth=100),
-            feature_name='UL24',
-        )
-        filtered = _suppress_ruleless_overlap_annotations(
-            [ann], {'UL23'}, features=[ruled_ul23, ruleless_ul24],
-        )
-        assert filtered == []
+        # The foreign codon is rejected; the internal CDS codon GGG → G wins.
+        # (Pre-fix this produced ref_aa 'A' from the foreign GCA codon.)
+        assert ann.ref_codon == 'GGG'
+        assert ann.alt_codon == 'GAG'
+        assert ann.ref_aa == 'G'
+        assert ann.alt_aa == 'E'
+        assert ann.consequence == 'missense'
 
 
 # ─── Mid-codon in-frame indel splitting ───────────────────────────────

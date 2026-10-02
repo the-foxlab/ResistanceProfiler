@@ -617,6 +617,7 @@ class TestCacheIntronRoundTrip:
                 'VALUES (?, ?, ?, ?)',
                 (feature.id, seg.segment_index, seg.start, seg.end),
             )
+        conn.execute('UPDATE feature SET has_rules = 1 WHERE id = ?', (feature.id,))
         conn.commit()
 
         intron = 'N' * 30
@@ -665,6 +666,7 @@ class TestCacheIntronRoundTrip:
             'nt_sequence, aa_sequence) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             (1, 'gag', 'Gag', 0, 30, '+', 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC', 'MKAFGPKFGP'),
         )
+        conn.execute('UPDATE feature SET has_rules = 1 WHERE id = 1')
         conn.commit()
 
         feature = FeatureRecord(

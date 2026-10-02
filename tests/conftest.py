@@ -160,6 +160,8 @@ def project_db(tmp_path: Path) -> Path:
         'VALUES (?, ?, ?, ?, ?, ?)',
         (1, 1, 1, 'K', 'E', 'resistant'),
     )
+    # Mirror the import contract: inserting a rule flags the feature.
+    conn.execute('UPDATE feature SET has_rules = 1 WHERE id = 1')
 
     conn.commit()
     conn.close()

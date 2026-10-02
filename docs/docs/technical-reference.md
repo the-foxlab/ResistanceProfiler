@@ -848,18 +848,25 @@ A warning is emitted when the anchor amino acids differ.
 position and drug as an `INS_any` wildcard rule, the wildcard is suppressed to
 avoid redundant hits.
 
-### 7.2 Ruleless feature suppression
+### 7.2 Rules-only feature alignment
 
-Features without resistance rules that overlap a ruled feature on the same
-reference are **suppressed** — their annotations are dropped. This prevents
-ruleless features (e.g. an overlapping upstream ORF) from shadowing variants
-that belong to the ruled feature. Overlap is evaluated per reference using
-half-open interval algebra: $[s_1, e_1) \cap [s_2, e_2) \ne \emptyset$ when
-$s_1 < e_2 \wedge s_2 < e_1$.
+Only features that carry at least one resistance rule participate in alignment
+and annotation. The `feature.has_rules` flag is set transactionally when a rule
+targeting the feature is imported and cleared never — a feature becomes
+alignable the moment a rule is added and stays alignable while the rule
+exists. Alignment (mappy), variant remapping, and annotation all operate
+exclusively on `has_rules = 1` features.
 
-A second locus-group suppression handles the case where a single variant lands
-inside both a ruled and a ruleless feature: only the ruled-feature annotation
-is kept.
+A VCF CHROM whose reference FASTA record aligns to no rule-backed feature is an
+**orphan**: its record is dropped at query resolution with a warning, its
+variants are not remapped, and the CHROM is reported as dropped rather than
+profiled. A run in which no matched reference carries rules fails with a
+`ClickException`.
+
+Because ruleless features are never aligned, no annotation from a ruleless
+feature can enter the pipeline — there is no suppression step and no risk of a
+ruleless feature shadowing a ruled feature's variants (e.g. an overlapping
+upstream ORF).
 
 ---
 

@@ -73,28 +73,19 @@ def match_query_to_features(
 def load_features(
     conn: sqlite3.Connection,
     reference_id: int | None = None,
-    *,
-    with_rules: bool = False,
 ) -> list[FeatureRecord]:
     """
-    Load annotated CDS features, optionally restricted to those carrying resistance rules.
+    Load rule-backed CDS features (``has_rules = 1``).
 
-    When ``with_rules`` is False (the default) all annotated CDS features are returned,
-    including those without resistance rules. This is used by multi-record VCF query
-    resolution so that FASTA records aligning to a reference whose features carry no
-    rules are still detected (orphan case) and reported, rather than silently dropped.
-
-    When ``with_rules`` is True, only features that have at least one resistance rule
-    are returned, via a ``JOIN resistance_rule`` clause (``SELECT DISTINCT`` deduplicates
-    features that have multiple rules). This is the FASTA-mode semantics where ruleless
-    features are irrelevant.
+    Only features that carry at least one resistance rule are ever aligned
+    against. Features become alignable when a rule targeting them is imported
+    (see ``respro.db.rules_import``); a query record that aligns to no ruled
+    feature is dropped with a warning by the caller (orphan reference).
 
     :param conn: project database connection
     :param reference_id: optional internal reference id filter
-    :param with_rules: when True, load only features that have at least one resistance rule
-    :return: list of FeatureRecord objects (ruled and, by default, ruleless)
+    :return: list of rule-backed FeatureRecord objects
     """
-    rule_join = 'JOIN resistance_rule rr ON rr.feature_id = g.id ' if with_rules else ''
     if reference_id is None:
         rows = conn.execute(
             'SELECT DISTINCT g.id, g.reference_id, g.name, g.protein, '
@@ -102,7 +93,7 @@ def load_features(
             'r.accession AS reference_accession '
             'FROM feature g '
             'JOIN reference r ON r.id = g.reference_id '
-            f'{rule_join}'
+            'WHERE g.has_rules = 1 '
             'ORDER BY g.reference_id, g.start',
         ).fetchall()
     else:
@@ -112,8 +103,7 @@ def load_features(
             'r.accession AS reference_accession '
             'FROM feature g '
             'JOIN reference r ON r.id = g.reference_id '
-            f'{rule_join}'
-            'WHERE g.reference_id = ? '
+            'WHERE g.has_rules = 1 AND g.reference_id = ? '
             'ORDER BY g.start',
             (reference_id,),
         ).fetchall()

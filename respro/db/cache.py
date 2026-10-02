@@ -89,7 +89,7 @@ def load_cached_mappings(
         'FROM query_feature_mapping qgm '
         'JOIN feature g ON g.id = qgm.feature_id '
         'JOIN reference r ON r.id = g.reference_id '
-        'WHERE qgm.query_ref_id = ?',
+        'WHERE qgm.query_ref_id = ? AND g.has_rules = 1',
         (qref['id'],),
     ).fetchall()
 

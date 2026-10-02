@@ -1753,7 +1753,7 @@ class TestGenbankAliasFallbacks:
         assert len(by_reference) == 1
         assert len(by_reference[0].segments) == 2
 
-        with_rules = load_features(conn, ref_id, with_rules=True)
+        with_rules = load_features(conn, ref_id)
         assert len(with_rules) == 1
         assert len(with_rules[0].segments) == 2
 

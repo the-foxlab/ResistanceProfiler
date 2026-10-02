@@ -69,16 +69,20 @@ def load_feature_segments_by_feature_id(
 
 def load_features_for_reference(conn: sqlite3.Connection, reference_id: int) -> list[FeatureRecord]:
     """
-    Load all feature records for a given reference.
+    Load rule-backed feature records (``has_rules = 1``) for a given reference.
+
+    Only features that carry at least one resistance rule are ever aligned or
+    profiled against; features become rule-backed when a rule targeting them is
+    imported (see ``respro.db.rules_import``).
 
     :param conn: SQLite database connection
     :param reference_id: ID of the reference
-    :return: list of FeatureRecord objects
+    :return: list of rule-backed FeatureRecord objects
     """
     rows = conn.execute(
         'SELECT id, reference_id, name, protein, start, end, strand, codon_start, nt_sequence, aa_sequence, '
         'feature_type, parent_feature_name '
-        'FROM feature WHERE reference_id = ? ORDER BY start',
+        'FROM feature WHERE reference_id = ? AND has_rules = 1 ORDER BY start',
         (reference_id,),
     ).fetchall()
 
