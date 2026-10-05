@@ -79,7 +79,7 @@ export function AboutTab({ setActiveMode, onStartTour, contactEmail }) {
   };
 
   return (
-    <article className="card about-tile">
+    <article className="about-tile">
       <section className="about-hero" tabIndex={0}>
         <div className="about-hero-content">
           <p className="about-hero-kicker">Pathogen-agnostic antiviral resistance profiling</p>

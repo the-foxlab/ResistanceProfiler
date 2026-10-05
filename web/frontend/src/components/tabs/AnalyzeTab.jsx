@@ -1006,7 +1006,7 @@ export function AnalyzeTab({
 
       {/* Report preview in its own tile below the analyze inputs/actions */}
       {analyzeSubMode !== 'batch' && inlineReportPath ? (
-        <article className="card full-width-tile tab-primary-tile">
+        <article className="full-width-tile tab-primary-tile">
           <iframe
             ref={reportFrameRef}
             title="ResistanceProfiler report"
