@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "geist": "^1.7.2",
     "plotly.js-dist-min": "^4.0.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

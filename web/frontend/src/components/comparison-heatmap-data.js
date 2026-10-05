@@ -5,18 +5,19 @@
  * Same input always produces the same output.
  */
 
-/** Predefined consequence-to-color mapping. */
+/** Predefined consequence-to-color mapping. Desaturated, colour-blind
+ * friendly tones; mirrors the semantic palette used across the app. */
 export const CONSEQUENCE_COLORS = {
-  missense: '#f39c12',
-  synonymous: '#27ae60',
-  stop_gained: '#1d1e1f',
-  stop_loss: '#3e0c8d',
-  start_loss: '#9e821d',
-  frameshift: '#e74c3c',
-  insertion: '#16a085',
-  deletion: '#2980b9',
-  splice_region: '#95a5a6',
-  unknown: '#bdc3c7',
+  missense: '#d97706',
+  synonymous: '#16a34a',
+  stop_gained: '#18181b',
+  stop_loss: '#6d28d9',
+  start_loss: '#854d0e',
+  frameshift: '#dc2626',
+  insertion: '#0d9488',
+  deletion: '#2563eb',
+  splice_region: '#a1a1aa',
+  unknown: '#d4d4d8',
 };
 
 /**
@@ -26,7 +27,7 @@ export const CONSEQUENCE_COLORS = {
  * :return: hex color string
  */
 export function consequenceColor(ctype) {
-  return CONSEQUENCE_COLORS[ctype] || '#cccccc';
+  return CONSEQUENCE_COLORS[ctype] || '#e4e4e7';
 }
 
 /**

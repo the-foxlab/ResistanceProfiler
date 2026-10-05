@@ -4,9 +4,12 @@ import { render, screen } from '@testing-library/react';
 import { AppFooter } from './AppFooter';
 
 describe('AppFooter', () => {
-  // The footer renders optional Legal notice and Contact links plus version spans.
-  // Each neighbour pair is separated by a `·` only when both are present, so the
-  // separator count equals the number of adjacent present items minus one.
+  // The footer renders the fixed project links (GitHub, Fuchs Lab) at the head
+  // of the first row, followed by optional Legal notice and Contact links, plus
+  // version spans on the second row. Each neighbour pair is separated by a `·`
+  // only when both are present, so the separator count equals the number of
+  // adjacent present items minus one. The two project links always contribute
+  // one separator between them, plus one before the next item when present.
 
   it('renders nothing but the footer shell when all optional props are absent', () => {
     render(<AppFooter />);
@@ -43,23 +46,28 @@ describe('AppFooter', () => {
         webVersion="0.1.0"
       />,
     );
+    // First row: GitHub · Fuchs Lab · Legal notice · Contact → 3 separators.
+    // Second row: CLI · WebApp → 1 separator.
     const separators = container.querySelectorAll('.app-footer-sep');
-    expect(separators).toHaveLength(2);
+    expect(separators).toHaveLength(4);
   });
 
   it('places a separator between legal and contact when versions are absent', () => {
     const { container } = render(
       <AppFooter legalLink="https://example.org/legal" contactEmail="support@example.org" />,
     );
+    // First row: GitHub · Fuchs Lab · Legal notice · Contact → 3 separators.
     const separators = container.querySelectorAll('.app-footer-sep');
-    expect(separators).toHaveLength(1);
+    expect(separators).toHaveLength(3);
   });
 
   it('places no separator between the link and version groups', () => {
     const { container } = render(
       <AppFooter contactEmail="support@example.org" cliVersion="1.2.3" />,
     );
+    // First row: GitHub · Fuchs Lab · Contact → 2 separators; second row has
+    // a single version span, so no separator there.
     const separators = container.querySelectorAll('.app-footer-sep');
-    expect(separators).toHaveLength(0);
+    expect(separators).toHaveLength(2);
   });
 });

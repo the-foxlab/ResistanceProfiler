@@ -2,8 +2,6 @@ import { useEffect, useState } from 'react';
 import logoSrc from '../assets/logo.svg';
 import aboutIconSrc from '../assets/icon-about.svg';
 import databaseIconSrc from '../assets/icon-database.svg';
-import githubIconSrc from '../assets/icon-github.svg';
-import websiteIconSrc from '../assets/website.svg';
 import mutationsIconSrc from '../assets/search.svg';
 import homeIconSrc from '../assets/home.svg';
 import reportIconSrc from '../assets/reports.svg';
@@ -238,14 +236,6 @@ export function DashboardView({
               selectId="topbar-db-select"
               className="topbar-db-bar"
             />
-          </div>
-          <div className="page-links" aria-label="Project links">
-            <a href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noreferrer" title="ResistanceProfiler on GitHub" aria-label="ResistanceProfiler on GitHub">
-              <img className="page-link-icon" src={githubIconSrc} alt="" aria-hidden="true" />
-            </a>
-            <a href="https://www.uniklinik-freiburg.de/virologie-en/research/research-teams/jonas-fuchs-team.html" target="_blank" rel="noreferrer" title="Jonas Fuchs Team website" aria-label="Jonas Fuchs Team website">
-              <img className="page-link-icon website-link-icon" src={websiteIconSrc} alt="" aria-hidden="true" />
-            </a>
           </div>
         </div>
 

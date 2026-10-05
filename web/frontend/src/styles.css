@@ -1,23 +1,27 @@
 :root {
   /* ── Unified design tokens (kept byte-identical with report.css) ─────────── */
-  --ink: #1b2a3a;
-  --muted: #5b7187;
-  --muted-strong: #3e556b;
-  --paper: #eef3f8;
-  --paper-soft: #f5f8fc;
-  --surface: #fbfdff;
+  /* Minimalist neutral system: flat zinc/slate surfaces, one desaturated
+     teal accent (brand colour from the logo), borders over shadows. Shared
+     verbatim with the report CSS so the embedded report iframe matches the
+     webapp shell. */
+  --ink: #18181b;
+  --muted: #71717a;
+  --muted-strong: #52525b;
+  --paper: #fafafa;
+  --paper-soft: #f4f4f5;
+  --surface: #ffffff;
   --surface-strong: #ffffff;
   --accent: #0f766e;
-  --accent-hover: #0a5a53;
-  --accent-tint: #e6f4f1;
+  --accent-hover: #115e59;
+  --accent-tint: #f0fdfa;
   --on-accent: #ffffff;
-  --accent-soft: #d8eee9;
-  --line: #dde6ee;
-  --line-soft: #e9eef3;
-  --line-strong: #b7c8d6;
-  --table-surface: #fcfeff;
-  --table-head-surface: #f1f6fa;
-  --table-line: #e6edf2;
+  --accent-soft: #ccfbf1;
+  --line: #e4e4e7;
+  --line-soft: #ececee;
+  --line-strong: #d4d4d8;
+  --table-surface: #ffffff;
+  --table-head-surface: #fafafa;
+  --table-line: #e4e4e7;
   --font-size-xs: 0.72rem;
   --font-size-sm: 0.78rem;
   --font-size-md: 0.86rem;
@@ -33,13 +37,15 @@
   --font-size-button: var(--font-size-sm);
   --analysis-slider-width: 21.5rem;
   --analysis-progress-width: 28rem;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 18px;
-  --shadow-sm: 0 1px 2px rgba(16, 32, 48, 0.04), 0 1px 3px rgba(16, 32, 48, 0.06);
-  --shadow: 0 2px 6px rgba(16, 32, 48, 0.04), 0 8px 22px rgba(16, 32, 48, 0.06);
-  --shadow-lg: 0 6px 18px rgba(16, 32, 48, 0.08), 0 18px 42px rgba(16, 32, 48, 0.10);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --shadow-sm: 0 1px 2px rgba(24, 24, 27, 0.05);
+  --shadow: 0 1px 3px rgba(24, 24, 27, 0.07), 0 4px 12px rgba(24, 24, 27, 0.05);
+  --shadow-lg: 0 4px 12px rgba(24, 24, 27, 0.10), 0 12px 32px rgba(24, 24, 27, 0.12);
+  --font-sans: 'Geist', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace;
   /* Semantic severity colours — shared by badges, pills, chips, metric tiers */
   --resistant-bg: #fee2e2;
   --resistant-text: #991b1b;
@@ -70,13 +76,13 @@
   --info-bg: #dbeafe;
   --info-text: #1d4ed8;
   --info-border: #bcd5fb;
-  --neutral-bg: #f1f5f9;
-  --neutral-text: #3f5567;
-  --neutral-border: #d3dde6;
+  --neutral-bg: #f4f4f5;
+  --neutral-text: #52525b;
+  --neutral-border: #d4d4d8;
   /* Webapp-only structural tokens (not used by the report) */
-  --topbar-logo-width: 380px;
-  --topbar-logo-height: 55px;
-  --topbar-link-icon-size: 32px;
+  --topbar-logo-width: 300px;
+  --topbar-logo-height: 46px;
+  --topbar-link-icon-size: 18px;
   --sidebar-width: 118px;
   --sidebar-logo-gap: 5px;
   /* Mobile-responsive tokens (webapp-only; no report counterpart).
@@ -101,23 +107,21 @@
 html {
   min-height: 100%;
   background-color: var(--paper);
-  background-image: linear-gradient(180deg, #dbe4ec 0 74px, var(--paper) 74px 100%);
   overflow-x: hidden;
 }
 
 body {
   margin: 0;
   color: var(--ink);
-  font-family: 'Source Sans 3', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-sans);
   font-size: var(--font-size-body);
   line-height: 1.55;
-  background:
-    radial-gradient(circle at 10% 0%, #e6eef5 0%, transparent 38%),
-    radial-gradient(circle at 100% 18%, #e9f4f1 0%, transparent 34%),
-    linear-gradient(180deg, #f5f8fc, var(--paper));
   background-color: var(--paper);
   min-height: 100%;
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  /* Scientific data UI: equal-width digits keep tables and metrics aligned. */
+  font-variant-numeric: tabular-nums;
 }
 
 h1 {
@@ -153,8 +157,9 @@ button,
   border-radius: var(--radius-md);
   background: var(--accent);
   color: var(--on-accent);
+  font-family: var(--font-sans);
   font-size: var(--font-size-button);
-  font-weight: 700;
+  font-weight: 600;
   padding: 0.55rem 0.9rem;
   cursor: pointer;
   text-decoration: none;
@@ -180,11 +185,13 @@ button:disabled {
 input,
 select {
   width: 100%;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
   padding: 0.5rem 0.65rem;
   background: var(--surface-strong);
   color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-button);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -221,10 +228,10 @@ th {
   top: 0;
   background: var(--table-head-surface);
   color: var(--muted);
-  font-weight: 700;
+  font-weight: 600;
   font-size: var(--font-size-xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
 
 .about-tile,
@@ -263,9 +270,7 @@ th {
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
   padding: clamp(1.75rem, 2.2vw, 2.1rem);
-  background:
-    radial-gradient(circle at 88% 18%, rgba(15, 139, 124, 0.10), rgba(15, 139, 124, 0) 46%),
-    linear-gradient(125deg, var(--surface-strong), #f5fbff 46%, var(--accent-tint));
+  background: var(--surface-strong);
   box-shadow: var(--shadow);
 }
 
@@ -301,9 +306,9 @@ th {
 .about-hero-kicker {
   margin: 0;
   color: var(--accent);
-  font-size: 0.84rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -568,7 +573,7 @@ th {
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--paper-soft);
-  font-family: 'Fira Code', 'JetBrains Mono', 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 0.75rem;
   color: var(--muted-strong);
   padding: 0.12rem 0.48rem;
@@ -636,9 +641,9 @@ th {
 }
 
 .about-operator-pill-not {
-  background: #f2ebff;
-  color: #5f45a6;
-  border: 1px solid #d8c8ff;
+  background: var(--paper-soft);
+  color: var(--muted-strong);
+  border: 1px solid var(--line-strong);
 }
 
 .about-operator-pill-xor {
@@ -653,7 +658,7 @@ th {
   background: var(--surface-strong);
   padding: 0.12rem 0.38rem;
   color: var(--muted-strong);
-  font-family: 'Fira Code', 'JetBrains Mono', 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
 }
 
@@ -685,9 +690,9 @@ th {
 }
 
 .about-terminal {
-  border: 1px solid #243f5f;
+  border: 1px solid #27272a;
   border-radius: var(--radius-md);
-  background: linear-gradient(180deg, #0d2742, #112d4a);
+  background: #18181b;
   overflow: hidden;
 }
 
@@ -696,15 +701,15 @@ th {
   align-items: center;
   justify-content: space-between;
   padding: 0.55rem 0.65rem;
-  border-bottom: 1px solid rgba(183, 209, 236, 0.18);
-  background: rgba(10, 32, 54, 0.72);
+  border-bottom: 1px solid #27272a;
+  background: #1f1f23;
 }
 
 .about-terminal-header p {
   margin: 0;
-  color: #d7e7f7;
+  color: #a1a1aa;
   font-size: 0.75rem;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
@@ -718,28 +723,28 @@ th {
 
 .about-terminal code {
   white-space: pre;
-  color: #e6f2ff;
-  font-family: 'Fira Code', 'JetBrains Mono', 'Courier New', monospace;
+  color: #e4e4e7;
+  font-family: var(--font-mono);
   font-size: 0.76rem;
 }
 
 .about-terminal-prompt {
-  color: #5de2aa;
+  color: #4ade80;
   margin-right: 0.28rem;
 }
 
 .about-copy-btn {
-  border: 1px solid #c8d8ea;
-  background: var(--surface-strong);
-  color: #1b4364;
+  border: 1px solid #3f3f46;
+  background: transparent;
+  color: #d4d4d8;
   font-size: 0.72rem;
-  font-weight: 700;
+  font-weight: 600;
   border-radius: var(--radius-sm);
   padding: 0.26rem 0.5rem;
 }
 
 .about-copy-btn:hover {
-  background: #eef6ff;
+  background: #27272a;
 }
 
 .about-cli-side {
@@ -784,7 +789,7 @@ th {
 
 .about-mini-command code {
   color: var(--muted-strong);
-  font-family: 'Fira Code', 'JetBrains Mono', 'Courier New', monospace;
+  font-family: var(--font-mono);
   font-size: 0.72rem;
   overflow-wrap: anywhere;
 }
@@ -863,6 +868,12 @@ th {
   min-width: 118px;
 }
 
+/* The Analyze action closes the form: right-aligned so the eye travels
+   down the input bands and lands on the button. */
+.profile-analyze-row {
+  justify-content: flex-end;
+}
+
 .analyze-status {
   margin: 0.6rem 0 0 auto;
   max-width: 85%;
@@ -875,6 +886,9 @@ th {
   max-width: 100%;
   object-fit: contain;
   object-position: left center;
+  /* Slightly dimmed so the logo recedes behind the sidebar nav instead of
+     competing with it for visual weight. */
+  opacity: 0.92;
 }
 
 .brand-logo-wrap {
@@ -898,7 +912,6 @@ th {
   border-radius: var(--radius-lg);
   background: var(--surface);
   padding: 1.1rem;
-  box-shadow: var(--shadow);
 }
 
 .dashboard-main {
@@ -989,7 +1002,6 @@ th {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface-strong);
-  box-shadow: var(--shadow-sm);
   min-width: 0;
 }
 
@@ -1048,10 +1060,11 @@ th {
 
 .database-section-heading {
   margin: 0;
-  font-size: var(--font-size-xl);
-  font-weight: 700;
-  color: var(--ink);
-  letter-spacing: -0.01em;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .database-phenotype-switch {
@@ -1251,9 +1264,9 @@ th {
   min-width: 6.5rem;
   padding: 0.2rem 0.6rem;
   border-radius: 999px;
-  background: var(--accent);
-  color: var(--on-accent);
-  border: 1px solid var(--accent-hover);
+  background: var(--accent-tint);
+  color: var(--accent);
+  border: 1px solid var(--accent-soft);
   font-size: var(--font-size-xs);
   font-weight: 600;
   white-space: nowrap;
@@ -1436,7 +1449,7 @@ th {
   height: var(--topbar-link-icon-size);
   object-fit: contain;
   display: block;
-  opacity: 0.75;
+  opacity: 0.85;
   transition: opacity 0.18s ease, color 0.18s ease;
 }
 
@@ -1447,7 +1460,7 @@ th {
   justify-content: flex-end;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 0.65rem;
+  gap: 0.9rem;
 }
 
 .page-links a {
@@ -1460,14 +1473,14 @@ th {
   border-radius: 0;
   padding: 0;
   background: transparent;
-  justify-content: center;
-  color: var(--ink);
+  color: var(--muted);
+  transition: color 0.15s ease;
 }
 
 .page-links a:hover {
   background: transparent;
   border: none;
-  color: var(--ink);
+  color: var(--accent);
 }
 
 .page-links a:hover .page-link-icon {
@@ -2027,7 +2040,7 @@ th {
 
 .upload-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), #12917f);
+  background: var(--accent);
   transition: width 0.2s ease;
 }
 
@@ -2059,8 +2072,64 @@ th {
   margin-top: 0.55rem;
 }
 
+/* ── Analyze form hierarchy (single-sample VCF mode) ───────────────────
+   The six fields are regrouped visually without changing the DOM: the three
+   file inputs form the primary "Input files" band (larger, prominent), and
+   sample name + the two cutoffs form a secondary "Sample settings" band
+   (narrower, muted). Named grid areas assign each data-tour-target label
+   to its band; the labels themselves keep their order for keyboard/tab
+   flow and the guided tour. */
 .profile-upload-row-vcf {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: 1.2fr 1.2fr 1fr;
+  grid-template-areas:
+    'vcf-file vcf-reference vcf-bam'
+    'vcf-sample vcf-freq vcf-cov';
+  row-gap: 1rem;
+}
+
+.profile-upload-row-vcf > label[data-tour-target='vcf-file'] { grid-area: vcf-file; }
+.profile-upload-row-vcf > label[data-tour-target='vcf-reference'] { grid-area: vcf-reference; }
+.profile-upload-row-vcf > label[data-tour-target='vcf-bam'] { grid-area: vcf-bam; }
+.profile-upload-row-vcf > label[data-tour-target='vcf-sample-name'] { grid-area: vcf-sample; }
+.profile-upload-row-vcf > label[data-tour-target='vcf-frequency-cutoff'] { grid-area: vcf-freq; }
+.profile-upload-row-vcf > label[data-tour-target='vcf-coverage-cutoff'] { grid-area: vcf-cov; }
+
+/* Secondary band: sample name + cutoffs read as settings, not inputs. */
+.profile-upload-row-vcf > label[data-tour-target='vcf-sample-name'],
+.profile-upload-row-vcf > label[data-tour-target='vcf-frequency-cutoff'],
+.profile-upload-row-vcf > label[data-tour-target='vcf-coverage-cutoff'] {
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--line);
+}
+
+.profile-upload-row-vcf > label[data-tour-target='vcf-sample-name'] input,
+.profile-upload-row-vcf > label[data-tour-target='vcf-frequency-cutoff'] input,
+.profile-upload-row-vcf > label[data-tour-target='vcf-coverage-cutoff'] input {
+  min-height: 2.4rem;
+  background: var(--surface);
+}
+
+@media (max-width: 980px) {
+  .profile-upload-row-vcf {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      'vcf-file vcf-reference'
+      'vcf-bam vcf-sample'
+      'vcf-freq vcf-cov';
+  }
+}
+
+@media (max-width: 620px) {
+  .profile-upload-row-vcf {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'vcf-file'
+      'vcf-reference'
+      'vcf-bam'
+      'vcf-sample'
+      'vcf-freq'
+      'vcf-cov';
+  }
 }
 
 .profile-upload-row-batch-vcf {
@@ -2343,34 +2412,35 @@ th {
   width: var(--sidebar-width);
   height: 100vh;
   height: 100dvh;
-  background: linear-gradient(180deg, #142236, #0f1a28);
-  border-right: 1px solid #28384e;
+  background: var(--surface-strong);
+  border-right: 1px solid var(--line);
   z-index: 30;
 }
 
 .sidebar-rail-link {
+  position: relative;
   width: 100%;
-  min-height: 64px;
+  min-height: 60px;
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.25rem;
-  padding: 0.4rem 0.35rem;
-  border: 1px solid #2d4058;
+  gap: 0.3rem;
+  padding: 0.45rem 0.35rem;
+  border: none;
   border-radius: var(--radius-md);
-  background: #182a40;
-  color: #d2deea;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  background: transparent;
+  color: var(--muted);
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .sidebar-rail-text {
-  font-size: var(--font-size-sm);
-  font-weight: 700;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
   letter-spacing: 0.01em;
   white-space: normal;
   text-align: center;
-  line-height: 1.1;
+  line-height: 1.15;
 }
 
 .sidebar-rail-link.about-tab {
@@ -2378,24 +2448,36 @@ th {
 }
 
 .sidebar-rail-link.active {
-  background: var(--accent);
-  border-color: #28a59b;
-  color: var(--on-accent);
+  background: var(--accent-tint);
+  color: var(--accent);
 }
 
-.sidebar-rail-link:hover {
-  background: #1d3251;
-  border-color: #3f5672;
+/* Brand accent bar on the active item — a slim teal indicator hugging the
+   rail's left edge, echoing the logo color without heavy chrome. */
+.sidebar-rail-link.active::before {
+  content: '';
+  position: absolute;
+  left: -0.5rem;
+  top: 0.55rem;
+  bottom: 0.55rem;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.sidebar-rail-link:hover:not(.active) {
+  background: var(--paper-soft);
+  color: var(--ink);
 }
 
 .sidebar-rail-nav {
   display: flex;
   flex-direction: column;
   height: 100%;
-  gap: 0.55rem;
+  gap: 0.3rem;
   align-content: start;
   justify-items: center;
-  padding: 0.8rem 0.55rem;
+  padding: 0.75rem 0.5rem;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -2525,7 +2607,6 @@ th {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface-strong);
-  box-shadow: var(--shadow-sm);
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -2546,7 +2627,6 @@ th {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface-strong);
-  box-shadow: var(--shadow-sm);
   overflow: auto;
 }
 
@@ -2561,13 +2641,14 @@ th {
 }
 
 .top-bar {
-  background:
-    radial-gradient(circle at 88% 18%, rgba(15, 139, 124, 0.09), rgba(15, 139, 124, 0) 44%),
-    linear-gradient(125deg, var(--surface-strong), #f5fbff 46%, var(--accent-tint));
+  position: sticky;
+  top: 0;
+  z-index: 25;
+  background: var(--surface-strong);
   border: none;
   border-radius: 0;
   border-bottom: 1px solid var(--line);
-  padding: 0.5rem 0.7rem;
+  padding: 0.45rem 1rem;
   margin-bottom: 0.8rem;
   display: flex;
   align-items: center;
@@ -2585,7 +2666,6 @@ th {
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface-strong);
-  box-shadow: var(--shadow-sm);
 }
 
 /* Placeholder shown before a report is generated */
@@ -2742,7 +2822,7 @@ th.sortable-col {
     width: var(--sidebar-width);
     height: 100vh;
     height: 100dvh;
-    border-right: 1px solid #28384e;
+    border-right: 1px solid var(--line);
     border-bottom: none;
   }
 
@@ -3474,6 +3554,31 @@ th.sortable-col {
   flex-shrink: 0;
 }
 
+/* Project links (GitHub / team website) live in the same footer row as the
+   Legal notice / Contact links, separated by the shared ``·`` separators.
+   Icons are inline-flex so the text label aligns with the row baseline. */
+.app-footer-icon-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  transition: color 0.15s ease;
+}
+
+.app-footer-icon-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.app-footer-icon-link .page-link-icon {
+  width: 18px;
+  height: 18px;
+  opacity: 0.9;
+  display: block;
+}
+
 .app-footer-group {
   display: flex;
   align-items: center;
@@ -3488,7 +3593,9 @@ th.sortable-col {
 }
 
 .app-footer a:hover {
+  color: var(--accent);
   text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .app-footer-version,
@@ -3662,7 +3769,7 @@ th.sortable-col {
   background: var(--paper-soft);
   padding: 1rem;
   color: var(--ink);
-  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85rem;
   line-height: 1.6;
   white-space: pre-wrap;

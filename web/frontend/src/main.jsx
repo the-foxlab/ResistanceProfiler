@@ -6,6 +6,7 @@ import { TourProvider } from './components/tour/TourContext';
 import { buildTourSteps } from './components/tour/steps';
 import { useDashboardLogic } from './useDashboardLogic';
 import { useMobileClass } from './hooks/useMobileClass';
+import './fonts.css';
 import './styles.css';
 
 function App() {

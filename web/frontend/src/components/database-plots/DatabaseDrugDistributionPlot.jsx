@@ -1,6 +1,8 @@
 import Plotly from 'plotly.js-dist-min';
 import { useRef, useEffect, useState } from 'react';
 
+import { baseLayout, axisTitleFont } from './shared';
+
 function _formatIc50Tick(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
@@ -43,18 +45,18 @@ function _renderScoreCountPlot(container, plot) {
   };
 
   const layout = {
+    ...baseLayout(),
     bargap: 0.2,
     xaxis: {
-      title: { text: plot.xAxisLabel || 'Score', font: { size: 12, color: '#4c6072' } },
-      tickangle: 0,
+      ...baseLayout().xaxis,
       showgrid: false,
+      title: { text: plot.xAxisLabel || 'Score', font: axisTitleFont() },
+      tickangle: 0,
     },
     yaxis: {
-      title: { text: plot.yAxisLabel || 'Rule count', font: { size: 12, color: '#4c6072' } },
+      ...baseLayout().yaxis,
+      title: { text: plot.yAxisLabel || 'Rule count', font: axisTitleFont() },
       showgrid: true,
-      gridcolor: '#dbe6ee',
-      gridwidth: 1,
-      griddash: 'dot',
       rangemode: 'tozero',
     },
     barmode: 'group',
@@ -106,20 +108,20 @@ function _renderIc50DistributionPlot(container, plot) {
   const xlabel = plot.xAxisLabel || 'IC₅₀ (log scale)';
 
   const layout = {
+    ...baseLayout(),
     xaxis: {
+      ...baseLayout().xaxis,
       type: 'linear',
-      title: { text: xlabel, font: { size: 12, color: '#4c6072' } },
+      title: { text: xlabel, font: axisTitleFont() },
       tickvals: plot.xTicks,
       ticktext,
       range: plot.xDomain,
       autorange: false,
       showgrid: true,
-      gridcolor: '#dbe6ee',
-      gridwidth: 1,
-      griddash: 'dot',
       zeroline: false,
     },
     yaxis: {
+      ...baseLayout().yaxis,
       tickvals: plot.yTicks,
       ticktext: yTickLabels,
       showgrid: false,

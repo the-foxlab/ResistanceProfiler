@@ -378,7 +378,7 @@ export function buildScoreDistributionSections(rules, formulaRules, plotMeta) {
             bars: scoreEntries.map((entry) => ({
               scoreLabel: entry.scoreLabel,
               count: entry.count,
-              color: '#6d8194',
+              color: '#0f766e',
             })),
           };
         })
