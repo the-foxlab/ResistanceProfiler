@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none">
+  <!-- Half-filled circle: system preference. Used as a CSS mask, so only the
+       alpha channel matters; the fill colour is irrelevant. -->
+  <circle cx="10" cy="10" r="7.2" stroke="#000000" stroke-width="1.6"/>
+  <path d="M10 2.8 A7.2 7.2 0 0 1 10 17.2 Z" fill="#000000"/>
+</svg>
