@@ -27,9 +27,15 @@ export function MutationsTab({
   databases,
   selectedDatabaseId,
 }) {
+  // With only one table present, stretch the card and its table to fill the
+  // viewport so no dead whitespace is left below the content.
+  const singleTable = rules.length > 0 !== formulaRules.length > 0;
+  const cardClassName = singleTable
+    ? 'card full-width-tile tab-primary-tile mutations-single-table'
+    : 'card full-width-tile tab-primary-tile';
   return (
     <>
-      <article className="card full-width-tile tab-primary-tile">
+      <article className={cardClassName}>
         <div className="workspace-output-header workspace-output-header-with-db section-header">
           <div>
             <h2>Browse mutations</h2>
