@@ -100,6 +100,69 @@
   --mobile-tap-target: 44px;
 }
 
+/* ── Dark theme ────────────────────────────────────────────────────────────
+   Applied via `data-theme="dark"` on <html> (set by the blocking script in
+   index.html and kept in sync by hooks/useTheme.js). Only colour tokens are
+   redefined — every component reads tokens, so no per-component rules are
+   needed. The dark palette inverts surfaces (zinc-950 → zinc-800) while the
+   teal accent stays; tints flip to dark translucent washes. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --ink: #f4f4f5;
+  --muted: #a1a1aa;
+  --muted-strong: #d4d4d8;
+  --paper: #101012;
+  --paper-soft: #18181b;
+  --surface: #18181b;
+  --surface-strong: #1c1c1f;
+  --accent: #2dd4bf;
+  --accent-hover: #5eead4;
+  --accent-tint: rgba(45, 212, 191, 0.12);
+  --on-accent: #0f172a;
+  --accent-soft: rgba(45, 212, 191, 0.16);
+  --line: #27272a;
+  --line-soft: #1f1f23;
+  --line-strong: #3f3f46;
+  --table-surface: #18181b;
+  --table-head-surface: #1c1c1f;
+  --table-line: #27272a;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.5), 0 12px 32px rgba(0, 0, 0, 0.45);
+  /* Severity colours: same hues, dark-mode lightness (bg = dark wash,
+     text/border = light tint of the hue) so contrast stays readable. */
+  --resistant-bg: rgba(248, 113, 113, 0.14);
+  --resistant-text: #fca5a5;
+  --resistant-border: rgba(248, 113, 113, 0.35);
+  --intermediate-bg: rgba(251, 146, 60, 0.14);
+  --intermediate-text: #fdba74;
+  --intermediate-border: rgba(251, 146, 60, 0.35);
+  --low-level-bg: rgba(250, 204, 21, 0.12);
+  --low-level-text: #fde047;
+  --low-level-border: rgba(250, 204, 21, 0.3);
+  --sensitive-bg: rgba(74, 222, 128, 0.12);
+  --sensitive-text: #86efac;
+  --sensitive-border: rgba(74, 222, 128, 0.3);
+  --metric-tier1-bg: rgba(56, 189, 248, 0.12);
+  --metric-tier1-text: #7dd3fc;
+  --metric-tier1-border: rgba(56, 189, 248, 0.3);
+  --metric-tier2-bg: rgba(250, 204, 21, 0.12);
+  --metric-tier2-text: #fde047;
+  --metric-tier2-border: rgba(250, 204, 21, 0.3);
+  --metric-tier3-bg: rgba(251, 146, 60, 0.14);
+  --metric-tier3-text: #fdba74;
+  --metric-tier3-border: rgba(251, 146, 60, 0.35);
+  --metric-tier4-bg: rgba(248, 113, 113, 0.14);
+  --metric-tier4-text: #fca5a5;
+  --metric-tier4-border: rgba(248, 113, 113, 0.35);
+  --info-bg: rgba(96, 165, 250, 0.14);
+  --info-text: #93c5fd;
+  --info-border: rgba(96, 165, 250, 0.35);
+  --neutral-bg: #1f1f23;
+  --neutral-text: #a1a1aa;
+  --neutral-border: #3f3f46;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -279,15 +342,28 @@ th {
 }
 
 .about-hero {
+  position: relative;
   display: grid;
-  grid-template-columns: 1.2fr minmax(260px, 0.8fr);
   gap: 1.25rem;
-  align-items: center;
   border: 1px solid var(--line);
   border-radius: var(--radius-xl);
   padding: clamp(1.75rem, 2.2vw, 2.1rem);
   background: var(--surface-strong);
   box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+/* Decorative accent rule replacing the removed illustration: a soft
+   gradient bar along the top edge keeps the hero visually anchored
+   without a raster image. */
+.about-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-tint));
+  opacity: 0.85;
+  pointer-events: none;
 }
 
 .about-hero:focus-visible,
@@ -368,22 +444,6 @@ th {
 
 .about-hero-link:hover {
   background: var(--accent-tint);
-}
-
-.about-hero-visual {
-  min-height: 0;
-  aspect-ratio: 2 / 1;
-  max-height: 300px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.about-hero-image {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  opacity: 0.94;
 }
 
 .about-notice-grid {
@@ -706,9 +766,9 @@ th {
 }
 
 .about-terminal {
-  border: 1px solid #27272a;
+  border: 1px solid #3f3f46;
   border-radius: var(--radius-md);
-  background: #18181b;
+  background: #09090b;
   overflow: hidden;
 }
 
@@ -717,8 +777,8 @@ th {
   align-items: center;
   justify-content: space-between;
   padding: 0.55rem 0.65rem;
-  border-bottom: 1px solid #27272a;
-  background: #1f1f23;
+  border-bottom: 1px solid #3f3f46;
+  background: #111113;
 }
 
 .about-terminal-header p {
@@ -1876,6 +1936,12 @@ th {
   transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+:root[data-theme='dark'] .analyze-submode-switch-knob,
+:root[data-theme='dark'] .profile-settings-row .database-phenotype-switch::before {
+  background: var(--line-strong);
+  box-shadow: 0 2px 5px rgb(0 0 0 / 35%), inset 0 1px rgb(255 255 255 / 12%);
+}
+
 /* When the switch is in the "batch" state, slide the knob to the right half. */
 .analyze-submode-switch[data-state='batch'] .analyze-submode-switch-knob {
   transform: translateX(100%);
@@ -2822,6 +2888,65 @@ th {
   stroke-width: 1.2;
 }
 
+/* Minimal three-icon theme picker; state is indicated by the accent tint. */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  flex-shrink: 0;
+}
+
+.theme-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.theme-toggle-btn:hover:not(.active) {
+  color: var(--ink);
+  background: var(--paper-soft);
+}
+
+.theme-toggle-btn.active {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.theme-toggle-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.theme-toggle-text {
+  display: none;
+}
+
+/* Icons remain SVG assets applied as CSS masks, recoloured by currentColor. */
+.theme-toggle-icon {
+  display: block;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  background-color: currentColor;
+  -webkit-mask-image: var(--icon-src);
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  mask-image: var(--icon-src);
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+}
+
 .workspace-frame {
   width: 100%;
   border: 1px solid var(--line);
@@ -3040,7 +3165,6 @@ th.sortable-col {
     grid-template-columns: 1fr;
   }
 
-  .about-hero,
   .about-cli-grid {
     grid-template-columns: 1fr;
   }
@@ -3315,14 +3439,27 @@ th.sortable-col {
     min-width: 120px;
   }
 
+  .brand-logo-wrap,
+  .brand-logo {
+    width: 100%;
+    max-width: var(--topbar-logo-width-mobile);
+    min-width: 0;
+  }
+
+  .theme-toggle-btn {
+    width: 40px;
+    min-height: var(--mobile-tap-target);
+    border-radius: var(--radius-md);
+  }
+
+  .theme-toggle-text {
+    display: none;
+  }
+
   .top-bar-brand-block {
     width: 100%;
     gap: 0.5rem;
     flex-wrap: wrap;
-  }
-
-  .about-hero-visual {
-    max-height: none;
   }
 
   .topbar-db-bar {
@@ -3745,6 +3882,20 @@ th.sortable-col {
   height: 18px;
   opacity: 0.9;
   display: block;
+}
+
+/* GitHub mark is a single-colour SVG applied as a CSS mask so it inherits
+   the link colour (var(--muted), accent on hover) in both themes. */
+.app-footer-icon-mask {
+  background-color: currentColor;
+  -webkit-mask-image: var(--icon-src);
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  mask-image: var(--icon-src);
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
 }
 
 .app-footer-group {

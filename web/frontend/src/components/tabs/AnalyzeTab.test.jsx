@@ -244,6 +244,21 @@ describe('AnalyzeTab reportOrigin with relative report URLs', () => {
   // the plot/structure/sequence popups never opened.
   const relativeBuildReportUrl = (path) => `/api/report?artifact_id=${path}`;
 
+  it('reposts the resolved theme when the iframe finishes loading', () => {
+    render(<AnalyzeTab {...minimalProps({
+      inlineReportPath: 'r1',
+      buildReportUrl: relativeBuildReportUrl,
+      resolvedTheme: 'dark',
+    })} />);
+    const frame = document.querySelector('.workspace-frame');
+    const postMessage = vi.spyOn(frame.contentWindow, 'postMessage').mockImplementation(() => {});
+    const themeMessage = { type: 'respro:report-theme', theme: 'dark' };
+
+    fireEvent.load(frame);
+    expect(postMessage).toHaveBeenCalledOnce();
+    expect(postMessage).toHaveBeenCalledWith(themeMessage, window.location.origin);
+  });
+
   function dispatchFromFrame(type, payload) {
     const frame = document.querySelector('.workspace-frame');
     act(() => {

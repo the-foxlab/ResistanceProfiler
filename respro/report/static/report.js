@@ -2,6 +2,32 @@
  * Report tab switching logic.
  */
 
+// ── Theme resolution ──────────────────────────────────────────────────────
+// The report's standard is ALWAYS WHITE (light). Dark mode is not a report
+// feature: when the report is embedded in the webapp iframe, the host posts
+// its resolved theme as { type: 'respro:report-theme', theme: 'light'|'dark' }
+// and re-posts on every toggle, so the iframe inherits the app's theme.
+// Standalone reports (CLI output, opened in a new tab) always stay light —
+// no prefers-color-scheme detection. Applied as early as possible (this
+// script runs before DOMContentLoaded from an inline <script> in the
+// template) so the first paint already uses the right theme.
+(function applyReportTheme() {
+  function setTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
+  }
+  if (window.parent !== window) {
+    window.addEventListener('message', function (event) {
+      if (event.data && event.data.type === 'respro:report-theme' && event.data.theme) {
+        setTheme(event.data.theme);
+      }
+    });
+    // Default until the first host message arrives: light. The host posts
+    // immediately on iframe load, so a dark host never flashes light.
+  } else {
+    setTheme('light');
+  }
+})();
+
 document.addEventListener('DOMContentLoaded', function () {
   const tabButtons = document.querySelectorAll('.tab-button');
   const tabContents = document.querySelectorAll('.tab-content');

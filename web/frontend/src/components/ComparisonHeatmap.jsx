@@ -1,4 +1,5 @@
 import Plotly from 'plotly.js-dist-min';
+import { currentTheme } from './database-plots/shared';
 import { useRef, useEffect, useState } from 'react';
 import { Spinner } from './Spinner';
 import {
@@ -168,7 +169,7 @@ function renderHeatmap(container, data) {
     x: prepared.xLabels,
     y: prepared.samples,
     type: 'heatmap',
-    colorscale: [[0, '#e4e4e7'], [1, '#a1a1aa']],
+    colorscale: currentTheme() === 'dark' ? [[0, '#27272a'], [1, '#71717a']] : [[0, '#e4e4e7'], [1, '#a1a1aa']],
     showscale: false,
     zmin: 0,
     zmax: 1,
@@ -178,7 +179,7 @@ function renderHeatmap(container, data) {
     yaxis: 'y',
     customdata: prepared.gapCustomdata,
     hovertemplate: 'Sample: %{y}<br>Mutation: %{customdata[0]}<br>Feature: %{customdata[1]}<br>Coverage gap<extra></extra>',
-    line: { color: '#ffffff', width: 1 },
+    line: { color: currentTheme() === 'dark' ? '#09090b' : '#ffffff', width: 1 },
   };
   traces.push(gapTrace);
 
@@ -203,7 +204,7 @@ function renderHeatmap(container, data) {
       tickvals: [0, 0.25, 0.5, 0.75, 1.0],
       ticktext: ['0', '0.25', '0.5', '0.75', '1.0'],
       thickness: 15,
-      tickfont: { size: 10, color: '#71717a' },
+      tickfont: { size: 10, color: currentTheme() === 'dark' ? '#a1a1aa' : '#71717a' },
       outlinewidth: 0,
     },
     xgap: 1,
@@ -212,7 +213,7 @@ function renderHeatmap(container, data) {
     yaxis: 'y',
     customdata: prepared.mainCustomdata,
     hovertemplate: 'Sample: %{y}<br>Mutation: %{customdata[0]}<br>Feature: %{customdata[1]}<br>Allele freq: %{z}<extra></extra>',
-    line: { color: '#333', width: 1 },
+    line: { color: currentTheme() === 'dark' ? '#09090b' : '#333', width: 1 },
   };
   traces.push(mainTrace);
 
@@ -233,7 +234,7 @@ function renderHeatmap(container, data) {
       yaxis: 'y2',
       customdata: prepared.featureCustomdata,
       hovertemplate: 'Feature: %{customdata[0]}<br>Mutation: %{customdata[1]}<extra></extra>',
-      line: { color: '#ffffff', width: 1 },
+      line: { color: currentTheme() === 'dark' ? '#09090b' : '#ffffff', width: 1 },
     };
     traces.push(featureTrace);
   }
@@ -255,7 +256,7 @@ function renderHeatmap(container, data) {
       yaxis: 'y3',
       customdata: prepared.dbHitCustomdata,
       hovertemplate: '%{customdata[0]}<extra></extra>',
-      line: { color: '#ffffff', width: 1 },
+      line: { color: currentTheme() === 'dark' ? '#09090b' : '#ffffff', width: 1 },
     };
     traces.push(dbHitTrace);
   }
@@ -277,7 +278,7 @@ function renderHeatmap(container, data) {
       yaxis: 'y4',
       customdata: prepared.consequenceCustomdata,
       hovertemplate: 'Consequence: %{customdata[0]}<extra></extra>',
-      line: { color: '#ffffff', width: 1 },
+      line: { color: currentTheme() === 'dark' ? '#09090b' : '#ffffff', width: 1 },
     };
     traces.push(consequenceTrace);
   }

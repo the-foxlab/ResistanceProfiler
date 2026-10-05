@@ -1,7 +1,7 @@
 import Plotly from 'plotly.js-dist-min';
 import { useRef, useEffect, useState } from 'react';
 
-import { baseLayout } from './shared';
+import { baseLayout, currentTheme } from './shared';
 
 function SummaryPieCard({ pie }) {
   const containerRef = useRef(null);
@@ -46,7 +46,7 @@ function SummaryPieCard({ pie }) {
             xref: 'paper',
             yref: 'paper',
             showarrow: false,
-            font: { size: 22, color: '#18181b', weight: 'bold' },
+            font: { size: 22, color: currentTheme() === 'dark' ? '#f4f4f5' : '#18181b', weight: 'bold' },
           },
           {
             text: pie.centerLabel || pie.title,
@@ -55,7 +55,7 @@ function SummaryPieCard({ pie }) {
             xref: 'paper',
             yref: 'paper',
             showarrow: false,
-            font: { size: 11, color: '#71717a' },
+            font: { size: 11, color: currentTheme() === 'dark' ? '#a1a1aa' : '#71717a' },
             yshift: 18,
           },
         ],

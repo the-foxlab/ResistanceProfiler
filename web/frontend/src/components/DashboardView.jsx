@@ -6,6 +6,8 @@ import mutationsIconSrc from '../assets/search.svg';
 import homeIconSrc from '../assets/home.svg';
 import reportIconSrc from '../assets/reports.svg';
 import { DatabaseSelectorBar } from './DatabaseSelectorBar';
+import { ThemeToggle } from './ThemeToggle';
+import { useTheme } from '../hooks/useTheme';
 import { AnalyzeTab } from './tabs/AnalyzeTab';
 import { ResultsTab } from './tabs/ResultsTab';
 import { MutationsTab } from './tabs/MutationsTab';
@@ -148,6 +150,9 @@ export function DashboardView({
   // mode never leaves the drawer open over the new content.
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  // Theme preference ('system'|'light'|'dark'); resolved is what is actually
+  // applied on <html data-theme> and drives Plotly re-theming.
+  const { preference: themePreference, resolved: themeResolved, setTheme } = useTheme();
 
   useEffect(() => {
     const updateScrollTopVisibility = () => {
@@ -237,6 +242,10 @@ export function DashboardView({
               className="topbar-db-bar"
             />
           </div>
+          <ThemeToggle
+            preference={themePreference}
+            onChange={setTheme}
+          />
         </div>
 
         <section className="panel-stack">
@@ -306,6 +315,7 @@ export function DashboardView({
               inlineReportPath={inlineReportPath}
               isAnalyzeScopeLocked={isAnalyzeScopeLocked}
               PROFILE_MODES={PROFILE_MODES}
+              resolvedTheme={themeResolved}
             />
           )}
           {activeMode === 'results' && (

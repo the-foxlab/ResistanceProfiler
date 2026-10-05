@@ -72,6 +72,7 @@ export function AnalyzeTab({
   inlineReportPath,
   isAnalyzeScopeLocked,
   PROFILE_MODES,
+  resolvedTheme,
 }) {
   const [reportFrameHeight, setReportFrameHeight] = useState(null);
   const [hostedPlot, setHostedPlot] = useState(null);
@@ -85,6 +86,24 @@ export function AnalyzeTab({
   const selectedReportOption = reportOptions.find(
     (option) => option.path === selectedProfileReportPath,
   ) || null;
+
+  // Post the resolved theme to the embedded report whenever it changes or a
+  // new iframe mounts (report reload). The report listens for
+  // respro:report-theme and applies it as data-theme on its <html>.
+  useEffect(() => {
+    const frame = reportFrameRef.current;
+    if (!frame || !resolvedTheme) {
+      return;
+    }
+    try {
+      frame.contentWindow?.postMessage(
+        { type: 'respro:report-theme', theme: resolvedTheme },
+        reportOrigin || window.location.origin,
+      );
+    } catch {
+      // The iframe load handler retries once the report listener is ready.
+    }
+  }, [resolvedTheme, inlineReportPath]);
 
   useEffect(() => {
     setReportFrameHeight(null);
@@ -996,6 +1015,10 @@ export function AnalyzeTab({
             sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads"
             style={reportFrameHeight ? { height: `${reportFrameHeight}px` } : undefined}
             onLoad={(event) => {
+              event.currentTarget.contentWindow?.postMessage(
+                { type: 'respro:report-theme', theme: resolvedTheme },
+                reportOrigin || window.location.origin,
+              );
               try {
                 const frameDoc = event.currentTarget.contentDocument;
                 if (!frameDoc || !frameDoc.body || !frameDoc.documentElement) {

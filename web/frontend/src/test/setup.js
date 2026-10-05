@@ -16,3 +16,19 @@ if (!HTMLCanvasElement.prototype.getContext) {
   HTMLCanvasElement.prototype.getContext = () => null;
 }
 
+// jsdom does not implement window.matchMedia; the theme hook (useTheme) uses
+// it to resolve the 'system' preference. Stub it with a light preference so
+// components render deterministically under vitest.
+if (typeof window.matchMedia !== 'function') {
+  window.matchMedia = (query) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  });
+}
+

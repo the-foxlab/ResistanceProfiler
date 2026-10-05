@@ -12,7 +12,6 @@ import networkIconSrc from '../../assets/network.svg';
 import contactIconSrc from '../../assets/contact.svg';
 import licenseIconSrc from '../../assets/license.svg';
 import cliIconSrc from '../../assets/icon-cli.svg';
-import aboutIllustrationSrc from '../../assets/about.png';
 import databaseIconSrc from '../../assets/icon-database.svg';
 import mutationsIconSrc from '../../assets/search.svg';
 import reportIconSrc from '../../assets/reports.svg';
@@ -113,9 +112,6 @@ export function AboutTab({ setActiveMode, onStartTour, contactEmail }) {
               GitHub
             </a>
           </div>
-        </div>
-        <div className="about-hero-visual" aria-hidden="true">
-          <img src={aboutIllustrationSrc} alt="" className="about-hero-image" />
         </div>
       </section>
 

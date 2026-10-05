@@ -15,7 +15,11 @@ export function AppFooter({ legalLink, contactEmail, cliVersion, webVersion }) {
   const projectLinks = (
     <>
       <a className="app-footer-icon-link" href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noreferrer" title="ResistanceProfiler on GitHub" aria-label="ResistanceProfiler on GitHub">
-        <img className="page-link-icon" src={githubIconSrc} alt="" aria-hidden="true" />
+        <span
+          className="page-link-icon app-footer-icon-mask"
+          aria-hidden="true"
+          style={{ '--icon-src': `url(${githubIconSrc})` }}
+        />
         <span>GitHub</span>
       </a>
       <span className="app-footer-sep" aria-hidden="true">·</span>
