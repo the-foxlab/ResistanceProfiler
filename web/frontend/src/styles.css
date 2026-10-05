@@ -2761,6 +2761,16 @@ th {
   min-width: 0;
 }
 
+/* Quiet full-width fallback when the database has no rules of either kind. */
+.mutation-empty-state {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-soft);
+  color: var(--muted);
+  text-align: center;
+}
+
 .top-bar {
   position: sticky;
   top: 0;

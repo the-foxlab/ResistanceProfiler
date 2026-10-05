@@ -35,6 +35,7 @@ export function MutationsTab({
             <h2>Browse mutations</h2>
           </div>
         </div>
+        {rules.length > 0 ? (
         <section className="mutation-merged-section">
           <div className="workspace-output-header section-header">
             <div>
@@ -122,7 +123,9 @@ export function MutationsTab({
             <p className="status">No mutations match the current filter.</p>
           ) : null}
         </section>
+        ) : null}
 
+        {formulaRules.length > 0 ? (
         <section className="mutation-merged-section">
           <div className="workspace-output-header section-header">
             <div>
@@ -197,6 +200,13 @@ export function MutationsTab({
             <p className="status">No formula combinations match the current filter.</p>
           ) : null}
         </section>
+        ) : null}
+
+        {mutationsLoaded && rules.length === 0 && formulaRules.length === 0 ? (
+          <p className="status mutation-empty-state">
+            No mutation rules were found for the selected database.
+          </p>
+        ) : null}
       </article>
     </>
   );
