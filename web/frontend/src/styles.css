@@ -972,35 +972,108 @@ th {
   margin: 0.25rem 0;
 }
 
+/* Database metadata: identity header, not a metadata box. The name is the
+   hero, description is muted prose, people/links sit in a spec-sheet grid,
+   and provenance (UUID, timestamps) is demoted to a muted footer line. No
+   inner border/background — a hairline divider separates it from the plots. */
 .database-meta-panel {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.45rem 1rem;
-  padding: 0.9rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-md);
-  background: var(--surface-strong);
-  margin-bottom: 0.8rem;
+  gap: 0.8rem;
+  padding: 0 0 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
 }
 
-.database-meta-row {
-  min-width: 0;
+.database-meta-identity {
   display: grid;
-  grid-template-columns: minmax(130px, 180px) minmax(0, 1fr);
-  gap: 0.7rem;
-  align-items: start;
-  padding: 0.2rem 0;
+  gap: 0.3rem;
+}
+
+.database-meta-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.database-meta-name {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+/* Schema version as a quiet neutral chip next to the name. */
+.database-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.08rem 0.5rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--neutral-bg);
+  color: var(--muted);
+  font-size: var(--font-size-xs, 0.72rem);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.database-meta-description {
+  margin: 0;
+  max-width: 70ch;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+/* Spec-sheet grid: micro-labels above values, one column per fact. */
+.database-meta-specs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.65rem 1.2rem;
+}
+
+.database-meta-spec {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.database-meta-label {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: var(--font-size-xs, 0.72rem);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .database-meta-value {
   font-size: var(--font-size-sm);
   line-height: 1.3;
   word-break: break-word;
+  color: var(--ink);
 }
 
-.database-meta-label {
-  font-weight: 700;
+/* Provenance demoted to one muted footer line with dot separators. */
+.database-meta-provenance {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.6rem;
   color: var(--muted);
+}
+
+.database-meta-provenance .database-meta-value {
+  color: var(--muted);
+  font-size: var(--font-size-xs, 0.72rem);
+}
+
+.database-meta-provenance-label {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.database-meta-provenance-sep {
+  color: var(--line-strong);
 }
 
 .database-plot-grid {
@@ -2258,6 +2331,23 @@ th {
   flex-wrap: nowrap;
 }
 
+/* The algorithms panel keeps the side-by-side label/value rows — its values
+   are wide tables, so the spec-sheet micro-grid used by the metadata header
+   would squeeze them. */
+.database-algorithms-panel .database-meta-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: start;
+  padding: 0.2rem 0;
+}
+
+.database-algorithms-panel .database-meta-label {
+  font-size: var(--font-size-sm);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .database-meta-section-heading-text {
   white-space: nowrap;
 }
@@ -2931,6 +3021,10 @@ th.sortable-col {
     min-width: 0;
     grid-template-columns: 1fr;
     gap: 0.2rem;
+  }
+
+  .database-meta-specs {
+    grid-template-columns: 1fr;
   }
 
   .database-meta-panel {
