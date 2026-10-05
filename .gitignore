@@ -33,6 +33,7 @@ Thumbs.db
 *.bam
 *.bai
 *.vcf
+*.png
 output/
 data/
 reports/

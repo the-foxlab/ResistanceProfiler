@@ -166,6 +166,19 @@ button,
   transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
 }
 
+input,
+select {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.65rem;
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-button);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
 button:active,
 .button-link:active {
   transform: translateY(0.5px);
@@ -178,21 +191,24 @@ button:hover,
 }
 
 button:disabled {
-  opacity: 0.6;
   cursor: not-allowed;
 }
 
-input,
-select {
-  width: 100%;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-  padding: 0.5rem 0.65rem;
-  background: var(--surface-strong);
-  color: var(--ink);
-  font-family: var(--font-sans);
-  font-size: var(--font-size-button);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+/* Disabled primary buttons lose their accent entirely (gray surface + muted
+   text) so they match the gray disabled secondary buttons next to them —
+   opacity alone kept the teal reading as an active affordance. */
+button:disabled.analyze-primary {
+  background: var(--neutral-border);
+  border-color: var(--neutral-border);
+  color: var(--muted);
+}
+
+/* One app-wide keyboard-focus ring: accent outline with offset, only for
+   keyboard users (:focus-visible) so mouse clicks stay clean. Element-specific
+   focus rules below override this where they need a different treatment. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 input:focus,
@@ -729,7 +745,9 @@ th {
 }
 
 .about-terminal-prompt {
-  color: #4ade80;
+  /* Teal-400 keeps the "live CLI" feel inside the brand palette (the old
+     #4ade80 green was the only foreign accent color in the app). */
+  color: #2dd4bf;
   margin-right: 0.28rem;
 }
 
@@ -1412,12 +1430,20 @@ th {
   flex: 0 0 0.9rem;
 }
 
-.input-info-btn:hover,
+.input-info-btn:hover {
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
+  box-shadow: none;
+}
+
+/* Keep the app-wide :focus-visible ring for keyboard users — the info buttons
+   are the only focusable affordance inside a form label, so losing the ring
+   makes them unreachable by keyboard. */
 .input-info-btn:focus-visible {
   border-color: transparent;
   background: transparent;
   color: inherit;
-  outline: none;
   box-shadow: none;
 }
 
@@ -1589,7 +1615,8 @@ th {
 }
 
 .analyze-shell-header h2 {
-  font-size: var(--font-size-xxl);
+  font-size: var(--font-size-xl);
+  letter-spacing: -0.01em;
 }
 
 .analyze-shell-header p {
@@ -1683,7 +1710,9 @@ th {
   flex-wrap: wrap;
 }
 
-/* One/multiple-sample toggle — an animated sliding switch (track + knob). */
+/* One/multiple-sample toggle — an animated sliding switch (track + knob).
+   Uses the same quiet surface track as the profile-mode switch so the two
+   segmented controls read as one family. */
 .analyze-submode-switch {
   position: relative;
   display: grid;
@@ -1691,14 +1720,13 @@ th {
   align-items: center;
   width: var(--analysis-slider-width);
   min-width: 0;
-  border: 1px solid var(--accent);
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: var(--accent);
+  background: var(--neutral-bg);
   height: 2rem;
   padding: 0.14rem;
   gap: 0;
   isolation: isolate;
-  box-shadow: inset 0 1px 2px rgb(0 0 0 / 16%);
 }
 
 .analyze-submode-switch-option {
@@ -1709,11 +1737,11 @@ th {
   gap: 0.35rem;
   border: none;
   background: transparent;
-  color: var(--on-accent);
+  color: var(--muted);
   height: 100%;
   padding: 0 0.65rem;
   font-size: var(--font-size-button);
-  font-weight: 700;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
   border-radius: 999px;
@@ -1721,7 +1749,8 @@ th {
 }
 
 .analyze-submode-switch-option.active {
-  color: var(--accent);
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .analyze-submode-switch-option:hover:not(:disabled) {
@@ -1729,12 +1758,12 @@ th {
 }
 
 .analyze-submode-switch-option.active:hover:not(:disabled) {
-  color: var(--accent);
+  color: var(--ink);
 }
 
 .analyze-submode-switch-option:not(.active):hover:not(:disabled) {
-  color: var(--on-accent);
-  opacity: 0.82;
+  color: var(--ink);
+  opacity: 1;
 }
 
 .analyze-submode-switch-option:focus-visible {
@@ -1824,7 +1853,9 @@ th {
 
 /* Profile input modes use the same filled-slider language as the workflow switch. */
 .profile-settings-row .database-phenotype-switch {
-  --profile-mode-accent: #7e7f80;
+  /* Quiet surface track with a hairline border so the control reads as
+     interactive even before hover (the old solid-gray fill looked disabled). */
+  --profile-mode-accent: var(--ink);
   position: relative;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1833,11 +1864,10 @@ th {
   height: 2rem;
   gap: 0;
   padding: 0.14rem;
-  border: 1px solid var(--profile-mode-accent);
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: var(--profile-mode-accent);
+  background: var(--neutral-bg);
   isolation: isolate;
-  box-shadow: inset 0 1px 2px rgb(0 0 0 / 16%);
 }
 
 .profile-settings-row .database-phenotype-switch::before {
@@ -1870,7 +1900,7 @@ th {
   border: none;
   border-radius: 999px;
   background: transparent;
-  color: var(--on-accent);
+  color: var(--muted);
   padding: 0 0.55rem;
 }
 
@@ -1879,11 +1909,12 @@ th {
   border-color: transparent;
   background: transparent;
   color: var(--profile-mode-accent);
+  font-weight: 700;
 }
 
 .profile-settings-row .database-phenotype-switch button:hover:not(:disabled) {
   background: transparent;
-  color: var(--on-accent);
+  color: var(--ink);
 }
 
 .analyze-submode-icon {
@@ -2738,7 +2769,10 @@ th {
 }
 
 .workspace-output-header h2 {
-  font-size: var(--font-size-xxl);
+  /* One step above the card h3 (0.95rem) so the page title clearly outranks
+     plot-card headers on dense tabs like the Database Dashboard. */
+  font-size: var(--font-size-xl);
+  letter-spacing: -0.01em;
 }
 
 .workspace-output-header h3 {
