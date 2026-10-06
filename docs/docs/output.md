@@ -138,7 +138,7 @@ respro vcf \
 
 !!! note "Web download"
     In the webapp, the TSV is produced for every profile/regenerate run alongside
-    the HTML, PDF, and JSON artifacts. Download it from the *Analyze* tab
-    (single-report action bar), the *Reports* tab (per-row TSV link), or the
-    batch/session "Download all" zip bundles. Run the CLI with `--export tsv` for
-    command-line use.
+    the HTML, PDF, and JSON artifacts. Download it from the *Analyze* page
+    (single-report action bar), the *Reports* page under Analysis (per-row TSV
+    link), or the batch/session "Download all" zip bundles. Run the CLI with
+    `--export tsv` for command-line use.

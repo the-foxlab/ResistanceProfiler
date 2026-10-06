@@ -1,38 +1,55 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 
 import { AboutTab } from './AboutTab';
 
-describe('AboutTab tour button', () => {
-  beforeEach(() => {
-    // AboutTab imports FRONTEND_CONFIG and assets; ensure no network calls.
+function renderAbout(props = {}) {
+  return render(
+    <MemoryRouter initialEntries={['/about']}>
+      <AboutTab setActiveMode={() => {}} {...props} />
+    </MemoryRouter>,
+  );
+}
+
+describe('AboutTab structure', () => {
+  it('no longer renders hero actions (Start analysis / Take a tour moved to Home)', () => {
+    renderAbout({ onStartTour: () => {} });
+    expect(screen.queryByRole('button', { name: /start analysis/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /take a tour/i })).toBeNull();
   });
 
-  it('renders a "Take a tour" button next to "Start analysis"', () => {
-    render(<AboutTab setActiveMode={() => {}} onStartTour={() => {}} />);
-    const startButton = screen.getByRole('button', { name: /start analysis/i });
-    const tourButton = screen.getByRole('button', { name: /take a tour/i });
-    expect(startButton).toBeInTheDocument();
-    expect(tourButton).toBeInTheDocument();
-    // The tour button must come immediately after the start button (both in .about-hero-actions).
-    const actions = startButton.closest('.about-hero-actions');
-    expect(actions).not.toBeNull();
-    const buttons = actions.querySelectorAll('button');
-    expect(buttons.length).toBeGreaterThanOrEqual(2);
-    expect(buttons[0]).toBe(startButton);
-    expect(buttons[1]).toBe(tourButton);
+  it('renders a link back to Home', () => {
+    renderAbout();
+    const link = screen.getByRole('link', { name: /back to home/i });
+    expect(link.getAttribute('href')).toBe('/');
   });
 
-  it('calls onStartTour when clicked', () => {
-    const onStartTour = vi.fn();
-    render(<AboutTab setActiveMode={() => {}} onStartTour={onStartTour} />);
-    fireEvent.click(screen.getByRole('button', { name: /take a tour/i }));
-    expect(onStartTour).toHaveBeenCalledTimes(1);
+  it('renders a table of contents whose anchors resolve to existing section ids', () => {
+    renderAbout();
+    const toc = screen.getByRole('navigation', { name: /on this page/i });
+    const anchors = [...toc.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+    expect(anchors.length).toBeGreaterThanOrEqual(4);
+    for (const href of anchors) {
+      const id = href.replace('#', '');
+      expect(document.getElementById(id), href).not.toBeNull();
+    }
   });
 
-  it('does not crash when onStartTour is not provided', () => {
-    render(<AboutTab setActiveMode={() => {}} />);
-    expect(() => fireEvent.click(screen.getByRole('button', { name: /take a tour/i }))).not.toThrow();
+  it('keeps the technical sections', () => {
+    renderAbout();
+    expect(screen.getAllByText(/rule nomenclature/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/rule combinations/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/supported interpretation algorithms/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/cli and extended functionality/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/contributing and contact/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/licensing/i).length).toBeGreaterThan(0);
+  });
+
+  it('no longer renders the notice cards (moved to Home)', () => {
+    renderAbout();
+    expect(screen.queryByText(/research use only/i)).toBeNull();
+    expect(screen.queryByText(/no database curation/i)).toBeNull();
   });
 });
 
@@ -42,13 +59,13 @@ describe('AboutTab contact email', () => {
   // hardcoded maintainer fallback is shown so a contact is always available.
 
   it('uses the env-sourced contact email when provided', () => {
-    render(<AboutTab setActiveMode={() => {}} contactEmail="support@example.org" />);
+    renderAbout({ contactEmail: "support@example.org" });
     const link = screen.getByRole('link', { name: 'support@example.org' });
     expect(link).toHaveAttribute('href', 'mailto:support@example.org');
   });
 
   it('falls back to the hardcoded maintainer address when contactEmail is absent', () => {
-    render(<AboutTab setActiveMode={() => {}} />);
+    renderAbout();
     const link = screen.getByRole('link', { name: /email jonas fuchs/i });
     expect(link).toHaveAttribute('href', 'mailto:jonas.fuchs@uniklinik-freiburg.de');
   });

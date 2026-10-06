@@ -946,6 +946,64 @@ th {
   min-width: 118px;
 }
 
+/* Top-bar help entry: opens the guided tour from any route. */
+.top-bar-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.top-bar-help:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.top-bar-help:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Top-bar help entry: opens the guided tour from any route. */
+.top-bar-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+
+.top-bar-help:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.top-bar-help:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* The Analyze action closes the form: right-aligned so the eye travels
    down the input bands and lands on the button. */
 .profile-analyze-row {
@@ -2888,6 +2946,26 @@ th {
   max-height: none;
 }
 
+/* Skip link: visually hidden until focused (keyboard a11y). */
+.skip-link {
+  position: fixed;
+  top: -48px;
+  left: 16px;
+  z-index: 1100;
+  padding: 0.5rem 0.9rem;
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  border-radius: 0 0 8px 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus-visible {
+  top: 0;
+}
+
 .top-bar {
   position: sticky;
   top: 0;
@@ -4133,13 +4211,16 @@ th.sortable-col {
   pointer-events: auto;
 }
 
-/* Start prompt: centered in the viewport. Inline left/top/transform center it; this
-   rule supplies the fixed positioning those offsets require. */
-.tour-prompt {
+/* Coach card: non-blocking first-visit hint anchored top-right of the viewport.
+   No backdrop — the page stays interactive while it is shown. */
+.tour-coach-card {
   position: fixed;
-  max-width: 360px;
+  top: 64px;
+  right: 16px;
+  z-index: 60;
+  max-width: 340px;
   background: var(--surface-strong);
-  border: 1px solid var(--line);
+  border: 1px solid var(--accent);
   border-radius: 10px;
   box-shadow: 0 8px 24px rgba(15, 23, 32, 0.18);
   padding: 1rem 1.1rem 0.9rem;

@@ -23,7 +23,7 @@ from fastapi import (
     Request,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from rq.exceptions import NoSuchJobError
 from rq.job import Job
@@ -229,15 +229,50 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     app.include_router(build_legal_router(imprint=config.imprint))
     app.include_router(build_contact_router(contact_email=config.contact_email))
 
-    frontend_dist = Path(__file__).resolve().parents[1] / 'frontend' / 'dist'
+    frontend_dist = _frontend_dist_dir()
     if frontend_dist.is_dir():
         app.mount(
+            f'{WEB_BACKEND_CONFIG.defaults.frontend_base_path.rstrip("/")}/assets',
+            StaticFiles(directory=str(frontend_dist / 'assets')),
+            name='frontend-assets',
+        )
+        app.mount(
             WEB_BACKEND_CONFIG.defaults.frontend_base_path,
-            StaticFiles(directory=str(frontend_dist), html=True),
-            name='frontend',
+            _build_spa_fallback_app(frontend_dist),
+            name='frontend-spa-fallback',
         )
 
     return app
+
+
+def _frontend_dist_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / 'frontend' / 'dist'
+
+
+def _build_spa_fallback_app(frontend_dist: Path) -> FastAPI:
+    """Serve index.html for unknown non-API paths so SPA deep links survive reloads.
+
+    Mounted last: API, report and artifact routes are registered on the main app
+    before this mount and are matched first. The fallback answers everything else
+    with index.html (real static assets are covered by the assets mount above;
+    other dist files, e.g. favicon, are resolved through index.html's own asset
+    URLs which the bundler emits under /assets).
+
+    Backend-reserved paths are excluded: ``/api/*`` keeps its JSON 404s, and the
+    FastAPI docs URLs (``/docs``, ``/redoc``, ``/openapi.json``) must stay 404 in
+    online mode (where they are disabled) instead of receiving index.html.
+    """
+
+    reserved_prefixes = ('/api', '/docs', '/redoc', '/openapi.json')
+
+    async def spa_fallback(request: Request) -> FileResponse:
+        if request.url.path.startswith(reserved_prefixes):
+            raise HTTPException(status_code=404, detail='Not Found')
+        return FileResponse(frontend_dist / 'index.html')
+
+    fallback = FastAPI(docs=None, redoc=None, openapi_url=None)
+    fallback.add_route('/{path:path}', spa_fallback, methods=['GET'])
+    return fallback
 
 
 def _build_artifact_bundle(

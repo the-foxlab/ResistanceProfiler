@@ -1,13 +1,10 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 
-import aboutIconSrc from '../../assets/icon-about.svg';
-import analyzeIconSrc from '../../assets/icon-analyze.svg';
 import aboutScopeIconSrc from '../../assets/icon-scope.svg';
 import aboutAlignIconSrc from '../../assets/icon-align.svg';
 import uploadIconSrc from '../../assets/upload.svg';
 import okListIconSrc from '../../assets/ok_list.svg';
-import shieldIconSrc from '../../assets/shield.svg';
-import noSignIconSrc from '../../assets/no_sign.svg';
 import networkIconSrc from '../../assets/network.svg';
 import contactIconSrc from '../../assets/contact.svg';
 import licenseIconSrc from '../../assets/license.svg';
@@ -17,6 +14,15 @@ import mutationsIconSrc from '../../assets/search.svg';
 import reportIconSrc from '../../assets/reports.svg';
 import logicIconSrc from '../../assets/logic.svg';
 import { FRONTEND_CONFIG } from '../../config';
+
+const ABOUT_TOC = [
+  { id: 'about-scope', label: 'Project scope and how it works' },
+  { id: 'about-nomenclature', label: 'Rule nomenclature' },
+  { id: 'about-combinations', label: 'Rule combinations' },
+  { id: 'about-algorithms', label: 'Interpretation algorithms' },
+  { id: 'about-cli', label: 'CLI and extended functionality' },
+  { id: 'about-governance', label: 'Contributing, data usage, licensing' },
+];
 
 const ABOUT_CLI_COMMANDS = [
   'respro databases --download db_name --output my_folder/',
@@ -57,7 +63,7 @@ const ABOUT_WORKFLOW_STEPS = [
   },
 ];
 
-export function AboutTab({ setActiveMode, onStartTour, contactEmail }) {
+export function AboutTab({ contactEmail }) {
   // Deployment-configurable contact address (RESPRO_WEB_CONTACT_EMAIL); falls back
   // to the maintainer address so the About tab always shows a contact.
   const contactAddress = contactEmail || 'jonas.fuchs@uniklinik-freiburg.de';
@@ -80,68 +86,24 @@ export function AboutTab({ setActiveMode, onStartTour, contactEmail }) {
 
   return (
     <article className="about-tile">
-      <section className="about-hero" tabIndex={0}>
-        <div className="about-hero-content">
-          <p className="about-hero-kicker">Pathogen-agnostic antiviral resistance profiling</p>
-          <h2>About ResistanceProfiler</h2>
-          <p>
-            ResistanceProfiler is a pathogen-agnostic antiviral resistance framework with a CLI-first core and a
-            web frontend for interactive analysis.
-          </p>
-          <div className="about-hero-actions">
-            <button type="button" onClick={() => setActiveMode('analyze')}>Start analysis</button>
-            <button
-              type="button"
-              onClick={() => {
-                if (onStartTour) {
-                  onStartTour();
-                }
-              }}
-            >
-              Take a tour
-            </button>
-            <a
-              className="about-hero-link"
-              href="https://the-foxlab.github.io/ResistanceProfiler/"
-              target="_blank"
-              rel="noreferrer"
-            >
-              View documentation
-            </a>
-            <a className="about-hero-link" href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noreferrer">
-              GitHub
-            </a>
-          </div>
-        </div>
-      </section>
+      <header className="about-intro">
+        <h1>About ResistanceProfiler</h1>
+        <p>
+          ResistanceProfiler is a pathogen-agnostic antiviral resistance framework with a CLI-first core and a
+          web frontend for interactive analysis. This page explains how it works under the hood.
+        </p>
+        <Link to="/" className="about-back-link">Back to home</Link>
+      </header>
 
-      <section className="about-notice-grid" aria-label="Important notices">
-        <article className="about-notice-card about-notice-card-research" tabIndex={0}>
-          <span className="about-notice-icon" aria-hidden="true">
-            <span className="about-icon-mask" style={{ '--icon-src': `url(${shieldIconSrc})` }} />
-          </span>
-          <div>
-            <h3>Research use only</h3>
-            <p>
-              This software supports exploratory interpretation and does not replace accredited clinical diagnostics.
-            </p>
-          </div>
-        </article>
-        <article className="about-notice-card about-notice-card-database" tabIndex={0}>
-          <span className="about-notice-icon" aria-hidden="true">
-            <span className="about-icon-mask" style={{ '--icon-src': `url(${noSignIconSrc})` }} />
-          </span>
-          <div>
-            <h3>No database curation</h3>
-            <p>
-              We do not maintain or curate resistance databases ourselves. We only provide up-to-date converted
-              <a href="https://github.com/the-foxlab/respro-databases" target="_blank" rel="noreferrer"> versions</a> of openly available databases and are not responsible for their content or maintenance.
-            </p>
-          </div>
-        </article>
-      </section>
+      <nav className="about-toc" aria-label="On this page">
+        <ul>
+          {ABOUT_TOC.map((entry) => (
+            <li key={entry.id}><a href={`#${entry.id}`}>{entry.label}</a></li>
+          ))}
+        </ul>
+      </nav>
 
-      <section className="about-section-card about-section-card-scope" tabIndex={0}>
+      <section className="about-section-card about-section-card-scope" id="about-scope" tabIndex={0}>
         <div className="about-section-title">
           <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${aboutScopeIconSrc})` }} aria-hidden="true" />
           <h3>Project Scope and How It Works</h3>
@@ -173,7 +135,7 @@ export function AboutTab({ setActiveMode, onStartTour, contactEmail }) {
         </div>
       </section>
 
-      <section className="about-knowledge-grid" aria-label="Resistance interpretation basics">
+      <section className="about-knowledge-grid" id="about-nomenclature" aria-label="Resistance interpretation basics">
         <article className="about-section-card" tabIndex={0}>
           <div className="about-section-title">
             <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${okListIconSrc})` }} aria-hidden="true" />
@@ -228,7 +190,7 @@ export function AboutTab({ setActiveMode, onStartTour, contactEmail }) {
           </div>
         </article>
 
-        <article className="about-section-card" tabIndex={0}>
+        <article className="about-section-card" id="about-combinations" tabIndex={0}>
           <div className="about-section-title">
             <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${networkIconSrc})` }} aria-hidden="true" />
             <h3>Rule Combinations</h3>
@@ -269,7 +231,7 @@ export function AboutTab({ setActiveMode, onStartTour, contactEmail }) {
           </p>
         </article>
 
-        <article className="about-section-card about-section-card-algorithms" tabIndex={0}>
+        <article className="about-section-card about-section-card-algorithms" id="about-algorithms" tabIndex={0}>
           <div className="about-section-title">
             <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${logicIconSrc})` }} aria-hidden="true" />
             <h3>Supported Interpretation Algorithms</h3>
@@ -299,7 +261,7 @@ export function AboutTab({ setActiveMode, onStartTour, contactEmail }) {
         </article>
       </section>
 
-      <section className="about-section-card about-cli-card" tabIndex={0}>
+      <section className="about-section-card about-cli-card" id="about-cli" tabIndex={0}>
         <div className="about-section-title">
           <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${cliIconSrc})` }} aria-hidden="true" />
           <h3>CLI and Extended Functionality</h3>
@@ -355,7 +317,7 @@ export function AboutTab({ setActiveMode, onStartTour, contactEmail }) {
         </div>
       </section>
 
-      <section className="about-bottom-grid" aria-label="Project information and governance">
+      <section className="about-bottom-grid" id="about-governance" aria-label="Project information and governance">
         <article className="about-section-card" tabIndex={0}>
           <div className="about-section-title">
             <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${contactIconSrc})` }} aria-hidden="true" />

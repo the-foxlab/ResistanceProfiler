@@ -2,13 +2,17 @@ import { describe, it, expect, vi } from 'vitest';
 
 import { buildTourSteps, TOUR_DOCS_URL, TOUR_DOCS_OUTPUT_URL } from './steps';
 
+function makeNav() {
+  return {
+    navigate: vi.fn(),
+    setActiveProfileMode: vi.fn(),
+    setAnalyzeSubMode: vi.fn(),
+  };
+}
+
 describe('buildTourSteps', () => {
-  it('returns an array with at least 15 steps in the required order', () => {
-    const steps = buildTourSteps({
-      setActiveMode: vi.fn(),
-      setActiveProfileMode: vi.fn(),
-      setAnalyzeSubMode: vi.fn(),
-    });
+  it('returns an array with the required steps in order', () => {
+    const steps = buildTourSteps(makeNav());
     expect(Array.isArray(steps)).toBe(true);
     expect(steps.length).toBe(18);
 
@@ -40,11 +44,7 @@ describe('buildTourSteps', () => {
   });
 
   it('every step has a non-empty id, title, and body; targetSelector is a string or null', () => {
-    const steps = buildTourSteps({
-      setActiveMode: vi.fn(),
-      setActiveProfileMode: vi.fn(),
-      setAnalyzeSubMode: vi.fn(),
-    });
+    const steps = buildTourSteps(makeNav());
     for (const step of steps) {
       expect(step.id).toBeTruthy();
       expect(step.targetSelector === null || typeof step.targetSelector === 'string').toBe(true);
@@ -55,83 +55,95 @@ describe('buildTourSteps', () => {
   });
 
   it('the vcf-bam step body mentions BAM and coverage', () => {
-    const steps = buildTourSteps({ setActiveMode: vi.fn(), setActiveProfileMode: vi.fn(), setAnalyzeSubMode: vi.fn() });
+    const steps = buildTourSteps(makeNav());
     const bam = steps.find((s) => s.id === 'vcf-bam');
     expect(bam.body.toLowerCase()).toContain('bam');
     expect(bam.body.toLowerCase()).toContain('coverage');
   });
 
   it('the vcf-frequency-cutoff step body mentions allele frequency', () => {
-    const steps = buildTourSteps({ setActiveMode: vi.fn(), setActiveProfileMode: vi.fn(), setAnalyzeSubMode: vi.fn() });
+    const steps = buildTourSteps(makeNav());
     const freq = steps.find((s) => s.id === 'vcf-frequency-cutoff');
     expect(freq.body.toLowerCase()).toContain('allele frequency');
   });
 
   it('the vcf-coverage-cutoff step body mentions read depth', () => {
-    const steps = buildTourSteps({ setActiveMode: vi.fn(), setActiveProfileMode: vi.fn(), setAnalyzeSubMode: vi.fn() });
+    const steps = buildTourSteps(makeNav());
     const cov = steps.find((s) => s.id === 'vcf-coverage-cutoff');
     expect(cov.body.toLowerCase()).toContain('read depth');
   });
 
-  it('the comparison step body mentions Select all comparable, Compare selected, Non-synonymous only, DB hits only, and heatmap', () => {
-    const steps = buildTourSteps({ setActiveMode: vi.fn(), setActiveProfileMode: vi.fn(), setAnalyzeSubMode: vi.fn() });
+  it('the comparison step body mentions heatmap', () => {
+    const steps = buildTourSteps(makeNav());
     const comp = steps.find((s) => s.id === 'comparison-heatmap');
     expect(comp.body.toLowerCase()).toContain('heatmap');
   });
 
   it('the final step links to the official GitHub docs', () => {
-    const steps = buildTourSteps({ setActiveMode: vi.fn(), setActiveProfileMode: vi.fn(), setAnalyzeSubMode: vi.fn() });
+    const steps = buildTourSteps(makeNav());
     const last = steps[steps.length - 1];
     expect(last.link).toBeDefined();
     expect(last.link.href).toBe(TOUR_DOCS_OUTPUT_URL);
     expect(TOUR_DOCS_OUTPUT_URL).toContain('the-foxlab.github.io/ResistanceProfiler');
   });
 
-  describe('before hooks drive navigation', () => {
-    it('the database-selector step calls setActiveMode("analyze")', () => {
-      const setActiveMode = vi.fn();
-      const steps = buildTourSteps({ setActiveMode, setActiveProfileMode: vi.fn(), setAnalyzeSubMode: vi.fn() });
+  describe('before hooks drive route navigation', () => {
+    it('the database-selector step navigates to /analysis', () => {
+      const nav = makeNav();
+      const steps = buildTourSteps(nav);
       steps.find((s) => s.id === 'database-selector').before();
-      expect(setActiveMode).toHaveBeenCalledWith('analyze');
+      expect(nav.navigate).toHaveBeenCalledWith('/analysis');
     });
 
-    it('the vcf-file step calls setActiveMode, setAnalyzeSubMode("single"), and setActiveProfileMode("vcf")', () => {
-      const setActiveMode = vi.fn();
-      const setActiveProfileMode = vi.fn();
-      const setAnalyzeSubMode = vi.fn();
-      const steps = buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyzeSubMode });
+    it('the vcf-file step navigates to /analysis and sets profile substate', () => {
+      const nav = makeNav();
+      const steps = buildTourSteps(nav);
       steps.find((s) => s.id === 'vcf-file').before();
-      expect(setActiveMode).toHaveBeenCalledWith('analyze');
-      expect(setAnalyzeSubMode).toHaveBeenCalledWith('single');
-      expect(setActiveProfileMode).toHaveBeenCalledWith('vcf');
+      expect(nav.navigate).toHaveBeenCalledWith('/analysis');
+      expect(nav.setAnalyzeSubMode).toHaveBeenCalledWith('single');
+      expect(nav.setActiveProfileMode).toHaveBeenCalledWith('vcf');
     });
 
     it('the fasta-mode step sets profile mode to fasta', () => {
-      const setActiveProfileMode = vi.fn();
-      const steps = buildTourSteps({ setActiveMode: vi.fn(), setActiveProfileMode, setAnalyzeSubMode: vi.fn() });
+      const nav = makeNav();
+      const steps = buildTourSteps(nav);
       steps.find((s) => s.id === 'fasta-mode').before();
-      expect(setActiveProfileMode).toHaveBeenCalledWith('fasta');
+      expect(nav.setActiveProfileMode).toHaveBeenCalledWith('fasta');
     });
 
     it('the regenerate-mode step sets profile mode to regenerate', () => {
-      const setActiveProfileMode = vi.fn();
-      const steps = buildTourSteps({ setActiveMode: vi.fn(), setActiveProfileMode, setAnalyzeSubMode: vi.fn() });
+      const nav = makeNav();
+      const steps = buildTourSteps(nav);
       steps.find((s) => s.id === 'regenerate-mode').before();
-      expect(setActiveProfileMode).toHaveBeenCalledWith('regenerate');
+      expect(nav.setActiveProfileMode).toHaveBeenCalledWith('regenerate');
     });
 
-    it('the reports-table step calls setActiveMode("results")', () => {
-      const setActiveMode = vi.fn();
-      const steps = buildTourSteps({ setActiveMode, setActiveProfileMode: vi.fn(), setAnalyzeSubMode: vi.fn() });
+    it('the reports-table step navigates to /analysis/reports', () => {
+      const nav = makeNav();
+      const steps = buildTourSteps(nav);
       steps.find((s) => s.id === 'reports-table').before();
-      expect(setActiveMode).toHaveBeenCalledWith('results');
+      expect(nav.navigate).toHaveBeenCalledWith('/analysis/reports');
     });
 
-    it('the database-dashboard step calls setActiveMode("database")', () => {
-      const setActiveMode = vi.fn();
-      const steps = buildTourSteps({ setActiveMode, setActiveProfileMode: vi.fn(), setAnalyzeSubMode: vi.fn() });
+    it('the database-dashboard step navigates to /databases', () => {
+      const nav = makeNav();
+      const steps = buildTourSteps(nav);
       steps.find((s) => s.id === 'database-dashboard').before();
-      expect(setActiveMode).toHaveBeenCalledWith('database');
+      expect(nav.navigate).toHaveBeenCalledWith('/databases');
+    });
+
+    it('the browse-mutations step navigates to /databases/mutations', () => {
+      const nav = makeNav();
+      const steps = buildTourSteps(nav);
+      steps.find((s) => s.id === 'browse-mutations').before();
+      expect(nav.navigate).toHaveBeenCalledWith('/databases/mutations');
+    });
+
+    it('the about step navigates to /about', () => {
+      const nav = makeNav();
+      const steps = buildTourSteps(nav);
+      steps.find((s) => s.id === 'about').before();
+      expect(nav.navigate).toHaveBeenCalledWith('/about');
     });
   });
 });

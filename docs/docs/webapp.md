@@ -18,6 +18,27 @@ The stack is intentionally minimal for local development:
 - `respro-web` (FastAPI + bundled frontend)
 - `respro-worker` (RQ worker)
 
+## App layout and navigation
+
+The web app is a single-page application with URL-based routing. The top bar
+spans the full width and carries the primary navigation; contextual sidebars
+appear below it only on workspace pages.
+
+| Route | Page | What it is for |
+|---|---|---|
+| `/` | **Home** | Landing page: launch analysis, explore databases, database stats. |
+| `/analysis` | **Analysis** | Submit VCF/FASTA/batch jobs and run them. |
+| `/analysis/reports` | **Analysis → Reports** | Session results, downloads, and the comparison heatmap. |
+| `/databases` | **Databases → Dashboard** | Interactive summary of the selected database. |
+| `/databases/mutations` | **Databases → Browse Mutations** | Search and filter single and combination rules; TSV export. |
+| `/databases/compare` | **Databases → Compare Databases** | Compare rule sets between databases. |
+| `/about` | **About** | Scope, rule nomenclature, algorithms, CLI usage, governance. |
+
+Deep links work: every route is served directly (the backend falls back to
+`index.html` for unknown non-API paths). A first-visit coach card on
+`/analysis` offers a short guided tour; it can also be started any time from
+the `?` button in the top bar.
+
 ## Standard local development
 
 1. Prepare the mounted data directory:
@@ -95,7 +116,7 @@ All webapp settings are optional environment variables. Set them in a `.env` fil
 | Variable | Default | Description |
 |---|---|---|
 | `RESPRO_WEB_IMPRINT` | *(empty — feature disabled)* | Legal notice / Impressum. Accepts either an absolute `http(s)://` URL (the footer links there and `/legal` redirects to it) or a local file path to an HTML file served at `/legal`. See [Legal notice / Impressum](#legal-notice-impressum-optional) for details. |
-| `RESPRO_WEB_CONTACT_EMAIL` | *(empty — feature disabled)* | Contact e-mail address surfaced as a `mailto:` link in the app footer and on the About tab. Must be a single valid e-mail address; an invalid value fails fast at startup. |
+| `RESPRO_WEB_CONTACT_EMAIL` | *(empty — feature disabled)* | Contact e-mail address surfaced as a `mailto:` link in the app footer and on the About page. Must be a single valid e-mail address; an invalid value fails fast at startup. |
 
 ### Rate limiting and batch sizes
 
@@ -146,7 +167,7 @@ REDIS_URL=redis://redis:6379/0
 # RESPRO_WEB_IMPRINT=https://example.org/impressum
 # RESPRO_WEB_IMPRINT=/data/impressum.html
 
-# Optional: contact e-mail shown in the footer and on the About tab
+# Optional: contact e-mail shown in the footer and on the About page
 # RESPRO_WEB_CONTACT_EMAIL=contact@example.org
 
 # Optional: enable maintained database auto-download and weekly updates

@@ -1,6 +1,15 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { useDashboardLogic, _resolveLegalLink, _resolveContactEmail } from './useDashboardLogic';
+
+// useDashboardLogic reads the URL via react-router; tests render the hook
+// inside a MemoryRouter so no browser history is needed.
+function renderDashboardHook() {
+  return renderHook(() => useDashboardLogic(), {
+    wrapper: ({ children }) => <MemoryRouter initialEntries={['/analysis']}>{children}</MemoryRouter>,
+  });
+}
 
 // Mock XMLHttpRequest for file upload tests
 class MockXHR {
@@ -101,7 +110,7 @@ describe('useDashboardLogic - File Upload Flow', () => {
       }),
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     // Wait for initialization
     await waitFor(() => {
@@ -147,7 +156,7 @@ describe('useDashboardLogic - File Upload Flow', () => {
       }),
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.databases.length).toBeGreaterThan(0);
@@ -179,7 +188,7 @@ describe('useDashboardLogic - File Upload Flow', () => {
       }),
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.databases.length).toBeGreaterThan(0);
@@ -223,7 +232,7 @@ describe('useDashboardLogic - File Upload Flow', () => {
       }),
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.databases.length).toBeGreaterThan(0);
@@ -255,7 +264,7 @@ describe('useDashboardLogic - File Upload Flow', () => {
       }),
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.databases.length).toBeGreaterThan(0);
@@ -287,7 +296,7 @@ describe('useDashboardLogic - File Upload Flow', () => {
       }),
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.databases.length).toBeGreaterThan(0);
@@ -402,7 +411,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
       }),
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.databases.length).toBeGreaterThan(0);
@@ -495,7 +504,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
       }),
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.databases.length).toBeGreaterThan(0);
@@ -568,7 +577,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
       });
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.databases.length).toBeGreaterThan(0);
@@ -696,7 +705,7 @@ describe('useDashboardLogic - Job Polling Flow', () => {
       });
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.databases.length).toBeGreaterThan(0);
@@ -794,7 +803,7 @@ describe('useDashboardLogic - Report Display Flow', () => {
       });
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.databases.length).toBeGreaterThan(0);
@@ -831,7 +840,7 @@ describe('useDashboardLogic - Report Display Flow', () => {
       }),
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     const reportUrl = result.current.buildReportUrl('/data/results/test.report.html');
 
@@ -927,7 +936,7 @@ describe('useDashboardLogic - Report Display Flow', () => {
       });
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.databases.length).toBeGreaterThan(0);
@@ -1030,7 +1039,7 @@ describe('useDashboardLogic - Example FASTA profile', () => {
       return Promise.resolve({ ok: true, json: async () => ({}) });
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.databases.length).toBeGreaterThan(0);
@@ -1143,7 +1152,7 @@ describe('cliVersion', () => {
       json: () => Promise.resolve({ data: { items: [] } }),
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.cliVersion).toBe('1.2.3');
@@ -1168,7 +1177,7 @@ describe('cliVersion', () => {
       json: () => Promise.resolve({ data: { items: [] } }),
     });
 
-    const { result } = renderHook(() => useDashboardLogic());
+    const { result } = renderDashboardHook();
 
     await waitFor(() => {
       expect(result.current.databases.length).toBe(0);

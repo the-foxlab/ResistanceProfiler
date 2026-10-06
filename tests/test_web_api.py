@@ -11,7 +11,7 @@ import textwrap
 import zipfile
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 import fakeredis
@@ -3301,3 +3301,67 @@ class TestDatabaseComparisonRoutes:
         )
         assert response.status_code == 400
 
+
+
+class TestSpaFallback:
+    """
+    The frontend uses path routing (/analysis, /databases, ...). Unknown
+    non-API paths must serve the SPA index.html so deep links survive a hard
+    reload, while API and artifact routes must keep their JSON 404s.
+    """
+
+    @pytest.fixture()
+    def spa_client(self, startup_config: StartupConfig, tmp_path: Path) -> TestClient:
+        dist_dir = tmp_path / 'dist'
+        dist_dir.mkdir()
+        (dist_dir / 'index.html').write_text('<!doctype html><title>SPA</title>')
+        (dist_dir / 'assets').mkdir()
+        (dist_dir / 'assets' / 'app.js').write_text('console.log(1)')
+        with patch('web.backend.main._frontend_dist_dir', return_value=dist_dir):
+            app = create_app(startup_config=startup_config)
+        return TestClient(app)
+
+    def test_unknown_frontend_path_serves_index_html(self, spa_client: TestClient) -> None:
+        for path in ('/analysis', '/analysis/reports', '/databases/mutations', '/about'):
+            response = spa_client.get(path)
+            assert response.status_code == 200, path
+            assert 'SPA' in response.text
+
+    def test_root_serves_index_html(self, spa_client: TestClient) -> None:
+        response = spa_client.get('/')
+        assert response.status_code == 200
+        assert 'SPA' in response.text
+
+    def test_unknown_api_path_still_returns_json_404(self, spa_client: TestClient) -> None:
+        response = spa_client.get('/api/does-not-exist')
+        assert response.status_code == 404
+        assert response.json()['detail'] == 'Not Found'
+
+    def test_api_prefix_subpath_returns_json_error(self, spa_client: TestClient) -> None:
+        # /api/report without its required query param is a validation error from
+        # the real route — proving the fallback never swallowed API paths.
+        response = spa_client.get('/api/report')
+        assert response.status_code == 422
+        assert response.json()['detail'][0]['loc'] == ['query', 'artifact_id']
+
+    def test_reserved_backend_paths_are_not_swallowed_by_the_fallback(self, startup_config: StartupConfig, tmp_path: Path) -> None:
+        # /docs, /redoc, /openapi.json are FastAPI docs URLs. In online mode they
+        # are disabled (docs_url=None) and must keep returning 404 instead of
+        # receiving the SPA index.html.
+        dist_dir = tmp_path / 'dist'
+        dist_dir.mkdir()
+        (dist_dir / 'index.html').write_text('<!doctype html><title>SPA</title>')
+        (dist_dir / 'assets').mkdir()
+        (dist_dir / 'assets' / 'app.js').write_text('console.log(1)')
+        online_config = replace(startup_config, deployment_mode='online')
+        with patch('web.backend.main._frontend_dist_dir', return_value=dist_dir):
+            app = create_app(startup_config=online_config)
+        client = TestClient(app)
+        for path in ('/docs', '/redoc', '/openapi.json'):
+            response = client.get(path)
+            assert response.status_code == 404, path
+
+    def test_static_assets_are_served_from_dist(self, spa_client: TestClient) -> None:
+        response = spa_client.get('/assets/app.js')
+        assert response.status_code == 200
+        assert 'console.log(1)' in response.text

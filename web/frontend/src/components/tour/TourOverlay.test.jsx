@@ -1,17 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 
 import { TourProvider, TOUR_VERSION, TOUR_STORAGE_KEY } from './TourContext';
 import { TourOverlay } from './TourOverlay';
 
 // A minimal app that renders a target element and the overlay wired to the provider.
+// The initial path is /analysis so the provider offers the coach card.
 function AppWithTarget({ steps }) {
   return (
-    <TourProvider steps={steps}>
-      <div data-testid="target-a" id="target-a">Target A</div>
-      <div data-testid="target-b" id="target-b">Target B</div>
-      <TourOverlay />
-    </TourProvider>
+    <MemoryRouter initialEntries={['/analysis']}>
+      <TourProvider steps={steps}>
+        <div data-testid="target-a" id="target-a">Target A</div>
+        <div data-testid="target-b" id="target-b">Target B</div>
+        <TourOverlay />
+      </TourProvider>
+    </MemoryRouter>
   );
 }
 
@@ -36,10 +40,10 @@ describe('TourOverlay', () => {
     vi.restoreAllMocks();
   });
 
-  describe('start prompt', () => {
-    it('shows the start prompt on first visit instead of auto-starting', () => {
+  describe('coach card', () => {
+    it('shows the coach card on first /analysis visit instead of auto-starting', () => {
       const { container } = render(<AppWithTarget steps={stepsWithTargets} />);
-      expect(container.querySelector('.tour-prompt')).not.toBeNull();
+      expect(container.querySelector('.tour-coach-card')).not.toBeNull();
       expect(container.querySelector('.tour-tooltip')).toBeNull();
       expect(screen.getByRole('button', { name: /start tour/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /no thanks/i })).toBeInTheDocument();
@@ -49,20 +53,13 @@ describe('TourOverlay', () => {
       localStorage.setItem(TOUR_STORAGE_KEY, TOUR_VERSION);
       const { container } = render(<AppWithTarget steps={stepsWithTargets} />);
       expect(container.querySelector('.tour-overlay')).toBeNull();
-      expect(container.querySelector('.tour-prompt')).toBeNull();
+      expect(container.querySelector('.tour-coach-card')).toBeNull();
     });
 
-    it('Esc on the prompt declines it and writes the version token', () => {
+    it('Esc on the coach card declines it and writes the version token', () => {
       const { container } = render(<AppWithTarget steps={stepsWithTargets} />);
       fireEvent.keyDown(document, { key: 'Escape' });
-      expect(container.querySelector('.tour-prompt')).toBeNull();
-      expect(localStorage.getItem(TOUR_STORAGE_KEY)).toBe(TOUR_VERSION);
-    });
-
-    it('backdrop click on the prompt declines it and writes the version token', () => {
-      const { container } = render(<AppWithTarget steps={stepsWithTargets} />);
-      fireEvent.click(container.querySelector('.tour-backdrop'));
-      expect(container.querySelector('.tour-prompt')).toBeNull();
+      expect(container.querySelector('.tour-coach-card')).toBeNull();
       expect(localStorage.getItem(TOUR_STORAGE_KEY)).toBe(TOUR_VERSION);
     });
   });

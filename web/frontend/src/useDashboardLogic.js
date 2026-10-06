@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import faviconSrc from './assets/favicon.svg';
 import packageJson from '../package.json';
 import { FRONTEND_CONFIG } from './config';
@@ -33,7 +34,12 @@ export function useDashboardLogic() {
   // About tab.
   const [contactEmail, setContactEmail] = useState(null);
   const [cliVersion, setCliVersion] = useState(null);
-  const [activeMode, setActiveMode] = useState('analyze');
+  // The URL is the source of truth for the active page; `activeMode` is derived
+  // so existing tab components keep working unchanged.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const activeMode = _pageForPath(location.pathname);
+  const setActiveMode = (mode) => navigate(_pathForPage(mode));
   const [activeProfileMode, setActiveProfileMode] = useState('vcf');
   const [analyzeSubMode, setAnalyzeSubMode] = useState('single');
 
@@ -210,6 +216,7 @@ export function useDashboardLogic() {
     mutationsLoaded: mutations.mutationsLoaded,
     activeMode,
     setActiveMode,
+    navigate,
     activeProfileMode,
     setActiveProfileMode,
     analyzeSubMode,
@@ -325,5 +332,30 @@ export function _resolveContactEmail(contactData) {
     return null;
   }
   return contactData.email;
+}
+
+const PAGE_TO_PATH = {
+  analyze: '/analysis',
+  results: '/analysis/reports',
+  database: '/databases',
+  mutations: '/databases/mutations',
+  compare: '/databases/compare',
+  about: '/about',
+};
+
+function _pageForPath(pathname) {
+  for (const [page, path] of Object.entries(PAGE_TO_PATH)) {
+    if (pathname === path) {
+      return page;
+    }
+  }
+  // Sub-pages map to their parent page for components that only read the mode.
+  if (pathname.startsWith('/analysis')) return 'analyze';
+  if (pathname.startsWith('/databases')) return 'database';
+  return 'analyze';
+}
+
+function _pathForPage(page) {
+  return PAGE_TO_PATH[page] || '/analysis';
 }
 
