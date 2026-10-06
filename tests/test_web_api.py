@@ -3103,3 +3103,201 @@ class TestRequestFieldBounds:
         )
         assert submit.status_code == 200
 
+
+def _build_compare_db(
+    path: Path,
+    *,
+    name: str,
+    accession: str,
+    rules: list[dict],
+) -> Path:
+    """Create a minimal project DB with one reference and the given atomic rules."""
+    from respro.db.schema import create_schema
+
+    conn = create_schema(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute('INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+                 (name, 6, str(uuid4())))
+    conn.execute('INSERT INTO reference (project_id, name, accession, length) VALUES (?, ?, ?, ?)',
+                 (1, f'ref_{accession}', accession, 100))
+    conn.execute(
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (1, 'gag', 'Gag', 0, 90, '+', 'ATG' * 30),
+    )
+    drug_ids: dict[str, int] = {}
+    for rule in rules:
+        drug = rule['drug']
+        if drug not in drug_ids:
+            conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, drug))
+            drug_ids[drug] = conn.execute('SELECT last_insert_rowid() AS id').fetchone()['id']
+        conn.execute(
+            'INSERT INTO resistance_rule '
+            '(feature_id, drug_id, position, reference, mutation, phenotype, ic50, fold_ic50, score, publication) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (1, drug_ids[drug], rule['position'], rule['reference'], rule['mutation'],
+             rule.get('phenotype', 'resistant'), rule.get('ic50', ''), rule.get('fold_ic50', ''),
+             rule.get('score', ''), rule.get('publication', '')),
+        )
+    conn.commit()
+    conn.close()
+    return path
+
+
+def _cmp_rule(position=1, reference='K', mutation='E', drug='DrugA', **kw) -> dict:
+    base = {'position': position, 'reference': reference, 'mutation': mutation, 'drug': drug}
+    base.update(kw)
+    return base
+
+
+class TestDatabaseComparisonRoutes:
+    """Routes for comparing 2-3 databases by rule overlap on a shared reference."""
+
+    @pytest.fixture()
+    def compare_config(self, startup_config: StartupConfig) -> StartupConfig:
+        """Startup config with two extra databases sharing accession ACC1."""
+        db_dir = startup_config.project_databases_dir
+        _build_compare_db(
+            db_dir / 'cmp_a.db', name='CmpA', accession='ACC1',
+            rules=[_cmp_rule(position=1, reference='K', mutation='E', drug='DrugA'),
+                   _cmp_rule(position=2, reference='M', mutation='V', drug='DrugB')],
+        )
+        _build_compare_db(
+            db_dir / 'cmp_b.db', name='CmpB', accession='ACC1',
+            rules=[_cmp_rule(position=1, reference='K', mutation='E', drug='DrugA'),
+                   _cmp_rule(position=3, reference='R', mutation='Q', drug='DrugD')],
+        )
+        return startup_config
+
+    def test_shared_references_returns_only_common_accessions(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        response = client.get('/api/databases/shared-references', params={'ids': 'cmp_a.db,cmp_b.db'})
+        assert response.status_code == 200
+        items = response.json()['data']['items']
+        assert [item['accession'] for item in items] == ['ACC1']
+        assert items[0]['present_in'] == ['cmp_a.db', 'cmp_b.db']
+
+    def test_shared_references_excludes_accession_missing_from_one_db(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        # The bundled project_db has no accession, so it shares nothing with ACC1.
+        bundled = next(
+            p.name for p in compare_config.project_databases_dir.glob('*.db')
+            if not p.name.startswith('cmp_')
+        )
+        response = client.get(
+            '/api/databases/shared-references', params={'ids': f'cmp_a.db,{bundled}'},
+        )
+        assert response.status_code == 200
+        assert response.json()['data']['items'] == []
+
+    def test_compare_returns_venn_and_rows(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        response = client.post(
+            '/api/databases/compare',
+            json={'database_ids': ['cmp_a.db', 'cmp_b.db'], 'accession': 'ACC1'},
+        )
+        assert response.status_code == 200
+        data = response.json()['data']
+        assert data['reference']['accession'] == 'ACC1'
+        regions = {frozenset(r['region']): r['count'] for r in data['venn']}
+        assert regions[frozenset({'cmp_a.db', 'cmp_b.db'})] == 1
+        assert regions[frozenset({'cmp_a.db'})] == 1
+        assert regions[frozenset({'cmp_b.db'})] == 1
+        assert len(data['rows']) == 3
+        shared = next(
+            r for r in data['rows']
+            if (r['feature'], r['position'], r['reference'], r['mutation'], r['drug'])
+            == ('gag', 1, 'K', 'E', 'DrugA')
+        )
+        assert shared['per_db']['cmp_a.db']['drug'] == 'DrugA'
+        assert shared['per_db']['cmp_b.db']['drug'] == 'DrugA'
+
+    def test_compare_accession_missing_from_one_db_returns_400(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        bundled = next(
+            p.name for p in compare_config.project_databases_dir.glob('*.db')
+            if not p.name.startswith('cmp_')
+        )
+        response = client.post(
+            '/api/databases/compare',
+            json={'database_ids': ['cmp_a.db', bundled], 'accession': 'ACC1'},
+        )
+        assert response.status_code == 400
+        assert 'ACC1' in response.json()['detail']
+
+    def test_compare_one_database_returns_400(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        response = client.post(
+            '/api/databases/compare',
+            json={'database_ids': ['cmp_a.db'], 'accession': 'ACC1'},
+        )
+        assert response.status_code == 400
+
+    def test_compare_four_databases_returns_400(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        db_dir = compare_config.project_databases_dir
+        _build_compare_db(db_dir / 'cmp_c.db', name='CmpC', accession='ACC1', rules=[_cmp_rule()])
+        _build_compare_db(db_dir / 'cmp_d.db', name='CmpD', accession='ACC1', rules=[_cmp_rule()])
+        response = client.post(
+            '/api/databases/compare',
+            json={'database_ids': ['cmp_a.db', 'cmp_b.db', 'cmp_c.db', 'cmp_d.db'], 'accession': 'ACC1'},
+        )
+        assert response.status_code == 400
+
+    def test_reference_accessions_returns_per_db_accession_sets(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        response = client.get(
+            '/api/databases/reference-accessions',
+            params={'ids': 'cmp_a.db,cmp_b.db'},
+        )
+        assert response.status_code == 200
+        data = response.json()['data']['items']
+        assert data['cmp_a.db']['ACC1'] == {'name': 'ref_ACC1', 'organism': ''}
+        assert data['cmp_b.db']['ACC1'] == {'name': 'ref_ACC1', 'organism': ''}
+
+    def test_shared_references_include_organism(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        conn = sqlite3.connect(compare_config.project_databases_dir / 'cmp_a.db')
+        conn.execute(
+            "UPDATE reference SET organism = 'Monkeypox virus' WHERE accession = 'ACC1'",
+        )
+        conn.commit()
+        conn.close()
+        response = client.get(
+            '/api/databases/shared-references',
+            params={'ids': 'cmp_a.db,cmp_b.db'},
+        )
+        assert response.status_code == 200
+        items = response.json()['data']['items']
+        assert items[0]['organism'] == 'Monkeypox virus'
+
+    def test_reference_accessions_unknown_db_returns_400(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        response = client.get(
+            '/api/databases/reference-accessions',
+            params={'ids': 'cmp_a.db,missing.db'},
+        )
+        assert response.status_code == 400
+
+    def test_corrupt_database_returns_400_not_500(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        # A corrupt (non-SQLite) database file must surface as a client error,
+        # not an unhandled 500.
+        corrupt_path = compare_config.project_databases_dir / 'cmp_a.db'
+        corrupt_path.write_bytes(b'not a sqlite database')
+        response = client.get(
+            '/api/databases/reference-accessions',
+            params={'ids': 'cmp_a.db,cmp_b.db'},
+        )
+        assert response.status_code == 400
+

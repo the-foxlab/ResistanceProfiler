@@ -248,3 +248,13 @@ class CompareResponse(BaseModel):
     db_hit_map: list[bool]  # True if any sample has a db_hit for that mutation column
     sample_disambiguation_note: str = ''
     matrix: list[list[CompareCell]]
+
+
+class CompareDatabasesPayload(BaseModel):
+    """Payload for comparing 2-3 databases by rule overlap on a shared reference."""
+
+    database_ids: list[str] = Field(
+        default_factory=list,
+        max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length,
+    )
+    accession: str = Field(max_length=WEB_BACKEND_CONFIG.defaults.opaque_id_max_length)

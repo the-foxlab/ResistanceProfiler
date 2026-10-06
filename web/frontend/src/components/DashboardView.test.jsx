@@ -102,3 +102,46 @@ describe('DashboardView mobile sidebar toggle', () => {
     expect(document.getElementById('sidebar-rail')).not.toHaveClass('open');
   });
 });
+
+describe('DashboardView sidebar sections', () => {
+  it('groups analysis and database modes into two labelled sections', () => {
+    renderWithTour(<DashboardView {...minimalProps()} />);
+    const sections = document.querySelectorAll('.sidebar-rail-section');
+    expect(sections).toHaveLength(2);
+    expect(sections[0].getAttribute('aria-label')).toBe('Analysis and reports');
+    expect(sections[1].getAttribute('aria-label')).toBe('Database browsing');
+  });
+
+  it('places analysis modes in the first section and database modes in the second', () => {
+    renderWithTour(<DashboardView {...minimalProps()} />);
+    const first = document.querySelectorAll('.sidebar-rail-section')[0];
+    const second = document.querySelectorAll('.sidebar-rail-section')[1];
+    const firstIds = [...first.querySelectorAll('.sidebar-rail-link')].map((b) => b.getAttribute('aria-label'));
+    const secondIds = [...second.querySelectorAll('.sidebar-rail-link')].map((b) => b.getAttribute('aria-label'));
+    expect(firstIds).toEqual(['Analysis', 'Reports']);
+    expect(secondIds).toEqual(['Database Dashboard', 'Browse Mutations', 'Compare Databases']);
+  });
+
+  it('separates the sections with a subtle divider', () => {
+    renderWithTour(<DashboardView {...minimalProps()} />);
+    const dividers = document.querySelectorAll('.sidebar-rail-divider');
+    expect(dividers.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('keeps About pinned below the sections, outside them', () => {
+    renderWithTour(<DashboardView {...minimalProps()} />);
+    const sections = document.querySelectorAll('.sidebar-rail-section');
+    for (const section of sections) {
+      const labels = [...section.querySelectorAll('.sidebar-rail-link')].map((b) => b.getAttribute('aria-label'));
+      expect(labels).not.toContain('About');
+    }
+    expect(screen.getByRole('button', { name: 'About' })).toBeInTheDocument();
+  });
+
+  it('still forwards setActiveMode when a mode inside a section is clicked', () => {
+    const setActiveMode = vi.fn();
+    renderWithTour(<DashboardView {...minimalProps({ setActiveMode })} />);
+    fireEvent.click(screen.getByRole('button', { name: /compare databases/i }));
+    expect(setActiveMode).toHaveBeenCalledWith('compare');
+  });
+});

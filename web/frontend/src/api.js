@@ -221,4 +221,22 @@ export async function downloadArtifactBundle(artifactIds, downloadName) {
   URL.revokeObjectURL(href);
 }
 
+export async function fetchSharedReferences(ids) {
+  const payload = await apiGet('/api/databases/shared-references', { ids: ids.join(',') });
+  return payload.data;
+}
+
+export async function fetchReferenceAccessions(ids) {
+  const payload = await apiGet('/api/databases/reference-accessions', { ids: ids.join(',') });
+  return payload.data;
+}
+
+export async function compareDatabases(databaseIds, accession) {
+  const payload = await apiPost('/api/databases/compare', {
+    database_ids: databaseIds,
+    accession,
+  });
+  return payload.data;
+}
+
 export { API_BASE, buildHeaders };

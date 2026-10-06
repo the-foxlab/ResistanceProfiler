@@ -5,6 +5,7 @@ import databaseIconSrc from '../assets/icon-database.svg';
 import mutationsIconSrc from '../assets/search.svg';
 import homeIconSrc from '../assets/home.svg';
 import reportIconSrc from '../assets/reports.svg';
+import compareIconSrc from '../assets/icon-venn.svg';
 import { DatabaseSelectorBar } from './DatabaseSelectorBar';
 import { ThemeToggle } from './ThemeToggle';
 import { useTheme } from '../hooks/useTheme';
@@ -12,6 +13,7 @@ import { AnalyzeTab } from './tabs/AnalyzeTab';
 import { ResultsTab } from './tabs/ResultsTab';
 import { MutationsTab } from './tabs/MutationsTab';
 import { DatabaseTab } from './tabs/DatabaseTab';
+import { CompareTab } from './tabs/CompareTab';
 import { AboutTab } from './tabs/AboutTab';
 import { AppFooter } from './AppFooter';
 import { useTour } from './tour/TourContext';
@@ -22,7 +24,15 @@ const MODES = [
   { id: 'results', label: 'Reports', iconSrc: reportIconSrc },
   { id: 'database', label: 'Database Dashboard', iconSrc: databaseIconSrc },
   { id: 'mutations', label: 'Browse Mutations', iconSrc: mutationsIconSrc },
+  { id: 'compare', label: 'Compare Databases', iconSrc: compareIconSrc },
   { id: 'about', label: 'About', iconSrc: aboutIconSrc },
+];
+
+// Sidebar grouping: user-facing analysis vs. database browsing. About stays
+// outside the sections, pinned to the bottom of the rail.
+const MODE_SECTIONS = [
+  { label: 'Analysis and reports', ids: ['analyze', 'results'] },
+  { label: 'Database browsing', ids: ['database', 'mutations', 'compare'] },
 ];
 
 
@@ -191,19 +201,36 @@ export function DashboardView({
         aria-label="Dashboard modes"
       >
         <nav className="sidebar-rail-nav">
-          {MODES.map((mode) => (
-            <button
-              key={mode.id}
-              type="button"
-              className={`sidebar-rail-link ${activeMode === mode.id ? 'active' : ''} ${mode.id === 'about' ? 'about-tab' : ''}`}
-              onClick={() => handleSelectMode(mode.id)}
-              aria-label={mode.label}
-              data-tour-target={`sidebar-${mode.id}`}
-            >
-              <span className="sidebar-icon-mask" style={{ '--icon-src': `url(${mode.iconSrc})` }} aria-hidden="true" />
-              <span className="sidebar-rail-text">{mode.label}</span>
-            </button>
+          {MODE_SECTIONS.map((section, index) => (
+            <div key={section.label} className="sidebar-rail-group">
+              {index > 0 && <div className="sidebar-rail-divider" role="presentation" />}
+              <div className="sidebar-rail-section" aria-label={section.label}>
+                {MODES.filter((mode) => section.ids.includes(mode.id)).map((mode) => (
+                  <button
+                    key={mode.id}
+                    type="button"
+                    className={`sidebar-rail-link ${activeMode === mode.id ? 'active' : ''} ${mode.id === 'about' ? 'about-tab' : ''}`}
+                    onClick={() => handleSelectMode(mode.id)}
+                    aria-label={mode.label}
+                    data-tour-target={`sidebar-${mode.id}`}
+                  >
+                    <span className="sidebar-icon-mask" style={{ '--icon-src': `url(${mode.iconSrc})` }} aria-hidden="true" />
+                    <span className="sidebar-rail-text">{mode.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
+          <button
+            type="button"
+            className={`sidebar-rail-link ${activeMode === 'about' ? 'active' : ''} about-tab`}
+            onClick={() => handleSelectMode('about')}
+            aria-label="About"
+            data-tour-target="sidebar-about"
+          >
+            <span className="sidebar-icon-mask" style={{ '--icon-src': `url(${aboutIconSrc})` }} aria-hidden="true" />
+            <span className="sidebar-rail-text">About</span>
+          </button>
         </nav>
       </aside>
       {/* Scrim behind the off-canvas drawer on mobile. Hidden on desktop and
@@ -381,6 +408,9 @@ export function DashboardView({
               mutationPlotMeta={mutationPlotMeta}
               selectedDatabase={selectedDatabase}
             />
+          )}
+          {activeMode === 'compare' && (
+            <CompareTab databases={databases} />
           )}
           {activeMode === 'about' && (
             <AboutTab
