@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router';
 
 import logoSrc from '../assets/logo.svg';
@@ -10,10 +10,9 @@ import reportIconSrc from '../assets/reports.svg';
 import compareIconSrc from '../assets/icon-venn.svg';
 import { DatabaseSelectorBar } from './DatabaseSelectorBar';
 import { ThemeToggle } from './ThemeToggle';
-import { useTheme } from '../hooks/useTheme';
+import { ThemeContext, useTheme } from '../hooks/useTheme';
 import { AppFooter } from './AppFooter';
 import { TourOverlay } from './tour/TourOverlay';
-import { useTour } from './tour/TourContext';
 import { ROUTE_META, SIDEBAR_SECTIONS } from '../routes';
 
 const SIDEBAR_ICONS = {
@@ -41,19 +40,36 @@ function readCollapsed() {
   }
 }
 
-export function AppShell({ logic, onStartTour, children }) {
+export function AppShell({ logic, children }) {
   const { pathname } = useLocation();
   const meta = ROUTE_META[pathname] || { showsSidebar: false, showsDatabaseSelector: false, breadcrumb: [] };
-  const { startTour } = useTour();
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readCollapsed);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [showScrollTop, setShowScrollTop] = useState(false);
+  const [topBarVisible, setTopBarVisible] = useState(true);
+  const topBarRef = useRef(null);
   const { preference: themePreference, resolved: themeResolved, setTheme } = useTheme();
 
-  // Close the off-canvas drawer whenever the route changes.
   useEffect(() => {
-    setMobileNavOpen(false);
-  }, [pathname]);
+    const topBar = topBarRef.current;
+    if (!topBar) return undefined;
+
+    if (!('IntersectionObserver' in window)) {
+      const updateVisibility = () => {
+        const bounds = topBar.getBoundingClientRect();
+        setTopBarVisible(bounds.bottom >= bounds.height / 2);
+      };
+      window.addEventListener('scroll', updateVisibility, { passive: true });
+      updateVisibility();
+      return () => window.removeEventListener('scroll', updateVisibility);
+    }
+
+    const observer = new IntersectionObserver(([entry]) => {
+      setTopBarVisible(entry.intersectionRatio >= 0.5);
+    }, { threshold: 0.5 });
+    observer.observe(topBar);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const updateScrollTopVisibility = () => {
@@ -63,20 +79,6 @@ export function AppShell({ logic, onStartTour, children }) {
     updateScrollTopVisibility();
     return () => window.removeEventListener('scroll', updateScrollTopVisibility);
   }, []);
-
-  // Close the off-canvas drawer on Escape while it is open. Bound only when
-  // the drawer is open so it never swallows Escape intended for other widgets
-  // (e.g. the plot modal in AnalyzeTab manages its own Escape listener).
-  useEffect(() => {
-    if (!mobileNavOpen) return undefined;
-    const closeOnEscape = (event) => {
-      if (event.key === 'Escape') {
-        setMobileNavOpen(false);
-      }
-    };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [mobileNavOpen]);
 
   const toggleCollapsed = () => {
     setCollapsed((current) => {
@@ -93,7 +95,7 @@ export function AppShell({ logic, onStartTour, children }) {
     ? (
       <aside
         id="sidebar-rail"
-        className={`sidebar-rail ${mobileNavOpen ? 'open' : ''} ${collapsed ? 'collapsed' : ''}`}
+        className={`sidebar-rail${collapsed ? ' collapsed' : ''}${mobileSidebarOpen ? ' mobile-open' : ''}${topBarVisible ? '' : ' header-hidden'}`}
         aria-label="Section navigation"
       >
         <nav className="sidebar-rail-nav">
@@ -105,7 +107,7 @@ export function AppShell({ logic, onStartTour, children }) {
           >
             {collapsed ? '»' : '«'}
           </button>
-          {SIDEBAR_SECTIONS.map((section, index) => {
+          {SIDEBAR_SECTIONS.map((section) => {
             const isActiveSection = pathname.startsWith(section.basePath);
             if (!isActiveSection) {
               return null;
@@ -121,39 +123,38 @@ export function AppShell({ logic, onStartTour, children }) {
                       className={({ isActive }) => `sidebar-rail-link ${isActive ? 'active' : ''}`}
                       aria-label={item.label}
                       data-tour-target={`sidebar-${item.page}`}
+                      onClick={() => setMobileSidebarOpen(false)}
                     >
                       <span className="sidebar-icon-mask" style={{ '--icon-src': `url(${SIDEBAR_ICONS[item.page]})` }} aria-hidden="true" />
                       <span className="sidebar-rail-text">{item.label}</span>
                     </NavLink>
                   ))}
                 </div>
-                {index < SIDEBAR_SECTIONS.length - 1 && <div className="sidebar-rail-divider" role="presentation" />}
               </div>
             );
           })}
         </nav>
+        <button
+          type="button"
+          className="mobile-sidebar-toggle"
+          aria-label={mobileSidebarOpen ? 'Close sidebar' : 'Open sidebar'}
+          aria-expanded={mobileSidebarOpen}
+          aria-controls="sidebar-rail"
+          onClick={() => setMobileSidebarOpen((open) => !open)}
+        >
+          {mobileSidebarOpen ? '«' : '»'}
+        </button>
       </aside>
     )
     : null;
 
   return (
+    <ThemeContext.Provider value={themeResolved}>
     <main className="dashboard-shell" id="main-content">
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
-      <header className="top-bar top-bar-full">
-        <button
-          type="button"
-          className={`mobile-menu-btn ${mobileNavOpen ? 'open' : ''}`}
-          aria-label="Toggle navigation"
-          aria-expanded={mobileNavOpen}
-          aria-controls="sidebar-rail"
-          onClick={() => setMobileNavOpen((v) => !v)}
-        >
-          <span className="mobile-menu-bar" aria-hidden="true" />
-          <span className="mobile-menu-bar" aria-hidden="true" />
-          <span className="mobile-menu-bar" aria-hidden="true" />
-        </button>
+      <header ref={topBarRef} className="top-bar top-bar-full">
         <Link to="/" className="top-bar-brand-block" aria-label="ResistanceProfiler home">
           <div className="brand-logo-wrap">
             <img className="brand-logo" src={logoSrc} alt="ResistanceProfiler logo" />
@@ -174,60 +175,38 @@ export function AppShell({ logic, onStartTour, children }) {
           ))}
         </nav>
         <div className="top-bar-actions">
-          <Link to="/analysis" className="analyze-primary top-bar-launch">
-            Launch
-          </Link>
-          {onStartTour && (
-            <button
-              type="button"
-              className="top-bar-help"
-              title="Take a guided tour of the app"
-              aria-label="Start the guided tour"
-              onClick={onStartTour}
-            >
-              ?
-            </button>
-          )}
           <ThemeToggle preference={themePreference} onChange={setTheme} />
         </div>
       </header>
 
       <div className="dashboard-body">
         {sidebar}
-        {/* Scrim behind the off-canvas drawer on mobile. Hidden on desktop and
-            whenever the drawer is closed via CSS (.is-open). Clicking it
-            dismisses the drawer, mirroring a modal overlay. */}
-        {sidebar && (
-          <div
-            className={`mobile-nav-backdrop ${mobileNavOpen ? 'is-open' : ''}`}
-            aria-hidden="true"
-            onClick={() => setMobileNavOpen(false)}
+        {mobileSidebarOpen && (
+          <button
+            type="button"
+            className="mobile-sidebar-backdrop"
+            aria-label="Close navigation"
+            onClick={() => setMobileSidebarOpen(false)}
           />
         )}
         <div className="dashboard-main">
-          {meta.breadcrumb.length > 0 && (
-            <nav className="breadcrumb-row" aria-label="Breadcrumb">
-              {meta.breadcrumb.map((crumb, index) => (
-                <span key={crumb} className="breadcrumb-item">
-                  {index > 0 && <span className="breadcrumb-sep" aria-hidden="true">›</span>}
-                  <span className="breadcrumb-crumb">{crumb}</span>
-                </span>
-              ))}
-            </nav>
-          )}
-          {meta.showsDatabaseSelector && (
+          {meta.heading && (
             <div className="workspace-subheader">
-              <DatabaseSelectorBar
-                databases={logic.databases}
-                selectedDatabase={logic.selectedDatabase}
-                selectedDatabaseId={logic.selectedDatabaseId}
-                onDatabaseChange={logic.setSelectedDatabaseId}
-                selectId="topbar-db-select"
-                className="topbar-db-bar"
-              />
+              <h1 className="workspace-heading">{meta.heading}</h1>
+              {meta.showsDatabaseSelector && (
+                <DatabaseSelectorBar
+                  databases={logic.databases}
+                  selectedDatabase={logic.selectedDatabase}
+                  selectedDatabaseId={logic.selectedDatabaseId}
+                  onDatabaseChange={logic.setSelectedDatabaseId}
+                  selectId="topbar-db-select"
+                  className="topbar-db-bar"
+                />
+              )}
             </div>
           )}
           <section className="panel-stack">
+            {meta.description && <p className="workspace-description">{meta.description}</p>}
             {children}
           </section>
           <AppFooter
@@ -249,5 +228,6 @@ export function AppShell({ logic, onStartTour, children }) {
       </button>
       <TourOverlay />
     </main>
+    </ThemeContext.Provider>
   );
 }

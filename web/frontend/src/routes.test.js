@@ -23,7 +23,7 @@ describe('route table', () => {
     expect(withSelector).toEqual({
       '/': false,
       '/analysis': true,
-      '/analysis/reports': true,
+      '/analysis/reports': false,
       '/databases': true,
       '/databases/mutations': true,
       '/databases/compare': false,

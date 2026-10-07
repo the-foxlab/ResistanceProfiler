@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 
 import { AppShell } from './AppShell';
-import { TourProvider, useTour } from './tour/TourContext';
+import { TourProvider } from './tour/TourContext';
 
 function renderShell(path, props = {}) {
   const logic = {
@@ -20,13 +20,17 @@ function renderShell(path, props = {}) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <TourProvider steps={[]}>
-        <AppShell logic={logic} onStartTour={props.onStartTour}>
+        <AppShell logic={logic}>
           <div>page-content</div>
         </AppShell>
       </TourProvider>
     </MemoryRouter>,
   );
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('AppShell database selector placement', () => {
   beforeEach(() => {
@@ -35,12 +39,15 @@ describe('AppShell database selector placement', () => {
 
   it('shows the selector on /analysis', () => {
     renderShell('/analysis');
-    expect(document.getElementById('topbar-db-select')).not.toBeNull();
+    const selector = document.getElementById('topbar-db-select');
+    expect(selector).not.toBeNull();
+    expect(selector.closest('.workspace-subheader')).not.toBeNull();
+    expect(selector.closest('.top-bar-actions')).toBeNull();
   });
 
   it('shows the selector on /analysis/reports', () => {
     renderShell('/analysis/reports');
-    expect(document.getElementById('topbar-db-select')).not.toBeNull();
+    expect(document.getElementById('topbar-db-select')).toBeNull();
   });
 
   it('shows the selector on /databases', () => {
@@ -51,6 +58,19 @@ describe('AppShell database selector placement', () => {
   it('shows the selector on /databases/mutations', () => {
     renderShell('/databases/mutations');
     expect(document.getElementById('topbar-db-select')).not.toBeNull();
+  });
+
+  it.each([
+    ['/analysis', 'Analyze'],
+    ['/analysis/reports', 'Session results'],
+    ['/databases', 'Database Dashboard'],
+    ['/databases/mutations', 'Browse mutations'],
+    ['/databases/compare', 'Compare databases'],
+  ])('places the %s heading in the shared workspace row', (path, headingText) => {
+    renderShell(path);
+    const heading = screen.getByRole('heading', { level: 1, name: headingText });
+    expect(heading.closest('.workspace-subheader')).not.toBeNull();
+    expect(screen.queryByRole('heading', { level: 2, name: headingText })).toBeNull();
   });
 
   it('hides the selector on /', () => {
@@ -90,11 +110,41 @@ describe('AppShell sidebar visibility', () => {
     }
   });
 
+  it('moves the sidebar nav with top-bar visibility', () => {
+    let reportIntersection;
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback) {
+        reportIntersection = callback;
+      }
+
+      observe() {}
+
+      disconnect() {}
+    });
+
+    renderShell('/analysis');
+    const sidebar = document.getElementById('sidebar-rail');
+    expect(sidebar).not.toHaveClass('header-hidden');
+
+    act(() => reportIntersection([{ isIntersecting: false, intersectionRatio: 0 }]));
+    expect(sidebar).toHaveClass('header-hidden');
+
+    fireEvent.click(screen.getByRole('link', { name: 'Reports' }));
+    expect(sidebar).toHaveClass('header-hidden');
+
+    act(() => reportIntersection([{ isIntersecting: true, intersectionRatio: 0.1 }]));
+    expect(sidebar).toHaveClass('header-hidden');
+
+    act(() => reportIntersection([{ isIntersecting: true, intersectionRatio: 0.6 }]));
+    expect(sidebar).not.toHaveClass('header-hidden');
+  });
+
   it('shows only the Analysis section under /analysis/*', () => {
     renderShell('/analysis/reports');
     const sections = document.querySelectorAll('.sidebar-rail-section');
     expect(sections).toHaveLength(1);
     expect(sections[0].getAttribute('aria-label')).toBe('Analysis');
+    expect(document.querySelector('.sidebar-rail-divider')).toBeNull();
   });
 
   it('shows only the Databases section under /databases/*', () => {
@@ -113,6 +163,35 @@ describe('AppShell sidebar visibility', () => {
     fireEvent.click(toggle);
     expect(localStorage.getItem('respro.sidebar.collapsed')).toBe('0');
   });
+
+  it('opens mobile navigation as an overlay and closes it from the backdrop', () => {
+    renderShell('/analysis');
+    const sidebar = document.getElementById('sidebar-rail');
+    const dashboardMain = document.querySelector('.dashboard-main');
+    const toggle = screen.getByRole('button', { name: /open sidebar/i });
+
+    fireEvent.click(toggle);
+    expect(sidebar).toHaveClass('mobile-open');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(document.querySelector('.mobile-sidebar-backdrop')).not.toBeNull();
+    expect(document.querySelector('.dashboard-main')).toBe(dashboardMain);
+
+    fireEvent.click(screen.getByRole('button', { name: /close navigation/i }));
+    expect(sidebar).not.toHaveClass('mobile-open');
+    expect(document.querySelector('.mobile-sidebar-backdrop')).toBeNull();
+  });
+
+  it('keeps text labels in the mobile drawer when desktop collapse is saved', () => {
+    localStorage.setItem('respro.sidebar.collapsed', '1');
+    renderShell('/analysis');
+    const sidebar = document.getElementById('sidebar-rail');
+
+    fireEvent.click(screen.getByRole('button', { name: /open sidebar/i }));
+
+    expect(sidebar).toHaveClass('collapsed', 'mobile-open');
+    expect(sidebar.querySelector('.sidebar-rail-text')).toHaveTextContent('Analyze');
+    expect(sidebar.querySelectorAll('.sidebar-rail-text')[1]).toHaveTextContent('Reports');
+  });
 });
 
 describe('AppShell top bar navigation', () => {
@@ -126,48 +205,16 @@ describe('AppShell top bar navigation', () => {
     expect(link).toHaveAttribute('aria-current', 'page');
   });
 
-  it('renders a Launch CTA that navigates to /analysis', () => {
+  it('keeps the primary navigation without redundant top-bar actions', () => {
     renderShell('/');
-    const launch = screen.getByRole('link', { name: /launch/i });
-    expect(launch.getAttribute('href')).toBe('/analysis');
+    expect(screen.getByRole('navigation', { name: /primary/i })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /^launch$/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /guided tour/i })).toBeNull();
   });
 
-  it('renders a top-bar help button that starts the tour from any route', () => {
-    const startTourSpy = vi.fn();
-    let tour;
-    function TourReader() {
-      tour = useTour();
-      return null;
-    }
-    render(
-      <MemoryRouter initialEntries={['/databases']}>
-        <TourProvider steps={[]}>
-          <TourReader />
-          <AppShell logic={{ databases: [] }} onStartTour={() => tour.startTour()}>
-            <div>page-content</div>
-          </AppShell>
-        </TourProvider>
-      </MemoryRouter>,
-    );
-    const help = screen.getByRole('button', { name: /start the guided tour/i });
-    fireEvent.click(help);
-    // The shell delegates to the provider's startTour (active tour, not the coach card).
-    expect(tour.isActive).toBe(true);
-    expect(startTourSpy).toHaveBeenCalledTimes(0);
-  });
-
-  it('the help button is reachable from a non-analysis route (no tour UI shown there)', () => {
-    const onStartTour = vi.fn();
-    renderShell('/databases', { onStartTour });
-    expect(screen.getByRole('button', { name: /start the guided tour/i })).toBeInTheDocument();
-    expect(document.querySelector('.tour-coach-card')).toBeNull();
-  });
-
-  it('renders breadcrumbs reflecting the route', () => {
+  it('does not render redundant breadcrumb navigation', () => {
     renderShell('/databases/mutations');
-    const nav = screen.getByRole('navigation', { name: /breadcrumb/i });
-    expect(nav.textContent).toContain('Databases');
-    expect(nav.textContent).toContain('Browse Mutations');
+    expect(screen.queryByRole('navigation', { name: /breadcrumb/i })).toBeNull();
   });
 
   it('renders a skip link that targets the main content region', () => {
@@ -179,20 +226,16 @@ describe('AppShell top bar navigation', () => {
   });
 });
 
-describe('AppShell mobile drawer', () => {
+describe('AppShell compact sidebar', () => {
   beforeEach(() => {
     localStorage.clear();
   });
 
-  it('toggles the drawer and closes it on backdrop click and Escape', () => {
+  it('keeps the collapsible sidebar available without a hamburger drawer', () => {
     renderShell('/analysis');
-    const btn = screen.getByRole('button', { name: /toggle navigation/i });
-    fireEvent.click(btn);
-    expect(document.getElementById('sidebar-rail')).toHaveClass('open');
-    fireEvent.click(document.querySelector('.mobile-nav-backdrop'));
+    expect(screen.queryByRole('button', { name: /toggle navigation/i })).toBeNull();
+    expect(document.querySelector('.mobile-nav-backdrop')).toBeNull();
     expect(document.getElementById('sidebar-rail')).not.toHaveClass('open');
-    fireEvent.click(btn);
-    fireEvent.keyDown(window, { key: 'Escape' });
-    expect(document.getElementById('sidebar-rail')).not.toHaveClass('open');
+    expect(screen.getByRole('button', { name: /collapse sidebar/i })).toBeInTheDocument();
   });
 });

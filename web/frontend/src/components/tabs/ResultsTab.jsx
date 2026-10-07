@@ -41,12 +41,8 @@ export function ResultsTab({
 
   return (
     <article className="card full-width-tile tab-primary-tile">
-      <div className="workspace-output-header section-header">
-        <div>
-          <h2>Session results</h2>
-          <p>All analysis outputs from this session. Results are cleared on page reload.</p>
-        </div>
-        {sessionResults.length > 0 ? (
+      {sessionResults.length > 0 ? (
+        <div className="workspace-output-header section-header">
           <button
             type="button"
             className="analyze-primary results-download-btn"
@@ -59,8 +55,8 @@ export function ResultsTab({
               'Download'
             )}
           </button>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       {sessionResults.length === 0 ? (
         <p className="status">No results yet. Run an analysis to see results here.</p>
       ) : (

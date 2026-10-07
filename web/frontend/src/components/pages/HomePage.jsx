@@ -1,12 +1,8 @@
-import { Link, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 
 import { usePageTitle } from '../../hooks/usePageTitle';
 import analyzeIconSrc from '../../assets/icon-analyze.svg';
 import databaseIconSrc from '../../assets/icon-database.svg';
-import reportIconSrc from '../../assets/reports.svg';
-import uploadIconSrc from '../../assets/upload.svg';
-import alignIconSrc from '../../assets/icon-align.svg';
-import searchIconSrc from '../../assets/search.svg';
 import shieldIconSrc from '../../assets/shield.svg';
 import noSignIconSrc from '../../assets/no_sign.svg';
 
@@ -15,30 +11,21 @@ const CAPABILITY_CARDS = [
     title: 'Analyze',
     text: 'Profile single samples or whole batches from VCF or consensus FASTA input, with optional BAM coverage annotation.',
     iconSrc: analyzeIconSrc,
-    to: '/analysis',
-    linkLabel: 'Open analysis',
+    links: [
+      { to: '/analysis', label: 'Open analysis' },
+      { to: '/analysis/reports', label: 'Session reports' },
+    ],
   },
   {
     title: 'Explore databases',
     text: 'Browse resistance rules, inspect mutation statistics, and compare rule sets across databases.',
     iconSrc: databaseIconSrc,
-    to: '/databases',
-    linkLabel: 'Open databases',
+    links: [
+      { to: '/databases', label: 'Open databases' },
+      { to: '/databases/mutations', label: 'Browse mutations' },
+      { to: '/databases/compare', label: 'Compare databases' },
+    ],
   },
-  {
-    title: 'Report and share',
-    text: 'Interactive HTML reports plus PDF, JSON and TSV exports. The CLI offers the same functionality for pipelines.',
-    iconSrc: reportIconSrc,
-    to: '/about',
-    linkLabel: 'Learn more',
-  },
-];
-
-const WORKFLOW_STEPS = [
-  { title: 'Input', text: 'VCF or FASTA with a matching reference.', iconSrc: uploadIconSrc },
-  { title: 'Match', text: 'Automatic reference and CDS matching.', iconSrc: alignIconSrc },
-  { title: 'Detect', text: 'Nucleotide and amino-acid changes.', iconSrc: searchIconSrc },
-  { title: 'Report', text: 'Interactive report with interpretations.', iconSrc: reportIconSrc },
 ];
 
 function sumOrganisms(databases) {
@@ -53,8 +40,7 @@ function sumOrganisms(databases) {
 
 export function HomePage({ logic }) {
   usePageTitle('ResPro | Home');
-  const navigate = useNavigate();
-  const { databases = [], runExampleProfile, onStartTour } = logic;
+  const { databases = [], onStartTour, setSelectedDatabaseId } = logic;
 
   const totalRules = databases.reduce((sum, db) => sum + (db.mutation_count || 0), 0);
   const totalOrganisms = sumOrganisms(databases);
@@ -62,11 +48,9 @@ export function HomePage({ logic }) {
   return (
     <div className="page-home">
       <section className="home-hero">
-        <p className="home-hero-kicker">Pathogen-agnostic antiviral resistance profiling</p>
-        <h1>Antiviral resistance profiling from sequence to report</h1>
+        <h1>Welcome to ResistanceProfiler!</h1>
         <p className="home-hero-lead">
-          ResistanceProfiler matches your sequencing data against curated resistance
-          databases and produces an interactive report with per-drug interpretations.
+          Antiviral resistance, analyzed consistently. Compare viral sequence data with openly available resistance databases.
         </p>
         <div className="home-hero-actions">
           <Link to="/analysis" className="analyze-primary home-cta-primary">Launch analysis</Link>
@@ -77,44 +61,21 @@ export function HomePage({ logic }) {
             </button>
           )}
         </div>
-        <div className="home-example-strip">
-          <span>Just curious?</span>
-          <button type="button" className="home-example-btn" onClick={() => runExampleProfile?.()}>
-            Run an example sample
-          </button>
-          <span className="home-example-note">no upload needed — the result opens right away</span>
-        </div>
       </section>
 
-      <section className="home-cards" aria-label="What you can do">
-        {CAPABILITY_CARDS.map((card) => (
-          <article key={card.title} className="home-capability-card" tabIndex={0}>
-            <span className="about-icon-mask home-card-icon" style={{ '--icon-src': `url(${card.iconSrc})` }} aria-hidden="true" />
-            <h3>{card.title}</h3>
-            <p>{card.text}</p>
-            <Link to={card.to}>{card.linkLabel}</Link>
-          </article>
-        ))}
-      </section>
-
-      <section className="home-workflow" aria-label="How it works">
-        <h2>How it works</h2>
-        <ol className="home-workflow-track">
-          {WORKFLOW_STEPS.map((step, index) => (
-            <li key={step.title} className="home-workflow-step">
-              <span className="about-icon-mask home-workflow-icon" style={{ '--icon-src': `url(${step.iconSrc})` }} aria-hidden="true" />
-              <span className="home-workflow-number">{index + 1}</span>
-              <h3>{step.title}</h3>
-              <p>{step.text}</p>
-            </li>
-          ))}
-        </ol>
+      <section className="home-context" aria-labelledby="home-context-title">
+        <h2 id="home-context-title">Why ResistanceProfiler?</h2>
+        <p>
+          Antiviral resistance is a significant health concern: it can reduce the effectiveness of antiviral therapy, cause severe complications, and limit treatment options. Yet there is no generally accepted standard for analyzing viral genomes to identify mutations associated with reduced drug susceptibility. Pathogen-specific tools do exist, such as the{' '}
+          <a href="https://hivdb.stanford.edu/" target="_blank" rel="noreferrer">
+            Stanford HIV Drug Resistance Database
+          </a>, but approaches are not standardized across pathogens. ResistanceProfiler was developed to standardize how resistance databases are organized and how viral sequence data are analyzed, making results easier to interpret and compare across pathogens and input formats.
+        </p>
       </section>
 
       <section className="home-databases" aria-label="Available databases">
         <div className="home-section-head">
           <h2>Available databases</h2>
-          <Link to="/databases">Open the database dashboard</Link>
         </div>
         <div className="home-stat-strip" aria-label="Database stats">
           <span className="home-stat"><b>{databases.length}</b> databases</span>
@@ -126,19 +87,48 @@ export function HomePage({ logic }) {
         ) : (
           <div className="home-db-grid">
             {databases.map((db) => (
-              <article key={db.id} className="home-db-card" tabIndex={0}>
+              <Link
+                key={db.id}
+                to="/databases"
+                className="home-db-card"
+                aria-label={`Open ${db.display_name || db.id} in Databases`}
+                onClick={() => setSelectedDatabaseId?.(db.id)}
+              >
                 <h3>{db.display_name || db.id}</h3>
-                <p className="home-db-organisms">{(db.supported_organisms || []).join(', ') || '—'}</p>
-                <p className="home-db-meta">
-                  <b>{db.mutation_count ?? 0}</b> rules
-                  {db.metadata?.maintainer_update && (
-                    <span> · updated {db.metadata.maintainer_update}</span>
+                <ul className="home-db-organisms" aria-label={`${db.display_name || db.id} supported species`}>
+                  {db.supported_organisms?.length ? (
+                    db.supported_organisms.map((organism, index) => (
+                      <li key={`${db.id}-${index}`}>{organism}</li>
+                    ))
+                  ) : (
+                    <li>Species not listed</li>
                   )}
-                </p>
-              </article>
+                </ul>
+                <footer className="home-db-meta">
+                  <span><b>{db.mutation_count ?? 0}</b> rules</span>
+                  {db.metadata?.maintainer_update && (
+                    <span>Updated <time dateTime={db.metadata.maintainer_update}>{db.metadata.maintainer_update}</time></span>
+                  )}
+                </footer>
+              </Link>
             ))}
           </div>
         )}
+      </section>
+
+      <section className="home-cards" aria-label="What you can do">
+        {CAPABILITY_CARDS.map((card) => (
+          <article key={card.title} className="home-capability-card" tabIndex={0}>
+            <span className="about-icon-mask home-card-icon" style={{ '--icon-src': `url(${card.iconSrc})` }} aria-hidden="true" />
+            <h3>{card.title}</h3>
+            <p>{card.text}</p>
+            <div className="home-capability-links">
+              {card.links.map((link) => (
+                <Link key={link.to} to={link.to}>{link.label}</Link>
+              ))}
+            </div>
+          </article>
+        ))}
       </section>
 
       <section className="home-notices" aria-label="Important notices">

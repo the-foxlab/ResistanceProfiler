@@ -321,7 +321,6 @@ export function CompareTab({ databases }) {
     <div className="compare-tab">
       <div className="compare-layout">
         <section className="card compare-selectors">
-          <h2 className="section-header">Compare databases</h2>
           <p className="compare-hint">
             Select {MIN_DATABASES}–{MAX_DATABASES} databases that share a reference. Overlap is matched by
             reference accession.

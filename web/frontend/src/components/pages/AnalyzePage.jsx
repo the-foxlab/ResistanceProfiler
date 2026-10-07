@@ -1,14 +1,19 @@
+import { useContext } from 'react';
+
+import { ThemeContext } from '../../hooks/useTheme';
 import { AnalyzeTab } from '../tabs/AnalyzeTab';
 
 export function AnalyzePage({ logic }) {
+  const resolvedTheme = useContext(ThemeContext);
+
   return (
     <div className="page-workspace">
-      <AnalyzeTab {...pickAnalyzeProps(logic)} />
+      <AnalyzeTab {...pickAnalyzeProps(logic, resolvedTheme)} />
     </div>
   );
 }
 
-function pickAnalyzeProps(logic) {
+function pickAnalyzeProps(logic, resolvedTheme) {
   return {
     selectedDatabase: logic.selectedDatabase,
     vcfInput: logic.vcfInput,
@@ -74,6 +79,6 @@ function pickAnalyzeProps(logic) {
     inlineReportPath: logic.inlineReportPath,
     isAnalyzeScopeLocked: logic.isProfileBusy || logic.isRegenerateBusy || logic.batchSubmitting,
     PROFILE_MODES: logic.PROFILE_MODES,
-    resolvedTheme: logic.resolvedTheme,
+    resolvedTheme,
   };
 }

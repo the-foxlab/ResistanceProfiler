@@ -285,8 +285,7 @@ export function AnalyzeTab({
     <>
       <article className="card profile-input-card tab-primary-tile">
         <div className="analyze-shell-header section-header">
-          <div>
-            <h2>Analyze</h2>
+          <div className="analyze-submode-summary">
             {selectedDatabase?.has_example ? (
               <button
                 type="button"
@@ -303,41 +302,33 @@ export function AnalyzeTab({
                 Example
               </button>
             ) : null}
-            <p>
-              Profile VCF files, consensus FASTA sequences, or regenerate a previous report from JSON.
-              BAM files are optional and can be used for coverage analysis.
-            </p>
-          </div>
-          {/* The upload progress bar stays visible in every view (input forms
-              and results), so the last upload's outcome remains readable. */}
-          <div className="analyze-submode-progress">
-            <div className="upload-progress" aria-label="Upload progress">
-              <div className="upload-progress-head">
-                <span>Upload progress</span>
-                <span>{uploadProgress.percent}%</span>
-                {/* Cancel the in-flight upload (single or batch). Single and batch
-                    uploads are mutually exclusive submodes, so the active flag
-                    determines which cancel handler to call. */}
-                {(isUploading || isBatchUploading) ? (
-                  <button
-                    type="button"
-                    className="upload-cancel-btn"
-                    onClick={() => {
-                      if (isUploading) {
-                        cancelUpload();
-                      } else {
-                        cancelBatchUpload();
-                      }
-                    }}
-                    title="Cancel"
-                    aria-label="Cancel"
-                  >
-                    ×
-                  </button>
-                ) : null}
-              </div>
-              <div className="upload-progress-track" aria-hidden="true">
-                <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
+            {/* Keep upload progress visible in every view, including results. */}
+            <div className="analyze-submode-progress">
+              <div className="upload-progress" aria-label="Upload progress">
+                <div className="upload-progress-head">
+                  <span>Upload progress</span>
+                  <span>{uploadProgress.percent}%</span>
+                  {(isUploading || isBatchUploading) ? (
+                    <button
+                      type="button"
+                      className="upload-cancel-btn"
+                      onClick={() => {
+                        if (isUploading) {
+                          cancelUpload();
+                        } else {
+                          cancelBatchUpload();
+                        }
+                      }}
+                      title="Cancel"
+                      aria-label="Cancel"
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+                <div className="upload-progress-track" aria-hidden="true">
+                  <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
+                </div>
               </div>
             </div>
           </div>

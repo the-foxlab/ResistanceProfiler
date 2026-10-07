@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Link } from 'react-router';
 
 import aboutScopeIconSrc from '../../assets/icon-scope.svg';
 import aboutAlignIconSrc from '../../assets/icon-align.svg';
@@ -7,7 +6,6 @@ import uploadIconSrc from '../../assets/upload.svg';
 import okListIconSrc from '../../assets/ok_list.svg';
 import networkIconSrc from '../../assets/network.svg';
 import contactIconSrc from '../../assets/contact.svg';
-import licenseIconSrc from '../../assets/license.svg';
 import cliIconSrc from '../../assets/icon-cli.svg';
 import databaseIconSrc from '../../assets/icon-database.svg';
 import mutationsIconSrc from '../../assets/search.svg';
@@ -20,9 +18,13 @@ const ABOUT_TOC = [
   { id: 'about-nomenclature', label: 'Rule nomenclature' },
   { id: 'about-combinations', label: 'Rule combinations' },
   { id: 'about-algorithms', label: 'Interpretation algorithms' },
+  { id: 'about-databases', label: 'Databases' },
   { id: 'about-cli', label: 'CLI and extended functionality' },
   { id: 'about-governance', label: 'Contributing, data usage, licensing' },
+  { id: 'about-funding', label: 'Funding' },
 ];
+
+const ABOUT_KNOWLEDGE_IDS = ['about-nomenclature', 'about-combinations', 'about-algorithms'];
 
 const ABOUT_CLI_COMMANDS = [
   'respro databases --download db_name --output my_folder/',
@@ -35,30 +37,59 @@ const ABOUT_CLI_COMMANDS = [
 
 const ABOUT_DOCKER_COMMAND = 'docker compose -f docker-compose.web.yml up --build';
 
+const ABOUT_DOCS_ROOT = 'https://the-foxlab.github.io/ResistanceProfiler/';
+const ABOUT_DOCS = {
+  workflow: `${ABOUT_DOCS_ROOT}how-it-works/#pipeline-overview`,
+  nomenclature: `${ABOUT_DOCS_ROOT}rules-format/#normalization-examples-input-canonical-interpretation`,
+  combinations: `${ABOUT_DOCS_ROOT}how-it-works/#rule-matching`,
+  algorithms: `${ABOUT_DOCS_ROOT}algorithms/#how-respro-evaluates-resistance`,
+  databaseSetup: `${ABOUT_DOCS_ROOT}database-preparation/#create-a-new-project-database`,
+  databaseDownload: `${ABOUT_DOCS_ROOT}cli-reference/#download-a-maintained-database`,
+  cli: `${ABOUT_DOCS_ROOT}cli-reference/#profile-fasta-input`,
+  webData: `${ABOUT_DOCS_ROOT}webapp/#data-and-filesystem`,
+  databaseMetadata: `${ABOUT_DOCS_ROOT}database-preparation/#optional-metadata-json`,
+};
+const ABOUT_DATABASES_URL = 'https://github.com/the-foxlab/respro-databases';
+const ABOUT_FUNDING_URL = 'https://uni-freiburg.de/med/forschung/qualifizierung-nach-der-promotion/medical-scientist/';
+
+function AboutDocsLink({ links }) {
+  return (
+    <p className="about-docs-link">
+      Related documentation:{' '}
+      {links.map((link, index) => (
+        <span key={link.href}>
+          {index > 0 && ' · '}
+          <a href={link.href} target="_blank" rel="noreferrer">{link.label}</a>
+        </span>
+      ))}
+    </p>
+  );
+}
+
 const ABOUT_WORKFLOW_STEPS = [
   {
     title: 'Input',
-    text: 'Consensus FASTA or VCF plus matching reference FASTA; optional BAM for coverage. The VCF may be multi-chrom and the reference FASTA multi-record (one record per CHROM) to profile segmented viruses or multiple targets in one run.',
+    text: 'Provide a consensus sequence (FASTA) or called variants (VCF) with the reference used for variant calling. An optional BAM adds read-level coverage and co-occurrence evidence.',
     iconSrc: uploadIconSrc,
   },
   {
     title: 'Reference matching',
-    text: 'Automatic sequence feature matching using minimap.',
+    text: 'ResPro maps the sample to the reference sequence and annotated features in the project database. This puts variants in the coordinate system used by its rules.',
     iconSrc: aboutAlignIconSrc,
   },
   {
     title: 'Mutation detection',
-    text: 'Nucleotide and amino-acid changes are identified.',
+    text: 'Nucleotide differences are mapped to annotated coding regions and translated into amino-acid substitutions or other coding effects where the sequence permits.',
     iconSrc: mutationsIconSrc,
   },
   {
     title: 'Rule evaluation',
-    text: 'Single and combination rules are matched.',
+    text: 'Observed amino-acid changes are checked against single-change rules and, when defined, formula rules that require a specific combination.',
     iconSrc: okListIconSrc,
   },
   {
     title: 'Report generation',
-    text: 'Structured results, JSON exports, plots, and HTML reports.',
+    text: 'The report presents matched rules, drug-level interpretations, frequencies, and coverage limitations, with downloadable formats for review.',
     iconSrc: reportIconSrc,
   },
 ];
@@ -68,6 +99,7 @@ export function AboutTab({ contactEmail }) {
   // to the maintainer address so the About tab always shows a contact.
   const contactAddress = contactEmail || 'jonas.fuchs@uniklinik-freiburg.de';
   const [copiedCommandKey, setCopiedCommandKey] = useState('');
+  const [activeSectionId, setActiveSectionId] = useState('about-scope');
 
   const copyAboutCommand = async (content, key) => {
     if (!navigator?.clipboard?.writeText) {
@@ -89,29 +121,38 @@ export function AboutTab({ contactEmail }) {
       <header className="about-intro">
         <h1>About ResistanceProfiler</h1>
         <p>
-          ResistanceProfiler is a pathogen-agnostic antiviral resistance framework with a CLI-first core and a
-          web frontend for interactive analysis. This page explains how it works under the hood.
+          ResistanceProfiler compares pathogen samples with curated reference databases to help interpret known
+          antiviral resistance markers. It supports research and does not replace accredited clinical diagnostics.
         </p>
-        <Link to="/" className="about-back-link">Back to home</Link>
       </header>
 
       <nav className="about-toc" aria-label="On this page">
         <ul>
           {ABOUT_TOC.map((entry) => (
-            <li key={entry.id}><a href={`#${entry.id}`}>{entry.label}</a></li>
+            <li key={entry.id}>
+              <button
+                type="button"
+                aria-pressed={activeSectionId === entry.id}
+                onClick={() => setActiveSectionId(entry.id)}
+              >
+                {entry.label}
+              </button>
+            </li>
           ))}
         </ul>
       </nav>
 
+      {activeSectionId === 'about-scope' && (
       <section className="about-section-card about-section-card-scope" id="about-scope" tabIndex={0}>
         <div className="about-section-title">
           <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${aboutScopeIconSrc})` }} aria-hidden="true" />
           <h3>Project Scope and How It Works</h3>
         </div>
         <p className="about-section-lead">
-          References and rules are matched during database creation to ensure internal consistency. Mutations are
-          stored in a project database, and new sequences are compared against internal references to identify
-          resistance patterns. The reference is determined automatically from <a href="https://github.com/lh3/minimap2" target="_blank" rel="noreferrer">mappy-based</a> CDS matching, and the sequence with the highest identity is selected.
+          ResPro maps a sample to the reference sequences and annotated coding features in a project database, then
+          compares the resulting amino-acid changes with that database's resistance rules. The database therefore
+          determines both the coordinate context and the evidence available for interpretation. A rule match is an
+          interpretation of curated evidence, not a patient-specific treatment recommendation.
         </p>
         <div className="about-workflow" role="list" aria-label="ResistanceProfiler workflow">
           <div className="about-workflow-track" aria-hidden="true">
@@ -133,17 +174,42 @@ export function AboutTab({ contactEmail }) {
             ))}
           </div>
         </div>
+        <div className="about-scope-notes">
+          <div className="about-cli-side-card">
+            <h4>What you provide</h4>
+            <p>A consensus sequence (FASTA), or a VCF plus the exact reference used to call its variants. An optional BAM provides aligned reads for coverage assessment and direct evidence about which variants occur together.</p>
+          </div>
+          <div className="about-cli-side-card">
+            <h4>What you get</h4>
+            <p>A per-drug interpretation summary, matched changes and their reported frequencies, and coverage notes identifying regions with insufficient or unavailable evidence. Results can be exported for review.</p>
+          </div>
+          <div className="about-cli-side-card">
+            <h4>What it does not do</h4>
+            <p>ResPro does not validate the sequencing assay or replace an accredited diagnostic. Interpretation is limited by reference matching, sequence quality, coverage, and the scope and currency of the selected rules; review these factors before drawing clinical conclusions.</p>
+          </div>
+        </div>
+        <AboutDocsLink links={[{ href: ABOUT_DOCS.workflow, label: 'Pipeline overview and reference matching' }]} />
       </section>
+      )}
 
-      <section className="about-knowledge-grid" id="about-nomenclature" aria-label="Resistance interpretation basics">
+      {ABOUT_KNOWLEDGE_IDS.includes(activeSectionId) && (
+      <section className="about-knowledge-grid about-knowledge-grid-single" aria-label="Resistance interpretation basics">
+        {activeSectionId === 'about-nomenclature' && (
         <article className="about-section-card" tabIndex={0}>
           <div className="about-section-title">
             <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${okListIconSrc})` }} aria-hidden="true" />
             <h3>Rule Nomenclature Basics</h3>
           </div>
           <p className="about-section-lead">
-            Rules are amino-acid-centric. A notation such as <span className="about-inline-pill">A123V</span> means
-            reference amino acid A at position 123 changes to V.
+            ResPro rule labels describe amino-acid-level events. In <span className="about-inline-pill">A123V</span>,
+            A is the reference residue, 123 is its position, and V is the alternate residue. Positions are relative
+            to the annotated protein sequence for the reference used by the project database.
+          </p>
+          <p className="about-section-lead">
+            Each rule is associated with an annotated feature (usually a protein-coding gene), a reference, and an
+            amino-acid event. A match contributes the rule's curated phenotype, score, or other interpretation to
+            the report. The same biological event may have a different coordinate or label when represented against
+            another reference, so reference context matters when comparing results across databases or studies.
           </p>
           <div className="about-table-wrap">
             <table>
@@ -163,45 +229,113 @@ export function AboutTab({ contactEmail }) {
                 <tr>
                   <td>Anchored deletion</td>
                   <td><span className="about-inline-pill">VG215V</span></td>
-                  <td>The G after position 215 is deleted.</td>
+                  <td>G is deleted after the reference V at position 215.</td>
                 </tr>
                 <tr>
                   <td>Anchored insertion</td>
                   <td><span className="about-inline-pill">V215VG</span></td>
-                  <td>Insertion of G after the V at position 215.</td>
+                  <td>G is inserted after the reference V at position 215.</td>
                 </tr>
                 <tr>
                   <td>Frameshift</td>
-                  <td><span className="about-inline-pill">L201Lfsx</span></td>
-                  <td>Reading-frame shift after the L at position 201.</td>
+                  <td><span className="about-inline-pill">L201LfsX</span></td>
+                  <td>Reading-frame shift after the reference L at position 201.</td>
                 </tr>
                 <tr>
                   <td>Phenotype</td>
                   <td><span className="about-inline-pill">sensitive / resistant</span></td>
-                  <td>Captures in-vitro susceptibility interpretation.</td>
+                  <td>Curated interpretation of in-vitro susceptibility evidence.</td>
                 </tr>
                 <tr>
                   <td>Clinical phenotype</td>
                   <td><span className="about-inline-pill">sensitive / resistant</span></td>
-                  <td>Captures treatment-oriented interpretation where available.</td>
+                  <td>A separately curated, clinically oriented category where the source provides one; not a patient-specific recommendation.</td>
                 </tr>
               </tbody>
             </table>
           </div>
+          <h4>Phenotype ranks and accepted labels</h4>
+          <p>
+            Rules can include an in-vitro <code>phenotype</code>, a clinically oriented <code>clinical_phenotype</code>,
+            or both. ResPro maps either field to the same ordinal rank vocabulary for severity comparisons and report
+            colours. These are categories, not probabilities; the two fields are interpreted independently.
+          </p>
+          <div className="about-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Interpretation</th>
+                  <th>Accepted labels</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>1</td>
+                  <td>Susceptible</td>
+                  <td><code>susceptible</code>, <code>sensitive</code>, <code>normal inhibition</code>, <code>ni</code>, <code>normal</code></td>
+                </tr>
+                <tr>
+                  <td>2</td>
+                  <td>Potential low-level resistance</td>
+                  <td><code>potential low-level resistance</code>, <code>possibly resistant</code>, <code>suspected reduced</code></td>
+                </tr>
+                <tr>
+                  <td>3</td>
+                  <td>Low-level resistance</td>
+                  <td><code>low-level resistance</code>, <code>reduced susceptibility</code>, <code>limited susceptibility</code></td>
+                </tr>
+                <tr>
+                  <td>4</td>
+                  <td>Intermediate</td>
+                  <td><code>intermediate</code>, <code>intermediate resistance</code>, <code>reduced inhibition</code>, <code>ri</code></td>
+                </tr>
+                <tr>
+                  <td>5</td>
+                  <td>Resistant</td>
+                  <td><code>resistant</code>, <code>high-level resistance</code>, <code>highly reduced inhibition</code>, <code>hri</code></td>
+                </tr>
+                <tr>
+                  <td>0</td>
+                  <td>Unknown</td>
+                  <td><code>unknown</code>, <code>not analysed</code>, <code>none</code>, or a blank field</td>
+                </tr>
+                <tr>
+                  <td>-1</td>
+                  <td>Contradictory</td>
+                  <td><code>contradictory</code>, <code>conflicting</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p>
+            Labels are case-insensitive and whitespace is trimmed. Bare values <code>1</code>–<code>5</code> are also
+            accepted and resolve to that rank's standard label. Ranks 1–5 run from least to most severe; unknown and
+            contradictory are special categories, not points on that scale.
+          </p>
+          <AboutDocsLink links={[
+            { href: ABOUT_DOCS.nomenclature, label: 'Mutation notation and normalization' },
+            { href: `${ABOUT_DOCS_ROOT}rules-format/#phenotype-normalization`, label: 'Phenotype rank vocabulary' },
+          ]} />
         </article>
+        )}
 
+        {activeSectionId === 'about-combinations' && (
         <article className="about-section-card" id="about-combinations" tabIndex={0}>
           <div className="about-section-title">
             <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${networkIconSrc})` }} aria-hidden="true" />
             <h3>Rule Combinations</h3>
           </div>
           <p className="about-section-lead">
-            Combination rules allow interpretation based on boolean logic across multiple mutation members. They
-            are defined separately from single rules and evaluated with operators such as and, or, not, and xor.
+            Sometimes one change alone is not enough to interpret a result. A combination rule checks a small set
+            of changes together, using familiar logic such as AND (both) or OR (either).
           </p>
           <p className="about-threshold-note">
-            Combination members if they reach a minimum guranteed co-occurrence threshold 
-            (<span className="about-inline-pill">&gt; 0.66</span> by default).
+            <strong>How is co-occurrence assessed?</strong> For an AND rule, ResPro estimates a conservative lower bound on the fraction carrying
+            all required changes, then compares it with the maximum possible overlap given the member frequencies.
+            By default, this guaranteed-to-maximum overlap ratio must reach <span className="about-inline-pill">2/3</span>.
+            This is not a requirement that each mutation have 2/3 allele frequency: it tests whether the evidence
+            supports the changes occurring together, rather than merely appearing separately in a mixed sample.
           </p>
           <div className="about-operator-list">
             <div className="about-operator-row">
@@ -226,50 +360,99 @@ export function AboutTab({ contactEmail }) {
             </div>
           </div>
           <p className="about-note-inline">
-            Single rules represent one mutation-to-interpretation mapping. Combination rules fire only when
-            their formula conditions are satisfied.
+            A single rule maps one amino-acid event to its curated interpretation. A formula rule evaluates its
+            expression across member rules; for example, <span className="about-inline-pill">A AND B</span> requires
+            both members and sufficient co-occurrence evidence. A sample can still match and report A's single rule
+            even when the formula rule does not fire. Parentheses can group conditions, and the report identifies
+            the rules that contributed to an interpretation.
           </p>
+          <AboutDocsLink links={[{ href: ABOUT_DOCS.combinations, label: 'Combination rule matching' }]} />
         </article>
+        )}
 
+        {activeSectionId === 'about-algorithms' && (
         <article className="about-section-card about-section-card-algorithms" id="about-algorithms" tabIndex={0}>
           <div className="about-section-title">
             <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${logicIconSrc})` }} aria-hidden="true" />
             <h3>Supported Interpretation Algorithms</h3>
           </div>
           <p className="about-section-lead">
-            Interpretation algorithms extend rule evaluation with additional logic. They are configured per
-            project in the metadata JSON at initialisation time.
+            A rule describes a known change or combination. An interpretation algorithm brings matching rules
+            together to produce an overall result for each drug. The project database determines which approach to use.
           </p>
           <div className="about-operator-list">
             <div className="about-operator-row">
               <span className="about-operator-pill about-operator-pill-and">effect_as_resistant</span>
               <p>
-                Configured high-impact variant effects (frameshift, stop_gained, stop_lost, start_lost,
-                insertion, deletion) observed in a feature/reference pair are interpreted as
-                  <span className="about-inline-pill">phenotype='resistant'</span> for the configured drug.
-                  This algorithm does not set <span className="about-inline-pill">clinical_phenotype</span>.
+                Adds a <span className="about-inline-pill">resistant</span> phenotype hit when a configured consequence
+                (frameshift, stop gained or lost, start lost, insertion, or deletion) is observed in the specified
+                feature and reference. This is an explicit database-level interpretation rule, not a direct
+                susceptibility measurement, and it does not assign a clinical phenotype.
               </p>
             </div>
             <div className="about-operator-row">
               <span className="about-operator-pill about-operator-pill-or">drug_interpretation</span>
               <p>
-                Combines matched rules into one overall drug result. Depending on the database, this can be
-                based on phenotype labels, scores, IC50 values, or fold-change cutoffs.
+                Aggregates matched evidence into a drug-level assessment using the method configured for that
+                database: the most severe phenotype label, a summed score, an IC50 value, or a fold-change value
+                compared with configured thresholds.
               </p>
             </div>
           </div>
+          <p className="about-note-inline">
+            These methods are configured with the project database, not selected separately for each sample. If
+            multiple methods are configured, the report shows their assessments and combines them using the most
+            severe inferred rank for the final call. This summarizes the database's rules; it does not account for
+            patient history, prior treatment, or other clinical factors.
+          </p>
+          <AboutDocsLink links={[{ href: ABOUT_DOCS.algorithms, label: 'Interpretation algorithms' }]} />
         </article>
+        )}
       </section>
+      )}
 
+      {activeSectionId === 'about-databases' && (
+      <section className="about-section-card about-section-card-databases" id="about-databases" tabIndex={0}>
+        <div className="about-section-title">
+          <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${databaseIconSrc})` }} aria-hidden="true" />
+          <h3>Databases</h3>
+        </div>
+        <p className="about-section-lead">
+          Every analysis compares your sample against a project database. You can download ready-made databases that
+          are converted from well-known, publicly maintained antiviral resistance resources, or build your own from
+          your own reference sequences and rules.
+        </p>
+        <ul>
+          <li><strong>Converted, not re-curated.</strong> Each maintained database is an automated conversion of an upstream source (for example Stanford HIVdb or HerpesDRG) into ResPro's rule format. The scientific interpretations stay with the upstream curators.</li>
+          <li><strong>Updates are traceable.</strong> Source-specific automation checks upstream data and can open a pull request with regenerated files when it changes. Check the repository history and database metadata for the source and update dates.</li>
+          <li><strong>Transparent provenance.</strong> Every database ships metadata — source, version and date, license, and publication reference — so you always know which evidence an interpretation rests on.</li>
+          <li><strong>Conversion limits are documented.</strong> Entries that cannot be converted are recorded with reasons in the database repository, rather than silently treated as supported rules.</li>
+          <li><strong>Your own rules are welcome.</strong> For local guidelines or in-house evidence, build a project database from GenBank references and a rules table with <code>respro init</code>. In the web app, maintained databases can also be downloaded and updated automatically at startup (server configuration).</li>
+        </ul>
+        <p className="about-threshold-note">
+          ResistanceProfiler does not independently curate or validate the source interpretations. Confirm the
+          database, source version, update date, and applicable license before research or clinical use; the software
+          is not a substitute for local validation or clinical review.
+        </p>
+        <AboutDocsLink links={[
+          { href: ABOUT_DATABASES_URL, label: 'Maintained database repository' },
+          { href: ABOUT_DOCS.databaseDownload, label: 'Download a maintained database' },
+          { href: ABOUT_DOCS.databaseSetup, label: 'Create a project database' },
+        ]} />
+      </section>
+      )}
+
+      {activeSectionId === 'about-cli' && (
       <section className="about-section-card about-cli-card" id="about-cli" tabIndex={0}>
         <div className="about-section-title">
           <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${cliIconSrc})` }} aria-hidden="true" />
           <h3>CLI and Extended Functionality</h3>
         </div>
         <p className="about-section-lead">
-          The CLI is the primary interface and includes project creation, rule curation, profiling, and export.
-          The same functionality as the web app can be achieved through the CLI, enabling direct integration into
-          existing workflows and pipelines.
+          The command-line interface (CLI) runs the same profiling workflows from a terminal. It can download or
+          build a project database, analyze FASTA or VCF inputs, and export results. It is particularly useful for
+          repeatable analyses, batch processing, and integration with existing bioinformatics pipelines; the web
+          app is available for interactive use.
         </p>
         <div className="about-cli-grid">
           <article className="about-terminal" tabIndex={0}>
@@ -294,8 +477,8 @@ export function AboutTab({ contactEmail }) {
             <div className="about-cli-side-card">
               <h4>Regenerate reports from JSON</h4>
               <p>
-                Profiling runs can emit a JSON dump of the result payload, which can later be used to regenerate
-                report artifacts.
+                When a run saves its result payload as JSON, the report files can be regenerated later without
+                repeating the profiling step. This is useful when changing report outputs or recovering a report.
               </p>
             </div>
             <div className="about-cli-side-card">
@@ -315,50 +498,71 @@ export function AboutTab({ contactEmail }) {
             </div>
           </article>
         </div>
+        <p className="about-note-inline">
+          The web app provides an interactive workflow; the CLI makes inputs, database selection, and exports
+          explicit in commands that can be recorded and repeated. Both use the same project database and rule logic.
+        </p>
+        <AboutDocsLink links={[
+          { href: ABOUT_DOCS.cli, label: 'FASTA profiling command' },
+          { href: `${ABOUT_DOCS_ROOT}cli-reference/#profile-vcf-input`, label: 'VCF profiling command' },
+        ]} />
       </section>
+      )}
 
-      <section className="about-bottom-grid" id="about-governance" aria-label="Project information and governance">
-        <article className="about-section-card" tabIndex={0}>
-          <div className="about-section-title">
-            <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${contactIconSrc})` }} aria-hidden="true" />
-            <h3>Contributing and Contact</h3>
+      {activeSectionId === 'about-governance' && (
+      <section className="about-section-card about-governance-section" id="about-governance" tabIndex={0}>
+        <div className="about-section-title">
+          <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${contactIconSrc})` }} aria-hidden="true" />
+          <h3>Contributing, Data Use and Licensing</h3>
+        </div>
+        <div className="about-governance-grid">
+          <div>
+            <h4>Contributing and contact</h4>
+            <p>
+              Contributions include rule datasets, bug reports, reproducible examples, and code improvements. Open an
+              issue or pull request on{' '}
+              <a href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noreferrer">GitHub</a>{' '}
+              with the database and software versions and a minimal example where possible. For direct contact, email{' '}
+              <a href={`mailto:${contactAddress}`}>
+                {contactEmail ? contactAddress : 'Jonas Fuchs'}
+              </a>.
+            </p>
           </div>
-          <p>
-            Contributions are very welcome, especially curated rule datasets, bug reports, reproducible test
-            cases, and code improvements. Open an issue or submit a pull request on{' '}
-            <a href="https://github.com/the-foxlab/ResistanceProfiler" target="_blank" rel="noreferrer">GitHub</a>{' '}
-            to get in touch. For direct contact, please contact: {' '}
-            <a href={`mailto:${contactAddress}`}>
-              {contactEmail ? contactAddress : 'email Jonas Fuchs'}
-            </a>.
-          </p>
-        </article>
-        <article className="about-section-card" tabIndex={0}>
-          <div className="about-section-title">
-            <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${databaseIconSrc})` }} aria-hidden="true" />
-            <h3>Data usage</h3>
+          <div>
+            <h4>Data use</h4>
+            <p>
+              In the web app, uploaded files and generated results are stored temporarily in the server deployment's
+              data directory and are removed according to its retention settings (24 hours by default). Closing a
+              browser tab does not itself guarantee immediate deletion. Storage, backups, and access depend on how
+              the service is hosted; ask the service administrator about local policy. Avoid patient names or other
+              direct identifiers, and use clinical data only in an appropriately governed deployment.
+            </p>
           </div>
-          <ul>
-            <li>Session-scoped uploads and reports are cleaned up automatically when a browser tab closes.</li>
-            <li>No data is stored on remote servers.</li>
-            <li>Avoid naming results with sensitive information such as patient identifiers or names.</li>
-          </ul>
-        </article>
-        <article className="about-section-card" tabIndex={0}>
-          <div className="about-section-title">
-            <span className="about-section-icon about-icon-mask" style={{ '--icon-src': `url(${licenseIconSrc})` }} aria-hidden="true" />
-            <h3>Licensing</h3>
+          <div>
+            <h4>Licensing and attribution</h4>
+            <p>
+              ResistanceProfiler source code is released under the GNU Affero General Public License v3.0. Reference
+              sequences, resistance rules, and publication-linked datasets may have separate licenses and citation
+              requirements. Check the selected database's metadata and upstream terms before redistribution,
+              publication, or clinical use; users are responsible for complying with those terms.
+            </p>
           </div>
-          <ul>
-            <li>ResistanceProfiler source code is released under the GNU Affero General Public License v3.0.</li>
-            <li>External references, rules, and publication-linked datasets may have separate licenses or citation requirements.</li>
-            <li>Users are responsible for compliant use of third-party data in their own environments.</li>
-          </ul>
-        </article>
+        </div>
+        <AboutDocsLink links={[
+          { href: ABOUT_DOCS.webData, label: 'Web-app data storage and retention' },
+          { href: ABOUT_DOCS.databaseMetadata, label: 'Database metadata and licensing' },
+        ]} />
       </section>
+      )}
 
-      <section className="about-supported-strip" tabIndex={0}>
-        <p>Supported by</p>
+      {activeSectionId === 'about-funding' && (
+      <section className="about-section-card about-funding-card" id="about-funding" tabIndex={0}>
+        <div className="about-section-title">
+          <h3>Supported by</h3>
+        </div>
+        <p className="about-section-lead">
+          This work is supported by the Hans A. Krebs Program for Medical Scientists at the University of Freiburg.
+        </p>
         <div className="about-supported-logos">
           <a
             href="https://uni-freiburg.de/med/forschung/qualifizierung-nach-der-promotion/medical-scientist/"
@@ -369,13 +573,17 @@ export function AboutTab({ contactEmail }) {
           >
             <img
               src="https://uni-freiburg.de/med/wp-content/uploads/sites/9/fodek-hans-a-krebs-program-for-medical-scientist.png"
-              alt="Sponsor logo"
+              alt="Hans A. Krebs Program for Medical Scientists logo"
               className="about-sponsor-logo"
               onError={(e) => { e.currentTarget.style.display = 'none'; }}
             />
           </a>
         </div>
+        <p className="about-docs-link">
+          <a href={ABOUT_FUNDING_URL} target="_blank" rel="noreferrer">Hans A. Krebs Program information</a>
+        </p>
       </section>
+      )}
     </article>
   );
 }

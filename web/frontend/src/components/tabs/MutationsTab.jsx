@@ -36,11 +36,6 @@ export function MutationsTab({
   return (
     <>
       <article className={cardClassName}>
-        <div className="workspace-output-header workspace-output-header-with-db section-header">
-          <div>
-            <h2>Browse mutations</h2>
-          </div>
-        </div>
         {rules.length > 0 ? (
         <section className="mutation-merged-section">
           <div className="workspace-output-header section-header">

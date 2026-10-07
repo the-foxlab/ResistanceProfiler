@@ -383,13 +383,6 @@ export function DatabaseTab({
   return (
     <>
       <article className="card full-width-tile database-plots-tile tab-primary-tile">
-        <div className="workspace-output-header workspace-output-header-with-db section-header">
-          <div>
-            <h2>Database Dashboard</h2>
-            <p>Overview and visual summaries of the active resistance database.</p>
-          </div>
-        </div>
-
         {selectedDatabase ? (
           <>
           {databaseInfoEntries.length > 0 ? (

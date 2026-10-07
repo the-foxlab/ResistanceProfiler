@@ -14,11 +14,11 @@ export const ROUTES = [
 
 export const ROUTE_META = {
   '/': { title: 'ResPro | Home', showsSidebar: false, showsDatabaseSelector: false, breadcrumb: ['Home'] },
-  '/analysis': { title: 'ResPro | Analysis', showsSidebar: true, showsDatabaseSelector: true, breadcrumb: ['Analysis'] },
-  '/analysis/reports': { title: 'ResPro | Reports', showsSidebar: true, showsDatabaseSelector: true, breadcrumb: ['Analysis', 'Reports'] },
-  '/databases': { title: 'ResPro | Databases', showsSidebar: true, showsDatabaseSelector: true, breadcrumb: ['Databases'] },
-  '/databases/mutations': { title: 'ResPro | Browse Mutations', showsSidebar: true, showsDatabaseSelector: true, breadcrumb: ['Databases', 'Browse Mutations'] },
-  '/databases/compare': { title: 'ResPro | Compare Databases', showsSidebar: true, showsDatabaseSelector: false, breadcrumb: ['Databases', 'Compare'] },
+  '/analysis': { title: 'ResPro | Analysis', heading: 'Analyze', description: 'Profile VCF files, consensus FASTA sequences, or regenerate a previous report from JSON. BAM files are optional and can be used for coverage analysis.', showsSidebar: true, showsDatabaseSelector: true, breadcrumb: ['Analysis'] },
+  '/analysis/reports': { title: 'ResPro | Reports', heading: 'Session results', description: 'All analysis outputs from this session. Results are cleared on page reload.', showsSidebar: true, showsDatabaseSelector: false, breadcrumb: ['Analysis', 'Reports'] },
+  '/databases': { title: 'ResPro | Databases', heading: 'Database Dashboard', description: 'Overview and visual summaries of the active resistance database.', showsSidebar: true, showsDatabaseSelector: true, breadcrumb: ['Databases'] },
+  '/databases/mutations': { title: 'ResPro | Browse Mutations', heading: 'Browse mutations', showsSidebar: true, showsDatabaseSelector: true, breadcrumb: ['Databases', 'Browse Mutations'] },
+  '/databases/compare': { title: 'ResPro | Compare Databases', heading: 'Compare databases', showsSidebar: true, showsDatabaseSelector: false, breadcrumb: ['Databases', 'Compare'] },
   '/about': { title: 'ResPro | About', showsSidebar: false, showsDatabaseSelector: false, breadcrumb: ['About'] },
 };
 

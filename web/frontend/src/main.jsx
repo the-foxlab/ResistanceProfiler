@@ -49,12 +49,11 @@ function AppInsideRouter() {
   );
 }
 
-// Lives inside TourProvider so it can read startTour from context and hand it to
-// the shell (top-bar help button) and the pages (Home "Take a tour" CTA).
+// Lives inside TourProvider so Home can start the guided tour.
 function AppWithTour({ logic }) {
   const { startTour } = useTour();
   return (
-    <AppShell logic={logic} onStartTour={startTour}>
+    <AppShell logic={logic}>
       <AppRoutes logic={{ ...logic, onStartTour: startTour }} />
     </AppShell>
   );
