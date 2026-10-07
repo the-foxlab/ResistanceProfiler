@@ -58,6 +58,10 @@ export function buildTourSteps({ navigate, setActiveProfileMode, setAnalyzeSubMo
         navigate('/analysis');
         setAnalyzeSubMode('single');
         setActiveProfileMode('vcf');
+        setTimeout(() => {
+          const advancedOptions = document.querySelector('.profile-upload-row-vcf .profile-advanced-options');
+          if (advancedOptions) advancedOptions.open = true;
+        }, 0);
       },
     },
     // 5. Sample name.
@@ -70,6 +74,10 @@ export function buildTourSteps({ navigate, setActiveProfileMode, setAnalyzeSubMo
         navigate('/analysis');
         setAnalyzeSubMode('single');
         setActiveProfileMode('vcf');
+        setTimeout(() => {
+          const advancedOptions = document.querySelector('.profile-upload-row-vcf .profile-advanced-options');
+          if (advancedOptions) advancedOptions.open = true;
+        }, 0);
       },
     },
     // 6. Frequency cutoff.

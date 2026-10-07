@@ -454,41 +454,46 @@ export function AnalyzeTab({
                     onChange={(event) => setVcfInput({ ...vcfInput, sample: event.target.value })}
                   />
                 </label>
-                <label data-tour-target="vcf-frequency-cutoff">
-                  <span className="label-text input-label-row">Frequency cutoff <button type="button" className="input-info-btn" aria-label="Frequency cutoff help" title="Minimum allele frequency from 0 to 1. Variants below this value are ignored."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.001"
-                    value={vcfInput.min_af}
-                    disabled={isProfileBusy}
-                    onChange={(event) => {
-                      const value = Number(event.target.value);
-                      if (!Number.isFinite(value)) {
-                        return;
-                      }
-                      setVcfInput({ ...vcfInput, min_af: value });
-                    }}
-                  />
-                </label>
-                <label data-tour-target="vcf-coverage-cutoff">
-                  <span className="label-text input-label-row">Coverage cutoff <button type="button" className="input-info-btn" aria-label="Coverage cutoff help" title="Minimum read depth required for including a position."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={vcfInput.min_depth}
-                    disabled={isProfileBusy}
-                    onChange={(event) => {
-                      const value = Number(event.target.value);
-                      if (!Number.isFinite(value)) {
-                        return;
-                      }
-                      setVcfInput({ ...vcfInput, min_depth: Math.trunc(value) });
-                    }}
-                  />
-                </label>
+                <details className="profile-advanced-options">
+                  <summary>Advanced options</summary>
+                  <div className="profile-advanced-options-fields">
+                    <label data-tour-target="vcf-frequency-cutoff">
+                      <span className="label-text input-label-row">Frequency cutoff <button type="button" className="input-info-btn" aria-label="Frequency cutoff help" title="Minimum allele frequency from 0 to 1. Variants below this value are ignored."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.001"
+                        value={vcfInput.min_af}
+                        disabled={isProfileBusy}
+                        onChange={(event) => {
+                          const value = Number(event.target.value);
+                          if (!Number.isFinite(value)) {
+                            return;
+                          }
+                          setVcfInput({ ...vcfInput, min_af: value });
+                        }}
+                      />
+                    </label>
+                    <label data-tour-target="vcf-coverage-cutoff">
+                      <span className="label-text input-label-row">Coverage cutoff <button type="button" className="input-info-btn" aria-label="Coverage cutoff help" title="Minimum read depth required for including a position."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={vcfInput.min_depth}
+                        disabled={isProfileBusy}
+                        onChange={(event) => {
+                          const value = Number(event.target.value);
+                          if (!Number.isFinite(value)) {
+                            return;
+                          }
+                          setVcfInput({ ...vcfInput, min_depth: Math.trunc(value) });
+                        }}
+                      />
+                    </label>
+                  </div>
+                </details>
               </div>
             ) : null}
 
@@ -582,6 +587,7 @@ export function AnalyzeTab({
               ) : null}
             </div>
 
+            {reportOptions.length > 0 ? (
             <div className="inline-actions report-actions analyze-report-actions">
               <select
                 value={selectedProfileReportPath}
@@ -646,6 +652,7 @@ export function AnalyzeTab({
                 Download TSV
               </button>
             </div>
+            ) : null}
 
             {!inlineReportPath ? (
               <div className="report-placeholder">
@@ -711,41 +718,46 @@ export function AnalyzeTab({
                       }}
                     />
                   </label>
-                  <label className="batch-settings-label">
-                    <span className="label-text input-label-row">Frequency cutoff <button type="button" className="input-info-btn" aria-label="Batch frequency cutoff help" title="Minimum allele frequency from 0 to 1 for all batch VCF runs."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="1"
-                      step="0.001"
-                      value={batchVcfCutoffs.min_af}
-                      disabled={batchSubmitting}
-                      onChange={(event) => {
-                        const value = Number(event.target.value);
-                        if (!Number.isFinite(value)) {
-                          return;
-                        }
-                        setBatchVcfCutoffs((prev) => ({ ...prev, min_af: value }));
-                      }}
-                    />
-                  </label>
-                  <label className="batch-settings-label">
-                    <span className="label-text input-label-row">Coverage cutoff <button type="button" className="input-info-btn" aria-label="Batch coverage cutoff help" title="Minimum read depth for all batch VCF runs."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={batchVcfCutoffs.min_depth}
-                      disabled={batchSubmitting}
-                      onChange={(event) => {
-                        const value = Number(event.target.value);
-                        if (!Number.isFinite(value)) {
-                          return;
-                        }
-                        setBatchVcfCutoffs((prev) => ({ ...prev, min_depth: Math.trunc(value) }));
-                      }}
-                    />
-                  </label>
+                  <details className="profile-advanced-options batch-advanced-options">
+                    <summary>Advanced options</summary>
+                    <div className="profile-advanced-options-fields">
+                      <label className="batch-settings-label">
+                        <span className="label-text input-label-row">Frequency cutoff <button type="button" className="input-info-btn" aria-label="Batch frequency cutoff help" title="Minimum allele frequency from 0 to 1 for all batch VCF runs."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.001"
+                          value={batchVcfCutoffs.min_af}
+                          disabled={batchSubmitting}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            if (!Number.isFinite(value)) {
+                              return;
+                            }
+                            setBatchVcfCutoffs((prev) => ({ ...prev, min_af: value }));
+                          }}
+                        />
+                      </label>
+                      <label className="batch-settings-label">
+                        <span className="label-text input-label-row">Coverage cutoff <button type="button" className="input-info-btn" aria-label="Batch coverage cutoff help" title="Minimum read depth for all batch VCF runs."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={batchVcfCutoffs.min_depth}
+                          disabled={batchSubmitting}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            if (!Number.isFinite(value)) {
+                              return;
+                            }
+                            setBatchVcfCutoffs((prev) => ({ ...prev, min_depth: Math.trunc(value) }));
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </details>
                 </div>
               ) : batchMode === 'fasta' ? (
                 <div className="profile-upload-row">

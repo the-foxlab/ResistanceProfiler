@@ -1,15 +1,11 @@
 import { useState } from 'react';
 
 import aboutScopeIconSrc from '../../assets/icon-scope.svg';
-import aboutAlignIconSrc from '../../assets/icon-align.svg';
-import uploadIconSrc from '../../assets/upload.svg';
 import okListIconSrc from '../../assets/ok_list.svg';
 import networkIconSrc from '../../assets/network.svg';
 import contactIconSrc from '../../assets/contact.svg';
 import cliIconSrc from '../../assets/icon-cli.svg';
 import databaseIconSrc from '../../assets/icon-database.svg';
-import mutationsIconSrc from '../../assets/search.svg';
-import reportIconSrc from '../../assets/reports.svg';
 import logicIconSrc from '../../assets/logic.svg';
 import { FRONTEND_CONFIG } from '../../config';
 
@@ -70,27 +66,22 @@ const ABOUT_WORKFLOW_STEPS = [
   {
     title: 'Input',
     text: 'Provide a consensus sequence (FASTA) or called variants (VCF) with the reference used for variant calling. An optional BAM adds read-level coverage and co-occurrence evidence.',
-    iconSrc: uploadIconSrc,
   },
   {
     title: 'Reference matching',
     text: 'ResPro maps the sample to the reference sequence and annotated features in the project database. This puts variants in the coordinate system used by its rules.',
-    iconSrc: aboutAlignIconSrc,
   },
   {
     title: 'Mutation detection',
     text: 'Nucleotide differences are mapped to annotated coding regions and translated into amino-acid substitutions or other coding effects where the sequence permits.',
-    iconSrc: mutationsIconSrc,
   },
   {
     title: 'Rule evaluation',
     text: 'Observed amino-acid changes are checked against single-change rules and, when defined, formula rules that require a specific combination.',
-    iconSrc: okListIconSrc,
   },
   {
     title: 'Report generation',
     text: 'The report presents matched rules, drug-level interpretations, frequencies, and coverage limitations, with downloadable formats for review.',
-    iconSrc: reportIconSrc,
   },
 ];
 
@@ -154,36 +145,27 @@ export function AboutTab({ contactEmail }) {
           determines both the coordinate context and the evidence available for interpretation. A rule match is an
           interpretation of curated evidence, not a patient-specific treatment recommendation.
         </p>
-        <div className="about-workflow" role="list" aria-label="ResistanceProfiler workflow">
-          <div className="about-workflow-track" aria-hidden="true">
-            {ABOUT_WORKFLOW_STEPS.map((step, index) => (
-              <span key={step.title} className="about-workflow-point">
-                <span className="about-workflow-number">{index + 1}</span>
-              </span>
-            ))}
-          </div>
-          <div className="about-workflow-cards">
-            {ABOUT_WORKFLOW_STEPS.map((step) => (
-              <article key={step.title} className="about-workflow-step" role="listitem" tabIndex={0}>
-                <span className="about-workflow-icon about-icon-mask" style={{ '--icon-src': `url(${step.iconSrc})` }} aria-hidden="true" />
-                <div className="about-workflow-copy">
-                  <h4>{step.title}</h4>
-                  <p>{step.text}</p>
-                </div>
-              </article>
-            ))}
-          </div>
-        </div>
+        <ol className="about-workflow" aria-label="ResistanceProfiler workflow">
+          {ABOUT_WORKFLOW_STEPS.map((step, index) => (
+            <li key={step.title} className="about-workflow-step">
+              <span className="about-workflow-number" aria-hidden="true">{index + 1}</span>
+              <div className="about-workflow-copy">
+                <h4>{step.title}</h4>
+                <p>{step.text}</p>
+              </div>
+            </li>
+          ))}
+        </ol>
         <div className="about-scope-notes">
-          <div className="about-cli-side-card">
+          <div>
             <h4>What you provide</h4>
             <p>A consensus sequence (FASTA), or a VCF plus the exact reference used to call its variants. An optional BAM provides aligned reads for coverage assessment and direct evidence about which variants occur together.</p>
           </div>
-          <div className="about-cli-side-card">
+          <div>
             <h4>What you get</h4>
             <p>A per-drug interpretation summary, matched changes and their reported frequencies, and coverage notes identifying regions with insufficient or unavailable evidence. Results can be exported for review.</p>
           </div>
-          <div className="about-cli-side-card">
+          <div>
             <h4>What it does not do</h4>
             <p>ResPro does not validate the sequencing assay or replace an accredited diagnostic. Interpretation is limited by reference matching, sequence quality, coverage, and the scope and currency of the selected rules; review these factors before drawing clinical conclusions.</p>
           </div>

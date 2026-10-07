@@ -81,6 +81,10 @@ button:disabled.analyze-primary {
   opacity: 0.78;
 }
 
+:root[data-theme='dark'] .input-info-btn .input-info-icon {
+  filter: invert(1);
+}
+
 .input-info-btn:hover .input-info-icon,
 .input-info-btn:focus-visible .input-info-icon {
   opacity: 0.9;
@@ -480,41 +484,56 @@ button:disabled.analyze-primary {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
-/* ── Analyze form hierarchy (single-sample VCF mode) ───────────────────
-   The six fields are regrouped visually without changing the DOM: the three
-   file inputs form the primary "Input files" band (larger, prominent), and
-   sample name + the two cutoffs form a secondary "Sample settings" band
-   (narrower, muted). Named grid areas assign each data-tour-target label
-   to its band; the labels themselves keep their order for keyboard/tab
-   flow and the guided tour. */
+/* The three files and sample name form the primary VCF input row; cutoffs
+   remain available in the secondary advanced-options disclosure. */
 .profile-upload-row-vcf {
-  grid-template-columns: 1.2fr 1.2fr 1fr;
+  grid-template-columns: 1.2fr 1.2fr 1fr 1fr;
   grid-template-areas:
-    'vcf-file vcf-reference vcf-bam'
-    'vcf-sample vcf-freq vcf-cov';
-  row-gap: 1rem;
+    'vcf-file vcf-reference vcf-bam vcf-sample'
+    'vcf-settings vcf-settings vcf-settings vcf-settings';
+  row-gap: 0.75rem;
 }
 
 .profile-upload-row-vcf > label[data-tour-target='vcf-file'] { grid-area: vcf-file; }
 .profile-upload-row-vcf > label[data-tour-target='vcf-reference'] { grid-area: vcf-reference; }
 .profile-upload-row-vcf > label[data-tour-target='vcf-bam'] { grid-area: vcf-bam; }
 .profile-upload-row-vcf > label[data-tour-target='vcf-sample-name'] { grid-area: vcf-sample; }
-.profile-upload-row-vcf > label[data-tour-target='vcf-frequency-cutoff'] { grid-area: vcf-freq; }
-.profile-upload-row-vcf > label[data-tour-target='vcf-coverage-cutoff'] { grid-area: vcf-cov; }
+.profile-upload-row-vcf > .profile-advanced-options { grid-area: vcf-settings; }
 
-/* Secondary band: sample name + cutoffs read as settings, not inputs. */
-.profile-upload-row-vcf > label[data-tour-target='vcf-sample-name'],
-.profile-upload-row-vcf > label[data-tour-target='vcf-frequency-cutoff'],
-.profile-upload-row-vcf > label[data-tour-target='vcf-coverage-cutoff'] {
-  padding-top: 0.75rem;
-  border-top: 1px dashed var(--line);
-}
-
-.profile-upload-row-vcf > label[data-tour-target='vcf-sample-name'] input,
-.profile-upload-row-vcf > label[data-tour-target='vcf-frequency-cutoff'] input,
-.profile-upload-row-vcf > label[data-tour-target='vcf-coverage-cutoff'] input {
+.profile-upload-row-vcf > label[data-tour-target='vcf-sample-name'] input {
   min-height: 2.4rem;
   background: var(--surface);
+}
+
+.profile-advanced-options {
+  min-width: 0;
+  color: var(--muted-strong);
+  font-size: 0.84rem;
+}
+
+.profile-advanced-options summary {
+  width: fit-content;
+  min-height: 2rem;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.profile-advanced-options-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.profile-advanced-options-fields label {
+  min-width: 0;
+}
+
+.batch-advanced-options {
+  grid-column: 1 / -1;
 }
 
 @media (max-width: 980px) {
@@ -523,7 +542,7 @@ button:disabled.analyze-primary {
     grid-template-areas:
       'vcf-file vcf-reference'
       'vcf-bam vcf-sample'
-      'vcf-freq vcf-cov';
+      'vcf-settings vcf-settings';
   }
 }
 
@@ -535,8 +554,11 @@ button:disabled.analyze-primary {
       'vcf-reference'
       'vcf-bam'
       'vcf-sample'
-      'vcf-freq'
-      'vcf-cov';
+      'vcf-settings';
+  }
+
+  .profile-advanced-options-fields {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -75,6 +75,36 @@ function minimalProps(overrides = {}) {
   };
 }
 
+describe('AnalyzeTab compact controls', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('hides the report toolbar until a report is available', () => {
+    const { rerender } = render(<AnalyzeTab {...minimalProps()} />);
+    expect(document.querySelector('.analyze-report-actions')).not.toBeInTheDocument();
+
+    rerender(<AnalyzeTab {...minimalProps({
+      reportOptions: [{ path: 'report.html', label: 'sample (reference)', pdfPath: 'report.pdf' }],
+      selectedProfileReportPath: 'report.html',
+    })} />);
+    expect(document.querySelector('.analyze-report-actions')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download PDF' })).toBeInTheDocument();
+  });
+
+  it('keeps VCF cutoffs available in a collapsed Advanced options disclosure', () => {
+    render(<AnalyzeTab {...minimalProps({
+      activeProfileMode: 'vcf',
+      vcfInput: { sample: 'sample', min_af: 0.01, min_depth: 10, vcf_id: '', reference_id: '' },
+    })} />);
+
+    const advancedOptions = document.querySelector('.profile-upload-row-vcf .profile-advanced-options');
+    expect(advancedOptions).not.toHaveAttribute('open');
+    expect(advancedOptions).toContainElement(document.querySelector('[data-tour-target="vcf-frequency-cutoff"]'));
+    expect(advancedOptions).toContainElement(document.querySelector('[data-tour-target="vcf-coverage-cutoff"]'));
+  });
+});
+
 // Dispatch a MessageEvent on window as if it came from the report iframe.
 // Wrapped in act() so React flushes the resulting state update synchronously
 // before the assertion runs.
