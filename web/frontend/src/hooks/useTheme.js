@@ -11,7 +11,7 @@ import { createContext, useCallback, useEffect, useState } from 'react';
  * <html>. The CSS defines dark tokens under
  * `:root[data-theme="dark"]` and mirrors the system preference under
  * `@media (prefers-color-scheme: dark)` for :root[data-theme="system"]
- * (see styles.css). Setting the attribute in JS (rather than relying on
+ * (see styles/global.css). Setting the attribute in JS (rather than relying on
  * the media query alone) keeps the resolved state queryable for Plotly
  * re-theming and lets the toggle show the current mode unambiguously.
  *

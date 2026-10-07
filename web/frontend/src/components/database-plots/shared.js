@@ -28,13 +28,13 @@ export const CLASSIFICATION_LABELS = {
   unknown: 'Unknown',
 };
 
-// Plotly base typography — Geist, matching the app shell (fonts.css).
+// Plotly base typography — Geist, matching the app shell (styles/typography.css).
 const PLOTLY_FONT_FAMILY = "'Geist', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif";
 
 // Neutral ink tones for chart text, mirroring the CSS token palette
 // (--ink/--muted-strong/--muted) so charts and shell read as one surface.
 // Light and dark values are kept in sync with the token blocks in
-// styles.css (:root and :root[data-theme='dark']).
+// styles/global.css (:root and :root[data-theme='dark']).
 const INK = { light: '#18181b', dark: '#f4f4f5' };
 const INK_SOFT = { light: '#52525b', dark: '#d4d4d8' };
 

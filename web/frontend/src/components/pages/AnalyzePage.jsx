@@ -40,7 +40,6 @@ function pickAnalyzeProps(logic, resolvedTheme) {
     isCancelingJob: logic.isCancelingJob,
     cancelActiveJob: logic.cancelActiveJob,
     runSelectedProfile: logic.runSelectedProfile,
-    runExampleProfile: logic.runExampleProfile,
     statusError: logic.statusError,
     selectedProfileReportPath: logic.selectedProfileReportPath,
     setSelectedProfileReportPath: logic.setSelectedProfileReportPath,

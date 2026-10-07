@@ -8,6 +8,7 @@ import mutationsIconSrc from '../assets/search.svg';
 import homeIconSrc from '../assets/home.svg';
 import reportIconSrc from '../assets/reports.svg';
 import compareIconSrc from '../assets/icon-venn.svg';
+import exampleIconSrc from '../assets/example.svg';
 import { DatabaseSelectorBar } from './DatabaseSelectorBar';
 import { ThemeToggle } from './ThemeToggle';
 import { ThemeContext, useTheme } from '../hooks/useTheme';
@@ -201,6 +202,23 @@ export function AppShell({ logic, children }) {
                   onDatabaseChange={logic.setSelectedDatabaseId}
                   selectId="topbar-db-select"
                   className="topbar-db-bar"
+                  trailingControl={pathname === '/analysis' && logic.selectedDatabase?.has_example ? (
+                    <button
+                      type="button"
+                      className="analyze-submode-btn example-btn"
+                      style={{ flex: '0 0 auto' }}
+                      onClick={() => {
+                        logic.setActiveProfileMode('fasta');
+                        logic.setAnalyzeSubMode('single');
+                        logic.runExampleProfile();
+                      }}
+                      disabled={logic.isProfileBusy}
+                      title="Load and profile the example consensus FASTA shipped with this database"
+                    >
+                      <span className="sidebar-icon-mask analyze-submode-icon" style={{ '--icon-src': `url(${exampleIconSrc})` }} aria-hidden="true" />
+                      Example
+                    </button>
+                  ) : null}
                 />
               )}
             </div>

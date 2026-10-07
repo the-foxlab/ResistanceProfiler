@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 
 import analyzeIconSrc from '../../assets/icon-analyze.svg';
 import batchIconSrc from '../../assets/batch.svg';
-import exampleIconSrc from '../../assets/example.svg';
 import fileIconSrc from '../../assets/file.svg';
 import infoIconSrc from '../../assets/info.svg';
 import { Spinner } from '../Spinner';
@@ -33,7 +32,6 @@ export function AnalyzeTab({
   isCancelingJob,
   cancelActiveJob,
   runSelectedProfile,
-  runExampleProfile,
   statusError,
   selectedProfileReportPath,
   setSelectedProfileReportPath,
@@ -286,22 +284,6 @@ export function AnalyzeTab({
       <article className="card profile-input-card tab-primary-tile">
         <div className="analyze-shell-header section-header">
           <div className="analyze-submode-summary">
-            {selectedDatabase?.has_example ? (
-              <button
-                type="button"
-                className="analyze-submode-btn example-btn"
-                onClick={() => {
-                  setActiveProfileMode('fasta');
-                  setAnalyzeSubMode('single');
-                  runExampleProfile();
-                }}
-                disabled={isProfileBusy}
-                title="Load and profile the example consensus FASTA shipped with this database"
-              >
-                <span className="sidebar-icon-mask analyze-submode-icon" style={{ '--icon-src': `url(${exampleIconSrc})` }} aria-hidden="true" />
-                Example
-              </button>
-            ) : null}
             {/* Keep upload progress visible in every view, including results. */}
             <div className="analyze-submode-progress">
               <div className="upload-progress" aria-label="Upload progress">

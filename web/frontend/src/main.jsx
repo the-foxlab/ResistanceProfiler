@@ -8,8 +8,7 @@ import { TourProvider, useTour } from './components/tour/TourContext';
 import { buildTourSteps } from './components/tour/steps';
 import { useDashboardLogic } from './useDashboardLogic';
 import { useMobileClass } from './hooks/useMobileClass';
-import './fonts.css';
-import './styles.css';
+import './styles/index.css';
 
 // Everything below lives INSIDE <BrowserRouter>: useDashboardLogic() calls
 // useLocation()/useNavigate(), which throw outside a Router context. Mounting

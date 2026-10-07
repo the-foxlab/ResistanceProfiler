@@ -1,0 +1,208 @@
+.mutation-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.5rem;
+  margin-top: 0.45rem;
+  margin-bottom: 0.8rem;
+  min-height: 2rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.mutation-search {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  padding: 0 0.55rem;
+  min-width: 0;
+  min-height: 2rem;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mutation-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.mutation-search img {
+  width: 1rem;
+  height: 1rem;
+  opacity: 0.75;
+  flex: 0 0 auto;
+}
+
+.mutation-search-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--font-size-sm);
+  padding: 0;
+  margin: 0;
+  min-height: 0;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.mutation-search-input::placeholder {
+  color: var(--muted);
+}
+
+.mutation-reset-button {
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.mutation-reset-button:hover {
+  border-color: var(--line-strong);
+  background: var(--paper-soft);
+}
+
+.mutation-reset-button img {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.mutation-download-button {
+  margin-left: 0;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  padding: 0 0.7rem;
+  min-height: 2rem;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.mutation-download-button:hover {
+  border-color: var(--line-strong);
+  background: var(--paper-soft);
+  color: var(--ink);
+}
+
+.mutation-table-wrap {
+  max-height: clamp(220px, 52vh, 460px);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-strong);
+  overflow: auto;
+}
+
+.mutation-merged-section + .mutation-merged-section {
+  margin-top: 1.15rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.mutation-merged-section {
+  min-width: 0;
+}
+
+/* Quiet full-width fallback when the database has no rules of either kind. */
+.mutation-empty-state {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-soft);
+  color: var(--muted);
+  text-align: center;
+}
+
+/* When only one table renders (single XOR combinatorial rules), stretch the
+   card to the viewport bottom and let the table wrap consume the leftover
+   height instead of leaving dead whitespace below the content. */
+.mutations-single-table {
+  min-height: calc(100vh - 74px - 0.8rem - 1rem);
+  min-height: calc(100dvh - 74px - 0.8rem - 1rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.mutations-single-table .mutation-merged-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.mutations-single-table .mutation-table-wrap {
+  /* flex-basis 0 keeps the wrap's huge scroll content out of the card's
+     intrinsic height (grid row sizing), while flex-grow then stretches it
+     to fill the viewport; overflow:auto makes the automatic minimum size 0
+     so the table scrolls inside instead of blowing up the layout. */
+  flex: 1 1 0;
+  max-height: none;
+}
+
+.mutation-table-wrap table th,
+.mutation-table-wrap table td {
+  text-align: left;
+  padding: 0.3rem 0.6rem;
+  white-space: nowrap;
+}
+
+.mutation-table-wrap table {
+  width: max-content;
+  min-width: 100%;
+}
+
+.mutation-comment-content {
+  white-space: nowrap;
+}
+
+@media (max-width: 620px) {
+
+  .mutation-table-wrap {
+    max-height: 50vh;
+  }
+
+  .mutation-table-wrap table {
+    table-layout: auto;
+    width: max-content;
+    min-width: max-content;
+  }
+
+  .mutation-table-wrap table td {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  .mutation-toolbar {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .mutation-search {
+    flex: 1 1 100%;
+  }
+  .mutation-download-button,
+.mutation-reset-button {
+    min-height: var(--mobile-tap-target);
+  }
+}

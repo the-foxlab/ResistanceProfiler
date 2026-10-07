@@ -1,0 +1,13 @@
+/* Global styles, shared components, then page-specific styles. Keep this order intentional. */
+@import './global.css';
+@import './typography.css';
+@import './components.css';
+@import './layout.css';
+@import './pages/about.css';
+@import './pages/analyze.css';
+@import './pages/database.css';
+@import './pages/mutations.css';
+@import './pages/results.css';
+@import './pages/compare.css';
+@import './tour.css';
+@import './pages/home.css';

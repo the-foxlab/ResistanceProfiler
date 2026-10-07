@@ -45,6 +45,35 @@ describe('AppShell database selector placement', () => {
     expect(selector.closest('.top-bar-actions')).toBeNull();
   });
 
+  it('places the Example action directly after the database selector on /analysis', () => {
+    const setActiveProfileMode = vi.fn();
+    const setAnalyzeSubMode = vi.fn();
+    const runExampleProfile = vi.fn();
+    renderShell('/analysis', {
+      databases: [{ id: 'db1', display_name: 'DB One', has_example: true }],
+      selectedDatabase: { id: 'db1', display_name: 'DB One', has_example: true },
+      setActiveProfileMode,
+      setAnalyzeSubMode,
+      runExampleProfile,
+    });
+
+    const selector = document.getElementById('topbar-db-select');
+    const exampleButton = screen.getByRole('button', { name: 'Example' });
+    expect(selector.nextElementSibling).toBe(exampleButton);
+    fireEvent.click(exampleButton);
+    expect(setActiveProfileMode).toHaveBeenCalledWith('fasta');
+    expect(setAnalyzeSubMode).toHaveBeenCalledWith('single');
+    expect(runExampleProfile).toHaveBeenCalledOnce();
+  });
+
+  it('does not show the Example action on other database-selector pages', () => {
+    renderShell('/databases', {
+      databases: [{ id: 'db1', display_name: 'DB One', has_example: true }],
+      selectedDatabase: { id: 'db1', display_name: 'DB One', has_example: true },
+    });
+    expect(screen.queryByRole('button', { name: 'Example' })).toBeNull();
+  });
+
   it('shows the selector on /analysis/reports', () => {
     renderShell('/analysis/reports');
     expect(document.getElementById('topbar-db-select')).toBeNull();
