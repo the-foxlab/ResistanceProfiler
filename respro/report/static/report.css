@@ -1,23 +1,27 @@
 :root {
   /* ── Unified design tokens (kept byte-identical with webapp styles.css) ──── */
-  --ink: #1b2a3a;
-  --muted: #5b7187;
-  --muted-strong: #3e556b;
-  --paper: #eef3f8;
-  --paper-soft: #f5f8fc;
-  --surface: #fbfdff;
+  /* Minimalist neutral system: flat zinc/slate surfaces, one desaturated
+     teal accent (brand colour from the logo), borders over shadows. Shared
+     verbatim with the webapp CSS so the report matches the shell that embeds
+     it. */
+  --ink: #18181b;
+  --muted: #71717a;
+  --muted-strong: #52525b;
+  --paper: #fafafa;
+  --paper-soft: #f4f4f5;
+  --surface: #ffffff;
   --surface-strong: #ffffff;
   --accent: #0f766e;
-  --accent-hover: #0a5a53;
-  --accent-tint: #e6f4f1;
+  --accent-hover: #115e59;
+  --accent-tint: #f0fdfa;
   --on-accent: #ffffff;
-  --accent-soft: #d8eee9;
-  --line: #dde6ee;
-  --line-soft: #e9eef3;
-  --line-strong: #b7c8d6;
-  --table-surface: #fcfeff;
-  --table-head-surface: #f1f6fa;
-  --table-line: #e6edf2;
+  --accent-soft: #ccfbf1;
+  --line: #e4e4e7;
+  --line-soft: #ececee;
+  --line-strong: #d4d4d8;
+  --table-surface: #ffffff;
+  --table-head-surface: #fafafa;
+  --table-line: #e4e4e7;
   --font-size-xs: 0.72rem;
   --font-size-sm: 0.78rem;
   --font-size-md: 0.86rem;
@@ -31,13 +35,15 @@
   --font-size-caption: var(--font-size-xs);
   --font-size-table: var(--font-size-sm);
   --font-size-button: var(--font-size-sm);
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 18px;
-  --shadow-sm: 0 1px 2px rgba(16, 32, 48, 0.04), 0 1px 3px rgba(16, 32, 48, 0.06);
-  --shadow: 0 2px 6px rgba(16, 32, 48, 0.04), 0 8px 22px rgba(16, 32, 48, 0.06);
-  --shadow-lg: 0 6px 18px rgba(16, 32, 48, 0.08), 0 18px 42px rgba(16, 32, 48, 0.10);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --shadow-sm: 0 1px 2px rgba(24, 24, 27, 0.05);
+  --shadow: 0 1px 3px rgba(24, 24, 27, 0.07), 0 4px 12px rgba(24, 24, 27, 0.05);
+  --shadow-lg: 0 4px 12px rgba(24, 24, 27, 0.10), 0 12px 32px rgba(24, 24, 27, 0.12);
+  --font-sans: 'Geist', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace;
   /* Semantic severity colours — shared by badges, pills, chips, metric tiers */
   --resistant-bg: #fee2e2;
   --resistant-text: #991b1b;
@@ -68,9 +74,93 @@
   --info-bg: #dbeafe;
   --info-text: #1d4ed8;
   --info-border: #bcd5fb;
-  --neutral-bg: #f1f5f9;
-  --neutral-text: #3f5567;
-  --neutral-border: #d3dde6;
+  --neutral-bg: #f4f4f5;
+  --neutral-text: #52525b;
+  --neutral-border: #d4d4d8;
+}
+
+/* ── Dark theme ────────────────────────────────────────────────────────────
+   Applied via `data-theme="dark"` on <html>, set by report.js: when the
+   report is embedded in the webapp iframe the host posts its resolved theme
+  (respro:report-theme); standalone reports always keep the default light
+  presentation, including when opened in a new tab.
+   Only colour tokens are redefined, mirroring the webapp dark palette in
+   web/frontend/src/styles.css. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --ink: #f4f4f5;
+  --muted: #a1a1aa;
+  --muted-strong: #d4d4d8;
+  --paper: #101012;
+  --paper-soft: #18181b;
+  --surface: #18181b;
+  --surface-strong: #1c1c1f;
+  --accent: #2dd4bf;
+  --accent-hover: #5eead4;
+  --accent-tint: rgba(45, 212, 191, 0.12);
+  --on-accent: #0f172a;
+  --accent-soft: rgba(45, 212, 191, 0.16);
+  --line: #27272a;
+  --line-soft: #1f1f23;
+  --line-strong: #3f3f46;
+  --table-surface: #18181b;
+  --table-head-surface: #1c1c1f;
+  --table-line: #27272a;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.5), 0 12px 32px rgba(0, 0, 0, 0.45);
+  --resistant-bg: rgba(248, 113, 113, 0.14);
+  --resistant-text: #fca5a5;
+  --resistant-border: rgba(248, 113, 113, 0.35);
+  --intermediate-bg: rgba(251, 146, 60, 0.14);
+  --intermediate-text: #fdba74;
+  --intermediate-border: rgba(251, 146, 60, 0.35);
+  --low-level-bg: rgba(250, 204, 21, 0.12);
+  --low-level-text: #fde047;
+  --low-level-border: rgba(250, 204, 21, 0.3);
+  --sensitive-bg: rgba(74, 222, 128, 0.12);
+  --sensitive-text: #86efac;
+  --sensitive-border: rgba(74, 222, 128, 0.3);
+  --metric-tier1-bg: rgba(56, 189, 248, 0.12);
+  --metric-tier1-text: #7dd3fc;
+  --metric-tier1-border: rgba(56, 189, 248, 0.3);
+  --metric-tier2-bg: rgba(250, 204, 21, 0.12);
+  --metric-tier2-text: #fde047;
+  --metric-tier2-border: rgba(250, 204, 21, 0.3);
+  --metric-tier3-bg: rgba(251, 146, 60, 0.14);
+  --metric-tier3-text: #fdba74;
+  --metric-tier3-border: rgba(251, 146, 60, 0.35);
+  --metric-tier4-bg: rgba(248, 113, 113, 0.14);
+  --metric-tier4-text: #fca5a5;
+  --metric-tier4-border: rgba(248, 113, 113, 0.35);
+  --info-bg: rgba(96, 165, 250, 0.14);
+  --info-text: #93c5fd;
+  --info-border: rgba(96, 165, 250, 0.35);
+  --neutral-bg: #1f1f23;
+  --neutral-text: #a1a1aa;
+  --neutral-border: #3f3f46;
+}
+
+/* Consequence pills use hardcoded light pastel backgrounds; give them dark
+   translucent washes with light text under the dark theme. */
+:root[data-theme='dark'] .mutation-consequence--missense     { background: rgba(243, 156, 18, 0.16); color: #f5b04d; border-color: rgba(243, 156, 18, 0.4); }
+:root[data-theme='dark'] .mutation-consequence--synonymous   { background: rgba(39, 174, 96, 0.16);  color: #6fd694; border-color: rgba(39, 174, 96, 0.4); }
+:root[data-theme='dark'] .mutation-consequence--frameshift   { background: rgba(231, 76, 60, 0.16);  color: #f08a80; border-color: rgba(231, 76, 60, 0.4); }
+:root[data-theme='dark'] .mutation-consequence--stop_gained  { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; border-color: rgba(148, 163, 184, 0.45); }
+:root[data-theme='dark'] .mutation-consequence--stop_loss    { background: rgba(139, 92, 246, 0.18); color: #c4b5fd; border-color: rgba(139, 92, 246, 0.45); }
+:root[data-theme='dark'] .mutation-consequence--start_loss   { background: rgba(234, 179, 8, 0.14);  color: #fde047; border-color: rgba(234, 179, 8, 0.4); }
+:root[data-theme='dark'] .mutation-consequence--insertion    { background: rgba(22, 160, 133, 0.16); color: #5eead4; border-color: rgba(22, 160, 133, 0.4); }
+:root[data-theme='dark'] .mutation-consequence--deletion     { background: rgba(41, 128, 185, 0.18); color: #93c5fd; border-color: rgba(41, 128, 185, 0.45); }
+:root[data-theme='dark'] .mutation-consequence--unknown      { background: rgba(113, 113, 122, 0.2); color: #d4d4d8; border-color: rgba(113, 113, 122, 0.45); }
+
+/* Summary tile icons are black-stroke SVGs (data URLs — CSS can't reach the
+   inner path); invert them so they read on dark surfaces. The drug structure
+   image is a real scientific figure and must NOT be inverted. */
+:root[data-theme='dark'] .summary-tile-icon,
+:root[data-theme='dark'] .db-hit-info-icon,
+:root[data-theme='dark'] .header-icon-button img,
+:root[data-theme='dark'] .info-card-action-button:not(.info-card-action-button--green) img {
+  filter: invert(1) brightness(1.6);
 }
 
 * {
@@ -86,7 +176,7 @@ body {
   margin: 0;
   padding: 0;
   color: var(--ink);
-  font-family: 'Source Sans 3', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-sans);
   font-size: var(--font-size-md);
   line-height: 1.55;
   background-color: var(--paper);
@@ -106,9 +196,7 @@ body {
 /* Header Section */
 .report-header {
   border-bottom: 1px solid var(--line);
-  background:
-    radial-gradient(circle at 92% 16%, rgba(15, 118, 110, 0.08), transparent 46%),
-    var(--surface-strong);
+  background: var(--surface-strong);
 }
 
 .header-top {
@@ -722,7 +810,7 @@ body {
   background: var(--paper-soft);
   padding: 1rem;
   color: var(--ink);
-  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: var(--font-size-sm);
   line-height: 1.6;
   white-space: pre-wrap;
@@ -1114,7 +1202,7 @@ body {
 }
 
 .mutation-combinatorial {
-  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   white-space: nowrap;
 }
@@ -1126,7 +1214,7 @@ body {
 
 .mutation-nt,
 .mutation-aa {
-  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: var(--font-size-xs);
   white-space: nowrap;
 }
@@ -1225,7 +1313,7 @@ body {
 }
 
 .aln-seq {
-  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--font-mono);
   font-variant-ligatures: none;
   font-feature-settings: 'liga' 0, 'calt' 0;
   font-size: var(--font-size-sm);
@@ -1308,7 +1396,7 @@ body {
 }
 
 .db-hit-muts-cell {
-  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: var(--font-size-xs);
 }
 
@@ -1389,7 +1477,7 @@ body {
   color: var(--muted);
   font-size: var(--font-size-xs);
   font-weight: 700;
-  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--font-mono);
   text-decoration: none;
   margin-right: 0.2rem;
 }
@@ -1484,7 +1572,7 @@ a.db-hit-pub-link:hover {
   font-weight: 700;
   color: var(--muted);
   font-size: var(--font-size-xs);
-  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--font-mono);
   min-width: 2rem;
 }
 
@@ -1721,7 +1809,7 @@ a.db-hit-pub-link:hover {
   column-gap: 0;
   row-gap: 0.1rem;
   font-size: var(--font-size-sm);
-  font-family: 'Fira Mono', 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 /* Mutation text — plain, with modifiers for bold/red */

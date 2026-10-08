@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none">
+  <!-- Sun: light theme. Used as a CSS mask, so only the alpha channel
+       matters; the stroke colour is irrelevant. -->
+  <circle cx="10" cy="10" r="3.6" stroke="#000000" stroke-width="1.6"/>
+  <path d="M10 2.2v1.6M10 16.2v1.6M2.2 10h1.6M16.2 10h1.6M4.6 4.6l1.1 1.1M14.3 14.3l1.1 1.1M4.6 15.4l1.1-1.1M14.3 5.7l1.1-1.1" stroke="#000000" stroke-width="1.6" stroke-linecap="round"/>
+</svg>

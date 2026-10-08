@@ -1,0 +1,453 @@
+/* Database metadata: identity header, not a metadata box. The name is the
+   hero, description is muted prose, people/links sit in a spec-sheet grid,
+   and provenance (UUID, timestamps) is demoted to a muted footer line. No
+   inner border/background — a hairline divider separates it from the plots. */
+.database-meta-panel {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0 0 1rem;
+  margin-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.database-meta-identity {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.database-meta-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.database-meta-name {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+/* Schema version as a quiet neutral chip next to the name. */
+.database-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.08rem 0.5rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--neutral-bg);
+  color: var(--muted);
+  font-size: var(--font-size-xs, 0.72rem);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.database-meta-description {
+  margin: 0;
+  max-width: none;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+
+/* Spec-sheet grid: micro-labels above values, one column per fact. */
+.database-meta-specs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.65rem 1.2rem;
+}
+
+.database-meta-spec {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.database-meta-label {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: var(--font-size-xs, 0.72rem);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.database-meta-value {
+  font-size: var(--font-size-sm);
+  line-height: 1.3;
+  word-break: break-word;
+  color: var(--ink);
+}
+
+/* Provenance demoted to one muted footer line with dot separators. */
+.database-meta-provenance {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.6rem;
+  color: var(--muted);
+}
+
+.database-meta-provenance .database-meta-value {
+  color: var(--muted);
+  font-size: var(--font-size-xs, 0.72rem);
+}
+
+.database-meta-provenance-label {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.database-meta-provenance-sep {
+  color: var(--line-strong);
+}
+
+.database-plot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.database-plots-tile .workspace-output-header {
+  margin-bottom: 0.8rem;
+}
+
+.database-plot-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-strong);
+  min-width: 0;
+}
+
+.database-plot-header {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.database-plot-header h3,
+.database-plot-header p,
+.database-plot-footer {
+  margin: 0;
+}
+
+.database-plot-header h3 {
+  font-size: var(--font-size-lg);
+}
+
+.database-plot-header p,
+.database-plot-footer {
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+
+.database-summary-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.8rem;
+}
+
+.database-phenotype-switch-row {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.75rem 0 0.35rem;
+  border-top: 1px solid var(--line);
+}
+
+.database-section-heading {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.database-phenotype-switch {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.database-phenotype-switch-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.database-phenotype-switch button {
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--ink);
+  padding: 0.3rem 0.75rem;
+  font-size: var(--font-size-button);
+  font-weight: 700;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.database-phenotype-switch button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.database-bin-size-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: var(--font-size-button);
+  color: var(--muted);
+}
+
+.database-bin-size-control span {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.database-bin-size-control input {
+  width: 5.2rem;
+  min-height: 2rem;
+  padding: 0.3rem 0.45rem;
+  font-size: var(--font-size-sm);
+}
+
+.database-reference-section {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.database-reference-heading {
+  display: grid;
+  gap: 0.15rem;
+  justify-items: start;
+}
+
+.database-reference-heading h3 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+}
+
+.database-reference-plot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.database-reference-section-wide .database-reference-plot-grid {
+  grid-template-columns: 1fr;
+}
+
+.database-reference-section-score .database-reference-plot-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.database-summary-pie-card {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.database-summary-pie-card .database-plot-header {
+  width: 100%;
+  justify-items: center;
+  text-align: center;
+}
+
+.database-chart-scroll {
+  display: block;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  padding-bottom: 0.15rem;
+  width: 100%;
+  max-width: 100%;
+}
+
+.database-plot-canvas {
+  width: 100%;
+  min-width: 0;
+}
+
+.database-plot-canvas .js-plotly-plot,
+.database-pie-chart-wrap .js-plotly-plot {
+  font-family: inherit;
+}
+
+.database-plot-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.45rem 0.7rem;
+}
+
+.database-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--ink);
+  text-align: center;
+  white-space: normal;
+}
+
+.database-legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.database-pie-chart-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 230px;
+  margin-inline: auto;
+}
+
+.database-pie-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem 0.7rem;
+}
+
+.database-pie-row {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+}
+
+.database-meta-section-heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: nowrap;
+}
+
+/* The algorithms panel keeps the side-by-side label/value rows — its values
+   are wide tables, so the spec-sheet micro-grid used by the metadata header
+   would squeeze them. */
+.database-algorithms-panel .database-meta-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: start;
+  padding: 0.2rem 0;
+}
+
+.database-algorithms-panel .database-meta-label {
+  font-size: var(--font-size-sm);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.database-meta-section-heading-text {
+  white-space: nowrap;
+}
+
+.database-meta-row-heading {
+  grid-column: 1 / -1;
+}
+
+.database-meta-row-table {
+  grid-column: 1 / -1;
+}
+
+.database-meta-row-table .database-meta-value {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.database-algorithm-table th {
+  white-space: nowrap;
+}
+
+.database-algorithm-table td {
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+
+  .database-plot-grid,
+.database-summary-row,
+.database-reference-plot-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .database-meta-row {
+    min-width: 0;
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+
+  .database-meta-specs {
+    grid-template-columns: 1fr;
+  }
+
+  .database-meta-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .database-phenotype-switch-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .database-phenotype-switch-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 620px) {
+
+  .database-plot-card {
+    padding: 0.75rem;
+  }
+
+  .database-phenotype-switch {
+    width: 100%;
+  }
+
+  .database-phenotype-switch-controls {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .database-bin-size-control {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .database-plot-canvas .js-plotly-plot,
+.database-pie-chart-wrap .js-plotly-plot {
+    width: 100%;
+  }
+
+  .database-reference-section-score .database-reference-plot-grid {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .database-reference-section-score .database-plot-card {
+    flex: 1 1 220px;
+    min-width: 0;
+  }
+}

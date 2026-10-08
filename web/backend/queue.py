@@ -113,6 +113,15 @@ def resolve_queue_runtime_settings() -> QueueRuntimeSettings:
     )
 
 
+def resolve_subprocess_timeout_seconds() -> int:
+    """Return the hard timeout for respro CLI subprocesses.
+
+    Sits slightly above the RQ job timeout so the worker's own job-kill mechanism
+    fires first; this timeout is the last-resort bound against orphaned processes.
+    """
+    return resolve_queue_runtime_settings().timeout_seconds + 60
+
+
 def _parse_non_negative_int(raw_value: str, *, setting_name: str) -> int:
     """Parse a non-negative integer setting and fail fast on invalid values."""
     try:

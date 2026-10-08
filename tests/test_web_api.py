@@ -5,13 +5,14 @@ from __future__ import annotations
 import importlib.metadata
 import io
 import json
+import re
 import shutil
 import sqlite3
 import textwrap
 import zipfile
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 import fakeredis
@@ -2988,6 +2989,33 @@ class TestRequestFieldBounds:
         )
         assert response.status_code == 422
 
+    def test_profile_fasta_rejects_leading_dash_sample_name(
+        self,
+        client: TestClient,
+    ) -> None:
+        # A sample value starting with '-' could be misparsed as a CLI option
+        # when passed to the respro subprocess argv; reject it at the boundary.
+        response = client.post(
+            '/api/profile/fasta',
+            json={'fasta_id': 'some-id', 'sample': '--verbose'},
+        )
+        assert response.status_code == 422
+
+    def test_batch_profile_vcf_rejects_leading_dash_sample_name(
+        self,
+        client: TestClient,
+    ) -> None:
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_ids': ['some-id'],
+                'sample_names': ['-s'],
+                'reference_id': 'some-id',
+                'db_path': 'x.db',
+            },
+        )
+        assert response.status_code == 422
+
     def test_profile_fasta_rejects_oversized_display_name(
         self,
         client: TestClient,
@@ -3103,3 +3131,347 @@ class TestRequestFieldBounds:
         )
         assert submit.status_code == 200
 
+
+def _build_compare_db(
+    path: Path,
+    *,
+    name: str,
+    accession: str,
+    rules: list[dict],
+) -> Path:
+    """Create a minimal project DB with one reference and the given atomic rules."""
+    from respro.db.schema import create_schema
+
+    conn = create_schema(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute('INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+                 (name, 6, str(uuid4())))
+    conn.execute('INSERT INTO reference (project_id, name, accession, length) VALUES (?, ?, ?, ?)',
+                 (1, f'ref_{accession}', accession, 100))
+    conn.execute(
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (1, 'gag', 'Gag', 0, 90, '+', 'ATG' * 30),
+    )
+    drug_ids: dict[str, int] = {}
+    for rule in rules:
+        drug = rule['drug']
+        if drug not in drug_ids:
+            conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, drug))
+            drug_ids[drug] = conn.execute('SELECT last_insert_rowid() AS id').fetchone()['id']
+        conn.execute(
+            'INSERT INTO resistance_rule '
+            '(feature_id, drug_id, position, reference, mutation, phenotype, ic50, fold_ic50, score, publication) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (1, drug_ids[drug], rule['position'], rule['reference'], rule['mutation'],
+             rule.get('phenotype', 'resistant'), rule.get('ic50', ''), rule.get('fold_ic50', ''),
+             rule.get('score', ''), rule.get('publication', '')),
+        )
+    conn.commit()
+    conn.close()
+    return path
+
+
+def _cmp_rule(position=1, reference='K', mutation='E', drug='DrugA', **kw) -> dict:
+    base = {'position': position, 'reference': reference, 'mutation': mutation, 'drug': drug}
+    base.update(kw)
+    return base
+
+
+class TestDatabaseComparisonRoutes:
+    """Routes for comparing 2-3 databases by rule overlap on a shared reference."""
+
+    @pytest.fixture()
+    def compare_config(self, startup_config: StartupConfig) -> StartupConfig:
+        """Startup config with two extra databases sharing accession ACC1."""
+        db_dir = startup_config.project_databases_dir
+        _build_compare_db(
+            db_dir / 'cmp_a.db', name='CmpA', accession='ACC1',
+            rules=[_cmp_rule(position=1, reference='K', mutation='E', drug='DrugA'),
+                   _cmp_rule(position=2, reference='M', mutation='V', drug='DrugB')],
+        )
+        _build_compare_db(
+            db_dir / 'cmp_b.db', name='CmpB', accession='ACC1',
+            rules=[_cmp_rule(position=1, reference='K', mutation='E', drug='DrugA'),
+                   _cmp_rule(position=3, reference='R', mutation='Q', drug='DrugD')],
+        )
+        return startup_config
+
+    def test_shared_references_returns_only_common_accessions(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        response = client.get('/api/databases/shared-references', params={'ids': 'cmp_a.db,cmp_b.db'})
+        assert response.status_code == 200
+        items = response.json()['data']['items']
+        assert [item['accession'] for item in items] == ['ACC1']
+        assert items[0]['present_in'] == ['cmp_a.db', 'cmp_b.db']
+
+    def test_shared_references_excludes_accession_missing_from_one_db(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        # The bundled project_db has no accession, so it shares nothing with ACC1.
+        bundled = next(
+            p.name for p in compare_config.project_databases_dir.glob('*.db')
+            if not p.name.startswith('cmp_')
+        )
+        response = client.get(
+            '/api/databases/shared-references', params={'ids': f'cmp_a.db,{bundled}'},
+        )
+        assert response.status_code == 200
+        assert response.json()['data']['items'] == []
+
+    def test_compare_returns_venn_and_rows(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        response = client.post(
+            '/api/databases/compare',
+            json={'database_ids': ['cmp_a.db', 'cmp_b.db'], 'accession': 'ACC1'},
+        )
+        assert response.status_code == 200
+        data = response.json()['data']
+        assert data['reference']['accession'] == 'ACC1'
+        regions = {frozenset(r['region']): r['count'] for r in data['venn']}
+        assert regions[frozenset({'cmp_a.db', 'cmp_b.db'})] == 1
+        assert regions[frozenset({'cmp_a.db'})] == 1
+        assert regions[frozenset({'cmp_b.db'})] == 1
+        assert len(data['rows']) == 3
+        shared = next(
+            r for r in data['rows']
+            if (r['feature'], r['position'], r['reference'], r['mutation'], r['drug'])
+            == ('gag', 1, 'K', 'E', 'DrugA')
+        )
+        assert shared['per_db']['cmp_a.db']['drug'] == 'DrugA'
+        assert shared['per_db']['cmp_b.db']['drug'] == 'DrugA'
+
+    def test_compare_accession_missing_from_one_db_returns_400(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        bundled = next(
+            p.name for p in compare_config.project_databases_dir.glob('*.db')
+            if not p.name.startswith('cmp_')
+        )
+        response = client.post(
+            '/api/databases/compare',
+            json={'database_ids': ['cmp_a.db', bundled], 'accession': 'ACC1'},
+        )
+        assert response.status_code == 400
+        assert 'ACC1' in response.json()['detail']
+
+    def test_compare_one_database_returns_400(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        response = client.post(
+            '/api/databases/compare',
+            json={'database_ids': ['cmp_a.db'], 'accession': 'ACC1'},
+        )
+        assert response.status_code == 400
+
+    def test_compare_four_databases_returns_400(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        db_dir = compare_config.project_databases_dir
+        _build_compare_db(db_dir / 'cmp_c.db', name='CmpC', accession='ACC1', rules=[_cmp_rule()])
+        _build_compare_db(db_dir / 'cmp_d.db', name='CmpD', accession='ACC1', rules=[_cmp_rule()])
+        response = client.post(
+            '/api/databases/compare',
+            json={'database_ids': ['cmp_a.db', 'cmp_b.db', 'cmp_c.db', 'cmp_d.db'], 'accession': 'ACC1'},
+        )
+        assert response.status_code == 400
+
+    def test_reference_accessions_returns_per_db_accession_sets(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        response = client.get(
+            '/api/databases/reference-accessions',
+            params={'ids': 'cmp_a.db,cmp_b.db'},
+        )
+        assert response.status_code == 200
+        data = response.json()['data']['items']
+        assert data['cmp_a.db']['ACC1'] == {'name': 'ref_ACC1', 'organism': ''}
+        assert data['cmp_b.db']['ACC1'] == {'name': 'ref_ACC1', 'organism': ''}
+
+    def test_shared_references_include_organism(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        conn = sqlite3.connect(compare_config.project_databases_dir / 'cmp_a.db')
+        conn.execute(
+            "UPDATE reference SET organism = 'Monkeypox virus' WHERE accession = 'ACC1'",
+        )
+        conn.commit()
+        conn.close()
+        response = client.get(
+            '/api/databases/shared-references',
+            params={'ids': 'cmp_a.db,cmp_b.db'},
+        )
+        assert response.status_code == 200
+        items = response.json()['data']['items']
+        assert items[0]['organism'] == 'Monkeypox virus'
+
+    def test_reference_accessions_unknown_db_returns_400(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        response = client.get(
+            '/api/databases/reference-accessions',
+            params={'ids': 'cmp_a.db,missing.db'},
+        )
+        assert response.status_code == 400
+
+    def test_corrupt_database_returns_400_not_500(
+        self, client: TestClient, compare_config: StartupConfig,
+    ) -> None:
+        # A corrupt (non-SQLite) database file must surface as a client error,
+        # not an unhandled 500.
+        corrupt_path = compare_config.project_databases_dir / 'cmp_a.db'
+        corrupt_path.write_bytes(b'not a sqlite database')
+        response = client.get(
+            '/api/databases/reference-accessions',
+            params={'ids': 'cmp_a.db,cmp_b.db'},
+        )
+        assert response.status_code == 400
+
+
+
+class TestSpaFallback:
+    """
+    The frontend uses path routing (/analysis, /databases, ...). Unknown
+    non-API paths must serve the SPA index.html so deep links survive a hard
+    reload, while API and artifact routes must keep their JSON 404s.
+    """
+
+    @pytest.fixture()
+    def spa_client(self, startup_config: StartupConfig, tmp_path: Path) -> TestClient:
+        dist_dir = tmp_path / 'dist'
+        dist_dir.mkdir()
+        (dist_dir / 'index.html').write_text('<!doctype html><title>SPA</title>')
+        (dist_dir / 'assets').mkdir()
+        (dist_dir / 'assets' / 'app.js').write_text('console.log(1)')
+        with patch('web.backend.main._frontend_dist_dir', return_value=dist_dir):
+            app = create_app(startup_config=startup_config)
+        return TestClient(app)
+
+    def test_unknown_frontend_path_serves_index_html(self, spa_client: TestClient) -> None:
+        for path in ('/analysis', '/analysis/reports', '/databases/mutations', '/about'):
+            response = spa_client.get(path)
+            assert response.status_code == 200, path
+            assert 'SPA' in response.text
+
+    def test_root_serves_index_html(self, spa_client: TestClient) -> None:
+        response = spa_client.get('/')
+        assert response.status_code == 200
+        assert 'SPA' in response.text
+
+    def test_unknown_api_path_still_returns_json_404(self, spa_client: TestClient) -> None:
+        response = spa_client.get('/api/does-not-exist')
+        assert response.status_code == 404
+        assert response.json()['detail'] == 'Not Found'
+
+    def test_api_prefix_subpath_returns_json_error(self, spa_client: TestClient) -> None:
+        # /api/report without its required query param is a validation error from
+        # the real route — proving the fallback never swallowed API paths.
+        response = spa_client.get('/api/report')
+        assert response.status_code == 422
+        assert response.json()['detail'][0]['loc'] == ['query', 'artifact_id']
+
+    def test_reserved_backend_paths_are_not_swallowed_by_the_fallback(self, startup_config: StartupConfig, tmp_path: Path) -> None:
+        # /docs, /redoc, /openapi.json are FastAPI docs URLs. In online mode they
+        # are disabled (docs_url=None) and must keep returning 404 instead of
+        # receiving the SPA index.html.
+        dist_dir = tmp_path / 'dist'
+        dist_dir.mkdir()
+        (dist_dir / 'index.html').write_text('<!doctype html><title>SPA</title>')
+        (dist_dir / 'assets').mkdir()
+        (dist_dir / 'assets' / 'app.js').write_text('console.log(1)')
+        online_config = replace(startup_config, deployment_mode='online')
+        with patch('web.backend.main._frontend_dist_dir', return_value=dist_dir):
+            app = create_app(startup_config=online_config)
+        client = TestClient(app)
+        for path in ('/docs', '/redoc', '/openapi.json'):
+            response = client.get(path)
+            assert response.status_code == 404, path
+
+    def test_static_assets_are_served_from_dist(self, spa_client: TestClient) -> None:
+        response = spa_client.get('/assets/app.js')
+        assert response.status_code == 200
+        assert 'console.log(1)' in response.text
+
+
+class TestNoPathLeakage:
+    """
+    400 responses must not disclose server filesystem paths. The webapp
+    deliberately redacts paths elsewhere (job results, readiness payload);
+    error details follow the same rule: users get a friendly message, never
+    an absolute path from the server's filesystem.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_session_stores(self):
+        reset_memory_stores()
+        yield
+        reset_memory_stores()
+
+    @staticmethod
+    def _assert_no_server_paths(response, allowed_roots: tuple[Path, ...]) -> None:
+        body = response.text
+        for root in allowed_roots:
+            assert str(root) not in body, (
+                f'{response.request.url} leaked server path {root} in detail: {body}'
+            )
+        # Any response containing an absolute-looking path from this server
+        # (e.g. /tmp/... or the repo layout) is a leak.
+        for match in re.findall(r'(?:/[\w.-]+){3,}', body):
+            assert not match.startswith(str(allowed_roots[0]).rsplit('/', 1)[0]), (
+                f'{response.request.url} leaked server path {match!r} in detail: {body}'
+            )
+
+    def test_rules_unknown_database_id_has_no_path(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        response = client.get('/api/rules', params={'database_id': 'does-not-exist.db'})
+        assert response.status_code == 400
+        self._assert_no_server_paths(response, startup_config.allowed_roots)
+
+    def test_rules_empty_database_dir_has_no_path(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        # An empty project-databases directory makes resolve_project_db_path
+        # raise FileNotFoundError; its message must not name the server path.
+        for db_file in startup_config.project_databases_dir.glob('*.db'):
+            db_file.unlink()
+        response = client.get('/api/rules')
+        assert response.status_code == 400
+        self._assert_no_server_paths(response, startup_config.allowed_roots)
+
+    def test_shared_references_unknown_db_has_no_path(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        response = client.get(
+            '/api/databases/shared-references', params={'ids': 'missing.db'},
+        )
+        assert response.status_code == 400
+        self._assert_no_server_paths(response, startup_config.allowed_roots)
+
+    def test_reference_accessions_unknown_db_has_no_path(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        response = client.get(
+            '/api/databases/reference-accessions', params={'ids': 'missing.db'},
+        )
+        assert response.status_code == 400
+        self._assert_no_server_paths(response, startup_config.allowed_roots)
+
+    def test_compare_unknown_db_has_no_path(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        response = client.post(
+            '/api/databases/compare',
+            json={'database_ids': ['missing.db', 'also-missing.db'], 'accession': 'ACC1'},
+        )
+        assert response.status_code == 400
+        self._assert_no_server_paths(response, startup_config.allowed_roots)
+
+    def test_report_unknown_artifact_has_no_path(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        response = client.get('/api/report', params={'artifact_id': 'no-such-id'})
+        assert response.status_code in (400, 404)
+        self._assert_no_server_paths(response, startup_config.allowed_roots)

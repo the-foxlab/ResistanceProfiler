@@ -287,12 +287,13 @@ function _renderDatabaseAlgorithms(algorithms) {
   );
 }
 
-export function DatabaseTab({
-  rules,
-  formulaRules,
-  mutationPlotMeta,
-  selectedDatabase,
-}) {
+export function DatabasePage({ logic }) {
+  const {
+    rules,
+    formulaRules,
+    mutationPlotMeta,
+    selectedDatabase,
+  } = logic;
   // These controls only affect database charts, not mutation browsing or profiling.
   const [requestedPhenotypeMode, setRequestedPhenotypeMode] = useState('auto');
   const [requestedBinSize, setRequestedBinSize] = useState(10);
@@ -346,6 +347,25 @@ export function DatabaseTab({
     return entries.filter((entry) => isPopulated(entry.value));
   }, [selectedDatabase]);
 
+  // Identity-first metadata layout: name + schema chip + description form the
+  // header, people/links sit in a spec-sheet grid, and provenance (UUID,
+  // timestamps) is demoted to one muted footer line.
+  const databaseMeta = useMemo(() => {
+    const byKey = new Map(databaseInfoEntries.map((entry) => [entry.key, entry]));
+    const pick = (key) => byKey.get(key) || null;
+    return {
+      name: pick('display_name'),
+      schemaVersion: pick('schema_version'),
+      description: pick('description'),
+      specs: ['maintainers', 'contact', 'publication_pmid', 'publication_doi', 'website', 'license']
+        .map(pick)
+        .filter(Boolean),
+      provenance: ['uuid', 'created_at', 'maintainer_update']
+        .map(pick)
+        .filter(Boolean),
+    };
+  }, [databaseInfoEntries]);
+
   useEffect(() => {
     // Keep mode selection valid when only one annotation source is available.
     if (phenotypeMode.hasPhenotype && !phenotypeMode.hasClinical) {
@@ -364,25 +384,53 @@ export function DatabaseTab({
   return (
     <>
       <article className="card full-width-tile database-plots-tile tab-primary-tile">
-        <div className="workspace-output-header workspace-output-header-with-db section-header">
-          <div>
-            <h2>Database Dashboard</h2>
-            <p>Overview and visual summaries of the active resistance database.</p>
-          </div>
-        </div>
-
         {selectedDatabase ? (
           <>
           {databaseInfoEntries.length > 0 ? (
             <section className="database-meta-panel" aria-label="Database information">
-              {databaseInfoEntries.map((entry) => (
-                <div key={entry.key} className="database-meta-row">
-                  <span className="database-meta-label">{entry.label}</span>
-                  <span className="database-meta-value">
-                    {_renderDatabaseMetaValue(entry)}
-                  </span>
+              {databaseMeta.name ? (
+                <div className="database-meta-identity">
+                  <div className="database-meta-name-row">
+                    <span className="database-meta-name">{databaseMeta.name.value}</span>
+                    {databaseMeta.schemaVersion ? (
+                      <span
+                        className="database-meta-chip"
+                        title="Database schema version"
+                      >
+                        v{String(databaseMeta.schemaVersion.value).replace(/^v/i, '')}
+                      </span>
+                    ) : null}
+                  </div>
+                  {databaseMeta.description ? (
+                    <p className="database-meta-description">{databaseMeta.description.value}</p>
+                  ) : null}
                 </div>
-              ))}
+              ) : null}
+              {databaseMeta.specs.length > 0 ? (
+                <div className="database-meta-specs">
+                  {databaseMeta.specs.map((entry) => (
+                    <div key={entry.key} className="database-meta-spec">
+                      <span className="database-meta-label">{entry.label}</span>
+                      <span className="database-meta-value">
+                        {_renderDatabaseMetaValue(entry)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {databaseMeta.provenance.length > 0 ? (
+                <div className="database-meta-provenance">
+                  {databaseMeta.provenance.map((entry, index) => (
+                    <span key={entry.key} className="database-meta-provenance-item">
+                      {index > 0 ? <span className="database-meta-provenance-sep" aria-hidden="true">·</span> : null}
+                      <span className="database-meta-value">
+                        <span className="database-meta-provenance-label">{entry.label}</span>{' '}
+                        {_renderDatabaseMetaValue(entry)}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </section>
           ) : null}
           {_renderDatabaseAlgorithms(selectedDatabase?.algorithms)}

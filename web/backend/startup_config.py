@@ -122,8 +122,7 @@ def resolve_project_db_path(project_databases_dir: Path, database_id: str | None
     db_paths = list_project_db_paths(project_databases_dir)
     if not db_paths:
         raise FileNotFoundError(
-            f'No project database found in {project_databases_dir}. '
-            'Add a .db file or enable maintained bootstrap.'
+            'No project database available. Add a .db file or enable maintained bootstrap.'
         )
 
     if not database_id:

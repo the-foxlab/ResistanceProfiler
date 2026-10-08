@@ -1,11 +1,13 @@
 import Plotly from 'plotly.js-dist-min';
-import { useRef, useEffect, useState } from 'react';
+import { useContext, useRef, useEffect, useState } from 'react';
 
-import { CLASSIFICATION_COLORS, CLASSIFICATION_LABELS } from './shared';
+import { CLASSIFICATION_COLORS, CLASSIFICATION_LABELS, baseLayout, axisTitleFont } from './shared';
+import { ThemeContext } from '../../hooks/useTheme';
 
 export function DatabasePositionPlot({ plot }) {
   const containerRef = useRef(null);
   const [plotError, setPlotError] = useState('');
+  const theme = useContext(ThemeContext);
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -39,20 +41,20 @@ export function DatabasePositionPlot({ plot }) {
         : { tickmode: 'auto', dtick: 1 };
 
       const layout = {
+        ...baseLayout(),
         barmode: 'stack',
         bargap: 0.15,
         xaxis: {
-          title: { text: plot.xAxisLabel || 'Amino-acid position', font: { size: 12, color: '#4c6072' } },
-          tickangle: -45,
+          ...baseLayout().xaxis,
           showgrid: false,
+          title: { text: plot.xAxisLabel || 'Amino-acid position', font: axisTitleFont() },
+          tickangle: -45,
           ...xaxisConfig,
         },
         yaxis: {
-          title: { text: 'Mutation count', font: { size: 12, color: '#4c6072' } },
+          ...baseLayout().yaxis,
+          title: { text: 'Mutation count', font: axisTitleFont() },
           showgrid: true,
-          gridcolor: '#dbe6ee',
-          gridwidth: 1,
-          griddash: 'dot',
           rangemode: 'tozero',
         },
         margin: { l: 50, r: 12, t: 8, b: 58 },
@@ -73,7 +75,7 @@ export function DatabasePositionPlot({ plot }) {
         Plotly.purge(containerRef.current);
       }
     };
-  }, [plot]);
+  }, [plot, theme]);
 
   // Re-render on window resize (debounced)
   useEffect(() => {
@@ -100,7 +102,7 @@ export function DatabasePositionPlot({ plot }) {
       window.removeEventListener('resize', handleResize);
       clearTimeout(timeoutId);
     };
-  }, [plot]);
+  }, [plot, theme]);
 
   return (
     <section className="database-plot-card">

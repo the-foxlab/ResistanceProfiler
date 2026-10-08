@@ -1,78 +1,79 @@
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 
 import analyzeIconSrc from '../../assets/icon-analyze.svg';
 import batchIconSrc from '../../assets/batch.svg';
-import exampleIconSrc from '../../assets/example.svg';
 import fileIconSrc from '../../assets/file.svg';
 import infoIconSrc from '../../assets/info.svg';
 import { Spinner } from '../Spinner';
+import { ThemeContext } from '../../hooks/useTheme';
 
-export function AnalyzeTab({
-  selectedDatabase,
-  vcfInput,
-  setVcfInput,
-  fastaInput,
-  setFastaInput,
-  jsonInputId,
-  isRegenerateBusy,
-  runRegenerateFromJson,
-  uploadFastaFile,
-  uploadVcfFile,
-  uploadReferenceFile,
-  uploadBamFile,
-  uploadJsonFile,
-  uploadProgress,
-  isUploading,
-  cancelUpload,
-  activeProfileMode,
-  setActiveProfileMode,
-  analyzeSubMode,
-  setAnalyzeSubMode,
-  isProfileBusy,
-  canCancelJob,
-  isCancelingJob,
-  cancelActiveJob,
-  runSelectedProfile,
-  runExampleProfile,
-  statusError,
-  selectedProfileReportPath,
-  setSelectedProfileReportPath,
-  reportOptions,
-  buildReportUrl,
-  buildArtifactUrl,
-  batchMode,
-  setBatchMode,
-  batchVcfFiles,
-  batchFastaFiles,
-  batchJsonFiles,
-  batchReferenceFasta,
-  batchSamples,
-  isBatchUploading,
-  cancelBatchUpload,
-  batchSubmitting,
-  isBatchDownloadBusy,
-  batchError,
-  batchRateLimitCooldown,
-  setBatchRateLimitCooldown,
-  batchSubmitted,
-  batchMaxSamples,
-  sampleLimitPerMinute,
-  batchVcfCutoffs,
-  setBatchVcfCutoffs,
-  addBatchVcfFiles,
-  addBatchFastaFiles,
-  addBatchJsonFiles,
-  addBatchBamFiles,
-  attachBatchBam,
-  removeBatchFile,
-  uploadBatchReferenceFasta,
-  submitBatch,
-  downloadAllBatchArtifacts,
-  resetBatch,
-  inlineReportPath,
-  isAnalyzeScopeLocked,
-  PROFILE_MODES,
-}) {
+export function AnalyzePage({ logic }) {
+  const {
+    selectedDatabase,
+    vcfInput,
+    setVcfInput,
+    fastaInput,
+    setFastaInput,
+    jsonInputId,
+    isRegenerateBusy,
+    runRegenerateFromJson,
+    uploadFastaFile,
+    uploadVcfFile,
+    uploadReferenceFile,
+    uploadBamFile,
+    uploadJsonFile,
+    uploadProgress,
+    isUploading,
+    cancelUpload,
+    activeProfileMode,
+    setActiveProfileMode,
+    analyzeSubMode,
+    setAnalyzeSubMode,
+    isProfileBusy,
+    canCancelJob,
+    isCancelingJob,
+    cancelActiveJob,
+    runSelectedProfile,
+    statusError,
+    selectedProfileReportPath,
+    setSelectedProfileReportPath,
+    reportOptions,
+    buildReportUrl,
+    buildArtifactUrl,
+    batchMode,
+    setBatchMode,
+    batchVcfFiles,
+    batchFastaFiles,
+    batchJsonFiles,
+    batchReferenceFasta,
+    batchSamples,
+    isBatchUploading,
+    cancelBatchUpload,
+    batchSubmitting,
+    isBatchDownloadBusy,
+    batchError,
+    batchRateLimitCooldown,
+    setBatchRateLimitCooldown,
+    batchSubmitted,
+    batchMaxSamples,
+    sampleLimitPerMinute,
+    batchVcfCutoffs,
+    setBatchVcfCutoffs,
+    addBatchVcfFiles,
+    addBatchFastaFiles,
+    addBatchJsonFiles,
+    addBatchBamFiles,
+    attachBatchBam,
+    removeBatchFile,
+    uploadBatchReferenceFasta,
+    submitBatch,
+    downloadAllBatchArtifacts,
+    resetBatch,
+    inlineReportPath,
+    PROFILE_MODES,
+  } = logic;
+  const resolvedTheme = useContext(ThemeContext);
+  const isAnalyzeScopeLocked = isProfileBusy || isRegenerateBusy || batchSubmitting;
   const [reportFrameHeight, setReportFrameHeight] = useState(null);
   const [hostedPlot, setHostedPlot] = useState(null);
   const [hostedStructure, setHostedStructure] = useState(null);
@@ -85,6 +86,24 @@ export function AnalyzeTab({
   const selectedReportOption = reportOptions.find(
     (option) => option.path === selectedProfileReportPath,
   ) || null;
+
+  // Post the resolved theme to the embedded report whenever it changes or a
+  // new iframe mounts (report reload). The report listens for
+  // respro:report-theme and applies it as data-theme on its <html>.
+  useEffect(() => {
+    const frame = reportFrameRef.current;
+    if (!frame || !resolvedTheme) {
+      return;
+    }
+    try {
+      frame.contentWindow?.postMessage(
+        { type: 'respro:report-theme', theme: resolvedTheme },
+        reportOrigin || window.location.origin,
+      );
+    } catch {
+      // The iframe load handler retries once the report listener is ready.
+    }
+  }, [resolvedTheme, inlineReportPath]);
 
   useEffect(() => {
     setReportFrameHeight(null);
@@ -266,59 +285,34 @@ export function AnalyzeTab({
     <>
       <article className="card profile-input-card tab-primary-tile">
         <div className="analyze-shell-header section-header">
-          <div>
-            <h2>Analyze</h2>
-            {selectedDatabase?.has_example ? (
-              <button
-                type="button"
-                className="analyze-submode-btn example-btn"
-                onClick={() => {
-                  setActiveProfileMode('fasta');
-                  setAnalyzeSubMode('single');
-                  runExampleProfile();
-                }}
-                disabled={isProfileBusy}
-                title="Load and profile the example consensus FASTA shipped with this database"
-              >
-                <span className="sidebar-icon-mask analyze-submode-icon" style={{ '--icon-src': `url(${exampleIconSrc})` }} aria-hidden="true" />
-                Example
-              </button>
-            ) : null}
-            <p>
-              Profile VCF files, consensus FASTA sequences, or regenerate a previous report from JSON.
-              BAM files are optional and can be used for coverage analysis.
-            </p>
-          </div>
-          {/* The upload progress bar stays visible in every view (input forms
-              and results), so the last upload's outcome remains readable. */}
-          <div className="analyze-submode-progress">
-            <div className="upload-progress" aria-label="Upload progress">
-              <div className="upload-progress-head">
-                <span>Upload progress</span>
-                <span>{uploadProgress.percent}%</span>
-                {/* Cancel the in-flight upload (single or batch). Single and batch
-                    uploads are mutually exclusive submodes, so the active flag
-                    determines which cancel handler to call. */}
-                {(isUploading || isBatchUploading) ? (
-                  <button
-                    type="button"
-                    className="upload-cancel-btn"
-                    onClick={() => {
-                      if (isUploading) {
-                        cancelUpload();
-                      } else {
-                        cancelBatchUpload();
-                      }
-                    }}
-                    title="Cancel"
-                    aria-label="Cancel"
-                  >
-                    ×
-                  </button>
-                ) : null}
-              </div>
-              <div className="upload-progress-track" aria-hidden="true">
-                <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
+          <div className="analyze-submode-summary">
+            {/* Keep upload progress visible in every view, including results. */}
+            <div className="analyze-submode-progress">
+              <div className="upload-progress" aria-label="Upload progress">
+                <div className="upload-progress-head">
+                  <span>Upload progress</span>
+                  <span>{uploadProgress.percent}%</span>
+                  {(isUploading || isBatchUploading) ? (
+                    <button
+                      type="button"
+                      className="upload-cancel-btn"
+                      onClick={() => {
+                        if (isUploading) {
+                          cancelUpload();
+                        } else {
+                          cancelBatchUpload();
+                        }
+                      }}
+                      title="Cancel"
+                      aria-label="Cancel"
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+                <div className="upload-progress-track" aria-hidden="true">
+                  <div className="upload-progress-fill" style={{ width: `${uploadProgress.percent}%` }} />
+                </div>
               </div>
             </div>
           </div>
@@ -462,41 +456,46 @@ export function AnalyzeTab({
                     onChange={(event) => setVcfInput({ ...vcfInput, sample: event.target.value })}
                   />
                 </label>
-                <label data-tour-target="vcf-frequency-cutoff">
-                  <span className="label-text input-label-row">Frequency cutoff <button type="button" className="input-info-btn" aria-label="Frequency cutoff help" title="Minimum allele frequency from 0 to 1. Variants below this value are ignored."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.001"
-                    value={vcfInput.min_af}
-                    disabled={isProfileBusy}
-                    onChange={(event) => {
-                      const value = Number(event.target.value);
-                      if (!Number.isFinite(value)) {
-                        return;
-                      }
-                      setVcfInput({ ...vcfInput, min_af: value });
-                    }}
-                  />
-                </label>
-                <label data-tour-target="vcf-coverage-cutoff">
-                  <span className="label-text input-label-row">Coverage cutoff <button type="button" className="input-info-btn" aria-label="Coverage cutoff help" title="Minimum read depth required for including a position."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={vcfInput.min_depth}
-                    disabled={isProfileBusy}
-                    onChange={(event) => {
-                      const value = Number(event.target.value);
-                      if (!Number.isFinite(value)) {
-                        return;
-                      }
-                      setVcfInput({ ...vcfInput, min_depth: Math.trunc(value) });
-                    }}
-                  />
-                </label>
+                <details className="profile-advanced-options">
+                  <summary>Advanced options</summary>
+                  <div className="profile-advanced-options-fields">
+                    <label data-tour-target="vcf-frequency-cutoff">
+                      <span className="label-text input-label-row">Frequency cutoff <button type="button" className="input-info-btn" aria-label="Frequency cutoff help" title="Minimum allele frequency from 0 to 1. Variants below this value are ignored."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                      <input
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.001"
+                        value={vcfInput.min_af}
+                        disabled={isProfileBusy}
+                        onChange={(event) => {
+                          const value = Number(event.target.value);
+                          if (!Number.isFinite(value)) {
+                            return;
+                          }
+                          setVcfInput({ ...vcfInput, min_af: value });
+                        }}
+                      />
+                    </label>
+                    <label data-tour-target="vcf-coverage-cutoff">
+                      <span className="label-text input-label-row">Coverage cutoff <button type="button" className="input-info-btn" aria-label="Coverage cutoff help" title="Minimum read depth required for including a position."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={vcfInput.min_depth}
+                        disabled={isProfileBusy}
+                        onChange={(event) => {
+                          const value = Number(event.target.value);
+                          if (!Number.isFinite(value)) {
+                            return;
+                          }
+                          setVcfInput({ ...vcfInput, min_depth: Math.trunc(value) });
+                        }}
+                      />
+                    </label>
+                  </div>
+                </details>
               </div>
             ) : null}
 
@@ -590,6 +589,7 @@ export function AnalyzeTab({
               ) : null}
             </div>
 
+            {reportOptions.length > 0 ? (
             <div className="inline-actions report-actions analyze-report-actions">
               <select
                 value={selectedProfileReportPath}
@@ -654,6 +654,7 @@ export function AnalyzeTab({
                 Download TSV
               </button>
             </div>
+            ) : null}
 
             {!inlineReportPath ? (
               <div className="report-placeholder">
@@ -719,41 +720,46 @@ export function AnalyzeTab({
                       }}
                     />
                   </label>
-                  <label className="batch-settings-label">
-                    <span className="label-text input-label-row">Frequency cutoff <button type="button" className="input-info-btn" aria-label="Batch frequency cutoff help" title="Minimum allele frequency from 0 to 1 for all batch VCF runs."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
-                    <input
-                      type="number"
-                      min="0"
-                      max="1"
-                      step="0.001"
-                      value={batchVcfCutoffs.min_af}
-                      disabled={batchSubmitting}
-                      onChange={(event) => {
-                        const value = Number(event.target.value);
-                        if (!Number.isFinite(value)) {
-                          return;
-                        }
-                        setBatchVcfCutoffs((prev) => ({ ...prev, min_af: value }));
-                      }}
-                    />
-                  </label>
-                  <label className="batch-settings-label">
-                    <span className="label-text input-label-row">Coverage cutoff <button type="button" className="input-info-btn" aria-label="Batch coverage cutoff help" title="Minimum read depth for all batch VCF runs."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={batchVcfCutoffs.min_depth}
-                      disabled={batchSubmitting}
-                      onChange={(event) => {
-                        const value = Number(event.target.value);
-                        if (!Number.isFinite(value)) {
-                          return;
-                        }
-                        setBatchVcfCutoffs((prev) => ({ ...prev, min_depth: Math.trunc(value) }));
-                      }}
-                    />
-                  </label>
+                  <details className="profile-advanced-options batch-advanced-options">
+                    <summary>Advanced options</summary>
+                    <div className="profile-advanced-options-fields">
+                      <label className="batch-settings-label">
+                        <span className="label-text input-label-row">Frequency cutoff <button type="button" className="input-info-btn" aria-label="Batch frequency cutoff help" title="Minimum allele frequency from 0 to 1 for all batch VCF runs."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.001"
+                          value={batchVcfCutoffs.min_af}
+                          disabled={batchSubmitting}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            if (!Number.isFinite(value)) {
+                              return;
+                            }
+                            setBatchVcfCutoffs((prev) => ({ ...prev, min_af: value }));
+                          }}
+                        />
+                      </label>
+                      <label className="batch-settings-label">
+                        <span className="label-text input-label-row">Coverage cutoff <button type="button" className="input-info-btn" aria-label="Batch coverage cutoff help" title="Minimum read depth for all batch VCF runs."><img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" /></button></span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={batchVcfCutoffs.min_depth}
+                          disabled={batchSubmitting}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            if (!Number.isFinite(value)) {
+                              return;
+                            }
+                            setBatchVcfCutoffs((prev) => ({ ...prev, min_depth: Math.trunc(value) }));
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </details>
                 </div>
               ) : batchMode === 'fasta' ? (
                 <div className="profile-upload-row">
@@ -987,7 +993,7 @@ export function AnalyzeTab({
 
       {/* Report preview in its own tile below the analyze inputs/actions */}
       {analyzeSubMode !== 'batch' && inlineReportPath ? (
-        <article className="card full-width-tile tab-primary-tile">
+        <article className="full-width-tile tab-primary-tile">
           <iframe
             ref={reportFrameRef}
             title="ResistanceProfiler report"
@@ -996,6 +1002,10 @@ export function AnalyzeTab({
             sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads"
             style={reportFrameHeight ? { height: `${reportFrameHeight}px` } : undefined}
             onLoad={(event) => {
+              event.currentTarget.contentWindow?.postMessage(
+                { type: 'respro:report-theme', theme: resolvedTheme },
+                reportOrigin || window.location.origin,
+              );
               try {
                 const frameDoc = event.currentTarget.contentDocument;
                 if (!frameDoc || !frameDoc.body || !frameDoc.documentElement) {

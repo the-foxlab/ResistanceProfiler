@@ -9,12 +9,12 @@ export const TOUR_DOCS_OUTPUT_URL = `${TOUR_DOCS_URL}output/`;
  * as a user would, so the spotlight points at live DOM.
  *
  * @param {object} navigation - Setters from useDashboardLogic.
- * @param {(mode: string) => void} navigation.setActiveMode
+ * @param {(path: string) => void} navigation.navigate
  * @param {(mode: string) => void} navigation.setActiveProfileMode
  * @param {(mode: string) => void} navigation.setAnalyzeSubMode
  * @returns {Array} ordered tour steps
  */
-export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyzeSubMode }) {
+export function buildTourSteps({ navigate, setActiveProfileMode, setAnalyzeSubMode }) {
   return [
     // 1. Top-bar database selector — explain switching databases.
     {
@@ -22,7 +22,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       targetSelector: '.topbar-db-bar',
       title: 'Choose your database',
       body: 'The database you select here determines which resistance rules and references are used for every analysis in this session. Switch it any time before running a new analysis.',
-      before: () => setActiveMode('analyze'),
+      before: () => navigate('/analysis'),
     },
     // 2. VCF file upload.
     {
@@ -31,7 +31,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       title: 'VCF mode — variant file',
       body: 'Upload a VCF (.vcf or .vcf.gz) with standard headers. The VCF may be multi-chrom; each CHROM must match one record in the reference FASTA by header name.',
       before: () => {
-        setActiveMode('analyze');
+        navigate('/analysis');
         setAnalyzeSubMode('single');
         setActiveProfileMode('vcf');
       },
@@ -43,7 +43,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       title: 'VCF mode — reference FASTA',
       body: 'Provide a matching reference FASTA. It must match the VCF coordinate system and may be multi-record (one FASTA record per VCF CHROM); each record header must match a CHROM name.',
       before: () => {
-        setActiveMode('analyze');
+        navigate('/analysis');
         setAnalyzeSubMode('single');
         setActiveProfileMode('vcf');
       },
@@ -55,9 +55,13 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       title: 'VCF mode — BAM (optional)',
       body: 'An optional sorted BAM file for coverage evaluation. A BAM index is generated automatically. This is only needed when you want coverage-annotation and combined SNP codon analysis.',
       before: () => {
-        setActiveMode('analyze');
+        navigate('/analysis');
         setAnalyzeSubMode('single');
         setActiveProfileMode('vcf');
+        setTimeout(() => {
+          const advancedOptions = document.querySelector('.profile-upload-row-vcf .profile-advanced-options');
+          if (advancedOptions) advancedOptions.open = true;
+        }, 0);
       },
     },
     // 5. Sample name.
@@ -67,9 +71,13 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       title: 'VCF mode — sample name',
       body: 'Give your sample a name. This label appears on the report.',
       before: () => {
-        setActiveMode('analyze');
+        navigate('/analysis');
         setAnalyzeSubMode('single');
         setActiveProfileMode('vcf');
+        setTimeout(() => {
+          const advancedOptions = document.querySelector('.profile-upload-row-vcf .profile-advanced-options');
+          if (advancedOptions) advancedOptions.open = true;
+        }, 0);
       },
     },
     // 6. Frequency cutoff.
@@ -79,7 +87,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       title: 'VCF mode — frequency cutoff',
       body: 'Set the minimum allele frequency (0 to 1). Variants below this threshold are ignored and will not appear in the report.',
       before: () => {
-        setActiveMode('analyze');
+        navigate('/analysis');
         setAnalyzeSubMode('single');
         setActiveProfileMode('vcf');
       },
@@ -91,7 +99,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       title: 'VCF mode — coverage cutoff',
       body: 'Set the minimum read depth required to include a position. Variants below this threshold are ignored and will not appear in the report.',
       before: () => {
-        setActiveMode('analyze');
+        navigate('/analysis');
         setAnalyzeSubMode('single');
         setActiveProfileMode('vcf');
       },
@@ -103,7 +111,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       title: 'FASTA mode',
       body: 'Switch to FASTA mode to upload a consensus FASTA sequence. The reference is matched automatically by sequence identity.',
       before: () => {
-        setActiveMode('analyze');
+        navigate('/analysis');
         setAnalyzeSubMode('single');
         setActiveProfileMode('fasta');
       },
@@ -115,7 +123,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       title: 'Regenerate from JSON',
       body: 'Upload a previous results JSON exported by ResistanceProfiler to rebuild its report. This is matched by a unique database ID, so regeneration will not work after that database has been updated.',
       before: () => {
-        setActiveMode('analyze');
+        navigate('/analysis');
         setAnalyzeSubMode('single');
         setActiveProfileMode('regenerate');
       },
@@ -127,7 +135,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       title: 'Run or cancel',
       body: 'Press Analyze to start the job. While a job runs you can cancel it. The indicator shows which database is in use, and any errors appear here in red.',
       before: () => {
-        setActiveMode('analyze');
+        navigate('/analysis');
         setAnalyzeSubMode('single');
         setActiveProfileMode('vcf');
       },
@@ -139,7 +147,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       title: 'Reopen previous reports',
       body: 'Reports from earlier in this session are listed here. Open one in a new tab, or download its PDF, JSON, or TSV export without re-running the analysis.',
       before: () => {
-        setActiveMode('analyze');
+        navigate('/analysis');
         setAnalyzeSubMode('single');
         setActiveProfileMode('vcf');
       },
@@ -151,7 +159,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       title: 'One sample or many',
       body: 'Use this toggle to switch between "One Sample" and "Multiple Samples". The batch mode lets you submit multiple VCF or FASTA files at once with a shared reference, per-sample BAMs, and a single set of cutoffs — ideal when you have a plate or folder of samples to profile together.',
       before: () => {
-        setActiveMode('analyze');
+        navigate('/analysis');
         setAnalyzeSubMode('single');
       },
     },
@@ -161,7 +169,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       targetSelector: '[data-tour-target="sidebar-results"]',
       title: 'Session results',
       body: 'Every analysis from this session is listed in the Reports tab (results are cleared on page reload). Each row links to its HTML report and offers PDF and JSON downloads. Use "Download all" or select rows and "Download selected" for a bundle.',
-      before: () => setActiveMode('results'),
+      before: () => navigate('/analysis/reports'),
     },
     // 14. Comparison — highlight the Reports tile (same tab, comparison lives below the table).
     {
@@ -169,7 +177,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       targetSelector: '[data-tour-target="sidebar-results"]',
       title: 'Compare samples as a heatmap',
       body: 'As soon as you have results, you can select two or more comparable results (same database and reference), then "Compare selected" to build a mutation heatmap.',
-      before: () => setActiveMode('results'),
+      before: () => navigate('/analysis/reports'),
     },
     // 15. Database Dashboard — highlight the Database tile in the sidebar.
     {
@@ -177,7 +185,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       targetSelector: '[data-tour-target="sidebar-database"]',
       title: 'Database Dashboard',
       body: 'The Database Dashboard tab summarises the rules and mutations in the selected database with interactive plots.',
-      before: () => setActiveMode('database'),
+      before: () => navigate('/databases'),
     },
     // 16. Browse Mutations — highlight the Mutations tile in the sidebar.
     {
@@ -185,7 +193,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       targetSelector: '[data-tour-target="sidebar-mutations"]',
       title: 'Browse Mutations',
       body: 'The Browse Mutations tab lets you search and filter the single and combination rules in the selected database, and export them as TSV.',
-      before: () => setActiveMode('mutations'),
+      before: () => navigate('/databases/mutations'),
     },
     // 17. About — highlight the About tile in the sidebar.
     {
@@ -193,7 +201,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       targetSelector: '[data-tour-target="sidebar-about"]',
       title: 'About',
       body: 'The About tab explains how ResistanceProfiler works, the rule nomenclature, and how to run it from the CLI.',
-      before: () => setActiveMode('about'),
+      before: () => navigate('/about'),
     },
     // 18. Final step — highlight nothing; link to official GitHub docs for full detail.
     {
@@ -201,7 +209,7 @@ export function buildTourSteps({ setActiveMode, setActiveProfileMode, setAnalyze
       targetSelector: null,
       title: 'Want the full detail?',
       body: 'This tour covers the essentials. For in-depth explanations read the ',
-      before: () => setActiveMode('about'),
+      before: () => navigate('/about'),
       link: { label: 'official documentation.', href: TOUR_DOCS_OUTPUT_URL },
     },
   ];

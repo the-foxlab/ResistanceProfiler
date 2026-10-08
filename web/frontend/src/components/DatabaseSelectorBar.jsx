@@ -6,6 +6,7 @@ export function DatabaseSelectorBar({
   disabled = false,
   selectId,
   className,
+  trailingControl,
 }) {
   const description = selectedDatabase?.metadata?.description;
 
@@ -26,6 +27,7 @@ export function DatabaseSelectorBar({
               <option key={database.id} value={database.id}>{database.display_name}</option>
             ))}
           </select>
+          {trailingControl}
           {selectedDatabase ? (
             // Quick context badge for currently loaded mutation entry count.
             <span className="header-db-badge">{selectedDatabase.mutation_count} entries</span>

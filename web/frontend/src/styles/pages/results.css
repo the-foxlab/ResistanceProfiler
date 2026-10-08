@@ -1,0 +1,13 @@
+/* Checkbox column in session results table */
+.checkbox-col {
+  width: 2rem;
+  min-width: 2rem;
+  text-align: center;
+}
+
+.results-download-btn {
+  align-self: flex-start;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
+}

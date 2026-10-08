@@ -219,14 +219,6 @@ export function useBatchManager({
     }
   };
 
-  const removeBatchBam = (vcfIndex) => {
-    setBatchVcfFiles((prev) => prev.map((entry, i) => (
-      i === vcfIndex
-        ? { ...entry, bamId: null, bamName: null }
-        : entry
-    )));
-  };
-
   const addBatchFastaFiles = async (files) => {
     isBatchUploadCanceledRef.current = false;
     const toUpload = Array.from(files).slice(0, batchMaxSamples - batchFastaFiles.length);
@@ -554,7 +546,6 @@ export function useBatchManager({
     addBatchJsonFiles,
     addBatchBamFiles,
     attachBatchBam,
-    removeBatchBam,
     removeBatchFile,
     uploadBatchReferenceFasta,
     submitBatch,

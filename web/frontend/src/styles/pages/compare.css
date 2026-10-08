@@ -1,0 +1,485 @@
+.comparison-actions {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.comparison-actions .comparison-secondary {
+  background-color: var(--neutral-text);
+  border-color: var(--neutral-text);
+}
+
+.comparison-actions .comparison-secondary:hover {
+  background-color: var(--muted-strong);
+  border-color: var(--muted-strong);
+}
+
+.comparison-filters {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.6rem;
+}
+
+@media (max-width: 620px) {
+
+  .comparison-heatmap-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .comparison-heatmap-container .js-plotly-plot {
+    width: 100%;
+  }
+}
+
+/* ----- Comparison heatmap ----- */
+.comparison-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1.5rem;
+  padding: 1rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.comparison-section .workspace-output-header {
+  align-self: flex-start;
+  width: 100%;
+}
+
+.comparison-heatmap-container {
+  width: 100%;
+  min-height: 200px;
+  overflow-x: auto;
+}
+.comparison-heatmap-container .js-plotly-plot {
+  margin: 0 auto;
+}
+
+.comparison-heatmap-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2rem;
+  color: var(--muted);
+}
+
+.comparison-heatmap-error {
+  padding: 1rem;
+  color: var(--resistant-text);
+}
+
+.comparison-legend-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.comparison-legend-separator {
+  display: inline-block;
+  width: 1px;
+  height: 1rem;
+  background-color: var(--line-strong);
+  margin: 0 0.25rem;
+}
+
+.comparison-feature-legend-title {
+  font-weight: 600;
+}
+
+.comparison-feature-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.comparison-feature-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+}
+
+.comparison-cell-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.comparison-cell-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid var(--line-strong);
+}
+
+.comparison-consequence-legend-title {
+  font-weight: 600;
+}
+
+.comparison-consequence-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.comparison-consequence-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1px solid var(--line-strong);
+}
+
+.comparison-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.comparison-switch input[type="checkbox"] {
+  cursor: pointer;
+}
+
+/* Compare Databases tab */
+.compare-tab {
+  display: grid;
+  gap: 0.8rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.compare-layout {
+  display: grid;
+  grid-template-columns: minmax(18rem, 22rem) 1fr;
+  gap: 0.8rem;
+  /* Both cards share the row height so the Rule overlap tile matches the
+     selector tile instead of floating at its own content height. */
+  align-items: stretch;
+}
+
+@media (max-width: 60rem) {
+  .compare-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.compare-venn-card {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The placeholder (and the rendered diagram) sit centered in the tile so the
+   card does not look top-heavy next to the selector card. */
+.compare-venn-card .comparison-venn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.compare-venn-card .compare-venn-placeholder {
+  flex: 1;
+  min-height: 14rem;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  margin: 0;
+  border: none;
+}
+
+.compare-hint {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+
+.compare-db-dropdowns {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0 0 0.75rem;
+}
+
+.compare-db-slot {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.compare-db-slot label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--muted-strong);
+}
+
+.compare-slot-hint {
+  font-size: var(--font-size-xs, 0.75rem);
+  color: var(--muted);
+}
+
+.compare-venn-placeholder {
+  min-height: 8rem;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem;
+  text-align: center;
+}
+
+.compare-ref-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.compare-ref-row label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--muted-strong);
+  padding-bottom: 0.55rem;
+}
+
+.compare-ref-row select {
+  flex: 1 1 14rem;
+  min-width: 12rem;
+}
+
+.compare-error {
+  margin: 0.6rem 0 0;
+  color: #b91c1c;
+  font-size: var(--font-size-sm);
+}
+
+.comparison-venn {
+  width: 100%;
+  min-width: 0;
+}
+
+.comparison-venn > div {
+  width: 100%;
+  min-height: 320px;
+}
+
+.comparison-venn svg {
+  display: block;
+  max-width: 100%;
+}
+
+.comparison-venn .venn-area {
+  cursor: pointer;
+}
+
+/* In-circle count labels: small and quiet. */
+.comparison-venn .venn-area text.label {
+  font-size: var(--font-size-sm);
+}
+
+/* Active region: stronger stroke plus a fill lift so the selection is
+   obvious; the count label just turns bold (same ink in both themes). */
+.comparison-venn .venn-area.is-active path {
+  stroke: var(--accent);
+  stroke-width: 3px !important;
+}
+
+.comparison-venn .venn-area.is-active text.label {
+  font-weight: 700;
+}
+
+.comparison-venn-empty {
+  min-height: 8rem;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.compare-counts {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+  font-size: var(--font-size-sm);
+  color: var(--muted-strong);
+}
+
+.compare-table-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+}
+
+.compare-table-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.compare-table-controls label {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--muted-strong);
+}
+
+.compare-table-controls select {
+  width: auto;
+  min-width: 10rem;
+}
+
+.compare-table-controls input[type='search'] {
+  width: auto;
+  min-width: 12rem;
+}
+
+.compare-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-table);
+}
+
+.compare-table th,
+.compare-table td {
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--table-line);
+}
+
+.compare-table thead th {
+  background: var(--table-head-surface);
+  font-weight: 600;
+  color: var(--muted-strong);
+  position: sticky;
+  top: 0;
+}
+
+.compare-table-row {
+  cursor: pointer;
+}
+
+.compare-table-row:hover {
+  background: var(--paper-soft);
+}
+
+.compare-expand-btn {
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  line-height: 1;
+  font-size: var(--font-size-md);
+  border-radius: var(--radius-sm);
+}
+
+.compare-region-badge {
+  display: inline-flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.compare-region-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: var(--font-size-xs);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  background: var(--paper-soft);
+}
+
+.compare-region-dot::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+
+.compare-region-dot.is-present {
+  color: var(--ink);
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.compare-region-dot.is-present::before {
+  background: var(--accent);
+}
+
+.compare-table-detail td {
+  background: var(--paper-soft);
+  padding: 0.6rem 0.8rem;
+}
+
+.compare-metadata-subtable {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.8rem;
+}
+
+.compare-metadata-db-name {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--muted-strong);
+  margin-bottom: 0.3rem;
+}
+
+.compare-metadata-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-xs);
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.compare-metadata-table th,
+.compare-metadata-table td {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.compare-metadata-table th {
+  color: var(--muted);
+  font-weight: 600;
+  width: 40%;
+}
+
+.compare-metadata-absent {
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+  padding: 0.3rem 0;
+}
+/* Dark mode: fills/strokes come from the theme-aware venn.js palette; this
+   rule keeps the count labels legible on dark. */
+:root[data-theme='dark'] .comparison-venn .venn-area text.label {
+  fill: var(--muted-strong);
+}
+
+:root[data-theme='dark'] .comparison-venn .venn-area.is-active path {
+  stroke-width: 3px !important;
+}

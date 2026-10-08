@@ -1,40 +1,43 @@
 import mutationsIconSrc from '../../assets/search.svg';
 import resetFilterIconSrc from '../../assets/reset_filter.svg';
 
-export function MutationsTab({
-  rules,
-  formulaRules,
-  mutationColumns,
-  formulaColumns,
-  displayedRules,
-  displayedFormulaRules,
-  mutationFilter,
-  setMutationFilter,
-  mutationFilterColumn,
-  setMutationFilterColumn,
-  mutationSortColumn,
-  setMutationSortColumn,
-  mutationSortAsc,
-  setMutationSortAsc,
-  formulaFilter,
-  setFormulaFilter,
-  formulaFilterColumn,
-  setFormulaFilterColumn,
-  mutationPlotMeta,
-  mutationsLoaded,
-  downloadMutationsAsTsv,
-  downloadFormulaRulesAsTsv,
-  databases,
-  selectedDatabaseId,
-}) {
+export function MutationsPage({ logic }) {
+  const {
+    rules,
+    formulaRules,
+    mutationColumns,
+    formulaColumns,
+    displayedRules,
+    displayedFormulaRules,
+    mutationFilter,
+    setMutationFilter,
+    mutationFilterColumn,
+    setMutationFilterColumn,
+    mutationSortColumn,
+    setMutationSortColumn,
+    mutationSortAsc,
+    setMutationSortAsc,
+    formulaFilter,
+    setFormulaFilter,
+    formulaFilterColumn,
+    setFormulaFilterColumn,
+    mutationPlotMeta,
+    mutationsLoaded,
+    downloadMutationsAsTsv,
+    downloadFormulaRulesAsTsv,
+    databases,
+    selectedDatabaseId,
+  } = logic;
+  // With only one table present, stretch the card and its table to fill the
+  // viewport so no dead whitespace is left below the content.
+  const singleTable = rules.length > 0 !== formulaRules.length > 0;
+  const cardClassName = singleTable
+    ? 'card full-width-tile tab-primary-tile mutations-single-table'
+    : 'card full-width-tile tab-primary-tile';
   return (
     <>
-      <article className="card full-width-tile tab-primary-tile">
-        <div className="workspace-output-header workspace-output-header-with-db section-header">
-          <div>
-            <h2>Browse mutations</h2>
-          </div>
-        </div>
+      <article className={cardClassName}>
+        {rules.length > 0 ? (
         <section className="mutation-merged-section">
           <div className="workspace-output-header section-header">
             <div>
@@ -122,7 +125,9 @@ export function MutationsTab({
             <p className="status">No mutations match the current filter.</p>
           ) : null}
         </section>
+        ) : null}
 
+        {formulaRules.length > 0 ? (
         <section className="mutation-merged-section">
           <div className="workspace-output-header section-header">
             <div>
@@ -197,6 +202,13 @@ export function MutationsTab({
             <p className="status">No formula combinations match the current filter.</p>
           ) : null}
         </section>
+        ) : null}
+
+        {mutationsLoaded && rules.length === 0 && formulaRules.length === 0 ? (
+          <p className="status mutation-empty-state">
+            No mutation rules were found for the selected database.
+          </p>
+        ) : null}
       </article>
     </>
   );

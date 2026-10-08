@@ -125,32 +125,31 @@ export function TourOverlay({ steps: stepsProp }) {
   }, [isActive, dismissTour, nextStep, prevStep]);
 
   if (isPrompting) {
+    // Non-blocking coach card: no backdrop, no modal semantics. It floats over
+    // the page and can be dismissed with the buttons or Esc without trapping focus.
     return (
-      <div className="tour-overlay" role="dialog" aria-modal="true" aria-labelledby={promptId}>
-        <div className="tour-backdrop" onClick={declineTour} aria-hidden="true" />
-        <div
-          ref={promptRef}
-          id={promptId}
-          className="tour-prompt"
-          tabIndex={-1}
-          role="document"
-          style={{ left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }}
-        >
-          <div className="tour-tooltip-header">
-            <h3 className="tour-tooltip-title">Take a quick tour?</h3>
-          </div>
-          <div className="tour-tooltip-body">
-            ResPro is a pathogen-agnostic antiviral resistance analysis framework. You can analyze and visualize antiviral resistance data from sanger and next-generation sequencing data. The short guided tour will walk you through the core features.
-          </div>
-          <div className="tour-tooltip-actions">
-            <button type="button" className="tour-btn tour-btn-skip" onClick={declineTour}>
-              No thanks
+      <div
+        ref={promptRef}
+        id={promptId}
+        className="tour-coach-card"
+        tabIndex={-1}
+        role="dialog"
+        aria-labelledby={promptId}
+      >
+        <div className="tour-tooltip-header">
+          <h3 className="tour-tooltip-title">Take a quick tour?</h3>
+        </div>
+        <div className="tour-tooltip-body">
+          ResPro is a pathogen-agnostic antiviral resistance analysis framework. You can analyze and visualize antiviral resistance data from sanger and next-generation sequencing data. The short guided tour will walk you through the core features.
+        </div>
+        <div className="tour-tooltip-actions">
+          <button type="button" className="tour-btn tour-btn-skip" onClick={declineTour}>
+            No thanks
+          </button>
+          <div className="tour-tooltip-nav">
+            <button type="button" className="tour-btn tour-btn-next" onClick={startTour}>
+              Start tour
             </button>
-            <div className="tour-tooltip-nav">
-              <button type="button" className="tour-btn tour-btn-next" onClick={startTour}>
-                Start tour
-              </button>
-            </div>
           </div>
         </div>
       </div>

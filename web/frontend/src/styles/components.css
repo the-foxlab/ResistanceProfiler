@@ -1,0 +1,629 @@
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  padding: 1.1rem;
+}
+
+.field-optional {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: var(--font-size-sm);
+}
+
+.full-width-tile {
+  width: 100%;
+}
+
+.inline-actions {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  align-items: center;
+}
+
+.inline-actions select {
+  min-height: 2.25rem;
+}
+
+.sample-name-input {
+  min-height: 2.75rem;
+}
+
+.label-text {
+  display: inline;
+}
+
+.page-link-icon {
+  width: var(--topbar-link-icon-size);
+  height: var(--topbar-link-icon-size);
+  object-fit: contain;
+  margin-top: 0.35rem;
+  display: block;
+  opacity: 0.85;
+  transition: opacity 0.18s ease, color 0.18s ease;
+}
+
+.tab-primary-tile {
+  display: grid;
+  gap: 0.6rem;
+  align-content: start;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.section-header {
+  margin: 0;
+}
+
+.section-subtile {
+  margin-top: 0;
+  padding: 0;
+}
+
+.example-btn {
+  display: inline-flex;
+  width: fit-content;
+  height: 2rem;
+  padding: 0 0.72rem;
+}
+
+.status-succeeded { background: var(--sensitive-bg);    color: var(--sensitive-text);    border: 1px solid var(--sensitive-border); }
+.status-failed    { background: var(--resistant-bg);    color: var(--resistant-text);    border: 1px solid var(--resistant-border); }
+.status-queued    { background: var(--intermediate-bg); color: var(--intermediate-text); border: 1px solid var(--intermediate-border); }
+.status-running   { background: var(--info-bg);         color: var(--info-text);         border: 1px solid var(--info-border); }
+
+.batch-settings-label {
+  margin: 0;
+  min-width: 185px;
+}
+
+/* Batch uploaded-files table (VCF mode: VCF file | size | BAM file | BAM size | upload BAM | remove;
+   FASTA mode: FASTA file | size | remove). Sits inside a .batch-uploaded-table-wrap scroller. */
+.batch-uploaded-table-wrap {
+  max-height: none;
+  margin-top: 0.4rem;
+}
+
+.batch-uploaded-table {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.batch-uploaded-table th,
+.batch-uploaded-table td {
+  padding: 0.32rem 0.5rem;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Give filenames room to truncate; sizes and the remove control stay narrow. */
+.batch-uploaded-table .batch-uploaded-cell-name {
+  min-width: 0;
+}
+.batch-uploaded-table .batch-uploaded-cell-size,
+.batch-uploaded-table .batch-uploaded-cell-bam-size {
+  width: 84px;
+  text-align: right;
+}
+.batch-uploaded-table .batch-uploaded-cell-bam-name {
+  min-width: 0;
+}
+.batch-uploaded-table .batch-uploaded-cell-bam-upload {
+  width: 160px;
+}
+.batch-uploaded-table .batch-uploaded-cell-remove {
+  width: 40px;
+  text-align: center;
+}
+
+.batch-uploaded-bam-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0;
+  min-width: 0;
+}
+
+.batch-remove-file-btn {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  border-radius: var(--radius-sm);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-md);
+  line-height: 1;
+}
+
+/* Clear-all control next to the batch file count; resets the whole batch
+   upload overview without touching single-sample uploads. */
+.batch-clear-all-btn {
+  border: none;
+  background: none;
+  color: var(--muted-strong);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  padding: 0;
+  margin: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.batch-clear-all-btn:hover {
+  background: none;
+  color: var(--color-error, #c2410c);
+}
+
+.batch-files-count-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.report-actions select {
+  flex: 1 1 auto;
+  min-width: min(220px, 100%);
+}
+
+.report-actions .report-action-btn {
+  flex: 1 1 9.5rem;
+  min-width: min(9.5rem, 100%);
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.report-actions .download-action-btn {
+  background: var(--surface-strong);
+  border-color: var(--line);
+  color: var(--ink);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.report-actions .download-action-btn:hover {
+  background: var(--paper-soft);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.spinner {
+  display: inline-block;
+  width: 1.2em;
+  height: 1.2em;
+  margin-right: 0.4em;
+  vertical-align: middle;
+  animation: spin 1s linear infinite;
+}
+
+.status {
+  font-size: var(--font-size-md);
+  color: var(--muted);
+}
+
+.table-wrap {
+  overflow: auto;
+  max-height: clamp(220px, 52vh, 460px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-strong);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Minimal three-icon theme picker; state is indicated by the accent tint. */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  flex-shrink: 0;
+}
+
+.theme-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.theme-toggle-btn:hover:not(.active) {
+  color: var(--ink);
+  background: var(--paper-soft);
+}
+
+.theme-toggle-btn.active {
+  color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.theme-toggle-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.theme-toggle-text {
+  display: none;
+}
+
+/* Icons remain SVG assets applied as CSS masks, recoloured by currentColor. */
+.theme-toggle-icon {
+  display: block;
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  background-color: currentColor;
+  -webkit-mask-image: var(--icon-src);
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  mask-image: var(--icon-src);
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+}
+
+.workspace-frame {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-strong);
+}
+
+/* Placeholder shown before a report is generated */
+.report-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem 1.5rem;
+  margin-block: auto;
+  min-height: 14rem;
+}
+
+.report-placeholder-icon-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: var(--accent-tint);
+  border: 2px solid var(--accent-soft);
+}
+
+.report-placeholder-icon {
+  width: 44px;
+  height: 44px;
+  opacity: 0.75;
+}
+
+.report-placeholder-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+.workspace-output-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: left;
+  gap: 0.5rem 1rem;
+}
+
+.workspace-output-header > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.workspace-output-header h2,
+.workspace-output-header p {
+  margin: 0;
+}
+
+.workspace-output-header h2 {
+  /* One step above the card h3 (0.95rem) so the page title clearly outranks
+     plot-card headers on dense tabs like the Database Dashboard. */
+  font-size: var(--font-size-xl);
+  letter-spacing: -0.01em;
+}
+
+.workspace-output-header h3 {
+  margin: 0;
+  font-size: var(--font-size-lg);
+}
+
+.workspace-output-header p {
+  color: var(--muted);
+  font-size: var(--font-size-md);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (max-width: 820px) {
+  .inline-actions {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .inline-actions > *,
+.inline-actions select {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .inline-actions select {
+    width: 100%;
+  }
+
+  .inline-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Report actions define a desktop non-wrapping flex row with minimum
+     control widths. Replace it on mobile so all actions remain reachable. */
+  .report-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .report-actions select {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .report-actions .report-action-btn {
+    width: 100%;
+    min-width: 0;
+    flex: none;
+  }
+}
+
+@media (max-width: 620px) {
+
+  .theme-toggle-btn {
+    width: 40px;
+    min-height: var(--mobile-tap-target);
+    border-radius: var(--radius-md);
+  }
+
+  .theme-toggle-text {
+    display: none;
+  }
+
+  .inline-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .table-wrap td {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  /* ── T4: tab content tiles / input grids fluid on phone ───────────────
+     Collapse remaining multi-column grids to a single column, shrink card
+     padding, and let Plotly containers fill width while scrolling
+     horizontally only when their content is genuinely wider than the
+     viewport. */
+  .card {
+    padding: var(--mobile-card-padding);
+  }
+
+  /* ── T5: embedded report iframe mobile sizing (webapp shell only) ─────
+     The report-internal CSS (respro/report/static/report.css) is a separate
+     token system and is OUT OF SCOPE for this feature; only the webapp
+     shell frame is adjusted here. Report-internal mobile issues are logged
+     as a follow-up. */
+  .workspace-frame {
+    width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+.full-width-tile > .workspace-output-header:first-child {
+  flex-wrap: nowrap;
+}
+
+.report-preview-plot-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.report-preview-plot-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(12, 22, 31, 0.62);
+  -webkit-backdrop-filter: blur(1px);
+  backdrop-filter: blur(1px);
+}
+
+.report-preview-plot-panel {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 1100px);
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface-strong);
+  box-shadow: var(--shadow-lg);
+  padding: 1.5rem;
+}
+
+.report-preview-plot-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.65rem;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.report-preview-plot-close:hover {
+  border-color: var(--line-strong);
+  background: var(--paper-soft);
+}
+
+.report-preview-plot-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.report-preview-structure-panel {
+  width: min(100%, 520px);
+}
+
+.report-preview-structure-title {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.report-preview-sequence-panel {
+  width: min(100%, 72rem);
+}
+
+.report-preview-sequence-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.report-preview-sequence-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.report-preview-sequence-toggle {
+  display: flex;
+  gap: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 0.22rem;
+  background: var(--paper-soft);
+  width: fit-content;
+}
+
+.report-preview-sequence-toggle .seq-toggle-btn {
+  padding: 0.28rem 0.8rem;
+  border: none;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.report-preview-sequence-toggle .seq-toggle-btn--active {
+  background: var(--surface-strong);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.report-preview-sequence-toggle .seq-toggle-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.report-preview-sequence-block {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-soft);
+  padding: 1rem;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.page-not-found {
+  display: grid;
+  justify-items: start;
+  gap: 0.65rem;
+  width: min(100%, 720px);
+  margin: clamp(2rem, 8vh, 6rem) auto;
+  padding: clamp(1.5rem, 4vw, 3rem);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.page-not-found h1,
+.page-not-found p {
+  margin: 0;
+}
+
+.page-not-found a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}

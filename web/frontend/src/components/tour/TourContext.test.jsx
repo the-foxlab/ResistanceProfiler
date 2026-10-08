@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, renderHook } from '@testing-library/react';
 import { useState } from 'react';
+import { MemoryRouter } from 'react-router';
 
 import { TourProvider, useTour, TOUR_VERSION, TOUR_STORAGE_KEY } from './TourContext';
 
@@ -24,16 +25,18 @@ function TourConsumer({ onState }) {
   );
 }
 
-function renderTour(steps) {
+function renderTour(steps, initialPath = '/analysis') {
   let captured;
   const utils = render(
-    <TourProvider steps={steps}>
-      <TourConsumer
-        onState={(t) => {
-          captured = t;
-        }}
-      />
-    </TourProvider>,
+    <MemoryRouter initialEntries={[initialPath]}>
+      <TourProvider steps={steps}>
+        <TourConsumer
+          onState={(t) => {
+            captured = t;
+          }}
+        />
+      </TourProvider>
+    </MemoryRouter>,
   );
   return { ...utils, getTour: () => captured };
 }
@@ -122,27 +125,27 @@ describe('TourContext', () => {
     });
   });
 
-  describe('versioned start prompt', () => {
-    it('shows the start prompt (isPrompting=true) when the stored version does not match TOUR_VERSION', () => {
+  describe('route-triggered coach card', () => {
+    it('offers the coach card (isPrompting=true) on /analysis when the stored version does not match TOUR_VERSION', () => {
       localStorage.setItem(TOUR_STORAGE_KEY, 'v0');
       renderTour(sampleSteps);
       expect(screen.getByTestId('is-prompting').textContent).toBe('true');
       expect(screen.getByTestId('is-active').textContent).toBe('false');
     });
 
-    it('does NOT show the prompt when the stored version matches TOUR_VERSION', () => {
+    it('does NOT offer the coach card on /analysis when the stored version matches TOUR_VERSION', () => {
       localStorage.setItem(TOUR_STORAGE_KEY, TOUR_VERSION);
       renderTour(sampleSteps);
       expect(screen.getByTestId('is-prompting').textContent).toBe('false');
       expect(screen.getByTestId('is-active').textContent).toBe('false');
     });
 
-    it('shows the prompt when no version is stored yet (first visit)', () => {
+    it('offers the coach card when no version is stored yet (first /analysis visit)', () => {
       renderTour(sampleSteps);
       expect(screen.getByTestId('is-prompting').textContent).toBe('true');
     });
 
-    it('accepting the prompt (startTour) activates the tour and clears the prompt', () => {
+    it('accepting the coach card (startTour) activates the tour and clears the prompt', () => {
       renderTour(sampleSteps);
       expect(screen.getByTestId('is-prompting').textContent).toBe('true');
       fireEvent.click(screen.getByText('start'));
@@ -150,7 +153,7 @@ describe('TourContext', () => {
       expect(screen.getByTestId('is-prompting').textContent).toBe('false');
     });
 
-    it('declining the prompt (declineTour) writes the token and clears the prompt', () => {
+    it('declining the coach card (declineTour) writes the token and clears the prompt', () => {
       renderTour(sampleSteps);
       fireEvent.click(screen.getByText('decline'));
       expect(screen.getByTestId('is-prompting').textContent).toBe('false');

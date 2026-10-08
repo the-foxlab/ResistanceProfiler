@@ -12,8 +12,9 @@ export const CLASSIFICATION_COLORS = {
   unknown: '#c3ccd6',
 };
 
-// Default palette for pie slices; order matters for stable legend color mapping.
-export const PIE_COLORS = ['#27978e', '#5c79ca', '#be6e4e', '#8d5ddf', '#d1a034', '#467a87', '#64748b'];
+// Categorical colors are ordered consistently across pies and drug plots.
+export const PIE_COLORS = ['#0f766e', '#2563eb', '#c2410c', '#7c3aed', '#b45309', '#0284c7', '#be185d'];
+const DARK_PIE_COLORS = ['#5eead4', '#93c5fd', '#fdba74', '#c4b5fd', '#fcd34d', '#67e8f9', '#f9a8d4'];
 
 // Human-readable legend labels for stacked bars and summary plots.
 export const CLASSIFICATION_LABELS = {
@@ -27,10 +28,86 @@ export const CLASSIFICATION_LABELS = {
   unknown: 'Unknown',
 };
 
-export function chartLabelStyle() {
-  // Small axis label helper keeps font settings consistent across charts.
+// Plotly base typography — Geist, matching the app shell (styles/typography.css).
+const PLOTLY_FONT_FAMILY = "'Geist', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif";
+
+// Neutral ink tones for chart text, mirroring the CSS token palette
+// (--ink/--muted-strong/--muted) so charts and shell read as one surface.
+// Light and dark values are kept in sync with the token blocks in
+// styles/global.css (:root and :root[data-theme='dark']).
+const INK = { light: '#18181b', dark: '#f4f4f5' };
+const INK_SOFT = { light: '#52525b', dark: '#d4d4d8' };
+
+// Axis titles need more contrast than generic muted text: in dark mode the
+// muted tone (#a1a1aa) reads as darkish grey on the dark surface, so titles
+// use the soft ink value instead. Light mode keeps the muted tone.
+const AXIS_TITLE = { light: '#71717a', dark: '#d4d4d8' };
+
+// Hairline grid: matches --line but slightly darker so it stays
+// visible against the plot background at 1px.
+const GRID = { light: '#e8e8ea', dark: '#2e2e33' };
+
+/**
+ * Read the currently resolved theme from <html data-theme>. The attribute is
+ * set by hooks/useTheme.js (and the pre-paint script in index.html), so this
+ * works before React mounts and stays live across theme switches.
+ */
+export function currentTheme() {
+  if (typeof document === 'undefined') return 'light';
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+}
+
+function pick(colors) {
+  return colors[currentTheme()];
+}
+
+export function pieColorsForTheme(theme) {
+  return theme === 'dark' ? DARK_PIE_COLORS : PIE_COLORS;
+}
+
+/**
+ * Shared Plotly layout baseline. Every chart spreads this first and overrides
+ * per-chart specifics on top, so typography, grid and background styling stay
+ * consistent across the dashboard without duplicating values.
+ */
+export function baseLayout() {
   return {
-    fontSize: 12,
-    fill: '#4c6072',
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    font: {
+      family: PLOTLY_FONT_FAMILY,
+      size: 12,
+      color: pick(INK_SOFT),
+    },
+    // Default axis treatment: hairline dotted grid on both axes; components
+    // override showgrid/gridcolor per axis where a cleaner look is wanted.
+    xaxis: {
+      gridcolor: pick(GRID),
+      gridwidth: 1,
+      griddash: 'dot',
+      zeroline: false,
+      tickfont: { color: pick(INK_SOFT) },
+    },
+    yaxis: {
+      gridcolor: pick(GRID),
+      gridwidth: 1,
+      griddash: 'dot',
+      zeroline: false,
+      tickfont: { color: pick(INK_SOFT) },
+    },
+    hoverlabel: {
+      font: { family: PLOTLY_FONT_FAMILY, size: 12, color: pick(INK) },
+      bgcolor: currentTheme() === 'dark' ? '#27272a' : '#ffffff',
+      bordercolor: currentTheme() === 'dark' ? '#3f3f46' : '#d4d4d8',
+    },
   };
+}
+
+/**
+ * Standard axis title font, replacing the previously duplicated inline
+ * `{ size: 12, color: '#4c6072' }` objects in each chart component. Uses
+ * AXIS_TITLE rather than INK_MUTED so titles stay readable in dark mode.
+ */
+export function axisTitleFont() {
+  return { size: 12, color: pick(AXIS_TITLE) };
 }

@@ -1,0 +1,59 @@
+/* Self-hosted Geist variable fonts (npm package `geist`).
+   The woff2 files are resolved by Vite at build time and emitted as hashed
+   assets, so the app renders Geist offline without any CDN dependency. */
+
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2') format('woff2');
+}
+
+html {
+  min-height: 100%;
+  background-color: var(--paper);
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-body);
+  line-height: 1.55;
+  background-color: var(--paper);
+  min-height: 100%;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  /* Scientific data UI: equal-width digits keep tables and metrics aligned. */
+  font-variant-numeric: tabular-nums;
+}
+
+h1 {
+  font-size: var(--font-size-heading-1);
+}
+
+h2 {
+  font-size: var(--font-size-heading-2);
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-heading-3);
+}
+
+caption,
+small {
+  font-size: var(--font-size-caption);
+}

@@ -18,6 +18,8 @@ from pathlib import Path
 
 from rq import get_current_job
 
+from web.backend.queue import resolve_subprocess_timeout_seconds
+
 logger = logging.getLogger(__name__)
 
 
@@ -287,14 +289,25 @@ def _respro_command_prefix() -> list[str]:
 
 
 def _run_respro_command(command: list[str]) -> None:
-    """Execute one respro subprocess command and raise a user-facing error on failure."""
+    """Execute one respro subprocess command and raise a user-facing error on failure.
+
+    The subprocess timeout sits slightly above the RQ job timeout so the worker's
+    own job-kill mechanism fires first; the hard timeout is the last-resort bound
+    that prevents an orphaned CLI process from running indefinitely.
+    """
+    timeout_seconds = resolve_subprocess_timeout_seconds()
     try:
         completed = subprocess.run(
             command,
             check=False,
             capture_output=True,
             text=True,
+            timeout=timeout_seconds,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f'respro CLI subprocess timed out after {timeout_seconds} seconds.'
+        ) from exc
     except OSError as exc:
         raise RuntimeError(f'Failed to execute respro CLI subprocess: {exc}') from exc
 
@@ -339,7 +352,7 @@ def _load_run_payload(results_json_path: Path) -> dict:
     """Load the run block from one exported results JSON file."""
     path = Path(results_json_path)
     if not path.is_file():
-        raise ValueError(f'Expected report artifact not found: {path}')
+        raise ValueError('Expected report artifact not found.')
     try:
         payload = json.loads(path.read_text(encoding='utf-8'))
     except json.JSONDecodeError as exc:

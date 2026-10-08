@@ -168,32 +168,3 @@ export function groupDrugThresholds(drugThresholds) {
     });
 }
 
-/**
- * Format a thresholds object as a compact string for dashboard display.
- *
- * @param {Object} thresholds - thresholds dict (e.g. {resistant: 1, intermediate: 1})
- * @returns {string}
- */
-export function formatAlgorithmThresholds(thresholds) {
-  if (!thresholds || typeof thresholds !== 'object') {
-    return 'Not configured';
-  }
-
-  const keys = Object.keys(thresholds).sort((a, b) => a.localeCompare(b));
-  if (keys.length === 0) {
-    return 'Not configured';
-  }
-
-  const values = keys.map((key) => {
-    const value = thresholds[key];
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      const nestedKeys = Object.keys(value).sort((a, b) => a.localeCompare(b));
-      const nestedText = nestedKeys
-        .map((nestedKey) => `${nestedKey}=${value[nestedKey]}`)
-        .join(', ');
-      return `${key}: ${nestedText}`;
-    }
-    return `${key}=${value}`;
-  });
-  return values.join('; ');
-}

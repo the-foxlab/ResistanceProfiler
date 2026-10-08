@@ -1,4 +1,5 @@
 import Plotly from 'plotly.js-dist-min';
+import { currentTheme } from './database-plots/shared';
 import { useRef, useEffect, useState } from 'react';
 import { Spinner } from './Spinner';
 import {
@@ -7,6 +8,7 @@ import {
   featureColorPalette,
   uniqueConsequenceTypes,
 } from './comparison-heatmap-data';
+import { baseLayout } from './database-plots/shared';
 
 /**
  * Interactive comparison heatmap rendered with Plotly.js.
@@ -110,10 +112,10 @@ export function ComparisonHeatmap({ data, isBusy }) {
   const cellLegend = (
     <>
       <span className="comparison-cell-legend-item">
-        <span className="comparison-cell-swatch" style={{ backgroundColor: '#b0b0b0' }} /> Coverage gap
+        <span className="comparison-cell-swatch" style={{ backgroundColor: '#a1a1aa' }} /> Coverage gap
       </span>
       <span className="comparison-cell-legend-item">
-        <span className="comparison-cell-swatch" style={{ backgroundColor: '#d62728' }} /> Database hit
+        <span className="comparison-cell-swatch" style={{ backgroundColor: '#dc2626' }} /> Database hit
       </span>
     </>
   );
@@ -167,7 +169,7 @@ function renderHeatmap(container, data) {
     x: prepared.xLabels,
     y: prepared.samples,
     type: 'heatmap',
-    colorscale: [[0, '#e0e0e0'], [1, '#b0b0b0']],
+    colorscale: currentTheme() === 'dark' ? [[0, '#27272a'], [1, '#71717a']] : [[0, '#e4e4e7'], [1, '#a1a1aa']],
     showscale: false,
     zmin: 0,
     zmax: 1,
@@ -177,7 +179,7 @@ function renderHeatmap(container, data) {
     yaxis: 'y',
     customdata: prepared.gapCustomdata,
     hovertemplate: 'Sample: %{y}<br>Mutation: %{customdata[0]}<br>Feature: %{customdata[1]}<br>Coverage gap<extra></extra>',
-    line: { color: '#333', width: 1 },
+    line: { color: currentTheme() === 'dark' ? '#09090b' : '#ffffff', width: 1 },
   };
   traces.push(gapTrace);
 
@@ -188,11 +190,11 @@ function renderHeatmap(container, data) {
     y: prepared.samples,
     type: 'heatmap',
     colorscale: [
-      [0, '#440154'],
-      [0.25, '#3b528b'],
-      [0.5, '#21918c'],
-      [0.75, '#5ec962'],
-      [1.0, '#fde725'],
+      [0, '#f0fdfa'],
+      [0.25, '#99f6e4'],
+      [0.5, '#2dd4bf'],
+      [0.75, '#0f766e'],
+      [1.0, '#7f1d1d'],
     ],
     zmin: 0,
     zmax: 1,
@@ -202,6 +204,8 @@ function renderHeatmap(container, data) {
       tickvals: [0, 0.25, 0.5, 0.75, 1.0],
       ticktext: ['0', '0.25', '0.5', '0.75', '1.0'],
       thickness: 15,
+      tickfont: { size: 10, color: currentTheme() === 'dark' ? '#a1a1aa' : '#71717a' },
+      outlinewidth: 0,
     },
     xgap: 1,
     ygap: 1,
@@ -209,7 +213,7 @@ function renderHeatmap(container, data) {
     yaxis: 'y',
     customdata: prepared.mainCustomdata,
     hovertemplate: 'Sample: %{y}<br>Mutation: %{customdata[0]}<br>Feature: %{customdata[1]}<br>Allele freq: %{z}<extra></extra>',
-    line: { color: '#333', width: 1 },
+    line: { color: currentTheme() === 'dark' ? '#09090b' : '#333', width: 1 },
   };
   traces.push(mainTrace);
 
@@ -230,7 +234,7 @@ function renderHeatmap(container, data) {
       yaxis: 'y2',
       customdata: prepared.featureCustomdata,
       hovertemplate: 'Feature: %{customdata[0]}<br>Mutation: %{customdata[1]}<extra></extra>',
-      line: { color: '#333', width: 1 },
+      line: { color: currentTheme() === 'dark' ? '#09090b' : '#ffffff', width: 1 },
     };
     traces.push(featureTrace);
   }
@@ -242,7 +246,7 @@ function renderHeatmap(container, data) {
       x: prepared.xLabels,
       y: ['DB hit'],
       type: 'heatmap',
-      colorscale: [[0, '#f0f0f0'], [1, '#d62728']],
+      colorscale: [[0, '#f4f4f5'], [1, '#dc2626']],
       zmin: 0,
       zmax: 1,
       showscale: false,
@@ -252,7 +256,7 @@ function renderHeatmap(container, data) {
       yaxis: 'y3',
       customdata: prepared.dbHitCustomdata,
       hovertemplate: '%{customdata[0]}<extra></extra>',
-      line: { color: '#333', width: 1 },
+      line: { color: currentTheme() === 'dark' ? '#09090b' : '#ffffff', width: 1 },
     };
     traces.push(dbHitTrace);
   }
@@ -274,20 +278,22 @@ function renderHeatmap(container, data) {
       yaxis: 'y4',
       customdata: prepared.consequenceCustomdata,
       hovertemplate: 'Consequence: %{customdata[0]}<extra></extra>',
-      line: { color: '#333', width: 1 },
+      line: { color: currentTheme() === 'dark' ? '#09090b' : '#ffffff', width: 1 },
     };
     traces.push(consequenceTrace);
   }
 
   // Layout with domains for all axes
   const layout = {
+    ...baseLayout(),
     margin: { l: prepared.leftMargin, r: 80, t: 20, b: 60 },
     xaxis: {
+      ...baseLayout().xaxis,
+      showgrid: false,
       tickangle: 45,
       side: 'bottom',
-      showgrid: false,
     },
-    yaxis: { showgrid: false, domain: [0, prepared.heatmapDomainEnd] },
+    yaxis: { ...baseLayout().yaxis, showgrid: false, domain: [0, prepared.heatmapDomainEnd] },
     height: prepared.height,
     autosize: true,
   };

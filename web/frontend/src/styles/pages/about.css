@@ -1,0 +1,734 @@
+.about-tile {
+  width: min(100%, 1320px);
+  min-width: 0;
+  min-height: 0;
+  margin: 0 auto;
+  padding: clamp(1rem, 2vw, 1.75rem) 0 2rem;
+  display: grid;
+  gap: 1.25rem;
+}
+
+.about-tile > *,
+.about-knowledge-grid > *,
+.about-cli-grid > *,
+.about-governance-grid > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.about-tile p,
+.about-tile li {
+  line-height: 1.6;
+  color: var(--muted-strong);
+}
+
+/* Decorative accent rule replacing the removed illustration: a soft
+   gradient bar along the top edge keeps the hero visually anchored
+   without a raster image. */
+
+.about-notice-card:focus-visible,
+.about-section-card:focus-visible,
+.about-workflow-step:focus-visible,
+.about-terminal:focus-visible,
+.about-cli-side:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.about-icon-mask {
+  display: block;
+  background-color: var(--accent);
+  -webkit-mask-image: var(--icon-src);
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  mask-image: var(--icon-src);
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+}
+
+.about-notice-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.1rem;
+  background: var(--surface-strong);
+}
+
+.about-notice-card-research {
+  background: var(--accent-tint);
+}
+
+.about-notice-card-database {
+  background: var(--info-bg);
+}
+
+.about-notice-card h3,
+.about-notice-card p {
+  margin: 0;
+}
+
+.about-notice-card h3 {
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.about-notice-card p {
+  margin-top: 0.25rem;
+  font-size: 0.86rem;
+  color: var(--muted-strong);
+}
+
+.about-notice-icon {
+  width: 62px;
+  height: 62px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.about-notice-icon .about-icon-mask {
+  width: 35px;
+  height: 35px;
+}
+
+.about-section-card {
+  padding: 1rem 1.1rem;
+}
+
+.about-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 0.65rem;
+}
+
+.about-section-title h3,
+.about-section-card h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(1.08rem, 1.55vw, 1.25rem);
+  letter-spacing: -0.01em;
+}
+
+.about-section-icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+}
+
+.about-section-lead {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted-strong);
+}
+
+.about-section-card-scope .about-section-lead {
+  max-width: none;
+}
+
+.about-section-card ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.42rem;
+}
+
+.about-workflow {
+  display: grid;
+  gap: 0;
+  margin-top: 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.about-workflow-step {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: start;
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.about-workflow-number {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+  z-index: 1;
+}
+
+.about-workflow-copy {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.about-workflow-copy h4,
+.about-workflow-copy p {
+  margin: 0;
+}
+
+.about-workflow-copy h4 {
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.about-workflow-copy p {
+  font-size: 0.8rem;
+  color: var(--muted-strong);
+}
+
+.about-knowledge-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.1rem;
+}
+
+.about-knowledge-grid-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.about-inline-pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper-soft);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--muted-strong);
+  padding: 0.12rem 0.48rem;
+}
+
+.about-table-wrap {
+  margin-top: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  overflow: auto;
+}
+
+.about-table-wrap th,
+.about-table-wrap td {
+  font-size: 0.8rem;
+}
+
+.about-table-wrap td {
+  color: var(--muted-strong);
+}
+
+.about-table-wrap .about-inline-pill {
+  white-space: nowrap;
+}
+
+.about-operator-list {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.8rem;
+}
+
+.about-operator-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 0.55rem 0.7rem;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.about-operator-row p,
+.about-operator-row code {
+  margin: 0;
+}
+
+.about-operator-pill {
+  border-radius: 999px;
+  padding: 0.16rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.about-operator-pill-and {
+  background: var(--sensitive-bg);
+  color: var(--sensitive-text);
+  border: 1px solid var(--sensitive-border);
+}
+
+.about-operator-pill-or {
+  background: var(--intermediate-bg);
+  color: var(--intermediate-text);
+  border: 1px solid var(--intermediate-border);
+}
+
+.about-operator-pill-not {
+  background: var(--paper-soft);
+  color: var(--muted-strong);
+  border: 1px solid var(--line-strong);
+}
+
+.about-operator-pill-xor {
+  background: var(--info-bg);
+  color: var(--info-text);
+  border: 1px solid var(--info-border);
+}
+
+.about-operator-row code {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+  padding: 0.12rem 0.38rem;
+  color: var(--muted-strong);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.about-note-inline {
+  margin: 0.75rem 0 0;
+  padding: 0.6rem 0.7rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--paper-soft);
+  font-size: 0.83rem;
+  color: var(--muted-strong);
+}
+
+.about-threshold-note {
+  margin: 0.6rem 0 0;
+  padding: 0.55rem 0.68rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--paper-soft);
+  font-size: 0.8rem;
+  color: var(--muted-strong);
+}
+
+/* Per-section footer link to the CLI documentation. Quiet by design: the
+   pointer is the content, the link only needs to be discoverable. */
+.about-docs-link {
+  margin: 0.85rem 0 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line-soft);
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+/* Three "what you provide / get / it does not do" cards closing the scope
+   section. Shares the side-card language from the CLI grid. */
+.about-scope-notes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin-top: 1rem;
+  border-block: 1px solid var(--line);
+}
+
+.about-scope-notes > div {
+  padding: 0.8rem 1rem;
+}
+
+.about-scope-notes > div:first-child {
+  padding-left: 0;
+}
+
+.about-scope-notes > div + div {
+  border-left: 1px solid var(--line-soft);
+}
+
+.about-scope-notes h4,
+.about-scope-notes p {
+  margin: 0;
+}
+
+.about-scope-notes h4 {
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+
+.about-scope-notes p {
+  margin-top: 0.25rem;
+  font-size: 0.8rem;
+}
+
+/* Databases section: lists read better full-width than inside the
+   knowledge-grid column layout. */
+.about-section-card-databases ul {
+  margin-top: 0.2rem;
+}
+
+.about-section-card-databases li strong {
+  color: var(--ink);
+}
+
+/* Governance: outer section carries the id (scroll/tour targets) while the
+   single card contains three unboxed topic columns. */
+.about-governance-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.9rem 1.2rem;
+}
+
+.about-governance-grid > div + div {
+  padding-left: 1.1rem;
+  border-left: 1px solid var(--line-soft);
+}
+
+.about-governance-grid h4,
+.about-governance-grid p {
+  margin: 0;
+}
+
+.about-governance-grid h4 {
+  margin-bottom: 0.35rem;
+  color: var(--ink);
+  font-size: 0.88rem;
+}
+
+.about-governance-grid p {
+  font-size: 0.84rem;
+}
+
+/* The CLI terminal block keeps a fixed dark palette in both themes (a
+   terminal is always dark); scoped tokens keep the zinc values in one place. */
+.about-cli-grid {
+  --terminal-line: #3f3f46;
+  --terminal-bg: #09090b;
+  --terminal-header-bg: #111113;
+  --terminal-muted: #a1a1aa;
+  --terminal-text: #e4e4e7;
+  --terminal-btn-text: #d4d4d8;
+  --terminal-btn-hover-bg: #27272a;
+  --terminal-prompt: #2dd4bf;
+
+  margin-top: 0.85rem;
+  display: grid;
+  grid-template-columns: 1.5fr minmax(220px, 1fr);
+  gap: 0.95rem;
+}
+
+.about-terminal {
+  border: 1px solid var(--terminal-line);
+  border-radius: var(--radius-md);
+  background: var(--terminal-bg);
+  overflow: hidden;
+}
+
+.about-terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0.65rem;
+  border-bottom: 1px solid var(--terminal-line);
+  background: var(--terminal-header-bg);
+}
+
+.about-terminal-header p {
+  margin: 0;
+  color: var(--terminal-muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.about-terminal pre {
+  margin: 0;
+  padding: 0.85rem;
+  display: grid;
+  gap: 0.42rem;
+  overflow-x: auto;
+}
+
+.about-terminal code {
+  white-space: pre;
+  color: var(--terminal-text);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+}
+
+.about-terminal-prompt {
+  /* Teal-400 keeps the "live CLI" feel inside the brand palette (the old
+     green accent was the only foreign accent color in the app). */
+  color: var(--terminal-prompt);
+  margin-right: 0.28rem;
+}
+
+.about-copy-btn {
+  border: 1px solid var(--terminal-line);
+  background: transparent;
+  color: var(--terminal-btn-text);
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  padding: 0.26rem 0.5rem;
+}
+
+.about-copy-btn:hover {
+  background: var(--terminal-btn-hover-bg);
+}
+
+.about-cli-side {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.about-cli-side-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 0.8rem;
+}
+
+.about-cli-side-card h4,
+.about-cli-side-card p {
+  margin: 0;
+}
+
+.about-cli-side-card h4 {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.about-cli-side-card p {
+  margin-top: 0.35rem;
+  font-size: 0.82rem;
+  color: var(--muted-strong);
+}
+
+.about-mini-command {
+  margin-top: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-strong);
+  padding: 0.42rem 0.44rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.about-mini-command code {
+  color: var(--muted-strong);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.about-supported-logos {
+  margin-top: 0.56rem;
+  display: flex;
+  justify-content: flex-start;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.about-supported-logo {
+  width: min(100%, 760px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  text-decoration: none;
+}
+
+.about-sponsor-logo {
+  display: block;
+  max-width: 100%;
+  max-height: 112px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.about-section-card a,
+.about-notice-card a,
+.about-governance-grid a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.about-section-card a:hover,
+.about-notice-card a:hover,
+.about-governance-grid a:hover {
+  text-decoration: underline;
+}
+
+.about-section-card-algorithms {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 980px) {
+
+  .about-knowledge-grid,
+.about-scope-notes,
+.about-supported-logos {
+    grid-template-columns: 1fr;
+  }
+
+  .about-scope-notes > div,
+  .about-scope-notes > div:first-child {
+    padding: 0.7rem 0;
+  }
+
+  .about-scope-notes > div + div {
+    border-top: 1px solid var(--line-soft);
+    border-left: 0;
+  }
+
+  .about-governance-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .about-governance-grid > div + div {
+    padding-top: 0.7rem;
+    padding-left: 0;
+    border-top: 1px solid var(--line-soft);
+    border-left: 0;
+  }
+
+  .about-cli-grid {
+    grid-template-columns: 1fr;
+  }
+
+}
+
+@media (max-width: 620px) {
+
+  .about-tile {
+    width: 100%;
+  }
+
+  .about-section-card {
+    padding: 1rem 1.1rem;
+  }
+
+  .about-workflow,
+.about-operator-row {
+    grid-template-columns: 1fr;
+  }
+
+  .about-workflow-copy {
+    gap: 0.2rem;
+  }
+
+  .about-mini-command {
+    grid-template-columns: 1fr;
+  }
+}
+
+.about-intro {
+  display: grid;
+  justify-items: start;
+  gap: 0.8rem;
+  width: 100%;
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+
+.about-intro h1 {
+  max-width: none;
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(1.75rem, 3vw, 2.35rem);
+  white-space: nowrap;
+  line-height: 1.12;
+}
+
+.about-intro p {
+  max-width: none;
+  margin: 0;
+  color: var(--muted-strong);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.about-toc {
+  position: sticky;
+  top: calc(var(--app-header-height) + 0.5rem);
+  z-index: 10;
+  padding: 0.65rem 0;
+  border-block: 1px solid var(--line);
+  background: color-mix(in srgb, var(--paper) 94%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.about-toc ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.about-toc button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-strong);
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.about-toc button:hover,
+.about-toc button[aria-pressed='true'] {
+  border-color: var(--line);
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.about-cli-card {
+  scroll-margin-top: calc(var(--app-header-height) + 4rem);
+}
+
+.about-section-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+@media (max-width: 820px) {
+
+  .about-toc {
+    position: static;
+    backdrop-filter: none;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+
+  .about-intro h1 {
+    white-space: normal;
+  }
+
+  .about-toc ul {
+    width: max-content;
+    min-width: 100%;
+    flex-wrap: nowrap;
+    gap: 0.2rem;
+  }
+
+  .about-toc button {
+    min-height: 32px;
+    padding-inline: 0.45rem;
+    font-size: 0.73rem;
+  }
+}

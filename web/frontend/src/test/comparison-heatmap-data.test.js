@@ -16,11 +16,11 @@ describe('consequenceColor', () => {
   });
 
   it('returns fallback color for unknown type', () => {
-    expect(consequenceColor('nonexistent')).toBe('#cccccc');
+    expect(consequenceColor('nonexistent')).toBe('#e4e4e7');
   });
 
   it('returns fallback for empty string', () => {
-    expect(consequenceColor('')).toBe('#cccccc');
+    expect(consequenceColor('')).toBe('#e4e4e7');
   });
 });
 

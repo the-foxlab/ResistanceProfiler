@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from pydantic import BaseModel, Field
 
 from web.backend.config import WEB_BACKEND_CONFIG
+
+# Sample names are passed as argv values to the respro CLI subprocess; a leading
+# dash would risk being misparsed as an option flag by the CLI's argparse.
+_SAMPLE_NAME_PATTERN = r'^[^-].*$'
+SampleName = Annotated[str, Field(max_length=WEB_BACKEND_CONFIG.defaults.sample_name_max_length, pattern=_SAMPLE_NAME_PATTERN)]
 
 
 class ProfileFastaPayload(BaseModel):
@@ -19,7 +26,11 @@ class ProfileFastaPayload(BaseModel):
     use_example: bool = False
     input_display_name: str | None = Field(default=None, max_length=WEB_BACKEND_CONFIG.defaults.display_name_max_length)
     database_id: str | None = Field(default=None, max_length=WEB_BACKEND_CONFIG.defaults.opaque_id_max_length)
-    sample: str | None = Field(default=None, max_length=WEB_BACKEND_CONFIG.defaults.sample_name_max_length)
+    sample: str | None = Field(
+        default=None,
+        max_length=WEB_BACKEND_CONFIG.defaults.sample_name_max_length,
+        pattern=_SAMPLE_NAME_PATTERN,
+    )
     threads: int | None = Field(default=None, ge=1, le=WEB_BACKEND_CONFIG.defaults.profile_max_threads)
 
 
@@ -34,7 +45,11 @@ class ProfileVcfPayload(BaseModel):
     reference_id: str = Field(max_length=WEB_BACKEND_CONFIG.defaults.opaque_id_max_length)
     input_display_name: str | None = Field(default=None, max_length=WEB_BACKEND_CONFIG.defaults.display_name_max_length)
     database_id: str | None = Field(default=None, max_length=WEB_BACKEND_CONFIG.defaults.opaque_id_max_length)
-    sample: str | None = Field(default=None, max_length=WEB_BACKEND_CONFIG.defaults.sample_name_max_length)
+    sample: str | None = Field(
+        default=None,
+        max_length=WEB_BACKEND_CONFIG.defaults.sample_name_max_length,
+        pattern=_SAMPLE_NAME_PATTERN,
+    )
     min_af: float | None = Field(default=None, ge=0.0, le=1.0)
     min_depth: int | None = Field(default=None, ge=0, le=WEB_BACKEND_CONFIG.defaults.min_depth_max)
     bam_id: str | None = Field(default=None, max_length=WEB_BACKEND_CONFIG.defaults.opaque_id_max_length)
@@ -99,7 +114,7 @@ class BatchProfileVcfPayload(BaseModel):
     """
 
     vcf_ids: list[str] = Field(max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length)
-    sample_names: list[str] = Field(max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length)
+    sample_names: list[SampleName] = Field(max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length)
     input_display_names: list[str] | None = Field(
         default=None,
         max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length,
@@ -126,7 +141,7 @@ class BatchProfileFastaPayload(BaseModel):
     """
 
     fasta_ids: list[str] = Field(max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length)
-    sample_names: list[str] = Field(max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length)
+    sample_names: list[SampleName] = Field(max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length)
     input_display_names: list[str] | None = Field(
         default=None,
         max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length,
@@ -145,7 +160,7 @@ class BatchRegenerateJsonPayload(BaseModel):
     """
 
     json_ids: list[str] = Field(max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length)
-    sample_names: list[str] = Field(max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length)
+    sample_names: list[SampleName] = Field(max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length)
     input_display_names: list[str] | None = Field(
         default=None,
         max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length,
@@ -248,3 +263,13 @@ class CompareResponse(BaseModel):
     db_hit_map: list[bool]  # True if any sample has a db_hit for that mutation column
     sample_disambiguation_note: str = ''
     matrix: list[list[CompareCell]]
+
+
+class CompareDatabasesPayload(BaseModel):
+    """Payload for comparing 2-3 databases by rule overlap on a shared reference."""
+
+    database_ids: list[str] = Field(
+        default_factory=list,
+        max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length,
+    )
+    accession: str = Field(max_length=WEB_BACKEND_CONFIG.defaults.opaque_id_max_length)
