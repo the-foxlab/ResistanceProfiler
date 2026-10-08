@@ -42,7 +42,6 @@ def resolve_fasta_query_multi(
     *,
     use_cache: bool = True,
     threads: int = 1,
-    with_rules_only: bool = False,
     selected_query_names: set[str] | None = None,
     cfg: CliConfig = CLI_CONFIG,
 ) -> list[QueryRecord]:
@@ -50,17 +49,13 @@ def resolve_fasta_query_multi(
     Read a (possibly multi-record) user FASTA and align each record to internal CDS.
 
     Each FASTA record is aligned independently against the project database's
-    features. Records that produce no alignment are dropped with a warning; if no
-    record aligns, ``ValueError`` is raised.
+    rule-backed features (``has_rules = 1``). Records that produce no alignment
+    are dropped with a warning; if no record aligns, ``ValueError`` is raised.
 
     :param conn: project database connection
     :param fasta_path: path to user FASTA (single- or multi-record)
     :param use_cache: if True, reuse/store per-record mapping cache in project DB
     :param threads: number of worker processes for parallel feature alignment
-    :param with_rules_only: if True, align only against features that carry resistance
-        rules (FASTA-mode semantics, where ruleless features are irrelevant); if False,
-        align against ALL annotated features so references whose features have no rules
-        are still detected as orphans (multi-VCF semantics). Default False.
     :param selected_query_names: when provided (VCF mode), only FASTA records whose
         header matches one of these names are aligned/returned; other records are
         ignored entirely (never aligned, cached, or turned into report groups). This
@@ -84,7 +79,7 @@ def resolve_fasta_query_multi(
                 f'Selected={sorted(selected)}.'
             )
 
-    features = load_features(conn, with_rules=with_rules_only)
+    features = load_features(conn)
     if not features:
         raise ValueError('No features with resistance rules in project database')
 
@@ -158,7 +153,7 @@ def resolve_fasta_query(
         )
 
     records = resolve_fasta_query_multi(
-        conn, fasta_path, use_cache=use_cache, threads=threads, with_rules_only=True, cfg=cfg,
+        conn, fasta_path, use_cache=use_cache, threads=threads, cfg=cfg,
     )
     record = records[0]
     return record.query_name, record.query_sequence, record.feature_matches

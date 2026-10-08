@@ -55,6 +55,7 @@ def in_memory_db():
             aa_sequence TEXT,
             feature_type TEXT DEFAULT 'CDS',
             parent_feature_name TEXT,
+            has_rules INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (reference_id) REFERENCES reference(id)
         )
     ''')
@@ -123,14 +124,15 @@ class TestLoadFeaturesForReference:
         assert result == []
 
     def test_loads_features_with_segments(self, in_memory_db):
-        """Should load features with their segments."""
-        # Insert test data
+        """Should load rule-backed features with their segments."""
+        # Insert test data — the feature is flagged rule-backed to satisfy the
+        # rules-only loading contract.
         in_memory_db.execute(
             'INSERT INTO reference (id, project_id, name, length) VALUES (1, 1, "test", 1000)'
         )
         in_memory_db.execute(
-            'INSERT INTO feature (id, reference_id, name, start, end, strand, nt_sequence, aa_sequence, feature_type) '
-            'VALUES (1, 1, "gene1", 100, 500, "+", "ATGC", "MK", "CDS")'
+            'INSERT INTO feature (id, reference_id, name, start, end, strand, nt_sequence, aa_sequence, feature_type, has_rules) '
+            'VALUES (1, 1, "gene1", 100, 500, "+", "ATGC", "MK", "CDS", 1)'
         )
         in_memory_db.execute(
             'INSERT INTO feature_segment (feature_id, segment_index, start, end) VALUES (1, 0, 100, 300)'

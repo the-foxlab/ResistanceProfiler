@@ -72,6 +72,7 @@ def fasta_db(tmp_path: Path) -> Path:
         'VALUES (?, ?, ?, ?, ?, ?)',
         (1, 1, 1, 'K', 'E', 'resistant'),
     )
+    conn.execute('UPDATE feature SET has_rules = 1 WHERE id = 1')
     conn.commit()
     conn.close()
     return db_path
@@ -118,6 +119,7 @@ def fasta_db_multi_reference(tmp_path: Path) -> Path:
         'VALUES (?, ?, ?, ?, ?, ?)',
         (2, 1, 1, 'P', 'A', 'resistant'),
     )
+    conn.execute('UPDATE feature SET has_rules = 1 WHERE id IN (1, 2)')
     conn.commit()
     conn.close()
     return db_path
@@ -553,6 +555,7 @@ class TestFastaCacheRegression:
             (1, 'minus_feature', 'Minus', 0, 18, '-', feature_nt),
         )
         conn.execute('UPDATE feature SET codon_start = ? WHERE id = ?', (1, 1))
+        conn.execute('UPDATE feature SET has_rules = 1 WHERE id = 1')
         conn.commit()
 
         feature = FeatureRecord(

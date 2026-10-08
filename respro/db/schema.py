@@ -9,7 +9,7 @@ from pathlib import Path
 
 from respro.utils.files import require_file
 
-PROJECT_SCHEMA_VERSION = 2
+PROJECT_SCHEMA_VERSION = 3
 RESULTS_SCHEMA_VERSION = 1
 
 PROJECT_SCHEMA_SQL = """\
@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS feature (
     aa_sequence TEXT    NOT NULL DEFAULT '',  -- pre-translated protein sequence
     feature_type TEXT   NOT NULL DEFAULT 'CDS',
     parent_feature_name TEXT NOT NULL DEFAULT '',
+    has_rules   INTEGER NOT NULL DEFAULT 0,  -- 1 when at least one resistance rule targets this feature
     UNIQUE(reference_id, name)
 );
 
@@ -459,6 +460,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'aa_sequence': "TEXT NOT NULL DEFAULT ''",
         'feature_type': "TEXT NOT NULL DEFAULT 'CDS'",
         'parent_feature_name': "TEXT NOT NULL DEFAULT ''",
+        'has_rules': 'INTEGER NOT NULL DEFAULT 0',
     },
     'drug': {
         'alias': "TEXT DEFAULT ''",
@@ -705,6 +707,28 @@ def _ensure_project_indexes(conn: sqlite3.Connection) -> None:
     )
 
 
+def _feature_has_column(conn: sqlite3.Connection, column_name: str) -> bool:
+    """Return whether the feature table currently has the given column."""
+    available = {
+        row['name']
+        for row in conn.execute('PRAGMA table_info(feature)').fetchall()
+    }
+    return column_name in available
+
+
+def _backfill_feature_has_rules(conn: sqlite3.Connection) -> None:
+    """One-time backfill of feature.has_rules from existing resistance rules.
+
+    Runs only during the migration that adds the column, so the flag is never
+    recomputed afterwards — rule import maintains it transactionally (see
+    respro.db.rules_import).
+    """
+    conn.execute(
+        'UPDATE feature SET has_rules = 1 '
+        'WHERE id IN (SELECT DISTINCT feature_id FROM resistance_rule)'
+    )
+
+
 def open_project_db(db_path: Path) -> sqlite3.Connection:
     """
     Open an existing project database and validate the schema version.
@@ -717,8 +741,12 @@ def open_project_db(db_path: Path) -> sqlite3.Connection:
     _configure_connection(conn)
     _ensure_optional_tables(conn)
     _validate_project_schema_overlap(conn, db_path)
+    had_has_rules = _feature_has_column(conn, 'has_rules')
     changed = False
     if _add_missing_optional_columns(conn, _OPTIONAL_PROJECT_COLUMN_DEFS):
+        changed = True
+    if not had_has_rules and _feature_has_column(conn, 'has_rules'):
+        _backfill_feature_has_rules(conn)
         changed = True
     if _backfill_feature_segments(conn):
         changed = True

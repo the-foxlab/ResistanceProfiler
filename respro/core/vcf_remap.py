@@ -51,11 +51,38 @@ def remap_variants(
         c2q = {cds_pos: query_pos for query_pos, cds_pos in q2c.items()}
         match_maps.append((match, q2c, c2q))
 
-    remapped: list[VariantCall] = []
     warnings: list[str] = []
     remap_input_variants = _expand_anchor_changed_indels(variants, warnings)
+    remapped = _remap_variants_per_match(
+        remap_input_variants, match_maps, query_len, query_upper, warnings,
+    )
+    deduped, dedupe_warnings = _dedupe_remapped_variants(remapped)
+    warnings.extend(dedupe_warnings)
 
-    for var in remap_input_variants:
+    logger.info(
+        'Remapped %d of %d variant(s); %d warning(s)',
+        len(deduped), len(remap_input_variants), len(warnings),
+    )
+    return deduped, warnings
+
+
+def _remap_variants_per_match(
+    variants: list[VariantCall],
+    match_maps: list[tuple[FeatureMatch, dict[int, int], dict[int, int]]],
+    query_len: int,
+    query_upper: str,
+    warnings: list[str],
+) -> list[tuple[VariantCall, FeatureMatch]]:
+    """Emit one remapped (variant, producing match) pair per variant × match overlap.
+
+    The raw phase of :func:`remap_variants`: every overlapping match projects the
+    variant independently, so a query position inside several aligned spans yields
+    one copy per match — possibly with different projected positions, alleles, and
+    query codons. Deduplication happens in :func:`_dedupe_remapped_variants`.
+    """
+    remapped: list[tuple[VariantCall, FeatureMatch]] = []
+
+    for var in variants:
         hit = False
         skip_reason = 'no match / outside mapped CDS'
         for match, q2c, c2q in match_maps:
@@ -126,7 +153,11 @@ def remap_variants(
             if match.strand == '-' and len(query_ref_codon) == 3:
                 query_ref_codon = str(Seq(query_ref_codon).complement())
 
-            remapped.append(VariantCall(
+            # Bind the query codon to the feature whose alignment frame produced it.
+            # Annotation only trusts the codon when the annotating feature has this id.
+            query_codon_feature_id = match.feature.id if query_ref_codon else 0
+
+            remapped.append((VariantCall(
                 chrom=var.chrom,
                 pos=genomic_pos,
                 ref=ref_base,
@@ -135,6 +166,7 @@ def remap_variants(
                 depth=var.depth,
                 filter_status=var.filter_status,
                 query_ref_codon=query_ref_codon,
+                query_codon_feature_id=query_codon_feature_id,
                 # Preserve the original user-reference coords. For split anchor-changed
                 # indels the split events already carry the original record's user coords;
                 # fall back to this variant's own coords for unsplit inputs.
@@ -142,7 +174,7 @@ def remap_variants(
                 user_pos=var.user_pos or var.pos,
                 user_ref=var.user_ref or var.ref,
                 user_alt=var.user_alt or var.alt,
-            ))
+            ), match))
             hit = True
 
         if not hit:
@@ -152,11 +184,53 @@ def remap_variants(
                 skip_reason,
             )
 
-    logger.info(
-        'Remapped %d of %d variant(s); %d warning(s)',
-        len(remapped), len(remap_input_variants), len(warnings),
-    )
-    return remapped, warnings
+    return remapped
+
+
+def _match_rank(match: FeatureMatch) -> tuple[float, float, float, str]:
+    """Best-match ordering key: identity desc, cds_coverage desc, query_coverage desc,
+    feature name asc — identical to the ``pick_best_reference_id`` ordering."""
+    return (-match.identity, -match.cds_coverage, -match.query_coverage, match.feature.name)
+
+
+def _dedupe_remapped_variants(
+    remapped: list[tuple[VariantCall, FeatureMatch]],
+) -> tuple[list[VariantCall], list[str]]:
+    """
+    Collapse remapped variants with identical (chrom, pos, ref, alt) keys.
+
+    A query position may lie inside the aligned spans of several features on the
+    same reference; each match remaps the variant independently. When the projected
+    internal position and alleles coincide, only the best-scoring match's copy is
+    kept — the duplicates would otherwise be annotated repeatedly and, before
+    codon-source binding, with conflicting query codons.
+
+    :param remapped: (variant, producing match) pairs in emission order
+    :return: (deduplicated variants in emission order, warnings listing collapses)
+    """
+    best_by_key: dict[tuple[str, int, str, str], tuple[VariantCall, FeatureMatch]] = {}
+    order: list[tuple[str, int, str, str]] = []
+    for var, match in remapped:
+        key = (var.chrom, var.pos, var.ref, var.alt)
+        if key not in best_by_key:
+            best_by_key[key] = (var, match)
+            order.append(key)
+        elif _match_rank(match) < _match_rank(best_by_key[key][1]):
+            best_by_key[key] = (var, match)
+
+    warnings: list[str] = []
+    collapsed = len(remapped) - len(order)
+    if collapsed:
+        details = ', '.join(
+            f'{key[0]}:{key[1] + 1}{key[2]}>{key[3]}' for key in order
+            if sum(1 for v, _ in remapped
+                   if (v.chrom, v.pos, v.ref, v.alt) == key) > 1
+        )
+        warnings.append(
+            f'Collapsed {collapsed} duplicate remapped variant(s) projected from '
+            f'overlapping feature matches: {details}'
+        )
+    return [best_by_key[key][0] for key in order], warnings
 
 
 def route_and_remap_variants(

@@ -908,11 +908,11 @@ def _draw_feature_panel(
                 (x_top, y_top),
                 textcoords='offset points',
                 xytext=(0, 7),
-                fontsize=7,
+                fontsize=6,
                 color=colour,
                 fontweight='bold',
-                rotation=90,
-                ha='center',
+                rotation=25,
+                ha='left',
             )
 
     pad = max(10, int((feature.end - feature.start) * 0.03))
@@ -948,7 +948,7 @@ def _apply_top_jitter(
     The stem stays anchored at the true genomic position. Only the top dot is
     shifted slightly to separate overlapping points.
 
-    The minimum separation is 1/100 of the feature length so jitter scales
+    The minimum separation is 1/75 of the feature length so jitter scales
     consistently across features of different sizes.
 
     :param annotations: annotations within one feature panel
@@ -960,7 +960,7 @@ def _apply_top_jitter(
         key=lambda ann: (ann.variant.pos, ann.variant.allele_freq, ann.alt_aa, ann.consequence),
     )
     x_values = [ann.variant.pos + 1 for ann in sorted_anns]
-    min_distance = feature_length / 100
+    min_distance = feature_length / 75
     x_values_jittered = adjust_array_min_distance(x_values, min_distance=min_distance)
     return list(zip(sorted_anns, x_values_jittered))
 

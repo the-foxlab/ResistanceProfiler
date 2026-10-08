@@ -13,6 +13,7 @@ from pathlib import Path
 import click
 import pysam
 import pytest
+from Bio.Seq import Seq
 from typer.testing import CliRunner
 
 from respro.cli.main import app
@@ -22,7 +23,12 @@ from respro.core.query import (
     resolve_fasta_query_multi,
 )
 from respro.core.vcf_coverage import compute_coverage_gaps_from_bam_multi
-from respro.core.vcf_remap import route_and_remap_variants
+from respro.core.vcf_remap import (
+    _build_query_to_cds_map,
+    _expand_anchor_changed_indels,
+    _remap_variants_per_match,
+    route_and_remap_variants,
+)
 from respro.db.models import ProfilingResult, ReferenceGroup, VariantCall
 from respro.db.results import load_run, save_run
 from respro.db.schema import create_schema, init_results_db, open_project_db
@@ -81,6 +87,7 @@ def _make_multi_ref_db(db_path: Path, *, ref_b_has_rules: bool = True) -> Path:
         'VALUES (?, ?, ?, ?, ?, ?)',
         (1, 1, 1, 'K', 'E', 'resistant'),
     )
+    conn.execute('UPDATE feature SET has_rules = 1 WHERE id = 1')
     if ref_b_has_rules:
         # refB rule: codon 1 (0-based) is P (CCC at nt 3..5), mutation A -> resistant
         conn.execute(
@@ -89,6 +96,7 @@ def _make_multi_ref_db(db_path: Path, *, ref_b_has_rules: bool = True) -> Path:
             'VALUES (?, ?, ?, ?, ?, ?)',
             (2, 1, 1, 'P', 'A', 'resistant'),
         )
+        conn.execute('UPDATE feature SET has_rules = 1 WHERE id = 2')
     conn.commit()
     conn.close()
     return db_path
@@ -132,6 +140,7 @@ def single_ref_db(tmp_path: Path) -> Path:
         'VALUES (?, ?, ?, ?, ?, ?)',
         (1, 1, 1, 'K', 'E', 'resistant'),
     )
+    conn.execute('UPDATE feature SET has_rules = 1 WHERE id = 1')
     conn.commit()
     conn.close()
     return db_path
@@ -444,6 +453,20 @@ class TestRouteAndRemapVariants:
             'VALUES (?, ?, ?, ?, ?, ?, ?)',
             (2, 'polB', 'PolB', 0, len(shared_seq), '+', shared_seq),
         )
+        conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'testdrug'))
+        conn.execute(
+            'INSERT INTO resistance_rule '
+            '(feature_id, drug_id, position, reference, mutation, phenotype) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (1, 1, 1, 'K', 'E', 'resistant'),
+        )
+        conn.execute(
+            'INSERT INTO resistance_rule '
+            '(feature_id, drug_id, position, reference, mutation, phenotype) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (2, 1, 1, 'K', 'E', 'resistant'),
+        )
+        conn.execute('UPDATE feature SET has_rules = 1 WHERE id IN (1, 2)')
         conn.commit()
         conn.close()
 
@@ -469,7 +492,193 @@ class TestRouteAndRemapVariants:
             f'expected 1 remapped variant after narrowing to best reference, got {len(remapped)}'
         )
         assert dropped_chroms == []
-        assert dropped_chroms == []
+
+
+def _make_two_match_db(db_path: Path) -> Path:
+    """
+    Build a project DB where ONE reference carries two overlapping features that a
+    single query aligns to: a full-length reverse-strand feature (UL23-like) and a
+    partially overlapping forward-strand feature (UL24-like) on the same reference.
+    """
+    # Genomic layout: revFeat spans [0, 600) on the '-' strand, fwdFeat spans
+    # [400, 1000) on the '+' strand. They overlap on [400, 600). The sequence is
+    # seeded random (deterministic) so mappy cannot shift the alignment onto a
+    # repetitive motif — both matches must project query positions identically.
+    import random
+    rng = random.Random(20260901)
+    genomic = ''.join(rng.choices('ACGT', k=1000))
+    rev_coding = str(Seq(genomic[0:600]).reverse_complement())  # UL23-like coding seq
+    fwd_coding = genomic[400:1000]              # UL24-like coding seq, forward strand
+
+    conn = create_schema(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+        ('TwoMatch', 1, str(uuid.uuid4())),
+    )
+    conn.execute(
+        'INSERT INTO reference (project_id, name, length, organism) VALUES (?, ?, ?, ?)',
+        (1, 'refX', len(genomic), 'OrgX'),
+    )
+    conn.execute(
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (1, 'revFeat', 'RevF', 0, 600, '-', rev_coding),
+    )
+    conn.execute(
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (1, 'fwdFeat', 'FwdF', 400, 1000, '+', fwd_coding),
+    )
+    conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'testdrug'))
+    conn.execute(
+        'INSERT INTO resistance_rule '
+        '(feature_id, drug_id, position, reference, mutation, phenotype) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (1, 1, 0, 'M', 'T', 'resistant'),
+    )
+    conn.execute(
+        'INSERT INTO resistance_rule '
+        '(feature_id, drug_id, position, reference, mutation, phenotype) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (2, 1, 0, 'M', 'T', 'resistant'),
+    )
+    conn.execute('UPDATE feature SET has_rules = 1 WHERE id IN (1, 2)')
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+class TestRemapDedupeSameReference:
+    """Remapped variants with identical (chrom, pos, ref, alt) from two overlapping
+    same-reference matches collapse to the best-scoring match."""
+
+    def test_two_overlapping_same_reference_matches_dedupe(self, tmp_path: Path) -> None:
+        """A query position inside both matches yields ONE remapped variant."""
+        db_path = _make_two_match_db(tmp_path / 'two_match.db')
+        import random
+        rng = random.Random(20260901)
+        genomic = ''.join(rng.choices('ACGT', k=1000))
+        # The query is the reverse complement of the genomic sequence, mirroring
+        # the real bug: both matches are reverse-to-reference (query supplied in
+        # the opposite orientation of both features' coding strands).
+        query = str(Seq(genomic).reverse_complement())
+        fasta_path = tmp_path / 'q.fasta'
+        fasta_path.write_text(f'>chrom_x\n{query}\n')
+        records = _build_query_records(db_path, fasta_path)
+
+        assert len(records) == 1
+        names = {m.feature.name for m in records[0].feature_matches}
+        assert names == {'revFeat', 'fwdFeat'}, (
+            f'expected both features matched, got {names}'
+        )
+
+        # A variant at a query position inside BOTH matches' aligned spans.
+        # Query pos 499 (genomic pos 500) lies in revFeat's span [0, 600) and
+        # fwdFeat's span [400, 1000).
+        variants = [
+            VariantCall(chrom='chrom_x', pos=499, ref=query[499], alt='A',
+                        allele_freq=0.95, depth=500),
+        ]
+        remapped, warnings, dropped = route_and_remap_variants(variants, records)
+
+        assert dropped == []
+        assert len(remapped) == 1, (
+            f'expected 1 remapped variant after dedupe, got {len(remapped)}: '
+            f'{[(v.pos, v.ref, v.alt) for v in remapped]}'
+        )
+        # The dedupe emits a warning listing the collapsed duplicates.
+        assert any('duplicate' in w.lower() for w in warnings)
+
+    def test_dedupe_keeps_best_scoring_match_codon(self, tmp_path: Path) -> None:
+        """The surviving variant carries the query codon from the best-scoring match.
+
+        Best match ordering: identity desc, cds_coverage desc, query_coverage desc,
+        feature name asc (same as pick_best_reference_id).
+        """
+        db_path = _make_two_match_db(tmp_path / 'two_match.db')
+        import random
+        rng = random.Random(20260901)
+        genomic = ''.join(rng.choices('ACGT', k=1000))
+        query = str(Seq(genomic).reverse_complement())
+        fasta_path = tmp_path / 'q.fasta'
+        fasta_path.write_text(f'>chrom_x\n{query}\n')
+        records = _build_query_records(db_path, fasta_path)
+
+        # Find which match has better coverage; the surviving codon must come from it.
+        matches = records[0].feature_matches
+        best = min(matches, key=lambda m: (-m.identity, -m.cds_coverage,
+                                           -m.query_coverage, m.feature.name))
+
+        variants = [
+            VariantCall(chrom='chrom_x', pos=499, ref=query[499], alt='A',
+                        allele_freq=0.95, depth=500),
+        ]
+        remapped, _warnings, _dropped = route_and_remap_variants(variants, records)
+
+        assert len(remapped) == 1
+        survivor = remapped[0]
+        if survivor.query_ref_codon:
+            # The codon must originate from the best match's feature.
+            assert survivor.query_codon_feature_id == best.feature.id, (
+                f'survivor codon from feature {survivor.query_codon_feature_id}, '
+                f'expected best match {best.feature.name} ({best.feature.id})'
+            )
+        else:
+            pytest.fail('survivor should carry a query codon from the best match')
+
+    def test_raw_remap_emits_two_copies_with_distinct_codon_source(self, tmp_path: Path) -> None:
+        """Before dedupe, two overlapping matches each emit a remapped copy whose
+        query codon is bound to its own feature — the frame-mixup regression shape.
+
+        Both matches are reverse-to-reference (query supplied as the reverse
+        complement of the genomic sequence), mirroring the UL23/UL24 bug: the same
+        query position projects to the same internal (pos, ref, alt) with two
+        different query codons, one per feature's reading frame.
+        """
+        db_path = _make_two_match_db(tmp_path / 'two_match.db')
+        import random
+        rng = random.Random(20260901)
+        genomic = ''.join(rng.choices('ACGT', k=1000))
+        query = str(Seq(genomic).reverse_complement())
+        fasta_path = tmp_path / 'q.fasta'
+        fasta_path.write_text(f'>chrom_x\n{query}\n')
+        records = _build_query_records(db_path, fasta_path)
+        rec = records[0]
+
+        match_maps = []
+        for match in rec.feature_matches:
+            q2c = _build_query_to_cds_map(
+                match.cigar, match.query_start, match.query_end,
+                match.strand, len(query), match.cds_start, match.intron_intervals,
+            )
+            c2q = {c: q for q, c in q2c.items()}
+            match_maps.append((match, q2c, c2q))
+
+        variants = [
+            VariantCall(chrom='chrom_x', pos=499, ref=query[499], alt='A',
+                        allele_freq=0.95, depth=500),
+        ]
+        warnings: list[str] = []
+        expanded = _expand_anchor_changed_indels(variants, warnings)
+        raw = _remap_variants_per_match(expanded, match_maps, len(query), query.upper(), warnings)
+
+        # Two copies, one per overlapping match, each bound to its own feature.
+        assert len(raw) == 2
+        by_fid = {v.query_codon_feature_id: v for v, _m in raw}
+        assert set(by_fid) == {1, 2}, (
+            f'expected copies bound to both feature ids, got {sorted(by_fid)}'
+        )
+        # The two copies project to the same internal variant key but carry
+        # different query codons (different reading frames).
+        (v1, _), (v2, _) = raw
+        assert (v1.pos, v1.ref, v1.alt) == (v2.pos, v2.ref, v2.alt)
+        assert v1.query_ref_codon != v2.query_ref_codon
+
+        # And the public entry point collapses them to one best-scoring copy.
+        remapped, dedupe_warnings, _dropped = route_and_remap_variants(variants, records)
+        assert len(remapped) == 1
+        assert any('duplicate' in w.lower() for w in dedupe_warnings)
 
 
 def _make_reference_group(
@@ -632,41 +841,45 @@ class TestAssembleMultiReferenceResult:
         finally:
             conn.close()
 
-    def test_one_ref_with_rules_one_orphan_completes_with_warning(
+    def test_one_ref_with_rules_one_orphan_dropped_with_warning(
         self, multi_ref_db_orphan_b: Path, tmp_path: Path, caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """A 2-record submission where only refA has rules -> completes; refB reported as orphan."""
+        """A 2-record submission where only refA is rule-backed -> refB dropped with warning.
+
+        Under the rules-only contract, a FASTA record that aligns to no rule-backed feature
+        is an orphan: it is dropped at query resolution with a warning, never becomes a
+        report group, and its VCF CHROM is reported as dropped rather than profiled.
+        """
         fasta_path = tmp_path / 'refs.fasta'
         fasta_path.write_text(f'>chrom_a\n{_REF_A_SEQ}\n>chrom_b\n{_REF_B_SEQ}\n')
         conn = open_project_db(multi_ref_db_orphan_b)
         try:
-            records = resolve_fasta_query_multi(conn, fasta_path)
-            remapped = _build_remapped_for_records(conn, records)
-
             with caplog.at_level('WARNING', logger='respro'):
-                result = assemble_multi_reference_result(
-                    project_conn=conn,
-                    query_records=records,
-                    remapped_variants=remapped,
-                    coverage_gaps=[],
-                    project_name='Multi Test',
-                    sample='samp',
-                    vcf_name='in.vcf',
-                    total_variants=len(remapped),
-                )
+                records = resolve_fasta_query_multi(conn, fasta_path)
+            # chrom_b aligned to no rule-backed feature and was dropped.
+            assert [r.query_name for r in records] == ['chrom_a']
+            assert any(
+                'chrom_b' in r.message and 'dropping' in r.message.lower()
+                for r in caplog.records
+            ), f'expected orphan drop warning, got {[r.message for r in caplog.records]}'
 
-            # Both references retained (orphan kept, not dropped).
-            assert len(result.references) == 2
-            # refA has rules; refB has none.
+            remapped = _build_remapped_for_records(conn, records)
+            result = assemble_multi_reference_result(
+                project_conn=conn,
+                query_records=records,
+                remapped_variants=remapped,
+                coverage_gaps=[],
+                project_name='Multi Test',
+                sample='samp',
+                vcf_name='in.vcf',
+                total_variants=len(remapped),
+            )
+            # Only refA is retained; the orphan never becomes a report group.
+            assert len(result.references) == 1
+            assert result.references[0].reference_name == 'refA'
             assert result.references[0].rule_feature_names == {'gagA'}
-            assert result.references[1].rule_feature_names == set()
-            # refA rule hit fired; refB has no rule hit.
             gag_a_hits = [a for a in result.annotations if a.feature_name == 'gagA' and a.is_resistance_hit]
-            gag_b_hits = [a for a in result.annotations if a.feature_name == 'gagB' and a.is_resistance_hit]
             assert len(gag_a_hits) == 1
-            assert gag_b_hits == []
-            # A warning was logged about the orphaned (ruleless) reference.
-            assert any('refB' in r.message and ('rule' in r.message.lower() or 'orphan' in r.message.lower()) for r in caplog.records)
         finally:
             conn.close()
 
@@ -806,8 +1019,8 @@ class TestAssembleMultiReferenceResult:
         # Build a DB with two references that BOTH name their single CDS "pol".
         # refA's pol starts M K A F... (codon 1 = K, AAA at nt 3..5); refA has a K2E rule.
         # refB's pol also starts M K ... (codon 1 = K) but with a DISTINCT sequence so each
-        # query record aligns to exactly one reference; refB has NO rule.
-        # A K2E variant on refB's pol must NOT pick up refA's K2E rule.
+        # query record aligns to exactly one reference; refB has its own K2Q rule on a
+        # separate drug. A K2E variant on refB's pol must NOT pick up refA's K2E rule.
         # Both references share the SAME organism so the cross-species collision gate does
         # not reject this run (this test exercises same-species shared-gene behaviour).
         refa_motif = 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC'  # codon 1 = K (AAA at nt 3..5)
@@ -829,11 +1042,17 @@ class TestAssembleMultiReferenceResult:
                      'VALUES (?, ?, ?, ?, ?, ?, ?)', (1, 'pol', 'Pol', 0, len(refa_seq), '+', refa_seq))
         conn.execute('INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) '
                      'VALUES (?, ?, ?, ?, ?, ?, ?)', (2, 'pol', 'Pol', 0, len(refb_seq), '+', refb_seq))
-        conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'testdrug'))
-        # refA-only rule: codon 1 K2E.
+        conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'drugA'))
+        conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'drugB'))
+        # refA rule: codon 1 K2E on drugA; refB rule: codon 1 K2Q on drugB
+        # (A->C at pos 3 gives AAA->CAA = Q, a single-nt-achievable mutation).
         conn.execute('INSERT INTO resistance_rule '
                      '(feature_id, drug_id, position, reference, mutation, phenotype) '
                      'VALUES (?, ?, ?, ?, ?, ?)', (1, 1, 1, 'K', 'E', 'resistant'))
+        conn.execute('INSERT INTO resistance_rule '
+                     '(feature_id, drug_id, position, reference, mutation, phenotype) '
+                     'VALUES (?, ?, ?, ?, ?, ?)', (2, 2, 1, 'K', 'Q', 'resistant'))
+        conn.execute('UPDATE feature SET has_rules = 1 WHERE id IN (1, 2)')
         conn.commit()
         conn.close()
 
@@ -849,10 +1068,11 @@ class TestAssembleMultiReferenceResult:
                 ref_ids = {m.feature.reference_id for m in rec.feature_matches}
                 assert len(ref_ids) == 1, f'{rec.query_name} matched {ref_ids}'
 
-            # K2E variant on BOTH chroms (pos 3, A->G -> codon 1 K->E).
+            # K2E variant on chrom_a (A->G -> codon 1 K->E); K2Q variant on chrom_b
+            # (A->C -> codon 1 K->Q), each matching its own reference's rule.
             variants = [
                 VariantCall(chrom='chrom_a', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
-                VariantCall(chrom='chrom_b', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
+                VariantCall(chrom='chrom_b', pos=3, ref='A', alt='C', allele_freq=0.95, depth=500),
             ]
             remapped, _w, _d = route_and_remap_variants(variants, records)
 
@@ -880,12 +1100,19 @@ class TestAssembleMultiReferenceResult:
                     pol_hits_by_ref.setdefault(ref_name, 0)
                     pol_hits_by_ref[ref_name] += 1
             assert pol_hits_by_ref.get('refA') == 1, f'refA should have 1 rule hit, got {pol_hits_by_ref}'
-            assert 'refB' not in pol_hits_by_ref, (
-                f'refB must not receive refA\'s K2E rule (cross-reference contamination), '
-                f'got hits={pol_hits_by_ref}'
+            assert pol_hits_by_ref.get('refB') == 1, (
+                f'refB should get its own K2Q rule hit, got {pol_hits_by_ref}'
             )
-            # Total resistance hits = 1 (only refA), not 2.
-            assert result.resistance_hits == 1
+            # Each annotation carries exactly its own rule (no cross-reference contamination).
+            for ann in result.annotations:
+                if ann.feature_name == 'pol' and ann.is_resistance_hit:
+                    drugs = {rm.drug_name for rm in ann.rule_matches}
+                    expected = 'drugA' if ann.variant.chrom == 'chrom_a' else 'drugB'
+                    assert drugs == {expected}, (
+                        f'{ann.variant.chrom} pol annotation must carry only {expected}, got {drugs}'
+                    )
+            # Total resistance hits = 2 (one per reference), each from its own rule.
+            assert result.resistance_hits == 2
         finally:
             conn.close()
 
@@ -894,15 +1121,16 @@ def _make_colliding_db(
     db_path: Path, *,
     organism_a: str, organism_b: str,
     shared_feature_name: str = 'pol',
-    ref_b_has_rules: bool = False,
+    ref_b_has_rules: bool = True,
 ) -> Path:
     """
     Build a project DB with two references whose single CDS shares one feature name.
 
     Both references name their CDS ``shared_feature_name`` (default 'pol'). The two
     references belong to ``organism_a`` and ``organism_b`` respectively, so a cross-species
-    gene-name collision occurs iff the two organisms differ. refA always has a K2E rule;
-    refB has no rule unless ``ref_b_has_rules`` is True.
+    gene-name collision occurs iff the two organisms differ. Both references are rule-backed
+    (required for alignability under the rules-only contract); ``ref_b_has_rules=False``
+    makes refB an unalignable orphan.
     """
     refa_motif = 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC'  # codon 1 = K (AAA at nt 3..5)
     refb_motif = 'ATGAAACCCGGGAAATTTCCCGGGAAATTT'  # codon 1 = K (AAA at nt 3..5), distinct elsewhere
@@ -929,6 +1157,8 @@ def _make_colliding_db(
         conn.execute('INSERT INTO resistance_rule '
                      '(feature_id, drug_id, position, reference, mutation, phenotype) '
                      'VALUES (?, ?, ?, ?, ?, ?)', (2, 1, 1, 'K', 'E', 'resistant'))
+        conn.execute('UPDATE feature SET has_rules = 1 WHERE id = 2')
+    conn.execute('UPDATE feature SET has_rules = 1 WHERE id = 1')
     conn.commit()
     conn.close()
     return db_path
@@ -1173,6 +1403,7 @@ def _make_two_species_db_with_extra_feature(
     conn.execute('INSERT INTO resistance_rule '
                  '(feature_id, drug_id, position, reference, mutation, phenotype) '
                  'VALUES (?, ?, ?, ?, ?, ?)', (2, 1, 1, 'K', 'E', 'resistant'))
+    conn.execute('UPDATE feature SET has_rules = 1 WHERE id IN (1, 2)')
     conn.commit()
     conn.close()
     return db_path
@@ -1963,6 +2194,7 @@ class TestResultsDbMultiReference:
         conn.execute('INSERT INTO resistance_rule '
                      '(feature_id, drug_id, position, reference, mutation, phenotype) '
                      'VALUES (?, ?, ?, ?, ?, ?)', (2, 1, 1, 'K', 'E', 'resistant'))
+        conn.execute('UPDATE feature SET has_rules = 1 WHERE id IN (1, 2)')
         conn.commit()
         conn.close()
 

@@ -71,6 +71,8 @@ def project_db(tmp_path: Path) -> Path:
         'VALUES (?, ?, ?, ?, ?, ?)',
         (3, 1, 2, 'A', 'V', 'resistant'),
     )
+    # Mirror the import contract: inserting a rule flags the feature.
+    conn.execute('UPDATE feature SET has_rules = 1 WHERE id IN (1, 3)')
     conn.commit()
     conn.close()
     return db_path
@@ -130,14 +132,14 @@ class TestCigarToCoordinateMap:
 # ──────────────────────────────────────────────────────────────────────
 
 # ──────────────────────────────────────────────────────────────────────
-# DB: load_features (with_rules filter)
+# DB: load_features (rules-only contract)
 # ──────────────────────────────────────────────────────────────────────
 
 class TestLoadFeaturesWithRules:
     def test_returns_only_features_with_rules(self, project_db: Path) -> None:
         from respro.db.schema import open_project_db
         conn = open_project_db(project_db)
-        features = load_features(conn, reference_id=1, with_rules=True)
+        features = load_features(conn, reference_id=1)
         conn.close()
         names = {g.name for g in features}
         assert 'gag' in names
@@ -146,7 +148,7 @@ class TestLoadFeaturesWithRules:
     def test_without_reference_filter_loads_all_rule_features(self, project_db: Path) -> None:
         from respro.db.schema import open_project_db
         conn = open_project_db(project_db)
-        features = load_features(conn, with_rules=True)
+        features = load_features(conn)
         conn.close()
         names = {g.name for g in features}
         assert names == {'gag', 'rt'}

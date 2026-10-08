@@ -301,6 +301,12 @@ class VariantCall:
     reference (the VCF CHROM/POS/REF/ALT as parsed, before remap to internal
     coordinates). They are populated by the VCF remap path and left empty for
     FASTA-emitted variants (no user reference is supplied in FASTA mode).
+
+    ``query_codon_feature_id`` is the id of the feature whose alignment frame
+    produced ``query_ref_codon`` (0 when unset, e.g. legacy callers). A query
+    codon is only trusted by annotation when the annotating feature has this
+    id — a codon extracted from an overlapping second feature's frame must not
+    leak into another feature's annotation.
     """
 
     chrom: str
@@ -311,6 +317,7 @@ class VariantCall:
     depth: int = 0
     filter_status: str = 'PASS'
     query_ref_codon: str = ''
+    query_codon_feature_id: int = 0
     user_chrom: str = ''
     user_pos: int = 0
     user_ref: str = ''

@@ -20,7 +20,6 @@ from rich.panel import Panel
 
 from respro.config.cli_settings import CLI_CONFIG, CliConfig
 from respro.core.annotation import (
-    _suppress_ruleless_overlap_annotations,
     annotate_variants,
     assign_af_bins,
 )
@@ -309,15 +308,6 @@ def assemble_multi_reference_result(
             f'(matched references: {ref_names})'
         )
 
-    # Warn about orphaned (ruleless) references — kept and reported, not an error.
-    for rg in references:
-        if not rg.rule_feature_names:
-            logger.warning(
-                'Matched reference %r has no resistance rules in the project database; '
-                'features will appear in the report without rule hits',
-                rg.reference_name,
-            )
-
     # Annotate per reference: group remapped variants by chrom (== query_name) and
     # annotate each group against only its reference's features.
     variants_by_chrom: dict[str, list[VariantCall]] = {}
@@ -333,7 +323,7 @@ def assemble_multi_reference_result(
             bam_cooccurrence=bam_ctx, cfg=cfg,
         ))
 
-    # Rule suppression and matching must run once per DISTINCT reference, not once per
+    # Rule matching must run once per DISTINCT reference, not once per
     # ReferenceGroup. In the targeted-sequencing case two records align to the same
     # reference and produce two ReferenceGroups carrying the same rules; running match_rules
     # twice against the shared annotations list would append each ResistanceRule twice
@@ -348,14 +338,6 @@ def assemble_multi_reference_result(
     # A single reference_id may span several chroms in the targeted case, so the scope for a
     # reference_id is the union of its ReferenceGroups' query_names. The matchers mutate the
     # shared annotation objects in place, so filtering the passed list is sufficient.
-    # _suppress_ruleless_overlap_annotations groups by (chrom, pos, ref, alt), so annotations
-    # from different references (different chroms) never share a locus; it is safe to run on
-    # the full list and is idempotent under the reference_id dedup. The ``features`` argument
-    # enables feature-overlap suppression: a ruleless feature that overlaps a ruled feature on
-    # the same reference is dropped entirely, even when its variants sit at loci no ruled
-    # feature shares (the UL23/UL24 leak). Overlap is scoped per reference_id inside the
-    # helper, matching the per-reference dedup here, and the locus grouping uses chrom so
-    # cross-reference annotations never collide.
     chroms_by_reference_id: dict[int, set[str]] = {}
     for rg in references:
         chroms_by_reference_id.setdefault(rg.reference_id, set()).add(rg.query_name)
@@ -365,10 +347,6 @@ def assemble_multi_reference_result(
         if rg.reference_id in seen_reference_ids:
             continue
         seen_reference_ids.add(rg.reference_id)
-        annotations = _suppress_ruleless_overlap_annotations(
-            annotations, rg.rule_feature_names,
-            features=rg.features, scope_chroms=chroms_by_reference_id[rg.reference_id],
-        )
         ref_chroms = chroms_by_reference_id[rg.reference_id]
         ref_annotations = [a for a in annotations if a.variant.chrom in ref_chroms]
         if ref_annotations:
@@ -524,9 +502,7 @@ def _finalize_and_export(
     :param extra_export_formats: optional additional output formats ('json', 'pdf')
     :return: (ProfilingResult, export path dict)
     """
-    annotations = _suppress_ruleless_overlap_annotations(
-        ctx.annotations, ctx.rule_feature_names, features=ctx.features,
-    )
+    annotations = ctx.annotations
     annotations = match_rules(annotations, ctx.rules)
     formula_hits = match_formula_rules(
         annotations,

@@ -553,9 +553,19 @@ def _insert_prepared_atomic_rules(
                 pub_cache,
                 publication_lookup_failures,
             )
+        _mark_feature_has_rules(conn, prepared.feature_id)
         count += 1
 
     return count, skipped_duplicates, skipped_duplicates_detail
+
+
+def _mark_feature_has_rules(conn: sqlite3.Connection, feature_id: int) -> None:
+    """Flag a feature as rule-backed within the caller's transaction.
+
+    Called inside the same transaction as the rule insert so a rollback never
+    leaves a flagged feature without its rule.
+    """
+    conn.execute('UPDATE feature SET has_rules = 1 WHERE id = ?', (feature_id,))
 
 
 def load_formula_rules(
@@ -742,6 +752,14 @@ def load_formula_rules(
                 'INSERT INTO resistance_formula_rule_member (formula_rule_id, rule_id) VALUES (?, ?)',
                 (formula_rule_id, rule_ids_by_external_id[ref_id]),
             )
+            # Formula member rules reference features too — the member rule's
+            # feature becomes rule-backed when the formula rule is inserted.
+            member_feature_id = conn.execute(
+                'SELECT feature_id FROM resistance_rule WHERE id = ?',
+                (rule_ids_by_external_id[ref_id],),
+            ).fetchone()
+            if member_feature_id is not None:
+                _mark_feature_has_rules(conn, int(member_feature_id['feature_id']))
 
         raw_publication = _get_value(row, 'publication')
         if raw_publication:
