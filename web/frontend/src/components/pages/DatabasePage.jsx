@@ -1,14 +1,526 @@
-import { DatabaseTab } from '../tabs/DatabaseTab';
+import { useEffect, useMemo, useState } from 'react';
+
+import infoIconSrc from '../../assets/info.svg';
+import { isPopulated, groupDrugThresholds, orderedThresholdLabels } from '../../utils';
+import { buildDatabasePlots } from '../database-plots/buildDatabasePlots';
+import { DatabasePieSummaryRow } from '../database-plots/DatabasePieSummaryTile';
+import { DatabasePositionPlot } from '../database-plots/DatabasePositionPlot';
+import { DatabaseDrugDistributionPlot } from '../database-plots/DatabaseDrugDistributionPlot';
+
+function _renderPmidLinks(value) {
+  const pmidText = String(value);
+  const pmids = Array.from(new Set(pmidText.match(/\d+/g) || []));
+  if (pmids.length === 0) {
+    return pmidText;
+  }
+  return (
+    <>
+      {pmids.map((pmid, index) => (
+        <span key={pmid}>
+          {index > 0 ? ', ' : ''}
+          <a
+            href={`https://pubmed.ncbi.nlm.nih.gov/${pmid}/`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            PMID:{pmid}
+          </a>
+        </span>
+      ))}
+    </>
+  );
+}
+
+function _renderDatabaseMetaValue(entry) {
+  const valueText = String(entry.value).trim();
+  if (entry.key === 'website') {
+    return (
+      <a href={valueText} target="_blank" rel="noreferrer">{valueText}</a>
+    );
+  }
+  if (entry.key === 'publication_doi') {
+    const doi = valueText.replace(/^https?:\/\/doi\.org\//i, '');
+    return (
+      <a href={`https://doi.org/${doi}`} target="_blank" rel="noreferrer">
+        {valueText}
+      </a>
+    );
+  }
+  if (entry.key === 'publication_pmid') {
+    return _renderPmidLinks(valueText);
+  }
+  if (entry.key === 'contact' && valueText.includes('@') && !valueText.includes('mailto:')) {
+    return (
+      <a href={`mailto:${valueText}`}>{valueText}</a>
+    );
+  }
+  return entry.value;
+}
+
+function _groupEffectRules(rules) {
+  if (!Array.isArray(rules) || rules.length === 0) {
+    return [];
+  }
+
+  const grouped = new Map();
+  for (const rule of rules) {
+    const feature = String(rule.feature || '').trim();
+    const reference = String(rule.reference || '').trim();
+    const drug = String(rule.drug || '').trim();
+    const effects = Array.isArray(rule.effect) ? rule.effect.map((e) => String(e).trim()).filter(Boolean) : [];
+    const key = `${feature}|||${reference}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, { feature, reference, effects: new Set(), drugs: new Set() });
+    }
+    for (const eff of effects) {
+      grouped.get(key).effects.add(eff);
+    }
+    if (drug) {
+      grouped.get(key).drugs.add(drug);
+    }
+  }
+
+  return [...grouped.values()]
+    .map((row) => ({
+      feature: row.feature,
+      reference: row.reference,
+      effects: [...row.effects].sort((a, b) => a.localeCompare(b)),
+      drugs: [...row.drugs].sort((a, b) => a.localeCompare(b)),
+    }))
+    .sort((a, b) => {
+      const featureOrder = a.feature.localeCompare(b.feature);
+      if (featureOrder !== 0) {
+        return featureOrder;
+      }
+      return a.reference.localeCompare(b.reference);
+    });
+}
+
+/**
+ * Render a single threshold value as a table cell. Returns an empty string when
+ * the key is absent so each configured label gets its own column instead of
+ * being joined with `;` in one cell.
+ */
+function _thresholdCell(thresholds, key) {
+  if (!thresholds || typeof thresholds !== 'object') {
+    return '';
+  }
+  const value = thresholds[key];
+  return value === undefined || value === null ? '' : String(value);
+}
+
+/**
+ * Title-case a phenotype label for use as a column header.
+ */
+function _titleLabel(label) {
+  return String(label || '').trim()
+    ? String(label).replace(/\b\w/g, (c) => c.toUpperCase())
+    : '';
+}
+
+/**
+ * Collect the ordered set of threshold labels across a list of threshold dicts.
+ *
+ * Each config's own labels are ordered by severity rank (weakest → strongest)
+ * via :func:`orderedThresholdLabels`; labels seen in later configs that were
+ * absent from earlier ones are appended in rank order. This produces a stable
+ * superset of columns for multi-method tables where methods may declare
+ * different tiers.
+ *
+ * @param {Object[]} thresholdDicts - list of thresholds objects
+ * @returns {string[]} ordered, de-duplicated label keys
+ */
+function _collectThresholdLabels(thresholdDicts) {
+  const seen = new Set();
+  const ordered = [];
+  for (const thresholds of thresholdDicts) {
+    if (!thresholds || typeof thresholds !== 'object') {
+      continue;
+    }
+    for (const label of orderedThresholdLabels(thresholds)) {
+      if (!seen.has(label)) {
+        seen.add(label);
+        ordered.push(label);
+      }
+    }
+  }
+  return ordered;
+}
+
+/**
+ * Render the per-drug override table for `drug_interpretation`. Each row shows
+ * the reference, the collapsed drug set, and one column per configured
+ * threshold label (ordered weakest → strongest by severity rank).
+ */
+function _renderDrugThresholdsOverrides(drugThresholds, label) {
+  const grouped = groupDrugThresholds(drugThresholds);
+  if (grouped.length === 0) {
+    return null;
+  }
+  const labels = _collectThresholdLabels(grouped.map((row) => row.thresholds));
+  return (
+    <div className="database-meta-row database-meta-row-table">
+      <span className="database-meta-label">{label}</span>
+      <span className="database-meta-value">
+        <table className="database-algorithm-table">
+          <thead>
+            <tr>
+              <th>Reference</th>
+              <th>Drugs</th>
+              {labels.map((lbl) => (
+                <th key={lbl}>{_titleLabel(lbl)}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {grouped.map((row, idx) => (
+              <tr key={`${row.reference}-${row.drugs.join(',')}-${idx}`}>
+                <td>{row.reference}</td>
+                <td>{row.drugs.join(', ')}</td>
+                {labels.map((lbl) => (
+                  <td key={lbl}>{_thresholdCell(row.thresholds, lbl)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </span>
+    </div>
+  );
+}
+
+function _renderDatabaseAlgorithms(algorithms) {
+  if (!algorithms) return null;
+  const effectAsResistant = algorithms.effect_as_resistant;
+  const drugInterp = algorithms.drug_interpretation;
+  const groupedEffectRules = _groupEffectRules(effectAsResistant?.rules);
+  if (!effectAsResistant && !drugInterp) return null;
+
+  // Collect the superset of threshold labels across all drug_interpretation
+  // methods, ordered weakest → strongest by severity rank. This drives the
+  // dynamic column headers so multi-tier vocabularies (e.g. 5-tier HIV scores)
+  // display every configured breakpoint instead of only intermediate/resistant.
+  const labels = drugInterp
+    ? _collectThresholdLabels(drugInterp.map((entry) => entry.thresholds))
+    : [];
+
+  return (
+    <section className="database-meta-panel database-algorithms-panel" aria-label="Configured algorithms">
+      <div className="database-meta-row database-meta-row-heading">
+        <span className="database-meta-label database-meta-section-heading">
+          <span className="database-meta-section-heading-text">Supplied Interpretation Algorithms</span>
+          <button
+            type="button"
+            className="input-info-btn"
+            aria-label="Supplied interpretation algorithms info"
+            title="These settings are supplied by the active database. See the About section for algorithm details and interpretation behavior."
+          >
+            <img className="input-info-icon" src={infoIconSrc} alt="" aria-hidden="true" />
+          </button>
+        </span>
+      </div>
+      {drugInterp && drugInterp.length > 0 ? (
+        <>
+          <div className="database-meta-row database-meta-row-table">
+            <span className="database-meta-label">drug_interpretation</span>
+            <span className="database-meta-value">
+              <table className="database-algorithm-table">
+                <thead>
+                  <tr>
+                    <th>Method</th>
+                    {labels.map((lbl) => (
+                      <th key={lbl}>{_titleLabel(lbl)}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {drugInterp.map((entry, idx) => (
+                    <tr key={entry.method || idx}>
+                      <td>{String(entry.method || '').trim() || 'Not configured'}</td>
+                      {labels.map((lbl) => (
+                        <td key={lbl}>{_thresholdCell(entry.thresholds, lbl)}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </span>
+          </div>
+          {drugInterp.map((entry, idx) =>
+            entry.drug_thresholds
+              ? _renderDrugThresholdsOverrides(
+                  entry.drug_thresholds,
+                  `drug_interpretation overrides (${String(entry.method || '').trim() || idx})`,
+                )
+              : null,
+          )}
+        </>
+      ) : null}
+      {groupedEffectRules.length > 0 ? (
+        <div className="database-meta-row database-meta-row-table">
+          <span className="database-meta-label">effect_as_resistant</span>
+          <span className="database-meta-value">
+            <table className="database-algorithm-table">
+              <thead>
+                <tr>
+                  <th>Feature</th>
+                  <th>Effects</th>
+                  <th>Reference</th>
+                  <th>Drugs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groupedEffectRules.map((rule) => (
+                  <tr key={`${rule.feature}-${rule.reference}`}>
+                    <td>{rule.feature}</td>
+                    <td>{rule.effects.join(', ')}</td>
+                    <td>{rule.reference}</td>
+                    <td>{rule.drugs.join(', ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </span>
+        </div>
+      ) : null}
+    </section>
+  );
+}
 
 export function DatabasePage({ logic }) {
+  const {
+    rules,
+    formulaRules,
+    mutationPlotMeta,
+    selectedDatabase,
+  } = logic;
+  // These controls only affect database charts, not mutation browsing or profiling.
+  const [requestedPhenotypeMode, setRequestedPhenotypeMode] = useState('auto');
+  const [requestedBinSize, setRequestedBinSize] = useState(10);
+
+  const {
+    summaryTile,
+    ic50Sections,
+    detailSections,
+    phenotypeMode,
+    binSize,
+  } = useMemo(
+    () => buildDatabasePlots(
+      rules,
+      formulaRules,
+      mutationPlotMeta,
+      requestedPhenotypeMode,
+      requestedBinSize,
+    ),
+    [
+      rules,
+      formulaRules,
+      mutationPlotMeta,
+      requestedPhenotypeMode,
+      requestedBinSize,
+    ]
+  );
+
+  const activePhenotypeMode = phenotypeMode.activeMode;
+
+  const databaseInfoEntries = useMemo(() => {
+    if (!selectedDatabase) {
+      return [];
+    }
+
+    const metadata = selectedDatabase.metadata || {};
+    const entries = [
+      { key: 'display_name', label: 'Database name', value: selectedDatabase.display_name },
+      { key: 'uuid', label: 'UUID', value: selectedDatabase.uuid },
+      { key: 'created_at', label: 'Created at', value: selectedDatabase.created_at },
+      { key: 'schema_version', label: 'Schema version', value: selectedDatabase.schema_version },
+      { key: 'maintainers', label: 'Maintainers', value: metadata.maintainers },
+      { key: 'contact', label: 'Contact', value: metadata.contact },
+      { key: 'publication_pmid', label: 'Publication PMID', value: metadata.publication_pmid },
+      { key: 'publication_doi', label: 'Publication DOI', value: metadata.publication_doi },
+      { key: 'website', label: 'Website', value: metadata.website },
+      { key: 'description', label: 'Description', value: metadata.description },
+      { key: 'maintainer_update', label: 'Maintainer update', value: metadata.maintainer_update },
+      { key: 'license', label: 'License', value: metadata.license },
+    ];
+
+    return entries.filter((entry) => isPopulated(entry.value));
+  }, [selectedDatabase]);
+
+  // Identity-first metadata layout: name + schema chip + description form the
+  // header, people/links sit in a spec-sheet grid, and provenance (UUID,
+  // timestamps) is demoted to one muted footer line.
+  const databaseMeta = useMemo(() => {
+    const byKey = new Map(databaseInfoEntries.map((entry) => [entry.key, entry]));
+    const pick = (key) => byKey.get(key) || null;
+    return {
+      name: pick('display_name'),
+      schemaVersion: pick('schema_version'),
+      description: pick('description'),
+      specs: ['maintainers', 'contact', 'publication_pmid', 'publication_doi', 'website', 'license']
+        .map(pick)
+        .filter(Boolean),
+      provenance: ['uuid', 'created_at', 'maintainer_update']
+        .map(pick)
+        .filter(Boolean),
+    };
+  }, [databaseInfoEntries]);
+
+  useEffect(() => {
+    // Keep mode selection valid when only one annotation source is available.
+    if (phenotypeMode.hasPhenotype && !phenotypeMode.hasClinical) {
+      setRequestedPhenotypeMode('phenotype');
+      return;
+    }
+    if (phenotypeMode.hasClinical && !phenotypeMode.hasPhenotype) {
+      setRequestedPhenotypeMode('clinical');
+      return;
+    }
+    if (!phenotypeMode.hasClinical && !phenotypeMode.hasPhenotype) {
+      setRequestedPhenotypeMode('auto');
+    }
+  }, [phenotypeMode.hasClinical, phenotypeMode.hasPhenotype]);
+
   return (
-    <div className="page-workspace">
-      <DatabaseTab
-        rules={logic.rules}
-        formulaRules={logic.formulaRules}
-        mutationPlotMeta={logic.mutationPlotMeta}
-        selectedDatabase={logic.selectedDatabase}
-      />
-    </div>
+    <>
+      <article className="card full-width-tile database-plots-tile tab-primary-tile">
+        {selectedDatabase ? (
+          <>
+          {databaseInfoEntries.length > 0 ? (
+            <section className="database-meta-panel" aria-label="Database information">
+              {databaseMeta.name ? (
+                <div className="database-meta-identity">
+                  <div className="database-meta-name-row">
+                    <span className="database-meta-name">{databaseMeta.name.value}</span>
+                    {databaseMeta.schemaVersion ? (
+                      <span
+                        className="database-meta-chip"
+                        title="Database schema version"
+                      >
+                        v{String(databaseMeta.schemaVersion.value).replace(/^v/i, '')}
+                      </span>
+                    ) : null}
+                  </div>
+                  {databaseMeta.description ? (
+                    <p className="database-meta-description">{databaseMeta.description.value}</p>
+                  ) : null}
+                </div>
+              ) : null}
+              {databaseMeta.specs.length > 0 ? (
+                <div className="database-meta-specs">
+                  {databaseMeta.specs.map((entry) => (
+                    <div key={entry.key} className="database-meta-spec">
+                      <span className="database-meta-label">{entry.label}</span>
+                      <span className="database-meta-value">
+                        {_renderDatabaseMetaValue(entry)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {databaseMeta.provenance.length > 0 ? (
+                <div className="database-meta-provenance">
+                  {databaseMeta.provenance.map((entry, index) => (
+                    <span key={entry.key} className="database-meta-provenance-item">
+                      {index > 0 ? <span className="database-meta-provenance-sep" aria-hidden="true">·</span> : null}
+                      <span className="database-meta-value">
+                        <span className="database-meta-provenance-label">{entry.label}</span>{' '}
+                        {_renderDatabaseMetaValue(entry)}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+          {_renderDatabaseAlgorithms(selectedDatabase?.algorithms)}
+          {summaryTile || ic50Sections.length > 0 || detailSections.length > 0 ? (
+            <div className="database-plot-grid">
+              {summaryTile ? <DatabasePieSummaryRow tile={summaryTile} /> : null}
+              {/* Chart controls are global for all gene tiles in this section. */}
+              {ic50Sections.map((section) => (
+                <section
+                  key={section.sectionKey}
+                  className={[
+                    'database-reference-section',
+                    section.layout === 'single-column' ? 'database-reference-section-wide' : '',
+                    section.layout === 'score-grid' ? 'database-reference-section-score' : '',
+                  ].filter(Boolean).join(' ')}
+                >
+                  <div className="database-phenotype-switch-row">
+                    <h3 className="database-section-heading">{section.sectionHeading}</h3>
+                  </div>
+                  <div className="database-reference-plot-grid">
+                    {section.plots.map((plot) => (
+                      <DatabaseDrugDistributionPlot key={plot.key} plot={plot} />
+                    ))}
+                  </div>
+                </section>
+              ))}
+              {detailSections.length > 0 ? (
+                <>
+                  <div className="database-phenotype-switch-row">
+                    <h3 className="database-section-heading">Mutations in each gene</h3>
+                    <div className="database-phenotype-switch-controls">
+                      {phenotypeMode.hasPhenotype && phenotypeMode.hasClinical ? (
+                        <div className="database-phenotype-switch" role="group" aria-label="Position annotation mode">
+                          <button
+                            type="button"
+                            className={activePhenotypeMode === 'phenotype' ? 'active' : ''}
+                            onClick={() => setRequestedPhenotypeMode('phenotype')}
+                          >
+                            Phenotype
+                          </button>
+                          <button
+                            type="button"
+                            className={activePhenotypeMode === 'clinical' ? 'active' : ''}
+                            onClick={() => setRequestedPhenotypeMode('clinical')}
+                          >
+                            Clinical phenotype
+                          </button>
+                        </div>
+                      ) : null}
+                      <label className="database-bin-size-control" aria-label="Amino-acid bin size">
+                        <span>Bin size</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="100"
+                          step="1"
+                          value={binSize}
+                          onChange={(event) => {
+                            const nextValue = Number(event.target.value);
+                            if (Number.isFinite(nextValue)) {
+                              setRequestedBinSize(nextValue);
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  {detailSections.map((section) => (
+                    <section key={section.referenceKey} className="database-reference-section">
+                      <div className="database-reference-heading">
+                        <h3>{section.referenceHeading}</h3>
+                      </div>
+                      <div className="database-reference-plot-grid">
+                        {section.plots.map((plot) => (
+                          <DatabasePositionPlot key={plot.key} plot={plot} />
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </>
+              ) : null}
+            </div>
+          ) : (
+            <p className="status">No plot-friendly data is available for the active database.</p>
+          )}
+          </>
+        ) : (
+          <p className="status">No active database loaded.</p>
+        )}
+      </article>
+    </>
   );
 }

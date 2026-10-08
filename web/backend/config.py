@@ -79,9 +79,6 @@ class WebDefaults:
     upload_max_vcf_line_length: int
     upload_max_vcf_data_lines: int
     upload_bgzf_header_bytes: int
-    upload_allowed_fasta_types: tuple[str, ...]
-    upload_allowed_vcf_types: tuple[str, ...]
-    upload_allowed_bam_types: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -169,9 +166,6 @@ def _load_web_backend_config() -> WebBackendConfig:
         upload_max_vcf_line_length=int(upload_payload['max_vcf_line_length']),
         upload_max_vcf_data_lines=int(upload_payload['max_vcf_data_lines']),
         upload_bgzf_header_bytes=int(upload_payload['bgzf_header_bytes']),
-        upload_allowed_fasta_types=tuple(str(item) for item in upload_payload['allowed_fasta_types']),
-        upload_allowed_vcf_types=tuple(str(item) for item in upload_payload['allowed_vcf_types']),
-        upload_allowed_bam_types=tuple(str(item) for item in upload_payload['allowed_bam_types']),
     )
 
     return WebBackendConfig(env=env, defaults=defaults)

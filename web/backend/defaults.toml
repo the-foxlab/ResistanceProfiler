@@ -82,6 +82,3 @@ max_fasta_line_length = 500000
 max_vcf_line_length = 100000
 max_vcf_data_lines = 2000000
 bgzf_header_bytes = 18
-allowed_fasta_types = ['text/plain', 'application/octet-stream']
-allowed_vcf_types = ['text/plain', 'text/x-vcf', 'application/octet-stream']
-allowed_bam_types = ['application/octet-stream']

@@ -228,11 +228,6 @@ def set_session_cookie_header(session: Session, deployment_mode: str = 'local') 
     return session_cookie_attributes(deployment_mode) % session.token
 
 
-def is_session_known(session_hash: str) -> bool:
-    """Return whether a session hash maps to a known, unexpired session record."""
-    return _session_exists(session_hash)
-
-
 # ─── Ownership registry (uploads / jobs / artifacts) ──────────────────────
 #
 # Every upload, job, and artifact is recorded in Redis with its owning session

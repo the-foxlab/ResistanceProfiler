@@ -21,7 +21,6 @@ import { createContext, useCallback, useEffect, useState } from 'react';
  */
 
 const STORAGE_KEY = 'respro-theme';
-export const THEME_STORAGE_KEY = STORAGE_KEY;
 export const ThemeContext = createContext('light');
 
 function readStoredTheme() {

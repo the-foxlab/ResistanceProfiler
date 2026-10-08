@@ -4,6 +4,7 @@ import faviconSrc from './assets/favicon.svg';
 import packageJson from '../package.json';
 import { FRONTEND_CONFIG } from './config';
 import { API_BASE, buildHeaders, apiGet } from './api';
+import { ROUTES } from './routes';
 import { PROFILE_MODES } from './constants';
 import { useProfileSubmit } from './hooks/useProfileSubmit';
 import { useBatchManager } from './hooks/useBatchManager';
@@ -15,10 +16,6 @@ import { useComparisonManager } from './hooks/useComparisonManager';
 // Web version is a build-time constant from package.json; the CLI version comes
 // from the backend (/api/ui/config) since it reflects the installed respro package.
 const webVersion = packageJson.version;
-
-// Re-export existing public API for backward compatibility
-export { buildApiUrl, formatUserError, apiPostRaw } from './api';
-export { PROFILE_MODES };
 
 export function useDashboardLogic() {
   // Top-level orchestration state not owned by any domain hook.
@@ -334,14 +331,10 @@ export function _resolveContactEmail(contactData) {
   return contactData.email;
 }
 
-const PAGE_TO_PATH = {
-  analyze: '/analysis',
-  results: '/analysis/reports',
-  database: '/databases',
-  mutations: '/databases/mutations',
-  compare: '/databases/compare',
-  about: '/about',
-};
+// Derived from the single route table in routes.js; keyed by page id.
+const PAGE_TO_PATH = Object.fromEntries(
+  ROUTES.map(({ path, page }) => [page, path]),
+);
 
 function _pageForPath(pathname) {
   for (const [page, path] of Object.entries(PAGE_TO_PATH)) {

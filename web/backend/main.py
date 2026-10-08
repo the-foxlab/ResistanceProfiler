@@ -3,17 +3,13 @@
 from __future__ import annotations
 
 import importlib.metadata
-import io
 import logging
 import os
 import re
 import threading
 import time
-import zipfile
-from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
 
 import redis
 import uvicorn
@@ -22,6 +18,7 @@ from fastapi import (
     HTTPException,
     Request,
 )
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -70,9 +67,6 @@ from web.backend.startup_config import (
 logger = logging.getLogger(__name__)
 _SAMPLE_QUOTA_LOCK = threading.Lock()
 _SAMPLE_QUOTA_COUNTER: dict[tuple[str, int], int] = {}
-_WEB_TIMESTAMP_TOKEN = re.compile(
-    r'\.(\d{20})(?=\.(?:report\.html|report\.pdf|results\.json|results\.tsv)$)'
-)
 
 
 def _is_allowed_artifact_path(artifact_path: Path) -> bool:
@@ -275,135 +269,10 @@ def _build_spa_fallback_app(frontend_dist: Path) -> FastAPI:
     return fallback
 
 
-def _build_artifact_bundle(
-    artifact_paths: list[str],
-    results_dir: Path,
-    is_allowed_artifact_path: Callable[[Path], bool],
-) -> bytes:
-    """Pack validated result artifacts into one zip archive."""
-    buffer = io.BytesIO()
-    used_names: set[str] = set()
-
-    with zipfile.ZipFile(buffer, mode='w', compression=zipfile.ZIP_DEFLATED) as archive:
-        for raw_path in artifact_paths:
-            artifact_path = Path(raw_path).expanduser().resolve()
-            if not is_path_within_allowed_roots(artifact_path, (results_dir,)):
-                raise HTTPException(status_code=400, detail='Artifact path is outside allowed results directory.')
-            if not is_allowed_artifact_path(artifact_path):
-                raise HTTPException(
-                    status_code=400,
-                    detail='Unsupported artifact type. Allowed: .report.pdf, .results.json, .report.html, .results.tsv.',
-                )
-            if not artifact_path.is_file():
-                raise HTTPException(status_code=404, detail='Artifact not found.')
-
-            archive.write(
-                artifact_path,
-                arcname=_deduplicate_archive_name(_derive_download_filename(artifact_path), used_names),
-            )
-
-    return buffer.getvalue()
-
-
-def _deduplicate_archive_name(file_name: str, used_names: set[str]) -> str:
-    """Keep archive member names unique while preserving readable basenames."""
-    if file_name not in used_names:
-        used_names.add(file_name)
-        return file_name
-
-    path = Path(file_name)
-    stem = path.stem
-    suffix = ''.join(path.suffixes)
-    counter = 1
-    while True:
-        candidate = f'{stem}_{counter}{suffix}'
-        if candidate not in used_names:
-            used_names.add(candidate)
-            return candidate
-        counter += 1
-
-
-def _resolve_batch_input_display_names(
-    *,
-    input_paths: list[str],
-    input_display_names: list[str] | None,
-    path_label: str,
-) -> list[str]:
-    """Resolve batch input display names, defaulting to uploaded file basenames."""
-    if input_display_names is None:
-        return [Path(path).name for path in input_paths]
-    if len(input_display_names) != len(input_paths):
-        raise HTTPException(
-            status_code=422,
-            detail=f'{path_label} and input_display_names must have the same length.',
-        )
-    return [Path(name).name for name in input_display_names]
-
-
-def _validate_batch_paths(
-    *,
-    input_paths: list[str],
-    sample_names: list[str],
-    allowed_roots: tuple[Path, ...],
-    path_kind: Literal['VCF', 'FASTA'],
-) -> list[tuple[Path, str]]:
-    """Resolve and validate per-sample input paths for batch profiling routes."""
-    validated_inputs: list[tuple[Path, str]] = []
-    for input_path_str, sample_name in zip(input_paths, sample_names):
-        input_path = Path(input_path_str).expanduser().resolve()
-        if not is_path_within_allowed_roots(input_path, allowed_roots):
-            raise HTTPException(
-                status_code=400,
-                detail=f'{path_kind} path for sample {sample_name!r} is outside allowed upload directory.',
-            )
-        if not input_path.is_file():
-            raise HTTPException(status_code=404, detail=f'{path_kind} file not found for sample {sample_name!r}.')
-        validated_inputs.append((input_path, sample_name))
-    return validated_inputs
-
-
-def _derive_unique_artifact_base_names(input_display_names: list[str]) -> list[str]:
-    """Build deterministic unique artifact base names from display names."""
-    seen_counts: dict[str, int] = {}
-    artifact_base_names: list[str] = []
-    for display_name in input_display_names:
-        base_name = _sanitize_artifact_base_name(display_name)
-        duplicate_count = seen_counts.get(base_name, 0)
-        if duplicate_count == 0:
-            artifact_base_names.append(base_name)
-        else:
-            artifact_base_names.append(f'{base_name}_{duplicate_count}')
-        seen_counts[base_name] = duplicate_count + 1
-    return artifact_base_names
-
-
-def _sanitize_artifact_base_name(input_name: str) -> str:
-    """Normalize one input name to a stable report-artifact base name."""
-    raw_stem = Path(input_name).stem.strip() or 'profile'
-    raw_stem = raw_stem.removesuffix('.results')
-    safe_stem = ''.join(ch if ch.isalnum() or ch in '._-' else '_' for ch in raw_stem) or 'profile'
-    return safe_stem
-
-
-def _derive_download_filename(artifact_path: Path) -> str:
-    """Map internal artifact names to user-facing download names."""
-    file_name = _WEB_TIMESTAMP_TOKEN.sub('', artifact_path.name)
-    if file_name.endswith('.report.html'):
-        return file_name[:-12] + '.html'
-    if file_name.endswith('.report.pdf'):
-        return file_name[:-11] + '.pdf'
-    if file_name.endswith('.results.json'):
-        return file_name[:-13] + '.json'
-    if file_name.endswith('.results.tsv'):
-        return file_name[:-12] + '.tsv'
-    return file_name
-
-
 def _sweep_expired_files(results_dir: Path, uploads_dir: Path, ttl_seconds: int) -> None:
     """
     Delete files in results and uploads dirs that are older than TTL.
     """
-    logger = logging.getLogger(__name__)
     now = time.time()
     total_deleted = 0
 
@@ -844,7 +713,9 @@ def _set_session_cookie_middleware(app: FastAPI, deployment_mode: str) -> None:
     @app.middleware('http')
     async def _session_cookie(request: Request, call_next):  # type: ignore[no-untyped-def]
         cookie_value = request.cookies.get(SESSION_COOKIE_NAME)
-        session = resolve_or_create_session(cookie_value)
+        # resolve_or_create_session performs synchronous Redis I/O; run it in the
+        # threadpool so a slow Redis cannot stall the event loop for every request.
+        session = await run_in_threadpool(resolve_or_create_session, cookie_value)
         request.state.session = session
         response = await call_next(request)
         response.headers['Set-Cookie'] = set_session_cookie_header(session, deployment_mode)

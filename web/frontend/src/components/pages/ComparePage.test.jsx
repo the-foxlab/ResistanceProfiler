@@ -25,7 +25,7 @@ vi.mock('../ComparisonVenn', () => ({
 }));
 
 import { fetchSharedReferences, fetchReferenceAccessions, compareDatabases } from '../../api';
-import { CompareTab } from './CompareTab';
+import { ComparePage } from './ComparePage';
 
 const DATABASES = [
   { id: 'db1', display_name: 'Alpha' },
@@ -107,7 +107,7 @@ async function waitForReady() {
   );
 }
 
-describe('CompareTab selectors', () => {
+describe('ComparePage selectors', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetCompareState();
@@ -117,37 +117,37 @@ describe('CompareTab selectors', () => {
   });
 
   it('renders three database dropdowns', () => {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     expect(screen.getByLabelText('Database 1')).toBeInTheDocument();
     expect(screen.getByLabelText('Database 2')).toBeInTheDocument();
     expect(screen.getByLabelText('Database 3')).toBeInTheDocument();
   });
 
   it('loads reference accessions for all databases on mount', () => {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     expect(fetchReferenceAccessions).toHaveBeenCalledWith(['db1', 'db2', 'db3', 'db4']);
   });
 
   it('offers all databases in the first dropdown', () => {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     expect(dropdownOptions('Database 1')).toEqual(['', 'db1', 'db2', 'db3', 'db4']);
   });
 
   it('restricts the second dropdown to databases sharing a reference', async () => {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     fireEvent.change(screen.getByLabelText('Database 1'), { target: { value: 'db1' } });
     await waitFor(() => expect(dropdownOptions('Database 2')).toEqual(['', 'db2', 'db3']));
   });
 
   it('restricts the third dropdown to databases sharing references with both selections', async () => {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     // db3 shares ACC2 with db1 but nothing with db2 → excluded.
     await waitFor(() => expect(dropdownOptions('Database 3')).toEqual(['']));
   });
 
   it('clears downstream slots when an earlier selection changes', async () => {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     await waitForReady();
     fireEvent.change(screen.getByLabelText('Database 1'), { target: { value: 'db4' } });
@@ -158,7 +158,7 @@ describe('CompareTab selectors', () => {
   });
 
   it('resets the comparison result when the selection changes', async () => {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     await waitForReady();
     fireEvent.click(screen.getByRole('button', { name: /compare/i }));
@@ -168,7 +168,7 @@ describe('CompareTab selectors', () => {
   });
 
   it('fetches shared references when 2 databases are selected', async () => {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     await waitFor(() => expect(fetchSharedReferences).toHaveBeenCalledWith(['db1', 'db2']));
     // Exactly one shared reference auto-selects.
@@ -176,13 +176,13 @@ describe('CompareTab selectors', () => {
   });
 
   it('does not fetch shared references for a single selection', () => {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1']);
     expect(fetchSharedReferences).not.toHaveBeenCalled();
   });
 
   it('shows the reference as ID (Species) in the dropdown', async () => {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     await waitForReady();
     const option = screen.getByRole('option', { name: 'ACC1 (Monkeypox virus)' });
@@ -193,7 +193,7 @@ describe('CompareTab selectors', () => {
   });
 });
 
-describe('CompareTab compare flow', () => {
+describe('ComparePage compare flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetCompareState();
@@ -202,7 +202,7 @@ describe('CompareTab compare flow', () => {
   });
 
   it('calls the compare endpoint and stores the response', async () => {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     await waitForReady();
     fireEvent.click(screen.getByRole('button', { name: /compare/i }));
@@ -216,7 +216,7 @@ describe('CompareTab compare flow', () => {
 
   it('shows an error when the compare request fails', async () => {
     compareDatabases.mockRejectedValue(new Error('accession missing from one database'));
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     await waitForReady();
     fireEvent.click(screen.getByRole('button', { name: /compare/i }));
@@ -224,7 +224,7 @@ describe('CompareTab compare flow', () => {
   });
 });
 
-describe('CompareTab table', () => {
+describe('ComparePage table', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetCompareState();
@@ -233,7 +233,7 @@ describe('CompareTab table', () => {
   });
 
   async function renderCompared() {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     await waitForReady();
     fireEvent.click(screen.getByRole('button', { name: /compare/i }));
@@ -332,7 +332,7 @@ describe('CompareTab table', () => {
   });
 });
 
-describe('CompareTab auto-select bug regression', () => {
+describe('ComparePage auto-select bug regression', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetCompareState();
@@ -342,7 +342,7 @@ describe('CompareTab auto-select bug regression', () => {
   });
 
   it('Compare button is enabled immediately after auto-select of a single shared reference', async () => {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     // Auto-select fires when the shared-references fetch resolves.
     await waitForReady();
@@ -353,7 +353,7 @@ describe('CompareTab auto-select bug regression', () => {
   });
 
   it('auto-selected accession survives without further interaction', async () => {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     await waitForReady();
     // No additional change events; the preloaded reference must be usable.
@@ -369,7 +369,7 @@ describe('CompareTab auto-select bug regression', () => {
       ],
       count: 2,
     });
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     // The select displays the first reference; state must match so Compare works.
     const refSelect = await screen.findByRole('combobox', { name: /shared reference/i });
@@ -381,7 +381,7 @@ describe('CompareTab auto-select bug regression', () => {
   });
 });
 
-describe('CompareTab table search', () => {
+describe('ComparePage table search', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetCompareState();
@@ -391,7 +391,7 @@ describe('CompareTab table search', () => {
   });
 
   async function renderCompared() {
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     await waitForReady();
     fireEvent.click(screen.getByRole('button', { name: /compare/i }));
@@ -482,7 +482,7 @@ describe('CompareTab table search', () => {
   });
 
   it('persists the search term across remounts with the result', async () => {
-    const { unmount } = render(<CompareTab databases={DATABASES} />);
+    const { unmount } = render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     await waitForReady();
     fireEvent.click(screen.getByRole('button', { name: /compare/i }));
@@ -490,14 +490,14 @@ describe('CompareTab table search', () => {
     fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: 'UL24' } });
     unmount();
 
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     expect(screen.getByPlaceholderText(/search/i)).toHaveValue('UL24');
     expect(screen.getByText('UL24')).toBeInTheDocument();
     expect(screen.queryByText('UL23')).not.toBeInTheDocument();
   });
 });
 
-describe('CompareTab session persistence', () => {
+describe('ComparePage session persistence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetCompareState();
@@ -507,14 +507,14 @@ describe('CompareTab session persistence', () => {
   });
 
   it('restores the selection and result when the tab remounts', async () => {
-    const { unmount } = render(<CompareTab databases={DATABASES} />);
+    const { unmount } = render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     await waitForReady();
     fireEvent.click(screen.getByRole('button', { name: /compare/i }));
     await screen.findByTestId('venn-stub');
     unmount();
 
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     // Selection, reference and result are restored without re-fetch/re-run.
     expect(screen.getByLabelText('Database 1')).toHaveValue('db1');
     expect(screen.getByLabelText('Database 2')).toHaveValue('db2');
@@ -524,13 +524,13 @@ describe('CompareTab session persistence', () => {
   });
 
   it('does not refetch shared references on remount when state was persisted', async () => {
-    const { unmount } = render(<CompareTab databases={DATABASES} />);
+    const { unmount } = render(<ComparePage logic={{ databases: DATABASES }} />);
     selectDatabases(['db1', 'db2']);
     await waitForReady();
     unmount();
 
     fetchSharedReferences.mockClear();
-    render(<CompareTab databases={DATABASES} />);
+    render(<ComparePage logic={{ databases: DATABASES }} />);
     expect(screen.getByLabelText('Database 1')).toHaveValue('db1');
     expect(fetchSharedReferences).not.toHaveBeenCalled();
   });

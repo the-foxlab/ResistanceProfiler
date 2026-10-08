@@ -15,8 +15,6 @@ button:disabled.analyze-primary {
   min-width: 118px;
 }
 
-/* Top-bar help entry: opens the guided tour from any route. */
-
 /* The Analyze action closes the form: right-aligned so the eye travels
    down the input bands and lands on the button. */
 .profile-analyze-row {

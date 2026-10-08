@@ -1,10 +1,7 @@
 .about-tile {
-  min-height: 0;
-}
-
-.about-tile {
   width: 100%;
   min-width: 0;
+  min-height: 0;
   margin: 0;
   display: grid;
   gap: 1.25rem;
@@ -405,7 +402,18 @@
   font-size: 0.84rem;
 }
 
+/* The CLI terminal block keeps a fixed dark palette in both themes (a
+   terminal is always dark); scoped tokens keep the zinc values in one place. */
 .about-cli-grid {
+  --terminal-line: #3f3f46;
+  --terminal-bg: #09090b;
+  --terminal-header-bg: #111113;
+  --terminal-muted: #a1a1aa;
+  --terminal-text: #e4e4e7;
+  --terminal-btn-text: #d4d4d8;
+  --terminal-btn-hover-bg: #27272a;
+  --terminal-prompt: #2dd4bf;
+
   margin-top: 0.85rem;
   display: grid;
   grid-template-columns: 1.5fr minmax(220px, 1fr);
@@ -413,9 +421,9 @@
 }
 
 .about-terminal {
-  border: 1px solid #3f3f46;
+  border: 1px solid var(--terminal-line);
   border-radius: var(--radius-md);
-  background: #09090b;
+  background: var(--terminal-bg);
   overflow: hidden;
 }
 
@@ -424,13 +432,13 @@
   align-items: center;
   justify-content: space-between;
   padding: 0.55rem 0.65rem;
-  border-bottom: 1px solid #3f3f46;
-  background: #111113;
+  border-bottom: 1px solid var(--terminal-line);
+  background: var(--terminal-header-bg);
 }
 
 .about-terminal-header p {
   margin: 0;
-  color: #a1a1aa;
+  color: var(--terminal-muted);
   font-size: 0.75rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -446,22 +454,22 @@
 
 .about-terminal code {
   white-space: pre;
-  color: #e4e4e7;
+  color: var(--terminal-text);
   font-family: var(--font-mono);
   font-size: 0.76rem;
 }
 
 .about-terminal-prompt {
   /* Teal-400 keeps the "live CLI" feel inside the brand palette (the old
-     #4ade80 green was the only foreign accent color in the app). */
-  color: #2dd4bf;
+     green accent was the only foreign accent color in the app). */
+  color: var(--terminal-prompt);
   margin-right: 0.28rem;
 }
 
 .about-copy-btn {
-  border: 1px solid #3f3f46;
+  border: 1px solid var(--terminal-line);
   background: transparent;
-  color: #d4d4d8;
+  color: var(--terminal-btn-text);
   font-size: 0.72rem;
   font-weight: 600;
   border-radius: var(--radius-sm);
@@ -469,7 +477,7 @@
 }
 
 .about-copy-btn:hover {
-  background: #27272a;
+  background: var(--terminal-btn-hover-bg);
 }
 
 .about-cli-side {
@@ -620,13 +628,6 @@
   }
 }
 
-.page-about {
-  width: min(100%, 1320px);
-  min-width: 0;
-  margin: 0 auto;
-  padding: clamp(1rem, 2vw, 1.75rem) 0 2rem;
-}
-
 .about-intro {
   display: grid;
   justify-items: start;
@@ -704,10 +705,6 @@
 }
 
 @media (max-width: 820px) {
-
-  .page-about {
-    width: 100%;
-  }
 
   .about-toc {
     position: static;

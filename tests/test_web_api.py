@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.metadata
 import io
 import json
+import re
 import shutil
 import sqlite3
 import textwrap
@@ -2988,6 +2989,33 @@ class TestRequestFieldBounds:
         )
         assert response.status_code == 422
 
+    def test_profile_fasta_rejects_leading_dash_sample_name(
+        self,
+        client: TestClient,
+    ) -> None:
+        # A sample value starting with '-' could be misparsed as a CLI option
+        # when passed to the respro subprocess argv; reject it at the boundary.
+        response = client.post(
+            '/api/profile/fasta',
+            json={'fasta_id': 'some-id', 'sample': '--verbose'},
+        )
+        assert response.status_code == 422
+
+    def test_batch_profile_vcf_rejects_leading_dash_sample_name(
+        self,
+        client: TestClient,
+    ) -> None:
+        response = client.post(
+            '/api/profile/batch/vcf',
+            json={
+                'vcf_ids': ['some-id'],
+                'sample_names': ['-s'],
+                'reference_id': 'some-id',
+                'db_path': 'x.db',
+            },
+        )
+        assert response.status_code == 422
+
     def test_profile_fasta_rejects_oversized_display_name(
         self,
         client: TestClient,
@@ -3365,3 +3393,85 @@ class TestSpaFallback:
         response = spa_client.get('/assets/app.js')
         assert response.status_code == 200
         assert 'console.log(1)' in response.text
+
+
+class TestNoPathLeakage:
+    """
+    400 responses must not disclose server filesystem paths. The webapp
+    deliberately redacts paths elsewhere (job results, readiness payload);
+    error details follow the same rule: users get a friendly message, never
+    an absolute path from the server's filesystem.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_session_stores(self):
+        reset_memory_stores()
+        yield
+        reset_memory_stores()
+
+    @staticmethod
+    def _assert_no_server_paths(response, allowed_roots: tuple[Path, ...]) -> None:
+        body = response.text
+        for root in allowed_roots:
+            assert str(root) not in body, (
+                f'{response.request.url} leaked server path {root} in detail: {body}'
+            )
+        # Any response containing an absolute-looking path from this server
+        # (e.g. /tmp/... or the repo layout) is a leak.
+        for match in re.findall(r'(?:/[\w.-]+){3,}', body):
+            assert not match.startswith(str(allowed_roots[0]).rsplit('/', 1)[0]), (
+                f'{response.request.url} leaked server path {match!r} in detail: {body}'
+            )
+
+    def test_rules_unknown_database_id_has_no_path(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        response = client.get('/api/rules', params={'database_id': 'does-not-exist.db'})
+        assert response.status_code == 400
+        self._assert_no_server_paths(response, startup_config.allowed_roots)
+
+    def test_rules_empty_database_dir_has_no_path(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        # An empty project-databases directory makes resolve_project_db_path
+        # raise FileNotFoundError; its message must not name the server path.
+        for db_file in startup_config.project_databases_dir.glob('*.db'):
+            db_file.unlink()
+        response = client.get('/api/rules')
+        assert response.status_code == 400
+        self._assert_no_server_paths(response, startup_config.allowed_roots)
+
+    def test_shared_references_unknown_db_has_no_path(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        response = client.get(
+            '/api/databases/shared-references', params={'ids': 'missing.db'},
+        )
+        assert response.status_code == 400
+        self._assert_no_server_paths(response, startup_config.allowed_roots)
+
+    def test_reference_accessions_unknown_db_has_no_path(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        response = client.get(
+            '/api/databases/reference-accessions', params={'ids': 'missing.db'},
+        )
+        assert response.status_code == 400
+        self._assert_no_server_paths(response, startup_config.allowed_roots)
+
+    def test_compare_unknown_db_has_no_path(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        response = client.post(
+            '/api/databases/compare',
+            json={'database_ids': ['missing.db', 'also-missing.db'], 'accession': 'ACC1'},
+        )
+        assert response.status_code == 400
+        self._assert_no_server_paths(response, startup_config.allowed_roots)
+
+    def test_report_unknown_artifact_has_no_path(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        response = client.get('/api/report', params={'artifact_id': 'no-such-id'})
+        assert response.status_code in (400, 404)
+        self._assert_no_server_paths(response, startup_config.allowed_roots)

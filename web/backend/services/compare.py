@@ -260,13 +260,13 @@ def _validate_paths(
     for path in result_json_paths:
         resolved = path.expanduser().resolve()
         if not str(resolved).endswith('.results.json'):
-            raise ValueError(f'Path must end with .results.json: {resolved}')
+            raise ValueError('Path must end with .results.json.')
         if not is_path_within_allowed_roots(resolved, (results_dir,)):
-            raise ValueError(f'Path is outside allowed results directory: {resolved}')
+            raise ValueError('Path is outside allowed results directory.')
         if not is_allowed_artifact_path(resolved):
-            raise ValueError(f'Unsupported artifact type: {resolved}')
+            raise ValueError('Unsupported artifact type. Allowed: .results.json.')
         if not resolved.is_file():
-            raise ValueError(f'Result file not found: {resolved}')
+            raise ValueError('Result file not found.')
 
 
 def _load_all_samples(result_json_paths: list[Path]) -> list[tuple[Path, dict, dict]]:
@@ -288,7 +288,7 @@ def _load_full_payload(results_json_path: Path) -> dict:
     """Load the full result JSON object from disk."""
     path = Path(results_json_path)
     if not path.is_file():
-        raise ValueError(f'Expected report artifact not found: {path}')
+        raise ValueError('Expected report artifact not found.')
     try:
         payload = json.loads(path.read_text(encoding='utf-8'))
     except json.JSONDecodeError as exc:

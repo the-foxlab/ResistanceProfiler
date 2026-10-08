@@ -24,11 +24,6 @@ export const ROUTE_META = {
 
 const DEFAULT_TITLE = 'ResPro';
 
-export function resolveRouteTitle(pathname) {
-  const meta = ROUTE_META[pathname];
-  return meta ? meta.title : DEFAULT_TITLE;
-}
-
 export function resolveRouteMeta(pathname) {
   return ROUTE_META[pathname] || { title: DEFAULT_TITLE, showsSidebar: false, showsDatabaseSelector: false, breadcrumb: [] };
 }

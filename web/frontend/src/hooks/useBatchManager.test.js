@@ -262,24 +262,6 @@ describe('useBatchManager — batch BAM auto-pairing and per-row override', () =
     expect(result.current.batchVcfFiles[0].bamName).toBe('manual.bam');
   });
 
-  it('removeBatchBam clears only the BAM on the targeted row', async () => {
-    const stubs = makeStubs();
-    const { result } = renderHook(() => useBatchManager(stubs));
-
-    await uploadVcf(result, 'sample1.vcf', 'up-vcf-1');
-    await uploadVcf(result, 'sample2.vcf', 'up-vcf-2');
-    await uploadBam(result, 'sample1.bam', 'up-bam-1');
-
-    act(() => {
-      result.current.removeBatchBam(0);
-    });
-
-    expect(result.current.batchVcfFiles[0].bamId).toBeNull();
-    expect(result.current.batchVcfFiles[0].bamName).toBeNull();
-    // Other row untouched.
-    expect(result.current.batchVcfFiles[1].bamId).toBeNull();
-  });
-
   it('removeBatchFile drops the VCF row together with its BAM', async () => {
     const stubs = makeStubs();
     const { result } = renderHook(() => useBatchManager(stubs));

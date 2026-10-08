@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, cleanup, fireEvent, screen, act } from '@testing-library/react';
 
-import { AnalyzeTab } from './AnalyzeTab';
+import { AnalyzePage } from './AnalyzePage';
+import { ThemeContext } from '../../hooks/useTheme';
 
-// AnalyzeTab destructures a large prop surface, but only a handful are read
-// on the render path exercised here (the report iframe + plot modal). The
+// AnalyzePage reads a large logic surface, but only a handful of fields are
+// read on the render path exercised here (the report iframe + plot modal). The
 // rest are passed through to event handlers and never invoked during these
 // tests, so no-op stubs suffice.
-function minimalProps(overrides = {}) {
+function minimalLogic(overrides = {}) {
   return {
     selectedDatabase: null,
     vcfInput: '',
@@ -69,22 +70,21 @@ function minimalProps(overrides = {}) {
     downloadAllBatchArtifacts: () => {},
     resetBatch: () => {},
     inlineReportPath: '',
-    isAnalyzeScopeLocked: false,
     PROFILE_MODES: [],
     ...overrides,
   };
 }
 
-describe('AnalyzeTab compact controls', () => {
+describe('AnalyzePage compact controls', () => {
   afterEach(() => {
     cleanup();
   });
 
   it('hides the report toolbar until a report is available', () => {
-    const { rerender } = render(<AnalyzeTab {...minimalProps()} />);
+    const { rerender } = render(<AnalyzePage logic={minimalLogic()} />);
     expect(document.querySelector('.analyze-report-actions')).not.toBeInTheDocument();
 
-    rerender(<AnalyzeTab {...minimalProps({
+    rerender(<AnalyzePage logic={minimalLogic({
       reportOptions: [{ path: 'report.html', label: 'sample (reference)', pdfPath: 'report.pdf' }],
       selectedProfileReportPath: 'report.html',
     })} />);
@@ -93,7 +93,7 @@ describe('AnalyzeTab compact controls', () => {
   });
 
   it('keeps VCF cutoffs available in a collapsed Advanced options disclosure', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       activeProfileMode: 'vcf',
       vcfInput: { sample: 'sample', min_af: 0.01, min_depth: 10, vcf_id: '', reference_id: '' },
     })} />);
@@ -119,13 +119,13 @@ function dispatchReportMessage(type, payload, { origin, source } = {}) {
   });
 }
 
-describe('AnalyzeTab embedded report messaging', () => {
+describe('AnalyzePage embedded report messaging', () => {
   afterEach(() => {
     cleanup();
   });
 
   it('ignores respro:open-plot messages from an unexpected origin', () => {
-    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    render(<AnalyzePage logic={minimalLogic({ inlineReportPath: 'r1' })} />);
     // Report origin is http://127.0.0.1:8000 (from buildReportUrl); post
     // from a foreign origin.
     dispatchReportMessage('respro:open-plot', { src: 'blob:evil', alt: 'x' }, {
@@ -135,7 +135,7 @@ describe('AnalyzeTab embedded report messaging', () => {
   });
 
   it('opens the hosted plot modal from a same-origin respro:open-plot payload', () => {
-    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    render(<AnalyzePage logic={minimalLogic({ inlineReportPath: 'r1' })} />);
     const frame = document.querySelector('.workspace-frame');
     dispatchReportMessage('respro:open-plot', { src: 'blob:plot', alt: 'Resistance plot' }, {
       source: frame?.contentWindow ?? null,
@@ -148,7 +148,7 @@ describe('AnalyzeTab embedded report messaging', () => {
   });
 
   it('closes the hosted plot modal on Escape', () => {
-    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    render(<AnalyzePage logic={minimalLogic({ inlineReportPath: 'r1' })} />);
     const frame = document.querySelector('.workspace-frame');
     dispatchReportMessage('respro:open-plot', { src: 'blob:plot' }, {
       source: frame?.contentWindow ?? null,
@@ -159,7 +159,7 @@ describe('AnalyzeTab embedded report messaging', () => {
   });
 
   it('applies a respro:report-height payload as the iframe height', () => {
-    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    render(<AnalyzePage logic={minimalLogic({ inlineReportPath: 'r1' })} />);
     const frame = document.querySelector('.workspace-frame');
     dispatchReportMessage('respro:report-height', { height: 1234 }, {
       source: frame?.contentWindow ?? null,
@@ -168,7 +168,7 @@ describe('AnalyzeTab embedded report messaging', () => {
   });
 
   it('ignores respro:report-height from a foreign origin', () => {
-    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    render(<AnalyzePage logic={minimalLogic({ inlineReportPath: 'r1' })} />);
     const frame = document.querySelector('.workspace-frame');
     dispatchReportMessage('respro:report-height', { height: 9999 }, {
       origin: 'https://evil.example',
@@ -178,7 +178,7 @@ describe('AnalyzeTab embedded report messaging', () => {
   });
 
   it('ignores respro:open-structure messages from an unexpected origin', () => {
-    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    render(<AnalyzePage logic={minimalLogic({ inlineReportPath: 'r1' })} />);
     dispatchReportMessage('respro:open-structure', { src: 'blob:evil', title: 'Drug X' }, {
       origin: 'https://evil.example',
     });
@@ -186,7 +186,7 @@ describe('AnalyzeTab embedded report messaging', () => {
   });
 
   it('opens the hosted structure modal from a same-origin respro:open-structure payload', () => {
-    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    render(<AnalyzePage logic={minimalLogic({ inlineReportPath: 'r1' })} />);
     const frame = document.querySelector('.workspace-frame');
     dispatchReportMessage('respro:open-structure', { src: 'blob:struct', title: 'Zidovudine' }, {
       source: frame?.contentWindow ?? null,
@@ -199,7 +199,7 @@ describe('AnalyzeTab embedded report messaging', () => {
   });
 
   it('closes the hosted structure modal on Escape', () => {
-    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    render(<AnalyzePage logic={minimalLogic({ inlineReportPath: 'r1' })} />);
     const frame = document.querySelector('.workspace-frame');
     dispatchReportMessage('respro:open-structure', { src: 'blob:struct', title: 'Drug X' }, {
       source: frame?.contentWindow ?? null,
@@ -210,7 +210,7 @@ describe('AnalyzeTab embedded report messaging', () => {
   });
 
   it('ignores respro:open-sequence messages from an unexpected origin', () => {
-    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    render(<AnalyzePage logic={minimalLogic({ inlineReportPath: 'r1' })} />);
     dispatchReportMessage('respro:open-sequence', { title: 'PR', ntSequence: 'ACGT', aaSequence: 'M' }, {
       origin: 'https://evil.example',
     });
@@ -218,7 +218,7 @@ describe('AnalyzeTab embedded report messaging', () => {
   });
 
   it('opens the hosted sequence modal from a same-origin respro:open-sequence payload', () => {
-    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    render(<AnalyzePage logic={minimalLogic({ inlineReportPath: 'r1' })} />);
     const frame = document.querySelector('.workspace-frame');
     dispatchReportMessage('respro:open-sequence', {
       title: 'Protease',
@@ -234,7 +234,7 @@ describe('AnalyzeTab embedded report messaging', () => {
   });
 
   it('switches the hosted sequence modal between DNA and Protein views', () => {
-    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    render(<AnalyzePage logic={minimalLogic({ inlineReportPath: 'r1' })} />);
     const frame = document.querySelector('.workspace-frame');
     dispatchReportMessage('respro:open-sequence', {
       title: 'Protease',
@@ -251,7 +251,7 @@ describe('AnalyzeTab embedded report messaging', () => {
   });
 
   it('closes the hosted sequence modal on Escape', () => {
-    render(<AnalyzeTab {...minimalProps({ inlineReportPath: 'r1' })} />);
+    render(<AnalyzePage logic={minimalLogic({ inlineReportPath: 'r1' })} />);
     const frame = document.querySelector('.workspace-frame');
     dispatchReportMessage('respro:open-sequence', { title: 'PR', ntSequence: 'ACGT', aaSequence: 'M' }, {
       source: frame?.contentWindow ?? null,
@@ -262,7 +262,7 @@ describe('AnalyzeTab embedded report messaging', () => {
   });
 });
 
-describe('AnalyzeTab reportOrigin with relative report URLs', () => {
+describe('AnalyzePage reportOrigin with relative report URLs', () => {
   afterEach(() => {
     cleanup();
   });
@@ -275,11 +275,14 @@ describe('AnalyzeTab reportOrigin with relative report URLs', () => {
   const relativeBuildReportUrl = (path) => `/api/report?artifact_id=${path}`;
 
   it('reposts the resolved theme when the iframe finishes loading', () => {
-    render(<AnalyzeTab {...minimalProps({
-      inlineReportPath: 'r1',
-      buildReportUrl: relativeBuildReportUrl,
-      resolvedTheme: 'dark',
-    })} />);
+    render(
+      <ThemeContext.Provider value="dark">
+        <AnalyzePage logic={minimalLogic({
+          inlineReportPath: 'r1',
+          buildReportUrl: relativeBuildReportUrl,
+        })} />
+      </ThemeContext.Provider>,
+    );
     const frame = document.querySelector('.workspace-frame');
     const postMessage = vi.spyOn(frame.contentWindow, 'postMessage').mockImplementation(() => {});
     const themeMessage = { type: 'respro:report-theme', theme: 'dark' };
@@ -303,7 +306,7 @@ describe('AnalyzeTab reportOrigin with relative report URLs', () => {
   }
 
   it('accepts respro:open-plot when the report URL is relative (same-origin deployment)', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       inlineReportPath: 'r1',
       buildReportUrl: relativeBuildReportUrl,
     })} />);
@@ -319,23 +322,25 @@ describe('AnalyzeTab reportOrigin with relative report URLs', () => {
     // with the old bare new URL(src) that threw and left reportOrigin=''
     // permanently (no later re-render recomputes it), so the popup never
     // opened until the sample was rerun.
-    const props = minimalProps({
+    const singleProps = minimalLogic({
       inlineReportPath: 'r1',
       buildReportUrl: relativeBuildReportUrl,
       batchMode: 'vcf',
+      analyzeSubMode: 'single',
     });
-    const { rerender } = render(<AnalyzeTab {...props} analyzeSubMode="single" />);
+    const batchProps = { ...singleProps, analyzeSubMode: 'batch' };
+    const { rerender } = render(<AnalyzePage logic={singleProps} />);
     // Switch to batch: the report tile (and its iframe) unmounts.
-    rerender(<AnalyzeTab {...props} analyzeSubMode="batch" />);
+    rerender(<AnalyzePage logic={batchProps} />);
     // Switch back to single: the iframe remounts; refs are null during the
     // render that derives reportOrigin.
-    rerender(<AnalyzeTab {...props} analyzeSubMode="single" />);
+    rerender(<AnalyzePage logic={singleProps} />);
     dispatchFromFrame('respro:open-plot', { src: 'blob:plot', alt: 'Resistance plot' });
     expect(screen.getByRole('dialog', { name: /resistance plot/i })).toBeInTheDocument();
   });
 
   it('accepts respro:open-sequence and respro:open-structure with a relative report URL', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       inlineReportPath: 'r1',
       buildReportUrl: relativeBuildReportUrl,
     })} />);
@@ -346,13 +351,13 @@ describe('AnalyzeTab reportOrigin with relative report URLs', () => {
   });
 });
 
-describe('AnalyzeTab submit gating during upload', () => {
+describe('AnalyzePage submit gating during upload', () => {
   afterEach(() => {
     cleanup();
   });
 
   it('disables the single Analyze button while an upload is in flight', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'single',
       activeProfileMode: 'fasta',
       fastaInput: { fasta_id: 'up-1', input_display_name: 'a.fasta' },
@@ -365,7 +370,7 @@ describe('AnalyzeTab submit gating during upload', () => {
   });
 
   it('re-enables the single Analyze button once the upload completes', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'single',
       activeProfileMode: 'fasta',
       fastaInput: { fasta_id: 'up-1', input_display_name: 'a.fasta' },
@@ -378,7 +383,7 @@ describe('AnalyzeTab submit gating during upload', () => {
   });
 
   it('disables the batch Submit button while an upload is in flight', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'batch',
       batchSubmitted: false,
       batchMode: 'fasta',
@@ -393,7 +398,7 @@ describe('AnalyzeTab submit gating during upload', () => {
   });
 
   it('re-enables the batch Submit button once the upload completes', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'batch',
       batchSubmitted: false,
       batchMode: 'fasta',
@@ -408,14 +413,14 @@ describe('AnalyzeTab submit gating during upload', () => {
   });
 });
 
-describe('AnalyzeTab cancel-upload button', () => {
+describe('AnalyzePage cancel-upload button', () => {
   afterEach(() => {
     cleanup();
   });
 
   it('shows a cancel button during a single upload that calls cancelUpload', () => {
     const cancelUpload = vi.fn();
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'single',
       isUploading: true,
       cancelUpload,
@@ -429,7 +434,7 @@ describe('AnalyzeTab cancel-upload button', () => {
   });
 
   it('hides the cancel button when no single upload is in flight', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'single',
       isUploading: false,
     })} />);
@@ -439,7 +444,7 @@ describe('AnalyzeTab cancel-upload button', () => {
 
   it('shows a cancel button during a batch upload that calls cancelBatchUpload', () => {
     const cancelBatchUpload = vi.fn();
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'batch',
       batchSubmitted: false,
       batchMode: 'fasta',
@@ -457,7 +462,7 @@ describe('AnalyzeTab cancel-upload button', () => {
   it('does not call resetBatch when switching to batch mode (preserves uploads)', () => {
     const resetBatch = vi.fn();
     const setAnalyzeSubMode = vi.fn();
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'single',
       setAnalyzeSubMode,
       resetBatch,
@@ -471,13 +476,13 @@ describe('AnalyzeTab cancel-upload button', () => {
   });
 });
 
-describe('AnalyzeTab clear-all button (batch upload overview)', () => {
+describe('AnalyzePage clear-all button (batch upload overview)', () => {
   afterEach(() => {
     cleanup();
   });
 
   it('shows a Clear all button in the pre-submission batch form when files are uploaded', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'batch',
       batchSubmitted: false,
       batchMode: 'fasta',
@@ -489,7 +494,7 @@ describe('AnalyzeTab clear-all button (batch upload overview)', () => {
 
   it('calls resetBatch when Clear all is clicked', () => {
     const resetBatch = vi.fn();
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'batch',
       batchSubmitted: false,
       batchMode: 'fasta',
@@ -502,7 +507,7 @@ describe('AnalyzeTab clear-all button (batch upload overview)', () => {
   });
 
   it('hides the Clear all button when no files are uploaded', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'batch',
       batchSubmitted: false,
       batchMode: 'fasta',
@@ -513,7 +518,7 @@ describe('AnalyzeTab clear-all button (batch upload overview)', () => {
   });
 
   it('hides the Clear all button in single-sample mode', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'single',
     })} />);
 
@@ -521,13 +526,13 @@ describe('AnalyzeTab clear-all button (batch upload overview)', () => {
   });
 });
 
-describe('AnalyzeTab upload progress visibility', () => {
+describe('AnalyzePage upload progress visibility', () => {
   afterEach(() => {
     cleanup();
   });
 
   it('shows the upload progress bar in the batch results view', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'batch',
       batchSubmitted: true,
       batchSamples: [{ job_id: 'j1', sample_name: 's1', status: 'succeeded' }],
@@ -538,7 +543,7 @@ describe('AnalyzeTab upload progress visibility', () => {
   });
 
   it('shows the upload progress bar in the single-sample results view', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'single',
       inlineReportPath: 'reports/r1.html',
       uploadProgress: { percent: 100, fileName: 'a.fasta' },
@@ -548,7 +553,7 @@ describe('AnalyzeTab upload progress visibility', () => {
   });
 
   it('shows the upload progress bar in the single-sample input view', () => {
-    render(<AnalyzeTab {...minimalProps({
+    render(<AnalyzePage logic={minimalLogic({
       analyzeSubMode: 'single',
       uploadProgress: { percent: 0, fileName: '' },
     })} />);

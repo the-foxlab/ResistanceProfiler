@@ -161,8 +161,6 @@ export function useMutationBrowser({ selectedDatabaseId, setStatusError }) {
   const [mutationSortAsc, setMutationSortAsc] = useState(true);
   const [formulaFilter, setFormulaFilter] = useState('');
   const [formulaFilterColumn, setFormulaFilterColumn] = useState('-1');
-  const [mutationColumnKeys, setMutationColumnKeys] = useState([]);
-  const [formulaColumnKeys, setFormulaColumnKeys] = useState([]);
   const [mutationPlotMeta, setMutationPlotMeta] = useState({ references: [], features: [] });
   const [mutationsLoaded, setMutationsLoaded] = useState(false);
   const [rules, setRules] = useState([]);
@@ -170,21 +168,17 @@ export function useMutationBrowser({ selectedDatabaseId, setStatusError }) {
 
   const mutationColumns = useMemo(() => {
     return buildMutationColumns(
-      mutationColumnKeys.length > 0
-        ? mutationColumnKeys
-        : (rules[0] ? Object.keys(rules[0]) : []),
+      rules[0] ? Object.keys(rules[0]) : [],
       mutationPlotMeta
     );
-  }, [mutationColumnKeys, rules, mutationPlotMeta]);
+  }, [rules, mutationPlotMeta]);
 
   const formulaColumns = useMemo(() => {
     return buildFormulaColumns(
-      formulaColumnKeys.length > 0
-        ? formulaColumnKeys
-        : (formulaRules[0] ? Object.keys(formulaRules[0]) : []),
+      formulaRules[0] ? Object.keys(formulaRules[0]) : [],
       mutationPlotMeta
     );
-  }, [formulaColumnKeys, formulaRules, mutationPlotMeta]);
+  }, [formulaRules, mutationPlotMeta]);
 
   const parseValue = (text) => {
     // Sorting prefers numeric comparison when possible, otherwise case-insensitive text.
@@ -282,8 +276,6 @@ export function useMutationBrowser({ selectedDatabaseId, setStatusError }) {
       const plotMeta = payload.data.plot_meta || { references: [], features: [] };
       setRules(items);
       setFormulaRules(formulaItems);
-      setMutationColumnKeys(columns);
-      setFormulaColumnKeys(formulaColumns);
       setMutationPlotMeta(plotMeta);
       setMutationsLoaded(true);
       // Keep status area quiet after background mutation loading to reduce UI noise.
@@ -346,7 +338,6 @@ export function useMutationBrowser({ selectedDatabaseId, setStatusError }) {
     setFormulaFilter,
     formulaFilterColumn,
     setFormulaFilterColumn,
-    mutationColumnKeys,
     mutationPlotMeta,
     mutationsLoaded,
     rules,
@@ -360,8 +351,6 @@ export function useMutationBrowser({ selectedDatabaseId, setStatusError }) {
     loadMutations,
     downloadMutationsAsTsv,
     downloadFormulaRulesAsTsv,
-    setMutationColumnKeys,
-    setFormulaColumnKeys,
     setMutationPlotMeta,
     setMutationsLoaded,
   };

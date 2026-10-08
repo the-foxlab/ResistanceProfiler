@@ -2,19 +2,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 
-import { AboutTab } from './AboutTab';
+import { AboutPage } from './AboutPage';
 
-function renderAbout(props = {}) {
+function renderAbout(logic = {}) {
   return render(
     <MemoryRouter initialEntries={['/about']}>
-      <AboutTab setActiveMode={() => {}} {...props} />
+      <AboutPage logic={logic} />
     </MemoryRouter>,
   );
 }
 
-describe('AboutTab structure', () => {
+describe('AboutPage structure', () => {
   it('no longer renders hero actions (Start analysis / Take a tour moved to Home)', () => {
-    renderAbout({ onStartTour: () => {} });
+    renderAbout();
     expect(screen.queryByRole('button', { name: /start analysis/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /take a tour/i })).toBeNull();
   });
@@ -117,7 +117,7 @@ describe('AboutTab structure', () => {
   });
 });
 
-describe('AboutTab contact email', () => {
+describe('AboutPage contact email', () => {
   // The "Contributing and Contact" card shows a mailto link. When the deployment
   // supplies a contact email via props, that address is used; otherwise the
   // hardcoded maintainer fallback is shown so a contact is always available.

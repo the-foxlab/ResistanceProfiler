@@ -604,11 +604,6 @@
   overflow-y: auto;
 }
 
-.page-workspace {
-  width: 100%;
-  min-width: 0;
-}
-
 .page-not-found {
   display: grid;
   justify-items: start;

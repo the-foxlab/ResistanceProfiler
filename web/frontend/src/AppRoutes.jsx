@@ -1,6 +1,5 @@
-import { Routes, Route, useLocation, Navigate } from 'react-router';
+import { Routes, Route, useLocation } from 'react-router';
 
-import { ROUTES } from './routes';
 import { usePageTitle } from './hooks/usePageTitle';
 import { resolveRouteMeta } from './routes';
 import { HomePage } from './components/pages/HomePage';

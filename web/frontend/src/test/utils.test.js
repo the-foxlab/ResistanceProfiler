@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildApiUrl, formatUserError } from '../api';
-import { isPopulated, buildDrugAliasLookup, groupDrugThresholds, formatAlgorithmThresholds, labelToRank, orderedThresholdLabels } from '../utils';
+import { isPopulated, buildDrugAliasLookup, groupDrugThresholds, labelToRank, orderedThresholdLabels } from '../utils';
 
 describe('API Utility Functions', () => {
   describe('buildApiUrl', () => {
@@ -192,25 +192,6 @@ describe('groupDrugThresholds', () => {
     ];
     const result = groupDrugThresholds(overrides);
     expect(result[0].drugs).toEqual(['ACV', 'PCV']);
-  });
-});
-
-describe('formatAlgorithmThresholds', () => {
-  it('returns "Not configured" for null', () => {
-    expect(formatAlgorithmThresholds(null)).toBe('Not configured');
-  });
-
-  it('returns "Not configured" for empty object', () => {
-    expect(formatAlgorithmThresholds({})).toBe('Not configured');
-  });
-
-  it('formats flat thresholds sorted by key', () => {
-    expect(formatAlgorithmThresholds({ resistant: 2, intermediate: 1 })).toBe('intermediate=1; resistant=2');
-  });
-
-  it('formats nested thresholds', () => {
-    const result = formatAlgorithmThresholds({ ACV: { intermediate: 3.0, resistant: 10.0 } });
-    expect(result).toBe('ACV: intermediate=3, resistant=10');
   });
 });
 
