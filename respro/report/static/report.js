@@ -17,6 +17,9 @@
   }
   if (window.parent !== window) {
     window.addEventListener('message', function (event) {
+      if (event.source !== window.parent || event.origin !== window.location.origin) {
+        return;
+      }
       if (event.data && event.data.type === 'respro:report-theme' && event.data.theme) {
         setTheme(event.data.theme);
       }
