@@ -1,11 +1,20 @@
 import Plotly from 'plotly.js-dist-min';
-import { useRef, useEffect, useState } from 'react';
+import { useContext, useRef, useEffect, useMemo, useState } from 'react';
 
-import { baseLayout, currentTheme } from './shared';
+import { baseLayout, pieColorsForTheme } from './shared';
+import { ThemeContext } from '../../hooks/useTheme';
 
 function SummaryPieCard({ pie }) {
   const containerRef = useRef(null);
   const [plotError, setPlotError] = useState('');
+  const theme = useContext(ThemeContext);
+  const slices = useMemo(() => {
+    const colors = pieColorsForTheme(theme);
+    return pie.slices.map((slice, index) => ({
+      ...slice,
+      color: colors[index % colors.length],
+    }));
+  }, [pie.slices, theme]);
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -22,10 +31,11 @@ function SummaryPieCard({ pie }) {
     try {
       const trace = {
         type: 'pie',
-        labels: pie.slices.map((s) => s.label),
-        values: pie.slices.map((s) => s.count),
+        labels: slices.map((s) => s.label),
+        values: slices.map((s) => s.count),
         marker: {
-          colors: pie.slices.map((s) => s.color),
+          colors: slices.map((s) => s.color),
+          line: { color: theme === 'dark' ? '#1c1c1f' : '#ffffff', width: 2 },
         },
         hole: 0.41,
         hovertemplate: '%{label}: %{value}<extra></extra>',
@@ -46,7 +56,7 @@ function SummaryPieCard({ pie }) {
             xref: 'paper',
             yref: 'paper',
             showarrow: false,
-            font: { size: 22, color: currentTheme() === 'dark' ? '#f4f4f5' : '#18181b', weight: 'bold' },
+            font: { size: 22, color: theme === 'dark' ? '#f4f4f5' : '#18181b', weight: 'bold' },
           },
           {
             text: pie.centerLabel || pie.title,
@@ -55,7 +65,7 @@ function SummaryPieCard({ pie }) {
             xref: 'paper',
             yref: 'paper',
             showarrow: false,
-            font: { size: 11, color: currentTheme() === 'dark' ? '#a1a1aa' : '#71717a' },
+            font: { size: 11, color: theme === 'dark' ? '#d4d4d8' : '#71717a' },
             yshift: 18,
           },
         ],
@@ -75,7 +85,7 @@ function SummaryPieCard({ pie }) {
         Plotly.purge(containerRef.current);
       }
     };
-  }, [pie]);
+  }, [pie, slices, theme]);
 
   // Re-render on window resize (debounced)
   useEffect(() => {
@@ -102,7 +112,7 @@ function SummaryPieCard({ pie }) {
       window.removeEventListener('resize', handleResize);
       clearTimeout(timeoutId);
     };
-  }, [pie]);
+  }, [pie, theme]);
 
   return (
     <section className="database-plot-card database-summary-pie-card">
@@ -115,7 +125,7 @@ function SummaryPieCard({ pie }) {
             <div ref={containerRef} style={{ width: '100%' }} />
           </div>
           <div className="database-pie-legend" aria-label={`${pie.title} legend`}>
-            {pie.slices.map((slice) => (
+            {slices.map((slice) => (
               <div key={slice.label} className="database-pie-row">
                 <span className="database-legend-item">
                   <span className="database-legend-dot" style={{ backgroundColor: slice.color }} aria-hidden="true" />

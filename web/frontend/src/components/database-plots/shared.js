@@ -12,9 +12,9 @@ export const CLASSIFICATION_COLORS = {
   unknown: '#c3ccd6',
 };
 
-// Default palette for pie slices; order matters for stable legend color mapping.
-// Desaturated, colour-blind friendly tones anchored on the brand teal.
-export const PIE_COLORS = ['#0f766e', '#4a6fa5', '#b0714f', '#7c5cbf', '#b8912a', '#3d7d8c', '#71717a'];
+// Categorical colors are ordered consistently across pies and drug plots.
+export const PIE_COLORS = ['#0f766e', '#2563eb', '#c2410c', '#7c3aed', '#b45309', '#0284c7', '#be185d'];
+const DARK_PIE_COLORS = ['#5eead4', '#93c5fd', '#fdba74', '#c4b5fd', '#fcd34d', '#67e8f9', '#f9a8d4'];
 
 // Human-readable legend labels for stacked bars and summary plots.
 export const CLASSIFICATION_LABELS = {
@@ -61,6 +61,10 @@ function pick(colors) {
   return colors[currentTheme()];
 }
 
+export function pieColorsForTheme(theme) {
+  return theme === 'dark' ? DARK_PIE_COLORS : PIE_COLORS;
+}
+
 /**
  * Shared Plotly layout baseline. Every chart spreads this first and overrides
  * per-chart specifics on top, so typography, grid and background styling stay
@@ -77,8 +81,20 @@ export function baseLayout() {
     },
     // Default axis treatment: hairline dotted grid on both axes; components
     // override showgrid/gridcolor per axis where a cleaner look is wanted.
-    xaxis: { gridcolor: pick(GRID), gridwidth: 1, griddash: 'dot', zeroline: false },
-    yaxis: { gridcolor: pick(GRID), gridwidth: 1, griddash: 'dot', zeroline: false },
+    xaxis: {
+      gridcolor: pick(GRID),
+      gridwidth: 1,
+      griddash: 'dot',
+      zeroline: false,
+      tickfont: { color: pick(INK_SOFT) },
+    },
+    yaxis: {
+      gridcolor: pick(GRID),
+      gridwidth: 1,
+      griddash: 'dot',
+      zeroline: false,
+      tickfont: { color: pick(INK_SOFT) },
+    },
     hoverlabel: {
       font: { family: PLOTLY_FONT_FAMILY, size: 12, color: pick(INK) },
       bgcolor: currentTheme() === 'dark' ? '#27272a' : '#ffffff',

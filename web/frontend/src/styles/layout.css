@@ -811,6 +811,34 @@
     z-index: 45;
   }
 
+  .workspace-subheader {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    height: auto;
+    min-height: 64px;
+    gap: 1rem;
+  }
+
+  .workspace-heading {
+    padding-left: 42px;
+  }
+
+  .workspace-subheader .topbar-db-bar {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .workspace-subheader .topbar-db-bar .header-db-select {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
   .sidebar-rail {
     z-index: 40;
     width: min(220px, calc(100vw - 3rem));
@@ -945,29 +973,6 @@
 }
 
 @media (max-width: 620px) {
-
-  .workspace-subheader {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    align-items: start;
-    height: auto;
-    min-height: 64px;
-    gap: 0.35rem;
-  }
-
-  .workspace-subheader .topbar-db-bar {
-    grid-row: 2;
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
-    overflow: visible;
-  }
-
-  .workspace-subheader .topbar-db-bar .header-db-select {
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
-  }
 
   .top-bar.top-bar-full {
     padding-inline: 0.45rem;

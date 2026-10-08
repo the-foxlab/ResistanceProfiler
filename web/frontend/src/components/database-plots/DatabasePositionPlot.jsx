@@ -1,11 +1,13 @@
 import Plotly from 'plotly.js-dist-min';
-import { useRef, useEffect, useState } from 'react';
+import { useContext, useRef, useEffect, useState } from 'react';
 
 import { CLASSIFICATION_COLORS, CLASSIFICATION_LABELS, baseLayout, axisTitleFont } from './shared';
+import { ThemeContext } from '../../hooks/useTheme';
 
 export function DatabasePositionPlot({ plot }) {
   const containerRef = useRef(null);
   const [plotError, setPlotError] = useState('');
+  const theme = useContext(ThemeContext);
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -73,7 +75,7 @@ export function DatabasePositionPlot({ plot }) {
         Plotly.purge(containerRef.current);
       }
     };
-  }, [plot]);
+  }, [plot, theme]);
 
   // Re-render on window resize (debounced)
   useEffect(() => {
@@ -100,7 +102,7 @@ export function DatabasePositionPlot({ plot }) {
       window.removeEventListener('resize', handleResize);
       clearTimeout(timeoutId);
     };
-  }, [plot]);
+  }, [plot, theme]);
 
   return (
     <section className="database-plot-card">

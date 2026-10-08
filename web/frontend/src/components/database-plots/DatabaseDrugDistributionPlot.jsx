@@ -1,7 +1,8 @@
 import Plotly from 'plotly.js-dist-min';
-import { useRef, useEffect, useState } from 'react';
+import { useContext, useRef, useEffect, useState } from 'react';
 
 import { baseLayout, axisTitleFont } from './shared';
+import { ThemeContext } from '../../hooks/useTheme';
 
 function _formatIc50Tick(value) {
   const numeric = Number(value);
@@ -142,6 +143,7 @@ function _renderIc50DistributionPlot(container, plot) {
 export function DatabaseDrugDistributionPlot({ plot }) {
   const containerRef = useRef(null);
   const [plotError, setPlotError] = useState('');
+  const theme = useContext(ThemeContext);
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -165,7 +167,7 @@ export function DatabaseDrugDistributionPlot({ plot }) {
         Plotly.purge(containerRef.current);
       }
     };
-  }, [plot]);
+  }, [plot, theme]);
 
   // Re-render on window resize (debounced)
   useEffect(() => {
@@ -192,7 +194,7 @@ export function DatabaseDrugDistributionPlot({ plot }) {
       window.removeEventListener('resize', handleResize);
       clearTimeout(timeoutId);
     };
-  }, [plot]);
+  }, [plot, theme]);
 
   return (
     <section className="database-plot-card">
