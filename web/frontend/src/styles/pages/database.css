@@ -45,7 +45,7 @@
 
 .database-meta-description {
   margin: 0;
-  max-width: 70ch;
+  max-width: none;
   color: var(--muted);
   font-size: var(--font-size-sm);
   line-height: 1.5;

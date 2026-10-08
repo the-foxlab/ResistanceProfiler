@@ -1,8 +1,9 @@
 .about-tile {
-  width: 100%;
+  width: min(100%, 1320px);
   min-width: 0;
   min-height: 0;
-  margin: 0;
+  margin: 0 auto;
+  padding: clamp(1rem, 2vw, 1.75rem) 0 2rem;
   display: grid;
   gap: 1.25rem;
 }
