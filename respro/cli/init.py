@@ -18,7 +18,6 @@ from respro.db.algorithms import (
     apply_drug_alias_mappings,
     load_interpretation_algorithms,
     store_interpretation_algorithms,
-    warn_algorithm_labels_not_in_db,
 )
 from respro.db.drugs import _consolidate_drug_names_to_lowercase, _get_drugs_from_pubchem
 from respro.db.features import _load_genbank_records
@@ -131,7 +130,6 @@ def init_project(
             algorithms = _sanitize_effect_as_resistant_algorithms(conn, project_id, algorithms)
             if algorithms:
                 store_interpretation_algorithms(conn, project_id, algorithms)
-                warn_algorithm_labels_not_in_db(conn, project_id, algorithms)
         alias_config = next((a for a in algorithms if a['name'] == 'drug_alias'), None)
         if alias_config:
             apply_drug_alias_mappings(conn, project_id, alias_config)
