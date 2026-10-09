@@ -137,6 +137,33 @@ describe('HomePage database showcase', () => {
     renderHome({ databases: [] });
     expect(screen.getByText(/no databases/i)).toBeInTheDocument();
   });
+
+  it('caps the organism list at four entries with an overflow line', () => {
+    const manyOrganisms = {
+      id: 'db3',
+      display_name: 'Wide DRG',
+      supported_organisms: [
+        'Virus A', 'Virus B', 'Virus C', 'Virus D', 'Virus E', 'Virus F',
+      ],
+      mutation_count: 10,
+    };
+    renderHome({ databases: [manyOrganisms] });
+
+    const card = screen.getByRole('heading', { name: 'Wide DRG' }).closest('a');
+    const items = card.querySelectorAll('.home-db-organisms li');
+    expect(items).toHaveLength(5);
+    expect(items[3].textContent).toBe('Virus D');
+    expect(items[4]).toHaveTextContent('... 2 more species');
+    expect(items[4]).toHaveClass('home-db-more');
+    expect(card.textContent).not.toContain('Virus E');
+  });
+
+  it('shows all organisms without overflow line when there are at most four', () => {
+    renderHome();
+    const card = screen.getByRole('heading', { name: 'Herpes DRG' }).closest('a');
+    expect(card.querySelectorAll('.home-db-organisms li')).toHaveLength(2);
+    expect(card.querySelector('.home-db-more')).toBeNull();
+  });
 });
 
 describe('HomePage trust notices', () => {
