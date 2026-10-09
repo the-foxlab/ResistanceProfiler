@@ -124,6 +124,22 @@ class TestFetchPubmedMetadata:
         with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
             assert fetch_pubmed_metadata('12345678') is None
 
+    def test_strips_markup_tags_from_title(self) -> None:
+        # Defensive: PubMed titles are usually clean, but strip JATS markup
+        # (e.g. <i>) should it ever appear in the esummary payload.
+        payload = {
+            'result': {
+                '33055248': {
+                    'title': '<i>In Vitro</i> Profiling of Laninamivir-Resistant Substitutions',
+                    'articleids': [],
+                },
+            },
+        }
+        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+            result = fetch_pubmed_metadata('33055248')
+        assert result is not None
+        assert result['title'] == 'In Vitro Profiling of Laninamivir-Resistant Substitutions'
+
 
 # ── fetch_publication_metadata ─────────────────────────────────────────────────
 
@@ -149,6 +165,87 @@ class TestFetchPublicationMetadata:
             'year': '',
             'journal': '',
         }
+
+    def test_strips_jats_markup_tags_from_title(self) -> None:
+        # CrossRef returns publisher-deposit titles verbatim, including
+        # JATS/NLM inline markup such as <scp> (small caps).
+        payload = {
+            'message': {
+                'title': [
+                    'Drug susceptibility surveillance in the <scp>U</scp>nited '
+                    '<scp>S</scp>tates: application of the <scp>WHO</scp> criteria'
+                ],
+            },
+        }
+        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+            result = fetch_publication_metadata('10.1111/irv.12215')
+        assert result is not None
+        assert result['title'] == (
+            'Drug susceptibility surveillance in the United States: '
+            'application of the WHO criteria'
+        )
+
+    def test_collapses_newlines_and_indentation_in_title(self) -> None:
+        # Real CrossRef payload shape: markup broken across lines with indentation.
+        # The small-caps letter continues the word, so "S" + "outhern" rejoins.
+        payload = {
+            'message': {
+                'title': [
+                    '... during the 2011\n                    <scp>S</scp>\n'
+                    '                    outhern\n                    <scp>H</scp>\n'
+                    '                    emisphere season'
+                ],
+            },
+        }
+        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+            result = fetch_publication_metadata('10.1111/irv.12113')
+        assert result is not None
+        assert result['title'] == '... during the 2011 Southern Hemisphere season'
+
+    def test_rejoins_tight_subtype_tokens(self) -> None:
+        # "<scp>A</scp>(<scp>H</scp>3<scp>N</scp>2)" is the virus subtype
+        # A(H3N2): fragments join tightly, no spaces inserted.
+        payload = {
+            'message': {
+                'title': [
+                    'Progressive emergence of an oseltamivir‐resistant '
+                    '<scp>A</scp>(<scp>H</scp>3<scp>N</scp>2) virus'
+                ],
+            },
+        }
+        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+            result = fetch_publication_metadata('10.1111/irv.12108')
+        assert result is not None
+        assert result['title'] == (
+            'Progressive emergence of an oseltamivir‐resistant A(H3N2) virus'
+        )
+
+    def test_italic_phrase_without_surrounding_spaces_gets_word_boundaries(self) -> None:
+        # "Selected<i>In Vitro</i>with" must become "Selected In Vitro with".
+        payload = {
+            'message': {
+                'title': [
+                    'Variants Selected<i>In Vitro</i>with Laninamivir'
+                ],
+            },
+        }
+        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+            result = fetch_publication_metadata('10.1128/aac.03313-14')
+        assert result is not None
+        assert result['title'] == 'Variants Selected In Vitro with Laninamivir'
+
+    def test_complete_acronym_keeps_word_boundary(self) -> None:
+        # "<scp>WHO</scp> antiviral" is a complete token followed by a real
+        # word boundary — the space must survive.
+        payload = {
+            'message': {
+                'title': ['application of the <scp>WHO</scp> antiviral criteria'],
+            },
+        }
+        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+            result = fetch_publication_metadata('10.1111/irv.12215')
+        assert result is not None
+        assert result['title'] == 'application of the WHO antiviral criteria'
 
     def test_returns_none_on_404(self) -> None:
         with patch('respro.io.publications.urlopen', side_effect=urllib.error.HTTPError(

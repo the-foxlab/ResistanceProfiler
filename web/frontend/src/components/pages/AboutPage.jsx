@@ -544,19 +544,34 @@ export function AboutPage({ logic }) {
           <h3>Supported by</h3>
         </div>
         <p className="about-section-lead">
-          This work is supported by the Hans A. Krebs Program for Medical Scientists at the University of Freiburg.
+          This work is supported by the Hans A. Krebs Program for Medical Scientists at the University of Freiburg and
+          the Department of Virology at the Medical Center – University of Freiburg.
         </p>
         <div className="about-supported-logos">
           <a
             href="https://uni-freiburg.de/med/forschung/qualifizierung-nach-der-promotion/medical-scientist/"
             target="_blank"
             rel="noreferrer"
-            aria-label="Sponsor page"
+            aria-label="Hans A. Krebs Program for Medical Scientists"
             className="about-supported-logo"
           >
             <img
               src="https://uni-freiburg.de/med/wp-content/uploads/sites/9/fodek-hans-a-krebs-program-for-medical-scientist.png"
               alt="Hans A. Krebs Program for Medical Scientists logo"
+              className="about-sponsor-logo"
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            />
+          </a>
+          <a
+            href="https://www.uniklinik-freiburg.de/virologie-en/research/research-teams/jonas-fuchs-team.html"
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Institute of Virology, Medical Center – University of Freiburg"
+            className="about-supported-logo"
+          >
+            <img
+              src="https://www.uniklinik-freiburg.de/fileadmin/_processed_/9/1/csm_Virologie_D__2021_1aa65478be.png"
+              alt="Institute of Virology, Medical Center – University of Freiburg logo"
               className="about-sponsor-logo"
               onError={(e) => { e.currentTarget.style.display = 'none'; }}
             />

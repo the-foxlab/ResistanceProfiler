@@ -244,6 +244,10 @@
   gap: 0.8rem;
 }
 
+.database-reference-plot-grid > .database-plot-card:only-child {
+  grid-column: 1 / -1;
+}
+
 .database-reference-section-wide .database-reference-plot-grid {
   grid-template-columns: 1fr;
 }

@@ -33,6 +33,67 @@ _DOI_RATE_LIMIT_RETRIES = 3
 _DOI_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
 _RE_DOI_LIKE = r'^10\.\S+/\S+$'
 
+# Publisher-deposit titles (notably from CrossRef) carry JATS/NLM inline markup
+# such as ``<scp>S</scp>`` (small caps) and ``<i>In Vitro</i>`` (italics), often
+# broken across lines with indentation. The tags are stripped and the text is
+# normalised to plain single-spaced prose. Word fragments split by a tag are
+# rejoined: a small-caps letter followed by a line break and the rest of the
+# word (``<scp>S</scp>\n  outhern``) must render as ``Southern``, while a
+# complete token followed by a real word boundary keeps its space.
+_TITLE_TAG_RE = re.compile(r'(\s*)<([A-Za-z][A-Za-z0-9]*)>(.*?)</\2>(\s*)', re.DOTALL)
+_RE_TITLE_LEFTOVER_TAG = re.compile(r'</?[A-Za-z][^>]*>')
+_RE_TITLE_WHITESPACE = re.compile(r'\s+')
+
+
+def _replace_title_tag(m: re.Match[str]) -> str:
+    """Replace one inline markup tag with plain text, preserving word integrity."""
+    leading, content_raw, trailing = m.group(1), m.group(3), m.group(4)
+    content = content_raw.strip()
+    if not content:
+        return f'{leading} '
+    if ' ' in content:
+        # Multi-word phrase (e.g. italicised "In Vitro"): keep it as separate
+        # words; surrounding whitespace runs are normalised afterwards.
+        return f'{leading} {content} '
+    rest = m.string[m.end():]
+    if not trailing:
+        # No whitespace between the closing tag and the next character: the
+        # fragment is tightly joined ("<scp>U</scp>nited", "<scp>H</scp>3N2",
+        # "<scp>A</scp>(").
+        if rest[:1].isalnum() or rest[:1] in '([':
+            return f'{leading}{content}'
+    elif rest[:1].islower() and ('\n' in trailing or len(trailing) > 1 or len(content) == 1):
+        # Whitespace run (a formatting line break with indentation) splits a
+        # word whose fragment is the tagged content, e.g.
+        # "<scp>S</scp>\n  outhern" → "Southern".
+        return f'{leading}{content}'
+    return f'{leading}{content} '
+
+
+def _clean_publication_title(raw_title: object) -> str:
+    """
+    Normalise a raw publication title to plain single-spaced text.
+
+    Removes inline JATS/NLM markup tags (e.g. ``<scp>``, ``<i>``, ``<sup>``),
+    rejoins word fragments split by tags across line breaks, and collapses all
+    whitespace runs (including newlines with indentation) to single spaces.
+
+    :param raw_title: raw title value from an API payload (any type)
+    :return: cleaned title string; empty string when the input is not a string
+    """
+    if not isinstance(raw_title, str):
+        return ''
+    title = raw_title
+    # Repeat until stable so nested markup (e.g. "<i><scp>X</scp></i>") resolves.
+    for _ in range(10):
+        cleaned = _TITLE_TAG_RE.sub(_replace_title_tag, title)
+        if cleaned == title:
+            break
+        title = cleaned
+    # Belt-and-braces: drop any leftover unclosed tags.
+    title = _RE_TITLE_LEFTOVER_TAG.sub('', title)
+    return _RE_TITLE_WHITESPACE.sub(' ', title).strip()
+
 
 def fetch_pubmed_metadata(pmid: str, timeout: int = CLI_CONFIG.timeouts.pubmed) -> dict | None:
     """
@@ -63,8 +124,7 @@ def fetch_pubmed_metadata(pmid: str, timeout: int = CLI_CONFIG.timeouts.pubmed) 
             if not isinstance(result_data, dict):
                 logger.debug('NCBI PMID lookup malformed payload for %r: missing PMID result object', pmid)
                 return None
-            raw_title = result_data.get('title', '')
-            title = raw_title.strip() if isinstance(raw_title, str) else ''
+            title = _clean_publication_title(result_data.get('title', ''))
             doi = ''
             article_ids = result_data.get('articleids')
             if not isinstance(article_ids, list):
@@ -223,7 +283,7 @@ def fetch_publication_metadata(doi: str, timeout: int = CLI_CONFIG.timeouts.cros
                 logger.debug('CrossRef lookup malformed payload for DOI %r: title is not a list', normalized_doi)
                 return None
             first_title = titles[0] if titles else ''
-            title = first_title.strip() if isinstance(first_title, str) else ''
+            title = _clean_publication_title(first_title)
             first_author = _parse_crossref_first_author(message.get('author'))
             year = _parse_crossref_year(message)
             container = message.get('container-title')

@@ -37,6 +37,18 @@ describe('AboutPage structure', () => {
     expect(fundingHeading.closest('section')).toHaveClass('about-section-card');
     expect(document.getElementById('about-scope')).toBeNull();
     expect(document.getElementById('about-funding')).not.toBeNull();
+
+    const virologyLogo = screen.getByRole('img', {
+      name: 'Institute of Virology, Medical Center – University of Freiburg logo',
+    });
+    expect(virologyLogo).toHaveAttribute(
+      'src',
+      'https://www.uniklinik-freiburg.de/fileadmin/_processed_/9/1/csm_Virologie_D__2021_1aa65478be.png',
+    );
+    expect(virologyLogo.closest('a')).toHaveAttribute(
+      'href',
+      'https://www.uniklinik-freiburg.de/virologie-en/research/research-teams/jonas-fuchs-team.html',
+    );
   });
 
   it('keeps the technical sections', () => {

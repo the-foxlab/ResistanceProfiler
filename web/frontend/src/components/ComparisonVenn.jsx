@@ -44,11 +44,10 @@ export function ComparisonVenn({ data, activeRegion, onRegionClick }) {
     if (!areas.some((area) => area.size > 0)) {
       return undefined;
     }
-    const width = el.clientWidth || 640;
     const renderDiagram = () => {
       const selection = select(el);
       const chart = VennDiagram()
-        .width(width)
+        .width(el.clientWidth || 640)
         .height(320)
         .duration(0);
       // Invoke the chart function directly (d3's .call() returns the

@@ -16,12 +16,15 @@ class CliTimeoutConfig:
     pubchem: int
     pubmed: int
     crossref: int
-    # GenBank/NCBI nuccore efetch timeout, retry count, and exponential-backoff
-    # base (seconds; doubled each retry). Promoted from respro/io/maintained_db.py
-    # module constants so they join the overridable config surface.
+    # GenBank/NCBI nuccore efetch timeout, retry count, exponential-backoff
+    # base (seconds; doubled each retry), and inter-request pacing interval
+    # (seconds; keeps bulk downloads under NCBI's 3 req/s rate limit).
+    # Promoted from respro/io/maintained_db.py module constants so they join
+    # the overridable config surface.
     genbank_timeout: int
     genbank_max_retries: int
     genbank_backoff_base: float
+    genbank_request_interval: float
 
 
 @dataclass(frozen=True)
@@ -172,6 +175,7 @@ def _build_cli_config(payload: dict) -> CliConfig:
             genbank_timeout=int(timeouts['genbank_timeout']),
             genbank_max_retries=int(timeouts['genbank_max_retries']),
             genbank_backoff_base=float(timeouts['genbank_backoff_base']),
+            genbank_request_interval=float(timeouts['genbank_request_interval']),
         ),
         urls=CliUrlConfig(
             pubchem_compound_page=str(urls['pubchem_compound_page']),

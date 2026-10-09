@@ -423,6 +423,13 @@ class TestParseReferenceIdentifiers:
 # ── _fetch_genbank_records ────────────────────────────────────────────────────
 
 class TestFetchGenbankRecords:
+    @staticmethod
+    def _http_error(code: int, msg: str, headers: dict | None = None) -> urllib.error.HTTPError:
+        """Build an HTTPError with optional response headers (e.g. Retry-After)."""
+        return urllib.error.HTTPError(
+            url='', code=code, msg=msg, hdrs=headers, fp=None,  # type: ignore[arg-type]
+        )
+
     def test_writes_gb_files(self, tmp_path: Path) -> None:
         with patch('urllib.request.urlopen', return_value=_bytes_mock(_GENBANK_CONTENT)):
             paths = _fetch_genbank_records(['X04770'], tmp_path)
@@ -443,7 +450,8 @@ class TestFetchGenbankRecords:
                 _fetch_genbank_records(['BAD'], tmp_path)
 
     def test_fetches_multiple_accessions(self, tmp_path: Path) -> None:
-        with patch('urllib.request.urlopen', return_value=_bytes_mock(_GENBANK_CONTENT)):
+        with patch('urllib.request.urlopen', return_value=_bytes_mock(_GENBANK_CONTENT)), \
+             patch('time.sleep'):
             paths = _fetch_genbank_records(['X04770', 'X04771'], tmp_path)
         assert len(paths) == 2
         assert {p.name for p in paths} == {'X04770.gb', 'X04771.gb'}
@@ -523,12 +531,82 @@ class TestFetchGenbankRecords:
 
     def test_retries_then_http_error_raises_http_error(self, tmp_path: Path) -> None:
         """A transient error followed by a permanent HTTPError surfaces the HTTP error."""
-        se = [ConnectionResetError('reset'), urllib.error.HTTPError(
-            url='', code=500, msg='Server Error', hdrs=None, fp=None,  # type: ignore[arg-type]
-        )]
+        se = [ConnectionResetError('reset'), self._http_error(400, 'Bad Request')]
         with patch('urllib.request.urlopen', side_effect=se), patch('time.sleep'):
-            with pytest.raises(RuntimeError, match='HTTP 500'):
+            with pytest.raises(RuntimeError, match='HTTP 400'):
                 _fetch_genbank_records(['X04770'], tmp_path)
+
+    def test_http_429_is_retried(self, tmp_path: Path) -> None:
+        """NCBI rate limiting (HTTP 429) is transient and must be retried with backoff."""
+        se = [
+            self._http_error(429, 'Too Many Requests'),
+            self._http_error(429, 'Too Many Requests'),
+            _bytes_mock(_GENBANK_CONTENT),
+        ]
+        with patch('urllib.request.urlopen', side_effect=se) as mock_open, \
+             patch('time.sleep') as mock_sleep:
+            paths = _fetch_genbank_records(['X04770'], tmp_path)
+        assert len(paths) == 1
+        assert paths[0].read_bytes() == _GENBANK_CONTENT
+        assert mock_open.call_count == 3
+        assert mock_sleep.call_count == 2  # one backoff per failed attempt
+
+    def test_http_503_is_retried(self, tmp_path: Path) -> None:
+        """HTTP 503 (service unavailable) is transient for NCBI eutils and retried."""
+        se = [self._http_error(503, 'Service Unavailable'), _bytes_mock(_GENBANK_CONTENT)]
+        with patch('urllib.request.urlopen', side_effect=se), patch('time.sleep'):
+            paths = _fetch_genbank_records(['X04770'], tmp_path)
+        assert len(paths) == 1
+        assert paths[0].read_bytes() == _GENBANK_CONTENT
+
+    def test_429_honors_retry_after_header(self, tmp_path: Path) -> None:
+        """A Retry-After header on a 429 response overrides the exponential backoff."""
+        se = [
+            self._http_error(429, 'Too Many Requests', headers={'Retry-After': '7'}),
+            _bytes_mock(_GENBANK_CONTENT),
+        ]
+        with patch('urllib.request.urlopen', side_effect=se), patch('time.sleep') as mock_sleep:
+            _fetch_genbank_records(['X04770'], tmp_path)
+        assert mock_sleep.call_count == 1
+        assert mock_sleep.call_args_list[0].args[0] == 7.0
+
+    def test_429_with_malformed_retry_after_uses_backoff(self, tmp_path: Path) -> None:
+        """A non-numeric Retry-After header falls back to exponential backoff."""
+        se = [
+            self._http_error(429, 'Too Many Requests', headers={'Retry-After': 'soon'}),
+            _bytes_mock(_GENBANK_CONTENT),
+        ]
+        with patch('urllib.request.urlopen', side_effect=se), patch('time.sleep') as mock_sleep:
+            _fetch_genbank_records(['X04770'], tmp_path)
+        from respro.config.cli_settings import CLI_CONFIG
+        assert mock_sleep.call_args_list[0].args[0] == CLI_CONFIG.timeouts.genbank_backoff_base
+
+    def test_raises_after_max_retries_on_429(self, tmp_path: Path) -> None:
+        """Persistent 429 responses exhaust retries and raise RuntimeError."""
+        with patch('urllib.request.urlopen', side_effect=[
+            self._http_error(429, 'Too Many Requests'),
+        ] * 3), patch('time.sleep'):
+            with pytest.raises(RuntimeError, match='after 3 attempts.*429'):
+                _fetch_genbank_records(['X04770'], tmp_path)
+
+    def test_inter_request_delay_between_accessions(self, tmp_path: Path) -> None:
+        """A pacing delay is applied between successive accessions (not after the last)."""
+        from respro.config.cli_settings import CLI_CONFIG
+        with patch('urllib.request.urlopen', return_value=_bytes_mock(_GENBANK_CONTENT)), \
+             patch('time.sleep') as mock_sleep:
+            _fetch_genbank_records(['X04770', 'X04771', 'X04772'], tmp_path)
+        assert mock_sleep.call_count == 2
+        assert all(
+            call.args[0] == CLI_CONFIG.timeouts.genbank_request_interval
+            for call in mock_sleep.call_args_list
+        )
+
+    def test_no_inter_request_delay_for_single_accession(self, tmp_path: Path) -> None:
+        """A single accession must not trigger any pacing sleep."""
+        with patch('urllib.request.urlopen', return_value=_bytes_mock(_GENBANK_CONTENT)), \
+             patch('time.sleep') as mock_sleep:
+            _fetch_genbank_records(['X04770'], tmp_path)
+        assert mock_sleep.call_count == 0
 
 
 class TestGenbankConfigWiring:
@@ -591,6 +669,22 @@ class TestGenbankConfigWiring:
             with pytest.raises(RuntimeError):
                 _fetch_genbank_records(['X04770'], tmp_path)
         assert mock_sleep.call_count == 4  # 5 retries → 4 backoff sleeps
+    def test_request_interval_tracks_overridden_config(self, tmp_path: Path) -> None:
+        """Patching genbank_request_interval should change the pacing sleep between accessions."""
+        from respro.config import cli_settings
+        patched = dataclasses.replace(
+            cli_settings.CLI_CONFIG,
+            timeouts=dataclasses.replace(
+                cli_settings.CLI_CONFIG.timeouts, genbank_request_interval=2.5,
+            ),
+        )
+        with patch.object(cli_settings, 'CLI_CONFIG', patched), \
+             patch('respro.io.maintained_db.CLI_CONFIG', patched), \
+             patch('urllib.request.urlopen', return_value=_bytes_mock(_GENBANK_CONTENT)), \
+             patch('time.sleep') as mock_sleep:
+            _fetch_genbank_records(['X04770', 'X04771'], tmp_path)
+        assert mock_sleep.call_count == 1
+        assert mock_sleep.call_args_list[0].args[0] == 2.5
 
 
 # ── download_database_files ───────────────────────────────────────────────────
@@ -622,7 +716,7 @@ class TestDownloadDatabaseFiles:
         meta_bytes = json.dumps(_METADATA).encode()
 
         se = self._make_download_side_effect(rules_bytes, meta_bytes)
-        with patch('urllib.request.urlopen', side_effect=se):
+        with patch('urllib.request.urlopen', side_effect=se), patch('time.sleep'):
             result = download_database_files('hsv_daehne_jaki', tmp_path)
 
         assert 'rules' in result
@@ -670,7 +764,7 @@ class TestDownloadDatabaseFiles:
             # cannot raise IndexError.
             return responses[min(idx, len(responses) - 1)]
 
-        with patch('urllib.request.urlopen', side_effect=se):
+        with patch('urllib.request.urlopen', side_effect=se), patch('time.sleep'):
             result = download_database_files('hsv_daehne_jaki', tmp_path)
 
         assert result['formula_rules'] is None
@@ -698,7 +792,7 @@ class TestDownloadDatabaseFiles:
             call_count[0] += 1
             return responses[min(idx, len(responses) - 1)]
 
-        with patch('urllib.request.urlopen', side_effect=se):
+        with patch('urllib.request.urlopen', side_effect=se), patch('time.sleep'):
             result = download_database_files('hsv_daehne_jaki', tmp_path)
 
         assert isinstance(result['example'], Path)
@@ -709,7 +803,7 @@ class TestDownloadDatabaseFiles:
         meta_bytes = json.dumps(_METADATA).encode()
 
         se = self._make_download_side_effect(rules_bytes, meta_bytes)
-        with patch('urllib.request.urlopen', side_effect=se):
+        with patch('urllib.request.urlopen', side_effect=se), patch('time.sleep'):
             result = download_database_files('hsv_daehne_jaki', tmp_path)
 
         assert result['example'] is None

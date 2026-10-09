@@ -9,6 +9,10 @@ crossref = 7
 genbank_timeout = 30        # seconds; urlopen timeout for a single efetch attempt
 genbank_max_retries = 3     # max attempts before raising RuntimeError
 genbank_backoff_base = 1.0  # seconds; doubled each retry (1, 2, 4)
+# Minimum pause (seconds) between successive GenBank efetch requests during a
+# bulk database download. NCBI eutils allows at most 3 requests/second without
+# an API key; pacing prevents the download from tripping HTTP 429 rate limits.
+genbank_request_interval = 0.5
 
 [urls]
 pubchem_compound_page = 'https://pubchem.ncbi.nlm.nih.gov/compound/{cid}'

@@ -38,6 +38,25 @@ function sumOrganisms(databases) {
   return organisms.size;
 }
 
+const MAX_ORGANISMS_SHOWN = 4;
+
+function organismListItems(db) {
+  const organisms = db.supported_organisms || [];
+  if (organisms.length === 0) {
+    return [{ label: 'Species not listed', muted: true }];
+  }
+  const items = organisms
+    .slice(0, MAX_ORGANISMS_SHOWN)
+    .map((organism) => ({ label: organism }));
+  if (organisms.length > MAX_ORGANISMS_SHOWN) {
+    items.push({
+      label: `... ${organisms.length - MAX_ORGANISMS_SHOWN} more species`,
+      muted: true,
+    });
+  }
+  return items;
+}
+
 export function HomePage({ logic }) {
   usePageTitle('ResPro | Home');
   const { databases = [], onStartTour, setSelectedDatabaseId } = logic;
@@ -96,13 +115,11 @@ export function HomePage({ logic }) {
               >
                 <h3>{db.display_name || db.id}</h3>
                 <ul className="home-db-organisms" aria-label={`${db.display_name || db.id} supported species`}>
-                  {db.supported_organisms?.length ? (
-                    db.supported_organisms.map((organism, index) => (
-                      <li key={`${db.id}-${index}`}>{organism}</li>
-                    ))
-                  ) : (
-                    <li>Species not listed</li>
-                  )}
+                  {organismListItems(db).map((item, index) => (
+                    <li key={`${db.id}-${index}`} className={item.muted ? 'home-db-more' : undefined}>
+                      {item.label}
+                    </li>
+                  ))}
                 </ul>
                 <footer className="home-db-meta">
                   <span><b>{db.mutation_count ?? 0}</b> rules</span>
