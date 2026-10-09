@@ -159,20 +159,27 @@
   gap: 0.8rem;
   width: 100%;
   min-width: 0;
+  max-width: 100%;
 }
 
 .compare-layout {
   display: grid;
-  grid-template-columns: minmax(18rem, 22rem) 1fr;
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
   gap: 0.8rem;
+  min-width: 0;
   /* Both cards share the row height so the Rule overlap tile matches the
      selector tile instead of floating at its own content height. */
   align-items: stretch;
 }
 
+.compare-layout > .card {
+  min-width: 0;
+  max-width: 100%;
+}
+
 @media (max-width: 60rem) {
   .compare-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -215,6 +222,12 @@
 .compare-db-slot {
   display: grid;
   gap: 0.2rem;
+  min-width: 0;
+}
+
+.compare-db-slot select {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .compare-db-slot label {
@@ -474,6 +487,46 @@
   font-size: var(--font-size-sm);
   padding: 0.3rem 0;
 }
+
+@media (max-width: 620px) {
+  .compare-ref-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.3rem;
+  }
+
+  .compare-ref-row label {
+    padding-bottom: 0;
+  }
+
+  .compare-ref-row select {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .compare-table-toolbar,
+  .compare-table-controls {
+    width: 100%;
+  }
+
+  .compare-table-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .compare-table-controls > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .compare-table-controls select,
+  .compare-table-controls input[type='search'],
+  .compare-table-controls button {
+    width: 100%;
+  }
+}
+
 /* Dark mode: fills/strokes come from the theme-aware venn.js palette; this
    rule keeps the count labels legible on dark. */
 :root[data-theme='dark'] .comparison-venn .venn-area text.label {
