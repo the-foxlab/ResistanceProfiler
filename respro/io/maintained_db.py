@@ -23,13 +23,13 @@ from respro.config.cli_settings import CLI_CONFIG
 
 logger = logging.getLogger(__name__)
 
-_GENBANK_TIMEOUT = 30
 # NCBI eutils is rate-limited and intermittently resets connections or returns
-# truncated chunked responses. Retry transient failures a few times with
-# exponential backoff before giving up. HTTPError is NOT retried — a 4xx/5xx
+# truncated chunked responses. Transient failures (429/503 below, plus transport
+# errors) are retried with exponential backoff before giving up — the timeout,
+# retry count, and backoff base live in [timeouts] of respro/config/defaults.toml
+# (genbank_timeout, genbank_max_retries, genbank_backoff_base). Any other 4xx/5xx
 # status is a permanent response, not a transport hiccup.
-_GENBANK_MAX_RETRIES = 3
-_GENBANK_BACKOFF_BASE = 1.0  # seconds; doubled each retry (1, 2, 4)
+_RETRYABLE_HTTP_CODES = frozenset({429, 503})
 
 # NCBI nucleotide accession: letters/digits/underscore, optional ``.version`` suffix.
 # Rejects path separators, ``..``, whitespace, and other characters that could escape
@@ -186,6 +186,22 @@ def list_output_files(db_name: str) -> list[dict]:
 # ──────────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────────
+
+def _retry_after_seconds(exc: urllib.error.HTTPError, default: float) -> float:
+    """Return the wait time for a rate-limited response.
+
+    Honors a numeric ``Retry-After`` response header when present (NCBI sends
+    one on 429 responses); otherwise falls back to ``default``.
+    """
+    headers = getattr(exc, 'headers', None)
+    if headers is not None:
+        raw = headers.get('Retry-After')
+        if raw:
+            try:
+                return max(float(raw), 0.0)
+            except ValueError:
+                pass
+    return default
 
 def _fetch_manifest() -> dict:
     """Fetch and validate the global maintained database manifest."""
@@ -370,12 +386,17 @@ def _fetch_genbank_records(accessions: list[str], dest_dir: Path) -> list[Path]:
     """
     Fetch GenBank records for a list of NCBI accession IDs.
 
-    Transient transport failures (``ConnectionResetError``, ``IncompleteRead``,
-    and other ``OSError`` / ``http.client.HTTPException`` subclasses) are
-    retried up to ``_GENBANK_MAX_RETRIES`` times with exponential backoff.
-    A permanent ``HTTPError`` (4xx/5xx) is raised immediately without
-    retrying. NCBI eutils is rate-limited, so a short inter-request delay is
-    also applied between successful accessions.
+    Requests are paced: a configurable inter-request delay
+    (``genbank_request_interval``) is applied between successive accessions so
+    a large database download stays under NCBI eutils' rate limit (3 requests
+    per second without an API key).
+
+    Transient failures are retried up to ``genbank_max_retries`` times with
+    exponential backoff: transport errors (``ConnectionResetError``,
+    ``IncompleteRead``, and other ``OSError`` / ``http.client.HTTPException``
+    subclasses) and rate-limit/availability HTTP responses (429, 503). A 429
+    response's ``Retry-After`` header, when present, overrides the backoff
+    delay. Any other HTTP error status is permanent and raised immediately.
 
     :param accessions: list of nucleotide accession strings
     :param dest_dir: directory where .gb files are written
@@ -390,7 +411,12 @@ def _fetch_genbank_records(accessions: list[str], dest_dir: Path) -> list[Path]:
     genbank_timeout = CLI_CONFIG.timeouts.genbank_timeout
     genbank_max_retries = CLI_CONFIG.timeouts.genbank_max_retries
     genbank_backoff_base = CLI_CONFIG.timeouts.genbank_backoff_base
-    for accession in accessions:
+    genbank_request_interval = CLI_CONFIG.timeouts.genbank_request_interval
+    for index, accession in enumerate(accessions):
+        if index > 0:
+            # Pace successive requests so bulk downloads stay under the NCBI
+            # eutils rate limit instead of triggering 429 responses.
+            time.sleep(genbank_request_interval)
         _validate_accession(accession)
         url = CLI_CONFIG.urls.ncbi_nuccore_efetch.format(accession=urllib.parse.quote(accession))
         dest = dest_dir / f'{accession}.gb'
@@ -403,10 +429,23 @@ def _fetch_genbank_records(accessions: list[str], dest_dir: Path) -> list[Path]:
                     content = resp.read()
                 break  # success
             except urllib.error.HTTPError as exc:
-                # Permanent response — do not retry.
-                raise RuntimeError(
-                    f'Failed to fetch GenBank record for {accession!r}: HTTP {exc.code}'
-                ) from exc
+                if exc.code not in _RETRYABLE_HTTP_CODES:
+                    # Permanent response — do not retry.
+                    raise RuntimeError(
+                        f'Failed to fetch GenBank record for {accession!r}: HTTP {exc.code}'
+                    ) from exc
+                # Rate limit (429) or availability (503) — retry with backoff,
+                # honoring a Retry-After header when NCBI provides one.
+                last_exc = exc
+                logger.warning(
+                    'Rate-limited/availability error fetching GenBank record %r '
+                    '(attempt %d/%d): HTTP %s',
+                    accession, attempt, genbank_max_retries, exc.code,
+                )
+                if attempt < genbank_max_retries:
+                    time.sleep(_retry_after_seconds(
+                        exc, genbank_backoff_base * (2 ** (attempt - 1)),
+                    ))
             except (OSError, http.client.HTTPException) as exc:
                 # Transient transport failure — retry with backoff.
                 last_exc = exc

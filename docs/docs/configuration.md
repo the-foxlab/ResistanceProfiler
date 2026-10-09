@@ -32,6 +32,7 @@ Every key below corresponds to an entry in `respro/config/defaults.toml`, where 
 | `genbank_timeout` | int | `30` | `urlopen` timeout (seconds) for a single NCBI nuccore efetch attempt. |
 | `genbank_max_retries` | int | `3` | Max efetch attempts before raising `RuntimeError`. |
 | `genbank_backoff_base` | float | `1.0` | Exponential backoff base (seconds); doubled each retry (1, 2, 4). |
+| `genbank_request_interval` | float | `0.5` | Minimum pause (seconds) between successive GenBank efetch requests during a bulk download. Keeps `databases --download` under NCBI eutils' limit of 3 requests/second (without an API key), preventing HTTP 429 rate-limit errors. |
 
 ### `[urls]` — external service URL templates
 

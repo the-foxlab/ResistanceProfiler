@@ -381,6 +381,12 @@ class TestPromotedMagicNumbers:
         assert config.timeouts.genbank_backoff_base == 1.0
         assert isinstance(config.timeouts.genbank_backoff_base, float)
 
+    def test_genbank_request_interval_default(self):
+        """Should load genbank_request_interval with documented default 0.5."""
+        config = _load_cli_config()
+        assert config.timeouts.genbank_request_interval == 0.5
+        assert isinstance(config.timeouts.genbank_request_interval, float)
+
     def test_defaults_toml_has_codon_promoted_keys(self):
         """defaults.toml should expose the promoted codon keys with inline comments."""
         defaults_path = files('respro.config').joinpath('defaults.toml')
