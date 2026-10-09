@@ -39,7 +39,7 @@ describe('AboutPage structure', () => {
     expect(document.getElementById('about-funding')).not.toBeNull();
 
     const virologyLogo = screen.getByRole('img', {
-      name: 'Department of Virology, Medical Center – University of Freiburg logo',
+      name: 'Institute of Virology, Medical Center – University of Freiburg logo',
     });
     expect(virologyLogo).toHaveAttribute(
       'src',
