@@ -3340,8 +3340,9 @@ class TestPdfExports:
     def test_contradictory_only_drug_surfaced_in_narrative(self) -> None:
         """A drug whose only hits are contradictory must surface in the summary
         narrative as contradictory evidence (it wins over susceptible). The lead
-        sentence must mention contradictory evidence and a list section must name
-        the drug, using the contradictory rank colour."""
+        sentence carries no findings clause (R2); a list section must name the
+        drug under the uniform verbatim title, using the contradictory rank
+        colour."""
         contradict_rule = ResistanceRule(
             id=1,
             feature_name='gag',
@@ -3393,19 +3394,21 @@ class TestPdfExports:
         # by_phenotype with only contradictory hits → contradictory assessment.
         assert drug_table['rows'][0]['assessment'] == 'contradictory'
         text = ctx['summary']['narrative']
-        # Lead sentence must mention contradictory evidence.
-        assert 'contradictory evidence for 1 drug' in text
-        # List section must name the drug under a contradictory heading.
-        assert 'Drugs with contradictory evidence' in text
+        # The lead carries no findings clause (R2); the contradictory drug
+        # surfaces under the uniform verbatim list-section title.
+        assert 'contradictory evidence for 1 drug' not in text
+        assert 'Drugs assessed as contradictory:' in text
         assert 'DrugA' in text
         # The contradictory list line must use the contradictory rank colour.
         from respro.db.phenotype_ranks import RANK_CONTRADICTORY, rank_to_colour
         assert rank_to_colour(RANK_CONTRADICTORY) in text
 
     def test_contradictory_loses_to_higher_tier_in_narrative(self) -> None:
-        """When a drug has both a resistant hit (by_phenotype) and a contradictory
-        hit, by_phenotype returns resistant (severity hit exists) and the final
-        assessment is resistant — contradictory must NOT appear in the narrative."""
+        """A drug with only a contradictory hit assesses as contradictory and
+        surfaces under its verbatim label; a drug with a resistant hit assesses
+        as resistant. Each surfaces in the narrative under its own assessment
+        label (the merge itself is rank-based — contradictory loses to higher
+        tiers within a single drug's assessment)."""
         resistant_rule = ResistanceRule(
             id=1,
             feature_name='gag',
@@ -3473,7 +3476,7 @@ class TestPdfExports:
         # Resistant drug surfaced; contradictory drug also surfaced (it has no
         # higher-tier hit on its own).
         assert 'Drugs assessed as resistant' in text
-        assert 'Drugs with contradictory evidence' in text
+        assert 'Drugs assessed as contradictory:' in text
         assert 'DrugB' in text
 
     def test_render_html_includes_summary_translation_controls(self) -> None:

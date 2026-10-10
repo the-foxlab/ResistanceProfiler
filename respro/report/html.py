@@ -1662,24 +1662,40 @@ def _build_summary_narrative(
         if (row.get('assessment') or '').strip()
     ]
 
-    # Group assessed drugs by their verbatim assessment label so the list
-    # sections carry the database/algorithm's own phenotype terminology
-    # (provenance) instead of canonical rank labels. Unknown labels (rank 0 or
-    # unmapped) are excluded. Sections are ordered most-severe first
-    # (severity rank descending, then alphabetically by label); drugs within a
-    # section are sorted case-insensitively. Contradictory assessments use the
-    # same uniform title pattern and surface as their own section (they win
-    # over susceptible but lose to higher tiers).
+    # Group drugs by verbatim phenotype label so the list sections carry the
+    # database/algorithm's own terminology (provenance) instead of canonical
+    # rank labels. Each drug is registered under its final assessment label and
+    # under every verbatim label its hits carry (``rank_label_counts``), so the
+    # narrative surfaces the full phenotype evidence breakdown — a drug whose
+    # hits span 'sensitive' and 'high-level resistance' appears in both
+    # sections even though its final assessment is the higher tier. Unknown
+    # labels (rank 0 or unmapped) are excluded. Sections are ordered
+    # most-severe first (severity rank descending, then alphabetically by
+    # label); drugs within a section are sorted case-insensitively.
+    # Contradictory uses the same uniform title pattern and surfaces as its
+    # own section.
     label_drugs: dict[str, list[str]] = {}
     label_ranks: dict[str, int] = {}
-    for row in assessed_rows:
-        label = (row.get('assessment') or '').strip()
+
+    def _register_label(label: str, name: str) -> None:
+        label = label.strip()
         rank = label_to_rank(label)
         if rank is None or rank == RANK_UNKNOWN:
-            continue
-        name = row.get('summary_name') or row.get('name') or 'Unknown'
-        label_drugs.setdefault(label, []).append(name)
+            return
+        drugs = label_drugs.setdefault(label, [])
+        if name not in drugs:
+            drugs.append(name)
         label_ranks.setdefault(label, rank)
+
+    for row in assessed_rows:
+        name = row.get('summary_name') or row.get('name') or 'Unknown'
+        assessment = (row.get('assessment') or '').strip()
+        if assessment:
+            _register_label(assessment, name)
+        for labels in (row.get('rank_label_counts') or {}).values():
+            for label, count in labels.items():
+                if count > 0:
+                    _register_label(label, name)
     ordered_labels = sorted(label_drugs, key=lambda lbl: (-label_ranks[lbl], lbl))
 
     # When multi-species, ProfilingResult.feature_matches only exposes the primary
