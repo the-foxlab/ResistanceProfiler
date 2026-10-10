@@ -23,7 +23,6 @@ from respro.core.fasta_to_vcf import (
     fasta_to_vcf,
 )
 from respro.core.query import (
-    resolve_cached_query_reference,
     resolve_fasta_query,
 )
 from respro.core.vcf_remap import (
@@ -470,72 +469,6 @@ class TestResolveFastaReference:
         assert len(matches) >= 1
         conn.close()
 
-class TestResolveCachedQueryReference:
-    def test_resolves_stored_header(self, fasta_db: Path, tmp_path: Path) -> None:
-        fasta_path = tmp_path / 'query.fasta'
-        fasta_path.write_text(f'>stored_ref\n{TINY_REF_SEQ}\n')
-
-        conn = open_project_db(fasta_db)
-        resolve_fasta_query(conn, fasta_path)
-
-        name, seq, matches = resolve_cached_query_reference(conn, 'stored_ref')
-
-        assert name == 'stored_ref'
-        assert seq == TINY_REF_SEQ
-        assert len(matches) >= 1
-        assert matches[0].feature.name == 'gag'
-        conn.close()
-
-    def test_unknown_header_lists_available_cached_headers(self, fasta_db: Path, tmp_path: Path) -> None:
-        fasta_path = tmp_path / 'query.fasta'
-        fasta_path.write_text(f'>stored_ref\n{TINY_REF_SEQ}\n')
-
-        conn = open_project_db(fasta_db)
-        resolve_fasta_query(conn, fasta_path)
-
-        with pytest.raises(ValueError, match='Available cached headers: stored_ref'):
-            resolve_cached_query_reference(conn, 'missing_ref')
-        conn.close()
-
-    def test_header_without_cached_mappings_raises(self, fasta_db: Path) -> None:
-        conn = open_project_db(fasta_db)
-        conn.execute(
-            'INSERT INTO query_reference (name, sequence, length, checksum) VALUES (?, ?, ?, ?)',
-            ('orphan_ref', TINY_REF_SEQ, len(TINY_REF_SEQ), 'orphan-checksum'),
-        )
-        conn.commit()
-
-        with pytest.raises(ValueError, match='no cached feature mappings'):
-            resolve_cached_query_reference(conn, 'orphan_ref')
-        conn.close()
-
-    def test_ambiguous_header_raises(self, fasta_db: Path) -> None:
-        conn = open_project_db(fasta_db)
-        features = [
-            FeatureRecord(
-                id=1,
-                reference_id=1,
-                name='gag',
-                protein='Gag',
-                start=0,
-                end=87,
-                strand='+',
-                codon_start=0,
-                nt_sequence=TINY_REF_SEQ,
-            )
-        ]
-        query_one = TINY_REF_SEQ
-        query_two = 'NNNNN' + TINY_REF_SEQ + 'NNNNN'
-        matches_one = match_query_to_features(query_one, features)
-        matches_two = match_query_to_features(query_two, features)
-        store_mappings(conn, 'dup_ref', query_one, sequence_checksum(query_one), matches_one)
-        store_mappings(conn, 'dup_ref', query_two, sequence_checksum(query_two), matches_two)
-
-        with pytest.raises(ValueError, match='ambiguous'):
-            resolve_cached_query_reference(conn, 'dup_ref')
-        conn.close()
-
-
 class TestFastaCacheRegression:
     def test_cached_minus_strand_partial_coverage_matches_uncached(self, tmp_path: Path) -> None:
         db_path = tmp_path / 'minus_cache_regression.db'
@@ -587,7 +520,7 @@ class TestFastaCacheRegression:
         assert not any(len(v.alt) > len(v.ref) for v in uncached_variants)
 
         checksum = sequence_checksum(query_seq)
-        store_mappings(conn, 'minus_cached', query_seq, checksum, [direct_match])
+        store_mappings(conn, checksum, [direct_match])
         loaded = load_cached_mappings(conn, checksum)
         conn.close()
 

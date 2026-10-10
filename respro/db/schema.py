@@ -9,7 +9,7 @@ from pathlib import Path
 
 from respro.utils.files import require_file
 
-PROJECT_SCHEMA_VERSION = 3
+PROJECT_SCHEMA_VERSION = 4
 RESULTS_SCHEMA_VERSION = 1
 
 PROJECT_SCHEMA_SQL = """\
@@ -175,14 +175,13 @@ CREATE TABLE IF NOT EXISTS resistance_formula_rule_publication (
 );
 CREATE INDEX IF NOT EXISTS idx_resistance_formula_rule_pub ON resistance_formula_rule_publication(formula_rule_id);
 
--- Cached user-provided query references and their CDS mappings
+-- Cached user-provided query references. Privacy-minimal: only the sequence
+-- checksum (computed from the sequence alone, header excluded) is persisted so
+-- identical sequences can reuse stored CIGAR mappings. No FASTA header,
+-- sequence, length, or timestamp is stored.
 CREATE TABLE IF NOT EXISTS query_reference (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT    NOT NULL,
-    sequence    TEXT    NOT NULL,
-    length      INTEGER NOT NULL,
     checksum    TEXT    NOT NULL,
-    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE(checksum)
 );
 
@@ -416,7 +415,7 @@ _REQUIRED_PROJECT_COLUMNS = {
     'feature_segment': {'id', 'feature_id', 'segment_index', 'start', 'end'},
     'drug': {'id', 'project_id', 'name'},
     'resistance_rule': {'id', 'feature_id', 'drug_id', 'position', 'mutation'},
-    'query_reference': {'id', 'name', 'sequence', 'length', 'checksum'},
+    'query_reference': {'id', 'checksum'},
     'query_feature_mapping': {
         'id', 'query_ref_id', 'feature_id', 'identity', 'cds_coverage',
         'query_start', 'query_end', 'strand', 'cigar',
@@ -495,9 +494,6 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
     'resistance_rule_set_member': {
         'reference_identifier': "TEXT DEFAULT ''",
         'reference': "TEXT DEFAULT ''",
-    },
-    'query_reference': {
-        'created_at': "TEXT DEFAULT ''",
     },
     'query_feature_mapping': {
         'query_coverage': 'REAL NOT NULL DEFAULT 0',
@@ -729,6 +725,46 @@ def _backfill_feature_has_rules(conn: sqlite3.Connection) -> None:
     )
 
 
+# Columns removed from query_reference by the privacy-minimal cache migration.
+# They previously stored the FASTA header (potentially patient-identifying),
+# the full sequence, its length, and a creation timestamp.
+_LEGACY_QUERY_REFERENCE_COLUMNS = ('name', 'sequence', 'length', 'created_at')
+
+
+def _drop_query_reference_pii_columns(conn: sqlite3.Connection) -> bool:
+    """Purge legacy query_reference columns that stored user-identifying data.
+
+    Kept rows (id, checksum) and their query_feature_mapping rows are preserved.
+    Returns whether the database was changed.
+    """
+    if 'query_reference' not in {
+        row['name']
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    }:
+        return False
+
+    available_columns = {
+        row['name']
+        for row in conn.execute('PRAGMA table_info(query_reference)').fetchall()
+    }
+    droppable = [c for c in _LEGACY_QUERY_REFERENCE_COLUMNS if c in available_columns]
+    if not droppable:
+        return False
+
+    if tuple(int(part) for part in sqlite3.sqlite_version.split('.')[:2]) < (3, 35):
+        raise ValueError(
+            'Migrating this project database requires SQLite >= 3.35 to drop legacy '
+            f'query_reference columns ({", ".join(droppable)}); '
+            f'found SQLite {sqlite3.sqlite_version}. Please upgrade Python/SQLite '
+            'to open this database.'
+        )
+
+    for column in droppable:
+        column_identifier = _quote_sql_identifier(column, kind='column')
+        conn.execute(f'ALTER TABLE query_reference DROP COLUMN {column_identifier}')
+    return True
+
+
 def open_project_db(db_path: Path) -> sqlite3.Connection:
     """
     Open an existing project database and validate the schema version.
@@ -743,6 +779,8 @@ def open_project_db(db_path: Path) -> sqlite3.Connection:
     _validate_project_schema_overlap(conn, db_path)
     had_has_rules = _feature_has_column(conn, 'has_rules')
     changed = False
+    if _drop_query_reference_pii_columns(conn):
+        changed = True
     if _add_missing_optional_columns(conn, _OPTIONAL_PROJECT_COLUMN_DEFS):
         changed = True
     if not had_has_rules and _feature_has_column(conn, 'has_rules'):

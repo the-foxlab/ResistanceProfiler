@@ -500,8 +500,8 @@ export function AboutPage({ logic }) {
           <div>
             <h4>Data use</h4>
             <p>
-              In the web app, uploaded files and generated results are stored temporarily and are removed as soon as you close the session. 
-              CIGAR strings from mapped fasta sequences are stored to ensure rapid reference matching if the exact same sequence is uploaded again. This is for the sole purpose of avoiding redundant processing. Importantly, no
+              In the web app, uploaded files and generated results are stored temporarily and are removed as soon as you close the session (browser tab). 
+              CIGAR strings and sequence checksums are stored to ensure rapid reference matching if the exact same sequence is uploaded again. This is for the sole purpose of avoiding redundant processing. Importantly, no
               other metadata or identifiers such as sample IDs are stored with these cigar strings. 
               Nevertheless, avoid patient names or other direct identifiers.
             </p>

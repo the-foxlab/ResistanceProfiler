@@ -1760,8 +1760,8 @@ class TestGenbankAliasFallbacks:
         query_sequence = 'GCT' * 100
         checksum = sequence_checksum(query_sequence)
         conn.execute(
-            'INSERT INTO query_reference (name, sequence, length, checksum) VALUES (?, ?, ?, ?)',
-            ('query', query_sequence, len(query_sequence), checksum),
+            'INSERT INTO query_reference (checksum) VALUES (?)',
+            (checksum,),
         )
         query_ref_id = conn.execute(
             'SELECT id FROM query_reference WHERE checksum = ?',

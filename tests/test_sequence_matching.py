@@ -181,7 +181,7 @@ class TestDbCaching:
         assert len(matches) == 1
 
         chk = sequence_checksum(_LONG_CDS)
-        store_mappings(conn, 'test_ref', _LONG_CDS, chk, matches)
+        store_mappings(conn, chk, matches)
 
         loaded = load_cached_mappings(conn, chk)
         conn.close()
@@ -226,7 +226,7 @@ class TestDbCaching:
         ]
         query = _CDS_SEQ[:24]
         chk = sequence_checksum(query)
-        store_mappings(conn, 'test_ref_nonzero_start', query, chk, match)
+        store_mappings(conn, chk, match)
 
         loaded = load_cached_mappings(conn, chk)
         conn.close()

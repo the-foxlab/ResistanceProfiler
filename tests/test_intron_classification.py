@@ -627,7 +627,7 @@ class TestCacheIntronRoundTrip:
         assert matches[0].intron_intervals, 'spliced alignment should carry intron intervals'
 
         chk = sequence_checksum(query)
-        store_mappings(conn, 'unspliced_ref', query, chk, matches)
+        store_mappings(conn, chk, matches)
         conn.close()
 
         # Re-open via open_project_db to exercise the optional-column migration.
@@ -683,7 +683,7 @@ class TestCacheIntronRoundTrip:
         )
         query = 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC'
         chk = sequence_checksum(query)
-        store_mappings(conn, 'legacy_ref', query, chk, [legacy_match])
+        store_mappings(conn, chk, [legacy_match])
         conn.close()
 
         conn2 = open_project_db(db_path)

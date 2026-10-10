@@ -69,11 +69,11 @@ def load_cached_mappings(
     Load previously stored feature mappings for a query reference checksum.
 
     :param conn: project database connection
-    :param checksum: SHA-256 of the query sequence
+    :param checksum: SHA-256 of the query sequence (sequence only, header excluded)
     :return: list of FeatureMatch objects, or None if no cache entry exists
     """
     qref = conn.execute(
-        'SELECT id, name, sequence FROM query_reference WHERE checksum = ?',
+        'SELECT id FROM query_reference WHERE checksum = ?',
         (checksum,),
     ).fetchone()
     if qref is None:
@@ -131,24 +131,23 @@ def load_cached_mappings(
 
 def store_mappings(
     conn: sqlite3.Connection,
-    name: str,
-    sequence: str,
     checksum: str,
     matches: list[FeatureMatch],
 ) -> None:
     """
     Cache feature mappings for a query reference in the project database.
 
+    Privacy-minimal: only the sequence checksum and the per-feature CIGAR
+    mappings are persisted — never the FASTA header, the sequence itself, or
+    any timestamp.
+
     :param conn: project database connection
-    :param name: human-readable name for the query reference
-    :param sequence: full query nucleotide sequence
-    :param checksum: SHA-256 of the sequence
+    :param checksum: SHA-256 of the query sequence (sequence only, header excluded)
     :param matches: accepted FeatureMatch results to store
     """
     conn.execute(
-        'INSERT OR IGNORE INTO query_reference (name, sequence, length, checksum) '
-        'VALUES (?, ?, ?, ?)',
-        (name, sequence.upper(), len(sequence), checksum),
+        'INSERT OR IGNORE INTO query_reference (checksum) VALUES (?)',
+        (checksum,),
     )
     qref_id = conn.execute(
         'SELECT id FROM query_reference WHERE checksum = ?', (checksum,),
@@ -176,4 +175,4 @@ def store_mappings(
         )
 
     conn.commit()
-    logger.info('Cached %d mapping(s) for %r (checksum %s…)', len(matches), name, checksum[:12])
+    logger.info('Cached %d mapping(s) for checksum %s…', len(matches), checksum[:12])
