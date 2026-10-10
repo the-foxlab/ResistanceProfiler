@@ -10,6 +10,9 @@ function _formatIc50Tick(value) {
     return String(value);
   }
   const ic50Value = 10 ** numeric;
+  if (ic50Value >= 10000) {
+    return ic50Value.toExponential(0).replace('e+', 'e');
+  }
   if (ic50Value >= 100) {
     return String(Math.round(ic50Value));
   }
@@ -113,11 +116,12 @@ function _renderIc50DistributionPlot(container, plot) {
     xaxis: {
       ...baseLayout().xaxis,
       type: 'linear',
-      title: { text: xlabel, font: axisTitleFont() },
+      title: { text: xlabel, font: axisTitleFont(), standoff: 18 },
       tickvals: plot.xTicks,
       ticktext,
       range: plot.xDomain,
       autorange: false,
+      automargin: true,
       showgrid: true,
       zeroline: false,
     },
@@ -128,9 +132,10 @@ function _renderIc50DistributionPlot(container, plot) {
       showgrid: false,
       range: plot.yDomain,
       autorange: false,
+      automargin: true,
     },
     autosize: true,
-    margin: { l: 110, r: 16, t: 10, b: 40 },
+    margin: { l: 55, r: 16, t: 10, b: 60 },
     height: 320,
     showlegend: false,
     dragmode: false,

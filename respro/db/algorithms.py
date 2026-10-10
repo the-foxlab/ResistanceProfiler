@@ -13,6 +13,7 @@ from respro.db.phenotype_ranks import (
     RANK_CONTRADICTORY,
     RANK_UNKNOWN,
     label_to_rank,
+    most_frequent_label,
     rank_to_label,
 )
 
@@ -140,74 +141,6 @@ def validate_interpretation_algorithms(algorithms: object) -> list[dict]:
                 _validate_effect_as_resistant(item)
 
     return algorithms
-
-
-def _collect_algorithm_labels(algorithms: list[dict]) -> set[str]:
-    """Return the set of phenotype labels declared by the algorithm configs.
-
-    ``drug_interpretation`` declares labels as threshold dict keys.
-    ``effect_as_resistant`` implicitly declares ``'resistant'``. Other algorithm
-    kinds declare no phenotype labels.
-
-    :param algorithms: validated algorithm config list
-    :return: set of declared phenotype labels (lowercased)
-    """
-    labels: set[str] = set()
-    for config in algorithms:
-        name = config.get('name')
-        if name == 'drug_interpretation':
-            labels.update(config.get('thresholds', {}).keys())
-        elif name == 'effect_as_resistant':
-            labels.add('resistant')
-    return labels
-
-
-def warn_algorithm_labels_not_in_db(
-    conn: sqlite3.Connection,
-    project_id: int,
-    algorithms: list[dict],
-) -> None:
-    """Emit a non-fatal warning for each algorithm label absent from the DB.
-
-    For each phenotype label declared by *algorithms* (see
-    :func:`_collect_algorithm_labels`), check whether that exact label string is
-    among the labels stored in the project's ``resistance_rule`` and
-    ``resistance_formula_rule`` tables (both already lowercased + whitespace-
-    stripped at import time). When a declared label is not present in the DB, a
-    WARNING is logged. The label still resolves to a rank via the vocabulary, so
-    processing continues. Labels not in the vocabulary at all already hard-fail
-    during :func:`validate_interpretation_algorithms`.
-
-    :param conn: open project DB connection
-    :param project_id: project id
-    :param algorithms: validated algorithm config list
-    """
-    declared = _collect_algorithm_labels(algorithms)
-    if not declared:
-        return
-    stored: set[str] = set()
-    for table in ('resistance_rule', 'resistance_formula_rule'):
-        rows = conn.execute(
-            f'SELECT DISTINCT t.phenotype AS phenotype FROM {table} t '
-            'JOIN drug d ON d.id = t.drug_id '
-            'WHERE d.project_id = ? AND TRIM(COALESCE(t.phenotype, "")) <> ""',
-            (project_id,),
-        ).fetchall()
-        stored.update(r['phenotype'].strip() for r in rows)
-    # Only warn when the database actually stores phenotype labels. When no
-    # labels are stored at all the comparison is meaningless and the warning
-    # is just noise (e.g. projects whose rules carry no phenotype column).
-    if not stored:
-        return
-    for label in sorted(declared):
-        if label not in stored:
-            logger.warning(
-                'Algorithm config declares phenotype label %r, which is not among '
-                'the labels stored in the database (%s). The label still resolves '
-                'to a rank and processing continues; verify the vocabulary is '
-                'consistent between the algorithm config and the rules sheet.',
-                label, sorted(stored),
-            )
 
 
 def store_interpretation_algorithms(
@@ -758,6 +691,8 @@ def compute_drug_assessment(
     Compute per-method assessments and a final merged assessment for one drug.
 
     :param drug_data: dict with keys ``rank_counts`` (dict[int, int]),
+        ``rank_label_counts`` (dict[int, dict[str, int]], optional — verbatim
+        phenotype labels per rank for provenance-preserving assessments),
         ``score_total``, ``ic50_values``, ``fold_ic50_values``, ``hit_count``
     :param configs: list of validated ``drug_interpretation`` config dicts
     :param reference_name: observed reference name for the drug; when provided together
@@ -832,26 +767,39 @@ def _assess_by_phenotype(drug_data: dict, thresholds: dict) -> str:
     """Assess by phenotype labels: the highest-rank hit wins.
 
     Hardcoded logic (no configurable thresholds): iterate ``rank_counts``
-    highest-rank first and return the canonical label of the first rank >= 2
-    with count >= 1. Contradictory (any count > 0) wins over susceptible (rank
-    1) but loses to any higher-tier severity hit (ranks 2-5). Hits with no
-    severity/contradictory label yield ``'susceptible'``. No hits yield ``''``
-    (the caller defaults to ``'susceptible'``).
+    highest-rank first and return the first rank >= 2 with count >= 1. The
+    returned label preserves database provenance: when the winning rank's hits
+    carry verbatim phenotype labels (``rank_label_counts``), the most frequent
+    label at that rank is returned (alphabetical tie-break); without verbatim
+    labels the canonical fallback label for the rank is used. Contradictory
+    (any count > 0) wins over susceptible (rank 1) but loses to any higher-tier
+    severity hit (ranks 2-5). Hits with no severity/contradictory label yield
+    ``'susceptible'`` (or the verbatim rank-1 label when one exists). No hits
+    yield ``''`` (the caller defaults to ``'susceptible'``).
 
     *thresholds* is accepted for signature parity with the other assess helpers
     but is ignored.
     """
     rank_counts: dict[int, int] = drug_data.get('rank_counts', {})
+    rank_label_counts: dict[int, dict[str, int]] = drug_data.get('rank_label_counts', {})
+
+    def _label_for(rank: int) -> str:
+        labels = rank_label_counts.get(rank)
+        if labels:
+            return most_frequent_label(labels) or rank_to_label(rank)
+        return rank_to_label(rank)
 
     # Severity ranks 2–5, highest first; return the first with any hits.
     # Rank 1 (susceptible) is deliberately skipped here so that contradictory
     # can win over it — contradictory sits between rank 1 and rank 2.
     for rank in sorted((r for r in rank_counts if r >= 2), reverse=True):
         if rank_counts[rank] >= 1:
-            return rank_to_label(rank)
+            return _label_for(rank)
 
     if rank_counts.get(RANK_CONTRADICTORY, 0) > 0:
-        return 'contradictory'
+        return _label_for(RANK_CONTRADICTORY)
+    if rank_counts.get(1, 0) > 0:
+        return _label_for(1)
     if drug_data['hit_count'] > 0:
         return 'susceptible'
     return ''

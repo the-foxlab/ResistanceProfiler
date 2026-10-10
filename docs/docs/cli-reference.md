@@ -150,7 +150,7 @@ respro fasta \
 | `--output PATH`, `-o` | Output path (directory or HTML file path). Default: `output`. |
 | `--results-db PATH`, `-d` | Optional results database path. Creates or appends to an existing SQLite results database. |
 | `--threads N`, `-th` | Thread count for alignment calculations. Default: `1`. |
-| `--cache` / `--no-cache` | Cache the FASTA reference mapping in the project database for report regeneration (default: off). |
+| `--cache` / `--no-cache` | Reuse/store FASTA reference mapping cache in the project database (default: off). |
 | `--export FORMAT`, `-e` | Extra export format alongside HTML (`pdf`, `json`, `tsv`). Repeatable. |
 | `--config PATH`, `-c` | User TOML overriding bundled defaults (scientific thresholds, alignment, AF bins, timeouts). See [Configuration](configuration.md). |
 

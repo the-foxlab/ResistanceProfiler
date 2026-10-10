@@ -115,6 +115,22 @@ def rank_to_label(rank: int) -> str:
     return _FALLBACK_LABELS[rank]
 
 
+def most_frequent_label(counts: dict[str, int]) -> str | None:
+    """Return the most frequent label from a label → count mapping.
+
+    Used to preserve phenotype label provenance: when several distinct
+    verbatim labels share the same severity rank, the most frequent one is
+    shown. Ties break alphabetically so the result is deterministic and
+    independent of insertion order (and therefore of ``PYTHONHASHSEED``).
+
+    :param counts: mapping of label to occurrence count
+    :return: the winning label, or ``None`` when *counts* is empty
+    """
+    if not counts:
+        return None
+    return min(counts, key=lambda label: (-counts[label], label))
+
+
 def rank_to_colour(rank: int) -> str:
     """Return the display colour for *rank*.
 

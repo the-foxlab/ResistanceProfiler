@@ -198,7 +198,7 @@ class TestLoadFeaturesFiltersHasRules:
 
 
 class TestSchemaVersionBumped:
-    """PROJECT_SCHEMA_VERSION reflects the new column."""
+    """PROJECT_SCHEMA_VERSION reflects the privacy-minimal query cache."""
 
-    def test_schema_version_is_3(self) -> None:
-        assert PROJECT_SCHEMA_VERSION == 3
+    def test_schema_version_is_4(self) -> None:
+        assert PROJECT_SCHEMA_VERSION == 4

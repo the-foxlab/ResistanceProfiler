@@ -18,11 +18,11 @@ from respro.cli.profile_helpers import (
     _ProfilingRunContext,
 )
 from respro.config.cli_settings import CLI_CONFIG
-from respro.core.query import resolve_cached_query_reference
 from respro.db.models import AnnotatedVariant, FeatureMatch, VariantCall
 from respro.db.results import (
     list_runs,
     load_coverage_gaps,
+    load_profiled_features,
     load_run,
     project_updated_at,
 )
@@ -159,36 +159,50 @@ def _sync_single_run(
             af_bin=row.get('af_bin', ''),
         ))
 
-    # Try to recover query sequence and feature matches for FASTA-mode runs.
-    query_sequence = ''
+    # Recover profiled feature matches for FASTA-mode runs from persisted run
+    # data (the profiled_feature table), not from the project-DB query cache —
+    # the cache is privacy-minimal and stores only checksums and CIGAR
+    # mappings, so no query header or sequence can be recovered from it. The
+    # query sequence is therefore not recoverable here and alignment
+    # visualisation is omitted from synced reports.
     feature_matches: list[FeatureMatch] = []
     sample_name = run_dict.get('sample_name', '')
     if sample_name:
-        try:
-            _, query_sequence, feature_matches = resolve_cached_query_reference(
-                project_conn, sample_name,
-            )
-        except ValueError as exc:
-            logger.debug(
-                'Skipping cached query-reference recovery for sample %r: %s',
-                sample_name,
-                exc,
-            )
-
-    with err_console.status(f'[dim]Re-annotating run #{run_id}…[/dim]'):
-        ctx = _ProfilingRunContext(
-            annotations=raw_annotations,
-            formula_rules=formula_rules,
-            features=features,
-            rule_feature_names=rule_feature_names,
-            rules=rules,
-            total_variants=run_dict.get('total_variants', 0),
-            variants_in_cds=run_dict.get('variants_in_cds', 0),
-            coverage_gaps=coverage_gaps or [],
-            query_sequence=query_sequence,
-            feature_matches=feature_matches or [],
-            af_bins=CLI_CONFIG.af_bins.as_dict(),
+        profiled_names = load_profiled_features(results_conn, run_id).get(
+            run_dict['reference_name'], []
         )
+        if not profiled_names:
+            profiled_names = sorted(rule_feature_names)
+        feature_by_name = {f.name: f for f in features}
+        feature_matches = [
+            FeatureMatch(
+                feature=feature_by_name[name],
+                identity=0.0,
+                cds_coverage=0.0,
+                query_coverage=0.0,
+                query_start=0,
+                query_end=0,
+                strand='+',
+                cigar='',
+            )
+            for name in profiled_names
+            if name in feature_by_name
+        ]
+
+        with err_console.status(f'[dim]Re-annotating run #{run_id}…[/dim]'):
+            ctx = _ProfilingRunContext(
+                annotations=raw_annotations,
+                formula_rules=formula_rules,
+                features=features,
+                rule_feature_names=rule_feature_names,
+                rules=rules,
+                total_variants=run_dict.get('total_variants', 0),
+                variants_in_cds=run_dict.get('variants_in_cds', 0),
+                coverage_gaps=coverage_gaps or [],
+                query_sequence='',
+                feature_matches=feature_matches or [],
+                af_bins=CLI_CONFIG.af_bins.as_dict(),
+            )
         result, _outputs = _finalize_and_export(
             ctx=ctx,
             project_conn=project_conn,

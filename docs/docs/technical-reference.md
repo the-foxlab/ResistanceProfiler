@@ -1180,8 +1180,11 @@ same inputs always produce the same report:
   (identity, coverage, name).
 - **Multi-reference override resolution**: alphabetically first reference name.
 - **Project fingerprint**: an immutable UUID guards regeneration compatibility.
-- **Query mapping cache**: mappings are cached by sequence checksum (SHA-256),
-  so repeated runs with the same query reuse stored alignments.
+- **Query mapping cache**: mappings are cached by sequence checksum (SHA-256,
+  computed from the sequence alone — the FASTA header is excluded), so repeated
+  runs with the same query reuse stored alignments. The cache is
+  privacy-minimal: only the checksum and the per-feature CIGAR mappings are
+  persisted.
 - **Mutation token canonicalisation**: all rule notation variants are normalised
   to five canonical forms at import time, ensuring consistent matching regardless
   of the curator's notation style.

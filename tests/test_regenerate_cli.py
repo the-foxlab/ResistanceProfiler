@@ -510,11 +510,12 @@ class TestRegenerate:
         ])
         assert profile_result.exit_code == 0, profile_result.output
 
-        # The live report must include both drugs and the susceptible narrative.
+        # The live report must include both drugs; the zero-hit drug is
+        # assessed susceptible and surfaces in the narrative list section.
         live_html = list(profile_out.glob('*.html'))[0].read_text()
         assert 'TestDrug' in live_html
         assert 'OtherDrug' in live_html
-        assert 'susceptibility to 1 drug' in live_html
+        assert 'Drugs assessed as susceptible:' in live_html
 
         # Regenerate from the results DB.
         regen_db_dir = tmp_path / 'regen_db'
@@ -529,7 +530,7 @@ class TestRegenerate:
         regen_db_html = list(regen_db_dir.glob('*.html'))[0].read_text()
         assert 'TestDrug' in regen_db_html
         assert 'OtherDrug' in regen_db_html
-        assert 'susceptibility to 1 drug' in regen_db_html
+        assert 'Drugs assessed as susceptible:' in regen_db_html
 
         # Regenerate from the JSON export.
         json_files = list(profile_out.glob('*.results.json'))
@@ -545,7 +546,7 @@ class TestRegenerate:
         regen_json_html = list(regen_json_dir.glob('*.html'))[0].read_text()
         assert 'TestDrug' in regen_json_html
         assert 'OtherDrug' in regen_json_html
-        assert 'susceptibility to 1 drug' in regen_json_html
+        assert 'Drugs assessed as susceptible:' in regen_json_html
 
 
     def test_regenerate_preserves_frechet_formula_frequency_and_bin(

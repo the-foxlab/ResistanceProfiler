@@ -85,10 +85,10 @@ export function HomePage({ logic }) {
       <section className="home-context" aria-labelledby="home-context-title">
         <h2 id="home-context-title">Why ResistanceProfiler?</h2>
         <p>
-          Antiviral resistance is a significant health concern: it can reduce the effectiveness of antiviral therapy, cause severe complications, and limit treatment options. Yet there is no generally accepted standard for analyzing viral genomes to identify mutations associated with reduced drug susceptibility. Pathogen-specific tools do exist, such as the{' '}
+          Antiviral resistance is a significant health concern: it can reduce the effectiveness of antiviral therapy, thereby causing severe complications due to continued viral replication, and limit treatment options. Yet there is no generally accepted standard for analyzing viral genomic information to identify mutations associated with reduced drug susceptibility. Pathogen-specific tools do exist, such as the{' '}
           <a href="https://hivdb.stanford.edu/" target="_blank" rel="noreferrer">
             Stanford HIV Drug Resistance Database
-          </a>, but approaches are not standardized across pathogens. ResistanceProfiler was developed to standardize how resistance databases are organized and how viral sequence data are analyzed, making results easier to interpret and compare across pathogens and input formats.
+          </a>, but approaches are not standardized across pathogens. ResistanceProfiler was developed to standardize how resistance databases are organized and how viral sequence information is analyzed, making results easier to interpret and compare across pathogens and input formats.
         </p>
       </section>
 
