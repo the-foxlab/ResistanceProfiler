@@ -35,7 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       github.event_name == 'workflow_dispatch' ||
-      startsWith(github.event.release.tag_name, 'v')
+      startsWith(github.event.release.tag_name, 'v') ||
+      startsWith(github.event.release.tag_name, 'web-v')
 
     steps:
       - name: Checkout repository
