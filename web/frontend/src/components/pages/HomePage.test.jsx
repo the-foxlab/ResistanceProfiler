@@ -83,7 +83,7 @@ describe('HomePage context', () => {
     const context = screen.getByRole('region', { name: /why resistanceprofiler/i });
     expect(context.querySelectorAll('p')).toHaveLength(1);
     expect(context).toHaveTextContent(/antiviral resistance is a significant health concern/i);
-    expect(context).toHaveTextContent(/standardize how resistance databases are organized and how viral sequence data are analyzed/i);
+    expect(context).toHaveTextContent(/standardize how resistance databases are organized and how viral sequence information is analyzed/i);
     expect(screen.getByRole('link', { name: /stanford hiv drug resistance database/i })).toHaveAttribute(
       'href',
       'https://hivdb.stanford.edu/',

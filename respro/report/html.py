@@ -41,6 +41,7 @@ from respro.db.phenotype_ranks import (
     RANK_CONTRADICTORY,
     RANK_UNKNOWN,
     label_to_rank,
+    most_frequent_label,
     rank_to_colour,
     rank_to_label,
 )
@@ -1661,41 +1662,25 @@ def _build_summary_narrative(
         if (row.get('assessment') or '').strip()
     ]
 
-    # Categorize assessed drugs by the inferred rank of their assessment label,
-    # using the canonical rank vocabulary (respro.db.phenotype_ranks):
-    #   rank 5 → resistant
-    #   rank 4 → intermediate
-    #   rank 3 → low-level resistance
-    #   rank 2 → potential low-level resistance
-    #   rank 1 → susceptible
-    #   rank -1 → contradictory
-    # Unknown (rank 0) is excluded. Each non-susceptible rank gets its own bucket
-    # so the narrative and the drug list sections use the same terminology as the
-    # per-drug badges. Contradictory is surfaced as its own bucket so drugs whose
-    # final assessment is contradictory (it wins over susceptible but loses to
-    # higher tiers) appear in the summary narrative.
-    drugs_by_rank: dict[int, list[str]] = {}
+    # Group assessed drugs by their verbatim assessment label so the list
+    # sections carry the database/algorithm's own phenotype terminology
+    # (provenance) instead of canonical rank labels. Unknown labels (rank 0 or
+    # unmapped) are excluded. Sections are ordered most-severe first
+    # (severity rank descending, then alphabetically by label); drugs within a
+    # section are sorted case-insensitively. Contradictory assessments use the
+    # same uniform title pattern and surface as their own section (they win
+    # over susceptible but lose to higher tiers).
+    label_drugs: dict[str, list[str]] = {}
+    label_ranks: dict[str, int] = {}
     for row in assessed_rows:
-        rank = label_to_rank((row.get('assessment') or '').strip())
+        label = (row.get('assessment') or '').strip()
+        rank = label_to_rank(label)
         if rank is None or rank == RANK_UNKNOWN:
             continue
         name = row.get('summary_name') or row.get('name') or 'Unknown'
-        drugs_by_rank.setdefault(rank, []).append(name)
-    for rank in drugs_by_rank:
-        drugs_by_rank[rank] = sorted(drugs_by_rank[rank], key=lambda n: n.lower())
-
-    resistant_drugs = drugs_by_rank.get(5, [])
-    intermediate_drugs = drugs_by_rank.get(4, [])
-    low_level_drugs = drugs_by_rank.get(3, [])
-    potential_low_level_drugs = drugs_by_rank.get(2, [])
-    sensitive_drugs = drugs_by_rank.get(1, [])
-    contradictory_drugs = drugs_by_rank.get(RANK_CONTRADICTORY, [])
-
-    # All non-susceptible, non-resistant, non-contradictory ranks (2–4) form the
-    # intermediate-tier group used by the lead-sentence count.
-    intermediate_tier_drugs = (
-        potential_low_level_drugs + low_level_drugs + intermediate_drugs
-    )
+        label_drugs.setdefault(label, []).append(name)
+        label_ranks.setdefault(label, rank)
+    ordered_labels = sorted(label_drugs, key=lambda lbl: (-label_ranks[lbl], lbl))
 
     # When multi-species, ProfilingResult.feature_matches only exposes the primary
     # reference's matches (it delegates to references[0]); aggregate across all
@@ -1716,7 +1701,6 @@ def _build_summary_narrative(
         display_names.get(match.feature.name, match.feature.name)
         for match in all_feature_matches
     })
-    was_were = 'were' if len(profiled_features) != 1 else 'was'
 
     # Multi-species attribution: group profiled features by organism so the lead
     # sentence names each organism alongside its features, instead of collapsing to
@@ -1747,98 +1731,47 @@ def _build_summary_narrative(
         for org in features_by_organism:
             feats = features_by_organism[org]
             feat_list = _join_english_list([escape(f) for f in feats])
-            seq_word = 'sequence' if len(feats) == 1 else 'sequences'
             per_organism_clauses.append(
-                f'the {seq_word} of {feat_list} of <strong>{escape(org)}</strong>'
+                f'{feat_list} of <strong>{escape(org)}</strong>'
             )
-        feature_clause = 'The ' + _join_english_list(per_organism_clauses)
-        was_were = 'were'
-        # Each per-organism clause above already names its organism; do not append
-        # the (single) primary organism again or it duplicates in the sentence.
-        feature_organism_clause = feature_clause
+        # Each per-organism clause names its organism; do not append the
+        # (single) primary organism again or it duplicates in the sentence.
+        feature_organism_clause = (
+            'The tested sequence information mapped to '
+            + _join_english_list(per_organism_clauses)
+        )
     elif profiled_features:
         feature_list = _join_english_list([
             escape(feature) for feature in profiled_features
         ])
-        feature_clause = f"The sequence{'s' if len(profiled_features) != 1 else ''} of {feature_list}"
         organism_name = escape(result.organism) if result.organism else 'Unknown organism'
-        feature_organism_clause = f'{feature_clause} of <strong>{organism_name}</strong>'
+        feature_organism_clause = (
+            f'The tested sequence information mapped to {feature_list} '
+            f'of <strong>{organism_name}</strong>'
+        )
     else:
-        feature_clause = 'The input sequence'
         organism_name = escape(result.organism) if result.organism else 'Unknown organism'
-        feature_organism_clause = f'{feature_clause} of <strong>{organism_name}</strong>'
+        feature_organism_clause = (
+            f'The tested sequence information of <strong>{organism_name}</strong> '
+            'mapped to no profiled features'
+        )
 
     n_drugs = len(assessed_rows) if assessed_rows else len(drug_rows)
     if has_assessment and n_drugs:
         drug_word = 'drug' if n_drugs == 1 else 'drugs'
-        n_resistant = len(resistant_drugs)
-        n_intermediate_tier = len(intermediate_tier_drugs)
-        n_susceptible = len(sensitive_drugs)
-        n_contradictory = len(contradictory_drugs)
-        if n_resistant == 0 and n_intermediate_tier == 0 and n_contradictory == 0:
-            lead = (
-                f'{feature_organism_clause} {was_were} evaluated against '
-                f'known resistance-associated mutations for {n_drugs} {drug_word}. '
-                'The assessment found no evidence for resistance for any drug.'
-            )
-        elif n_susceptible == 0 and n_intermediate_tier == 0 and n_contradictory == 0:
-            lead = (
-                f'{feature_organism_clause} {was_were} evaluated against '
-                f'known resistance-associated mutations for {n_drugs} {drug_word}. '
-                'The assessment found evidence for resistance for all analysed drugs.'
-            )
-        else:
-            # Build the lead sentence listing only non-zero categories, using
-            # the canonical rank terminology: resistance / reduced
-            # susceptibility / contradictory evidence / susceptibility. The
-            # "reduced susceptibility" bucket aggregates ranks 2–4 (potential
-            # low-level resistance, low-level resistance, intermediate), which
-            # are listed individually in the drug list sections below.
-            # Contradictory evidence is its own category. Zero-count categories
-            # are omitted entirely.
-            parts: list[str] = []
-            if n_resistant:
-                parts.append(
-                    f"resistance against {n_resistant} "
-                    f"{'drug' if n_resistant == 1 else 'drugs'}"
-                )
-            if n_intermediate_tier:
-                parts.append(
-                    f"reduced susceptibility against {n_intermediate_tier} "
-                    f"{'drug' if n_intermediate_tier == 1 else 'drugs'}"
-                )
-            if n_contradictory:
-                parts.append(
-                    f"contradictory evidence for {n_contradictory} "
-                    f"{'drug' if n_contradictory == 1 else 'drugs'}"
-                )
-            if n_susceptible:
-                parts.append(
-                    f"susceptibility to {n_susceptible} "
-                    f"{'drug' if n_susceptible == 1 else 'drugs'}"
-                )
-            if len(parts) == 1:
-                findings = f'The assessment found evidence for {parts[0]}.'
-            else:
-                findings = (
-                    'The assessment found evidence for '
-                    + ', '.join(parts[:-1])
-                    + f', and {parts[-1]}.'
-                )
-            lead = (
-                f'{feature_organism_clause} {was_were} evaluated against '
-                f'known resistance-associated mutations for {n_drugs} {drug_word}. '
-                f'{findings}'
-            )
+        lead = (
+            f'{feature_organism_clause} and was evaluated against '
+            f'known resistance-associated mutations for {n_drugs} {drug_word}.'
+        )
     elif drug_rows:
         lead = (
-            f'{feature_organism_clause} {was_were} evaluated against '
+            f'{feature_organism_clause} and was evaluated against '
             f'known resistance-associated mutations, but no final drug interpretation '
             'algorithm is configured.'
         )
     else:
         lead = (
-            f'{feature_organism_clause} were evaluated, '
+            f'{feature_organism_clause} and was evaluated, '
             'but no in-scope drugs were available for interpretation.'
         )
     paragraphs.append(lead)
@@ -1881,41 +1814,12 @@ def _build_summary_narrative(
 
     list_sections: list[str] = []
     if has_assessment and (assessed_rows or drug_rows):
-        if resistant_drugs:
+        for label in ordered_labels:
+            names = sorted(label_drugs[label], key=lambda n: n.lower())
             list_sections.append(_list_line(
-                'Drugs assessed as resistant',
-                5,
-                resistant_drugs,
-            ))
-        if intermediate_drugs:
-            list_sections.append(_list_line(
-                'Drugs assessed as intermediate',
-                4,
-                intermediate_drugs,
-            ))
-        if low_level_drugs:
-            list_sections.append(_list_line(
-                'Drugs assessed as low-level resistance',
-                3,
-                low_level_drugs,
-            ))
-        if potential_low_level_drugs:
-            list_sections.append(_list_line(
-                'Drugs assessed as potential low-level resistance',
-                2,
-                potential_low_level_drugs,
-            ))
-        if sensitive_drugs:
-            list_sections.append(_list_line(
-                'Drugs assessed as susceptible',
-                1,
-                sensitive_drugs,
-            ))
-        if contradictory_drugs:
-            list_sections.append(_list_line(
-                'Drugs with contradictory evidence',
-                RANK_CONTRADICTORY,
-                contradictory_drugs,
+                f'Drugs assessed as {label}',
+                label_ranks[label],
+                names,
             ))
 
     narrative_text = ' '.join(paragraphs)
@@ -1987,6 +1891,7 @@ def _build_drug_interpretation_table(
             'drug_class': drug_class,
             'hit_count': 0,
             'rank_counts': {},  # rank -> count, populated from phenotype labels
+            'rank_label_counts': {},  # rank -> {verbatim label -> count}
             'score_total': 0.0, 'score_display': '0',
             'ic50_display': '\u2014', 'fold_ic50_display': '\u2014',
             'ic50_values': [], 'fold_ic50_values': [],
@@ -2102,6 +2007,8 @@ def _build_drug_interpretation_table(
             rank = label_to_rank(pheno)
             if rank is not None:
                 by_drug[drug]['rank_counts'][rank] = by_drug[drug]['rank_counts'].get(rank, 0) + 1
+                label_counts = by_drug[drug]['rank_label_counts'].setdefault(rank, {})
+                label_counts[pheno] = label_counts.get(pheno, 0) + 1
         score_metric = metrics_by_label.get('Score')
         if score_metric is not None:
             val = _parse_numeric_value((score_metric.get('value') or '').strip())
@@ -2288,14 +2195,24 @@ def _build_drug_interpretation_table(
     )
     if RANK_CONTRADICTORY in present_ranks:
         phenotype_ranks.append(RANK_CONTRADICTORY)
-    phenotype_columns = [
-        {
+    # Column headers preserve database label provenance: per rank, the most
+    # frequent verbatim label across all drugs wins (alphabetical tie-break);
+    # without verbatim labels the canonical fallback label is used. Badge
+    # classes stay rank-derived so colouring is unchanged.
+    rank_labels: dict[int, dict[str, int]] = {}
+    for d in drug_rows:
+        for rank, labels in d['rank_label_counts'].items():
+            bucket = rank_labels.setdefault(rank, {})
+            for label, count in labels.items():
+                bucket[label] = bucket.get(label, 0) + count
+    phenotype_columns = []
+    for rank in phenotype_ranks:
+        verbatim = most_frequent_label(rank_labels.get(rank, {}))
+        phenotype_columns.append({
             'rank': rank,
-            'label': rank_to_label(rank).title(),
+            'label': (verbatim or rank_to_label(rank)).title(),
             'badge_class': _phenotype_badge_class(rank_to_label(rank)),
-        }
-        for rank in phenotype_ranks
-    ]
+        })
 
     num_value_columns = sum(1 for ml in method_labels if ml['value_header'])
     col_count = (

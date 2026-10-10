@@ -409,6 +409,10 @@
     grid-template-columns: 1fr;
   }
 
+  .database-algorithms-panel .database-meta-row-table {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .database-phenotype-switch-row {
     flex-direction: column;
     align-items: flex-start;

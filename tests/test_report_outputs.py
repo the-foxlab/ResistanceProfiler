@@ -1399,7 +1399,9 @@ class TestBuildReportContext:
         # Method assessments should have badge classes
         ma = drug_table['rows'][0]['method_assessments']
         assert len(ma) == 1
-        assert ma[0]['assessment'] == 'susceptible'
+        # by_phenotype preserves the database-provided label ('sensitive'),
+        # not the canonical fallback ('susceptible').
+        assert ma[0]['assessment'] == 'sensitive'
         assert ma[0]['assessment_badge_class'] == 'phenotype--susceptible'
 
     def test_drug_thresholds_override_attaches_resolved_thresholds_and_source(self) -> None:

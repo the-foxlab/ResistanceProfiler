@@ -35,6 +35,8 @@ describe('AboutPage structure', () => {
 
     const fundingHeading = screen.getByRole('heading', { name: 'Supported by' });
     expect(fundingHeading.closest('section')).toHaveClass('about-section-card');
+    expect(screen.getByText(/Institute of Virology Freiburg/)).toBeInTheDocument();
+    expect(screen.queryByText(/Department of Virology at the Medical Center – Universityclinic of Freiburg/)).toBeNull();
     expect(document.getElementById('about-scope')).toBeNull();
     expect(document.getElementById('about-funding')).not.toBeNull();
 
@@ -93,7 +95,7 @@ describe('AboutPage structure', () => {
     expect(section).toHaveClass('about-section-card');
     expect(within(section).getByRole('heading', { level: 3, name: /contributing, data use and licensing/i })).toBeInTheDocument();
     expect(within(section).getAllByRole('heading', { level: 4 })).toHaveLength(3);
-    expect(within(section).getByText(/24 hours by default/i)).toBeInTheDocument();
+    expect(within(section).getByText(/uploaded files and generated results are stored temporarily and are removed as soon as you close the session/i)).toBeInTheDocument();
     expect(within(section).queryByText(/no data is stored on remote servers/i)).toBeNull();
   });
 

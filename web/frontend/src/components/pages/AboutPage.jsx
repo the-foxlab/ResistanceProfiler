@@ -144,7 +144,7 @@ export function AboutPage({ logic }) {
           ResPro maps a sample to the reference sequences and annotated coding features in a project database, then
           compares the resulting amino-acid changes with that database's resistance rules. The database therefore
           determines both the coordinate context and the evidence available for interpretation. A rule match is an
-          interpretation of curated evidence, not a patient-specific treatment recommendation.
+          interpretation of curated evidence.
         </p>
         <ol className="about-workflow" aria-label="ResistanceProfiler workflow">
           {ABOUT_WORKFLOW_STEPS.map((step, index) => (
@@ -160,7 +160,7 @@ export function AboutPage({ logic }) {
         <div className="about-scope-notes">
           <div>
             <h4>What you provide</h4>
-            <p>A consensus sequence (FASTA), or a VCF plus the exact reference used to call its variants. An optional BAM provides aligned reads for coverage assessment and direct evidence about which variants occur together.</p>
+            <p>A consensus sequence (FASTA), or a VCF plus the exact reference used to call its variants. An optional BAM provides aligned reads for coverage assessment and direct evidence about which variants occur in the same codon.</p>
           </div>
           <div>
             <h4>What you get</h4>
@@ -191,8 +191,7 @@ export function AboutPage({ logic }) {
           <p className="about-section-lead">
             Each rule is associated with an annotated feature (usually a protein-coding gene), a reference, and an
             amino-acid event. A match contributes the rule's curated phenotype, score, or other interpretation to
-            the report. The same biological event may have a different coordinate or label when represented against
-            another reference, so reference context matters when comparing results across databases or studies.
+            the report.
           </p>
           <div className="about-table-wrap">
             <table>
@@ -224,24 +223,14 @@ export function AboutPage({ logic }) {
                   <td><span className="about-inline-pill">L201LfsX</span></td>
                   <td>Reading-frame shift after the reference L at position 201.</td>
                 </tr>
-                <tr>
-                  <td>Phenotype</td>
-                  <td><span className="about-inline-pill">sensitive / resistant</span></td>
-                  <td>Curated interpretation of in-vitro susceptibility evidence.</td>
-                </tr>
-                <tr>
-                  <td>Clinical phenotype</td>
-                  <td><span className="about-inline-pill">sensitive / resistant</span></td>
-                  <td>A separately curated, clinically oriented category where the source provides one; not a patient-specific recommendation.</td>
-                </tr>
               </tbody>
             </table>
           </div>
           <h4>Phenotype ranks and accepted labels</h4>
           <p>
             Rules can include an in-vitro <code>phenotype</code>, a clinically oriented <code>clinical_phenotype</code>,
-            or both. ResPro maps either field to the same ordinal rank vocabulary for severity comparisons and report
-            colours. These are categories, not probabilities; the two fields are interpreted independently.
+            or both. ResPro maps either field to the same severity rank  and report
+            colours.
           </p>
           <div className="about-table-wrap">
             <table>
@@ -294,7 +283,7 @@ export function AboutPage({ logic }) {
           <p>
             Labels are case-insensitive and whitespace is trimmed. Bare values <code>1</code>–<code>5</code> are also
             accepted and resolve to that rank's standard label. Ranks 1–5 run from least to most severe; unknown and
-            contradictory are special categories, not points on that scale.
+            contradictory are special categories.
           </p>
           <AboutDocsLink links={[
             { href: ABOUT_DOCS.nomenclature, label: 'Mutation notation and normalization' },
@@ -317,8 +306,7 @@ export function AboutPage({ logic }) {
             <strong>How is co-occurrence assessed?</strong> For an AND rule, ResPro estimates a conservative lower bound on the fraction carrying
             all required changes, then compares it with the maximum possible overlap given the member frequencies.
             By default, this guaranteed-to-maximum overlap ratio must reach <span className="about-inline-pill">2/3</span>.
-            This is not a requirement that each mutation have 2/3 allele frequency: it tests whether the evidence
-            supports the changes occurring together, rather than merely appearing separately in a mixed sample.
+            Here ResPro tests whether the evidence supports that the changes cooccur together solely based on their observed frequencies.
           </p>
           <div className="about-operator-list">
             <div className="about-operator-row">
@@ -369,8 +357,7 @@ export function AboutPage({ logic }) {
               <p>
                 Adds a <span className="about-inline-pill">resistant</span> phenotype hit when a configured consequence
                 (frameshift, stop gained or lost, start lost, insertion, or deletion) is observed in the specified
-                feature and reference. This is an explicit database-level interpretation rule, not a direct
-                susceptibility measurement, and it does not assign a clinical phenotype.
+                feature and reference. This is an explicit database-level interpretation rule.
               </p>
             </div>
             <div className="about-operator-row">
@@ -383,10 +370,9 @@ export function AboutPage({ logic }) {
             </div>
           </div>
           <p className="about-note-inline">
-            These methods are configured with the project database, not selected separately for each sample. If
+            These methods are configured with the project database. If
             multiple methods are configured, the report shows their assessments and combines them using the most
-            severe inferred rank for the final call. This summarizes the database's rules; it does not account for
-            patient history, prior treatment, or other clinical factors.
+            severe inferred rank for the final call.
           </p>
           <AboutDocsLink links={[{ href: ABOUT_DOCS.algorithms, label: 'Interpretation algorithms' }]} />
         </article>
@@ -460,7 +446,7 @@ export function AboutPage({ logic }) {
             <div className="about-cli-side-card">
               <h4>Regenerate reports from JSON</h4>
               <p>
-                When a run saves its result payload as JSON, the report files can be regenerated later without
+                When a run is saved as JSON, the report files can be regenerated later without
                 repeating the profiling step. This is useful when changing report outputs or recovering a report.
               </p>
             </div>
@@ -514,11 +500,10 @@ export function AboutPage({ logic }) {
           <div>
             <h4>Data use</h4>
             <p>
-              In the web app, uploaded files and generated results are stored temporarily in the server deployment's
-              data directory and are removed according to its retention settings (24 hours by default). Closing a
-              browser tab does not itself guarantee immediate deletion. Storage, backups, and access depend on how
-              the service is hosted; ask the service administrator about local policy. Avoid patient names or other
-              direct identifiers, and use clinical data only in an appropriately governed deployment.
+              In the web app, uploaded files and generated results are stored temporarily and are removed as soon as you close the session. 
+              CIGAR strings from mapped fasta sequences are stored to ensure rapid reference matching if the exact same sequence is uploaded again. This is for the sole purpose of avoiding redundant processing. Importantly, no
+              other metadata or identifiers such as sample IDs are stored with these cigar strings. 
+              Nevertheless, avoid patient names or other direct identifiers.
             </p>
           </div>
           <div>
@@ -545,7 +530,7 @@ export function AboutPage({ logic }) {
         </div>
         <p className="about-section-lead">
           This work is supported by the Hans A. Krebs Program for Medical Scientists at the University of Freiburg and
-          the Department of Virology at the Medical Center – University of Freiburg.
+          the Institute of Virology Freiburg.
         </p>
         <div className="about-supported-logos">
           <a

@@ -95,6 +95,8 @@ Combines the matched rules for a drug into one overall result. Depending on your
 
 Each `method` may appear at most once; two entries with the same `method` are rejected.
 
+`by_phenotype` preserves label provenance: the assessment reports the phenotype label stored in the database (most frequent label among the winning rank's hits, alphabetical tie-break), falling back to the canonical rank label only when a drug has no labelled hits.
+
 When multiple methods are configured, the report shows a per-method assessment column (plain text) alongside the final **Assessment** column. The final assessment is strongest-wins by inferred rank: rank 5 (resistant) > … > rank 2 (potential low-level resistance) > `contradictory` (rank -1) > rank 1 (susceptible), with `unknown` (rank 0) weakest. `contradictory` thus wins over susceptible but loses to any higher-tier severity. The most severe result across all methods becomes the final call.
 
 When `drug_thresholds` overrides are configured, each per-method assessment cell in the report shows an info icon on hover naming the resolved thresholds and their source (override `(reference, drug)`, override `(drug)`, or global default). The table layout, badge styling, and final Assessment column are unchanged; without overrides the report renders identically to the global-only case.
