@@ -34,17 +34,15 @@ Thumbs.db
 *.bai
 *.vcf
 *.png
+*.html
 output/
 data/
 reports/
 example/
-sample.report.html
 bioconda/
-test.html
 .env
 .vscode/
 docker-compose.web_2.yml
-imprint.html
 # MkDocs build output
 site/
 graphify-out

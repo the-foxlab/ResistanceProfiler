@@ -133,7 +133,9 @@ def _sync_single_run(
         )
     ref_id = int(ref_row['id'])
 
-    features, rules, formula_rules, rule_feature_names = _load_reference_data(project_conn, ref_id)
+    features, rules, formula_rules, rule_feature_names, report_features = _load_reference_data(
+        project_conn, ref_id,
+    )
     coverage_gaps = load_coverage_gaps(results_conn, run_id)
 
     # Reconstruct raw AnnotatedVariant objects without rule matches so re-annotation is clean.
@@ -194,6 +196,7 @@ def _sync_single_run(
                 annotations=raw_annotations,
                 formula_rules=formula_rules,
                 features=features,
+                report_features=report_features,
                 rule_feature_names=rule_feature_names,
                 rules=rules,
                 total_variants=run_dict.get('total_variants', 0),

@@ -67,25 +67,19 @@ def load_feature_segments_by_feature_id(
     return {feature_id: tuple(items) for feature_id, items in grouped.items()}
 
 
-def load_features_for_reference(conn: sqlite3.Connection, reference_id: int) -> list[FeatureRecord]:
-    """
-    Load rule-backed feature records (``has_rules = 1``) for a given reference.
+_FEATURE_SELECT_COLUMNS = (
+    'SELECT id, reference_id, name, protein, start, end, strand, codon_start, nt_sequence, '
+    'aa_sequence, feature_type, parent_feature_name '
+    'FROM feature WHERE reference_id = ?'
+)
 
-    Only features that carry at least one resistance rule are ever aligned or
-    profiled against; features become rule-backed when a rule targeting them is
-    imported (see ``respro.db.rules_import``).
 
-    :param conn: SQLite database connection
-    :param reference_id: ID of the reference
-    :return: list of rule-backed FeatureRecord objects
-    """
-    rows = conn.execute(
-        'SELECT id, reference_id, name, protein, start, end, strand, codon_start, nt_sequence, aa_sequence, '
-        'feature_type, parent_feature_name '
-        'FROM feature WHERE reference_id = ? AND has_rules = 1 ORDER BY start',
-        (reference_id,),
-    ).fetchall()
-
+def _features_from_rows(
+    conn: sqlite3.Connection,
+    rows: list[sqlite3.Row],
+    reference_id: int,
+) -> list[FeatureRecord]:
+    """Map feature rows to FeatureRecord objects, loading segments for all of them."""
     feature_ids = [int(row['id']) for row in rows]
     segments_by_feature = load_feature_segments_by_feature_id(conn, feature_ids)
 
@@ -109,6 +103,45 @@ def load_features_for_reference(conn: sqlite3.Connection, reference_id: int) -> 
     ]
     logger.debug('Loaded %d feature(s) for reference_id=%d', len(features), reference_id)
     return features
+
+
+def load_features_for_reference(conn: sqlite3.Connection, reference_id: int) -> list[FeatureRecord]:
+    """
+    Load rule-backed feature records (``has_rules = 1``) for a given reference.
+
+    Only features that carry at least one resistance rule are ever aligned or
+    profiled against; features become rule-backed when a rule targeting them is
+    imported (see ``respro.db.rules_import``).
+
+    :param conn: SQLite database connection
+    :param reference_id: ID of the reference
+    :return: list of rule-backed FeatureRecord objects
+    """
+    rows = conn.execute(
+        f'{_FEATURE_SELECT_COLUMNS} AND has_rules = 1 ORDER BY start',
+        (reference_id,),
+    ).fetchall()
+    return _features_from_rows(conn, rows, reference_id)
+
+
+def load_all_features_for_reference(conn: sqlite3.Connection, reference_id: int) -> list[FeatureRecord]:
+    """
+    Load all feature records for a given reference, regardless of ``has_rules``.
+
+    Reporting needs the complete feature set: the genome overview draws every
+    CDS gene (rule-backed and ruleless) and mat_peptide panels resolve their
+    parent CDS via ``parent_feature_name``. Alignment and annotation stay
+    scoped to :func:`load_features_for_reference`.
+
+    :param conn: SQLite database connection
+    :param reference_id: ID of the reference
+    :return: list of all FeatureRecord objects, ordered by start
+    """
+    rows = conn.execute(
+        f'{_FEATURE_SELECT_COLUMNS} ORDER BY start',
+        (reference_id,),
+    ).fetchall()
+    return _features_from_rows(conn, rows, reference_id)
 
 
 def _load_genbank_records(

@@ -29,7 +29,10 @@ from respro.core.query import (
     select_matches_for_reference,
 )
 from respro.core.rules import match_formula_rules, match_rules
-from respro.db.features import load_features_for_reference
+from respro.db.features import (
+    load_all_features_for_reference,
+    load_features_for_reference,
+)
 from respro.db.models import (
     AnnotatedVariant,
     CoverageGap,
@@ -149,22 +152,29 @@ def _resolve_reference(
 def _load_reference_data(
     project_conn: sqlite3.Connection,
     ref_id: int,
-) -> tuple[list, list, list, set[str]]:
+) -> tuple[list, list, list, set[str], list]:
     """
-    Load features, atomic rules, formula rules, and the union of rule-covered features.
+    Load features, atomic rules, formula rules, the union of rule-covered features,
+    and the full feature list for reporting.
+
+    The first list is rule-backed (``has_rules = 1``) and scopes alignment and
+    variant annotation. The fifth list contains every feature of the reference
+    (rule-backed or not) for report rendering: the genome overview draws all CDS
+    genes and mat_peptide panels resolve their parent CDS from it.
 
     :param project_conn: open project database connection
     :param ref_id: internal reference id
-    :return: (features, rules, formula_rules, rule_feature_names)
+    :return: (features, rules, formula_rules, rule_feature_names, report_features)
     """
     features = load_features_for_reference(project_conn, ref_id)
+    report_features = load_all_features_for_reference(project_conn, ref_id)
     rules = load_rules(project_conn, ref_id)
     formula_rules = load_formula_rules(project_conn, ref_id)
     rule_feature_names: set[str] = {rule.feature_name for rule in rules}
     for formula_rule in formula_rules:
         for member_rule in formula_rule.member_rules.values():
             rule_feature_names.add(member_rule.feature_name)
-    return features, rules, formula_rules, rule_feature_names
+    return features, rules, formula_rules, rule_feature_names, report_features
 
 
 def _reject_cross_species_gene_name_collisions(references: list[ReferenceGroup]) -> None:
@@ -271,7 +281,9 @@ def assemble_multi_reference_result(
         if ref_name is None:
             raise click.ClickException(f'Reference id {ref_id} not found in project database')
         organism, reference_length_nt = load_reference_metadata(project_conn, ref_id)
-        features, rules, formula_rules, rule_feature_names = _load_reference_data(project_conn, ref_id)
+        features, rules, formula_rules, rule_feature_names, _report_features = _load_reference_data(
+            project_conn, ref_id,
+        )
 
         references.append(ReferenceGroup(
             reference_name=ref_name,
@@ -397,6 +409,7 @@ class _ProfilingRunContext:
     annotations: list[AnnotatedVariant]
     formula_rules: list
     features: list
+    report_features: list
     rule_feature_names: set[str]
     rules: list
     total_variants: int
@@ -545,7 +558,7 @@ def _finalize_and_export(
 
     return _export_and_persist(
         result,
-        features=ctx.features,
+        features=ctx.report_features,
         rules=ctx.rules,
         rule_feature_names=ctx.rule_feature_names,
         project_conn=project_conn,
@@ -594,10 +607,23 @@ def _finalize_and_export_multi(
     features: list = []
     rules: list = []
     rule_feature_names: set[str] = set()
+    seen_feature_ids: set[int] = set()
+    seen_reference_ids: set[int] = set()
     for rg in result.references:
-        features.extend(rg.features)
         rules.extend(rg.rules)
         rule_feature_names |= rg.rule_feature_names
+        # Reporting needs every feature of each matched reference (the genome overview
+        # draws ruleless CDS genes; mat_peptide panels resolve their parent CDS), while
+        # rg.features stays rule-backed for annotation. Load the full set per distinct
+        # reference_id: in the targeted case two ReferenceGroups share one reference_id.
+        if rg.reference_id in seen_reference_ids:
+            continue
+        seen_reference_ids.add(rg.reference_id)
+        for feature in load_all_features_for_reference(project_conn, rg.reference_id):
+            if feature.id in seen_feature_ids:
+                continue
+            seen_feature_ids.add(feature.id)
+            features.append(feature)
 
     return _export_and_persist(
         result,

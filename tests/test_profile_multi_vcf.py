@@ -4,6 +4,7 @@ Multi-chrom VCF + multi-record reference FASTA support.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import sqlite3
@@ -144,6 +145,76 @@ def single_ref_db(tmp_path: Path) -> Path:
     conn.commit()
     conn.close()
     return db_path
+
+
+def _make_mat_peptide_multi_ref_db(db_path: Path) -> Path:
+    """
+    Build a two-reference project DB shaped like stanford-hiv.
+
+    Each reference carries a ruleless parent CDS (gagA-pol / gagB-pol) and a
+    rule-backed mat_peptide child (protA / protB). Rules live on the
+    mat_peptides only, so the rule-backed feature set contains no CDS.
+    """
+    conn = create_schema(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+        ('MatPeptide Multi Test', 1, str(uuid.uuid4())),
+    )
+    conn.execute(
+        'INSERT INTO reference (project_id, name, length, organism) VALUES (?, ?, ?, ?)',
+        (1, 'refA', len(_REF_A_SEQ), 'Organism A'),
+    )
+    conn.execute(
+        'INSERT INTO reference (project_id, name, length, organism) VALUES (?, ?, ?, ?)',
+        (1, 'refB', len(_REF_B_SEQ), 'Organism B'),
+    )
+    conn.execute(
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, '
+        'nt_sequence, feature_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        (1, 'gagA-pol', 'GagPolA', 0, len(_REF_A_SEQ), '+', _REF_A_SEQ, 'CDS'),
+    )
+    conn.execute(
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, '
+        'nt_sequence, feature_type, parent_feature_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        (1, 'protA', 'ProtA', 0, len(_REF_A_SEQ), '+', _REF_A_SEQ, 'mat_peptide', 'gagA-pol'),
+    )
+    conn.execute(
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, '
+        'nt_sequence, feature_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        (2, 'gagB-pol', 'GagPolB', 0, len(_REF_B_SEQ), '+', _REF_B_SEQ, 'CDS'),
+    )
+    conn.execute(
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, '
+        'nt_sequence, feature_type, parent_feature_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        (2, 'protB', 'ProtB', 0, len(_REF_B_SEQ), '+', _REF_B_SEQ, 'mat_peptide', 'gagB-pol'),
+    )
+    conn.execute('INSERT INTO drug (project_id, name) VALUES (?, ?)', (1, 'testdrug'))
+    # protA rule: codon 1 (0-based) is K (AAA at nt 3..5), mutation E -> resistant
+    conn.execute(
+        'INSERT INTO resistance_rule '
+        '(feature_id, drug_id, position, reference, mutation, phenotype) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (2, 1, 1, 'K', 'E', 'resistant'),
+    )
+    conn.execute('UPDATE feature SET has_rules = 1 WHERE id = 2')
+    # protB rule: codon 1 (0-based) is P (CCC at nt 3..5), mutation A -> resistant
+    conn.execute(
+        'INSERT INTO resistance_rule '
+        '(feature_id, drug_id, position, reference, mutation, phenotype) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (4, 1, 1, 'P', 'A', 'resistant'),
+    )
+    conn.execute('UPDATE feature SET has_rules = 1 WHERE id = 4')
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+@pytest.fixture()
+def mat_peptide_multi_ref_db(tmp_path: Path) -> Path:
+    """Two references whose rules live on mat_peptides with ruleless parent CDS."""
+    return _make_mat_peptide_multi_ref_db(tmp_path / 'mat_peptide_multi.db')
 
 
 class TestResolveFastaQueryMulti:
@@ -1605,6 +1676,33 @@ _MULTI_CHROM_VCF = (
     # chrom_b codon1 (P, CCC at nt 1..3 in 1-based -> pos 4): C->G -> P2A
     'chrom_b\t4\t.\tC\tG\t100\tPASS\tAF=0.95;DP=500\n'
 )
+
+
+class TestMultiReferenceMatPeptidePlot:
+    """Multi-reference runs must plot the ruleless parent CDS of mat_peptide rules."""
+
+    def test_report_plots_ruleless_parent_cds_on_both_references(
+        self, mat_peptide_multi_ref_db: Path, tmp_path: Path,
+    ) -> None:
+        fasta_path = tmp_path / 'refs.fasta'
+        fasta_path.write_text(f'>chrom_a\n{_REF_A_SEQ}\n>chrom_b\n{_REF_B_SEQ}\n')
+        vcf_path = tmp_path / 'multi.vcf'
+        vcf_path.write_text(_MULTI_CHROM_VCF)
+        output_dir = tmp_path / 'out'
+        runner = CliRunner()
+        result = runner.invoke(app, [
+            'vcf', '--project', str(mat_peptide_multi_ref_db), '--vcf', str(vcf_path),
+            '--ref-fasta', str(fasta_path), '--output', str(output_dir),
+            '--min-af', '0.01', '--min-depth', '0', '--no-cache',
+        ])
+
+        assert result.exit_code == 0, result.output
+        html = list(output_dir.glob('*.report.html'))[0].read_text()
+        match = re.search(r'data:image/svg\+xml;base64,([A-Za-z0-9+/=]+)', html)
+        assert match is not None, 'report must embed the plot SVG'
+        svg = base64.b64decode(match.group(1)).decode('utf-8')
+        assert 'gagA-pol' in svg
+        assert 'gagB-pol' in svg
 
 
 class TestMultiChromVcfCli:

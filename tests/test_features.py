@@ -18,6 +18,7 @@ import pytest
 from respro.db.features import (
     _is_ncbi_protein_accession,
     _resolve_ncbi_protein_url,
+    load_all_features_for_reference,
     load_feature_segments_by_feature_id,
     load_features_for_reference,
 )
@@ -215,3 +216,119 @@ class TestResolveNcbiProteinUrl:
         cache: dict[str, str] = {}
         url = _resolve_ncbi_protein_url('  AAA12345.1  ', cache)
         assert 'AAA12345.1' in url
+
+
+def _insert_feature(
+    conn: sqlite3.Connection,
+    reference_id: int,
+    feature_id: int,
+    name: str,
+    start: int,
+    end: int,
+    *,
+    feature_type: str = 'CDS',
+    parent_feature_name: str = '',
+    has_rules: int = 0,
+    segments: list[tuple[int, int]] | None = None,
+) -> None:
+    """Insert one feature row (and optional segments) into the in-memory test DB."""
+    conn.execute(
+        'INSERT INTO feature (id, reference_id, name, start, end, strand, feature_type, '
+        'parent_feature_name, has_rules) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        (feature_id, reference_id, name, start, end, '+', feature_type, parent_feature_name, has_rules),
+    )
+    for index, (seg_start, seg_end) in enumerate(segments or []):
+        conn.execute(
+            'INSERT INTO feature_segment (feature_id, segment_index, start, end) VALUES (?, ?, ?, ?)',
+            (feature_id, index, seg_start, seg_end),
+        )
+
+
+class TestLoadAllFeaturesForReference:
+    """Tests for load_all_features_for_reference() — the reporting feature set."""
+
+    def test_returns_rule_backed_and_ruleless_features(self, in_memory_db):
+        """Should return every feature of the reference, rule-backed or not."""
+        in_memory_db.execute(
+            'INSERT INTO reference (id, project_id, name, length) VALUES (1, 1, "test", 1000)'
+        )
+        _insert_feature(in_memory_db, 1, 1, 'gag-pol', 100, 500, feature_type='CDS')
+        _insert_feature(
+            in_memory_db, 1, 2, 'prot_1', 100, 300,
+            feature_type='mat_peptide', parent_feature_name='gag-pol', has_rules=1,
+        )
+        _insert_feature(in_memory_db, 1, 3, 'env', 600, 900, feature_type='CDS')
+        in_memory_db.commit()
+
+        result = load_all_features_for_reference(in_memory_db, 1)
+        assert [f.name for f in result] == ['gag-pol', 'prot_1', 'env']
+
+    def test_orders_features_by_start(self, in_memory_db):
+        """Should order features by genomic start regardless of insertion order."""
+        in_memory_db.execute(
+            'INSERT INTO reference (id, project_id, name, length) VALUES (1, 1, "test", 1000)'
+        )
+        _insert_feature(in_memory_db, 1, 1, 'late', 600, 900)
+        _insert_feature(in_memory_db, 1, 2, 'early', 100, 300)
+        in_memory_db.commit()
+
+        result = load_all_features_for_reference(in_memory_db, 1)
+        assert [f.name for f in result] == ['early', 'late']
+
+    def test_loads_segments_for_all_features(self, in_memory_db):
+        """Should load segments for rule-backed and ruleless features alike."""
+        in_memory_db.execute(
+            'INSERT INTO reference (id, project_id, name, length) VALUES (1, 1, "test", 1000)'
+        )
+        _insert_feature(
+            in_memory_db, 1, 1, 'split_ruleless', 100, 500,
+            segments=[(100, 300), (400, 500)],
+        )
+        _insert_feature(
+            in_memory_db, 1, 2, 'split_ruled', 600, 900, has_rules=1,
+            segments=[(600, 700), (800, 900)],
+        )
+        in_memory_db.commit()
+
+        result = load_all_features_for_reference(in_memory_db, 1)
+        segments_by_name = {f.name: f.segments for f in result}
+        assert len(segments_by_name['split_ruleless']) == 2
+        assert len(segments_by_name['split_ruled']) == 2
+
+    def test_scoped_to_reference(self, in_memory_db):
+        """Should return only features of the requested reference."""
+        in_memory_db.execute(
+            'INSERT INTO reference (id, project_id, name, length) VALUES (1, 1, "r1", 1000)'
+        )
+        in_memory_db.execute(
+            'INSERT INTO reference (id, project_id, name, length) VALUES (2, 1, "r2", 1000)'
+        )
+        _insert_feature(in_memory_db, 1, 1, 'r1_gene', 100, 300)
+        _insert_feature(in_memory_db, 2, 2, 'r2_gene', 100, 300)
+        in_memory_db.commit()
+
+        result = load_all_features_for_reference(in_memory_db, 1)
+        assert [f.name for f in result] == ['r1_gene']
+
+    def test_returns_empty_list_for_unknown_reference(self, in_memory_db):
+        """Should return an empty list when the reference has no features."""
+        result = load_all_features_for_reference(in_memory_db, 999)
+        assert result == []
+
+    def test_matches_rule_backed_loader_for_shared_features(self, in_memory_db):
+        """Rule-backed features must be identical under both loaders."""
+        in_memory_db.execute(
+            'INSERT INTO reference (id, project_id, name, length) VALUES (1, 1, "test", 1000)'
+        )
+        _insert_feature(in_memory_db, 1, 1, 'ruleless', 100, 300)
+        _insert_feature(
+            in_memory_db, 1, 2, 'ruled', 400, 600, has_rules=1,
+            segments=[(400, 500), (550, 600)],
+        )
+        in_memory_db.commit()
+
+        all_features = load_all_features_for_reference(in_memory_db, 1)
+        ruled_features = load_features_for_reference(in_memory_db, 1)
+        assert [f.name for f in ruled_features] == ['ruled']
+        assert ruled_features[0] == next(f for f in all_features if f.name == 'ruled')
