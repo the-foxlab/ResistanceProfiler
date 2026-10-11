@@ -96,6 +96,11 @@ describe('AboutPage structure', () => {
     expect(within(section).getByRole('heading', { level: 3, name: /contributing, data use and licensing/i })).toBeInTheDocument();
     expect(within(section).getAllByRole('heading', { level: 4 })).toHaveLength(3);
     expect(within(section).getByText(/uploaded files and generated results are stored temporarily and are removed as soon as you close the session/i)).toBeInTheDocument();
+    expect(within(section).getByText(/© 2026 Jonas Fuchs, University Medical Center Freiburg/i)).toBeInTheDocument();
+    expect(within(section).getByRole('link', { name: 'full license' })).toHaveAttribute(
+      'href',
+      'https://github.com/the-foxlab/ResistanceProfiler/blob/master/LICENSE',
+    );
     expect(within(section).queryByText(/no data is stored on remote servers/i)).toBeNull();
   });
 

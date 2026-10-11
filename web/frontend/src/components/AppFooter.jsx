@@ -5,11 +5,12 @@
  * All links share one row and each neighbour pair is separated by a ``·`` only
  * when both are present, so the separator count equals the number of adjacent
  * present items minus one. The order is:
- * GitHub · Fuchs Lab · Legal notice · Contact, then Core version · WebApp
- * version on the second row.
+ * GitHub · Fuchs Lab · Legal notice · Contact, followed by version details
+ * and a final License · copyright row.
  */
 import githubIconSrc from '../assets/icon-github.svg';
 import websiteIconSrc from '../assets/website.svg';
+import { PROJECT_LICENSE_URL } from '../constants';
 
 export function AppFooter({ legalLink, contactEmail, cliVersion, webVersion }) {
   const projectLinks = (
@@ -32,28 +33,21 @@ export function AppFooter({ legalLink, contactEmail, cliVersion, webVersion }) {
 
   return (
     <footer className="app-footer">
-      {(legalLink || contactEmail) ? (
-        <div className="app-footer-group">
-          {projectLinks}
-          {legalLink && (
+      <div className="app-footer-group">
+        {projectLinks}
+        {legalLink && (
+          <>
             <span className="app-footer-sep" aria-hidden="true">·</span>
-          )}
-          {legalLink && (
             <a href={legalLink} target="_blank" rel="noreferrer">Legal notice</a>
-          )}
-          {/* The project links always precede Contact, so its separator is
-              unconditional (when Contact exists) — it must not depend on
-              whether Legal notice is present. */}
-          {contactEmail && (
+          </>
+        )}
+        {contactEmail && (
+          <>
             <span className="app-footer-sep" aria-hidden="true">·</span>
-          )}
-          {contactEmail && (
             <a href={`mailto:${contactEmail}`}>Contact</a>
-          )}
-        </div>
-      ) : (
-        <div className="app-footer-group">{projectLinks}</div>
-      )}
+          </>
+        )}
+      </div>
       {(cliVersion || webVersion) && (
         <div className="app-footer-group">
           {cliVersion && (
@@ -67,6 +61,11 @@ export function AppFooter({ legalLink, contactEmail, cliVersion, webVersion }) {
           )}
         </div>
       )}
+      <div className="app-footer-group">
+        <a href={PROJECT_LICENSE_URL} target="_blank" rel="noreferrer">License</a>
+        <span className="app-footer-sep" aria-hidden="true">·</span>
+        <span className="app-footer-copyright">© 2026 Jonas Fuchs</span>
+      </div>
     </footer>
   );
 }

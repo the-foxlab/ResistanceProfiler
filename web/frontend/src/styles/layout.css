@@ -495,6 +495,7 @@
   text-underline-offset: 3px;
 }
 
+.app-footer-copyright,
 .app-footer-version,
 .app-footer-sep {
   color: var(--muted);

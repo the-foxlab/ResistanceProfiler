@@ -1870,6 +1870,18 @@ a.db-hit-pub-link:hover {
   grid-template-columns: max-content 5rem 1fr;
 }
 
+@media (max-width: 700px) {
+  .feature-mutation-list,
+  .feature-mutation-list--with-coverage {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
+  .feature-mutations {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+}
+
 /* Mini inline gene coverage bar — height matches the feature badge */
 .feature-coverage-bar {
   height: 1rem;
