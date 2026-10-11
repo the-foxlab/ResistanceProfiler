@@ -156,6 +156,7 @@
 /* Compare Databases tab */
 .compare-tab {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.8rem;
   width: 100%;
   min-width: 0;
