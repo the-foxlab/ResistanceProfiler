@@ -1,5 +1,5 @@
 import Plotly from 'plotly.js-dist-min';
-import { currentTheme } from './database-plots/shared';
+import { baseLayout, currentTheme } from './database-plots/shared';
 import { useRef, useEffect, useState } from 'react';
 import { Spinner } from './Spinner';
 import {
@@ -8,7 +8,6 @@ import {
   featureColorPalette,
   uniqueConsequenceTypes,
 } from './comparison-heatmap-data';
-import { baseLayout } from './database-plots/shared';
 
 /**
  * Interactive comparison heatmap rendered with Plotly.js.
@@ -284,6 +283,7 @@ function renderHeatmap(container, data) {
   }
 
   // Layout with domains for all axes
+  const axisLabelColor = currentTheme() === 'dark' ? '#f4f4f5' : '#18181b';
   const layout = {
     ...baseLayout(),
     margin: { l: prepared.leftMargin, r: 80, t: 20, b: 60 },
@@ -292,8 +292,14 @@ function renderHeatmap(container, data) {
       showgrid: false,
       tickangle: 45,
       side: 'bottom',
+      tickfont: { ...baseLayout().xaxis.tickfont, color: axisLabelColor },
     },
-    yaxis: { ...baseLayout().yaxis, showgrid: false, domain: [0, prepared.heatmapDomainEnd] },
+    yaxis: {
+      ...baseLayout().yaxis,
+      showgrid: false,
+      domain: [0, prepared.heatmapDomainEnd],
+      tickfont: { ...baseLayout().yaxis.tickfont, color: axisLabelColor },
+    },
     height: prepared.height,
     autosize: true,
   };
@@ -303,7 +309,7 @@ function renderHeatmap(container, data) {
       showticklabels: true,
       showgrid: false,
       domain: [prepared.featureDomainStart, prepared.featureDomainEnd],
-      tickfont: { size: 10 },
+      tickfont: { size: 10, color: axisLabelColor },
     };
   }
 
@@ -312,7 +318,7 @@ function renderHeatmap(container, data) {
       showticklabels: true,
       showgrid: false,
       domain: [prepared.dbHitDomainStart, prepared.dbHitDomainEnd],
-      tickfont: { size: 10 },
+      tickfont: { size: 10, color: axisLabelColor },
     };
   }
 
@@ -321,7 +327,7 @@ function renderHeatmap(container, data) {
       showticklabels: true,
       showgrid: false,
       domain: [prepared.consequenceDomainStart, prepared.consequenceDomainEnd],
-      tickfont: { size: 10 },
+      tickfont: { size: 10, color: axisLabelColor },
     };
   }
 
@@ -335,5 +341,4 @@ function renderHeatmap(container, data) {
     },
   });
 }
-
 
