@@ -5,6 +5,7 @@ and end-to-end CLI workflow.
 
 from __future__ import annotations
 
+import base64
 import random
 import re
 from pathlib import Path
@@ -15,6 +16,7 @@ from conftest import TINY_REF_NAME, TINY_REF_SEQ
 from typer.testing import CliRunner
 
 from respro.cli.main import app
+from respro.cli.profile_helpers import _load_reference_data
 from respro.core.alignment import match_query_to_features
 from respro.core.annotation import annotate_variants
 from respro.core.fasta_to_vcf import (
@@ -542,6 +544,74 @@ class TestFastaCacheRegression:
 # CLI end-to-end: profile --ref-fasta
 # ──────────────────────────────────────────────────────────────────────
 
+@pytest.fixture()
+def mat_peptide_db(tmp_path: Path) -> Path:
+    """Project DB shaped like stanford-hiv: rules on a mat_peptide whose parent CDS is ruleless."""
+    db_path = tmp_path / 'mat_peptide_project.db'
+    conn = create_schema(db_path)
+    conn.execute(
+        'INSERT INTO project (name, schema_version) VALUES (?, ?)',
+        ('MatPeptide Test', 15),
+    )
+    conn.execute(
+        'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
+        (1, TINY_REF_NAME, len(TINY_REF_SEQ)),
+    )
+    # Ruleless parent CDS spanning the reference (stanford-hiv: gag-pol).
+    conn.execute(
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, '
+        'nt_sequence, feature_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        (1, 'gag-pol', 'GagPol', 0, 87, '+', TINY_REF_SEQ, 'CDS'),
+    )
+    # Rule-backed mat_peptide child (stanford-hiv: protease/RT/integrase).
+    conn.execute(
+        'INSERT INTO feature (reference_id, name, protein, start, end, strand, '
+        'nt_sequence, feature_type, parent_feature_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        (1, 'prot', 'Prot', 0, 87, '+', TINY_REF_SEQ, 'mat_peptide', 'gag-pol'),
+    )
+    conn.execute(
+        'INSERT INTO drug (project_id, name) VALUES (?, ?)',
+        (1, 'TestDrug'),
+    )
+    conn.execute(
+        'INSERT INTO resistance_rule '
+        '(feature_id, drug_id, position, reference, mutation, phenotype) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (2, 1, 1, 'K', 'E', 'resistant'),
+    )
+    conn.execute('UPDATE feature SET has_rules = 1 WHERE id = 2')
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+class TestLoadReferenceDataReportFeatures:
+    """_load_reference_data also returns the full (reporting) feature list."""
+
+    def test_returns_report_features_as_fifth_element(
+        self, mat_peptide_db: Path,
+    ) -> None:
+        conn = open_project_db(mat_peptide_db)
+        features, _rules, _formula_rules, _rule_names, report_features = (
+            _load_reference_data(conn, 1)
+        )
+        conn.close()
+
+        assert [f.name for f in features] == ['prot']
+        assert [f.name for f in report_features] == ['gag-pol', 'prot']
+
+    def test_report_features_include_ruleless_cds(
+        self, fasta_db: Path,
+    ) -> None:
+        conn = open_project_db(fasta_db)
+        _features, _rules, _formula_rules, _rule_names, report_features = (
+            _load_reference_data(conn, 1)
+        )
+        conn.close()
+
+        assert [f.name for f in report_features] == ['gag']
+
+
 class TestProfileFastaCli:
     def test_profile_requires_ref_fasta(self, fasta_db: Path, tmp_path: Path) -> None:
         vcf_path = tmp_path / 'sample.vcf'
@@ -687,6 +757,32 @@ class TestProfileFastaCli:
         html = (output_dir / f'{vcf_path.stem}.report.html').read_text()
         assert TINY_REF_NAME in html
         assert 'gag' in html
+
+    def test_mat_peptide_rules_render_plot_with_full_genome_overview(
+        self, mat_peptide_db: Path, tmp_path: Path,
+    ) -> None:
+        """Rules on a mat_peptide must still produce a plot whose genome
+        overview draws the ruleless parent CDS (stanford-hiv regression)."""
+        # One-SNP consensus: codon 1 K -> E triggers the mat_peptide rule.
+        query_seq = TINY_REF_SEQ[:3] + 'GAA' + TINY_REF_SEQ[6:]
+        fasta_path = tmp_path / 'query.fasta'
+        fasta_path.write_text(f'>query\n{query_seq}\n')
+
+        output_dir = tmp_path / 'mp_results'
+        result = CliRunner().invoke(app, [
+            'fasta',
+            '--project', str(mat_peptide_db),
+            '--fasta', str(fasta_path),
+            '--output', str(output_dir),
+        ])
+
+        assert result.exit_code == 0, result.output
+        html = (output_dir / 'query.report.html').read_text()
+        match = re.search(r'data:image/svg\+xml;base64,([A-Za-z0-9+/=]+)', html)
+        assert match is not None, 'report must embed the plot SVG'
+        svg = base64.b64decode(match.group(1)).decode('utf-8')
+        # The ruleless parent CDS must appear in the genome overview.
+        assert 'gag-pol' in svg
 
 # ──────────────────────────────────────────────────────────────────────
 # FASTA consensus profiling — unit + integration tests

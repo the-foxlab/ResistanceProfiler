@@ -4,12 +4,15 @@ Tests for CLI commands (regenerate, classify) and manage database/results flows.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
 import sqlite3
 import textwrap
+import uuid
 from pathlib import Path
 
+import pytest
 from Bio import SeqIO
 from Bio.Seq import Seq
 from Bio.SeqFeature import CompoundLocation, FeatureLocation, SeqFeature
@@ -37,7 +40,7 @@ from respro.db.results import (
     save_run,
 )
 from respro.db.rules_queries import load_rules
-from respro.db.schema import init_results_db, open_project_db, open_results_db
+from respro.db.schema import create_schema, init_results_db, open_project_db, open_results_db
 from respro.report.non_html_exports import export_results
 
 
@@ -201,6 +204,69 @@ class TestExploreRuns:
 
 
 class TestRegenerate:
+    @pytest.fixture()
+    def mat_peptide_project_db(self, tmp_path: Path) -> Path:
+        """Project DB shaped like stanford-hiv: rules on a mat_peptide, ruleless parent CDS."""
+        db_path = tmp_path / 'mat_peptide_project.db'
+        conn = create_schema(db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+            ('MatPeptide Project', 6, str(uuid.uuid4())),
+        )
+        conn.execute(
+            'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
+            (1, TINY_REF_NAME, len(TINY_REF_SEQ)),
+        )
+        conn.execute(
+            'INSERT INTO feature (reference_id, name, protein, start, end, strand, '
+            'nt_sequence, feature_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (1, 'gag-pol', 'GagPol', 0, 87, '+', TINY_REF_SEQ, 'CDS'),
+        )
+        conn.execute(
+            'INSERT INTO feature (reference_id, name, protein, start, end, strand, '
+            'nt_sequence, feature_type, parent_feature_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (1, 'prot', 'Prot', 0, 87, '+', TINY_REF_SEQ, 'mat_peptide', 'gag-pol'),
+        )
+        conn.execute(
+            'INSERT INTO drug (project_id, name) VALUES (?, ?)',
+            (1, 'TestDrug'),
+        )
+        conn.execute(
+            'INSERT INTO resistance_rule '
+            '(feature_id, drug_id, position, reference, mutation, phenotype) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (2, 1, 1, 'K', 'E', 'resistant'),
+        )
+        conn.execute('UPDATE feature SET has_rules = 1 WHERE id = 2')
+        conn.commit()
+        conn.close()
+        return db_path
+
+    def test_regenerate_mat_peptide_run_renders_plot_with_parent_cds(
+        self, mat_peptide_project_db: Path, sample_vcf: Path,
+        sample_ref_fasta: Path, tmp_path: Path,
+    ) -> None:
+        """Regenerating a stored run must plot the ruleless parent CDS (stanford-hiv)."""
+        results_db = tmp_path / 'results.db'
+        _run_profile(mat_peptide_project_db, sample_vcf, sample_ref_fasta, results_db, tmp_path)
+
+        out_dir = tmp_path / 'regenerated_mp'
+        result = CliRunner().invoke(app, [
+            'regenerate',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(mat_peptide_project_db),
+            '--output', str(out_dir),
+        ])
+
+        assert result.exit_code == 0, result.output
+        html = list(out_dir.glob('*.html'))[0].read_text()
+        match = re.search(r'data:image/svg\+xml;base64,([A-Za-z0-9+/=]+)', html)
+        assert match is not None, 'regenerated report must embed the plot SVG'
+        svg = base64.b64decode(match.group(1)).decode('utf-8')
+        assert 'gag-pol' in svg
+
     def test_regenerate_generates_html_report(
         self,
         project_db: Path,

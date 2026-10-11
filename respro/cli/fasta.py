@@ -152,7 +152,9 @@ def _profile_fasta_command(
         ref_id, ref_name, fasta_matches = _resolve_reference(
             project_conn, fasta_matches, query_name, logger,
         )
-        features, rules, formula_rules, rule_feature_names = _load_reference_data(project_conn, ref_id)
+        features, rules, formula_rules, rule_feature_names, report_features = _load_reference_data(
+            project_conn, ref_id,
+        )
 
         variants, coverage_gaps = fasta_to_vcf(query_seq, fasta_matches)
         annotations = annotate_variants(variants, features, is_fasta_mode=True, cfg=cfg)
@@ -173,6 +175,7 @@ def _profile_fasta_command(
             annotations=annotations,
             formula_rules=formula_rules,
             features=features,
+            report_features=report_features,
             rule_feature_names=rule_feature_names,
             rules=rules,
             total_variants=len(annotations),

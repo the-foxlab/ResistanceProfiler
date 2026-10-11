@@ -1,14 +1,14 @@
 import Plotly from 'plotly.js-dist-min';
-import { currentTheme } from './database-plots/shared';
-import { useRef, useEffect, useState } from 'react';
+import { baseLayout } from './database-plots/shared';
+import { useRef, useEffect, useState, useContext } from 'react';
 import { Spinner } from './Spinner';
+import { ThemeContext } from '../hooks/useTheme';
 import {
   prepareHeatmapData,
   consequenceColor,
   featureColorPalette,
   uniqueConsequenceTypes,
 } from './comparison-heatmap-data';
-import { baseLayout } from './database-plots/shared';
 
 /**
  * Interactive comparison heatmap rendered with Plotly.js.
@@ -20,6 +20,7 @@ import { baseLayout } from './database-plots/shared';
 export function ComparisonHeatmap({ data, isBusy }) {
   const containerRef = useRef(null);
   const [plotError, setPlotError] = useState('');
+  const theme = useContext(ThemeContext);
 
   useEffect(() => {
     if (!data || !containerRef.current) {
@@ -32,7 +33,7 @@ export function ComparisonHeatmap({ data, isBusy }) {
 
     setPlotError('');
     try {
-      renderHeatmap(containerRef.current, data);
+      renderHeatmap(containerRef.current, data, theme);
     } catch (err) {
       setPlotError(String(err.message || err));
     }
@@ -42,7 +43,7 @@ export function ComparisonHeatmap({ data, isBusy }) {
         Plotly.purge(containerRef.current);
       }
     };
-  }, [data]);
+  }, [data, theme]);
 
   // Re-render heatmap on window resize (debounced) — Plots.resize() is insufficient
   // for multi-yaxis domain layouts; a full re-render matches the "Compare selected" behavior
@@ -55,7 +56,7 @@ export function ComparisonHeatmap({ data, isBusy }) {
       timeoutId = setTimeout(() => {
         if (containerRef.current && data) {
           try {
-            renderHeatmap(containerRef.current, data);
+            renderHeatmap(containerRef.current, data, theme);
           } catch (_) {
             // ignore re-render errors on resize
           }
@@ -68,7 +69,7 @@ export function ComparisonHeatmap({ data, isBusy }) {
       window.removeEventListener('resize', handleResize);
       clearTimeout(timeoutId);
     };
-  }, [data]);
+  }, [data, theme]);
 
   if (isBusy) {
     return (
@@ -154,7 +155,7 @@ export function ComparisonHeatmap({ data, isBusy }) {
   );
 }
 
-function renderHeatmap(container, data) {
+function renderHeatmap(container, data, theme) {
   const prepared = prepareHeatmapData(data);
   if (!prepared) {
     Plotly.purge(container);
@@ -169,7 +170,7 @@ function renderHeatmap(container, data) {
     x: prepared.xLabels,
     y: prepared.samples,
     type: 'heatmap',
-    colorscale: currentTheme() === 'dark' ? [[0, '#27272a'], [1, '#71717a']] : [[0, '#e4e4e7'], [1, '#a1a1aa']],
+    colorscale: theme === 'dark' ? [[0, '#27272a'], [1, '#71717a']] : [[0, '#e4e4e7'], [1, '#a1a1aa']],
     showscale: false,
     zmin: 0,
     zmax: 1,
@@ -179,7 +180,7 @@ function renderHeatmap(container, data) {
     yaxis: 'y',
     customdata: prepared.gapCustomdata,
     hovertemplate: 'Sample: %{y}<br>Mutation: %{customdata[0]}<br>Feature: %{customdata[1]}<br>Coverage gap<extra></extra>',
-    line: { color: currentTheme() === 'dark' ? '#09090b' : '#ffffff', width: 1 },
+    line: { color: theme === 'dark' ? '#09090b' : '#ffffff', width: 1 },
   };
   traces.push(gapTrace);
 
@@ -204,7 +205,7 @@ function renderHeatmap(container, data) {
       tickvals: [0, 0.25, 0.5, 0.75, 1.0],
       ticktext: ['0', '0.25', '0.5', '0.75', '1.0'],
       thickness: 15,
-      tickfont: { size: 10, color: currentTheme() === 'dark' ? '#a1a1aa' : '#71717a' },
+      tickfont: { size: 10, color: theme === 'dark' ? '#a1a1aa' : '#71717a' },
       outlinewidth: 0,
     },
     xgap: 1,
@@ -213,7 +214,7 @@ function renderHeatmap(container, data) {
     yaxis: 'y',
     customdata: prepared.mainCustomdata,
     hovertemplate: 'Sample: %{y}<br>Mutation: %{customdata[0]}<br>Feature: %{customdata[1]}<br>Allele freq: %{z}<extra></extra>',
-    line: { color: currentTheme() === 'dark' ? '#09090b' : '#333', width: 1 },
+    line: { color: theme === 'dark' ? '#09090b' : '#333', width: 1 },
   };
   traces.push(mainTrace);
 
@@ -234,7 +235,7 @@ function renderHeatmap(container, data) {
       yaxis: 'y2',
       customdata: prepared.featureCustomdata,
       hovertemplate: 'Feature: %{customdata[0]}<br>Mutation: %{customdata[1]}<extra></extra>',
-      line: { color: currentTheme() === 'dark' ? '#09090b' : '#ffffff', width: 1 },
+      line: { color: theme === 'dark' ? '#09090b' : '#ffffff', width: 1 },
     };
     traces.push(featureTrace);
   }
@@ -256,7 +257,7 @@ function renderHeatmap(container, data) {
       yaxis: 'y3',
       customdata: prepared.dbHitCustomdata,
       hovertemplate: '%{customdata[0]}<extra></extra>',
-      line: { color: currentTheme() === 'dark' ? '#09090b' : '#ffffff', width: 1 },
+      line: { color: theme === 'dark' ? '#09090b' : '#ffffff', width: 1 },
     };
     traces.push(dbHitTrace);
   }
@@ -278,12 +279,13 @@ function renderHeatmap(container, data) {
       yaxis: 'y4',
       customdata: prepared.consequenceCustomdata,
       hovertemplate: 'Consequence: %{customdata[0]}<extra></extra>',
-      line: { color: currentTheme() === 'dark' ? '#09090b' : '#ffffff', width: 1 },
+      line: { color: theme === 'dark' ? '#09090b' : '#ffffff', width: 1 },
     };
     traces.push(consequenceTrace);
   }
 
   // Layout with domains for all axes
+  const axisLabelColor = theme === 'dark' ? '#f4f4f5' : '#18181b';
   const layout = {
     ...baseLayout(),
     margin: { l: prepared.leftMargin, r: 80, t: 20, b: 60 },
@@ -292,8 +294,14 @@ function renderHeatmap(container, data) {
       showgrid: false,
       tickangle: 45,
       side: 'bottom',
+      tickfont: { ...baseLayout().xaxis.tickfont, color: axisLabelColor },
     },
-    yaxis: { ...baseLayout().yaxis, showgrid: false, domain: [0, prepared.heatmapDomainEnd] },
+    yaxis: {
+      ...baseLayout().yaxis,
+      showgrid: false,
+      domain: [0, prepared.heatmapDomainEnd],
+      tickfont: { ...baseLayout().yaxis.tickfont, color: axisLabelColor },
+    },
     height: prepared.height,
     autosize: true,
   };
@@ -303,7 +311,7 @@ function renderHeatmap(container, data) {
       showticklabels: true,
       showgrid: false,
       domain: [prepared.featureDomainStart, prepared.featureDomainEnd],
-      tickfont: { size: 10 },
+      tickfont: { size: 10, color: axisLabelColor },
     };
   }
 
@@ -312,7 +320,7 @@ function renderHeatmap(container, data) {
       showticklabels: true,
       showgrid: false,
       domain: [prepared.dbHitDomainStart, prepared.dbHitDomainEnd],
-      tickfont: { size: 10 },
+      tickfont: { size: 10, color: axisLabelColor },
     };
   }
 
@@ -321,7 +329,7 @@ function renderHeatmap(container, data) {
       showticklabels: true,
       showgrid: false,
       domain: [prepared.consequenceDomainStart, prepared.consequenceDomainEnd],
-      tickfont: { size: 10 },
+      tickfont: { size: 10, color: axisLabelColor },
     };
   }
 
@@ -335,5 +343,3 @@ function renderHeatmap(container, data) {
     },
   });
 }
-
-

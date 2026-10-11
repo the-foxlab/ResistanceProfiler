@@ -8,6 +8,7 @@ import cliIconSrc from '../../assets/icon-cli.svg';
 import databaseIconSrc from '../../assets/icon-database.svg';
 import logicIconSrc from '../../assets/logic.svg';
 import { FRONTEND_CONFIG, MAINTAINER_EMAIL } from '../../config';
+import { PROJECT_LICENSE_URL } from '../../constants';
 
 const ABOUT_TOC = [
   { id: 'about-scope', label: 'Project scope and how it works' },
@@ -509,10 +510,13 @@ export function AboutPage({ logic }) {
           <div>
             <h4>Licensing and attribution</h4>
             <p>
-              ResistanceProfiler source code is released under the GNU Affero General Public License v3.0. Reference
-              sequences, resistance rules, and publication-linked datasets may have separate licenses and citation
-              requirements. Check the selected database's metadata and upstream terms before redistribution,
-              publication, or clinical use; users are responsible for complying with those terms.
+              © 2026 Jonas Fuchs, University Medical Center Freiburg. ResistanceProfiler source code, including the
+              web app, is licensed under the GNU Affero General Public License version 3.0 only (AGPL-3.0-only);
+              see the{' '}
+              <a href={PROJECT_LICENSE_URL} target="_blank" rel="noreferrer">full license</a>. Reference sequences,
+              resistance rules, and publication-linked datasets may have separate licenses and citation requirements.
+              Check the selected database's metadata and upstream terms before redistribution, publication, or clinical
+              use; users are responsible for complying with those terms.
             </p>
           </div>
         </div>

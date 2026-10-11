@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from respro.config.cli_settings import load_config_with_overrides
-from respro.db.features import load_features_for_reference
+from respro.db.features import load_all_features_for_reference
 from respro.db.models import FeatureMatch, ProfilingResult, ReferenceGroup
 from respro.db.results import (
     load_classifications,
@@ -252,7 +252,11 @@ def regenerate(
             ref_rules: list = []
             ref_rule_feature_names: set[str] = set()
             if ref_id is not None:
-                ref_features = load_features_for_reference(project_conn, ref_id)
+                # Reporting needs every feature of the reference: the genome overview
+                # draws ruleless CDS genes and mat_peptide panels resolve their parent
+                # CDS. Annotations come from stored rows, so the rule-backed scope that
+                # governs live annotation does not apply here.
+                ref_features = load_all_features_for_reference(project_conn, ref_id)
                 ref_rules = load_rules(project_conn, ref_id)
                 ref_rule_feature_names = {rule.feature_name for rule in ref_rules}
             all_features.extend(ref_features)

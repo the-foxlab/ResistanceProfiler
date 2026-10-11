@@ -4,19 +4,24 @@ import { render, screen } from '@testing-library/react';
 import { AppFooter } from './AppFooter';
 
 describe('AppFooter', () => {
-  // The footer renders the fixed project links (GitHub, Fuchs Lab) at the head
-  // of the first row, followed by optional Legal notice and Contact links, plus
-  // version spans on the second row. Each neighbour pair is separated by a `·`
-  // only when both are present, so the separator count equals the number of
-  // adjacent present items minus one. The two project links always contribute
-  // one separator between them, plus one before the next item when present.
+  // Project links, the license, copyright, and optional deployment links and
+  // version details share the footer in separate rows.
 
-  it('renders nothing but the footer shell when all optional props are absent', () => {
-    render(<AppFooter />);
+  it('renders project license and copyright when optional props are absent', () => {
+    const { container } = render(<AppFooter />);
     expect(screen.queryByText('Legal notice')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /contact/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/respro CLI/)).not.toBeInTheDocument();
     expect(screen.queryByText(/respro WebApp/)).not.toBeInTheDocument();
+    const copyright = screen.getByText('© 2026 Jonas Fuchs');
+    const license = screen.getByRole('link', { name: 'License' });
+    expect(copyright).toBeInTheDocument();
+    expect(license).toHaveAttribute(
+      'href',
+      'https://github.com/the-foxlab/ResistanceProfiler/blob/master/LICENSE',
+    );
+    expect(license.parentElement).toBe(copyright.parentElement);
+    expect(copyright.parentElement).toBe(container.querySelector('footer').lastElementChild);
   });
 
   it('renders a mailto contact link only when contactEmail is set', () => {
@@ -46,28 +51,34 @@ describe('AppFooter', () => {
         webVersion="0.1.0"
       />,
     );
+    const footer = container.querySelector('footer');
+    expect(footer.lastElementChild).toContainElement(
+      screen.getByRole('link', { name: 'License' }),
+    );
+    expect(footer.lastElementChild).toHaveTextContent('© 2026 Jonas Fuchs');
     // First row: GitHub · Fuchs Lab · Legal notice · Contact → 3 separators.
-    // Second row: CLI · WebApp → 1 separator.
+    // Version row: CLI · WebApp → 1; final License · copyright row → 1.
     const separators = container.querySelectorAll('.app-footer-sep');
-    expect(separators).toHaveLength(4);
+    expect(separators).toHaveLength(5);
   });
 
   it('places a separator between legal and contact when versions are absent', () => {
     const { container } = render(
       <AppFooter legalLink="https://example.org/legal" contactEmail="support@example.org" />,
     );
-    // First row: GitHub · Fuchs Lab · Legal notice · Contact → 3 separators.
+    // First row: GitHub · Fuchs Lab · Legal notice · Contact → 3; final
+    // License · copyright row → 1.
     const separators = container.querySelectorAll('.app-footer-sep');
-    expect(separators).toHaveLength(3);
+    expect(separators).toHaveLength(4);
   });
 
   it('places no separator between the link and version groups', () => {
     const { container } = render(
       <AppFooter contactEmail="support@example.org" cliVersion="1.2.3" />,
     );
-    // First row: GitHub · Fuchs Lab · Contact → 2 separators; second row has
-    // a single version span, so no separator there.
+    // First row: GitHub · Fuchs Lab · Contact → 2; final License · copyright
+    // row → 1 separator. The single version span has no separator.
     const separators = container.querySelectorAll('.app-footer-sep');
-    expect(separators).toHaveLength(2);
+    expect(separators).toHaveLength(3);
   });
 });
