@@ -8,7 +8,9 @@ import logging
 import sqlite3
 
 from respro.db.models import is_internal_formula_component_drug_name
+from respro.io.lookup import LookupStatus
 from respro.io.pubchem import lookup_drug
+from respro.io.wikipedia import lookup_summary
 
 logger = logging.getLogger(__name__)
 
@@ -102,13 +104,21 @@ def _consolidate_drug_names_to_lowercase(conn: sqlite3.Connection, project_id: i
 
 def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
     """
-    Add missing PubChem metadata to drug records.
+    Add missing enrichment metadata to drug records.
 
-    Queries PubChem by drug name and writes back the CID, canonical URL, and
-    a short description for each matched compound. Drugs that already have
-    complete PubChem data are not queried again. Failures — including no
-    network access, unrecognised drug names, or unexpected API responses — are
-    logged and skipped so the database is always built successfully.
+    For each unresolved drug a fallback chain is tried: PubChem compound
+    (CID) → PubChem substance (SID, typical for monoclonal antibodies) →
+    Wikipedia summary. Whichever fields the chain yields are stored — a
+    substance hit contributes a substance URL plus synonym text (no CID, no
+    structure image), a Wikipedia hit contributes a description only.
+    Drugs that already have stored data (including substance-url-only
+    antibody drugs) are not queried again. Drugs where the whole chain
+    *definitively* found nothing (404 at every stage) are flagged
+    (``pubchem_lookup_failed``) and skipped on subsequent runs so doomed
+    network calls are not repeated; transient failures (no network access,
+    unexpected API responses) leave the flag cleared so the next run
+    retries. All failures are logged and skipped so the database is always
+    built successfully.
 
     :param conn: SQLite database connection (row_factory must be sqlite3.Row)
     :param project_id: project ID used to scope the drug lookup
@@ -116,7 +126,7 @@ def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
 
     conn.row_factory = sqlite3.Row
     drug_rows = conn.execute(
-        'SELECT id, name, pubchem_cid, pubchem_url, description, structure_url '
+        'SELECT id, name, pubchem_cid, pubchem_url, description, structure_url, pubchem_lookup_failed '
         'FROM drug WHERE project_id = ?',
         (project_id,),
     ).fetchall()
@@ -126,10 +136,15 @@ def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
 
     # Query unresolved drugs and entries missing a description so we can
     # backfill title-based text for compounds where PubChem has no description.
+    # A non-empty description means the chain already produced text (compound,
+    # substance synonyms, or Wikipedia) — the drug counts as complete. Drugs
+    # flagged pubchem_lookup_failed are skipped: the whole chain definitively
+    # found nothing for them on a previous run.
     drugs_to_query = [
         drug for drug in drug_rows
         if (
-            (not (drug['pubchem_cid'] or '').strip() or not (drug['description'] or '').strip())
+            not int(drug['pubchem_lookup_failed'] or 0)
+            and not (drug['description'] or '').strip()
             and not is_internal_formula_component_drug_name(drug['name'] or '')
         )
     ]
@@ -147,20 +162,57 @@ def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
 
     for drug in drugs_to_query:
         drug_name = drug['name']
-        record = lookup_drug(drug_name)
-        if record is None:
+        drug_result = lookup_drug(drug_name)
+        if drug_result.status is LookupStatus.FOUND and drug_result.value is not None:
+            record = drug_result.value
+            cid_text = str(record.cid) if record.cid is not None else ''
+            conn.execute(
+                'UPDATE drug SET pubchem_cid = ?, pubchem_url = ?, description = ?, '
+                'structure_url = ?, pubchem_lookup_failed = 0 WHERE id = ?',
+                (cid_text, record.url, record.description, record.structure_url, drug['id']),
+            )
+            info_added += 1
+            if record.cid is not None:
+                logger.info('PubChem: added data for %r (CID %s)', drug_name, record.cid)
+            else:
+                logger.info('PubChem: added substance data for %r (no compound record)', drug_name)
+            continue
+
+        if drug_result.status is LookupStatus.ERROR:
+            # Transient failure — the chain outcome is unknown, so leave the
+            # flag cleared and let the next run retry the whole drug.
             logger.warning(
-                'PubChem: no record found for %r — stored without PubChem data',
+                'PubChem lookup for %r failed (transient error) — will retry on the next run',
+                drug_name,
+            )
+            continue
+
+        summary_result = lookup_summary(drug_name)
+        if summary_result.status is LookupStatus.FOUND and summary_result.value is not None:
+            conn.execute(
+                'UPDATE drug SET description = ?, pubchem_lookup_failed = 0 WHERE id = ?',
+                (summary_result.value, drug['id']),
+            )
+            info_added += 1
+            logger.info('Wikipedia: added description for %r (no PubChem record)', drug_name)
+            continue
+
+        if summary_result.status is LookupStatus.ERROR:
+            logger.warning(
+                'Wikipedia lookup for %r failed (transient error) — will retry on the next run',
                 drug_name,
             )
             continue
 
         conn.execute(
-            'UPDATE drug SET pubchem_cid = ?, pubchem_url = ?, description = ?, structure_url = ? WHERE id = ?',
-            (str(record.cid), record.url, record.description, record.structure_url, drug['id']),
+            'UPDATE drug SET pubchem_lookup_failed = 1 WHERE id = ?',
+            (drug['id'],),
         )
-        info_added += 1
-        logger.info('PubChem: added data for %r (CID %s)', drug_name, record.cid)
+        logger.warning(
+            'PubChem/Wikipedia: no record found for %r — stored without enrichment data '
+            '(flagged, will not be re-queried)',
+            drug_name,
+        )
 
     logger.info('PubChem: added data for %d/%d queried drug(s)', info_added, len(drugs_to_query))
 

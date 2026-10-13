@@ -44,6 +44,19 @@ After the command finishes, the file `myrespro.db` exists and is ready for profi
 
 The `phenotype` and `clinical_phenotype` columns in the rules TSV are normalized against the rank vocabulary described in [Rules Format](rules-format.md#phenotype-normalization). In short: labels are stored verbatim (lowercased + whitespace-stripped), bare ranks `1`–`5` resolve to canonical fallback labels, empty cells mean *unknown* (rank 0), and any non-empty unknown label **hard-fails** during `respro init`.
 
+### Drug metadata enrichment fallback chain
+
+Without `--no-additional-info`, ResPro enriches each drug in the rules TSV with a description and a link via a three-stage fallback chain. The first stage that succeeds wins:
+
+1. **PubChem compound** — resolves the drug name to a CID and stores the compound URL, a short description, and a 2D structure image URL.
+2. **PubChem substance** — monoclonal antibodies and similar biologics have no PubChem compound record, so on a CID miss ResPro looks the name up as a PubChem *substance* instead. The lowest substance ID (SID) is used as the canonical record; the drug card then links to the substance page and shows a synonym as the description text. Substance records have no structure image, so no structure button is shown for these drugs.
+3. **Wikipedia** — drugs with no PubChem record at all (neither compound nor substance) get a one-paragraph description from the unauthenticated Wikipedia REST summary endpoint. No PubChem link is stored in this case.
+
+Drugs where the whole chain definitively finds nothing (an HTTP 404 at every stage) are flagged in the database (`pubchem_lookup_failed = 1`) and skipped on subsequent `respro add`/enrichment runs, so a drug that cannot be resolved does not re-trigger network lookups every time. Flagged drugs stay excluded until the flag is reset manually, e.g. with `UPDATE drug SET pubchem_lookup_failed = 0` in the database — after that, the next enrichment run retries the drug. Transient failures (no network access, unexpected API responses) do *not* set the flag: the drug is simply retried on the next run.
+
+!!! note "Wikipedia attribution"
+    Descriptions for CID-less drugs come from Wikipedia and are licensed under **CC BY-SA**; the stored text is used as-is without embedded attribution. When redistributing a database or report that includes such descriptions, attribute Wikipedia accordingly.
+
 ## Add rules to an existing database
 
 You can extend a database with new rules (and optionally new GenBank references) without rebuilding it from scratch:

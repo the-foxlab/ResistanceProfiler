@@ -85,9 +85,10 @@ CREATE TABLE IF NOT EXISTS drug (
     name        TEXT    NOT NULL,
     alias       TEXT    DEFAULT '',
     pubchem_cid TEXT    DEFAULT '',  -- PubChem compound ID (integer stored as text)
-    pubchem_url TEXT    DEFAULT '',  -- canonical PubChem compound URL
-    description TEXT    DEFAULT '',  -- short human-readable description from PubChem
+    pubchem_url TEXT    DEFAULT '',  -- canonical PubChem compound or substance URL
+    description TEXT    DEFAULT '',  -- short human-readable description from PubChem/Wikipedia
     structure_url TEXT    DEFAULT '',  -- 2D structure image URL from PubChem
+    pubchem_lookup_failed INTEGER DEFAULT 0,  -- 1 when the full enrichment chain yielded nothing
     UNIQUE(project_id, name)
 );
 
@@ -467,6 +468,7 @@ _OPTIONAL_PROJECT_COLUMN_DEFS = {
         'pubchem_url': "TEXT DEFAULT ''",
         'description': "TEXT DEFAULT ''",
         'structure_url': "TEXT DEFAULT ''",
+        'pubchem_lookup_failed': 'INTEGER DEFAULT 0',
     },
     'resistance_rule': {
         'external_id': "TEXT NOT NULL DEFAULT ''",

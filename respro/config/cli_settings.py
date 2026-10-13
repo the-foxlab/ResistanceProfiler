@@ -36,6 +36,10 @@ class CliUrlConfig:
     pubchem_cid_lookup: str
     pubchem_description: str
     pubchem_title: str
+    pubchem_substance_sids: str
+    pubchem_substance_record: str
+    pubchem_substance_page: str
+    wikipedia_summary: str
     ncbi_pubmed_esummary: str
     ncbi_pmc_idconv: str
     crossref_works: str
@@ -183,6 +187,10 @@ def _build_cli_config(payload: dict) -> CliConfig:
             pubchem_cid_lookup=str(urls['pubchem_cid_lookup']),
             pubchem_description=str(urls['pubchem_description']),
             pubchem_title=str(urls['pubchem_title']),
+            pubchem_substance_sids=str(urls['pubchem_substance_sids']),
+            pubchem_substance_record=str(urls['pubchem_substance_record']),
+            pubchem_substance_page=str(urls['pubchem_substance_page']),
+            wikipedia_summary=str(urls['wikipedia_summary']),
             ncbi_pubmed_esummary=str(urls['ncbi_pubmed_esummary']),
             ncbi_pmc_idconv=str(urls['ncbi_pmc_idconv']),
             crossref_works=str(urls['crossref_works']),

@@ -45,6 +45,10 @@ These are URL templates containing `{placeholder}` segments. Override only if yo
 | `pubchem_cid_lookup` | `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{name}/cids/JSON` |
 | `pubchem_description` | `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/description/JSON` |
 | `pubchem_title` | `https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/property/Title/JSON` |
+| `pubchem_substance_sids` | `https://pubchem.ncbi.nlm.nih.gov/rest/pug/substance/name/{name}/sids/JSON` |
+| `pubchem_substance_record` | `https://pubchem.ncbi.nlm.nih.gov/rest/pug/substance/sid/{sid}/JSON` |
+| `pubchem_substance_page` | `https://pubchem.ncbi.nlm.nih.gov/substance/{sid}` |
+| `wikipedia_summary` | `https://en.wikipedia.org/api/rest_v1/page/summary/{name}` |
 | `ncbi_pubmed_esummary` | `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={pmid}&retmode=json` |
 | `ncbi_pmc_idconv` | `https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/?ids={identifier}&format=json` |
 | `crossref_works` | `https://api.crossref.org/works/{doi}` |

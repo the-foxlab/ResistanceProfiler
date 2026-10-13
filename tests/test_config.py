@@ -86,6 +86,19 @@ class TestCliUrlConfig:
         assert '{cid}' in config.urls.pubchem_structure_png
         assert '{name}' in config.urls.pubchem_cid_lookup
 
+    def test_pubchem_substance_urls_have_placeholders(self):
+        """Should have {name}/{sid} placeholders in the substance fallback URLs."""
+        config = _load_cli_config()
+        assert '{name}' in config.urls.pubchem_substance_sids
+        assert '{sid}' in config.urls.pubchem_substance_record
+        assert '{sid}' in config.urls.pubchem_substance_page
+
+    def test_wikipedia_summary_url_has_placeholder(self):
+        """Should have {name} placeholder in the Wikipedia summary URL."""
+        config = _load_cli_config()
+        assert '{name}' in config.urls.wikipedia_summary
+        assert config.urls.wikipedia_summary.startswith('https://en.wikipedia.org/')
+
     def test_ncbi_urls_have_placeholders(self):
         """Should have {pmid}/{identifier} placeholders in NCBI URLs."""
         config = _load_cli_config()
