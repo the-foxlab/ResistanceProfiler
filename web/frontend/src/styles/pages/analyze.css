@@ -126,7 +126,7 @@ button:disabled.analyze-primary {
 .analyze-submode-summary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 0.75rem;
   min-width: 0;
 }
@@ -140,7 +140,7 @@ button:disabled.analyze-primary {
 
 .analyze-submode-progress {
   width: var(--analysis-progress-width);
-  margin-left: auto;
+  margin-left: 0;
 }
 
 .analyze-submode-progress .upload-progress {
