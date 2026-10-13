@@ -564,15 +564,7 @@ button:disabled.analyze-primary {
   grid-template-columns:
     minmax(180px, 1fr)
     minmax(225px, 1.25fr)
-    minmax(180px, 1fr)
-    minmax(185px, 1fr)
-    minmax(185px, 1fr);
-}
-
-@media (min-width: 981px) and (max-width: 1200px) {
-  .profile-upload-row-batch-vcf {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+    minmax(180px, 1fr);
 }
 
 .profile-upload-row label {
