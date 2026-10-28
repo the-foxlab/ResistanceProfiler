@@ -1430,7 +1430,8 @@ def _build_summary_context(
     """
     formula_ids = formula_hit_annotation_ids or set()
     sequence_assessment = _build_sequence_assessment(result, display_names)
-    gene_coverage = _compute_gene_coverage(result, display_names)
+    coverage_assessed = _coverage_was_assessed(result)
+    gene_coverage = _compute_gene_coverage(result, display_names) if coverage_assessed else None
     mutation_profile = _build_mutation_profile(
         result,
         display_names,
@@ -1462,6 +1463,9 @@ def _build_summary_context(
         'sequence_assessment': sequence_assessment,
         'mutation_profile': mutation_profile,
         'has_coverage': gene_coverage is not None,
+        'coverage_not_assessed': gene_coverage is None and any(
+            rg.feature_matches for rg in result.references
+        ),
         'has_narrative': has_narrative,
         'narrative': str(narrative),
         'drug_table': drug_table,
@@ -1520,44 +1524,90 @@ def _build_sequence_assessment(
     }
 
 
+def _coverage_was_assessed(result: ProfilingResult) -> bool:
+    """
+    Return True when sequence coverage was actually measured for this run.
+
+    FASTA mode always measures coverage from the consensus alignment (N-run
+    codons and codons outside the aligned region become gaps). VCF mode measures
+    coverage only when a BAM was supplied; the run assembly records this in
+    ``coverage_assessed``.
+
+    :param result: profiling result
+    :return: True when a coverage percentage may be reported
+    """
+    return result.coverage_assessed or result.is_fasta_mode
+
+
 def _compute_gene_coverage(
     result: ProfilingResult,
     display_names: dict[str, str],
-) -> dict[str, int] | None:
+) -> dict[tuple[str, str], int] | None:
     """
-    Compute covered percentage per feature from feature matches and coverage gaps.
+    Compute covered percentage per feature, attributed per reference group.
+
+    Iterates every :class:`ReferenceGroup` (not just the primary reference) so
+    features aligned under secondary query records receive coverage. Coverage
+    gaps are attributed to a group via the gap's ``chrom`` (equal to the group's
+    ``query_name``); gaps with an unknown chrom (legacy rows, regenerated runs
+    with deduplicated groups) fall back to feature-name attribution against
+    every group containing that feature.
+
+    The returned dict is keyed by ``(reference_name, display name)``.
+    Single-species reports merge same-named features across references into one
+    mutation-profile row; the caller resolves that conflation with the
+    conservative minimum.
 
     :param result: profiling result
     :param display_names: feature display-name overrides
-    :return: dict mapping display name to covered %, or None when no feature matches exist
+    :return: dict mapping (reference name, display name) to covered %, or None
+        when no feature matches exist
     """
-    if not result.feature_matches:
+    group_matches = [
+        (rg.reference_name, rg.feature_matches)
+        for rg in result.references if rg.feature_matches
+    ]
+    if not group_matches:
         return None
 
-    total_codons: dict[str, int] = {}
-    for match in result.feature_matches:
-        feature = match.feature
-        count = max(0, (len(feature.nt_sequence) - feature.codon_start) // 3)
-        total_codons[feature.name] = count
+    total_codons: dict[tuple[str, str], int] = {}
+    for ref_name, matches in group_matches:
+        for match in matches:
+            feature = match.feature
+            count = max(0, (len(feature.nt_sequence) - feature.codon_start) // 3)
+            key = (ref_name, feature.name)
+            total_codons[key] = max(total_codons.get(key, 0), count)
 
-    non_covered: dict[str, int] = {}
+    chrom_to_ref = {rg.query_name: rg.reference_name for rg in result.references}
+    non_covered: dict[tuple[str, str], int] = {}
+    unattributed: dict[str, int] = {}
     for gap in result.coverage_gaps:
-        non_covered[gap.feature_name] = (
-            non_covered.get(gap.feature_name, 0) + gap.codon_end - gap.codon_start + 1
-        )
+        codons = gap.codon_end - gap.codon_start + 1
+        gap_ref = chrom_to_ref.get(gap.chrom)
+        if gap_ref is None:
+            unattributed[gap.feature_name] = unattributed.get(gap.feature_name, 0) + codons
+        else:
+            key = (gap_ref, gap.feature_name)
+            non_covered[key] = non_covered.get(key, 0) + codons
 
-    coverage: dict[str, int] = {}
-    for feature_name, total in total_codons.items():
+    coverage: dict[tuple[str, str], int] = {}
+    for (ref_name, feature_name), total in total_codons.items():
+        if not total:
+            # Zero-length CDS: no codons to cover — claim nothing.
+            continue
         display = display_names.get(feature_name, feature_name)
-        nc = min(non_covered.get(feature_name, 0), total)
-        coverage[display] = round(100 * (total - nc) / total) if total else 100
+        nc = min(
+            non_covered.get((ref_name, feature_name), 0) + unattributed.get(feature_name, 0),
+            total,
+        )
+        coverage[(ref_name, display)] = round(100 * (total - nc) / total)
     return coverage
 
 
 def _build_mutation_profile(
     result: ProfilingResult,
     display_names: dict[str, str],
-    gene_coverage: dict[str, int] | None,
+    gene_coverage: dict[tuple[str, str], int] | None,
     formula_hit_annotation_ids: set[int],
     is_multi_species: bool = False,
     reference_name_by_chrom: dict[str, str] | None = None,
@@ -1615,10 +1665,21 @@ def _build_mutation_profile(
     for (ref_name, feature), entries in sorted(
         feature_mutations.items(), key=lambda kv: (kv[0][1], kv[0][0] or '')
     ):
+        if gene_coverage is None:
+            covered_pct = None
+        elif is_multi_species:
+            covered_pct = gene_coverage.get((ref_name or '', feature))
+        else:
+            # Single-species rows merge same-named features across references;
+            # report the conservative (lowest) coverage among them.
+            candidates = [
+                pct for (_ref, display), pct in gene_coverage.items() if display == feature
+            ]
+            covered_pct = min(candidates) if candidates else None
         row = {
             'feature': feature,
             'mutations': [m for _, m in sorted(entries, key=lambda x: x[0])],
-            'covered_pct': gene_coverage.get(feature) if gene_coverage is not None else None,
+            'covered_pct': covered_pct,
         }
         if is_multi_species:
             row['reference_name'] = ref_name
@@ -1808,6 +1869,13 @@ def _build_summary_narrative(
             f'However, {uncovered_positions} position'
             f"{'s' if uncovered_positions != 1 else ''} of {feature_list} could not be assessed "
             'due to incomplete sequence data.'
+        )
+    elif not _coverage_was_assessed(result) and any(
+        rg.feature_matches for rg in result.references
+    ):
+        paragraphs.append(
+            'However, sequence coverage was not assessed: no read-depth (BAM) data was '
+            'provided, so the completeness of the analysed regions is unknown.'
         )
 
     high_impact_without_db = [

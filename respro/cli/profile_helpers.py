@@ -233,6 +233,7 @@ def assemble_multi_reference_result(
     total_variants: int,
     af_bins: dict[str, tuple[float, float]] | None = None,
     is_fasta_mode: bool = False,
+    coverage_assessed: bool = False,
     bam_cooccurrence_by_chrom: dict[str, BamCooccurrence] | None = None,
     cfg: CliConfig = CLI_CONFIG,
 ) -> ProfilingResult:
@@ -268,6 +269,8 @@ def assemble_multi_reference_result(
     :param total_variants: total variant count (pre-annotation)
     :param af_bins: AF bin thresholds; defaults to CLI config when None
     :param is_fasta_mode: mark emitted annotations as FASTA-derived
+    :param coverage_assessed: True when sequence coverage was measured (BAM
+        supplied in VCF mode); FASTA mode always measures coverage
     :return: assembled :class:`ProfilingResult` with ``references`` populated
     :raises click.ClickException: if no matched reference has resistance rules
     """
@@ -395,6 +398,7 @@ def assemble_multi_reference_result(
         total_variants=total_variants,
         variants_in_cds=variants_in_cds,
         resistance_hits=sum(1 for a in annotations if a.is_resistance_hit),
+        coverage_assessed=coverage_assessed,
         annotations=annotations,
         formula_hits=all_formula_hits,
         coverage_gaps=coverage_gaps,
@@ -550,6 +554,7 @@ def _finalize_and_export(
         variants_in_cds=ctx.variants_in_cds,
         resistance_hits=sum(1 for a in annotations if a.is_resistance_hit),
         is_fasta_mode=True,
+        coverage_assessed=True,
         annotations=annotations,
         formula_hits=formula_hits,
         coverage_gaps=ctx.coverage_gaps,

@@ -296,6 +296,7 @@ def _profile_vcf_command(
                 vcf_name=input_display_name or vcf.name,
                 total_variants=len(variants),
                 af_bins=cfg.af_bins.as_dict(),
+                coverage_assessed=bam is not None,
                 bam_cooccurrence_by_chrom=bam_cooccurrence_by_chrom,
                 cfg=cfg,
             )

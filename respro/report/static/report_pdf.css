@@ -181,6 +181,10 @@ body {
   text-align: left;
 }
 
+.feature-cov--na {
+  font-style: italic;
+}
+
 .feature-muts {
   min-width: 0;
   overflow-wrap: anywhere;

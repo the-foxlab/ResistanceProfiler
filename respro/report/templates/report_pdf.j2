@@ -46,7 +46,7 @@
           {% for entry in context.summary.mutation_profile %}
           <li class="feature-row">
             <span class="feature-name">{{ entry.feature }}</span>
-            <span class="feature-cov">{% if context.summary.has_coverage and entry.covered_pct is not none %}({{ entry.covered_pct }}% covered){% endif %}</span>
+            {% if context.summary.has_coverage and entry.covered_pct is not none %}<span class="feature-cov">({{ entry.covered_pct }}% covered)</span>{% elif context.summary.coverage_not_assessed %}<span class="feature-cov feature-cov--na">(coverage not assessed)</span>{% endif %}
             <span class="feature-muts">
               {% for m in entry.mutations %}
               <span class="mut-chip{% if m.is_high_impact %} mut-chip--high{% elif m.is_db_hit %} mut-chip--hit{% endif %}">{{ m.label }}</span>{% if not loop.last %}, {% endif %}

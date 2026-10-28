@@ -1899,6 +1899,14 @@ a.db-hit-pub-link:hover {
   border-radius: 2px;
 }
 
+/* Inline marker when coverage was not measured (VCF mode without a BAM) */
+.feature-coverage-na {
+  align-self: center;
+  font-size: 0.75rem;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
 /* Interpretation narrative */
 .summary-text-box {
   display: flex;

@@ -588,6 +588,10 @@ class ProfilingResult:
     variants_in_cds: int = 0
     resistance_hits: int = 0
     is_fasta_mode: bool = False  # True when the run derived variants from a consensus FASTA, not a VCF
+    # True when sequence coverage was actually measured (BAM supplied in VCF mode).
+    # FASTA mode always measures coverage from the consensus alignment, so the
+    # report treats is_fasta_mode as implying assessment.
+    coverage_assessed: bool = False
     annotations: list[AnnotatedVariant] = field(default_factory=list)
     formula_hits: list[FormulaRuleHit] = field(default_factory=list)
     coverage_gaps: list[CoverageGap] = field(default_factory=list)

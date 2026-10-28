@@ -92,8 +92,8 @@ def save_run(
         'INSERT INTO run '
         '(project_name, project_db_path, project_fingerprint, project_updated_at, reference_name, '
         'sample_name, vcf_path, total_variants, variants_in_cds, '
-        'resistance_hits, formula_hits, status, is_fasta_mode) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'resistance_hits, formula_hits, status, is_fasta_mode, coverage_assessed) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         (
             result.project_name,
             str(project_db_path),
@@ -108,6 +108,7 @@ def save_run(
             len(result.formula_hits),
             'complete',
             int(result.is_fasta_mode),
+            int(result.coverage_assessed),
         ),
     )
     run_id = cursor.lastrowid

@@ -193,6 +193,7 @@ def write_json(
         'status': 'complete',
         'created_at': result.run_timestamp,
         'is_fasta_mode': int(result.is_fasta_mode),
+        'coverage_assessed': int(result.coverage_assessed),
     }
 
     variant_rows = []
@@ -785,6 +786,7 @@ def _build_pdf_summary_context(
             'database_items': database_items,
             'mutation_profile': summary.get('mutation_profile', []),
             'has_coverage': bool(summary.get('has_coverage')),
+            'coverage_not_assessed': bool(summary.get('coverage_not_assessed')),
             'drug_rows': drug_rows,
             'has_drug_class': has_drug_class,
             'has_assessment': has_assessment,

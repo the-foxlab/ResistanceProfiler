@@ -218,7 +218,13 @@ def regenerate(
                 name = ref.get('reference_name', '')
                 names = ref.get('profiled_feature_names') or []
                 if name and names:
-                    profiled_feature_names_by_ref[name] = list(names)
+                    # Multiple records can share one reference name (per-CDS query
+                    # records on the same internal reference); accumulate the union
+                    # so no reference's profiled features are lost.
+                    existing = profiled_feature_names_by_ref.setdefault(name, [])
+                    for fname in names:
+                        if fname not in existing:
+                            existing.append(fname)
         if not profiled_feature_names_by_ref and results_conn is not None and run_id is not None:
             # results-DB path: load from the profiled_feature table
             db_profiled = load_profiled_features(results_conn, run_id)
@@ -312,6 +318,13 @@ def regenerate(
             variants_in_cds=run_dict.get('variants_in_cds', 0),
             resistance_hits=run_dict.get('resistance_hits', 0),
             is_fasta_mode=bool(run_dict.get('is_fasta_mode', 0)),
+            # Legacy runs predate the flag: FASTA runs measured coverage from the
+            # consensus alignment; for legacy VCF runs the BAM usage is unknown and
+            # the honest default is "not assessed".
+            coverage_assessed=(
+                bool(run_dict.get('coverage_assessed', 0))
+                or bool(run_dict.get('is_fasta_mode', 0))
+            ),
             annotations=annotations,
             formula_hits=formula_hits,
             coverage_gaps=coverage_gaps,

@@ -44,6 +44,10 @@ def make_profiling_result(
 
     Any additional ``kwargs`` (project_name, sample_name, annotations, etc.)
     are forwarded to :class:`ProfilingResult`.
+
+    ``coverage_assessed`` defaults to True: tests here build runs with measured
+    coverage unless stated otherwise. Production paths set the flag explicitly
+    (BAM supplied in VCF mode; always True in FASTA mode).
     """
     references: list[ReferenceGroup] = []
     if reference_name or query_sequence or feature_matches or reference_length_nt:
@@ -57,6 +61,7 @@ def make_profiling_result(
             feature_matches=feature_matches or [],
         ))
     kwargs.setdefault('organism', organism)
+    kwargs.setdefault('coverage_assessed', True)
     return ProfilingResult(references=references, **kwargs)
 
 
