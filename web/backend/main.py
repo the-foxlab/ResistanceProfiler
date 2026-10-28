@@ -264,7 +264,7 @@ def _build_spa_fallback_app(frontend_dist: Path) -> FastAPI:
             raise HTTPException(status_code=404, detail='Not Found')
         return FileResponse(frontend_dist / 'index.html')
 
-    fallback = FastAPI(docs=None, redoc=None, openapi_url=None)
+    fallback = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     fallback.add_route('/{path:path}', spa_fallback, methods=['GET'])
     return fallback
 
