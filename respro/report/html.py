@@ -1658,6 +1658,15 @@ def _build_mutation_profile(
             }
 
     feature_mutations: dict[tuple[str | None, str], list[tuple[int, dict]]] = {}
+    # Seed every profiled feature (aligned on a selected reference) so features
+    # without non-synonymous mutations still appear in the report with their
+    # coverage statement — a clean sequence with full coverage is a result,
+    # not an absence of one.
+    for rg in result.references:
+        seed_ref = rg.reference_name if is_multi_species else None
+        for match in rg.feature_matches:
+            feature = display_names.get(match.feature.name, match.feature.name)
+            feature_mutations.setdefault((seed_ref, feature), [])
     for (ref_name, feature, codon_pos, _label), entry in seen.items():
         feature_mutations.setdefault((ref_name, feature), []).append((codon_pos, entry))
 

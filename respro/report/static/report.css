@@ -1784,6 +1784,9 @@ a.db-hit-pub-link:hover {
 }
 
 .feature-mutation-badge {
+  display: inline-flex;
+  justify-content: space-between;
+  gap: 0.75rem;
   background: var(--neutral-bg);
   color: var(--neutral-text);
   border: 1px solid var(--neutral-border);
@@ -1793,6 +1796,18 @@ a.db-hit-pub-link:hover {
   font-weight: 600;
   white-space: nowrap;
   align-self: center;
+}
+
+/* Gene name within the badge — left-aligned */
+.feature-mutation-name {
+  min-width: 0;
+}
+
+/* Coverage percentage (or n.d.) within the badge — right-aligned */
+.feature-mutation-coverage {
+  font-weight: 400;
+  font-size: var(--font-size-xs);
+  color: var(--muted);
 }
 
 /* Reference name shown inside the gene badge in cross-reference reports */
@@ -1897,14 +1912,6 @@ a.db-hit-pub-link:hover {
   background: #ffffff;
   border: 0.5px solid #4d4d4d;
   border-radius: 2px;
-}
-
-/* Inline marker when coverage was not measured (VCF mode without a BAM) */
-.feature-coverage-na {
-  align-self: center;
-  font-size: 0.75rem;
-  color: #6b7280;
-  white-space: nowrap;
 }
 
 /* Interpretation narrative */

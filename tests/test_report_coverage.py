@@ -252,7 +252,8 @@ class TestCoverageAssessedSemantics:
         assert all(e["covered_pct"] is None for e in ctx["summary"]["mutation_profile"])
 
         html = render_html(result, similarity_high=1, similarity_moderate=0)
-        assert "coverage not assessed" in html
+        assert "n.d." in html
+        assert "feature-coverage-na" not in html
         assert "100% covered" not in html
         assert "None%" not in html
 
@@ -322,6 +323,60 @@ class TestPdfCoverageReporting:
         html = _render_pdf_html(self._two_feature_result(coverage_assessed=True))
         assert html.count("(100% covered)") == 2
         assert "None%" not in html
+
+
+class TestFeatureBadgeCoverage:
+    """The feature badge carries the coverage statement; clean features stay listed."""
+
+    def test_feature_without_mutations_still_listed(self) -> None:
+        """An aligned feature with no non-synonymous mutations keeps its badge row."""
+        result = ProfilingResult(
+            project_name="T",
+            organism="HSV-1",
+            sample_name="S",
+            vcf_name="t.vcf",
+            total_variants=0,
+            variants_in_cds=0,
+            coverage_assessed=True,
+            annotations=[],
+            references=[_make_group("NC_x", "chrom_a", "UL23", reference_id=1)],
+        )
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0)
+        assert ctx["summary"]["mutation_profile"] == [
+            {"feature": "UL23", "mutations": [], "covered_pct": 100},
+        ]
+
+    def test_badge_shows_percent_and_nd_in_html(self) -> None:
+        """Badge shows the percent int when measured and n.d. when not assessed."""
+        measured = ProfilingResult(
+            project_name="T",
+            organism="HSV-1",
+            sample_name="S",
+            vcf_name="t.vcf",
+            total_variants=0,
+            variants_in_cds=0,
+            coverage_assessed=True,
+            annotations=[],
+            references=[_make_group("NC_x", "chrom_a", "UL23", reference_id=1)],
+        )
+        html = render_html(measured, similarity_high=1, similarity_moderate=0)
+        assert 'feature-mutation-coverage">100%</span>' in html
+        assert 'feature-mutation-coverage">n.d.' not in html
+
+        unassessed = ProfilingResult(
+            project_name="T",
+            organism="HSV-1",
+            sample_name="S",
+            vcf_name="t.vcf",
+            total_variants=0,
+            variants_in_cds=0,
+            coverage_assessed=False,
+            annotations=[],
+            references=[_make_group("NC_x", "chrom_a", "UL23", reference_id=1)],
+        )
+        html = render_html(unassessed, similarity_high=1, similarity_moderate=0)
+        assert 'feature-mutation-coverage">n.d.</span>' in html
+        assert "feature-coverage-na" not in html
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -490,7 +545,7 @@ class TestCoverageEndToEnd:
         out_dir = self._run_profile(project_db, fasta_path, vcf_path, None, tmp_path, "live_nobam")
         html = (out_dir / "variants.report.html").read_text(encoding="utf-8")
         assert html.count('class="feature-coverage-bar"') == 0
-        assert html.count("coverage not assessed") >= 2
+        assert html.count("n.d.") >= 2
         assert "100% covered" not in html
         assert "None%" not in html
 

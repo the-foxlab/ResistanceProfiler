@@ -122,20 +122,18 @@
                     <div class="db-hit-info-panel">
                       <p><strong>Bold</strong> — mutation matches a database entry.</p>
                       <p><strong class="mut-legend-high-impact">Bold red</strong> — high-impact structural variant (frameshift, stop gain/loss, start loss, insertion, or deletion).</p>
-                      {% if context.summary.has_coverage %}<p>Bar — gene coverage in the input sequence (white = covered, grey = not covered).</p>{% elif context.summary.coverage_not_assessed %}<p>Coverage was not assessed (no read-depth data supplied).</p>{% endif %}
+                      {% if context.summary.has_coverage %}<p>Bar — gene coverage in the input sequence (white = covered, grey = not covered).</p>{% elif context.summary.coverage_not_assessed %}<p>n.d. — coverage was not assessed (no read-depth data supplied).</p>{% endif %}
                     </div>
                   </span>
                 </div>
                 <div class="feature-mutation-list{% if context.summary.has_coverage %} feature-mutation-list--with-coverage{% endif %}">
                   {% for entry in context.summary.mutation_profile %}
                     <div class="feature-mutation-row">
-                      <span class="feature-mutation-badge">{{ entry.feature }}{% if context.is_multi_species and entry.reference_name %} <span class="feature-mutation-reference">({{ entry.reference_name }})</span>{% endif %}</span>
+                      <span class="feature-mutation-badge"><span class="feature-mutation-name">{{ entry.feature }}{% if context.is_multi_species and entry.reference_name %} <span class="feature-mutation-reference">({{ entry.reference_name }})</span>{% endif %}</span>{% if context.summary.has_coverage and entry.covered_pct is not none %}<span class="feature-mutation-coverage">{{ entry.covered_pct }}%</span>{% elif context.summary.coverage_not_assessed %}<span class="feature-mutation-coverage">n.d.</span>{% endif %}</span>
                       {% if context.summary.has_coverage and entry.covered_pct is not none %}
                         <div class="feature-coverage-bar">
                           <div class="feature-coverage-bar__fill" style="width: {{ entry.covered_pct }}%"></div>
                         </div>
-                      {% elif context.summary.coverage_not_assessed %}
-                        <span class="feature-coverage-na">coverage not assessed</span>
                       {% endif %}
                       <div class="feature-mutations">
                         {% for m in entry.mutations %}<span class="mut-text{% if m.is_high_impact %} mut-text--high-impact{% elif m.is_db_hit %} mut-text--db-hit{% endif %}">{{ m.label }}</span>{% if not loop.last %}<span class="mut-sep">,</span> {% endif %}{% endfor %}
