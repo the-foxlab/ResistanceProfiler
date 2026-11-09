@@ -29,6 +29,7 @@ from web.backend.queue import get_batch_queue, get_queue
 from web.backend.services.session import (
     SESSION_COOKIE_NAME,
     hash_session_token,
+    record_artifact,
     record_job,
     reset_memory_stores,
 )
@@ -1007,23 +1008,23 @@ class TestWebApi:
     def test_artifact_bundle_packs_a_full_default_batch(
         self,
         client: TestClient,
-        web_sample_vcf: Path,
-        web_sample_ref_fasta: Path,
+        startup_config: StartupConfig,
     ) -> None:
         """A full default batch (one artifact per kind per sample) fits in one request."""
-        result = _profile_vcf_result(
-            client,
-            web_sample_vcf,
-            web_sample_ref_fasta,
-            sample='artifact-full-batch',
-            display_name='artifact-full-batch.vcf',
-        )
-        batch_size = WEB_BACKEND_CONFIG.defaults.max_batch_size
-        full_batch_ids = [
-            artifact_id
-            for _ in range(batch_size)
-            for artifact_id in result['artifact_ids']
-        ]
+        session_hash = _establish_session(client)
+        full_batch_ids = []
+        expected_files = {}
+        for sample in range(WEB_BACKEND_CONFIG.defaults.max_batch_size):
+            for kind in ARTIFACT_KINDS:
+                path = startup_config.results_dir / f'sample-{sample}{kind.internal_suffix}'
+                content = f'sample-{sample}-{kind.download_suffix}'
+                path.write_text(content)
+                expected_files[f'sample-{sample}{kind.download_suffix}'] = content
+                full_batch_ids.append(record_artifact(
+                    session_hash=session_hash, canonical_path=path, media_type=kind.media_type,
+                ))
+
+        assert len(set(full_batch_ids)) == len(full_batch_ids)
 
         bundle = client.post(
             '/api/artifact-bundle',
@@ -1032,7 +1033,9 @@ class TestWebApi:
 
         assert bundle.status_code == 200, bundle.text
         with zipfile.ZipFile(io.BytesIO(bundle.content)) as archive:
-            assert len(archive.namelist()) == len(full_batch_ids)
+            assert set(archive.namelist()) == set(expected_files)
+            for name, content in expected_files.items():
+                assert archive.read(name).decode() == content
 
     def test_artifact_bundle_rejects_unknown_artifact_id(
         self,
@@ -1045,6 +1048,81 @@ class TestWebApi:
 
         assert response.status_code == 404
         assert response.json()['detail'] == 'Artifact not found.'
+
+    def test_bundle_parts_extract_without_overwriting_conflicting_names(
+        self,
+        client: TestClient,
+        startup_config: StartupConfig,
+        tmp_path: Path,
+    ) -> None:
+        session_hash = _establish_session(client)
+        filenames = [
+            'sample.results.json', 'sample.results.json', 'sample_1.results.json',
+            'sample.results.json', 'sample_1.results.json', 'part1-sample.results.json',
+            'part2-sample.results.json', 'sample.results.json',
+        ]
+        artifact_ids = []
+        for index, filename in enumerate(filenames):
+            directory = startup_config.results_dir / str(index)
+            directory.mkdir()
+            path = directory / filename
+            path.write_text(f'artifact-{index}')
+            artifact_ids.append(record_artifact(
+                session_hash=session_hash, canonical_path=path, media_type='application/json',
+            ))
+
+        extracted = tmp_path / 'extracted'
+        all_names = []
+        for part, start in enumerate(range(0, len(artifact_ids), 3), start=1):
+            request_body = {'artifact_ids': artifact_ids[start:start + 3]}
+            response = client.post(
+                '/api/artifact-bundle',
+                params={'part': part},
+                json=request_body,
+            )
+            assert response.status_code == 200, response.text
+            with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+                names = archive.namelist()
+                all_names.extend(names)
+                archive.extractall(extracted)
+            repeated = client.post('/api/artifact-bundle', params={'part': part}, json=request_body)
+            assert repeated.status_code == 200
+            with zipfile.ZipFile(io.BytesIO(repeated.content)) as archive:
+                assert archive.namelist() == names
+
+        assert all_names == [
+            'part1-sample.json', 'part1-sample_1.json', 'part1-sample_1_1.json',
+            'part2-sample.json', 'part2-sample_1.json', 'part2-part1-sample.json',
+            'part3-part2-sample.json', 'part3-sample.json',
+        ]
+        assert len(set(all_names)) == len(filenames)
+        assert {name: (extracted / name).read_text() for name in all_names} == {
+            name: f'artifact-{index}' for index, name in enumerate(all_names)
+        }
+
+    @pytest.mark.parametrize('part', ['../other', '0', '-1'])
+    def test_bundle_rejects_invalid_part_number(self, client: TestClient, part: str) -> None:
+        response = client.post(
+            '/api/artifact-bundle', params={'part': part}, json={'artifact_ids': ['unknown']},
+        )
+
+        assert response.status_code == 422
+
+    def test_bundle_part_still_enforces_artifact_ownership(
+        self, client: TestClient, startup_config: StartupConfig,
+    ) -> None:
+        _establish_session(client)
+        path = startup_config.results_dir / 'private.results.json'
+        path.write_text('private')
+        artifact_id = record_artifact(
+            session_hash='another-session', canonical_path=path, media_type='application/json',
+        )
+
+        response = client.post(
+            '/api/artifact-bundle', params={'part': 1}, json={'artifact_ids': [artifact_id]},
+        )
+
+        assert response.status_code == 404
 
     def test_job_result_exposes_registry_ordered_artifact_ids(
         self,

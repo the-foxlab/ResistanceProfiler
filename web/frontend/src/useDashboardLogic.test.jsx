@@ -1224,3 +1224,129 @@ describe('artifact bundle limit', () => {
     });
   });
 });
+
+describe('pagehide session cleanup', () => {
+  let warning;
+  const originalNavigator = global.navigator;
+
+  beforeEach(() => {
+    setupXhrStub();
+    vi.clearAllMocks();
+    global.fetch.mockReset();
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ data: { items: [] } }),
+    });
+    warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    setArtifactBundleLimit(100);
+    vi.restoreAllMocks();
+    vi.stubGlobal('navigator', originalNavigator);
+  });
+
+  async function dashboardWithUploads(ids) {
+    const { result } = renderDashboardHook();
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(4));
+    for (const id of ids) {
+      await act(async () => {
+        const upload = result.current.uploadFastaFile(new File(['ATCG'], 'test.fasta'));
+        mockXHRInstance.triggerSuccess({ upload_id: id });
+        await upload;
+      });
+    }
+    global.fetch.mockClear();
+  }
+
+  it('does not delete live files when the page enters the back-forward cache', async () => {
+    const beacon = vi.fn(() => true);
+    vi.stubGlobal('navigator', { ...navigator, sendBeacon: beacon });
+    await dashboardWithUploads(['upload-1']);
+
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+
+    expect(beacon).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('reports a rejected beacon and attempts the same bounded payload with keepalive', async () => {
+    const beacon = vi.fn(() => false);
+    vi.stubGlobal('navigator', { ...navigator, sendBeacon: beacon });
+    await dashboardWithUploads(['upload-1']);
+
+    window.dispatchEvent(new PageTransitionEvent('pagehide'));
+
+    expect(beacon).toHaveBeenCalledTimes(1);
+    expect(warning).toHaveBeenCalledWith(expect.stringMatching(/beacon.*rejected/i));
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:8000/api/session/cleanup',
+      expect.objectContaining({
+        method: 'POST',
+        keepalive: true,
+        body: JSON.stringify({ upload_ids: ['upload-1'], artifact_ids: [] }),
+      }),
+    );
+  });
+
+  it('attempts keepalive if beacon throws', async () => {
+    vi.stubGlobal('navigator', { ...navigator, sendBeacon: vi.fn(() => { throw new Error('blocked'); }) });
+    await dashboardWithUploads(['upload-1']);
+
+    window.dispatchEvent(new PageTransitionEvent('pagehide'));
+
+    expect(warning).toHaveBeenCalledWith(expect.stringMatching(/beacon.*failed/i), expect.any(Error));
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/session/cleanup'),
+      expect.objectContaining({ keepalive: true, body: JSON.stringify({ upload_ids: ['upload-1'], artifact_ids: [] }) }),
+    );
+  });
+
+  it('reports an observable rate-limit response from keepalive cleanup', async () => {
+    vi.stubGlobal('navigator', { ...navigator, sendBeacon: undefined });
+    await dashboardWithUploads(['upload-1']);
+    global.fetch.mockResolvedValueOnce({ ok: false, status: 429 });
+
+    window.dispatchEvent(new PageTransitionEvent('pagehide'));
+
+    await waitFor(() => expect(warning).toHaveBeenCalledWith(expect.stringMatching(/429/)));
+  });
+
+  it('reports a rejected keepalive request', async () => {
+    vi.stubGlobal('navigator', { ...navigator, sendBeacon: undefined });
+    await dashboardWithUploads(['upload-1']);
+    global.fetch.mockRejectedValueOnce(new Error('quota exceeded'));
+
+    window.dispatchEvent(new PageTransitionEvent('pagehide'));
+
+    await waitFor(() => expect(warning).toHaveBeenCalledWith(
+      expect.stringMatching(/cleanup.*failed/i), expect.any(Error),
+    ));
+  });
+
+  it('warns when multiple bounded requests may exceed the rate limit', async () => {
+    vi.stubGlobal('navigator', { ...navigator, sendBeacon: vi.fn(() => true) });
+    await dashboardWithUploads(['upload-1', 'upload-2']);
+    setArtifactBundleLimit(1);
+
+    window.dispatchEvent(new PageTransitionEvent('pagehide'));
+
+    expect(navigator.sendBeacon).toHaveBeenCalledTimes(2);
+    expect(warning).toHaveBeenCalledWith(expect.stringMatching(/rate.limit/i));
+  });
+
+  it('retries only rejected chunks with their own ids', async () => {
+    vi.stubGlobal('navigator', { ...navigator, sendBeacon: vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true) });
+    await dashboardWithUploads(['upload-1', 'upload-2']);
+    setArtifactBundleLimit(1);
+
+    window.dispatchEvent(new PageTransitionEvent('pagehide'));
+
+    expect(navigator.sendBeacon).toHaveBeenCalledTimes(2);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/api/session/cleanup'),
+      expect.objectContaining({ body: JSON.stringify({ upload_ids: ['upload-1'], artifact_ids: [] }) }),
+    );
+  });
+});

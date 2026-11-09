@@ -118,6 +118,11 @@ describe('artifact bundle chunking', () => {
       'respro-session-artifacts-part2of3.zip',
       'respro-session-artifacts-part3of3.zip',
     ]);
+    expect(global.fetch.mock.calls.map(([url]) => String(url))).toEqual([
+      expect.stringMatching(/\/api\/artifact-bundle\?part=1$/),
+      expect.stringMatching(/\/api\/artifact-bundle\?part=2$/),
+      expect.stringMatching(/\/api\/artifact-bundle\?part=3$/),
+    ]);
     const sentBodies = global.fetch.mock.calls.map(([, options]) => JSON.parse(options.body));
     expect(sentBodies).toEqual([
       { artifact_ids: ['a', 'b'] },
@@ -131,6 +136,7 @@ describe('artifact bundle chunking', () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(downloadedNames).toEqual(['respro-session-artifacts.zip']);
+    expect(String(global.fetch.mock.calls[0][0])).toMatch(/\/api\/artifact-bundle$/);
   });
 });
 

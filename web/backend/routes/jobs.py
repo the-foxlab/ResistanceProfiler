@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -132,20 +133,32 @@ def _redact_result_paths(job_id: str, session_hash: str, result: dict) -> dict:
     artifact without enumerating the per-type fields themselves.
     """
     record = fetch_owned_record('job', job_id)
-    if record is None:
-        return result
+    if not owner_matches(record, session_hash):
+        raise HTTPException(status_code=404, detail='Job not found.')
+    fields = [field for field in ARTIFACT_RESULT_FIELDS if result.get(field)]
     stored_ids = record.fields.get('artifact_ids', '')
     if stored_ids:
-        artifact_ids = [value for value in stored_ids.split(',') if value]
+        artifact_ids = stored_ids.split(',')
+        if len(artifact_ids) != len(fields):
+            raise HTTPException(status_code=500, detail='Job artifacts unavailable.')
+        for field, artifact_id in zip(fields, artifact_ids, strict=True):
+            if not re.fullmatch(r'[A-Za-z0-9_-]+', artifact_id):
+                raise HTTPException(status_code=500, detail='Job artifacts unavailable.')
+            artifact = fetch_owned_record('artifact', artifact_id)
+            if artifact is None:
+                raise HTTPException(status_code=404, detail='Job artifacts unavailable.')
+            if (
+                not owner_matches(artifact, session_hash)
+                or artifact.canonical_path != str(result[field])
+                or artifact.fields.get('media_type') != ARTIFACT_MEDIA_TYPES[field]
+            ):
+                raise HTTPException(status_code=500, detail='Job artifacts unavailable.')
     else:
         artifact_ids = []
-        for field in ARTIFACT_RESULT_FIELDS:
-            path = result.get(field)
-            if not path:
-                continue
+        for field in fields:
             artifact_id = record_artifact(
                 session_hash=session_hash,
-                canonical_path=path,
+                canonical_path=result[field],
                 media_type=ARTIFACT_MEDIA_TYPES[field],
             )
             artifact_ids.append(artifact_id)
@@ -153,10 +166,8 @@ def _redact_result_paths(job_id: str, session_hash: str, result: dict) -> dict:
         _store_job_artifact_ids(job_id, artifact_ids)
 
     redacted = dict(result)
-    id_iter = iter(artifact_ids)
-    for field in ARTIFACT_RESULT_FIELDS:
-        if redacted.get(field):
-            redacted[field] = next(id_iter, redacted[field])
+    for field, artifact_id in zip(fields, artifact_ids, strict=True):
+        redacted[field] = artifact_id
     redacted['artifact_ids'] = artifact_ids
     return redacted
 

@@ -18,7 +18,12 @@ from web.backend.artifact_kinds import (
     is_html_report_path,
     unsupported_artifact_message,
 )
-from web.backend.models import ArtifactBundlePayload, ComparePayload, CompareResponse
+from web.backend.models import (
+    ArtifactBundlePayload,
+    ComparePayload,
+    CompareResponse,
+    artifact_bundle_payload_model,
+)
 from web.backend.services.compare import build_comparison_matrix
 from web.backend.services.session import (
     Session,
@@ -103,11 +108,10 @@ def build_artifacts_router(
             filename=derive_download_filename(artifact_path),
         )
 
-    @router.post('/api/artifact-bundle')
-    @limiter.limit(api_rate_limit)
     def download_artifact_bundle(
         request: Request,
         payload: ArtifactBundlePayload,
+        part: int | None = Query(default=None, ge=1, le=4294967295),
     ) -> Response:
         session = get_session(request)
         if not payload.artifact_ids:
@@ -130,12 +134,20 @@ def build_artifacts_router(
             resolved_paths,
             results_dir,
             is_allowed_artifact_path,
+            part=part,
         )
         return Response(
             content=bundle_bytes,
             media_type='application/zip',
             headers={'Content-Disposition': 'attachment; filename="respro-batch-artifacts.zip"'},
         )
+
+    # FastAPI inspects annotations when registering a route; bind the per-app
+    # model before SlowAPI wraps the endpoint and the router inspects it.
+    download_artifact_bundle.__annotations__['payload'] = artifact_bundle_payload_model(
+        artifact_bundle_max_artifacts,
+    )
+    router.post('/api/artifact-bundle')(limiter.limit(api_rate_limit)(download_artifact_bundle))
 
     @router.get('/api/branding/logo.svg')
     def branding_logo() -> FileResponse:
@@ -211,6 +223,8 @@ def _build_artifact_bundle(
     artifact_paths: list[Path],
     results_dir: Path,
     is_allowed_artifact_path: Callable[[Path], bool],
+    *,
+    part: int | None = None,
 ) -> bytes:
     """Pack validated result artifacts into one zip archive."""
     buffer = io.BytesIO()
@@ -223,10 +237,10 @@ def _build_artifact_bundle(
             if not artifact_path.is_file():
                 raise HTTPException(status_code=404, detail='Artifact not found.')
 
-            archive.write(
-                artifact_path,
-                arcname=_deduplicate_archive_name(derive_download_filename(artifact_path), used_names),
-            )
+            name = derive_download_filename(artifact_path)
+            if part is not None:
+                name = f'part{part}-{name}'
+            archive.write(artifact_path, arcname=_deduplicate_archive_name(name, used_names))
 
     return buffer.getvalue()
 

@@ -121,13 +121,8 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
     api_rate_limit = _resolve_api_rate_limit()
     max_batch_size = _resolve_max_batch_size()
     sample_limit_per_minute = max_batch_size
-    # The bundle limit follows the batch setting: one full batch of results, one
-    # artifact per registered export type. The payload list ceiling caps it so the
-    # advertised limit can always be sent in a single valid request.
-    artifact_bundle_max_artifacts = min(
-        len(ARTIFACT_KINDS) * max_batch_size,
-        WEB_BACKEND_CONFIG.defaults.path_list_max_length,
-    )
+    # One full batch may contain one artifact per registered export type.
+    artifact_bundle_max_artifacts = len(ARTIFACT_KINDS) * max_batch_size
 
     app.add_middleware(
         CORSMiddleware,

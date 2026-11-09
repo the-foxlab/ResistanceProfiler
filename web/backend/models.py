@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from web.backend.config import WEB_BACKEND_CONFIG
 
@@ -209,6 +209,27 @@ class SessionCleanupPayload(BaseModel):
     artifact_ids: list[str] = Field(
         default_factory=list,
         max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length,
+    )
+
+
+def artifact_bundle_payload_model(artifact_limit: int) -> type[ArtifactBundlePayload]:
+    """Bound bundle validation per app while allowing the route to report limit + 1."""
+    ceiling = max(WEB_BACKEND_CONFIG.defaults.path_list_max_length, artifact_limit + 1)
+    return create_model(
+        'ConfiguredArtifactBundlePayload',
+        __base__=ArtifactBundlePayload,
+        artifact_ids=(list[str], Field(default_factory=list, max_length=ceiling)),
+    )
+
+
+def session_cleanup_payload_model(artifact_limit: int) -> type[SessionCleanupPayload]:
+    """Allow frontend-sized chunks for both lists, with finite validation bounds."""
+    ceiling = WEB_BACKEND_CONFIG.defaults.path_list_max_length
+    return create_model(
+        'ConfiguredSessionCleanupPayload',
+        __base__=SessionCleanupPayload,
+        upload_ids=(list[str], Field(default_factory=list, max_length=max(ceiling, artifact_limit))),
+        artifact_ids=(list[str], Field(default_factory=list, max_length=max(ceiling, artifact_limit + 1))),
     )
 
 

@@ -237,12 +237,12 @@ export async function downloadArtifactBundle(artifactIds, downloadName) {
     const name = chunks.length === 1
       ? downloadName
       : withPartSuffix(downloadName, index + 1, chunks.length);
-    await downloadOneArtifactBundle(chunks[index], name);
+    await downloadOneArtifactBundle(chunks[index], name, chunks.length > 1 ? index + 1 : null);
   }
 }
 
-async function downloadOneArtifactBundle(artifactIds, downloadName) {
-  const response = await fetch(`${API_BASE}/api/artifact-bundle`, {
+async function downloadOneArtifactBundle(artifactIds, downloadName, part) {
+  const response = await fetch(buildApiUrl('/api/artifact-bundle', { part }), {
     method: 'POST',
     headers: buildHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ artifact_ids: artifactIds }),

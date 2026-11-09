@@ -9,7 +9,11 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from slowapi import Limiter
 
-from web.backend.models import SessionCleanupPayload, SessionCleanupResponse
+from web.backend.models import (
+    SessionCleanupPayload,
+    SessionCleanupResponse,
+    session_cleanup_payload_model,
+)
 from web.backend.services.session import (
     Session,
     delete_owned_record,
@@ -38,8 +42,6 @@ def build_session_router(
     """
     router = APIRouter()
 
-    @router.post('/api/session/cleanup', response_model=SessionCleanupResponse)
-    @limiter.limit(api_rate_limit)
     async def cleanup_session_uploads(
         request: Request,
         payload: SessionCleanupPayload,
@@ -89,5 +91,11 @@ def build_session_router(
                     logger.warning('Failed to delete artifact %s: %s', artifact_id, exc)
             delete_owned_record(prefix='artifact', record_id=artifact_id)
         return SessionCleanupResponse(deleted_count=deleted_count)
+
+    # Bind this app's payload bounds before FastAPI inspects the wrapped endpoint.
+    cleanup_session_uploads.__annotations__['payload'] = session_cleanup_payload_model(artifact_max_ids)
+    router.post('/api/session/cleanup', response_model=SessionCleanupResponse)(
+        limiter.limit(api_rate_limit)(cleanup_session_uploads),
+    )
 
     return router
