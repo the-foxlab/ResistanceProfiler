@@ -47,7 +47,6 @@ class WebDefaults:
     upload_rate_limit: str
     api_rate_limit: str
     max_batch_size: int
-    artifact_bundle_max_paths: int
     profile_max_threads: int
     sample_name_max_length: int
     display_name_max_length: int
@@ -134,7 +133,6 @@ def _load_web_backend_config() -> WebBackendConfig:
         upload_rate_limit=str(defaults_payload['upload_rate_limit']),
         api_rate_limit=str(defaults_payload['api_rate_limit']),
         max_batch_size=int(defaults_payload['max_batch_size']),
-        artifact_bundle_max_paths=int(defaults_payload['artifact_bundle_max_paths']),
         profile_max_threads=int(defaults_payload['profile_max_threads']),
         sample_name_max_length=int(defaults_payload['sample_name_max_length']),
         display_name_max_length=int(defaults_payload['display_name_max_length']),

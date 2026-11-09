@@ -426,6 +426,65 @@ describe('useBatchManager — JSON regenerate batch', () => {
     expect(submittedBody.min_af).toBeUndefined();
   });
 
+  it('downloadAllBatchArtifacts bundles the artifact_ids reported for each sample', async () => {
+    const stubs = makeStubs();
+    const { result } = renderHook(() => useBatchManager(stubs));
+
+    await uploadJson(result, 'sample1.results.json', 'up-json-1');
+    act(() => {
+      result.current.setBatchMode('json');
+    });
+
+    global.fetch.mockImplementation(async (url) => {
+      if (String(url).includes('/api/regenerate/batch')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            samples: [{ job_id: 'j1', sample_name: 'sample1', status: 'queued' }],
+            total: 1,
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          status: 'succeeded',
+          result: { artifact_ids: ['id-html', 'id-json', 'id-pdf', 'id-tsv'] },
+        }),
+      };
+    });
+
+    await act(async () => {
+      await result.current.submitBatch();
+    });
+    await waitFor(() => {
+      expect(result.current.batchSamples[0].artifactIds).toEqual([
+        'id-html',
+        'id-json',
+        'id-pdf',
+        'id-tsv',
+      ]);
+    });
+
+    global.URL.createObjectURL = vi.fn(() => 'blob:mock');
+    global.URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+
+    await act(async () => {
+      await result.current.downloadAllBatchArtifacts();
+    });
+
+    const bundleCall = global.fetch.mock.calls.find(([url]) =>
+      String(url).includes('/api/artifact-bundle')
+    );
+    expect(bundleCall).toBeDefined();
+    expect(JSON.parse(bundleCall[1].body)).toEqual({
+      artifact_ids: ['id-html', 'id-json', 'id-pdf', 'id-tsv'],
+    });
+  });
+
   it('submitBatch JSON branch surfaces a 429 rate limit via batchError', async () => {
     const stubs = makeStubs();
     const { result } = renderHook(() => useBatchManager(stubs));

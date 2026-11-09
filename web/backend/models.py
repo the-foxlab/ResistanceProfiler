@@ -186,12 +186,13 @@ class ArtifactBundlePayload(BaseModel):
 
     Artifacts are referenced by opaque IDs (recorded when a job produces them)
     rather than filesystem paths, so the server resolves and ownership-checks
-    them server-side.
+    them server-side. The list length ceiling here is only an abuse bound; the
+    workflow cap (artifact kinds x max batch size) is enforced by the route.
     """
 
     artifact_ids: list[str] = Field(
         default_factory=list,
-        max_length=WEB_BACKEND_CONFIG.defaults.artifact_bundle_max_paths,
+        max_length=WEB_BACKEND_CONFIG.defaults.path_list_max_length,
     )
 
 

@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { buildApiUrl, formatUserError } from '../api';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  buildApiUrl,
+  chunkIds,
+  downloadArtifactBundle,
+  formatUserError,
+  setArtifactBundleLimit,
+} from '../api';
 import { isPopulated, buildDrugAliasLookup, groupDrugThresholds, labelToRank, orderedThresholdLabels } from '../utils';
 
 describe('API Utility Functions', () => {
@@ -67,6 +73,64 @@ describe('API Utility Functions', () => {
       const result = formatUserError('ValueError: No CDS matches found in tmp123.fa');
       expect(result).toBe('No matches to references in the database found.');
     });
+  });
+});
+
+describe('artifact bundle chunking', () => {
+  let downloadedNames;
+
+  beforeEach(() => {
+    downloadedNames = [];
+    setArtifactBundleLimit(2);
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      blob: async () => new Blob(['zip-bytes']),
+    }));
+    global.URL.createObjectURL = vi.fn(() => 'blob:mock');
+    global.URL.revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function () {
+      downloadedNames.push(this.download);
+    });
+  });
+
+  afterEach(() => {
+    setArtifactBundleLimit(100);
+    vi.restoreAllMocks();
+  });
+
+  it('splits artifact ids into chunks at the configured limit', () => {
+    expect(chunkIds(['a', 'b', 'c', 'd', 'e'], 2)).toEqual([
+      ['a', 'b'],
+      ['c', 'd'],
+      ['e'],
+    ]);
+  });
+
+  it('downloads one numbered archive per chunk when the selection exceeds the limit', async () => {
+    await downloadArtifactBundle(
+      ['a', 'b', 'c', 'd', 'e'],
+      'respro-session-artifacts.zip',
+    );
+
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(downloadedNames).toEqual([
+      'respro-session-artifacts-part1of3.zip',
+      'respro-session-artifacts-part2of3.zip',
+      'respro-session-artifacts-part3of3.zip',
+    ]);
+    const sentBodies = global.fetch.mock.calls.map(([, options]) => JSON.parse(options.body));
+    expect(sentBodies).toEqual([
+      { artifact_ids: ['a', 'b'] },
+      { artifact_ids: ['c', 'd'] },
+      { artifact_ids: ['e'] },
+    ]);
+  });
+
+  it('keeps the plain archive name when everything fits in one request', async () => {
+    await downloadArtifactBundle(['a', 'b'], 'respro-session-artifacts.zip');
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(downloadedNames).toEqual(['respro-session-artifacts.zip']);
   });
 });
 

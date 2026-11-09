@@ -28,6 +28,10 @@ from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from web.backend.artifact_kinds import (
+    ARTIFACT_KINDS,
+    is_allowed_artifact_path,
+)
 from web.backend.config import (
     WEB_BACKEND_CONFIG,
     WEB_ENV,
@@ -70,14 +74,8 @@ _SAMPLE_QUOTA_COUNTER: dict[tuple[str, int], int] = {}
 
 
 def _is_allowed_artifact_path(artifact_path: Path) -> bool:
-    """Allow only known artifact file types for downloads."""
-    allowed_suffixes = (
-        '.report.pdf',
-        '.results.json',
-        '.report.html',
-        '.results.tsv',
-    )
-    return any(str(artifact_path).endswith(suffix) for suffix in allowed_suffixes)
+    """Allow only artifact file types registered in ``artifact_kinds``."""
+    return is_allowed_artifact_path(artifact_path)
 
 
 @asynccontextmanager
@@ -121,7 +119,15 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
 
     upload_rate_limit = _resolve_upload_rate_limit()
     api_rate_limit = _resolve_api_rate_limit()
-    sample_limit_per_minute = _resolve_max_batch_size()
+    max_batch_size = _resolve_max_batch_size()
+    sample_limit_per_minute = max_batch_size
+    # The bundle limit follows the batch setting: one full batch of results, one
+    # artifact per registered export type. The payload list ceiling caps it so the
+    # advertised limit can always be sent in a single valid request.
+    artifact_bundle_max_artifacts = min(
+        len(ARTIFACT_KINDS) * max_batch_size,
+        WEB_BACKEND_CONFIG.defaults.path_list_max_length,
+    )
 
     app.add_middleware(
         CORSMiddleware,
@@ -140,6 +146,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
         build_health_router(
             config=config,
             sample_limit_per_minute=sample_limit_per_minute,
+            artifact_bundle_max_artifacts=artifact_bundle_max_artifacts,
             build_readiness_payload=_build_readiness_payload,
             version=version,
         )
@@ -191,6 +198,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             allowed_roots=config.allowed_roots,
             is_path_within_allowed_roots=is_path_within_allowed_roots,
             is_allowed_artifact_path=_is_allowed_artifact_path,
+            artifact_bundle_max_artifacts=artifact_bundle_max_artifacts,
             limiter=limiter,
             api_rate_limit=api_rate_limit,
             get_session=get_session,
@@ -201,6 +209,7 @@ def create_app(startup_config: StartupConfig | None = None) -> FastAPI:
             uploads_dir=config.uploads_dir,
             results_dir=config.results_dir,
             allowed_roots=config.allowed_roots,
+            artifact_max_ids=artifact_bundle_max_artifacts,
             limiter=limiter,
             api_rate_limit=api_rate_limit,
             get_session=get_session,

@@ -377,6 +377,7 @@ export function useBatchManager({
           reportPdfPath: s.result ? s.result.report_pdf_path : null,
           reportJsonPath: s.result ? s.result.report_json_path : null,
           reportTsvPath: s.result ? s.result.report_tsv_path : null,
+          artifactIds: s.result ? s.result.artifact_ids : null,
         }))
       );
     }
@@ -471,6 +472,8 @@ export function useBatchManager({
         reportHtmlPath: null,
         reportPdfPath: null,
         reportJsonPath: null,
+        reportTsvPath: null,
+        artifactIds: null,
       }));
       setBatchSamples(initialSamples);
       setBatchSubmitted(true);
@@ -502,17 +505,15 @@ export function useBatchManager({
   };
 
   const downloadAllBatchArtifacts = async () => {
-    const artifactPaths = batchSamples.flatMap((sample) =>
-      [sample.reportHtmlPath, sample.reportPdfPath, sample.reportJsonPath, sample.reportTsvPath].filter(Boolean)
-    );
-    if (artifactPaths.length === 0) {
+    const artifactIds = batchSamples.flatMap((sample) => sample.artifactIds || []);
+    if (artifactIds.length === 0) {
       setBatchError('No completed batch artifacts are available for download.');
       return;
     }
     setBatchError(null);
     setIsBatchDownloadBusy(true);
     try {
-      await downloadArtifactBundle(artifactPaths, 'respro-batch-artifacts.zip');
+      await downloadArtifactBundle(artifactIds, 'respro-batch-artifacts.zip');
     } catch (error) {
       setBatchError(formatUserError(error.message));
     } finally {

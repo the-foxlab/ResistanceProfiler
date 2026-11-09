@@ -11,6 +11,7 @@ from rq.results import Result
 from rq.serializers import JSONSerializer
 from slowapi import Limiter
 
+from web.backend.artifact_kinds import ARTIFACT_MEDIA_TYPES, ARTIFACT_RESULT_FIELDS
 from web.backend.models import JobStatusResponse
 from web.backend.queue import get_queue
 from web.backend.services.session import (
@@ -119,16 +120,6 @@ def build_jobs_router(
     return router
 
 
-# Mapping of result dict keys that carry artifact paths to the artifact media
-# type used when recording them for ownership tracking.
-_ARTIFACT_PATH_FIELDS = {
-    'report_html_path': 'text/html',
-    'report_json_path': 'application/json',
-    'report_pdf_path': 'application/pdf',
-    'report_tsv_path': 'text/tab-separated-values',
-}
-
-
 def _redact_result_paths(job_id: str, session_hash: str, result: dict) -> dict:
     """Replace absolute artifact paths in a job result with opaque artifact IDs.
 
@@ -136,6 +127,9 @@ def _redact_result_paths(job_id: str, session_hash: str, result: dict) -> dict:
     session and the job record is updated with the resulting IDs. Subsequent
     fetches reuse the stored IDs. The absolute paths are never returned to the
     client.
+
+    ``artifact_ids`` is returned in registry order so clients can bundle every
+    artifact without enumerating the per-type fields themselves.
     """
     record = fetch_owned_record('job', job_id)
     if record is None:
@@ -145,14 +139,14 @@ def _redact_result_paths(job_id: str, session_hash: str, result: dict) -> dict:
         artifact_ids = [value for value in stored_ids.split(',') if value]
     else:
         artifact_ids = []
-        for field, media_type in _ARTIFACT_PATH_FIELDS.items():
+        for field in ARTIFACT_RESULT_FIELDS:
             path = result.get(field)
             if not path:
                 continue
             artifact_id = record_artifact(
                 session_hash=session_hash,
                 canonical_path=path,
-                media_type=media_type,
+                media_type=ARTIFACT_MEDIA_TYPES[field],
             )
             artifact_ids.append(artifact_id)
         # Persist the IDs on the job record so later polls don't re-record.
@@ -160,12 +154,10 @@ def _redact_result_paths(job_id: str, session_hash: str, result: dict) -> dict:
 
     redacted = dict(result)
     id_iter = iter(artifact_ids)
-    for field in _ARTIFACT_PATH_FIELDS:
-        if field in redacted and redacted[field]:
-            try:
-                redacted[field] = next(id_iter)
-            except StopIteration:  # pragma: no cover - defensive mismatch
-                break
+    for field in ARTIFACT_RESULT_FIELDS:
+        if redacted.get(field):
+            redacted[field] = next(id_iter, redacted[field])
+    redacted['artifact_ids'] = artifact_ids
     return redacted
 
 

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { useDashboardLogic, _resolveLegalLink, _resolveContactEmail } from './useDashboardLogic';
+import { getArtifactBundleLimit, setArtifactBundleLimit } from './api';
 
 // useDashboardLogic reads the URL via react-router; tests render the hook
 // inside a MemoryRouter so no browser history is needed.
@@ -1183,5 +1184,43 @@ describe('cliVersion', () => {
       expect(result.current.databases.length).toBe(0);
     });
     expect(result.current.cliVersion).toBeNull();
+  });
+});
+
+describe('artifact bundle limit', () => {
+  beforeEach(() => {
+    setupXhrStub();
+    vi.clearAllMocks();
+    global.fetch.mockReset();
+  });
+
+  afterEach(() => {
+    setArtifactBundleLimit(100);
+    vi.clearAllMocks();
+  });
+
+  it('applies the bundle limit reported by /api/ui/config', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { artifact_bundle_max_artifacts: 7 } }),
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false } }),
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { enabled: false, email: null } }),
+    });
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ data: { items: [] } }),
+    });
+
+    renderDashboardHook();
+
+    await waitFor(() => {
+      expect(getArtifactBundleLimit()).toBe(7);
+    });
   });
 });

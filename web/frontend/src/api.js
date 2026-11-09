@@ -201,7 +201,47 @@ export async function apiUpload(path, file, onProgress = null, onAbort = null) {
   });
 }
 
+// Upper bound for one bundle request. The backend advertises the authoritative
+// derived limit via /api/ui/config; this value is only the pre-config fallback.
+const DEFAULT_ARTIFACT_BUNDLE_LIMIT = 100;
+let artifactBundleLimit = DEFAULT_ARTIFACT_BUNDLE_LIMIT;
+
+export function setArtifactBundleLimit(limit) {
+  artifactBundleLimit = Number.isInteger(limit) && limit > 0 ? limit : DEFAULT_ARTIFACT_BUNDLE_LIMIT;
+}
+
+export function getArtifactBundleLimit() {
+  return artifactBundleLimit;
+}
+
+export function chunkIds(ids, limit = artifactBundleLimit) {
+  const size = Number.isInteger(limit) && limit > 0 ? limit : DEFAULT_ARTIFACT_BUNDLE_LIMIT;
+  const chunks = [];
+  for (let index = 0; index < ids.length; index += size) {
+    chunks.push(ids.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function withPartSuffix(downloadName, part, total) {
+  const dot = downloadName.lastIndexOf('.');
+  if (dot <= 0) {
+    return `${downloadName}-part${part}of${total}`;
+  }
+  return `${downloadName.slice(0, dot)}-part${part}of${total}${downloadName.slice(dot)}`;
+}
+
 export async function downloadArtifactBundle(artifactIds, downloadName) {
+  const chunks = chunkIds(artifactIds);
+  for (let index = 0; index < chunks.length; index += 1) {
+    const name = chunks.length === 1
+      ? downloadName
+      : withPartSuffix(downloadName, index + 1, chunks.length);
+    await downloadOneArtifactBundle(chunks[index], name);
+  }
+}
+
+async function downloadOneArtifactBundle(artifactIds, downloadName) {
   const response = await fetch(`${API_BASE}/api/artifact-bundle`, {
     method: 'POST',
     headers: buildHeaders({ 'Content-Type': 'application/json' }),

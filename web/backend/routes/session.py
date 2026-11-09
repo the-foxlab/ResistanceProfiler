@@ -6,7 +6,7 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from slowapi import Limiter
 
 from web.backend.models import SessionCleanupPayload, SessionCleanupResponse
@@ -24,6 +24,7 @@ def build_session_router(
     uploads_dir: Path,
     results_dir: Path,
     allowed_roots: tuple[Path, ...],
+    artifact_max_ids: int,
     limiter: Limiter,
     api_rate_limit: str,
     get_session: Callable[..., Session],
@@ -44,6 +45,14 @@ def build_session_router(
         payload: SessionCleanupPayload,
     ) -> SessionCleanupResponse:
         session = get_session(request)
+        if len(payload.artifact_ids) > artifact_max_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f'Too many artifact ids ({len(payload.artifact_ids)}). '
+                    f'At most {artifact_max_ids} can be cleaned up at once.'
+                ),
+            )
         deleted_count = 0
         for upload_id in payload.upload_ids:
             try:
