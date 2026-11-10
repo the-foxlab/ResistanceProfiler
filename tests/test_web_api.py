@@ -206,12 +206,25 @@ def web_sample_ref_fasta(startup_config: StartupConfig) -> Path:
 
 
 @pytest.fixture()
-def client(sync_queue: Queue, startup_config: StartupConfig):
-    """TestClient with queue override and startup config injected."""
+def client(sync_queue: Queue, startup_config: StartupConfig, monkeypatch: pytest.MonkeyPatch):
+    """TestClient with default batch size and injected queue and startup config."""
+    monkeypatch.delenv('RESPRO_WEB_MAX_BATCH_SIZE', raising=False)
     app = create_app(startup_config=startup_config)
     app.dependency_overrides[get_queue] = lambda: sync_queue
     app.dependency_overrides[get_batch_queue] = lambda: sync_queue
     return TestClient(app)
+
+
+def test_client_uses_default_batch_size_with_ambient_override(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default test client must not inherit a deployment's batch-size override."""
+    monkeypatch.setenv('RESPRO_WEB_MAX_BATCH_SIZE', '100')
+    test_client = request.getfixturevalue('client')
+
+    response = test_client.get('/api/ui/config')
+
+    assert response.json()['data']['batch_max_samples'] == WEB_BACKEND_CONFIG.defaults.max_batch_size
 
 
 class TestNoApiToken:
