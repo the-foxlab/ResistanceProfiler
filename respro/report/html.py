@@ -1958,39 +1958,67 @@ def _threshold_source_label(
 
 def _resolve_tier1_labels(
     project_conn: sqlite3.Connection | None,
-    profiled_features: set[str],
+    reference_ids: set[int],
 ) -> dict[str, str]:
     """Resolve each in-scope drug's tier-1 (rank-1) label from its own rules.
 
     A drug's tier-1 label is the most frequent verbatim ``resistance_rule``
-    phenotype at rank 1 (per :func:`label_to_rank`) among the drug's rules for
-    profiled features; ties break alphabetically via :func:`most_frequent_label`.
-    Drugs whose rules carry no rank-1 label get no entry — callers fall back to
-    the canonical rank-1 label.
+    phenotype at rank 1 (per :func:`label_to_rank`) among the drug's rules on
+    the profiled reference(s). Feature names are unique per reference only, so
+    the query scopes by ``feature.reference_id`` — a same-named feature on an
+    unprofiled reference must not outvote the profiled scope, while unprofiled
+    features *of the profiled reference* still count (the label reflects the
+    drug's curation for the organism being reported). Each rule contributes
+    its phenotype, or its clinical phenotype when the phenotype is empty or
+    ``'unknown'`` — the same precedence hit aggregation applies. Ties break
+    alphabetically via :func:`most_frequent_label`. Drugs whose rules carry no
+    rank-1 label get no entry — callers fall back to the canonical rank-1
+    label.
 
     :param project_conn: optional project DB connection
-    :param profiled_features: names of the profiled features (rule scope)
+    :param reference_ids: IDs of the profiled references (rule scope)
     :return: mapping of drug name to its tier-1 phenotype label
+    :raises sqlite3.Error: when the project DB cannot be queried — silently
+        degrading to the canonical label would disguise real database
+        problems (locked/corrupt DB, schema drift) as a legitimate
+        no-rank-1-label database
     """
-    if project_conn is None or not profiled_features:
+    if project_conn is None or not reference_ids:
         return {}
-    counts: dict[str, dict[str, int]] = {}
-    try:
-        placeholders = ','.join('?' * len(profiled_features))
-        rows = project_conn.execute(
-            f'SELECT d.name, r.phenotype, COUNT(*) AS n '
-            f'FROM drug d '
-            f'JOIN resistance_rule r ON r.drug_id = d.id '
-            f'JOIN feature f ON r.feature_id = f.id '
-            f'WHERE f.name IN ({placeholders}) '
-            f'GROUP BY d.name, r.phenotype',
-            tuple(profiled_features),
+    # A project DB always carries the core rule schema; connections with only
+    # the interpretation tables (partial/legacy callers) legitimately have no
+    # labels. Any other query failure is a real database problem and must
+    # surface instead of quietly producing canonical labels.
+    table_names = {
+        row[0] for row in project_conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
         ).fetchall()
-    except sqlite3.Error as exc:
-        logger.debug('Failed to load tier-1 phenotype labels from DB: %s', exc)
+    }
+    if not {'drug', 'resistance_rule', 'feature'}.issubset(table_names):
+        logger.debug(
+            'Project DB lacks the core rule schema; no tier-1 labels resolved.'
+        )
         return {}
-    for name, phenotype, n in rows:
-        label = (phenotype or '').strip().lower()
+    placeholders = ','.join('?' * len(reference_ids))
+    rows = project_conn.execute(
+        f'SELECT d.name, r.phenotype, r.clinical_phenotype, COUNT(*) AS n '
+        f'FROM drug d '
+        f'JOIN resistance_rule r ON r.drug_id = d.id '
+        f'JOIN feature f ON r.feature_id = f.id '
+        f'WHERE f.reference_id IN ({placeholders}) '
+        f'GROUP BY d.name, r.phenotype, r.clinical_phenotype',
+        tuple(reference_ids),
+    ).fetchall()
+    counts: dict[str, dict[str, int]] = {}
+    for name, phenotype, clinical_phenotype, n in rows:
+        # Phenotype wins over clinical phenotype unless empty or 'unknown' —
+        # mirroring the hit aggregation's label precedence.
+        label = ''
+        for value in (phenotype, clinical_phenotype):
+            candidate = (value or '').strip().lower()
+            if candidate and candidate != 'unknown':
+                label = candidate
+                break
         if label_to_rank(label) != 1:
             continue
         bucket = counts.setdefault((name or '').strip(), {})
@@ -2046,8 +2074,9 @@ def _build_drug_interpretation_table(
         Iterates over all configured severity labels (ordered weakest→strongest
         by rank) so multi-tier configs are described fully, not just
         resistant/intermediate. *tier1_label* is the database-resolved tier-1
-        label so the description names the tier exactly like the assessment
-        cells.
+        terminology — a single label, or ' or '-joined labels when in-scope
+        drugs use different rank-1 labels — so the description names the tier
+        exactly like the assessment cells.
         """
         # Order labels by severity rank (weakest first); skip sentinels.
         ranked = sorted(
@@ -2058,7 +2087,7 @@ def _build_drug_interpretation_table(
         if method == 'by_phenotype':
             parts = [
                 'Highest-rank phenotype label among the drug\u2019s hits wins.',
-                'Contradictory: wins over susceptible but loses to any higher-tier severity.',
+                f'Contradictory: wins over {tier1_label} but loses to any higher-tier severity.',
                 f'Otherwise: {tier1_label.title()}.',
             ]
         elif method == 'by_score':
@@ -2081,20 +2110,23 @@ def _build_drug_interpretation_table(
         return ' '.join(parts)
 
     hit_rows = database_hits.get('rows', [])
-    profiled_features = {m.feature.name for m in result.feature_matches}
+    # Feature names are unique per reference only, so scope the DB queries by
+    # feature/reference IDs: a same-named feature on another reference must
+    # not pull its drugs or its labels into this report's scope.
+    profiled_feature_ids = {m.feature.id for m in result.feature_matches}
+    profiled_reference_ids = {m.feature.reference_id for m in result.feature_matches}
     drug_class_map = load_drug_class_map(project_conn)
 
     # Pre-populate from project DB: all drugs with rules for profiled features
     by_drug: dict[str, dict] = {}
-    if project_conn is not None and profiled_features:
+    if project_conn is not None and profiled_feature_ids:
         try:
-            placeholders = ','.join('?' * len(profiled_features))
+            placeholders = ','.join('?' * len(profiled_feature_ids))
             for row in project_conn.execute(
                 f'SELECT DISTINCT d.name FROM drug d '
                 f'JOIN resistance_rule r ON r.drug_id = d.id '
-                f'JOIN feature f ON r.feature_id = f.id '
-                f'WHERE f.name IN ({placeholders})',
-                tuple(profiled_features),
+                f'WHERE r.feature_id IN ({placeholders})',
+                tuple(profiled_feature_ids),
             ).fetchall():
                 name = (row[0] or '').strip()
                 if name and name != '__formula_component__':
@@ -2123,9 +2155,10 @@ def _build_drug_interpretation_table(
         }
 
     # Attach each in-scope drug's tier-1 (rank-1) label, resolved from the
-    # drug's own rules; drugs without one keep the None default so the
-    # assessment falls back to the canonical rank-1 label.
-    tier1_by_drug = _resolve_tier1_labels(project_conn, profiled_features)
+    # drug's own rules on the profiled reference(s); drugs without one keep
+    # the None default so the assessment falls back to the canonical rank-1
+    # label.
+    tier1_by_drug = _resolve_tier1_labels(project_conn, profiled_reference_ids)
     for name, entry in by_drug.items():
         entry['tier1_label'] = tier1_by_drug.get(name)
 
@@ -2201,15 +2234,18 @@ def _build_drug_interpretation_table(
 
     has_assessment = len(drug_interp_configs) > 0
     has_final_assessment = len(drug_interp_configs) > 1
-    # Table-wide tier-1 representative for the description strings: the most
-    # frequent per-drug tier-1 label across in-scope drugs (alphabetical
-    # tie-break); the canonical rank-1 label when no drug carries one.
-    tier1_counts: dict[str, int] = {}
-    for entry in by_drug.values():
-        label = entry.get('tier1_label')
-        if label:
-            tier1_counts[label] = tier1_counts.get(label, 0) + 1
-    table_tier1_label = most_frequent_label(tier1_counts) or rank_to_label(1)
+    # Tier-1 terminology for the description strings: every distinct per-drug
+    # tier-1 label across in-scope drugs, sorted. A single majority label
+    # could disagree with the cells of the drugs it loses to, so the
+    # descriptions name the full fallback outcome space. Drugs without a
+    # database tier-1 label assess with the canonical rank-1 label, so it
+    # belongs in the outcome space whenever any drug falls back to it.
+    tier1_labels = {
+        entry['tier1_label'] for entry in by_drug.values() if entry.get('tier1_label')
+    }
+    if any(not entry.get('tier1_label') for entry in by_drug.values()):
+        tier1_labels.add(rank_to_label(1))
+    tier1_display = ' or '.join(sorted(tier1_labels))
     # True when any configured drug_interpretation method carries per-(reference, drug)
     # overrides; gates the per-cell hover so the no-override path renders unchanged.
     has_drug_thresholds = any(
@@ -2233,16 +2269,16 @@ def _build_drug_interpretation_table(
             method_labels.append({
                 'method': method,
                 'label': _METHOD_LABEL.get(method, method),
-                'description': _assessment_description(method, thresholds, table_tier1_label),
+                'description': _assessment_description(method, thresholds, tier1_display),
                 'value_header': value_header,
                 'value_field': value_field,
             })
         # Final assessment description — names the tier-1 tier with the same
-        # database-resolved label the assessment cells use.
+        # database-resolved terminology the assessment cells use.
         assessment_description = (
             'Final assessment: most severe result across all methods '
             '(resistant > \u2026 > potential low-level resistance > '
-            f'contradictory > {table_tier1_label}).'
+            f'contradictory > {tier1_display}).'
         )
 
         for drug_data in by_drug.values():
