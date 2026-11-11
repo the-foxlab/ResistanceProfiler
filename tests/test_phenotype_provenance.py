@@ -91,6 +91,41 @@ def _algorithm_conn(configs: list[dict]) -> sqlite3.Connection:
     return conn
 
 
+def _rules_conn(configs: list[dict], rules: list[tuple[str, str]]) -> sqlite3.Connection:
+    """In-memory project conn with in-scope drugs, rules, and interpretation configs.
+
+    *rules* holds ``(drug_name, phenotype)`` pairs; each drug gets one rule on
+    the profiled 'gag' feature, so the drug table can resolve in-scope drugs
+    and their tier-1 (rank-1) labels from the database.
+    """
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        'CREATE TABLE interpretation_algorithm '
+        '(id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)'
+    )
+    conn.execute('CREATE TABLE drug (id INTEGER PRIMARY KEY, name TEXT, alias TEXT)')
+    conn.execute('CREATE TABLE feature (id INTEGER PRIMARY KEY, name TEXT)')
+    conn.execute(
+        'CREATE TABLE resistance_rule '
+        '(id INTEGER PRIMARY KEY, drug_id INTEGER, feature_id INTEGER, phenotype TEXT)'
+    )
+    conn.execute("INSERT INTO feature (id, name) VALUES (1, 'gag')")
+    for drug_id, (drug_name, phenotype) in enumerate(rules, start=1):
+        conn.execute('INSERT INTO drug (id, name) VALUES (?, ?)', (drug_id, drug_name))
+        conn.execute(
+            'INSERT INTO resistance_rule (drug_id, feature_id, phenotype) VALUES (?, 1, ?)',
+            (drug_id, phenotype),
+        )
+    for config in configs:
+        conn.execute(
+            'INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES (?, ?)',
+            ('drug_interpretation', json.dumps(config)),
+        )
+    conn.commit()
+    return conn
+
+
 def _drug_data(rank_label_counts: dict[int, dict[str, int]],
                hit_count: int | None = None) -> dict:
     """Build the drug_data payload for compute_drug_assessment."""
@@ -177,10 +212,26 @@ class TestByPhenotypeVerbatimLabels:
         assert assessment == 'resistant'
 
     def test_hits_without_labels_default_to_canonical_susceptible(self) -> None:
-        """Hits carrying no rank-mappable label keep the canonical default."""
+        """Hits carrying no rank-mappable label keep the canonical default
+        when the drug carries no tier-1 label."""
         data = _drug_data({}, hit_count=1)
         assessment, _ = compute_drug_assessment(data, [{'method': 'by_phenotype'}])
         assert assessment == 'susceptible'
+
+    def test_hits_without_labels_use_tier1_label(self) -> None:
+        """Hits carrying no rank-mappable label fall back to the drug's
+        database tier-1 label."""
+        data = _drug_data({}, hit_count=1)
+        data['tier1_label'] = 'sensitive'
+        assessment, _ = compute_drug_assessment(data, [{'method': 'by_phenotype'}])
+        assert assessment == 'sensitive'
+
+    def test_zero_hits_use_tier1_label(self) -> None:
+        """A zero-hit drug assesses with the drug's tier-1 label, not a constant."""
+        data = _drug_data({}, hit_count=0)
+        data['tier1_label'] = 'sensitive'
+        assessment, _ = compute_drug_assessment(data, [{'method': 'by_phenotype'}])
+        assert assessment == 'sensitive'
 
     def test_deterministic_across_dict_insertion_order(self) -> None:
         """Label choice is independent of dict insertion order (PYTHONHASHSEED)."""
@@ -440,3 +491,126 @@ class TestNarrativeProvenanceLists:
         assert 'DrugA' in text
         from respro.db.phenotype_ranks import RANK_CONTRADICTORY, rank_to_colour
         assert rank_to_colour(RANK_CONTRADICTORY) in text
+
+
+# ─── F1: database-derived tier-1 fallback label ───────────────────────
+
+class TestTier1FallbackFromDatabase:
+    """Zero-hit drugs inherit each drug's own tier-1 (rank-1) label."""
+
+    def test_zero_hit_drug_assessed_with_database_tier1_label(self) -> None:
+        """A DB whose tier-1 rules say 'sensitive' assesses a zero-hit drug
+        'sensitive' under by_phenotype."""
+        result = _result_with_phenotypes([], feature_matches=_feature_matches(1))
+        conn = _rules_conn(
+            [{'name': 'drug_interpretation', 'method': 'by_phenotype'}],
+            [('DrugA', 'sensitive')],
+        )
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0,
+                                   project_conn=conn)
+        row = ctx['summary']['drug_table']['rows'][0]
+        assert row['name'] == 'DrugA'
+        assert row['hit_count'] == 0
+        assert row['tier1_label'] == 'sensitive'
+        assert row['assessment'] == 'sensitive'
+
+    def test_zero_hit_drug_numeric_method_uses_thresholds_rank1_label(self) -> None:
+        """by_ic50 resolves its rank-1 key from thresholds; the no-evidence
+        default uses it for a zero-hit drug instead of the hard-coded constant."""
+        result = _result_with_phenotypes([], feature_matches=_feature_matches(1))
+        conn = _rules_conn(
+            [{
+                'name': 'drug_interpretation', 'method': 'by_ic50',
+                'thresholds': {'sensitive': 0.0, 'intermediate': 3.0, 'resistant': 10.0},
+            }],
+            [('DrugA', 'sensitive')],
+        )
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0,
+                                   project_conn=conn)
+        row = ctx['summary']['drug_table']['rows'][0]
+        assert row['hit_count'] == 0
+        assert row['assessment'] == 'sensitive'
+
+    def test_bare_rank_import_keeps_canonical_susceptible(self) -> None:
+        """A DB imported via bare rank strings stores canonical 'susceptible';
+        zero-hit drugs stay 'susceptible' (the fix is a no-op there)."""
+        result = _result_with_phenotypes([], feature_matches=_feature_matches(1))
+        conn = _rules_conn(
+            [{'name': 'drug_interpretation', 'method': 'by_phenotype'}],
+            [('DrugA', 'susceptible')],
+        )
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0,
+                                   project_conn=conn)
+        row = ctx['summary']['drug_table']['rows'][0]
+        assert row['tier1_label'] == 'susceptible'
+        assert row['assessment'] == 'susceptible'
+
+
+# ─── F3: consistent summary description strings ───────────────────────
+
+class TestAssessmentDescriptionTier1Wording:
+    """Method and final-assessment descriptions name the tier-1 label the
+    database itself uses, matching the assessment cells."""
+
+    def test_by_phenotype_description_uses_database_tier1_label(self) -> None:
+        result = _result_with_phenotypes([], feature_matches=_feature_matches(1))
+        conn = _rules_conn(
+            [{'name': 'drug_interpretation', 'method': 'by_phenotype'}],
+            [('DrugA', 'sensitive')],
+        )
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0,
+                                   project_conn=conn)
+        description = ctx['summary']['drug_table']['method_labels'][0]['description']
+        assert description.endswith('Otherwise: Sensitive.')
+
+    def test_by_phenotype_description_canonical_db_byte_identical(self) -> None:
+        result = _result_with_phenotypes([], feature_matches=_feature_matches(1))
+        conn = _rules_conn(
+            [{'name': 'drug_interpretation', 'method': 'by_phenotype'}],
+            [('DrugA', 'susceptible')],
+        )
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0,
+                                   project_conn=conn)
+        description = ctx['summary']['drug_table']['method_labels'][0]['description']
+        assert description == (
+            'Highest-rank phenotype label among the drug\u2019s hits wins. '
+            'Contradictory: wins over susceptible but loses to any higher-tier severity. '
+            'Otherwise: Susceptible.'
+        )
+
+    def test_final_assessment_description_lists_database_tier1_label(self) -> None:
+        result = _result_with_phenotypes([], feature_matches=_feature_matches(1))
+        conn = _rules_conn(
+            [
+                {'name': 'drug_interpretation', 'method': 'by_phenotype'},
+                {'name': 'drug_interpretation', 'method': 'by_score',
+                 'thresholds': {'susceptible': 0, 'resistant': 10}},
+            ],
+            [('DrugA', 'sensitive')],
+        )
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0,
+                                   project_conn=conn)
+        assert ctx['summary']['drug_table']['has_final_assessment'] is True
+        assert ctx['summary']['drug_table']['assessment_description'] == (
+            'Final assessment: most severe result across all methods '
+            '(resistant > \u2026 > potential low-level resistance > '
+            'contradictory > sensitive).'
+        )
+
+    def test_final_assessment_description_canonical_db_byte_identical(self) -> None:
+        result = _result_with_phenotypes([], feature_matches=_feature_matches(1))
+        conn = _rules_conn(
+            [
+                {'name': 'drug_interpretation', 'method': 'by_phenotype'},
+                {'name': 'drug_interpretation', 'method': 'by_score',
+                 'thresholds': {'susceptible': 0, 'resistant': 10}},
+            ],
+            [('DrugA', 'susceptible')],
+        )
+        ctx = build_report_context(result, similarity_high=1, similarity_moderate=0,
+                                   project_conn=conn)
+        assert ctx['summary']['drug_table']['assessment_description'] == (
+            'Final assessment: most severe result across all methods '
+            '(resistant > \u2026 > potential low-level resistance > '
+            'contradictory > susceptible).'
+        )

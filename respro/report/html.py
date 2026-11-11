@@ -1956,6 +1956,52 @@ def _threshold_source_label(
     return 'global default'
 
 
+def _resolve_tier1_labels(
+    project_conn: sqlite3.Connection | None,
+    profiled_features: set[str],
+) -> dict[str, str]:
+    """Resolve each in-scope drug's tier-1 (rank-1) label from its own rules.
+
+    A drug's tier-1 label is the most frequent verbatim ``resistance_rule``
+    phenotype at rank 1 (per :func:`label_to_rank`) among the drug's rules for
+    profiled features; ties break alphabetically via :func:`most_frequent_label`.
+    Drugs whose rules carry no rank-1 label get no entry — callers fall back to
+    the canonical rank-1 label.
+
+    :param project_conn: optional project DB connection
+    :param profiled_features: names of the profiled features (rule scope)
+    :return: mapping of drug name to its tier-1 phenotype label
+    """
+    if project_conn is None or not profiled_features:
+        return {}
+    counts: dict[str, dict[str, int]] = {}
+    try:
+        placeholders = ','.join('?' * len(profiled_features))
+        rows = project_conn.execute(
+            f'SELECT d.name, r.phenotype, COUNT(*) AS n '
+            f'FROM drug d '
+            f'JOIN resistance_rule r ON r.drug_id = d.id '
+            f'JOIN feature f ON r.feature_id = f.id '
+            f'WHERE f.name IN ({placeholders}) '
+            f'GROUP BY d.name, r.phenotype',
+            tuple(profiled_features),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        logger.debug('Failed to load tier-1 phenotype labels from DB: %s', exc)
+        return {}
+    for name, phenotype, n in rows:
+        label = (phenotype or '').strip().lower()
+        if label_to_rank(label) != 1:
+            continue
+        bucket = counts.setdefault((name or '').strip(), {})
+        bucket[label] = bucket.get(label, 0) + int(n)
+    return {
+        name: label
+        for name, bucket in counts.items()
+        if (label := most_frequent_label(bucket)) is not None
+    }
+
+
 def _build_drug_interpretation_table(
     result: ProfilingResult,
     database_hits: dict,
@@ -1990,15 +2036,18 @@ def _build_drug_interpretation_table(
             'ic50_values': [], 'fold_ic50_values': [],
             'assessment': '', 'assessment_badge_class': '',
             'method_assessments': [],
+            'tier1_label': None,
             'reference_names': set(),
         }
 
-    def _assessment_description(method: str, thresholds: dict) -> str:
+    def _assessment_description(method: str, thresholds: dict, tier1_label: str) -> str:
         """Build a human-readable description of one method's threshold logic.
 
         Iterates over all configured severity labels (ordered weakest→strongest
         by rank) so multi-tier configs are described fully, not just
-        resistant/intermediate.
+        resistant/intermediate. *tier1_label* is the database-resolved tier-1
+        label so the description names the tier exactly like the assessment
+        cells.
         """
         # Order labels by severity rank (weakest first); skip sentinels.
         ranked = sorted(
@@ -2010,7 +2059,7 @@ def _build_drug_interpretation_table(
             parts = [
                 'Highest-rank phenotype label among the drug\u2019s hits wins.',
                 'Contradictory: wins over susceptible but loses to any higher-tier severity.',
-                'Otherwise: Susceptible.',
+                f'Otherwise: {tier1_label.title()}.',
             ]
         elif method == 'by_score':
             parts = [
@@ -2072,6 +2121,13 @@ def _build_drug_interpretation_table(
             'has_phenotypes': False, 'has_scores': False, 'has_assessment': False,
             'assessment_description': '', 'col_count': 2,
         }
+
+    # Attach each in-scope drug's tier-1 (rank-1) label, resolved from the
+    # drug's own rules; drugs without one keep the None default so the
+    # assessment falls back to the canonical rank-1 label.
+    tier1_by_drug = _resolve_tier1_labels(project_conn, profiled_features)
+    for name, entry in by_drug.items():
+        entry['tier1_label'] = tier1_by_drug.get(name)
 
     # Accumulate counts and score sums from hit rows
     for row in hit_rows:
@@ -2145,6 +2201,15 @@ def _build_drug_interpretation_table(
 
     has_assessment = len(drug_interp_configs) > 0
     has_final_assessment = len(drug_interp_configs) > 1
+    # Table-wide tier-1 representative for the description strings: the most
+    # frequent per-drug tier-1 label across in-scope drugs (alphabetical
+    # tie-break); the canonical rank-1 label when no drug carries one.
+    tier1_counts: dict[str, int] = {}
+    for entry in by_drug.values():
+        label = entry.get('tier1_label')
+        if label:
+            tier1_counts[label] = tier1_counts.get(label, 0) + 1
+    table_tier1_label = most_frequent_label(tier1_counts) or rank_to_label(1)
     # True when any configured drug_interpretation method carries per-(reference, drug)
     # overrides; gates the per-cell hover so the no-override path renders unchanged.
     has_drug_thresholds = any(
@@ -2168,15 +2233,16 @@ def _build_drug_interpretation_table(
             method_labels.append({
                 'method': method,
                 'label': _METHOD_LABEL.get(method, method),
-                'description': _assessment_description(method, thresholds),
+                'description': _assessment_description(method, thresholds, table_tier1_label),
                 'value_header': value_header,
                 'value_field': value_field,
             })
-        # Final assessment description
+        # Final assessment description — names the tier-1 tier with the same
+        # database-resolved label the assessment cells use.
         assessment_description = (
             'Final assessment: most severe result across all methods '
             '(resistant > \u2026 > potential low-level resistance > '
-            'contradictory > susceptible).'
+            f'contradictory > {table_tier1_label}).'
         )
 
         for drug_data in by_drug.values():

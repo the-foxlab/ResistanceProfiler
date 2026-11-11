@@ -27,7 +27,11 @@ def _strip_ansi(text: str) -> str:
 
 
 def _add_zero_hit_drug(project_db: Path) -> None:
-    """Add OtherDrug with a rule the sample never hits, plus by_phenotype assessment."""
+    """Add OtherDrug with rules the sample never hits, plus by_phenotype assessment.
+
+    OtherDrug's rank-1 (tier-1) rule says 'sensitive', so its zero-hit
+    assessment must use the database-derived tier-1 label.
+    """
     conn = sqlite3.connect(project_db)
     conn.row_factory = sqlite3.Row
     conn.execute("INSERT INTO drug (project_id, name) VALUES (?, ?)", (1, 'OtherDrug'))
@@ -40,6 +44,11 @@ def _add_zero_hit_drug(project_db: Path) -> None:
         (1, other_drug_id, 10, 'A', 'V', 'resistant'),
     )
     conn.execute(
+        'INSERT INTO resistance_rule (feature_id, drug_id, position, reference, mutation, phenotype) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (1, other_drug_id, 20, 'A', 'V', 'sensitive'),
+    )
+    conn.execute(
         'INSERT INTO interpretation_algorithm (project_id, algorithm_name, config_json) '
         'VALUES (?, ?, ?)',
         (1, 'drug_interpretation', json.dumps({'name': 'drug_interpretation', 'method': 'by_phenotype'})),
@@ -50,7 +59,8 @@ def _add_zero_hit_drug(project_db: Path) -> None:
 
 def _profile_fasta(project_db: Path, tmp_path: Path) -> tuple[Path, Path]:
     # One-SNP consensus: produces a TestDrug hit at codon 1 so OtherDrug
-    # (rule at codon 10, never hit) is assessed as susceptible.
+    # (rules at codons 10 and 20, never hit) is assessed with its database
+    # tier-1 label ('sensitive').
     query_seq = list(TINY_REF_SEQ)
     query_seq[4] = 'G' if query_seq[4] != 'G' else 'C'
     query_fasta = tmp_path / 'query.fasta'
@@ -92,7 +102,7 @@ class TestSyncWithoutQueryCache:
         assert result.exit_code == 0, _strip_ansi(result.output)
         assert 'synced' in result.output.lower()
 
-    def test_sync_preserves_zero_hit_susceptible_drugs(
+    def test_sync_preserves_zero_hit_drugs_with_database_label(
         self, project_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _add_zero_hit_drug(project_db)
@@ -111,4 +121,4 @@ class TestSyncWithoutQueryCache:
         html = html_files[0].read_text()
         assert 'TestDrug' in html
         assert 'OtherDrug' in html
-        assert 'Drugs assessed as susceptible' in html
+        assert 'Drugs assessed as sensitive' in html

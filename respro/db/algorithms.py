@@ -693,7 +693,9 @@ def compute_drug_assessment(
     :param drug_data: dict with keys ``rank_counts`` (dict[int, int]),
         ``rank_label_counts`` (dict[int, dict[str, int]], optional — verbatim
         phenotype labels per rank for provenance-preserving assessments),
-        ``score_total``, ``ic50_values``, ``fold_ic50_values``, ``hit_count``
+        ``tier1_label`` (str, optional — the drug's own tier-1 (rank-1) label
+        resolved from the database), ``score_total``, ``ic50_values``,
+        ``fold_ic50_values``, ``hit_count"
     :param configs: list of validated ``drug_interpretation`` config dicts
     :param reference_name: observed reference name for the drug; when provided together
         with ``drug_name``, per-``(reference, drug)`` overrides take precedence over
@@ -704,7 +706,9 @@ def compute_drug_assessment(
         ``final_assessment`` is the strongest-wins result and
         ``method_assessments`` is a list of
         ``{'method': ..., 'label': ..., 'assessment': ...}`` dicts (one per
-        configured method; methods with no evidence default to \"susceptible\")
+        configured method; methods with no evidence default to the tier-1
+        label: the resolved thresholds' rank-1 key, else the drug's database
+        tier-1 label, else the canonical rank-1 label)
     """
     method_assessments: list[dict] = []
 
@@ -726,11 +730,16 @@ def compute_drug_assessment(
         assessment = _compute_single_method(
             method, drug_data, resolved_thresholds,
         )
-        # Default to the canonical rank-1 label ("susceptible") when the method
-        # has no evidence of resistance. Both 'susceptible' and 'sensitive' are
-        # rank 1 in the vocabulary; 'susceptible' is the canonical fallback.
+        # No evidence of resistance: fall back through the tier-1 precedence
+        # chain — the resolved thresholds' rank-1 key (numeric methods), the
+        # drug's own tier-1 label resolved from the database, then the
+        # canonical rank-1 label.
         if not assessment:
-            assessment = 'susceptible'
+            assessment = (
+                _thresholds_rank1_label(resolved_thresholds)
+                or drug_data.get('tier1_label')
+                or rank_to_label(1)
+            )
         method_assessments.append({
             'method': method,
             'label': _METHOD_LABEL.get(method, method),
@@ -774,8 +783,9 @@ def _assess_by_phenotype(drug_data: dict, thresholds: dict) -> str:
     labels the canonical fallback label for the rank is used. Contradictory
     (any count > 0) wins over susceptible (rank 1) but loses to any higher-tier
     severity hit (ranks 2-5). Hits with no severity/contradictory label yield
-    ``'susceptible'`` (or the verbatim rank-1 label when one exists). No hits
-    yield ``''`` (the caller defaults to ``'susceptible'``).
+    the drug's tier-1 label (``tier1_label``) or the canonical rank-1 label
+    when the database carries none. No hits yield ``''`` (the caller applies
+    the tier-1 precedence chain).
 
     *thresholds* is accepted for signature parity with the other assess helpers
     but is ignored.
@@ -801,8 +811,21 @@ def _assess_by_phenotype(drug_data: dict, thresholds: dict) -> str:
     if rank_counts.get(1, 0) > 0:
         return _label_for(1)
     if drug_data['hit_count'] > 0:
-        return 'susceptible'
+        return drug_data.get('tier1_label') or rank_to_label(1)
     return ''
+
+
+def _thresholds_rank1_label(thresholds: dict) -> str | None:
+    """Return the first rank-1 label configured in *thresholds*, or ``None``.
+
+    Mirrors the rank-1 selection in ``_assess_by_score`` and
+    ``_assess_numeric``: the first label (in config order) that resolves to
+    rank 1 in the vocabulary wins.
+    """
+    for label in thresholds:
+        if label_to_rank(label) == 1:
+            return str(label)
+    return None
 
 
 def _severity_breakpoints(thresholds: dict) -> list[tuple[int, float, str]]:
@@ -833,19 +856,19 @@ def _assess_by_score(drug_data: dict, thresholds: dict) -> str:
     rank-1 label is the lower-bound fallback ceiling and is **skipped** during
     matching (consistent with ``_assess_numeric``) — its threshold value has no
     effect; only its label is returned when no rank > 1 breakpoint is met. When
-    no rank-1 label is configured, the caller defaults to ``'susceptible'``.
-    """
+    no rank-1 label is configured, hits without a met breakpoint fall back to
+    the drug's tier-1 label (canonical ``'susceptible'`` when absent)."""
     total = drug_data['score_total']
     for rank, threshold, label in reversed(_severity_breakpoints(thresholds)):
         if rank == 1:
             continue
         if total >= threshold:
             return label
-    rank1_labels = [label for label in thresholds if label_to_rank(label) == 1]
-    if rank1_labels:
-        return str(rank1_labels[0])
+    rank1_label = _thresholds_rank1_label(thresholds)
+    if rank1_label:
+        return rank1_label
     if drug_data['hit_count'] > 0:
-        return 'susceptible'
+        return drug_data.get('tier1_label') or rank_to_label(1)
     return ''
 
 
@@ -853,32 +876,38 @@ def _assess_by_ic50(drug_data: dict, thresholds: dict) -> str:
     ic50_values = drug_data['ic50_values']
     if not ic50_values:
         return ''
-    return _assess_numeric(ic50_values, thresholds)
+    return _assess_numeric(ic50_values, thresholds, drug_data.get('tier1_label'))
 
 
 def _assess_by_fold_ic50(drug_data: dict, thresholds: dict) -> str:
     fold_ic50_values = drug_data['fold_ic50_values']
     if not fold_ic50_values:
         return ''
-    return _assess_numeric(fold_ic50_values, thresholds)
+    return _assess_numeric(
+        fold_ic50_values, thresholds, drug_data.get('tier1_label'),
+    )
 
 
-def _assess_numeric(values: list[float], thresholds: dict) -> str:
+def _assess_numeric(
+    values: list[float],
+    thresholds: dict,
+    tier1_label: str | None = None,
+) -> str:
     """Assess numeric values against label-keyed breakpoints; return strongest matched label.
 
     Iterates severity breakpoints strongest-first (by ``(rank, threshold)``,
     not label string) and returns the first rank > 1 label whose threshold any
     value meets. When no severity-rank > 1 breakpoint is met, the configured
     rank-1 label is returned (e.g. ``susceptible``). If no rank-1 label is
-    configured (unvalidated legacy config), fall back to the canonical rank-1
-    label ``'susceptible'``.
+    configured (unvalidated legacy config), fall back to the drug's tier-1
+    label, then the canonical rank-1 label ``'susceptible'``.
     """
     for rank, threshold, label in reversed(_severity_breakpoints(thresholds)):
         if rank == 1:
             continue
         if any(value >= threshold for value in values):
             return label
-    rank1_labels = [label for label in thresholds if label_to_rank(label) == 1]
-    if rank1_labels:
-        return str(rank1_labels[0])
-    return 'susceptible'
+    rank1_label = _thresholds_rank1_label(thresholds)
+    if rank1_label:
+        return rank1_label
+    return tier1_label or rank_to_label(1)

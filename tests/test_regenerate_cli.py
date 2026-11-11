@@ -518,15 +518,15 @@ class TestRegenerate:
         pdf_files = list(out_dir.glob('*.report.pdf'))
         assert len(pdf_files) == 1
 
-    def test_regenerate_preserves_susceptible_zero_hit_drugs(
+    def test_regenerate_preserves_zero_hit_drugs_with_database_label(
         self,
         project_db: Path,
         sample_vcf: Path,
         sample_ref_fasta: Path,
         tmp_path: Path,
     ) -> None:
-        """A zero-hit (susceptible) drug must survive regenerate from both
-        the results DB and the JSON export.
+        """A zero-hit drug with a database tier-1 label must survive regenerate
+        from both the results DB and the JSON export, assessed with that label.
 
         Regression: ``regenerate`` previously rebuilt the profiling result with
         ``feature_matches=[]``, which starved the drug-interpretation table's
@@ -537,21 +537,28 @@ class TestRegenerate:
         JSON export, and ``regenerate`` synthesises ``FeatureMatch`` shells
         from them so the in-scope drug set is restored.
         """
-        # Extend the project DB: add a second drug with a rule for the same
-        # feature (gag) at a codon position the sample VCF does not hit, so the
-        # drug has zero hits and should be assessed as susceptible. Also add a
-        # by_phenotype drug_interpretation config so assessments are computed.
+        # Extend the project DB: add a second drug with rules for the same
+        # feature (gag) at codon positions the sample VCF does not hit, so the
+        # drug has zero hits. Its rank-1 (tier-1) rule says 'sensitive', so the
+        # zero-hit drug must be assessed 'sensitive' — the database-derived
+        # tier-1 label, not a hard-coded constant. Also add a by_phenotype
+        # drug_interpretation config so assessments are computed.
         conn = sqlite3.connect(project_db)
         conn.row_factory = sqlite3.Row
         conn.execute("INSERT INTO drug (project_id, name) VALUES (?, ?)", (1, 'OtherDrug'))
         other_drug_id = conn.execute(
             "SELECT id FROM drug WHERE name = 'OtherDrug'"
         ).fetchone()['id']
-        # Position 10 (0-based AA) — well beyond the single hit at codon 1.
+        # Positions 10 and 20 (0-based AA) — well beyond the single hit at codon 1.
         conn.execute(
             'INSERT INTO resistance_rule (feature_id, drug_id, position, reference, mutation, phenotype) '
             'VALUES (?, ?, ?, ?, ?, ?)',
             (1, other_drug_id, 10, 'A', 'V', 'resistant'),
+        )
+        conn.execute(
+            'INSERT INTO resistance_rule (feature_id, drug_id, position, reference, mutation, phenotype) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            (1, other_drug_id, 20, 'A', 'V', 'sensitive'),
         )
         conn.execute(
             'INSERT INTO interpretation_algorithm (project_id, algorithm_name, config_json) VALUES (?, ?, ?)',
@@ -577,11 +584,12 @@ class TestRegenerate:
         assert profile_result.exit_code == 0, profile_result.output
 
         # The live report must include both drugs; the zero-hit drug is
-        # assessed susceptible and surfaces in the narrative list section.
+        # assessed with its database tier-1 label and surfaces in the
+        # narrative list section.
         live_html = list(profile_out.glob('*.html'))[0].read_text()
         assert 'TestDrug' in live_html
         assert 'OtherDrug' in live_html
-        assert 'Drugs assessed as susceptible:' in live_html
+        assert 'Drugs assessed as sensitive:' in live_html
 
         # Regenerate from the results DB.
         regen_db_dir = tmp_path / 'regen_db'
@@ -596,7 +604,7 @@ class TestRegenerate:
         regen_db_html = list(regen_db_dir.glob('*.html'))[0].read_text()
         assert 'TestDrug' in regen_db_html
         assert 'OtherDrug' in regen_db_html
-        assert 'Drugs assessed as susceptible:' in regen_db_html
+        assert 'Drugs assessed as sensitive:' in regen_db_html
 
         # Regenerate from the JSON export.
         json_files = list(profile_out.glob('*.results.json'))
@@ -612,7 +620,7 @@ class TestRegenerate:
         regen_json_html = list(regen_json_dir.glob('*.html'))[0].read_text()
         assert 'TestDrug' in regen_json_html
         assert 'OtherDrug' in regen_json_html
-        assert 'Drugs assessed as susceptible:' in regen_json_html
+        assert 'Drugs assessed as sensitive:' in regen_json_html
 
 
     def test_regenerate_preserves_frechet_formula_frequency_and_bin(
