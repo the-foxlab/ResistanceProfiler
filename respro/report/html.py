@@ -1959,8 +1959,8 @@ def _threshold_source_label(
 def _resolve_tier1_labels(
     project_conn: sqlite3.Connection | None,
     reference_ids: set[int],
-) -> dict[str, str]:
-    """Resolve each in-scope drug's tier-1 (rank-1) label from its own rules.
+) -> tuple[dict[str, str], str | None]:
+    """Resolve tier-1 (rank-1) terminology from the profiled reference scope.
 
     A drug's tier-1 label is the most frequent verbatim ``resistance_rule``
     phenotype at rank 1 (per :func:`label_to_rank`) among the drug's rules on
@@ -1971,20 +1971,24 @@ def _resolve_tier1_labels(
     drug's curation for the organism being reported). Each rule contributes
     its phenotype, or its clinical phenotype when the phenotype is empty or
     ``'unknown'`` — the same precedence hit aggregation applies. Ties break
-    alphabetically via :func:`most_frequent_label`. Drugs whose rules carry no
-    rank-1 label get no entry — callers fall back to the canonical rank-1
-    label.
+    alphabetically via :func:`most_frequent_label`.
+
+    The second return value is the scope-wide fallback label: the most
+    frequent rank-1 label across the scope. Drugs with no rank-1 rule of their
+    own inherit it so one report does not mix tier-1 terminology; only a scope
+    with no rank-1 label at all leaves this ``None``, and the caller then uses
+    the canonical rank-1 label.
 
     :param project_conn: optional project DB connection
     :param reference_ids: IDs of the profiled references (rule scope)
-    :return: mapping of drug name to its tier-1 phenotype label
+    :return: ``(per-drug labels, scope-wide fallback label or None)``
     :raises sqlite3.Error: when the project DB cannot be queried — silently
         degrading to the canonical label would disguise real database
         problems (locked/corrupt DB, schema drift) as a legitimate
         no-rank-1-label database
     """
     if project_conn is None or not reference_ids:
-        return {}
+        return {}, None
     # A project DB always carries the core rule schema; connections with only
     # the interpretation tables (partial/legacy callers) legitimately have no
     # labels. Any other query failure is a real database problem and must
@@ -1998,7 +2002,7 @@ def _resolve_tier1_labels(
         logger.debug(
             'Project DB lacks the core rule schema; no tier-1 labels resolved.'
         )
-        return {}
+        return {}, None
     placeholders = ','.join('?' * len(reference_ids))
     rows = project_conn.execute(
         f'SELECT d.name, r.phenotype, r.clinical_phenotype, COUNT(*) AS n '
@@ -2010,6 +2014,7 @@ def _resolve_tier1_labels(
         tuple(reference_ids),
     ).fetchall()
     counts: dict[str, dict[str, int]] = {}
+    scope_totals: dict[str, int] = {}
     for name, phenotype, clinical_phenotype, n in rows:
         # Phenotype wins over clinical phenotype unless empty or 'unknown' —
         # mirroring the hit aggregation's label precedence.
@@ -2023,11 +2028,51 @@ def _resolve_tier1_labels(
             continue
         bucket = counts.setdefault((name or '').strip(), {})
         bucket[label] = bucket.get(label, 0) + int(n)
-    return {
-        name: label
-        for name, bucket in counts.items()
-        if (label := most_frequent_label(bucket)) is not None
-    }
+        scope_totals[label] = scope_totals.get(label, 0) + int(n)
+    return (
+        {
+            name: label
+            for name, bucket in counts.items()
+            if (label := most_frequent_label(bucket)) is not None
+        },
+        most_frequent_label(scope_totals),
+    )
+
+
+def _config_rank1_labels(
+    config: dict,
+    drug_reference_names: dict[str, set[str | None]],
+) -> set[str]:
+    """Collect every rank-1 label this numeric method's config can resolve to.
+
+    A numeric method's no-evidence assessment carries the rank-1 key of its
+    *resolved* thresholds, so the description outcome space must name exactly
+    those labels. Resolution mirrors the assessment itself: for every in-scope
+    drug and each of its applicable references,
+    :func:`resolve_thresholds_dict` picks the applicable thresholds
+    (``(reference, drug)`` override > ``(drug)`` override > nested per-drug
+    global entry > flat global thresholds), and only the rank-1 keys of the
+    *resolved* dict count — a superseded global label must not be named.
+    *drug_reference_names* maps each in-scope drug name (as stored) to its
+    applicable reference names; ``None`` means no reference is available (the
+    same fallback the assessment loop applies). ``by_phenotype`` is hardcoded
+    (no thresholds) and contributes nothing; its per-drug tier-1 and canonical
+    fallback labels are collected separately by the caller.
+
+    :param config: drug_interpretation config dict
+    :param drug_reference_names: in-scope drug name → applicable reference names
+    :return: set of rank-1 labels the method can resolve to
+    """
+    labels: set[str] = set()
+    if config.get('method') == 'by_phenotype':
+        return labels
+    for drug_name, ref_names in drug_reference_names.items():
+        for ref in sorted(ref_names, key=lambda r: (r is None, r or '')):
+            resolved = resolve_thresholds_dict(config, ref, drug_name)
+            labels.update(
+                str(label) for label in resolved if label_to_rank(label) == 1
+            )
+    return labels
 
 
 def _build_drug_interpretation_table(
@@ -2155,12 +2200,15 @@ def _build_drug_interpretation_table(
         }
 
     # Attach each in-scope drug's tier-1 (rank-1) label, resolved from the
-    # drug's own rules on the profiled reference(s); drugs without one keep
-    # the None default so the assessment falls back to the canonical rank-1
-    # label.
-    tier1_by_drug = _resolve_tier1_labels(project_conn, profiled_reference_ids)
+    # drug's own rules on the profiled reference(s); a drug with no rank-1 rule
+    # of its own inherits the scope's most frequent rank-1 label so the report
+    # does not mix tier-1 terminology. None (no rank-1 label anywhere) leaves
+    # the canonical rank-1 label as the assessment fallback.
+    tier1_by_drug, scope_tier1_label = _resolve_tier1_labels(
+        project_conn, profiled_reference_ids,
+    )
     for name, entry in by_drug.items():
-        entry['tier1_label'] = tier1_by_drug.get(name)
+        entry['tier1_label'] = tier1_by_drug.get(name) or scope_tier1_label
 
     # Accumulate counts and score sums from hit rows
     for row in hit_rows:
@@ -2234,18 +2282,44 @@ def _build_drug_interpretation_table(
 
     has_assessment = len(drug_interp_configs) > 0
     has_final_assessment = len(drug_interp_configs) > 1
-    # Tier-1 terminology for the description strings: every distinct per-drug
-    # tier-1 label across in-scope drugs, sorted. A single majority label
-    # could disagree with the cells of the drugs it loses to, so the
-    # descriptions name the full fallback outcome space. Drugs without a
-    # database tier-1 label assess with the canonical rank-1 label, so it
-    # belongs in the outcome space whenever any drug falls back to it.
+    # Tier-1 terminology for the description strings, as two outcome spaces:
+    #   - phenotype: every distinct per-drug tier-1 label across in-scope drugs
+    #     (a single majority label could disagree with the cells of the drugs
+    #     it loses to), plus the canonical rank-1 label when any drug lacks one
+    #     (the database carries no rank-1 label at all) — the outcomes
+    #     by_phenotype can produce;
+    #   - numeric, per method: the rank-1 keys of the thresholds each in-scope
+    #     drug actually resolves to. Resolution mirrors the assessment, so an
+    #     override replaces the global thresholds and a superseded global label
+    #     is not named.
+    # The by_phenotype description names only the phenotype space; the final
+    # description names the union across all methods.
     tier1_labels = {
         entry['tier1_label'] for entry in by_drug.values() if entry.get('tier1_label')
     }
     if any(not entry.get('tier1_label') for entry in by_drug.values()):
         tier1_labels.add(rank_to_label(1))
-    tier1_display = ' or '.join(sorted(tier1_labels))
+    # Each drug's applicable reference names for threshold resolution: the
+    # references its hits were observed under, or the profiled reference for
+    # zero-hit drugs — the same fallback the assessment loop applies (None
+    # when no reference name is available).
+    drug_reference_names = {
+        name: (
+            entry['reference_names']
+            or ({result.reference_name} if result.reference_name else {None})
+        )
+        for name, entry in by_drug.items()
+    }
+    numeric_tier1_labels: list[tuple[str, set[str]]] = [
+        (config.get('method', ''), _config_rank1_labels(config, drug_reference_names))
+        for config in drug_interp_configs
+        if config.get('method') != 'by_phenotype'
+    ]
+    phenotype_tier1_display = ' or '.join(sorted(tier1_labels))
+    tier1_display = ' or '.join(sorted(
+        tier1_labels
+        | {label for _method, labels in numeric_tier1_labels for label in labels}
+    ))
     # True when any configured drug_interpretation method carries per-(reference, drug)
     # overrides; gates the per-cell hover so the no-override path renders unchanged.
     has_drug_thresholds = any(
@@ -2266,10 +2340,24 @@ def _build_drug_interpretation_table(
                 value_header = 'Highest Fold IC50'
                 value_field = 'fold_ic50_display'
 
+            if method == 'by_phenotype':
+                # by_phenotype can only produce the database tier-1 labels (and
+                # the canonical fallback) — never numeric threshold keys.
+                method_tier1_display = phenotype_tier1_display
+            else:
+                method_labels_set = next(
+                    (labels for m, labels in numeric_tier1_labels if m == method),
+                    set(),
+                )
+                method_tier1_display = (
+                    ' or '.join(sorted(method_labels_set)) or phenotype_tier1_display
+                )
             method_labels.append({
                 'method': method,
                 'label': _METHOD_LABEL.get(method, method),
-                'description': _assessment_description(method, thresholds, tier1_display),
+                'description': _assessment_description(
+                    method, thresholds, method_tier1_display,
+                ),
                 'value_header': value_header,
                 'value_field': value_field,
             })
