@@ -34,6 +34,7 @@ from respro.report._row_helpers import (
     nt_change_stored,
     nt_change_user,
     select_effect_as_resistant_rules,
+    variant_source_label,
 )
 from respro.report.html import (
     build_report_context,
@@ -224,6 +225,7 @@ def write_json(
             'rule_effect_aa_freq': json.dumps(ann.rule_effect_aa_freq),
             'rule_effect_alt': json.dumps(ann.rule_effect_alt),
             'freq_method': ann.freq_method,
+            'variant_source': v.source,
             'combined_states': json.dumps([
                 {
                     'alt_codon': s.alt_codon,
@@ -315,7 +317,7 @@ def write_json(
 # (annotated variant × matched rule); non-hit variants also appear with empty
 # rule columns. See write_tsv for the row-emission rules.
 TSV_COLUMNS: tuple[str, ...] = (
-    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
+    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand', 'variant_source',
     'aa_frequency', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
@@ -334,7 +336,9 @@ _TSV_PLACEHOLDER = 'n/a'
 # so they are omitted entirely — mirroring the HTML's
 # ``has_user_ref_column`` (= ``not is_fasta_mode``) and the multi-species
 # Reference column gate.
-_TSV_VCF_ONLY_COLUMNS: frozenset[str] = frozenset({'reference', 'nt_mut_user', 'depth'})
+_TSV_VCF_ONLY_COLUMNS: frozenset[str] = frozenset(
+    {'reference', 'nt_mut_user', 'depth', 'variant_source'}
+)
 
 # Rule-derived columns that are only emitted when at least one row carries a
 # real value for them, mirroring the HTML Database Hits table's has_*_metrics
@@ -474,6 +478,7 @@ def _effect_as_resistant_tsv_rows(
             'nt_mut': nt_change_stored(ann),
             'nt_mut_user': nt_change_user(ann),
             'strand': strand_by_feature.get(ann.feature_name, ''),
+            'variant_source': variant_source_label(ann),
             'aa_frequency': repr(round(ann.variant.allele_freq, 3)),
             'depth': str(ann.variant.depth),
             'consequence': display_consequence(ann),
@@ -543,6 +548,7 @@ def write_tsv(
             'nt_mut': nt_change_stored(ann),
             'nt_mut_user': nt_change_user(ann),
             'strand': strand_by_feature.get(ann.feature_name, ''),
+            'variant_source': variant_source_label(ann),
             'aa_frequency': repr(round(ann.variant.allele_freq, 3)),
             'depth': str(ann.variant.depth),
             'consequence': display_consequence(ann),

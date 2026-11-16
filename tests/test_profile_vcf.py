@@ -4,7 +4,6 @@ Canonical VCF remap/annotation orientation tests (E1-E7).
 
 from __future__ import annotations
 
-import logging
 import re
 from pathlib import Path
 
@@ -13,7 +12,7 @@ from Bio import SeqIO
 from conftest import TINY_REF_NAME, TINY_REF_SEQ
 
 from respro.core.annotation import annotate_variants, reverse_complement
-from respro.core.vcf_remap import _transform_allele, remap_variants
+from respro.core.vcf_to_reference import reconcile_variants_for_matches
 from respro.db.models import FeatureMatch, FeatureRecord, FeatureSegment, VariantCall
 
 
@@ -104,19 +103,36 @@ def _assert_aa_token(ann, expected: str) -> None:
     assert ann.alt_aa == alt_aa
 
 
-class TestTransformAllele:
-    """Keep direct allele transformation helper checks."""
+class TestStrandComplementViaReconciler:
+    """Allele strand transformation is exercised end-to-end through the
+    reconciler's minus-strand cases (the former ``_transform_allele`` unit
+    helper was removed with the event-level remap pipeline)."""
 
-    def test_snp_need_comp_false(self) -> None:
-        assert _transform_allele('A', need_comp=False) == 'A'
+    def test_snp_complement_on_minus_match(self) -> None:
+        """A minus-strand match complements the called base into coding orientation."""
+        feature = _make_feature(strand='+')
+        query_seq = 'TTAGTTTCCGACTTGCAT'
+        match = _make_match(feature, match_strand='-', query=query_seq, cigar='18M')
+        var = _variant_from_token('T13C')
 
-    def test_snp_need_comp_true(self) -> None:
-        assert _transform_allele('A', need_comp=True) == 'T'
-        assert _transform_allele('C', need_comp=True) == 'G'
+        remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
-    def test_indel_need_comp_true(self) -> None:
-        assert _transform_allele('AGGG', need_comp=True) == 'TCCC'
-        assert _transform_allele('CTGG', need_comp=True) == 'GCCA'
+        assert not warnings
+        assert len(remapped) == 1
+        assert _token_from_variant(remapped[0]) == 'A4G'
+
+    def test_indel_payload_reverse_complemented_on_minus_match(self) -> None:
+        """A minus-strand insertion payload is reverse-complemented into coding orientation."""
+        feature = _make_feature(strand='+')
+        query_seq = 'TTAGTTTCCGACTTGCAT'
+        match = _make_match(feature, match_strand='-', query=query_seq, cigar='18M')
+        var = _variant_from_token('C11CAAA')
+
+        remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
+
+        assert not warnings
+        assert len(remapped) == 1
+        assert _token_from_variant(remapped[0]) == 'A5ATTT'
 
 
 @pytest.mark.parametrize(
@@ -153,7 +169,7 @@ def test_examples_e1_to_e4(
     match = _make_match(feature, match_strand=match_strand, query=query_seq, cigar='18M')
     var = _variant_from_token(query_token)
 
-    remapped, warnings = remap_variants([var], [match], query_seq)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
     assert not warnings
     assert len(remapped) == 1
@@ -173,58 +189,91 @@ def test_examples_e1_to_e4(
 
 
 def test_example_e5_query_deletion_rc_orientation() -> None:
-    """E5: query has deletion vs reference and query aligns as reverse-complement."""
+    """E5: query has deletion vs reference and query aligns as reverse-complement.
+
+    The reconciler additionally emits the baseline deletion (the sample lacks
+    three internal bases); the SNP still projects onto the internal reference
+    with the same amino-acid consequence as before reconciliation existed."""
     feature = _make_feature(strand='+')
     query_seq = 'TTAGTTTCCTTGCAT'
     match = _make_match(feature, match_strand='-', query=query_seq, cigar='6M3D9M')
     var = _variant_from_token('C8T')
 
-    remapped, warnings = remap_variants([var], [match], query_seq)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
     assert not warnings
-    assert len(remapped) == 1
-    assert _token_from_variant(remapped[0]) == 'G9A'
+    tokens = {_token_from_variant(v) for v in remapped}
+    assert 'G9A' in tokens
+    assert 'AGTC5A' in tokens  # baseline: sample deletion of internal GTC
 
     anns = annotate_variants(remapped, [feature])
-    assert len(anns) == 1
-    _assert_aa_token(anns[0], 'G3R')
+    missense = [a for a in anns if a.consequence == 'missense']
+    assert len(missense) == 1
+    _assert_aa_token(missense[0], 'G3R')
+    assert any(a.consequence == 'deletion' for a in anns)
 
 
 def test_example_e6_query_insertion_projection_and_no_projection() -> None:
-    """E6: one SNP projects through insertion, one SNP in insertion has no projection."""
+    """E6: one SNP projects through an insertion, one SNP inside the insertion
+    modifies the insertion haplotype.
+
+    Under reconciliation a call inside a supplied-only insertion has no CDS
+    projection but is not lost: it changes the insertion allele carried by the
+    call's sample state (at the call AF), while the plain supplied insertion
+    remains at the residual frequency mass."""
     feature = _make_feature(strand='+')
     query_seq = 'ATGCAATTTGTCGGAAACTAA'
     match = _make_match(feature, match_strand='+', query=query_seq, cigar='6M3I12M')
     projected = _variant_from_token('G9A')
     non_projected = _variant_from_token('T7C')
 
-    remapped, warnings = remap_variants([projected, non_projected], [match], query_seq)
+    remapped, warnings = reconcile_variants_for_matches([projected], [match], query_seq)
 
     assert not warnings
-    assert len(remapped) == 1
-    assert _token_from_variant(remapped[0]) == 'G6A'
+    tokens = {_token_from_variant(v) for v in remapped}
+    assert 'G6A' in tokens
+    assert 'A5ATTT' in tokens  # baseline: sample insertion of TTT
 
     anns = annotate_variants(remapped, [feature])
-    assert len(anns) == 1
-    _assert_aa_token(anns[0], 'V2I')
+    missense = [a for a in anns if a.consequence == 'missense']
+    assert len(missense) == 1
+    _assert_aa_token(missense[0], 'V2I')
+
+    remapped_in, warnings_in = reconcile_variants_for_matches(
+        [non_projected], [match], query_seq,
+    )
+
+    assert not warnings_in
+    states = {(v.ref, v.pos, v.alt, round(v.allele_freq, 2)) for v in remapped_in}
+    # The call's base sits inside the inserted TTT: the call state carries the
+    # substituted insertion at the call AF, the plain insertion at the residual.
+    assert ('A', 5, 'ATCT', 0.9) in states
+    assert ('A', 5, 'ATTT', 0.1) in states
 
 
 def test_example_e7_mismatch_column_projection() -> None:
-    """E7: SNP at mismatch column still projects and annotates correctly."""
+    """E7: SNP at a mismatch column still projects and annotates correctly.
+
+    Reconciled alleles are relative to the internal reference (A5T, not the
+    supplied G5T); the second supplied-vs-internal difference is emitted as a
+    reference-derived baseline event."""
     feature = _make_feature(strand='+')
     query_seq = 'ATGCAGGTCGGAAGCTAA'
     match = _make_match(feature, match_strand='+', query=query_seq, cigar='18M')
     var = _variant_from_token('G5T')
 
-    remapped, warnings = remap_variants([var], [match], query_seq)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
     assert not warnings
-    assert len(remapped) == 1
-    assert _token_from_variant(remapped[0]) == 'G5T'
+    tokens = {_token_from_variant(v) for v in remapped}
+    assert tokens == {'A5T', 'A5G', 'A13G'}
+    sources = {v.source for v in remapped}
+    assert 'reference_derived' in sources
 
     anns = annotate_variants(remapped, [feature])
-    assert len(anns) == 1
-    _assert_aa_token(anns[0], 'Q1H')
+    q_anns = [a for a in anns if a.alt_aa == 'H']
+    assert len(q_anns) == 1
+    _assert_aa_token(q_anns[0], 'Q1H')
 
 
 def test_overlapping_cds_matches_emit_one_remap_per_match() -> None:
@@ -260,7 +309,7 @@ def test_overlapping_cds_matches_emit_one_remap_per_match() -> None:
         _make_match(feature_b, match_strand='+', query=query_seq, cigar='9M'),
     ]
 
-    remapped, warnings = remap_variants([var], matches, query_seq)
+    remapped, warnings = reconcile_variants_for_matches([var], matches, query_seq)
 
     assert not warnings
     assert len(remapped) == 2
@@ -268,16 +317,18 @@ def test_overlapping_cds_matches_emit_one_remap_per_match() -> None:
 
 
 def test_anchor_ref_mismatch_produces_warning() -> None:
-    """VCF REF anchor mismatch to query emits warning and excludes the variant."""
+    """VCF REF block mismatching the supplied reference emits a warning and
+    excludes the variant (baseline retained)."""
     feature = _make_feature(strand='+')
     query = 'ATGCAAGTCGGAAACTAA'
     match = _make_match(feature, match_strand='+', query=query, cigar='18M')
     var = VariantCall(chrom='c', pos=3, ref='T', alt='G', allele_freq=0.9, depth=100)
 
-    remapped, warnings = remap_variants([var], [match], query)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query)
 
     assert len(remapped) == 0
     assert len(warnings) == 1
+    assert 'does not match supplied' in warnings[0]
 
 
 def test_split_feature_remap_projects_second_segment_coordinates() -> None:
@@ -287,7 +338,7 @@ def test_split_feature_remap_projects_second_segment_coordinates() -> None:
     match = _make_match(feature, match_strand='+', query=query, cigar='12M')
     var = VariantCall(chrom='c', pos=6, ref='G', alt='A', allele_freq=0.9, depth=50)
 
-    remapped, warnings = remap_variants([var], [match], query)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query)
 
     assert not warnings
     assert len(remapped) == 1
@@ -305,22 +356,22 @@ def test_split_feature_envelope_gap_is_treated_as_non_coding() -> None:
     assert annotations[0].feature_name == ''
 
 
-def test_split_feature_envelope_gap_remap_logs_debug_skip_reason(caplog: pytest.LogCaptureFixture) -> None:
-    """Split-feature envelope gaps should emit a debug skip reason during remap."""
+def test_split_feature_envelope_gap_call_modifies_insertion_haplotype() -> None:
+    """A call anchored on an inserted base (split-feature envelope gap) has no
+    CDS projection but modifies the insertion haplotype: the call state carries
+    the substituted insertion at the call AF, the plain supplied insertion at
+    the residual frequency mass."""
     feature = _make_split_feature(strand='+')
     query = 'ATGAAATTTTTTGGGTCC'
     match = _make_match(feature, match_strand='+', query=query, cigar='6M6I6M')
     var = VariantCall(chrom='c', pos=6, ref='T', alt='G', allele_freq=0.9, depth=50)
 
-    with caplog.at_level(logging.DEBUG, logger='respro.core.vcf_remap'):
-        remapped, warnings = remap_variants([var], [match], query)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query)
 
-    assert not remapped
     assert not warnings
-    assert any(
-        'query pos 6' in message and 'no match / outside mapped CDS' in message
-        for message in caplog.messages
-    )
+    states = {(v.ref, v.pos, v.alt, round(v.allele_freq, 2)) for v in remapped}
+    assert ('A', 5, 'AGTTTTT', 0.9) in states
+    assert ('A', 5, 'ATTTTTT', 0.1) in states
 
 
 def test_minus_feature_reference_sequence_is_reverse_complement_of_coding_sequence() -> None:
@@ -329,16 +380,16 @@ def test_minus_feature_reference_sequence_is_reverse_complement_of_coding_sequen
 
 
 def test_anchor_changed_indel_is_split_forward_orientation() -> None:
-    """Non-canonical indel with changed anchor is split into SNP + indel before remap."""
+    """Non-canonical indel with changed anchor preserves both SNP and indel signal."""
     feature = _make_feature(strand='+')
     query_seq = 'ATGCAAGTCGGAAACTAA'
     match = _make_match(feature, match_strand='+', query=query_seq, cigar='18M')
     # Encodes A->G at anchor plus 3-nt deletion payload in one record.
     var = _variant_from_token('AAGT4G')
 
-    remapped, warnings = remap_variants([var], [match], query_seq)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
-    assert any('Split' in w for w in warnings)
+    assert not warnings
     assert len(remapped) == 2
     tokens = {_token_from_variant(v) for v in remapped}
     assert 'A4G' in tokens
@@ -351,15 +402,18 @@ def test_anchor_changed_indel_is_split_forward_orientation() -> None:
 
 
 def test_anchor_changed_indel_is_split_reverse_orientation() -> None:
-    """Reverse-orientation remap preserves both SNP and indel from changed-anchor record."""
+    """Reverse-orientation reconciliation preserves both SNP and indel from a
+    changed-anchor record."""
     feature = _make_feature(strand='+')
     query_seq = 'TTAGTTTCCGACTTGCAT'
     match = _make_match(feature, match_strand='-', query=query_seq, cigar='18M')
-    var = _variant_from_token('CAAA11G')
+    # REF block matches the supplied reference at pos 8 (query[8:12] = CGAC);
+    # the anchor base is changed (C -> G) alongside a 3-nt deletion payload.
+    var = _variant_from_token('CGAC8G')
 
-    remapped, warnings = remap_variants([var], [match], query_seq)
+    remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
-    assert any('Split' in w for w in warnings)
+    assert not warnings
     assert len(remapped) == 2
     snp_count = sum(1 for v in remapped if len(v.ref) == 1 and len(v.alt) == 1)
     indel_count = sum(1 for v in remapped if len(v.ref) != len(v.alt))
@@ -384,7 +438,7 @@ class TestUserRefCoordsPreserved:
             chrom='userchr', pos=4, ref='A', alt='G', allele_freq=0.9, depth=100,
         )
 
-        remapped, warnings = remap_variants([var], [match], query_seq)
+        remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
         assert not warnings
         assert len(remapped) == 1
@@ -403,7 +457,7 @@ class TestUserRefCoordsPreserved:
             chrom='userchr', pos=13, ref='T', alt='C', allele_freq=0.9, depth=100,
         )
 
-        remapped, warnings = remap_variants([var], [match], query_seq)
+        remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
         assert not warnings
         assert len(remapped) == 1
@@ -424,7 +478,7 @@ class TestUserRefCoordsPreserved:
             chrom='userchr', pos=11, ref='C', alt='CAAA', allele_freq=0.9, depth=100,
         )
 
-        remapped, warnings = remap_variants([var], [match], query_seq)
+        remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
         assert not warnings
         assert len(remapped) == 1
@@ -443,9 +497,9 @@ class TestUserRefCoordsPreserved:
             chrom='userchr', pos=4, ref='AAGT', alt='G', allele_freq=0.9, depth=100,
         )
 
-        remapped, warnings = remap_variants([var], [match], query_seq)
+        remapped, warnings = reconcile_variants_for_matches([var], [match], query_seq)
 
-        assert any('Split' in w for w in warnings)
+        assert not warnings
         assert len(remapped) == 2
         for out in remapped:
             assert out.user_chrom == 'userchr'

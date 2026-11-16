@@ -263,7 +263,8 @@ CREATE TABLE IF NOT EXISTS variant_result (
     single_exchange_aa_freq REAL    DEFAULT 0.0,
     rule_effect_aa_freq     TEXT    DEFAULT '{}',
     rule_effect_alt         TEXT    DEFAULT '{}',
-    freq_method             TEXT    DEFAULT 'observed'
+    freq_method             TEXT    DEFAULT 'observed',
+    variant_source          TEXT    DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_vr_run ON variant_result(run_id);
@@ -401,6 +402,7 @@ _OPTIONAL_RESULTS_COLUMN_DEFS = {
         'rule_effect_aa_freq': "TEXT DEFAULT '{}'",
         'rule_effect_alt': "TEXT DEFAULT '{}'",
         'freq_method': "TEXT DEFAULT 'observed'",
+        'variant_source': "TEXT DEFAULT ''",
     },
     'coverage_gap': {
         'reference_name': "TEXT DEFAULT ''",

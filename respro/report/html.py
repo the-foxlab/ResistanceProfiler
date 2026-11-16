@@ -59,6 +59,7 @@ from respro.report._row_helpers import (
     nt_change_stored,
     nt_change_user,
     select_effect_as_resistant_rules,
+    variant_source_label,
 )
 from respro.report.alignment_visualization import (
     FeatureAlignment,
@@ -324,6 +325,7 @@ def build_report_context(
             'count': len(all_mutations_rows),
             'has_database_hits': any(r['is_database_hit'] for r in all_mutations_rows),
             'has_user_ref_column': not result.is_fasta_mode,
+            'has_variant_source_column': not result.is_fasta_mode,
             'has_combinatorial': any(
                 r['is_combined_codon_event'] for r in all_mutations_rows
             ),
@@ -542,6 +544,7 @@ def _build_all_mutations_rows(
             'feature': (display_names or {}).get(ann.feature_name, ann.feature_name),
             'nt_change_stored': nt_change_stored_val,
             'nt_change_user': nt_change_user_val,
+            'variant_source': variant_source_label(ann),
             'nt_pos': pos_1based,
             'aa_effects': aa_effects,
             'aa_change': aa_change,

@@ -29,9 +29,9 @@ from respro.report._row_helpers import (
 )
 from respro.report.non_html_exports import export_results, write_tsv
 
-# Canonical 19-column header, in order.
+# Canonical 20-column header, in order.
 TSV_COLUMNS = [
-    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
+    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand', 'variant_source',
     'aa_frequency', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'phenotype', 'clinical_phenotype', 'ic50', 'fold_ic50', 'score',
@@ -44,7 +44,7 @@ _PLACEHOLDER = 'n/a'
 # Hits table). Conditional columns (phenotype group, ic50, fold_ic50, score,
 # publications) are dropped when no row carries a real value.
 _TSV_ALWAYS_COLUMNS = [
-    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand',
+    'reference', 'gene', 'nt_mut', 'nt_mut_user', 'strand', 'variant_source',
     'aa_frequency', 'depth', 'consequence', 'aa_effects',
     'in_database', 'rule_type',
     'drug', 'source',

@@ -18,7 +18,7 @@ from respro.core.alignment import (
     match_query_to_features,
 )
 from respro.core.fasta_to_vcf import fasta_to_vcf
-from respro.core.vcf_remap import _build_query_to_cds_map, remap_variants
+from respro.core.vcf_to_reference import _build_query_to_cds_map, reconcile_variants_for_matches
 from respro.db.models import FeatureRecord, FeatureSegment, IntronInterval, VariantCall
 
 # ──────────────────────────────────────────────────────────────────────
@@ -449,7 +449,7 @@ class TestVcfRemapIntron:
         var = VariantCall(
             chrom='c', pos=60, ref=exon2_first_base, alt='T', allele_freq=1.0, depth=50,
         )
-        remapped, warnings = remap_variants([var], [m], query)
+        remapped, warnings = reconcile_variants_for_matches([var], [m], query)
 
         assert not warnings
         assert len(remapped) == 1
@@ -467,7 +467,7 @@ class TestVcfRemapIntron:
         m = matches[0]
         # Variant at query position 45 (middle of the intron span 30..60).
         var = VariantCall(chrom='c', pos=45, ref='N', alt='A', allele_freq=1.0, depth=50)
-        remapped, warnings = remap_variants([var], [m], query)
+        remapped, warnings = reconcile_variants_for_matches([var], [m], query)
 
         assert remapped == []
 
@@ -556,7 +556,7 @@ class TestVcfRemapIntron:
         var_exon2 = VariantCall(
             chrom='c', pos=60, ref=query[60], alt='T', allele_freq=1.0, depth=50,
         )
-        remapped, warnings = remap_variants([var_exon2], [m], query)
+        remapped, warnings = reconcile_variants_for_matches([var_exon2], [m], query)
         assert not warnings, f'unexpected warnings: {warnings}'
         assert len(remapped) == 1, f'expected 1 remapped variant, got {remapped}'
         genomic = remapped[0].pos
@@ -568,7 +568,7 @@ class TestVcfRemapIntron:
         var_intron = VariantCall(
             chrom='c', pos=45, ref='N', alt='A', allele_freq=1.0, depth=50,
         )
-        remapped_intron, _ = remap_variants([var_intron], [m], query)
+        remapped_intron, _ = reconcile_variants_for_matches([var_intron], [m], query)
         assert remapped_intron == []
 
     def test_adjacent_m_runs_merged_in_exon_only_cigar(self) -> None:

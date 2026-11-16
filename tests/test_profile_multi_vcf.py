@@ -24,12 +24,7 @@ from respro.core.query import (
     resolve_fasta_query_multi,
 )
 from respro.core.vcf_coverage import compute_coverage_gaps_from_bam_multi
-from respro.core.vcf_remap import (
-    _build_query_to_cds_map,
-    _expand_anchor_changed_indels,
-    _remap_variants_per_match,
-    route_and_remap_variants,
-)
+from respro.core.vcf_to_reference import reconcile_variants
 from respro.db.models import ProfilingResult, ReferenceGroup, VariantCall
 from respro.db.results import load_run, save_run
 from respro.db.schema import create_schema, init_results_db, open_project_db
@@ -365,8 +360,8 @@ def _build_query_records(multi_ref_db: Path, fasta_path: Path) -> list[QueryReco
         conn.close()
 
 
-class TestRouteAndRemapVariants:
-    """route_and_remap_variants groups variants by CHROM and remaps per matching QueryRecord."""
+class TestReconcileVariants:
+    """reconcile_variants groups variants by CHROM and reconciles per matching QueryRecord."""
 
     def test_two_chroms_each_matching_a_record_remaps_both(
         self, multi_ref_db: Path, tmp_path: Path,
@@ -387,9 +382,9 @@ class TestRouteAndRemapVariants:
         ]
 
         # Act
-        remapped, warnings, dropped_chroms = route_and_remap_variants(variants, records)
+        remapped, warnings, dropped_chroms = reconcile_variants(variants, records)
 
-        # Assert — both variants survived remap onto their respective internal references
+        # Assert — both variants survived reconciliation onto their respective internal references
         assert len(remapped) == 2
         # Each remapped variant now sits at the internal genomic position of its feature
         chroms = {v.chrom for v in remapped}
@@ -403,7 +398,7 @@ class TestRouteAndRemapVariants:
         """A VCF CHROM with no usable query record is warned and dropped at the routing layer.
 
         With the VCF CLI's FASTA-header preflight, a CHROM absent from the supplied FASTA
-        never reaches routing. At the ``route_and_remap_variants`` level a missing record
+        never reaches reconciliation. At the ``reconcile_variants`` level a missing record
         means the supplied reference had no usable internal feature mapping; its variants
         are skipped and the CHROM is recorded in ``dropped_chroms``.
         """
@@ -419,7 +414,7 @@ class TestRouteAndRemapVariants:
 
         # Act
         with caplog.at_level('WARNING', logger='respro'):
-            remapped, warnings, dropped_chroms = route_and_remap_variants(variants, records)
+            remapped, warnings, dropped_chroms = reconcile_variants(variants, records)
 
         # Assert — only the matched CHROM's variant survives
         assert len(remapped) == 1
@@ -442,32 +437,33 @@ class TestRouteAndRemapVariants:
         ]
 
         # Act / Assert
-        with pytest.raises(ValueError, match='No VCF CHROM could be remapped'):
-            route_and_remap_variants(variants, records)
+        with pytest.raises(ValueError, match='No VCF CHROM could be reconciled'):
+            reconcile_variants(variants, records)
 
-    def test_variants_outside_cds_are_dropped_silently_by_remap(
+    def test_variants_outside_cds_are_skipped_with_warning(
         self, multi_ref_db: Path, tmp_path: Path,
     ) -> None:
-        """Variants inside a matched CHROM but outside any CDS are dropped by remap (not by routing)."""
+        """Variants inside a matched CHROM but outside any CDS are skipped by
+        reconciliation with a warning (not by routing)."""
         # Arrange — variant at pos 0 (before codon 1's first nt at pos 3 is fine, but pos 0 is
         # the M start codon's first base; use a position far outside the CDS by giving a ref
-        # mismatch so remap drops it). Simpler: a variant whose REF doesn't match the query.
+        # mismatch so reconciliation skips it). Simpler: a variant whose REF doesn't match the query.
         fasta_path = tmp_path / 'refs.fasta'
         fasta_path.write_text(f'>chrom_a\n{_REF_A_SEQ}\n')
         records = _build_query_records(multi_ref_db, fasta_path)
 
         variants = [
-            # pos 3 with wrong REF — remap will warn and drop this variant
+            # pos 3 with wrong REF — reconciliation will warn and skip this variant
             VariantCall(chrom='chrom_a', pos=3, ref='T', alt='G', allele_freq=0.95, depth=500),
         ]
 
         # Act
-        remapped, warnings, dropped_chroms = route_and_remap_variants(variants, records)
+        remapped, warnings, dropped_chroms = reconcile_variants(variants, records)
 
-        # Assert — routing succeeded (chrom_a matched) but remap dropped the variant
+        # Assert — routing succeeded (chrom_a matched) but reconciliation skipped the variant
         assert remapped == []
         assert dropped_chroms == []
-        # remap_variants emits a warning for the REF mismatch
+        # reconcile_variants emits a warning for the REF mismatch
         assert len(warnings) >= 1
 
     def test_empty_variants_returns_empty(
@@ -478,22 +474,22 @@ class TestRouteAndRemapVariants:
         fasta_path.write_text(f'>chrom_a\n{_REF_A_SEQ}\n')
         records = _build_query_records(multi_ref_db, fasta_path)
 
-        remapped, warnings, dropped_chroms = route_and_remap_variants([], records)
+        remapped, warnings, dropped_chroms = reconcile_variants([], records)
 
         assert remapped == []
         assert warnings == []
 
-    def test_query_matching_two_references_narrows_to_best_before_remap(
+    def test_query_matching_two_references_narrows_to_best_before_reconcile(
         self, tmp_path: Path,
     ) -> None:
         """A query record matching features on two references is narrowed to the best one.
 
-        Without narrowing, remap_variants would emit one remapped variant per matching
+        Without narrowing, reconcile_variants would emit one reconciled variant per matching
         feature (one per reference), producing duplicate variants with different internal
-        genomic positions and cross-reference contamination. route_and_remap_variants must
+        genomic positions and cross-reference contamination. reconcile_variants must
         narrow each QueryRecord's feature_matches to its best reference (via
-        pick_best_reference_id + select_matches_for_reference) before remap, mirroring the
-        original single-reference flow.
+        pick_best_reference_id + select_matches_for_reference) before reconciliation,
+        mirroring the original single-reference flow.
         """
         # Build a project DB where refA and refB share an IDENTICAL feature sequence so a
         # single query aligns to both. refB has the higher-identity match (longer overlap).
@@ -556,7 +552,7 @@ class TestRouteAndRemapVariants:
         ]
 
         # Act
-        remapped, _warnings, dropped_chroms = route_and_remap_variants(variants, records)
+        remapped, _warnings, dropped_chroms = reconcile_variants(variants, records)
 
         # Assert — exactly ONE remapped variant (narrowed to the best reference), not two.
         assert len(remapped) == 1, (
@@ -651,7 +647,7 @@ class TestRemapDedupeSameReference:
             VariantCall(chrom='chrom_x', pos=499, ref=query[499], alt='A',
                         allele_freq=0.95, depth=500),
         ]
-        remapped, warnings, dropped = route_and_remap_variants(variants, records)
+        remapped, warnings, dropped = reconcile_variants(variants, records)
 
         assert dropped == []
         assert len(remapped) == 1, (
@@ -685,7 +681,7 @@ class TestRemapDedupeSameReference:
             VariantCall(chrom='chrom_x', pos=499, ref=query[499], alt='A',
                         allele_freq=0.95, depth=500),
         ]
-        remapped, _warnings, _dropped = route_and_remap_variants(variants, records)
+        remapped, _warnings, _dropped = reconcile_variants(variants, records)
 
         assert len(remapped) == 1
         survivor = remapped[0]
@@ -698,9 +694,11 @@ class TestRemapDedupeSameReference:
         else:
             pytest.fail('survivor should carry a query codon from the best match')
 
-    def test_raw_remap_emits_two_copies_with_distinct_codon_source(self, tmp_path: Path) -> None:
-        """Before dedupe, two overlapping matches each emit a remapped copy whose
-        query codon is bound to its own feature — the frame-mixup regression shape.
+    def test_overlapping_matches_collapse_to_best_match_codon_source(self, tmp_path: Path) -> None:
+        """Two overlapping matches each reconcile the call with their own reading
+        frame; the public entry point collapses the duplicates to one
+        best-scoring copy whose query codon is bound to the best match's feature
+        — the frame-mixup regression shape.
 
         Both matches are reverse-to-reference (query supplied as the reverse
         complement of the genomic sequence), mirroring the UL23/UL24 bug: the same
@@ -717,39 +715,25 @@ class TestRemapDedupeSameReference:
         records = _build_query_records(db_path, fasta_path)
         rec = records[0]
 
-        match_maps = []
-        for match in rec.feature_matches:
-            q2c = _build_query_to_cds_map(
-                match.cigar, match.query_start, match.query_end,
-                match.strand, len(query), match.cds_start, match.intron_intervals,
-            )
-            c2q = {c: q for q, c in q2c.items()}
-            match_maps.append((match, q2c, c2q))
+        best = min(
+            rec.feature_matches,
+            key=lambda m: (-m.identity, -m.cds_coverage, -m.query_coverage, m.feature.name),
+        )
 
         variants = [
             VariantCall(chrom='chrom_x', pos=499, ref=query[499], alt='A',
                         allele_freq=0.95, depth=500),
         ]
-        warnings: list[str] = []
-        expanded = _expand_anchor_changed_indels(variants, warnings)
-        raw = _remap_variants_per_match(expanded, match_maps, len(query), query.upper(), warnings)
+        remapped, dedupe_warnings, _dropped = reconcile_variants(variants, records)
 
-        # Two copies, one per overlapping match, each bound to its own feature.
-        assert len(raw) == 2
-        by_fid = {v.query_codon_feature_id: v for v, _m in raw}
-        assert set(by_fid) == {1, 2}, (
-            f'expected copies bound to both feature ids, got {sorted(by_fid)}'
-        )
-        # The two copies project to the same internal variant key but carry
-        # different query codons (different reading frames).
-        (v1, _), (v2, _) = raw
-        assert (v1.pos, v1.ref, v1.alt) == (v2.pos, v2.ref, v2.alt)
-        assert v1.query_ref_codon != v2.query_ref_codon
-
-        # And the public entry point collapses them to one best-scoring copy.
-        remapped, dedupe_warnings, _dropped = route_and_remap_variants(variants, records)
+        # The public entry point collapses the per-match copies to one
+        # best-scoring survivor with a dedupe warning.
         assert len(remapped) == 1
         assert any('duplicate' in w.lower() for w in dedupe_warnings)
+        assert remapped[0].query_codon_feature_id == best.feature.id, (
+            f'survivor codon from feature {remapped[0].query_codon_feature_id}, '
+            f'expected best match {best.feature.name} ({best.feature.id})'
+        )
 
 
 def _make_reference_group(
@@ -855,7 +839,7 @@ def _build_remapped_for_records(
 ) -> list:
     """Route+remap dummy K2E/P2A variants per record; return flat remapped VariantCall list.
 
-    Each remapped variant keeps its ``chrom`` (== query_name) so the assembler can
+    Each reconciled variant keeps its ``chrom`` (== query_name) so the assembler can
     group variants back to their reference for per-reference annotation.
     """
     # refA codon1 (K, AAA at nt 3..5): A->G at pos 3 -> GAA -> K2E.
@@ -866,7 +850,7 @@ def _build_remapped_for_records(
             chrom=rec.query_name, pos=3, ref=rec.query_sequence[3], alt='G',
             allele_freq=0.95, depth=500,
         ))
-    remapped, _warnings, _dropped = route_and_remap_variants(variants, records)
+    remapped, _warnings, _dropped = reconcile_variants(variants, records)
     return remapped
 
 
@@ -1045,7 +1029,7 @@ class TestAssembleMultiReferenceResult:
                 VariantCall(chrom='chrom_a2', pos=3, ref='A', alt='G',
                             allele_freq=0.95, depth=500),
             ]
-            remapped, _w, _d = route_and_remap_variants(variants, records)
+            remapped, _w, _d = reconcile_variants(variants, records)
 
             result = assemble_multi_reference_result(
                 project_conn=conn,
@@ -1145,7 +1129,7 @@ class TestAssembleMultiReferenceResult:
                 VariantCall(chrom='chrom_a', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
                 VariantCall(chrom='chrom_b', pos=3, ref='A', alt='C', allele_freq=0.95, depth=500),
             ]
-            remapped, _w, _d = route_and_remap_variants(variants, records)
+            remapped, _w, _d = reconcile_variants(variants, records)
 
             result = assemble_multi_reference_result(
                 project_conn=conn,
@@ -1276,7 +1260,7 @@ class TestCrossSpeciesGeneNameCollisionGate:
         try:
             records = resolve_fasta_query_multi(conn, fasta_path)
             assert len(records) == 2
-            remapped, _w, _d = route_and_remap_variants(_k2e_variants_for_both_chroms(), records)
+            remapped, _w, _d = reconcile_variants(_k2e_variants_for_both_chroms(), records)
 
             with pytest.raises(click.ClickException) as exc_info:
                 assemble_multi_reference_result(
@@ -1318,7 +1302,7 @@ class TestCrossSpeciesGeneNameCollisionGate:
         conn = open_project_db(db_path)
         try:
             records = resolve_fasta_query_multi(conn, fasta_path)
-            remapped, _w, _d = route_and_remap_variants(_k2e_variants_for_both_chroms(), records)
+            remapped, _w, _d = reconcile_variants(_k2e_variants_for_both_chroms(), records)
 
             result = assemble_multi_reference_result(
                 project_conn=conn,
@@ -1411,7 +1395,7 @@ class TestCrossSpeciesGeneNameCollisionGate:
         conn = open_project_db(db_path)
         try:
             records = resolve_fasta_query_multi(conn, fasta_path)
-            remapped, _w, _d = route_and_remap_variants(_k2e_variants_for_both_chroms(), records)
+            remapped, _w, _d = reconcile_variants(_k2e_variants_for_both_chroms(), records)
 
             with pytest.raises(click.ClickException):
                 assemble_multi_reference_result(
@@ -2103,7 +2087,7 @@ class TestOneGenomeOverviewPerInternalReference:
                 VariantCall(chrom='chrom_a1', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
                 VariantCall(chrom='chrom_a2', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
             ]
-            remapped, _w, _d = route_and_remap_variants(variants, records)
+            remapped, _w, _d = reconcile_variants(variants, records)
 
             result = assemble_multi_reference_result(
                 project_conn=conn,
@@ -2306,7 +2290,7 @@ class TestResultsDbMultiReference:
                 VariantCall(chrom='chrom_a', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
                 VariantCall(chrom='chrom_b', pos=3, ref='A', alt='G', allele_freq=0.95, depth=500),
             ]
-            remapped, _w, _d = route_and_remap_variants(variants, records)
+            remapped, _w, _d = reconcile_variants(variants, records)
             result = assemble_multi_reference_result(
                 project_conn=conn,
                 query_records=records,

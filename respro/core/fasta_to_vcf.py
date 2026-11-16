@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Sequence
 
 from Bio.Seq import Seq
 
@@ -132,6 +133,7 @@ def _variants_from_alignment(
     feature: FeatureRecord,
     covered_cds_start: int | None = None,
     covered_cds_end: int | None = None,
+    ref_positions: Sequence[Sequence[str]] | None = None,
 ) -> tuple[list[VariantCall], list[CoverageGap]]:
     """
     Emit nucleotide-level VariantCall records from aligned CDS vs query.
@@ -149,43 +151,24 @@ def _variants_from_alignment(
     :param feature: feature record with stored nt_sequence
     :param covered_cds_start: CDS nt start of aligned region (for gap detection)
     :param covered_cds_end: CDS nt end of aligned region (for gap detection)
+    :param ref_positions: optional precomputed per-ref-position tuples from
+        :func:`_build_ref_positions` (avoids rebuilding for repeated walks over
+        the same alignment, e.g. VCF reference reconciliation)
     :return: (variant calls, coverage gaps)
     """
     frame = feature.codon_start
     variants: list[VariantCall] = []
     gap_codon_indices: list[int] = []
 
-    # Parse alignment into per-ref-position tuples: (ref, query, insertions_before_this_ref)
-    ref_positions: list[tuple[str, str, str]] = []
-    pending_ins = ''
-    for ref_base, query_base in zip(aligned_ref, aligned_query):
-        if ref_base == '-':
-            pending_ins += query_base
-        else:
-            ref_positions.append((ref_base.upper(), query_base.upper(), pending_ins.upper()))
-            pending_ins = ''
+    if ref_positions is None:
+        ref_positions = _build_ref_positions(aligned_ref, aligned_query)
 
     coding = ref_positions[frame:]  # Skip non-coding frame offset
 
     # Detect non-assessable codons for coverage gaps
-    codon_count = len(coding) // 3
-    for codon_idx in range(codon_count):
-        codon_start = codon_idx * 3
-        codon_slice = coding[codon_start:codon_start + 3]
-
-        if _codon_outside_coverage(
-            codon_idx=codon_idx,
-            frame=frame,
-            covered_cds_start=covered_cds_start,
-            covered_cds_end=covered_cds_end,
-        ):
-            gap_codon_indices.append(codon_idx)
-            continue
-
-        query_codon = ''.join(q for _, q, _ in codon_slice)
-        if query_codon.upper() == 'NNN':
-            gap_codon_indices.append(codon_idx)
-
+    gap_codon_indices = _nnn_and_uncovered_codon_indices(
+        coding, frame, covered_cds_start, covered_cds_end,
+    )
     non_assessable_codons = set(gap_codon_indices)
 
     # Emit variants by iterating ungapped ref positions
@@ -242,7 +225,58 @@ def _variants_from_alignment(
     return variants, _merge_codon_gaps(feature.name, gap_codon_indices)
 
 
-def _get_query_codon(coding: list[tuple[str, str, str]], coding_nt_idx: int) -> str:
+def _build_ref_positions(
+    aligned_ref: str,
+    aligned_query: str,
+) -> list[tuple[str, str, str]]:
+    """
+    Parse a gapped alignment into per-ref-position tuples.
+
+    :param aligned_ref: reference CDS with gap characters
+    :param aligned_query: query CDS with gap characters (same length)
+    :return: list of ``(ref_base, query_base, insertions_before_this_ref)`` per
+        ungapped reference position, in alignment order
+    """
+    ref_positions: list[tuple[str, str, str]] = []
+    pending_ins = ''
+    for ref_base, query_base in zip(aligned_ref, aligned_query):
+        if ref_base == '-':
+            pending_ins += query_base
+        else:
+            ref_positions.append((ref_base.upper(), query_base.upper(), pending_ins.upper()))
+            pending_ins = ''
+    return ref_positions
+
+
+def _nnn_and_uncovered_codon_indices(
+    coding: Sequence[Sequence[str]],
+    frame: int,
+    covered_cds_start: int | None,
+    covered_cds_end: int | None,
+) -> list[int]:
+    """Return codon indices that are outside the covered span or an NNN query codon."""
+    gap_codon_indices: list[int] = []
+    codon_count = len(coding) // 3
+    for codon_idx in range(codon_count):
+        codon_start = codon_idx * 3
+        codon_slice = coding[codon_start:codon_start + 3]
+
+        if _codon_outside_coverage(
+            codon_idx=codon_idx,
+            frame=frame,
+            covered_cds_start=covered_cds_start,
+            covered_cds_end=covered_cds_end,
+        ):
+            gap_codon_indices.append(codon_idx)
+            continue
+
+        query_codon = ''.join(q for _, q, _ in codon_slice)
+        if query_codon.upper() == 'NNN':
+            gap_codon_indices.append(codon_idx)
+    return gap_codon_indices
+
+
+def _get_query_codon(coding: Sequence[Sequence[str]], coding_nt_idx: int) -> str:
     """Return the query codon string for one coding-nt index when available."""
     codon_start = (coding_nt_idx // 3) * 3
     if codon_start + 3 > len(coding):
@@ -439,7 +473,7 @@ def _make_variant_from_coding_nt(
 
 def _make_fasta_insertion_from_alignment(
     feature: FeatureRecord,
-    coding: list[tuple[str, str, str]],
+    coding: Sequence[Sequence[str]],
     idx: int,
     inserted_bases: str,
 ) -> VariantCall | None:
@@ -481,7 +515,7 @@ def _make_fasta_insertion_from_alignment(
 
 def _make_fasta_deletion_from_alignment(
     feature: FeatureRecord,
-    coding: list[tuple[str, str, str]],
+    coding: Sequence[Sequence[str]],
     start_idx: int,
     end_idx: int,
 ) -> VariantCall | None:

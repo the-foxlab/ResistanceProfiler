@@ -123,8 +123,9 @@ def save_run(
             'feature_name, reference_name, codon_pos, ref_codon, alt_codon, ref_aa, alt_aa, '
             'consequence, af_bin, rule_match, drug_hits, '
             'is_combined_codon_event, combined_member_count, combined_states, '
-            'single_exchange_aa_freq, rule_effect_aa_freq, rule_effect_alt, freq_method) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'single_exchange_aa_freq, rule_effect_aa_freq, rule_effect_alt, freq_method, '
+            'variant_source) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 run_id,
                 v.chrom,
@@ -151,6 +152,7 @@ def save_run(
                 json.dumps(ann.rule_effect_aa_freq),
                 json.dumps(ann.rule_effect_alt),
                 ann.freq_method,
+                v.source,
             ),
         )
 
@@ -436,6 +438,7 @@ def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
             alt=row['alt'],
             allele_freq=row.get('allele_freq') or 0.0,
             depth=row.get('depth') or 0,
+            source=row.get('variant_source') or '',
         )
         rule_matches = [_rule_from_hit(hit, row.get('feature_name', '')) for hit in drug_hits]
         ann = AnnotatedVariant(

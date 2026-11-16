@@ -44,6 +44,13 @@ The HTML report is a single, portable file you can open in any browser. It is al
 <figcaption>Detailed overview of all mutations, regardless of whether they have database hits.</figcaption>
 </figure>
 
+In VCF mode the All Mutations table carries a **Variant source** column:
+`VCF derived` means a variant call influenced the variant's allele or frequency;
+`Reference derived` means the variant was inferred purely from the comparison of
+the supplied reference against the stored internal reference — its frequency is
+an assumption from that comparison, not a measured allele fraction. The column
+is omitted in FASTA mode.
+
 
 
 ## JSON export (`*.results.json`)
@@ -104,6 +111,7 @@ respro vcf \
 | `gene` | Feature / gene name (display name applied when configured). |
 | `nt_mut` | Nucleotide change on the internal reference, `ref{pos}alt` (1-based). Combined codon events use `ref_codon{codon_pos}alt_codon`. |
 | `nt_mut_user` | Nucleotide change on the user-supplied reference (VCF coords before remap). VCF mode only; omitted in FASTA mode. |
+| `variant_source` | Provenance of the variant: `VCF derived` when a VCF call influenced the emitted allele or its frequency; `Reference derived` when it was inferred purely from the comparison of the supplied and internal references — its frequency is an assumption from that comparison, not a measured allele fraction. VCF mode only; omitted in FASTA mode. |
 | `strand` | Coding strand of the feature (`+`/`-`), sourced from the feature record. |
 | `af` | Allele frequency (raw float). |
 | `depth` | Read depth at the variant (VCF mode only; omitted in FASTA mode). Empty for combined formula rows. |

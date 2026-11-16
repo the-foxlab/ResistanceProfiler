@@ -56,6 +56,24 @@ def nt_change_user(ann: AnnotatedVariant) -> str:
     return f'{user_ref}{user_pos + 1}{user_alt}'
 
 
+def variant_source_label(ann: AnnotatedVariant) -> str:
+    """Return the display label for the variant-source provenance, or '' in FASTA mode.
+
+    ``vcf_derived`` variants were influenced by a VCF call (allele or frequency,
+    including residual frequencies); ``reference_derived`` variants were inferred
+    purely from the supplied-vs-internal reference comparison, so their frequency
+    is an assumption rather than a measured allele fraction.
+
+    :param ann: annotated variant
+    :return: 'VCF derived', 'Reference derived', or '' when unset (FASTA mode)
+    """
+    labels = {
+        'vcf_derived': 'VCF derived',
+        'reference_derived': 'Reference derived',
+    }
+    return labels.get(ann.variant.source, '')
+
+
 def build_reference_name_by_chrom(result: ProfilingResult) -> dict[str, str]:
     """Map each annotation chrom (== ReferenceGroup.query_name) to its reference_name.
 

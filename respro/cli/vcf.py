@@ -27,7 +27,7 @@ from respro.core.query import (
     select_matches_for_reference,
 )
 from respro.core.vcf_coverage import compute_coverage_gaps_from_bam_multi
-from respro.core.vcf_remap import _build_query_to_cds_map, route_and_remap_variants
+from respro.core.vcf_to_reference import _build_query_to_cds_map, reconcile_variants
 from respro.db.schema import open_project_db
 from respro.io.reference import read_fasta
 from respro.io.vcf import collect_vcf_chroms, parse_vcf
@@ -227,8 +227,8 @@ def _profile_vcf_command(
                 selected_query_names=observed_chroms, cfg=cfg,
             )
 
-        # Parse all CHROMs (expected_query_name=None) so multi-chrom VCFs are retained;
-        # route_and_remap_variants pairs each CHROM with its matching QueryRecord.
+        # Reconcile all CHROMs (expected_query_name=None) so multi-chrom VCFs are
+        # retained; reconcile_variants pairs each CHROM with its matching QueryRecord.
         variants = parse_vcf(vcf, expected_query_name=None)
         logger.info('Parsed %d variant(s)', len(variants))
         variants = [
@@ -237,16 +237,16 @@ def _profile_vcf_command(
         ]
         logger.info('%d variant(s) after AF/depth filtering', len(variants))
 
-        variants, remap_warnings, dropped_chroms = route_and_remap_variants(variants, query_records)
-        for warning in remap_warnings:
+        variants, reconcile_warnings, dropped_chroms = reconcile_variants(variants, query_records)
+        for warning in reconcile_warnings:
             logger.warning(warning)
         for chrom in dropped_chroms:
             logger.warning(
                 'Dropped VCF CHROM %r: its reference FASTA record has no usable internal '
-                'feature mapping; variants were not remapped',
+                'feature mapping; variants were not reconciled',
                 chrom,
             )
-        logger.info('%d variant(s) after FASTA remapping', len(variants))
+        logger.info('%d variant(s) after reference reconciliation', len(variants))
 
         coverage_gaps = []
         bam_cooccurrence_by_chrom: dict[str, BamCooccurrence] | None = None

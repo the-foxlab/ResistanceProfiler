@@ -177,6 +177,35 @@ def _load_reference_data(
     return features, rules, formula_rules, rule_feature_names, report_features
 
 
+def _bam_excluded_positions(
+    rg: ReferenceGroup,
+    coverage_gaps: list[CoverageGap],
+) -> set[tuple[str, int]]:
+    """
+    Return ``(chrom, genomic_pos)`` pairs inside non-assessable BAM coverage codons.
+
+    A candidate whose position falls inside a coverage-gap codon of any feature on
+    this reference cannot be assessed from reads and is excluded before final rule
+    matching. Position keys are global per chrom so an excluded candidate cannot
+    fire a rule through any overlapping feature.
+    """
+    features_by_name = {feature.name: feature for feature in rg.features}
+    excluded: set[tuple[str, int]] = set()
+    for gap in coverage_gaps:
+        if gap.chrom != rg.query_name:
+            continue
+        feature = features_by_name.get(gap.feature_name)
+        if feature is None:
+            continue
+        for codon_idx in range(gap.codon_start, gap.codon_end + 1):
+            for nt_offset in range(3):
+                cds_pos = feature.codon_start + codon_idx * 3 + nt_offset
+                genomic_pos = feature.cds_to_genomic_position(cds_pos)
+                if genomic_pos is not None:
+                    excluded.add((gap.chrom, genomic_pos))
+    return excluded
+
+
 def _reject_cross_species_gene_name_collisions(references: list[ReferenceGroup]) -> None:
     """
     Raise :class:`click.ClickException` if a matched feature name appears on selected
@@ -333,6 +362,19 @@ def assemble_multi_reference_result(
     for rg in references:
         group_variants = variants_by_chrom.get(rg.query_name, [])
         bam_ctx = bam_cooccurrence_by_chrom.get(rg.query_name) if bam_cooccurrence_by_chrom else None
+        if bam_cooccurrence_by_chrom is not None:
+            # Deferred BAM assessment (annotate-then-mask-then-recompute): the
+            # complete candidate set is annotated first; candidates whose codon
+            # fails the configured BAM coverage threshold are then removed and
+            # the retained members re-annotated so combined codon states are
+            # recomputed without excluded members. Emission and annotation are
+            # never gated on coverage; only final rule matching is.
+            annotate_variants(group_variants, rg.features, is_fasta_mode=is_fasta_mode, cfg=cfg)
+            excluded = _bam_excluded_positions(rg, coverage_gaps)
+            if excluded:
+                group_variants = [
+                    v for v in group_variants if (v.chrom, v.pos) not in excluded
+                ]
         annotations.extend(annotate_variants(
             group_variants, rg.features, is_fasta_mode=is_fasta_mode,
             bam_cooccurrence=bam_ctx, cfg=cfg,

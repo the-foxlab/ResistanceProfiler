@@ -10,7 +10,6 @@ from pathlib import Path
 import pysam
 
 from respro.config.cli_settings import CLI_CONFIG
-from respro.core.vcf_remap import _build_query_to_cds_map
 from respro.db.models import CoverageGap, FeatureMatch
 
 logger = logging.getLogger(__name__)
@@ -138,6 +137,10 @@ def compute_coverage_gaps_from_depth(
     gaps: list[CoverageGap] = []
     for match in matches:
         feature = match.feature
+        # Lazy import: vcf_to_reference imports fasta_to_vcf, which imports this
+        # module — a top-level import would be circular.
+        from respro.core.vcf_to_reference import _build_query_to_cds_map
+
         q2c = _build_query_to_cds_map(
             match.cigar,
             match.query_start,

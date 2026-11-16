@@ -400,54 +400,118 @@ ops) and deletions (CDS bases with no query counterpart, i.e. `D` ops) are
 accumulated into single variant records using VCF anchor-base convention (the
 base preceding the indel is included in both REF and ALT).
 
-### 4.2 VCF mode: coordinate remapping
+### 4.2 VCF mode: reference reconciliation
 
-In VCF mode, variants are already called by an external variant caller and
-defined in the user's reference coordinates. ResPro **remaps** each variant into
-internal CDS coordinates using the inverted CIGAR map.
+VCF variants are called against the **supplied** reference FASTA, but rules are
+defined against the **internal project reference**. ResPro reconciles both into
+one variant set in internal-reference coordinates (`respro/core/vcf_to_reference.py`).
+The reconciliation is **tiered** for performance — the supplied↔internal alignment
+is computed once per feature match:
 
-The remap pipeline performs, per variant:
+- **Tier 0 — preflight.** No alignment differences in any aligned feature region
+  → the baseline is empty and the output equals a direct remap.
+- **Tier 1 — pure mismatches.** In 1:1 CIGAR blocks, calls map by coordinate
+  lookup and the reconciled option set is arithmetic (internal base plus residual
+  vs the ALT alleles), O(1) per variant. Uncalled mismatch positions still emit
+  their baseline variant.
+- **Tier 2 — indel-adjacent calls.** Calls whose REF span touches an insertion
+  or deletion gap are applied to a local window of the alignment and re-emitted,
+  O(window) per interacting indel.
 
-1. **Position projection.** The variant's query position is looked up in the
-   query-to-CDS map. Positions outside any matched CDS region are skipped.
+#### Per-allele sample states
 
-2. **REF sanity check.** The VCF `REF` anchor base is compared to the
-   corresponding base in the user's query FASTA. A mismatch produces a warning
-   and the variant is skipped — this catches VCF/FASTA reference mismatches
-   early.
+Each in-cutoff VCF ALT defines its own local sample state: the supplied reference
+with the ALT substituted for the REF span (in coding orientation, reverse-
+complemented for minus-strand matches). The state is re-emitted against the
+internal reference at the call's allele frequency. The residual frequency mass
+$1 - \sum \text{AF}_{\text{alt}}$ at an affected position belongs to the plain
+supplied reference, so the baseline variant at that position is emitted at the
+residual frequency. Multi-allelic ALTs of one record are mutually exclusive
+states, never merged into one consensus. When the same internal allele is
+emitted by several states, its frequencies add up to the allele's total
+frequency.
 
-3. **Strand transformation.** When the alignment strand differs from the
-   feature strand, REF and ALT alleles are transformed to the internal forward
-   strand:
-   - **SNPs**: the single base is complemented.
-   - **Indels**: the anchor base is complemented and the payload is
-     reverse-complemented. The anchor also **switches side** (from leftmost to
-     rightmost or vice versa) because the VCF convention anchors the leftmost
-     base in genomic 5'→3' order, but the internal forward reference needs the
-     coding-preceding base as anchor.
+#### Source provenance
 
-4. **CDS-to-genomic conversion.** The CDS position is converted to an internal
-   genomic position via $\text{Genomic}(c)$.
+Every reconciled variant carries a `source` label, shown in the All Mutations
+table (VCF mode only) and the TSV/JSON exports:
 
-5. **Query codon context.** The three-base query codon surrounding the variant
-   is extracted and stored on the remapped variant. For reverse-strand
-   alignments, the codon is complemented to coding orientation. This context
-   allows downstream annotation to use the **query** codon (which may carry
-   co-occurring variants) rather than the internal reference codon alone.
+- **`vcf_derived`** — a VCF call influenced the emitted allele or its frequency
+  (including residual frequencies).
+- **`reference_derived`** — inferred purely from the supplied-vs-internal
+  reference comparison. Its frequency is an **assumption** from that comparison
+  (AF 1.0), not a measured allele fraction.
 
-### 4.3 Anchor-changed indel splitting
+#### Cutoffs and filtered calls
+
+Calls failing `--min-af`/`--min-depth` are removed **before** reconciliation, so
+their positions revert to the pure baseline (`reference_derived`, AF 1.0).
+Reference-derived variants bypass the AF/depth cutoffs but pass the deferred BAM
+coverage gate like every other candidate. FILTER≠PASS calls participate like any
+other call — pass/fail decisions belong to the upstream pipeline.
+
+#### Unverified inputs
+
+The following are skipped with a warning (baseline retained) instead of producing
+a false result:
+
+- Two separate records whose spans overlap — without phase, jointly applying
+  them assumes co-occurrence the input does not establish. (Sometimes the literal
+  edits would even be compatible, e.g. an insertion's anchor padding overlapping
+  a deletion; rejection is a conservative scope restriction, not a sequence
+  impossibility.)
+- A record's allele frequencies summing to more than 1.
+- A REF block that does not match the supplied reference.
+- A REF span that is not fully mapped (alignment gap, intron, or outside the
+  aligned region).
+- Baseline stretches containing `N` (no emission, one warning per stretch).
+
+#### Worked examples
+
+Complete frequencies at one position unless stated. Positions are 1-based for
+readability; the regression tests state zero-based positions explicitly.
+
+| Internal | VCF reference | VCF call | Result relative to internal |
+| --- | --- | --- | --- |
+| A | G | none | A→G at 1.0 (baseline assumption, `reference_derived`) |
+| A | G | G→A at 1.0 | no variant |
+| A | G | G→A at 0.5 | A→G at 0.5 (`vcf_derived`) |
+| A | G | G→C at 0.3 | A→G at 0.7 and A→C at 0.3 (both `vcf_derived`) |
+| A | G | G→A at 0.1, min-AF 0.5 | A→G at 1.0 (call below cutoff removed; `reference_derived`) |
+| A | GG | none | A→GG at 1.0 (baseline assumption) |
+| A | GG | G2del at 1.0 | A→G at 1.0 (baseline countered by the deletion) |
+| A | GG | G2del at 0.5 | A→G at 0.5 and residual A→GG at 0.5 (both `vcf_derived`) |
+
+Non-canceling indel interactions (Tier 2 local windows; anchored REF/ALT
+notation, 1-based positions):
+
+| Internal | Supplied ref | Baseline vs internal | VCF call (supplied coords) | Expected result vs internal |
+| --- | --- | --- | --- | --- |
+| ACGT | ACT | `G3del`@1.0 | `T3del`@1.0 | `GT3del`@1.0 — two deletions merge into one larger deletion |
+| AT | ACGT | `A1>ACG`@1.0 (insertion) | `C2>CG`@1.0 | sample `ACGGT`; net `A1>ACGG`@1.0 — two insertions merge into one insertion |
+| ACGT | ACT | `G3del`@1.0 | `C2>CGG`@1.0 | sample `ACGGT`; baseline deletion fully countered, net new insertion |
+| ACGT | ACT | `G3del`@1.0 | `C2>CGG`@0.4 | per-allele: insertion@0.4 and residual `G3del`@0.6 |
+| ACGT | ACGT (identical) | none | separate records `C2del`@1.0 and `C6del`@1.0 | each emitted independently, no merge |
+| ACGT | ACGT (identical) | none | separate records `C2>G`@1.0 and `C2>A`@1.0 | unverified: no variants for the span + warning |
+| ACGT | ACT | `G3del`@1.0 | `C2del`@1.0 | sample `AT`; net `CG2del`@1.0 — baseline deletion plus call merge |
+
+Reverse-complement orientation: the supplied reference maps reverse complement
+against the feature at these loci. For every minus-strand case the emitted
+genomic allele is converted to genomic orientation according to the internal
+feature strand (an axis separate from the supplied↔internal match strand), and
+the regression tests assert both the coding-orientation effect and the emitted
+genomic allele across the match-strand × feature-strand combinations. An exact
+RC pair (e.g. internal `AAA` vs supplied `TTT`) yields zero baseline events —
+this guards against wrongly oriented CIGARs emitting spurious differences.
+
+### 4.3 Anchor-changed indels
 
 Some variant callers encode a base substitution at the VCF anchor together with
-an indel, e.g. `ATTT → G` (anchor `A` changed to `G`, plus a deletion of
-`TTT`). Left as one event, the anchor substitution signal would be lost during
-strand-aware remap. ResPro **splits** such records deterministically into two
-events:
-
-1. **Anchor SNP**: `A → G` at the same query position.
-2. **Canonical indel**: `ATTT → A` (anchor reset to the REF anchor base).
-
-Both split events inherit the original record's allele frequency, depth, and
-filter status, and preserve the original user-reference coordinates for display.
+an indel, e.g. `ATTT → G`. The reconciliation slot model handles such records
+natively: the REF span's four slots receive the ALT's single base plus deletions,
+so the state emits the anchor substitution and the deletion as separate events at
+the record's allele frequency — the substitution signal is preserved without a
+pre-splitting step.
 
 ---
 
@@ -1035,6 +1099,15 @@ CDS-to-query coordinate map. CDS positions that map to `None` (deletions in the
 query) are treated as non-covered.
 
 Contiguous non-covered codons are merged into single `CoverageGap` entries.
+
+#### Deferred assessability mask
+
+Variant emission and reconciliation are **never** gated on coverage. The full
+candidate set is emitted and annotated first; then, before final single-rule and
+formula-rule matching, one BAM-derived mask removes every candidate whose
+position falls inside a non-covered codon. Combined-codon states are recomputed
+from the retained members, so an excluded SNP cannot contribute to another
+member's hit. Coverage gaps themselves are preserved for reporting.
 
 ---
 

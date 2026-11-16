@@ -46,14 +46,21 @@ In both modes, input is converted into a common internal representation before r
 
 Query sequence context is aligned to the internal project references and features. Only rule-backed features (`has_rules = 1`, i.e. features carrying at least one resistance rule) participate in alignment; a FASTA record that aligns to no rule-backed feature is dropped with a warning rather than profiled. The reference is determined automatically from [minimap2](https://github.com/lh3/minimap2)-based (mappy) CDS matching, and the sequence with the highest identity is selected.
 
-#### CIGAR-based coordinate remapping
+#### Reference reconciliation (VCF mode)
 
-For VCF input, variants are defined in user-provided reference coordinates. ResPro uses the CIGAR string from the minimap2 alignment to build a bidirectional coordinate map between query positions and internal CDS positions:
+VCF variants are called against the **supplied** reference FASTA, but resistance rules are defined against the **internal project reference** — the two often differ. ResPro reconciles both into one variant set in internal-reference coordinates:
 
-- Each VCF variant position is projected from the user reference into the internal CDS coordinate space.
-- REF alleles are verified against the user query FASTA; mismatches produce a warning and the variant is skipped.
-- For reverse-strand features, alleles are reverse-complemented to the internal forward strand.
-- Anchor-changed indels (where the VCF anchor base differs from the internal reference) are automatically split into a substitution plus a canonical indel before annotation.
+- The supplied↔internal alignment (the same minimap2 CIGAR used for coordinate mapping) yields **baseline differences**: positions where the supplied reference differs from the internal reference. Baseline variants carry an assumed allele frequency of 1.0 — an assumption derived from the reference comparison, not a measured allele fraction — and are labelled `Reference derived` in the report.
+- Each in-cutoff VCF call is applied as a **per-allele sample state**: the ALT replaces the REF span in the supplied reference, and the resulting local sequence is re-emitted against the internal reference at the call's allele frequency (`VCF derived`). A call that reverses a baseline difference cancels it; a call indel plus a baseline indel merge into the net event.
+- The **residual frequency mass** (1 − Σ call AFs at an affected position) belongs to the plain supplied reference, so the baseline variant at that position is emitted at the residual frequency.
+- Calls below the `--min-af`/`--min-depth` cutoffs are removed before reconciliation, so their positions revert to the pure baseline. FILTER≠PASS calls participate like any other call — pass/fail decisions belong to the upstream pipeline.
+- Two separate VCF records whose spans overlap cannot be jointly phased; they are skipped with a warning and the baseline is retained. Records with non-overlapping spans reconcile independently.
+- When the supplied and internal references are identical, the baseline is empty and VCF mode behaves exactly like a direct remap.
+
+!!! note "Choosing a reference FASTA"
+    ResPro does its best to also infer variants from mismatches between the supplied reference and the stored internal reference. For best results, use a reference that is highly similar to the stored one the resistance rules apply to — divergent references (especially with many indels) increase the number of reference-derived assumptions and unresolvable overlaps.
+
+See [Technical reference — Variant emission & reconciliation](technical-reference.md#variant-emission-reconciliation) for the full contract and worked examples.
 
 #### Spliced genes and unspliced queries
 

@@ -307,6 +307,12 @@ class VariantCall:
     codon is only trusted by annotation when the annotating feature has this
     id — a codon extracted from an overlapping second feature's frame must not
     leak into another feature's annotation.
+
+    ``source`` records how the variant was derived in VCF mode:
+    ``vcf_derived`` = a VCF call influenced the emitted allele or its frequency
+    (including residual frequencies), ``reference_derived`` = inferred purely
+    from the comparison of the supplied and internal references (assumed AF 1.0,
+    not measured). Empty in FASTA mode (no supplied reference is compared).
     """
 
     chrom: str
@@ -322,6 +328,7 @@ class VariantCall:
     user_pos: int = 0
     user_ref: str = ''
     user_alt: str = ''
+    source: str = ''
 
 
 @dataclass
