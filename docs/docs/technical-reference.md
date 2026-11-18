@@ -400,18 +400,18 @@ ops) and deletions (CDS bases with no query counterpart, i.e. `D` ops) are
 accumulated into single variant records using VCF anchor-base convention (the
 base preceding the indel is included in both REF and ALT).
 
-### 4.2 VCF mode: reference reconciliation
+### 4.2 VCF mode: reference comparison
 
 VCF variants are called against the **supplied** reference FASTA, but rules are
-defined against the **internal project reference**. ResPro reconciles both into
+defined against the **internal project reference**. ResPro compares both and emits
 one variant set in internal-reference coordinates (`respro/core/vcf_to_reference.py`).
-The reconciliation is **tiered** for performance — the supplied↔internal alignment
+The comparison is **tiered** for performance — the supplied↔internal alignment
 is computed once per feature match:
 
 - **Tier 0 — preflight.** No alignment differences in any aligned feature region
   → the baseline is empty and the output equals a direct remap.
 - **Tier 1 — pure mismatches.** In 1:1 CIGAR blocks, calls map by coordinate
-  lookup and the reconciled option set is arithmetic (internal base plus residual
+  lookup and the emitted option set is arithmetic (internal base plus residual
   vs the ALT alleles), O(1) per variant. Uncalled mismatch positions still emit
   their baseline variant.
 - **Tier 2 — indel-adjacent calls.** Calls whose REF span touches an insertion
@@ -433,7 +433,7 @@ frequency.
 
 #### Source provenance
 
-Every reconciled variant carries a `source` label, shown in the All Mutations
+Every emitted variant carries a `source` label, shown in the All Mutations
 table (VCF mode only) and the TSV/JSON exports:
 
 - **`vcf_derived`** — a VCF call influenced the emitted allele or its frequency
@@ -444,7 +444,7 @@ table (VCF mode only) and the TSV/JSON exports:
 
 #### Cutoffs and filtered calls
 
-Calls failing `--min-af`/`--min-depth` are removed **before** reconciliation, so
+Calls failing `--min-af`/`--min-depth` are removed **before** the comparison, so
 their positions revert to the pure baseline (`reference_derived`, AF 1.0).
 Reference-derived variants bypass the AF/depth cutoffs but pass the deferred BAM
 coverage gate like every other candidate. FILTER≠PASS calls participate like any
@@ -452,8 +452,7 @@ other call — pass/fail decisions belong to the upstream pipeline.
 
 #### Unverified inputs
 
-The following are skipped with a warning (baseline retained) instead of producing
-a false result:
+The following are skipped with a warning instead of producing a false result:
 
 - Two separate records whose spans overlap — without phase, jointly applying
   them assumes co-occurrence the input does not establish. (Sometimes the literal
@@ -461,10 +460,55 @@ a false result:
   a deletion; rejection is a conservative scope restriction, not a sequence
   impossibility.)
 - A record's allele frequencies summing to more than 1.
-- A REF block that does not match the supplied reference.
-- A REF span that is not fully mapped (alignment gap, intron, or outside the
-  aligned region).
+- A REF block that does not match the supplied reference. When several REF
+  blocks mismatch, one aggregate warning additionally states that the VCF was
+  probably called against a different reference.
+- A REF span that is outside the aligned region (alignment gap, intron, or
+  past the region's edge).
 - Baseline stretches containing `N` (no emission, one warning per stretch).
+
+#### Conventions
+
+These conventions pin the notation and normalization used by every worked
+example and regression test below:
+
+- **Anchored REF/ALT notation.** Indel events are written as
+  `REF{pos}ALT` with the anchor base retained in both alleles (VCF
+  convention), e.g. `C2>CG` inserts `G` after position 2's `C`,
+  `CGT3del`-style deletions appear as `CGT3>C` (1-based position in prose,
+  0-based `VariantCall.pos` in tests). Insertion payloads attach **after** the
+  anchor base for `+`-strand features and before it for `-`-strand features —
+  the same anchor convention as the FASTA emission engine.
+- **Indel representation in repeats.** Events are emitted at the anchor their
+  gapped alignment state produced; they are **not** left-normalized to the
+  leftmost equivalent representation. In repeated bases several anchored forms
+  render the same sample sequence (inserting `A` into `AAAAAA` at any position
+  yields the same 7-A sample), but rule matching attributes events to codons:
+  normalizing across a codon boundary would move an insertion between codons
+  and change which rules it can fire. Every emitted event is sequence-valid —
+  applying it to the internal reference reconstructs the final sample
+  (metamorphic regression tests assert this).
+- **Decomposition of length-changing replacements.** When the supplied
+  reference replaces an internal span with a different-length span (e.g.
+  internal `...CATT` vs supplied `...CGGTT`, replacing `A` at position 2 with
+  `GG`), the alignment walk decomposes the difference into its column-level
+  substitution (`A2>G`) plus an anchored insertion on that column (`A2>AG`),
+  which together reconstruct `CGGTT` when applied to `CATT`. A VCF deletion
+  that removes the inserted base (`G2del` at AF 1.0) cancels the insertion
+  component and retains the substitution `A2>G` as `vcf_derived`; at partial
+  AF (e.g. `G2del` at AF 0.5) the substitution is present on both the call and
+  residual states (`A2>G` at 1.0, `vcf_derived`) while the insertion survives
+  at the residual frequency (`A2>AG` at 0.5, `vcf_derived`).
+- **Record identity.** The ALTs of one VCF record are mutually exclusive
+  states of that record; two **separate** records at the same position are
+  distinct phase-unknown events (distinguished by the parsed record index)
+  and fall under the overlap policy above.
+- **Call-state emission scope.** A call state emits only differences *it*
+  caused (its span plus columns changed by surgery or collapse). Differences
+  the call merely sits next to belong to the baseline pass, which emits them
+  once at full frequency mass — a baseline variant keeps AF 1.0 unless a
+  call's covered columns intersect it (e.g. a reversion or a merged deletion
+  absorbing it).
 
 #### Worked examples
 
@@ -478,22 +522,24 @@ readability; the regression tests state zero-based positions explicitly.
 | A | G | G→A at 0.5 | A→G at 0.5 (`vcf_derived`) |
 | A | G | G→C at 0.3 | A→G at 0.7 and A→C at 0.3 (both `vcf_derived`) |
 | A | G | G→A at 0.1, min-AF 0.5 | A→G at 1.0 (call below cutoff removed; `reference_derived`) |
-| A | GG | none | A→GG at 1.0 (baseline assumption) |
-| A | GG | G2del at 1.0 | A→G at 1.0 (baseline countered by the deletion) |
-| A | GG | G2del at 0.5 | A→G at 0.5 and residual A→GG at 0.5 (both `vcf_derived`) |
+| A | GG | none | A→GG at 1.0 (decomposed as `A>G`@1.0 + `A>AG`@1.0, `reference_derived`) |
+| A | GG | G2del at 1.0 | A→G at 1.0 (insertion component countered by the deletion; `vcf_derived`) |
+| A | GG | G2del at 0.5 | A→G at 0.5 and residual A→GG at 0.5 (emitted as `A>G`@1.0 + `A>AG`@0.5, both `vcf_derived`) |
 
 Non-canceling indel interactions (Tier 2 local windows; anchored REF/ALT
 notation, 1-based positions):
 
 | Internal | Supplied ref | Baseline vs internal | VCF call (supplied coords) | Expected result vs internal |
 | --- | --- | --- | --- | --- |
-| ACGT | ACT | `G3del`@1.0 | `T3del`@1.0 | `GT3del`@1.0 — two deletions merge into one larger deletion |
-| AT | ACGT | `A1>ACG`@1.0 (insertion) | `C2>CG`@1.0 | sample `ACGGT`; net `A1>ACGG`@1.0 — two insertions merge into one insertion |
-| ACGT | ACT | `G3del`@1.0 | `C2>CGG`@1.0 | sample `ACGGT`; baseline deletion fully countered, net new insertion |
-| ACGT | ACT | `G3del`@1.0 | `C2>CGG`@0.4 | per-allele: insertion@0.4 and residual `G3del`@0.6 |
-| ACGT | ACGT (identical) | none | separate records `C2del`@1.0 and `C6del`@1.0 | each emitted independently, no merge |
+| ACGT | ACT | `G3del`@1.0 | `T3del`@1.0 | `GT3del`@1.0 — two deletions merge into one larger deletion (`vcf_derived`) |
+| ACGTT | ACTT | `G3del`@1.0 | `T4del`@1.0 | sample `ACT`; net `GT3del`@1.0 — two single-base deletions separated by repeat `T` merge into one larger deletion (`vcf_derived`) |
+| AT | ACGT | `A1>ACG`@1.0 (insertion) | `C2>CG`@1.0 | sample `ACGGT`; net `A1>ACGG`@1.0 — two insertions merge into one insertion (`vcf_derived`) |
+| ACGT | ACT | `G3del`@1.0 | `C2>CGG`@1.0 | sample `ACGGT`; net `C2>CG`@1.0 (left-aligned) — baseline deletion fully countered, net new insertion (`vcf_derived`) |
+| ACGT | ACT | `G3del`@1.0 | `C2>CGG`@0.4 | per-allele: `C2>CG`@0.4 (left-aligned) and residual `G3del`@0.6 (both `vcf_derived`) |
+| ACGTACGT | ACGTACGT (identical) | none | separate records `C2del`@1.0 and `C6del`@1.0 | each emitted independently, no merge (`vcf_derived`) |
 | ACGT | ACGT (identical) | none | separate records `C2>G`@1.0 and `C2>A`@1.0 | unverified: no variants for the span + warning |
-| ACGT | ACT | `G3del`@1.0 | `C2del`@1.0 | sample `AT`; net `CG2del`@1.0 — baseline deletion plus call merge |
+| ACGT | ACGT (identical) | none | separate records `C2>CA`@1.0 and `C2del`@1.0 | unverified by policy: baseline-only + warning (insertion anchor overlaps the deletion without phase) |
+| ACGT | ACT | `G3del`@1.0 | `C2del`@1.0 | sample `AT`; net `CG2del`@1.0 — baseline deletion plus call merge (`vcf_derived`) |
 
 Reverse-complement orientation: the supplied reference maps reverse complement
 against the feature at these loci. For every minus-strand case the emitted
@@ -507,7 +553,7 @@ this guards against wrongly oriented CIGARs emitting spurious differences.
 ### 4.3 Anchor-changed indels
 
 Some variant callers encode a base substitution at the VCF anchor together with
-an indel, e.g. `ATTT → G`. The reconciliation slot model handles such records
+an indel, e.g. `ATTT → G`. The slot model handles such records
 natively: the REF span's four slots receive the ALT's single base plus deletions,
 so the state emits the anchor substitution and the deletion as separate events at
 the record's allele frequency — the substitution signal is preserved without a
@@ -1102,7 +1148,7 @@ Contiguous non-covered codons are merged into single `CoverageGap` entries.
 
 #### Deferred assessability mask
 
-Variant emission and reconciliation are **never** gated on coverage. The full
+Variant emission and the reference comparison are **never** gated on coverage. The full
 candidate set is emitted and annotated first; then, before final single-rule and
 formula-rule matching, one BAM-derived mask removes every candidate whose
 position falls inside a non-covered codon. Combined-codon states are recomputed

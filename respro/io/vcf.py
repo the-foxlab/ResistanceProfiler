@@ -54,7 +54,7 @@ def parse_vcf(
     mismatched_contigs: set[str] = set()
 
     with pysam.VariantFile(str(vcf_path)) as vcf:
-        for record in vcf.fetch():
+        for record_index, record in enumerate(vcf.fetch()):
             if expected_query_name is not None and record.contig != expected_query_name:
                 dropped_contig_mismatch += 1
                 mismatched_contigs.add(record.contig)
@@ -92,6 +92,7 @@ def parse_vcf(
                     allele_freq=af,
                     depth=depth,
                     filter_status=filter_status,
+                    record_index=record_index,
                 ))
 
     if expected_query_name is None:

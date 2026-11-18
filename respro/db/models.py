@@ -313,6 +313,12 @@ class VariantCall:
     (including residual frequencies), ``reference_derived`` = inferred purely
     from the comparison of the supplied and internal references (assumed AF 1.0,
     not measured). Empty in FASTA mode (no supplied reference is compared).
+
+    ``record_index`` is the 0-based index of the VCF record the variant was
+    parsed from (``-1`` when not parser-produced, e.g. synthetically
+    constructed variants). Two separate records at the same position are
+    distinct phase-unknown events and must not be merged into one allele set;
+    only the ALTs of one record are mutually exclusive states.
     """
 
     chrom: str
@@ -329,6 +335,7 @@ class VariantCall:
     user_ref: str = ''
     user_alt: str = ''
     source: str = ''
+    record_index: int = -1
 
 
 @dataclass

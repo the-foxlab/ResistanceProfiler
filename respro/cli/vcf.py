@@ -27,7 +27,11 @@ from respro.core.query import (
     select_matches_for_reference,
 )
 from respro.core.vcf_coverage import compute_coverage_gaps_from_bam_multi
-from respro.core.vcf_to_reference import _build_query_to_cds_map, reconcile_variants
+from respro.core.vcf_to_reference import (
+    REFERENCE_DERIVED,
+    _build_query_to_cds_map,
+    reconcile_variants,
+)
 from respro.db.schema import open_project_db
 from respro.io.reference import read_fasta
 from respro.io.vcf import collect_vcf_chroms, parse_vcf
@@ -211,6 +215,20 @@ def _profile_vcf_command(
         # the wrong reference file was provided — a hard failure rather than a silent drop.
         observed_chroms = collect_vcf_chroms(vcf)
         fasta_headers = set(read_fasta(ref_fasta).keys())
+        if not observed_chroms:
+            import pysam
+
+            with pysam.VariantFile(str(vcf)) as vcf_handle:
+                header_contigs = {str(c) for c in vcf_handle.header.contigs} & fasta_headers
+            if len(fasta_headers) == 1:
+                observed_chroms = set(fasta_headers)
+            elif header_contigs:
+                observed_chroms = header_contigs
+            else:
+                cli_error(
+                    'VCF contains no variant records; nothing to profile. '
+                    'Provide a VCF with at least one variant record.'
+                )
         missing = sorted(observed_chroms - fasta_headers)
         if missing:
             cli_error(
@@ -237,16 +255,17 @@ def _profile_vcf_command(
         ]
         logger.info('%d variant(s) after AF/depth filtering', len(variants))
 
-        variants, reconcile_warnings, dropped_chroms = reconcile_variants(variants, query_records)
+        variants, reconcile_warnings, _dropped_chroms = reconcile_variants(variants, query_records)
         for warning in reconcile_warnings:
             logger.warning(warning)
-        for chrom in dropped_chroms:
+        logger.info('%d variant(s) after VCF reference comparison', len(variants))
+        ref_derived = sum(1 for v in variants if v.source == REFERENCE_DERIVED)
+        if ref_derived:
             logger.warning(
-                'Dropped VCF CHROM %r: its reference FASTA record has no usable internal '
-                'feature mapping; variants were not reconciled',
-                chrom,
+                '%d variant(s) come from differences between the supplied reference and '
+                "the internal project reference (marked 'Reference derived' in the output)",
+                ref_derived,
             )
-        logger.info('%d variant(s) after reference reconciliation', len(variants))
 
         coverage_gaps = []
         bam_cooccurrence_by_chrom: dict[str, BamCooccurrence] | None = None

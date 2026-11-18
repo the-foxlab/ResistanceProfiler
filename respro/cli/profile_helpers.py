@@ -206,6 +206,26 @@ def _bam_excluded_positions(
     return excluded
 
 
+def _variant_touches_excluded_positions(
+    var: VariantCall,
+    excluded: set[tuple[str, int]],
+) -> bool:
+    """
+    Return whether any genomic position an event depends on is coverage-excluded.
+
+    A VCF-style genomic REF string occupies ascending genomic positions
+    ``pos .. pos + len(ref) - 1``: a deletion's payload bases and an MNP's
+    substituted bases all need assessable coverage, while an insertion's REF
+    is its anchor alone (inserted bases carry no reference coordinates).
+    Checking only the anchor would retain a deletion whose deleted bases sit
+    in a non-assessable codon.
+    """
+    return any(
+        (var.chrom, var.pos + offset) in excluded
+        for offset in range(len(var.ref))
+    )
+
+
 def _reject_cross_species_gene_name_collisions(references: list[ReferenceGroup]) -> None:
     """
     Raise :class:`click.ClickException` if a matched feature name appears on selected
@@ -373,7 +393,8 @@ def assemble_multi_reference_result(
             excluded = _bam_excluded_positions(rg, coverage_gaps)
             if excluded:
                 group_variants = [
-                    v for v in group_variants if (v.chrom, v.pos) not in excluded
+                    v for v in group_variants
+                    if not _variant_touches_excluded_positions(v, excluded)
                 ]
         annotations.extend(annotate_variants(
             group_variants, rg.features, is_fasta_mode=is_fasta_mode,

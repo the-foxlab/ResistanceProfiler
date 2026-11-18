@@ -200,7 +200,7 @@ def write_json(
     variant_rows = []
     for ann in result.annotations:
         v = ann.variant
-        variant_rows.append({
+        row = {
             'id': None,
             'chrom': v.chrom,
             'pos': v.pos,
@@ -225,7 +225,6 @@ def write_json(
             'rule_effect_aa_freq': json.dumps(ann.rule_effect_aa_freq),
             'rule_effect_alt': json.dumps(ann.rule_effect_alt),
             'freq_method': ann.freq_method,
-            'variant_source': v.source,
             'combined_states': json.dumps([
                 {
                     'alt_codon': s.alt_codon,
@@ -238,7 +237,12 @@ def write_json(
                 }
                 for s in ann.combined_states
             ]),
-        })
+        }
+        if not result.is_fasta_mode:
+            # VCF-mode-only provenance (mirrors the TSV's variant_source gating):
+            # FASTA rows carry no source label, so the key is omitted entirely.
+            row['variant_source'] = v.source
+        variant_rows.append(row)
 
     coverage_rows = [
         {
@@ -622,6 +626,7 @@ def write_tsv(
         nt_users = ';'.join(nt_change_user(a) for a in members)
         aa_effects = ';'.join(_aa_effects(a) for a in members)
         strands = ';'.join(strand_by_feature.get(a.feature_name, '') for a in members)
+        sources = ';'.join(variant_source_label(a) for a in members)
         first_chrom = members[0].variant.chrom
         # The hit frequency of a formula row is the Fréchet lower bound: the
         # guaranteed minimum co-occurrence frequency of the combination, not
@@ -632,6 +637,7 @@ def write_tsv(
             'nt_mut': nt_muts,
             'nt_mut_user': nt_users,
             'strand': strands,
+            'variant_source': sources,
             'aa_frequency': repr(round(hit.frechet_lower, 3)),
             'depth': '',  # combined row spans multiple variants; no single depth
             'consequence': ';'.join(a.consequence for a in members),

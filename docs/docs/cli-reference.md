@@ -222,6 +222,19 @@ run.
   (e.g. HSV-1 `UL23` and HSV-2 `UL23`), profiling fails because resistance-relevant
   mutations cannot be attributed to a single species unambiguously. Same-species
   shared gene names are always allowed.
+- **Reference comparison and variant provenance.** Resistance rules are defined
+  against the stored internal project reference, while VCF variants are called
+  against `--ref-fasta`. ResPro reconciles both at sequence level: differences
+  between `--ref-fasta` and the internal reference are emitted as baseline
+  variants (`Reference derived`, assumed AF `1.0`) and overlaid with the
+  in-cutoff VCF calls (`VCF derived`, including residual frequencies at
+  partially called positions). Calls failing `--min-af` or `--min-depth` are
+  removed before reconciliation, reverting the position to the pure baseline
+  (`Reference derived`, AF `1.0`). When `--bam` is provided, one deferred
+  coverage gate removes any candidate (whether `VCF derived` or
+  `Reference derived`) whose codon/span fails the coverage threshold before
+  rule matching. For best results, call variants against a reference FASTA
+  that is identical or highly similar to the stored internal project reference.
 
 ### Allele-frequency source (VCF mode)
 

@@ -1,5 +1,5 @@
 """
-VCF reference reconciliation — sample states relative to the internal reference.
+VCF reference comparison — sample states relative to the internal reference.
 
 Also hosts the shared VCF coordinate machinery (the intron-aware query-to-CDS
 coordinate map and the cross-match dedupe helper) used by the BAM coverage
@@ -9,7 +9,7 @@ superseded by this module and removed.
 
 VCF variants are called against the supplied reference FASTA, but resistance
 rules are defined against the internal project reference. This module emits the
-complete reconciled variant set in internal-reference coordinates:
+complete variant set in internal-reference coordinates:
 
 1. **Baseline emission** — differences between the supplied reference and the
    internal reference, derived from the existing feature alignments (the same
@@ -28,7 +28,7 @@ complete reconciled variant set in internal-reference coordinates:
    baseline variant at that position is re-emitted at the residual frequency
    with the ``vcf_derived`` label (its frequency derives from caller AFs).
 
-The reconciliation is tiered for performance: the supplied-internal alignment
+The comparison is tiered for performance: the supplied-internal alignment
 is computed once per feature match; calls are located by coordinate lookup and
 only their local window is re-walked. When the supplied and internal references
 are identical the baseline is empty and the output equals the previous
@@ -37,6 +37,24 @@ event-level remap behaviour.
 Unverified inputs (overlapping separate records, REF blocks that do not match
 the supplied reference, spans crossing alignment gaps, inconsistent allele
 frequencies) are skipped with a warning instead of producing a false result.
+
+Flow (per feature match, see ``reconcile_variants_for_matches``):
+
+1. ``_build_match_alignment`` — parse the CIGAR into the baseline column state
+   (``ref_positions``) and the forward-position slot map.
+2. ``_emit_baseline`` — diff the supplied reference against the internal
+   reference with the FASTA alignment walk; each baseline variant records the
+   coding columns it occupies.
+3. ``_plan_calls`` — group calls into allele sets (one VCF record's ALTs),
+   verify them (REF block, slot coverage, frequency mass), reject overlapping
+   spans.
+4. ``_emit_call_state`` — per call, apply the ALT to a scratch copy of the
+   baseline state, walk the affected window for call-attributable differences,
+   restore the baseline state.
+5. Residual pass — re-emit baseline variants at the frequency mass not claimed
+   by the calls covering them.
+6. ``_aggregate_emissions`` + ``_dedupe_remapped_variants`` — sum per-allele
+   frequencies within a match, then collapse cross-match duplicates.
 """
 
 from __future__ import annotations
@@ -51,11 +69,9 @@ from respro.core.alignment import cigar_to_coordinate_map
 from respro.core.fasta_to_vcf import (
     _build_ref_positions,
     _gapped_strings_from_cigar,
-    _get_query_codon,
     _make_fasta_deletion_from_alignment,
     _make_fasta_insertion_from_alignment,
     _make_variant_from_coding_nt,
-    _nnn_and_uncovered_codon_indices,
     _strip_introns_from_region,
     _variants_from_alignment,
 )
@@ -101,21 +117,23 @@ def reconcile_variants(
     for var in variants:
         grouped.setdefault(var.chrom, []).append(var)
 
-    dropped_chroms: list[str] = []
+    # A VCF CHROM with no matching query record cannot be reconciled.
+    dropped_chroms = sorted(chrom for chrom in grouped if chrom not in records_by_name)
     reconciled_all: list[VariantCall] = []
     warnings_all: list[str] = []
 
-    any_chrom_matched = False
-    for chrom, group in grouped.items():
-        record = records_by_name.get(chrom)
-        if record is None:
-            logger.warning(
-                'VCF CHROM %r has no usable internal feature mapping; dropping %d variant(s)',
-                chrom, len(group),
-            )
-            dropped_chroms.append(chrom)
+    # Iterate the selected query records, not the retained calls: a contig
+    # whose calls all failed the AF/depth cutoffs (or that had no calls at all)
+    # still contributes its reference-derived baseline. Record selection is the
+    # caller's responsibility — the VCF CLI resolves exactly the CHROMs
+    # observed in the VCF, so no unrelated reference is profiled here.
+    for record in query_records:
+        if not record.feature_matches:
+            # Unusable record (aligned to nothing): contributes no baseline and
+            # cannot reconcile calls; variant chroms pointing at it are dropped
+            # via the dropped_chroms report below.
             continue
-        any_chrom_matched = True
+        group = grouped.get(record.query_name, [])
         # Narrow to the single best internal reference (same policy as the
         # previous event-level routing): a query may align to features on
         # multiple internal references; without narrowing, overlapping feature
@@ -123,21 +141,27 @@ def reconcile_variants(
         ref_id = pick_best_reference_id(record.feature_matches)
         narrowed_matches = select_matches_for_reference(record.feature_matches, ref_id)
         reconciled, warnings = reconcile_variants_for_matches(
-            group, narrowed_matches, record.query_sequence, output_chrom=chrom,
+            group, narrowed_matches, record.query_sequence, output_chrom=record.query_name,
         )
         reconciled_all.extend(reconciled)
         warnings_all.extend(warnings)
 
+    any_chrom_matched = any(chrom in records_by_name for chrom in grouped)
+    for chrom in dropped_chroms:
+        logger.warning(
+            'VCF CHROM %r has no matching reference record — dropping %d variant(s)',
+            chrom, len(grouped.get(chrom, [])),
+        )
     if variants and not any_chrom_matched:
         raise ValueError(
-            'No VCF CHROM could be reconciled to an internal reference. '
+            'No VCF CHROM matches an internal project reference. '
             f'VCF CHROMs={sorted(grouped)} '
             f'resolved FASTA records={sorted(records_by_name)}. '
             'Ensure the reference FASTA records align to features in the project database.'
         )
 
     logger.info(
-        'Reconciled %d variant(s) across %d CHROM(s); %d emitted, %d CHROM(s) dropped',
+        'Compared %d variant(s) across %d CHROM(s); %d emitted, %d CHROM(s) dropped',
         len(variants), len(grouped), len(reconciled_all), len(dropped_chroms),
     )
     return reconciled_all, warnings_all, dropped_chroms
@@ -167,6 +191,7 @@ def reconcile_variants_for_matches(
     query_upper = query_sequence.upper()
     warnings: list[str] = []
     pairs: list[tuple[VariantCall, FeatureMatch]] = []
+    all_rejections: list[_Rejection] = []
 
     for match in matches:
         ctx = _build_match_alignment(match, query_sequence)
@@ -174,15 +199,25 @@ def reconcile_variants_for_matches(
             continue
         baseline = _emit_baseline(ctx, warnings)
         plans, rejected = _plan_calls(ctx, variants, query_upper, warnings)
-        warnings.extend(rejected)
+        warnings.extend(r.message for r in rejected)
+        all_rejections.extend(rejected)
         emissions: list[VariantCall] = []
-        windows: list[tuple[int, int, float]] = []
+        covered_base: list[tuple[set[int], float]] = []
+        covered_pending: list[tuple[set[int], float]] = []
         for plan in plans:
-            events, window = _emit_call_state(ctx, plan, warnings)
+            events, cov_base, cov_pending = _emit_call_state(ctx, plan, warnings)
             emissions.extend(events)
-            windows.append((window[0], window[1], plan.call.allele_freq))
+            covered_base.append((cov_base, plan.call.allele_freq))
+            covered_pending.append((cov_pending, plan.call.allele_freq))
         for var, occupied in baseline:
-            residual, source = _baseline_residual(var, occupied, windows)
+            # A baseline variant lives in one sub-space of its column: SNPs and
+            # deletions in the base sub-space, insertions in the pending
+            # sub-space. A call's haplotype drops the baseline allele only when
+            # the call changed that sub-space (an insertion attached next to a
+            # baseline SNP keeps the SNP, and vice versa).
+            kind_pending = len(var.alt) > len(var.ref)
+            sets = covered_pending if kind_pending else covered_base
+            residual, source = _baseline_residual(var, occupied, sets)
             if residual <= _RESIDUAL_EPS:
                 continue
             emissions.append(replace(
@@ -194,6 +229,14 @@ def reconcile_variants_for_matches(
         for var, _match in pairs:
             var.chrom = output_chrom
 
+    mismatch_positions = sorted({r.pos for r in all_rejections if r.kind == 'ref_mismatch' and r.pos})
+    if len(mismatch_positions) >= 2:
+        warnings.append(
+            f'{len(mismatch_positions)} VCF positions do not match the supplied reference '
+            '— the VCF was probably called against a different reference; these variants '
+            'were skipped'
+        )
+
     deduped, dedupe_warnings = _dedupe_remapped_variants(pairs)
     warnings.extend(dedupe_warnings)
     return deduped, warnings
@@ -201,7 +244,23 @@ def reconcile_variants_for_matches(
 
 @dataclass(frozen=True)
 class _Slot:
-    """One supplied-reference base position inside a match's alignment."""
+    """One supplied-reference base position inside a match's alignment.
+
+    The alignment is stored per internal-reference column as
+    ``ref_positions[column] = [internal_base, supplied_base, pending]``, where
+    ``pending`` holds supplied bases that sit between the previous internal
+    column and this one (i.e. insertions relative to the internal reference).
+    Every aligned supplied base is therefore one of two slot kinds:
+
+    - ``'base'`` — the base aligns 1:1 to an internal column; its character is
+      that column's ``supplied_base``.
+    - ``'pending'`` — the base is one character of the owning column's
+      ``pending`` string; ``char_idx`` indexes it (``column`` is the column
+      whose pending string carries it, in coding orientation).
+
+    ``q`` is the base's forward-strand position in the supplied sequence, used
+    to verify the slot's stored character against the VCF REF block.
+    """
 
     kind: str  # 'base' (maps to an internal column) or 'pending' (inserted bases)
     column: int  # ref_positions index (full-CDS coordinates)
@@ -211,16 +270,51 @@ class _Slot:
 
 @dataclass
 class _CallPlan:
-    """One verified VCF call ready for state surgery."""
+    """One verified VCF call ready for state surgery.
+
+    ``slots`` lists the alignment slots covered by the call's REF span in
+    **coding orientation** (reversed for '-' matches, where the supplied block
+    reads right-to-left against the CDS). ``block`` is the ALT in coding
+    orientation: verbatim for '+' matches, reverse-complemented for '-'
+    matches. Slot ``i`` of the span receives ``block[i]`` on '+' matches and
+    ``block[i + (len(alt) - len(ref))]`` on '-' matches (the reversed block is
+    anchored at the coding-first slot, so extra ALT bases lead the span).
+    """
 
     call: VariantCall
     slots: list[_Slot]  # coding-ordered slots covered by the REF span
     block: str  # ALT in coding orientation
 
 
+@dataclass(frozen=True)
+class _Rejection:
+    """One skipped VCF call with its user-facing reason."""
+
+    kind: str  # 'ref_mismatch' | 'unmapped' | 'af_mass' | 'phase'
+    pos: int | None  # 1-based VCF position, when position-specific
+    message: str
+
+
 @dataclass
 class _MatchAlignment:
-    """Precomputed alignment context for one feature match."""
+    """Precomputed alignment context for one feature match.
+
+    ``ref_positions`` is the baseline (plain supplied-reference) state, one
+    entry per ungapped internal-reference column of the aligned region::
+
+        [internal_base, supplied_base, pending]
+
+    For example, internal ``ACGT`` vs supplied ``ACGGT`` (CIGAR ``3M1I1M``)
+    yields ``[['A','A',''], ['C','C',''], ['G','G',''], ['T','T','G']]`` — the
+    inserted supplied ``G`` is carried as the pending string of column 3, the
+    column it precedes in coding orientation. Call-state surgery edits these
+    entries in place (hence mutable lists) and restores them afterwards, so
+    every call is applied to the pristine baseline context.
+
+    ``slot_map`` maps each aligned forward query position to its
+    :class:`_Slot`; ``q2c`` is the underlying forward query position to
+    internal CDS position map (introns excluded).
+    """
 
     match: FeatureMatch
     feature: FeatureRecord
@@ -375,18 +469,51 @@ def _emit_baseline(
     baseline: list[tuple[VariantCall, set[int]]] = []
     for var in variants:
         var.source = REFERENCE_DERIVED
+        var.query_ref_codon = ''
+        var.query_codon_feature_id = 0
+        _attach_supplied_codon(ctx, var)
         baseline.append((var, _variant_occupied_columns(ctx, var)))
 
-    nnn_indices = _nnn_and_uncovered_codon_indices(
-        ctx.coding, feature.codon_start, ctx.match.cds_start, ctx.covered_cds_end,
-    )
-    for start, end in _merge_stretches(nnn_indices):
-        warnings.append(
-            f'Feature {feature.name}: supplied reference contains an ambiguous N '
-            f'stretch covering codon(s) {start + 1}-{end + 1}; no baseline variants '
-            'emitted for this stretch'
-        )
+    # N stretches in the supplied reference are unresolvable: suppress every
+    # baseline variant touching an N run and warn once per run. (FASTA-mode
+    # consensus profiling expands IUPAC codes instead — meaningful for a
+    # consensus, but a reference-derived allele frequency would be an invented
+    # assumption, so reconciliation degrades instead.)
+    n_runs = _n_run_stretches(ctx.coding)
+    if n_runs:
+        run_columns = [set(range(lo, hi + 1)) for lo, hi in n_runs]
+        baseline = [
+            (var, occ) for var, occ in baseline
+            if not any(occ & cols for cols in run_columns)
+        ]
+        for lo, hi in n_runs:
+            warnings.append(
+                f'Feature {feature.name}: supplied reference contains an ambiguous N stretch '
+                f'at positions {lo + 1}-{hi + 1} — no variants emitted for this stretch'
+            )
     return baseline
+
+
+_UNAMBIGUOUS_BASES = frozenset('ACGT')
+
+
+def _n_run_stretches(
+    coding: list[list[str]],
+) -> list[tuple[int, int]]:
+    """Return maximal runs of coding columns whose supplied base or pending insertion has N/ambiguity bases."""
+    runs: list[tuple[int, int]] = []
+    for idx, entry in enumerate(coding):
+        sup = entry[1].upper()
+        has_ambig = (sup != '-' and sup not in _UNAMBIGUOUS_BASES) or any(
+            ch not in _UNAMBIGUOUS_BASES for ch in entry[2].upper()
+        )
+        if not has_ambig:
+            continue
+        if runs and idx == runs[-1][1] + 1:
+            runs[-1] = (runs[-1][0], idx)
+        else:
+            runs.append((idx, idx))
+    return runs
 
 
 def _gapped_ref_string(ctx: _MatchAlignment) -> str:
@@ -403,57 +530,55 @@ def _gapped_query_string(ctx: _MatchAlignment) -> str:
     return ''.join(parts)
 
 
-def _merge_stretches(codon_indices: list[int]) -> list[tuple[int, int]]:
-    """Merge sorted codon indices into inclusive (start, end) stretches."""
-    stretches: list[tuple[int, int]] = []
-    for idx in sorted(codon_indices):
-        if stretches and idx == stretches[-1][1] + 1:
-            stretches[-1] = (stretches[-1][0], idx)
-        else:
-            stretches.append((idx, idx))
-    return stretches
-
-
 def _plan_calls(
     ctx: _MatchAlignment,
     variants: list[VariantCall],
     query_upper: str,
     warnings: list[str],
-) -> tuple[list[_CallPlan], list[str]]:
+) -> tuple[list[_CallPlan], list[_Rejection]]:
     """
     Group, verify and order the VCF calls for state surgery.
 
-    Calls are grouped into allele sets (one VCF record's ALTs share
-    CHROM/POS/REF). A set is verified when its REF block matches the supplied
-    reference, every REF position has an attachable slot, and its allele
-    frequencies sum to at most 1. Two verified sets whose slot-column ranges
-    overlap are jointly unverified (no phase): all their calls are skipped with
-    a warning and the baseline is retained for the span.
+    Calls are grouped into allele sets by ``(chrom, pos, ref, record_index)``:
+    the ALTs of one VCF record are mutually exclusive states, while two
+    separate records at the same position are distinct phase-unknown events
+    (the parser stamps ``record_index`` so they stay distinguishable). A set is
+    verified when its REF block matches the supplied reference, every REF
+    position has an attachable slot, and its allele frequencies sum to at most
+    1. Two verified sets whose supplied-reference spans overlap are jointly
+    unverified (no phase): all their calls are skipped with a warning and the
+    baseline is retained for the span.
 
-    :return: (verified call plans in input order, rejection warnings)
+    :return: (verified call plans in input order, rejections)
     """
-    groups: dict[tuple[str, int, str], list[VariantCall]] = {}
-    order: list[tuple[str, int, str]] = []
+    groups: dict[tuple[str, int, str, int], list[VariantCall]] = {}
+    order: list[tuple[str, int, str, int]] = []
     for var in variants:
-        key = (var.chrom, var.pos, var.ref)
+        key = (var.chrom, var.pos, var.ref, var.record_index)
         if key not in groups:
             groups[key] = []
             order.append(key)
         groups[key].append(var)
 
-    rejections: list[str] = []
-    slots_by_key: dict[tuple[str, int, str], list[_Slot] | None] = {}
+    rejections: list[_Rejection] = []
+    slots_by_key: dict[tuple[str, int, str, int], list[_Slot] | None] = {}
     for key in order:
         var = groups[key][0]
         ref_len = len(var.ref)
+        # Gate 1: the REF block must match the supplied reference — a VCF whose
+        # REF disagrees with its own reference cannot be applied.
         supplied = query_upper[var.pos:var.pos + ref_len].upper()
         if supplied != var.ref.upper():
-            rejections.append(
-                f'pos {var.pos + 1}: VCF REF {var.ref!r} does not match supplied '
-                f'reference {supplied!r}; call skipped (baseline retained)'
-            )
+            rejections.append(_Rejection(
+                kind='ref_mismatch', pos=var.pos + 1,
+                message=f'pos {var.pos + 1}: VCF REF {var.ref!r} does not match the supplied '
+                        f'reference {supplied!r} — variant skipped',
+            ))
             slots_by_key[key] = None
             continue
+        # Gate 2: every REF position must resolve to an attachable slot whose
+        # stored character matches the supplied base (catches spans crossing
+        # alignment gaps, introns, or the aligned region's edge).
         slots: list[_Slot] = []
         unresolved = False
         for offset in range(ref_len):
@@ -463,33 +588,43 @@ def _plan_calls(
                 break
             slots.append(slot)
         if unresolved:
-            rejections.append(
-                f'pos {var.pos + 1}: VCF {var.ref}>{var.alt} span is not fully mapped '
-                'to the internal reference; call skipped (baseline retained)'
-            )
+            rejections.append(_Rejection(
+                kind='unmapped', pos=var.pos + 1,
+                message=f'pos {var.pos + 1}: VCF {var.ref}>{var.alt} is outside the aligned '
+                        'region — variant skipped',
+            ))
             slots_by_key[key] = None
             continue
+        # Gate 3: one record's ALTs are mutually exclusive — their frequencies
+        # must not exceed the position's total frequency mass.
         total_af = sum(call.allele_freq for call in groups[key])
         if total_af > 1.0 + _AF_MASS_EPS:
-            rejections.append(
-                f'pos {var.pos + 1}: allele frequencies sum to {total_af:.3f} (> 1); '
-                'calls cannot be jointly phased and are skipped (baseline retained)'
-            )
+            rejections.append(_Rejection(
+                kind='af_mass', pos=var.pos + 1,
+                message=f'pos {var.pos + 1}: allele frequencies sum to {total_af:.3f} (> 1) — '
+                        'variants skipped',
+            ))
             slots_by_key[key] = None
             continue
         slots_by_key[key] = slots
 
+    # Gate 4: two verified allele sets whose supplied-reference spans overlap
+    # cannot be jointly phased — skip both and keep the baseline for the span.
+    # Spans are compared in supplied coordinates (POS .. POS+len(REF)-1,
+    # including the anchor), not projected slot columns: two records at
+    # distinct supplied positions never overlap, even when their slots share a
+    # column across an insertion boundary.
     verified = [key for key in order if slots_by_key.get(key) is not None]
-    conflicting: set[tuple[str, int, str]] = set()
+    conflicting: set[tuple[str, int, str, int]] = set()
     for i, key_a in enumerate(verified):
         slots_a = slots_by_key[key_a]
         assert slots_a is not None
-        cols_a = [s.column for s in slots_a]
+        span_a = (key_a[1], key_a[1] + len(key_a[2]) - 1)
         for key_b in verified[i + 1:]:
             slots_b = slots_by_key[key_b]
             assert slots_b is not None
-            cols_b = [s.column for s in slots_b]
-            if min(cols_a) <= max(cols_b) and min(cols_b) <= max(cols_a):
+            span_b = (key_b[1], key_b[1] + len(key_b[2]) - 1)
+            if span_a[0] <= span_b[1] and span_b[0] <= span_a[1]:
                 conflicting.add(key_a)
                 conflicting.add(key_b)
     if conflicting:
@@ -497,10 +632,11 @@ def _plan_calls(
             f'{key[0]}:{key[1] + 1}{key[2]}>' + '/'.join(c.alt for c in groups[key])
             for key in verified if key in conflicting
         )
-        rejections.append(
-            'Overlapping VCF records cannot be jointly phased; calls skipped '
-            f'(baseline retained): {span_text}'
-        )
+        rejections.append(_Rejection(
+            kind='phase', pos=None,
+            message='Overlapping VCF records cannot be phased together — variants skipped: '
+                    + span_text,
+        ))
 
     plans: list[_CallPlan] = []
     for key in order:
@@ -537,7 +673,7 @@ def _emit_call_state(
     ctx: _MatchAlignment,
     plan: _CallPlan,
     warnings: list[str],
-) -> tuple[list[VariantCall], tuple[int, int]]:
+) -> tuple[list[VariantCall], set[int], set[int]]:
     """
     Emit one call's sample state against the internal reference.
 
@@ -548,8 +684,18 @@ def _emit_call_state(
     call's allele frequency, the ``vcf_derived`` source label, and the original
     supplied coordinates.
 
-    :return: (emitted variants, inclusive coding-column walk window) — the
-        window is used by the residual pass to attribute frequency mass.
+    Only **call-attributable** differences are emitted, per sub-space: a
+    column's base and its pending insertion payload change independently, so a
+    call that edits the base must not re-emit the column's unchanged pending
+    payload, and vice versa. Differences the call merely sits next to belong to
+    the baseline emission, which carries them at full frequency mass.
+
+    :return: (emitted variants, covered base columns, covered pending columns)
+        — the covered sets are the columns whose base / pending payload the
+        call changed, plus the columns of emitted events (a merged deletion
+        run absorbs baseline-deleted columns beyond the span). The residual
+        pass subtracts the call's frequency mass from baseline variants in the
+        matching sub-space whose columns intersect.
     """
     feature = ctx.feature
     call = plan.call
@@ -563,8 +709,29 @@ def _emit_call_state(
 
     col_lo = min(s.column for s in slots)
     col_hi = max(s.column for s in slots)
+    # Snapshot the baseline state over the surgery's reach: the span columns,
+    # any contiguous run of deleted or repeat-adjacent columns bordering the
+    # span, and one anchor flank on each side. Columns outside the snapshot are
+    # guaranteed unmodified, which the walk relies on to skip them.
     snap_lo = max(0, col_lo - 1)
+    while snap_lo > 0 and (
+        ref_positions[snap_lo][1] == '-'
+        or ref_positions[snap_lo - 1][1] == '-'
+        or ref_positions[snap_lo][0] == ref_positions[min(col_hi, snap_lo + 1)][0]
+    ):
+        snap_lo -= 1
+    if snap_lo > 0:
+        snap_lo -= 1
+
     snap_hi = min(len(ref_positions) - 1, col_hi + 1)
+    while snap_hi + 1 < len(ref_positions) and (
+        ref_positions[snap_hi][1] == '-'
+        or ref_positions[snap_hi + 1][1] == '-'
+        or ref_positions[snap_hi][0] == ref_positions[max(col_lo, snap_hi - 1)][0]
+    ):
+        snap_hi += 1
+    if snap_hi + 1 < len(ref_positions):
+        snap_hi += 1
     saved = {j: list(ref_positions[j]) for j in range(snap_lo, snap_hi + 1)}
 
     # Attachment point for ALT bases beyond the REF span. '+' matches read the
@@ -592,30 +759,45 @@ def _emit_call_state(
     trailing_extra = ''
     try:
         shift = alt_len - ref_len
+        # Collect the surgery edits per slot, then apply them: base-slot edits
+        # are per-column and order-independent, but several pending slots can
+        # share one column's pending string — their character indexes were
+        # computed against the original string, so pending edits must be
+        # applied per column in DESCENDING char_idx order (removals otherwise
+        # shift the indexes of the edits still to come).
+        base_edits: list[tuple[int, str | None]] = []
+        pending_edits: dict[int, list[tuple[int, str | None]]] = {}
         for i, slot in enumerate(slots):
-            entry = ref_positions[slot.column]
-            if plus_strand:
-                block_idx = i
+            # '+' matches read the ALT block in coding order: slot i gets
+            # block[i], and slots beyond the ALT are deleted. '-' matches read
+            # it reversed with the block anchored at the coding-first slot, so
+            # slot i gets block[i + shift] — extra ALT bases lead the span.
+            block_idx = i if plus_strand else i + shift
+            new_char = block[block_idx] if 0 <= block_idx < alt_len else None
+            if slot.kind == 'base':
+                base_edits.append((slot.column, new_char))
             else:
-                block_idx = i + shift
-            if 0 <= block_idx < alt_len:
-                new_char = block[block_idx]
-                if slot.kind == 'base':
-                    ref_positions[slot.column] = [entry[0], new_char, entry[2]]
+                pending_edits.setdefault(slot.column, []).append((slot.char_idx, new_char))
+
+        for column, new_char in base_edits:
+            entry = ref_positions[column]
+            # None means the slot is deleted (ALT shorter than REF).
+            ref_positions[column] = [entry[0], new_char if new_char is not None else '-', entry[2]]
+        for column, edits in pending_edits.items():
+            entry = ref_positions[column]
+            p = entry[2]
+            for char_idx, new_char in sorted(edits, key=lambda e: e[0], reverse=True):
+                if new_char is None:
+                    p = p[:char_idx] + p[char_idx + 1:]
                 else:
-                    p = entry[2]
-                    ref_positions[slot.column] = [
-                        entry[0], entry[1], p[:slot.char_idx] + new_char + p[slot.char_idx + 1:],
-                    ]
-            else:
-                if slot.kind == 'base':
-                    ref_positions[slot.column] = [entry[0], '-', entry[2]]
-                else:
-                    p = entry[2]
-                    ref_positions[slot.column] = [
-                        entry[0], entry[1], p[:slot.char_idx] + p[slot.char_idx + 1:],
-                    ]
+                    p = p[:char_idx] + new_char + p[char_idx + 1:]
+            ref_positions[column] = [entry[0], entry[1], p]
+
         if shift > 0:
+            # ALT bases beyond the REF span become an insertion attached at the
+            # span's free end in coding orientation: after the coding-last slot
+            # for '+' matches (prepended to the next column's pending string),
+            # before the coding-first slot for '-' matches.
             trailing_extra = block[:shift] if not plus_strand else block[ref_len:]
             if extra_column < len(ref_positions):
                 entry = ref_positions[extra_column]
@@ -629,25 +811,44 @@ def _emit_call_state(
 
         _collapse_coincident_gaps(ref_positions, snap_lo, snap_hi)
 
-        lo = max(0, col_lo - off - 1)
-        hi = min(len(coding) - 1, col_hi - off + 1)
-        while lo > 0 and coding[lo][1] == '-' and coding[lo - 1][1] == '-':
-            lo -= 1
-        while hi + 1 < len(coding) and coding[hi][1] == '-' and coding[hi + 1][1] == '-':
-            hi += 1
+        # Columns whose base / pending payload the call changed relative to the
+        # baseline — per sub-space, so the walk and the residual pass can
+        # attribute each event kind independently. Keys are converted to coding
+        # coordinates once: the walk and covered sets work in coding
+        # coordinates, while the snapshot keys are full-CDS columns. Base slots
+        # spanned by the verified call are included in changed_base so a
+        # length-changing replacement countered by a deletion (e.g. A -> GG
+        # with G2del) emits and covers the surviving base difference as
+        # vcf_derived.
+        saved_coding = {j - off: entry for j, entry in saved.items()}
+        call_base_cols = {
+            s.column - off for s in slots
+            if s.kind == 'base' and 0 <= s.column - off < len(coding)
+        } if alt_len <= ref_len else set()
+        changed_base = {
+            j for j, entry in saved_coding.items()
+            if 0 <= j < len(coding) and ref_positions[j + off][1] != entry[1]
+        } | call_base_cols
+        changed_pending = {
+            j for j, entry in saved_coding.items()
+            if 0 <= j < len(coding) and ref_positions[j + off][2] != entry[2]
+        }
 
-        emitted = _walk_diff(ctx, lo, hi, pending_tail)
+        lo = max(0, snap_lo - off)
+        hi = min(len(coding) - 1, snap_hi - off)
+
+        emitted = _walk_diff(ctx, lo, hi, changed_base, changed_pending, pending_tail)
         if alt_len > ref_len and extra_column >= len(ref_positions):
             # Insertion past the last internal column: only '+'-strand features
             # have a representable anchor (the last internal base); '-'-strand
             # features would need the following genomic base, which is outside
             # the feature.
             if feature.strand == '+':
-                emitted.extend(_emit_trailing_insertion(ctx, col_hi, trailing_extra, call))
+                emitted.extend(_emit_trailing_insertion(ctx, col_hi - off, trailing_extra, call))
             else:
                 warnings.append(
-                    f'pos {call.pos + 1}: VCF insertion {call.ref}>{call.alt} extends '
-                    f'past the 3\u2032 end of feature {feature.name!r}; event skipped'
+                    f'pos {call.pos + 1}: VCF insertion {call.ref}>{call.alt} extends past the end '
+                    f'of feature {feature.name!r} — variant skipped'
                 )
     finally:
         for j, entry in saved.items():
@@ -662,7 +863,20 @@ def _emit_call_state(
         var.user_ref = call.ref
         var.user_alt = call.alt
         _attach_supplied_codon(ctx, var)
-    return emitted, (lo, hi)
+
+    # Covered columns per sub-space: the columns the call changed, plus the
+    # columns of emitted events (a merged deletion run absorbs
+    # baseline-deleted columns beyond the span; insertions occupy their
+    # pending column).
+    covered_base = set(changed_base)
+    covered_pending = set(changed_pending)
+    for var in emitted:
+        cols = _variant_occupied_columns(ctx, var)
+        if len(var.alt) > len(var.ref):
+            covered_pending |= cols
+        else:
+            covered_base |= cols
+    return emitted, covered_base, covered_pending
 
 
 def _collapse_coincident_gaps(
@@ -671,51 +885,163 @@ def _collapse_coincident_gaps(
     hi: int,
 ) -> None:
     """
-    Collapse coincident insertion+deletion gaps into substitutions.
+    Collapse coincident insertion+deletion gaps and merge repeat-separated deletions.
 
-    Call surgery can produce a column whose supplied base is deleted while its
-    pending string gained (or already had) characters — the gapped state then
-    shows an insertion and a deletion where the sequence has a substitution.
-    Moving one pending character into the deleted slot preserves the sequence
-    and yields the minimal event representation.
+    1. Across each maximal contiguous run of deleted columns ``c_start..c_end``,
+       collect the concatenated pending insertion bases ``P`` sitting in that
+       gap (``pending[c_start..c_end]`` plus ``pending[c_end + 1]`` when
+       ``c_end + 1 <= hi``) and distribute them in forward sequence order across
+       ``c_start..c_end`` without inverting ``P``.
+    2. When a deletion run of a single repeated base is separated from another
+       deletion run only by columns carrying that same repeat base (with empty
+       pending strings), shift the repeat-base deletion across the identical
+       repeat columns so the two deletions merge into one contiguous run.
     """
-    for j in range(lo, hi + 1):
-        entry = ref_positions[j]
-        while entry[1] == '-' and entry[2]:
-            ref_positions[j] = [entry[0], entry[2][0], entry[2][1:]]
-            entry = ref_positions[j]
-        if (
-            entry[1] == '-'
-            and j + 1 <= hi
-            and ref_positions[j + 1][2]
-            and ref_positions[j + 1][1] != '-'
+    j = lo
+    while j <= hi:
+        if ref_positions[j][1] != '-':
+            j += 1
+            continue
+        c_start = j
+        c_end = j
+        while c_end + 1 <= hi and ref_positions[c_end + 1][1] == '-':
+            c_end += 1
+        d_len = c_end - c_start + 1
+        has_next = c_end + 1 <= hi
+        p_cols = range(c_start, (c_end + 2) if has_next else (c_end + 1))
+        pending_all = ''.join(ref_positions[k][2] for k in p_cols)
+        if pending_all:
+            for k in p_cols:
+                ref_positions[k][2] = ''
+            ref_slice = [ref_positions[k][0] for k in range(c_start, c_end + 1)]
+            p_len = len(pending_all)
+            if p_len <= d_len:
+                prefix_matches = sum(
+                    1 for a, b in zip(pending_all, ref_slice[:p_len]) if a == b
+                )
+                suffix_matches = sum(
+                    1 for a, b in zip(pending_all, ref_slice[d_len - p_len:]) if a == b
+                )
+                start_col = (
+                    c_end - p_len + 1
+                    if suffix_matches >= prefix_matches
+                    else c_start
+                )
+                for offset, ch in enumerate(pending_all):
+                    ref_positions[start_col + offset][1] = ch
+            else:
+                prefix_matches = sum(
+                    1 for a, b in zip(pending_all[:d_len], ref_slice) if a == b
+                )
+                suffix_matches = sum(
+                    1 for a, b in zip(pending_all[p_len - d_len:], ref_slice) if a == b
+                )
+                if has_next and prefix_matches > suffix_matches:
+                    for offset in range(d_len):
+                        ref_positions[c_start + offset][1] = pending_all[offset]
+                    ref_positions[c_end + 1][2] = pending_all[d_len:]
+                else:
+                    extra = pending_all[:p_len - d_len]
+                    fill = pending_all[p_len - d_len:]
+                    ref_positions[c_start][2] = extra
+                    for offset in range(d_len):
+                        ref_positions[c_start + offset][1] = fill[offset]
+        j = c_end + 1
+
+    # Merge deletions separated only by identical repeat bases.
+    j = lo
+    while j <= hi:
+        if ref_positions[j][1] != '-' or ref_positions[j][2]:
+            j += 1
+            continue
+        d_lo = j
+        d_hi = j
+        while (
+            d_hi + 1 <= hi
+            and ref_positions[d_hi + 1][1] == '-'
+            and not ref_positions[d_hi + 1][2]
         ):
-            nxt = ref_positions[j + 1]
-            ref_positions[j] = [entry[0], nxt[2][0], entry[2]]
-            ref_positions[j + 1] = [nxt[0], nxt[1], nxt[2][1:]]
+            d_hi += 1
+        repeat_base = ref_positions[d_lo][0]
+        if all(ref_positions[k][0] == repeat_base for k in range(d_lo, d_hi + 1)):
+            r_start = d_lo
+            while (
+                r_start > lo
+                and ref_positions[r_start - 1][1] == repeat_base
+                and not ref_positions[r_start - 1][2]
+            ):
+                r_start -= 1
+            if r_start < d_lo and r_start > lo and ref_positions[r_start - 1][1] == '-':
+                del_count = d_hi - d_lo + 1
+                for k in range(r_start, r_start + del_count):
+                    ref_positions[k][1] = '-'
+                for k in range(r_start + del_count, d_hi + 1):
+                    ref_positions[k][1] = repeat_base
+                j = d_hi + 1
+                continue
+
+            r_end = d_hi
+            while (
+                r_end + 1 <= hi
+                and ref_positions[r_end + 1][1] == repeat_base
+                and ref_positions[r_end + 1][0] == repeat_base
+                and not ref_positions[r_end + 1][2]
+            ):
+                r_end += 1
+            if r_end > d_hi and r_end + 1 <= hi and ref_positions[r_end + 1][1] == '-':
+                rep_count = r_end - d_hi
+                for k in range(d_lo, d_lo + rep_count):
+                    ref_positions[k][1] = repeat_base
+                for k in range(d_lo + rep_count, r_end + 1):
+                    ref_positions[k][1] = '-'
+                j = r_end + 1
+                continue
+        j = d_hi + 1
 
 
 def _walk_diff(
     ctx: _MatchAlignment,
     lo: int,
     hi: int,
+    changed_base: set[int],
+    changed_pending: set[int],
     pending_tail: int = -1,
 ) -> list[VariantCall]:
     """
-    Walk the state's coding window for differences vs the internal reference.
+    Walk the state's coding window for call-attributable differences.
 
-    Emits SNPs, insertion payloads attached at their columns (including a
-    pending tail just past the window), and complete deletion runs. The window
-    bounds are extended by the caller so deletion runs are never truncated.
+    A column's difference vs the internal reference is emitted only when the
+    call affected the **matching sub-space** of that column relative to the
+    baseline (the plain supplied reference): insertion payloads (the pending
+    string) are attributed to ``changed_pending``, SNPs and deletions to
+    ``changed_base``. This keeps shared neighbour differences (a baseline SNP
+    or insertion next to the call's span) with the baseline pass, which emits
+    them once at full frequency mass instead of once per flanking call state.
+
+    Deletion runs are emitted as one merged event when **any** base of the run
+    changed — the merged event then also represents the baseline-deleted
+    columns it absorbs (their residual mass is reduced via the covered set).
+    Runs where nothing changed are pure baseline deletions and are skipped.
+
+    :param changed_base: coding columns whose base sub-space is call-attributed
+    :param changed_pending: coding columns whose pending sub-space changed
+    :param pending_tail: coding column just past the window carrying a modified
+        pending payload ('+'-match insertion extras), or -1
     """
     feature = ctx.feature
     coding = ctx.coding
     emitted: list[VariantCall] = []
 
+    def _base_changed(col: int) -> bool:
+        return col in changed_base
+
+    def _pending_changed(col: int) -> bool:
+        return col in changed_pending
+
     idx = lo
     while idx <= hi:
         ref_base, sup, pending = coding[idx]
-        if pending:
+        if pending and _pending_changed(idx):
             var = _make_fasta_insertion_from_alignment(feature, coding, idx, pending)
             if var is not None:
                 emitted.append(var)
@@ -723,12 +1049,13 @@ def _walk_diff(
             run_end = idx
             while run_end + 1 <= hi and coding[run_end + 1][1] == '-':
                 run_end += 1
-            var = _make_fasta_deletion_from_alignment(feature, coding, idx, run_end)
-            if var is not None:
-                emitted.append(var)
+            if any(_base_changed(col) for col in range(idx, run_end + 1)):
+                var = _make_fasta_deletion_from_alignment(feature, coding, idx, run_end)
+                if var is not None:
+                    emitted.append(var)
             idx = run_end + 1
             continue
-        if sup != ref_base:
+        if _base_changed(idx) and sup != ref_base:
             var = _make_variant_from_coding_nt(feature, idx, ref_base, sup)
             emitted.append(var)
         idx += 1
@@ -738,7 +1065,7 @@ def _walk_diff(
     # is extended to include the '+'-match insertion attachment column).
     if pending_tail > hi and pending_tail < len(coding):
         tail = coding[pending_tail][2]
-        if tail:
+        if _pending_changed(pending_tail) and tail:
             var = _make_fasta_insertion_from_alignment(
                 feature, coding, pending_tail, tail,
             )
@@ -785,7 +1112,13 @@ def _emit_trailing_insertion(
 
 
 def _attach_supplied_codon(ctx: _MatchAlignment, var: VariantCall) -> None:
-    """Bind the supplied-reference codon context to an emitted call variant.
+    """Bind the internal-reference codon context to an emitted variant.
+
+    Because reconciliation already emits every surviving supplied-vs-internal
+    difference in a codon as its own ``VariantCall``, ``query_ref_codon`` must
+    carry the internal reference codon (``ctx.coding[...][0]``) so downstream
+    annotation does not apply reverted or rejected baseline differences a
+    second time or overwrite internal ``ref_aa`` on indels.
 
     For minus-strand features the VCF anchor sits coding-downstream of the
     indel payload, so the amino-acid context shifts left by the REF length —
@@ -801,7 +1134,10 @@ def _attach_supplied_codon(ctx: _MatchAlignment, var: VariantCall) -> None:
         coding_idx -= len(var.ref)
     if coding_idx < 0 or coding_idx >= len(ctx.coding):
         return
-    codon = _get_query_codon(ctx.coding, coding_idx)
+    codon_start = (coding_idx // 3) * 3
+    if codon_start + 3 > len(ctx.coding):
+        return
+    codon = ''.join(ctx.coding[codon_start + offset][0] for offset in range(3))
     if '-' in codon:
         return
     var.query_ref_codon = codon
@@ -811,30 +1147,31 @@ def _attach_supplied_codon(ctx: _MatchAlignment, var: VariantCall) -> None:
 def _baseline_residual(
     var: VariantCall,
     occupied: set[int],
-    windows: list[tuple[int, int, float]],
+    covered_sets: list[tuple[set[int], float]],
 ) -> tuple[float, str]:
     """
     Compute a baseline variant's residual frequency mass and source label.
 
-    The baseline variant exists in the residual (plain supplied-reference)
-    haplotype and in every call haplotype whose walk window overlaps the
-    variant's occupied columns. Its residual mass is therefore its baseline
-    frequency scaled by the mass not claimed by overlapping calls; the source
-    is ``vcf_derived`` when any call overlaps (the frequency decomposition
-    derives from caller AFs), else ``reference_derived``.
+    A call's haplotype fails to carry the baseline allele at a column only when
+    the call affected that column (its covered set intersects the variant's
+    occupied columns) — a call whose span merely sits next to the baseline
+    variant leaves the baseline allele intact on its molecules. The residual
+    mass is therefore the baseline frequency minus the total frequency of the
+    calls covering it; the source is ``vcf_derived`` when any call covers it
+    (the frequency decomposition derives from caller AFs), else
+    ``reference_derived``.
 
     :param var: baseline variant (its allele_freq is the baseline frequency)
     :param occupied: coding columns the variant occupies
-    :param windows: (lo, hi, allele_freq) per processed call state window
+    :param covered_sets: (covered columns, allele frequency) per call state
     :return: (residual frequency, source label)
     """
     overlapping = sum(
-        af for lo, hi, af in windows
-        if occupied and lo <= max(occupied) and hi >= min(occupied)
+        af for covered, af in covered_sets if occupied and covered & occupied
     )
-    residual = var.allele_freq * (1.0 - overlapping)
+    residual = var.allele_freq - overlapping
     source = VCF_DERIVED if overlapping > _RESIDUAL_EPS else REFERENCE_DERIVED
-    return residual, source
+    return max(residual, 0.0), source
 
 
 def _variant_occupied_columns(ctx: _MatchAlignment, var: VariantCall) -> set[int]:
@@ -867,9 +1204,14 @@ def _aggregate_emissions(emissions: list[VariantCall]) -> list[VariantCall]:
     Sum frequency mass per (chrom, pos, ref, alt) key within one match.
 
     The same internal allele can be emitted by several mutually exclusive
-    haplotype states (a call state and the residual state, or several call
-    states); their frequencies add up to the allele's total frequency. The
-    aggregated variant keeps the first contributor's identity and adopts
+    sources: a call state and the residual baseline state (partial
+    cancellation), or several call states that each reach the allele through a
+    different haplotype. Their frequencies add up to the allele's total
+    frequency — e.g. a call at AF 0.5 that reverts a baseline difference emits
+    the reverted allele at 0.5 from the call state, while the baseline pass
+    emits the original difference at the residual 0.5.
+
+    The aggregated variant keeps the first contributor's identity and adopts
     ``vcf_derived`` provenance, user coordinates, depth and codon context from
     the first call-derived contributor.
     """
@@ -938,8 +1280,8 @@ def _dedupe_remapped_variants(
                    if (v.chrom, v.pos, v.ref, v.alt) == key) > 1
         )
         warnings.append(
-            f'Collapsed {collapsed} duplicate remapped variant(s) projected from '
-            f'overlapping feature matches: {details}'
+            f'Collapsed {collapsed} duplicate variant(s) from overlapping feature matches: '
+            f'{details}'
         )
     return [best_by_key[key][0] for key in order], warnings
 

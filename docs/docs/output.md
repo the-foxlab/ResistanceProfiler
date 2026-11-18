@@ -135,7 +135,8 @@ respro vcf \
   phenotype/IC50/fold-IC50/score.
 - **Formula (combinatorial) rules**: one **combined row** per fired formula rule.
   Member mutations are joined with `;` in `gene`, `nt_mut`, `nt_mut_user`,
-  `aa_effects`, `af`, and `strand`. The phenotype/IC50/fold-IC50/score
+  `variant_source`, `aa_effects`, and `strand` (`aa_frequency` reports the
+  formula hit's Fréchet lower bound). The phenotype/IC50/fold-IC50/score
   come from the formula rule set (the combined call), not the individual members.
 - **Formula-member-only variants**: a variant that is only a formula member (no
   single rule of its own) gets a `rule_type=formula-member` row with

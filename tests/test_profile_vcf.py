@@ -328,7 +328,7 @@ def test_anchor_ref_mismatch_produces_warning() -> None:
 
     assert len(remapped) == 0
     assert len(warnings) == 1
-    assert 'does not match supplied' in warnings[0]
+    assert 'does not match the supplied reference' in warnings[0]
 
 
 def test_split_feature_remap_projects_second_segment_coordinates() -> None:

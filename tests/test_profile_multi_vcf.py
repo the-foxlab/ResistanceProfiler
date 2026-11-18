@@ -437,7 +437,7 @@ class TestReconcileVariants:
         ]
 
         # Act / Assert
-        with pytest.raises(ValueError, match='No VCF CHROM could be reconciled'):
+        with pytest.raises(ValueError, match='No VCF CHROM matches'):
             reconcile_variants(variants, records)
 
     def test_variants_outside_cds_are_skipped_with_warning(
@@ -466,18 +466,31 @@ class TestReconcileVariants:
         # reconcile_variants emits a warning for the REF mismatch
         assert len(warnings) >= 1
 
-    def test_empty_variants_returns_empty(
+    def test_no_calls_emits_baseline_for_selected_records(
         self, multi_ref_db: Path, tmp_path: Path,
     ) -> None:
-        """No variants in -> no remapped variants out, no error."""
+        """No retained calls -> baseline-only reconciliation for the selected records.
+
+        Records are reconciled independently of the retained calls: a contig
+        whose calls all failed the AF/depth cutoffs still contributes its
+        reference-derived baseline (assumed AF 1.0). Which records are selected
+        is the caller's responsibility (the VCF CLI resolves exactly the CHROMs
+        observed in the VCF, so no unrelated reference is profiled).
+        """
         fasta_path = tmp_path / 'refs.fasta'
-        fasta_path.write_text(f'>chrom_a\n{_REF_A_SEQ}\n')
+        # Mutate one base so the supplied reference differs from the internal
+        # one — the baseline must be emitted even with zero retained calls.
+        supplied = _REF_A_SEQ[:10] + ('A' if _REF_A_SEQ[10] != 'A' else 'C') + _REF_A_SEQ[11:]
+        fasta_path.write_text(f'>chrom_a\n{supplied}\n')
         records = _build_query_records(multi_ref_db, fasta_path)
 
+        # _REF_A_SEQ differs from the internal reference (baseline differences exist).
         remapped, warnings, dropped_chroms = reconcile_variants([], records)
 
-        assert remapped == []
+        assert dropped_chroms == []
         assert warnings == []
+        assert remapped, 'baseline-only reconciliation must emit the reference baseline'
+        assert all(v.source == 'reference_derived' for v in remapped)
 
     def test_query_matching_two_references_narrows_to_best_before_reconcile(
         self, tmp_path: Path,

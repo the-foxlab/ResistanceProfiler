@@ -425,8 +425,10 @@ class TestFormulaRows:
     def _two_member_formula(self) -> tuple[list[AnnotatedVariant], FormulaRuleHit]:
         member_a = _ann(chrom='ref', pos=3, af=0.88, feature='gag', codon_pos=2,
                         alt_aa='E', af_bin='high')
+        member_a.variant.source = 'vcf_derived'
         member_b = _ann(chrom='ref', pos=9, af=0.97, feature='gag', codon_pos=4,
                         ref_aa='A', alt_aa='T', af_bin='high')
+        member_b.variant.source = 'reference_derived'
         rs = ResistanceRuleSet(
             id=10, drug_name='Brincidofovir', drug_id=1, phenotype='resistant',
             clinical_phenotype='resistant', ic50='>1.0', fold_ic50='15.0', score='4.0',
@@ -467,6 +469,7 @@ class TestFormulaRows:
         # the members' joined variant allele frequencies).
         assert ';' not in row[header.index('aa_frequency')]
         assert row[header.index('strand')] == '+;+'
+        assert row[header.index('variant_source')] == 'VCF derived;Reference derived'
         # Metrics come from the combined rule set, not members.
         assert row[header.index('drug')] == 'Brincidofovir'
         assert row[header.index('phenotype')] == 'resistant'
