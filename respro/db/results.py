@@ -58,6 +58,19 @@ def _deserialize_combined_states(blob: str) -> list[CodonState]:
     ]
 
 
+def _serialize_haplotype_links(links: tuple[tuple[int, int, float], ...]) -> str:
+    """Serialize variant haplotype links to a JSON blob for storage."""
+    return json.dumps([[int(rec_id), int(alt_id), float(af)] for rec_id, alt_id, af in links])
+
+
+def _deserialize_haplotype_links(blob: str | list | None) -> tuple[tuple[int, int, float], ...]:
+    """Deserialize a haplotype_links JSON blob or list back to normalized tuples."""
+    if not blob:
+        return ()
+    raw = json.loads(blob) if isinstance(blob, str) else blob
+    return tuple((int(item[0]), int(item[1]), float(item[2])) for item in raw)
+
+
 def save_run(
     results_conn: sqlite3.Connection,
     project_db_path: Path,
@@ -124,8 +137,8 @@ def save_run(
             'consequence, af_bin, rule_match, drug_hits, '
             'is_combined_codon_event, combined_member_count, combined_states, '
             'single_exchange_aa_freq, rule_effect_aa_freq, rule_effect_alt, freq_method, '
-            'variant_source) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            'variant_source, haplotype_links) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             (
                 run_id,
                 v.chrom,
@@ -153,6 +166,7 @@ def save_run(
                 json.dumps(ann.rule_effect_alt),
                 ann.freq_method,
                 v.source,
+                _serialize_haplotype_links(v.haplotype_links),
             ),
         )
 
@@ -439,6 +453,7 @@ def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
             allele_freq=row.get('allele_freq') or 0.0,
             depth=row.get('depth') or 0,
             source=row.get('variant_source') or '',
+            haplotype_links=_deserialize_haplotype_links(row.get('haplotype_links')),
         )
         rule_matches = [_rule_from_hit(hit, row.get('feature_name', '')) for hit in drug_hits]
         ann = AnnotatedVariant(

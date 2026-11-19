@@ -65,7 +65,7 @@ from dataclasses import dataclass, replace
 
 from Bio.Seq import Seq
 
-from respro.core.alignment import cigar_to_coordinate_map
+from respro.core.alignment import cigar_to_coordinate_map, full_intron_spans
 from respro.core.fasta_to_vcf import (
     _build_ref_positions,
     _gapped_strings_from_cigar,
@@ -201,14 +201,37 @@ def reconcile_variants_for_matches(
         plans, rejected = _plan_calls(ctx, variants, query_upper, warnings)
         warnings.extend(r.message for r in rejected)
         all_rejections.extend(rejected)
+        off = ctx.feature.codon_start
         emissions: list[VariantCall] = []
         covered_base: list[tuple[set[int], float]] = []
         covered_pending: list[tuple[set[int], float]] = []
+        plan_records: list[
+            tuple[int, int, float, set[int], set[int], set[int], set[int]]
+        ] = []
         for plan in plans:
             events, cov_base, cov_pending = _emit_call_state(ctx, plan, warnings)
             emissions.extend(events)
             covered_base.append((cov_base, plan.call.allele_freq))
             covered_pending.append((cov_pending, plan.call.allele_freq))
+            spanned_base = {
+                s.column - off
+                for s in plan.slots
+                if s.kind == 'base' and 0 <= s.column - off < len(ctx.coding)
+            }
+            spanned_pending = {
+                s.column - off
+                for s in plan.slots
+                if s.kind == 'pending' and 0 <= s.column - off < len(ctx.coding)
+            }
+            plan_records.append((
+                plan.record_id,
+                plan.alt_id,
+                plan.call.allele_freq,
+                cov_base,
+                cov_pending,
+                spanned_base,
+                spanned_pending,
+            ))
         for var, occupied in baseline:
             # A baseline variant lives in one sub-space of its column: SNPs and
             # deletions in the base sub-space, insertions in the pending
@@ -220,8 +243,39 @@ def reconcile_variants_for_matches(
             residual, source = _baseline_residual(var, occupied, sets)
             if residual <= _RESIDUAL_EPS:
                 continue
+            covering_records = {
+                rec_id
+                for rec_id, _alt_id, _af, cov_b, cov_p, _sp_b, _sp_p in plan_records
+                if occupied and ((cov_p if kind_pending else cov_b) & occupied)
+            }
+            if len(covering_records) == 1:
+                rec_id = next(iter(covering_records))
+                links: list[tuple[int, int, float]] = []
+                for r_id, alt_id, af, cov_b, cov_p, sp_b, sp_p in plan_records:
+                    if r_id != rec_id:
+                        continue
+                    cov = cov_p if kind_pending else cov_b
+                    spanned = sp_p if kind_pending else sp_b
+                    if (spanned & occupied) and not (cov & occupied):
+                        links.append((rec_id, alt_id, af))
+                uncalled_mass = residual - sum(af for _, _, af in links)
+                if uncalled_mass > _RESIDUAL_EPS:
+                    links.append((rec_id, -1, uncalled_mass))
+                residual_links: tuple[tuple[int, int, float], ...] = tuple(links)
+                residual_record_idx = rec_id
+                residual_alt_idx = links[0][1] if len(links) == 1 else -1
+            else:
+                residual_links = ()
+                residual_record_idx = -1
+                residual_alt_idx = -1
             emissions.append(replace(
-                var, allele_freq=residual, source=source, depth=0,
+                var,
+                allele_freq=residual,
+                source=source,
+                depth=0,
+                record_index=residual_record_idx,
+                alt_index=residual_alt_idx,
+                haplotype_links=residual_links,
             ))
         pairs.extend((var, match) for var in _aggregate_emissions(emissions))
 
@@ -284,6 +338,8 @@ class _CallPlan:
     call: VariantCall
     slots: list[_Slot]  # coding-ordered slots covered by the REF span
     block: str  # ALT in coding orientation
+    record_id: int = -1
+    alt_id: int = -1
 
 
 @dataclass(frozen=True)
@@ -392,19 +448,19 @@ def _build_slot_map(
     :return: forward query position -> :class:`_Slot`
     """
     query_len = len(query_sequence)
-    if match.strand == '+':
-        intron_spans = [
-            (match.query_start + iv.query_start,
-             match.query_start + iv.query_start + iv.length)
-            for iv in match.intron_intervals
-        ]
-    else:
-        rc_start = query_len - match.query_end
-        intron_spans = [
-            (query_len - (rc_start + iv.query_start + iv.length),
-             query_len - (rc_start + iv.query_start))
-            for iv in match.intron_intervals
-        ]
+    intron_spans: list[tuple[int, int]] = []
+    rc_start = query_len - match.query_end
+    for full_start, full_end in full_intron_spans(match.intron_intervals):
+        if match.strand == '+':
+            intron_spans.append((
+                match.query_start + full_start,
+                match.query_start + full_end,
+            ))
+        else:
+            intron_spans.append((
+                query_len - (rc_start + full_end),
+                query_len - (rc_start + full_start),
+            ))
 
     def in_intron(q: int) -> bool:
         return any(lo <= q < hi for lo, hi in intron_spans)
@@ -638,15 +694,35 @@ def _plan_calls(
                     + span_text,
         ))
 
+    used_record_ids = {key[3] for key in order if key[3] >= 0}
+    next_synthetic_record_id = max(used_record_ids, default=-1) + 1
+    record_id_by_key: dict[tuple[str, int, str, int], int] = {}
+    for key in order:
+        if key[3] >= 0:
+            record_id_by_key[key] = key[3]
+        else:
+            record_id_by_key[key] = next_synthetic_record_id
+            next_synthetic_record_id += 1
+
     plans: list[_CallPlan] = []
     for key in order:
         key_slots = slots_by_key.get(key)
         if key_slots is None or key in conflicting:
             continue
+        record_id = record_id_by_key[key]
+        used_alt_ids = {c.alt_index for c in groups[key] if c.alt_index >= 0}
+        next_alt_id = max(used_alt_ids, default=-1) + 1
         for call in groups[key]:
+            if call.alt_index >= 0:
+                alt_id = call.alt_index
+            else:
+                alt_id = next_alt_id
+                next_alt_id += 1
             coding_slots = key_slots if ctx.match.strand == '+' else list(reversed(key_slots))
             block = call.alt if ctx.match.strand == '+' else str(Seq(call.alt).reverse_complement())
-            plans.append(_CallPlan(call=call, slots=coding_slots, block=block))
+            plans.append(_CallPlan(
+                call=call, slots=coding_slots, block=block, record_id=record_id, alt_id=alt_id,
+            ))
     return plans, rejections
 
 
@@ -816,15 +892,16 @@ def _emit_call_state(
         # attribute each event kind independently. Keys are converted to coding
         # coordinates once: the walk and covered sets work in coding
         # coordinates, while the snapshot keys are full-CDS columns. Base slots
-        # spanned by the verified call are included in changed_base so a
-        # length-changing replacement countered by a deletion (e.g. A -> GG
-        # with G2del) emits and covers the surviving base difference as
-        # vcf_derived.
+        # spanned by length-reducing calls (alt_len < ref_len) are included in
+        # changed_base so a length-changing replacement countered by a deletion
+        # (e.g. A -> GG with G2del) emits and covers the surviving base
+        # difference as vcf_derived, while equal-length block substitutions do
+        # not falsely claim unchanged baseline-divergent positions.
         saved_coding = {j - off: entry for j, entry in saved.items()}
         call_base_cols = {
             s.column - off for s in slots
             if s.kind == 'base' and 0 <= s.column - off < len(coding)
-        } if alt_len <= ref_len else set()
+        } if alt_len < ref_len else set()
         changed_base = {
             j for j, entry in saved_coding.items()
             if 0 <= j < len(coding) and ref_positions[j + off][1] != entry[1]
@@ -844,7 +921,10 @@ def _emit_call_state(
             # features would need the following genomic base, which is outside
             # the feature.
             if feature.strand == '+':
-                emitted.extend(_emit_trailing_insertion(ctx, col_hi - off, trailing_extra, call))
+                emitted.extend(_emit_trailing_insertion(
+                    ctx, col_hi - off, trailing_extra, call,
+                    record_id=plan.record_id, alt_id=plan.alt_id,
+                ))
             else:
                 warnings.append(
                     f'pos {call.pos + 1}: VCF insertion {call.ref}>{call.alt} extends past the end '
@@ -854,6 +934,7 @@ def _emit_call_state(
         for j, entry in saved.items():
             ref_positions[j] = entry
 
+    call_link = ((plan.record_id, plan.alt_id, call.allele_freq),)
     for var in emitted:
         var.allele_freq = call.allele_freq
         var.depth = call.depth
@@ -862,6 +943,9 @@ def _emit_call_state(
         var.user_pos = call.pos
         var.user_ref = call.ref
         var.user_alt = call.alt
+        var.record_index = plan.record_id
+        var.alt_index = plan.alt_id
+        var.haplotype_links = call_link
         _attach_supplied_codon(ctx, var)
 
     # Covered columns per sub-space: the columns the call changed, plus the
@@ -1079,6 +1163,9 @@ def _emit_trailing_insertion(
     anchor_idx: int,
     extra: str,
     call: VariantCall,
+    *,
+    record_id: int = -1,
+    alt_id: int = -1,
 ) -> list[VariantCall]:
     """
     Emit an insertion whose payload falls after the last internal column.
@@ -1107,6 +1194,9 @@ def _emit_trailing_insertion(
     var.user_pos = call.pos
     var.user_ref = call.ref
     var.user_alt = call.alt
+    var.record_index = record_id
+    var.alt_index = alt_id
+    var.haplotype_links = ((record_id, alt_id, call.allele_freq),) if record_id >= 0 else ()
     _attach_supplied_codon(ctx, var)
     return [var]
 
@@ -1136,6 +1226,8 @@ def _attach_supplied_codon(ctx: _MatchAlignment, var: VariantCall) -> None:
         return
     codon_start = (coding_idx // 3) * 3
     if codon_start + 3 > len(ctx.coding):
+        return
+    if any(ctx.coding[codon_start + offset][1] == '-' for offset in range(3)):
         return
     codon = ''.join(ctx.coding[codon_start + offset][0] for offset in range(3))
     if '-' in codon:
@@ -1199,6 +1291,27 @@ def _variant_occupied_columns(ctx: _MatchAlignment, var: VariantCall) -> set[int
     return {coding_idx - 1 - offset for offset in range(payload_len)}
 
 
+def _merge_haplotype_links(
+    links_a: tuple[tuple[int, int, float], ...],
+    links_b: tuple[tuple[int, int, float], ...],
+) -> tuple[tuple[int, int, float], ...]:
+    """Merge haplotype-link entries across contributors for one aggregated variant."""
+    if not links_a:
+        return links_b
+    if not links_b:
+        return links_a
+    merged: dict[tuple[int, int], float] = {}
+    link_order: list[tuple[int, int]] = []
+    for rec_id, alt_id, af in (*links_a, *links_b):
+        pair = (rec_id, alt_id)
+        if pair not in merged:
+            merged[pair] = float(af)
+            link_order.append(pair)
+        else:
+            merged[pair] += float(af)
+    return tuple((rec_id, alt_id, merged[(rec_id, alt_id)]) for rec_id, alt_id in link_order)
+
+
 def _aggregate_emissions(emissions: list[VariantCall]) -> list[VariantCall]:
     """
     Sum frequency mass per (chrom, pos, ref, alt) key within one match.
@@ -1213,7 +1326,8 @@ def _aggregate_emissions(emissions: list[VariantCall]) -> list[VariantCall]:
 
     The aggregated variant keeps the first contributor's identity and adopts
     ``vcf_derived`` provenance, user coordinates, depth and codon context from
-    the first call-derived contributor.
+    the first call-derived contributor, while merging ``haplotype_links`` across
+    all contributors.
     """
     by_key: dict[tuple[str, int, str, str], VariantCall] = {}
     order: list[tuple[str, int, str, str]] = []
@@ -1225,6 +1339,7 @@ def _aggregate_emissions(emissions: list[VariantCall]) -> list[VariantCall]:
             order.append(key)
             continue
         first.allele_freq += var.allele_freq
+        first.haplotype_links = _merge_haplotype_links(first.haplotype_links, var.haplotype_links)
         if var.source == VCF_DERIVED:
             first.source = VCF_DERIVED
             if not first.user_ref:
@@ -1232,6 +1347,9 @@ def _aggregate_emissions(emissions: list[VariantCall]) -> list[VariantCall]:
                 first.user_pos = var.user_pos
                 first.user_ref = var.user_ref
                 first.user_alt = var.user_alt
+            if first.record_index < 0 and var.record_index >= 0:
+                first.record_index = var.record_index
+                first.alt_index = var.alt_index
             if var.depth > first.depth:
                 first.depth = var.depth
         if not first.query_ref_codon and var.query_ref_codon:
@@ -1396,16 +1514,21 @@ def _shift_past_introns(
     if not intron_spans:
         return cds_to_query
     spans = sorted(intron_spans)
+    full_spans = full_intron_spans([
+        IntronInterval(cds_junction_pos=0, query_start=start, length=end - start)
+        for start, end in spans
+    ])
+
     corrected: dict[int, int | None] = {}
     for cds_pos, qpos in cds_to_query.items():
         if qpos is None:
             corrected[cds_pos] = None
             continue
-        # Cumulative intron length for introns whose start is at or before qpos.
+        # Cumulative intron length for introns whose exon-only start is at or before qpos.
         shift = sum(end - start for start, end in spans if start <= qpos)
         new_pos = qpos + shift
-        # Exclude positions that land inside an intron span after shifting.
-        if any(start <= new_pos < end for start, end in spans):
+        # Exclude positions that land inside an intron span in full-region coordinates.
+        if any(full_start <= new_pos < full_end for full_start, full_end in full_spans):
             corrected[cds_pos] = None
             continue
         corrected[cds_pos] = new_pos

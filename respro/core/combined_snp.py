@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import itertools
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pysam
 
@@ -88,6 +88,9 @@ class BamCooccurrence:
     :ivar min_mapq: minimum read mapping quality (from ``[codon]`` config).
     :ivar min_depth: minimum spanning-molecule count; below this the codon
         falls back to single events (no combined call).
+    :ivar match_strand_by_feature: ``{feature_name: match.strand}`` mapping
+        recording the query-to-coding orientation (``'+'`` or ``'-'``) of each
+        feature match so BAM bases are complemented iff ``match.strand == '-'``.
     """
 
     bam: pysam.AlignmentFile
@@ -95,6 +98,7 @@ class BamCooccurrence:
     cds_to_query_by_feature: dict[str, dict[int, int]]
     min_mapq: int
     min_depth: int
+    match_strand_by_feature: dict[str, str] = field(default_factory=dict)
 
 
 def enumerate_candidate_codon_states(
@@ -184,6 +188,210 @@ def enumerate_candidate_codon_states(
     return candidates
 
 
+@dataclass(frozen=True)
+class _LinkedFactor:
+    """One multi-position phase factor driven by a single linking VCF record."""
+
+    positions: tuple[int, ...]
+    haplotypes: tuple[tuple[float, dict[int, frozenset[int]]], ...]
+    residual_mass: float
+    claimed_by_pos: dict[int, dict[int, float]]
+    opt_freqs_by_pos: dict[int, dict[int, float]]
+
+
+def _assemble_linked_factor(
+    rec_id: int,
+    comp: list[int],
+    alt_option_freqs: list[dict[int, float]],
+    alt_option_links: list[dict[int, tuple[tuple[int, int, float], ...]]],
+) -> _LinkedFactor | None:
+    """Assemble and consistency-validate one multi-position linked phase factor.
+
+    Returns ``None`` (signalling fallback to unlinked singleton factors) if any
+    haplotype shows inconsistent allele frequencies across positions, if haplotype
+    masses exceed ``1.0``, or if claimed frequencies exceed a position's
+    marginal frequency.
+    """
+    alt_ids = sorted({
+        aid
+        for p in comp
+        for links in alt_option_links[p].values()
+        for r, aid, _ in links
+        if r == rec_id
+    })
+    haps: list[tuple[float, dict[int, frozenset[int]]]] = []
+    claimed_by_pos: dict[int, dict[int, float]] = {p: {} for p in comp}
+    opt_freqs_by_pos: dict[int, dict[int, float]] = {}
+
+    for p in comp:
+        freqs_p = dict(alt_option_freqs[p])
+        freqs_p[-1] = max(0.0, 1.0 - sum(alt_option_freqs[p].values()))
+        opt_freqs_by_pos[p] = freqs_p
+
+    for aid in alt_ids:
+        afs = [
+            af
+            for p in comp
+            for links in alt_option_links[p].values()
+            for r, a, af in links
+            if r == rec_id and a == aid
+        ]
+        if not afs or max(afs) - min(afs) > 1e-6:
+            return None
+        h_af = max(afs)
+        h_choices: dict[int, frozenset[int]] = {}
+        for p in comp:
+            matched_fids = frozenset(
+                fid
+                for fid, links in alt_option_links[p].items()
+                if any(r == rec_id and a == aid for r, a, _ in links)
+            )
+            chosen = matched_fids if matched_fids else frozenset({-1})
+            h_choices[p] = chosen
+            for fid in chosen:
+                claimed_by_pos[p][fid] = claimed_by_pos[p].get(fid, 0.0) + h_af
+        haps.append((h_af, h_choices))
+
+    total_hap_mass = sum(h_af for h_af, _ in haps)
+    if total_hap_mass > 1.0 + 1e-6:
+        return None
+    for p in comp:
+        for fid, claimed in claimed_by_pos[p].items():
+            if claimed > opt_freqs_by_pos[p].get(fid, 0.0) + 1e-6:
+                return None
+
+    residual_mass = max(0.0, 1.0 - total_hap_mass)
+    return _LinkedFactor(
+        positions=tuple(comp),
+        haplotypes=tuple(haps),
+        residual_mass=residual_mass,
+        claimed_by_pos=claimed_by_pos,
+        opt_freqs_by_pos=opt_freqs_by_pos,
+    )
+
+
+def _build_phase_factors(
+    variants_at_codon: list[dict],
+    n_pos: int,
+) -> list[_LinkedFactor | int] | None:
+    """Partition codon position indices into disjoint singleton or linked phase factors.
+
+    Returns ``None`` when no record links >= 2 codon positions (fast path: every
+    position is an independent singleton factor).
+    """
+    seen_positions: dict[int, int] = {}
+    alt_option_freqs: list[dict[int, float]] = []
+    alt_option_links: list[dict[int, tuple[tuple[int, int, float], ...]]] = []
+
+    for v in variants_at_codon:
+        cp = v['codon_pos']
+        if not isinstance(cp, int) or cp < 0 or cp >= 3:
+            return None
+        if cp not in seen_positions:
+            seen_positions[cp] = len(alt_option_freqs)
+            alt_option_freqs.append({})
+            alt_option_links.append({})
+        pos_idx = seen_positions[cp]
+        raw_links = v.get('haplotype_links')
+        for member_id, (_base, freq) in enumerate(v['alts']):
+            flat_id = pos_idx * 100 + member_id
+            alt_option_freqs[pos_idx][flat_id] = float(freq)
+            alt_option_links[pos_idx][flat_id] = (
+                tuple(
+                    (int(rec_id), int(alt_id), float(af))
+                    for rec_id, alt_id, af in raw_links[member_id]
+                )
+                if raw_links is not None and member_id < len(raw_links)
+                else ()
+            )
+
+    record_positions: dict[int, set[int]] = {}
+    for pos_idx, links_by_fid in enumerate(alt_option_links):
+        for links in links_by_fid.values():
+            for rec_id, _alt_id, _af in links:
+                if rec_id >= 0:
+                    record_positions.setdefault(rec_id, set()).add(pos_idx)
+
+    linking_records = {rec_id for rec_id, pos_set in record_positions.items() if len(pos_set) >= 2}
+    if not linking_records:
+        return None
+
+    # Connected components of codon positions linked by shared linking records.
+    adj: dict[int, set[int]] = {p: set() for p in range(n_pos)}
+    for rec_id in linking_records:
+        pos_list = sorted(record_positions[rec_id])
+        for p1 in pos_list:
+            for p2 in pos_list:
+                if p1 != p2:
+                    adj[p1].add(p2)
+
+    visited: set[int] = set()
+    components: list[list[int]] = []
+    for p in range(n_pos):
+        if p in visited:
+            continue
+        stack = [p]
+        comp: list[int] = []
+        while stack:
+            cur = stack.pop()
+            if cur in visited:
+                continue
+            visited.add(cur)
+            comp.append(cur)
+            stack.extend(adj[cur] - visited)
+        components.append(sorted(comp))
+
+    factors: list[_LinkedFactor | int] = []
+    for comp in components:
+        if len(comp) == 1:
+            factors.append(comp[0])
+            continue
+        comp_set = set(comp)
+        recs_in_comp = [r for r in linking_records if record_positions[r] & comp_set]
+        if len(recs_in_comp) != 1:
+            # Two distinct unphased records do not establish joint phase across their union.
+            factors.extend(comp)
+            continue
+        linked = _assemble_linked_factor(
+            recs_in_comp[0], comp, alt_option_freqs, alt_option_links,
+        )
+        if linked is None:
+            factors.extend(comp)
+            continue
+        factors.append(linked)
+    return factors
+
+
+def _factor_bounds_for_candidate(
+    factor: _LinkedFactor | int,
+    cand: CandidateCodon,
+) -> tuple[float, float]:
+    """Return ``(lower_bound, upper_bound)`` for one factor under candidate ``cand``."""
+    if isinstance(factor, int):
+        q = cand.q_values[factor]
+        return q, q
+
+    linked_mass = sum(
+        h_af
+        for h_af, h_choices in factor.haplotypes
+        if all(cand.choices[p][1] in h_choices[p] for p in factor.positions)
+    )
+    unlinked_per_pos = [
+        max(
+            0.0,
+            factor.opt_freqs_by_pos[p][cand.choices[p][1]]
+            - factor.claimed_by_pos[p].get(cand.choices[p][1], 0.0),
+        )
+        for p in factor.positions
+    ]
+    n_in_factor = len(factor.positions)
+    lower_unlinked = max(0.0, sum(unlinked_per_pos) - (n_in_factor - 1) * factor.residual_mass)
+    upper_unlinked = min(unlinked_per_pos)
+    lower = min(linked_mass + lower_unlinked, linked_mass + upper_unlinked)
+    upper = linked_mass + upper_unlinked
+    return lower, upper
+
+
 def _compute_codon_frechet_states(
     variants_at_codon: list[dict],
     ref_codon: str,
@@ -201,8 +409,13 @@ def _compute_codon_frechet_states(
 
     - ``q_i`` = the frequency of the option chosen at position ``i`` (an ALT
       frequency, or the residual reference frequency).
-    - ``lower = max(0.0, sum(q) - (k - 1))`` — minimum guaranteed co-occurrence.
-    - ``upper = min(q)`` — maximum possible co-occurrence.
+    - When ``haplotype_links`` are supplied and a source ``record_id`` links two or
+      more codon positions, positions sharing that record form one linked phase
+      factor ``G`` whose candidate frequency mass comes directly from the record's
+      explicit haplotypes (plus conditioned Fréchet bounds over any unlinked
+      residual), while remaining positions stay singleton factors. Across the
+      resulting ``m`` disjoint phase factors, ``lower = max(0.0, sum(lower_r) - (m - 1))``
+      and ``upper = min(upper_r)``.
     - ``forced_fraction = lower / upper`` if ``upper > 0`` else ``0.0`` — the minimum
       fraction of the rarest required condition forced into this codon state.
 
@@ -223,7 +436,8 @@ def _compute_codon_frechet_states(
     position.
 
     :param variants_at_codon: list of ``{'codon_pos': int, 'alts': [(base, freq), ...]}``
-        dicts, one per distinct variant-bearing position. ``codon_pos`` is 0-based
+        dicts, one per distinct variant-bearing position (optionally carrying
+        ``'haplotype_links'`` aligned with ``'alts'``). ``codon_pos`` is 0-based
         within the codon; ``alts`` lists each ALT base (coding orientation) with its
         marginal allele frequency. The reference option is implicit.
     :param ref_codon: the internal reference codon (3 bases, coding orientation).
@@ -239,11 +453,19 @@ def _compute_codon_frechet_states(
         return []
 
     k = len(candidates[0].q_values)  # number of distinct variant positions
+    factors = _build_phase_factors(variants_at_codon, k)
     accepted_states: list[CodonState] = []
     for cand in candidates:
-        q_values = list(cand.q_values)
-        lower = max(0.0, sum(q_values) - (k - 1))
-        upper = min(q_values)
+        if factors is None:
+            q_values = list(cand.q_values)
+            lower = max(0.0, sum(q_values) - (k - 1))
+            upper = min(q_values)
+        else:
+            factor_bounds = [_factor_bounds_for_candidate(f, cand) for f in factors]
+            m = len(factor_bounds)
+            lower = max(0.0, sum(fl for fl, _ in factor_bounds) - (m - 1))
+            upper = min(fu for _, fu in factor_bounds)
+            lower = min(lower, upper)
         forced_fraction = lower / upper if upper > 0 else 0.0
         accepted = lower > eps and forced_fraction >= min_fraction - eps
 
@@ -265,7 +487,7 @@ def compute_codon_cooccurrence(
     contig: str,
     codon_query_positions: list[tuple[int, int]],
     candidate_states: list[CandidateCodon],
-    strand: str,
+    complement_bases: bool,
     min_mapq: int,
     min_depth: int,
 ) -> list[CodonState]:
@@ -285,8 +507,8 @@ def compute_codon_cooccurrence(
          variant query positions
          (``reference_start <= min_pos`` and ``reference_end >= max_pos + 1``).
       3. For each spanning read, read the base at each variant query position
-         via ``get_aligned_pairs(matches_only=True)``; reverse-complement when
-         ``strand == '-'``.
+         via ``get_aligned_pairs(matches_only=True)``; complement when
+         ``complement_bases`` is ``True`` (``match.strand == '-'``).
       4. Paired-end dedup: group spanning reads by ``query_name``. A group of 2
          (paired mates) that agree on the codon counts as **one** molecule; if
          they disagree the molecule is **rejected** (counted on neither). A
@@ -306,8 +528,8 @@ def compute_codon_cooccurrence(
         codon; ``query_pos`` is the 0-based position in the query reference the
         BAM is aligned against.
     :param candidate_states: candidates from :func:`enumerate_candidate_codon_states`.
-    :param strand: feature strand ('+' or '-'); bases are reverse-complemented
-        for '-' so codons are in coding orientation.
+    :param complement_bases: whether to complement BAM forward-strand bases
+        into coding orientation (``True`` when ``match.strand == '-'``).
     :param min_mapq: minimum mapping quality; reads below this are excluded.
     :param min_depth: minimum spanning-molecule count; below this returns ``[]``.
     :return: one :class:`CodonState` per candidate with ``count > 0``, or ``[]``
@@ -385,7 +607,7 @@ def compute_codon_cooccurrence(
                 ok = False
                 break
             base = (read.query_sequence or '')[qidx].upper()
-            if strand == '-':
+            if complement_bases:
                 base = reverse_complement(base)
             bases.append((codon_pos, base))
         if not ok:
@@ -545,7 +767,7 @@ def _annotate_combined_snp_codon(
     # Group ALTs by codon position so multiallelic positions are modelled as
     # multiple options at one position (not rejected).
     members: list[tuple[VariantCall, int, str, int]] = []  # (var, codon_pos, alt_base, member_index)
-    alts_by_pos: dict[int, list[tuple[str, float, int]]] = {}  # codon_pos -> [(alt_base, freq, alt_idx)]
+    alts_by_pos: dict[int, list[tuple[str, float, int, tuple[tuple[int, int, float], ...]]]] = {}
     pos_order: list[int] = []
     for var in sorted(variants, key=lambda v: v.pos):
         codon_pos = feature.codon_position_in_codon(var.pos)
@@ -559,7 +781,9 @@ def _annotate_combined_snp_codon(
             alts_by_pos[codon_pos] = []
             pos_order.append(codon_pos)
         alt_idx = len(alts_by_pos[codon_pos])
-        alts_by_pos[codon_pos].append((alt_base, float(var.allele_freq), alt_idx))
+        alts_by_pos[codon_pos].append(
+            (alt_base, float(var.allele_freq), alt_idx, tuple(var.haplotype_links))
+        )
         # Encode the member index as pos_idx * 100 + alt_idx (matches the helper's
         # encoding so member_indices in CodonState can be matched back).
         pos_idx = pos_order.index(codon_pos)
@@ -567,9 +791,14 @@ def _annotate_combined_snp_codon(
         members.append((var, codon_pos, alt_base, member_index))
 
     # Build the input specs: one entry per distinct position, with a list of
-    # (alt_base, freq) options (the multiallelic case has >1 option).
+    # (alt_base, freq) options (the multiallelic case has >1 option) and parallel
+    # haplotype_links per ALT.
     member_specs = [
-        {'codon_pos': cp, 'alts': [(ab, f) for ab, f, _ in alts_by_pos[cp]]}
+        {
+            'codon_pos': cp,
+            'alts': [(ab, f) for ab, f, _, _ in alts_by_pos[cp]],
+            'haplotype_links': [links for _, _, _, links in alts_by_pos[cp]],
+        }
         for cp in pos_order
     ]
 
@@ -593,12 +822,13 @@ def _annotate_combined_snp_codon(
                 break
             codon_query_positions.append((cp, qpos))
         else:
+            complement_bases = bam_cooccurrence.match_strand_by_feature.get(feature.name, '+') == '-'
             states = compute_codon_cooccurrence(
                 bam=bam_cooccurrence.bam,
                 contig=bam_cooccurrence.contig,
                 codon_query_positions=codon_query_positions,
                 candidate_states=candidates,
-                strand=feature.strand,
+                complement_bases=complement_bases,
                 min_mapq=bam_cooccurrence.min_mapq,
                 min_depth=bam_cooccurrence.min_depth,
             )

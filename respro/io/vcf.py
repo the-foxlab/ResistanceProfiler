@@ -93,6 +93,7 @@ def parse_vcf(
                     depth=depth,
                     filter_status=filter_status,
                     record_index=record_index,
+                    alt_index=alt_idx,
                 ))
 
     if expected_query_name is None:

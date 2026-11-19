@@ -3,6 +3,15 @@ Tests for codon-aware annotation logic.
 """
 
 import pytest
+from _sequence_oracle import (
+    V1_FRAME_OFFSET_CASES,
+    OracleFeatureSpec,
+    OracleHaplotype,
+    apply_sequence_edits,
+    derive_fixed_coding_haplotype_effect,
+    oracle_codon_mixture_frequencies,
+    reverse_complement_dna,
+)
 
 from respro.core.annotation import (
     _annotate_variant_in_feature,
@@ -2661,3 +2670,158 @@ class TestFrechetMultiallelic:
             ref_codon='AAA', min_fraction=2 / 3,
         )
         assert states == []
+
+
+class TestFrameOffsetFeatureAndAnnotationOracle:
+    """V1: FeatureRecord codon mapping and annotation match the independent oracle."""
+
+    @pytest.mark.parametrize(
+        ('codon_start', 'coding_internal', 'coding_idx', 'new_coding_base', 'strand'),
+        V1_FRAME_OFFSET_CASES,
+    )
+    def test_codon_index_and_annotation_across_offsets_and_strands(
+        self,
+        codon_start: int,
+        coding_internal: str,
+        coding_idx: int,
+        new_coding_base: str,
+        strand: str,
+    ) -> None:
+        spec = OracleFeatureSpec(
+            segments=((0, len(coding_internal)),),
+            strand=strand,
+            codon_start=codon_start,
+        )
+        feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='f',
+            protein='F',
+            start=0,
+            end=len(coding_internal),
+            strand=strand,
+            codon_start=codon_start,
+            nt_sequence=coding_internal,
+        )
+        genomic_pos = spec.cds_to_genomic(coding_idx)
+        assert genomic_pos is not None
+        assert feature.codon_index(genomic_pos) == spec.codon_index(genomic_pos)
+        assert feature.codon_position_in_codon(genomic_pos) == spec.codon_offset(genomic_pos)
+
+        for pre_cds in range(codon_start):
+            pre_pos = spec.cds_to_genomic(pre_cds)
+            assert pre_pos is not None
+            assert spec.codon_index(pre_pos) is None
+            assert feature.codon_index(pre_pos) is None
+            assert feature.codon_position_in_codon(pre_pos) is None
+
+        internal_genomic = (
+            coding_internal if strand == '+' else reverse_complement_dna(coding_internal)
+        )
+        ref_b = internal_genomic[genomic_pos]
+        alt_b = new_coding_base if strand == '+' else reverse_complement_dna(new_coding_base)
+        exp = derive_fixed_coding_haplotype_effect(
+            internal_coding=coding_internal,
+            supplied_seq=coding_internal,
+            match_strand='+',
+            codon_start=codon_start,
+            query_edits=[(coding_idx, coding_internal[coding_idx], new_coding_base)],
+            codon_idx=spec.codon_index(genomic_pos),
+        )
+        anns = annotate_variants(
+            [VariantCall(chrom='c', pos=genomic_pos, ref=ref_b, alt=alt_b, allele_freq=1.0)],
+            [feature],
+        )
+        assert len(anns) == 1
+        assert (anns[0].ref_codon, anns[0].alt_codon, anns[0].ref_aa, anns[0].alt_aa, anns[0].consequence) == exp
+
+
+class TestBlockSubstitutionAnnotationOracleV3:
+    """V3/V6: annotate_variants matches oracle codon mixture when haplotype_links are supplied."""
+
+    def test_linked_atoms_at_partial_af_annotate_with_record_af(self) -> None:
+        internal = 'ATGAAATTT'
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='gag', protein='Gag',
+            start=0, end=9, strand='+', codon_start=0, nt_sequence=internal,
+        )
+        links = ((0, 0, 0.4),)
+        atoms = [
+            VariantCall(
+                chrom='c', pos=3, ref='A', alt='C', allele_freq=0.4, depth=100,
+                record_index=0, alt_index=0, haplotype_links=links,
+            ),
+            VariantCall(
+                chrom='c', pos=4, ref='A', alt='G', allele_freq=0.4, depth=100,
+                record_index=0, alt_index=0, haplotype_links=links,
+            ),
+        ]
+        sample_coding = apply_sequence_edits(internal, [(3, 'AA', 'CG')])
+        oracle_mix = oracle_codon_mixture_frequencies(
+            [
+                OracleHaplotype(coding_seq=sample_coding, freq=0.4),
+                OracleHaplotype(coding_seq=internal, freq=0.6),
+            ],
+            codon_start=0,
+            codon_idx=1,
+        )
+        anns = annotate_variants(atoms, [feature])
+        assert len(anns) == 2
+        assert all(
+            a.alt_codon == 'CGA'
+            and a.alt_aa == oracle_mix['CGA'][0]
+            and a.single_exchange_aa_freq == pytest.approx(oracle_mix['CGA'][1])
+            for a in anns
+        )
+
+    def test_multiallelic_block_over_baseline_divergent_codon_links_surviving_alt(self) -> None:
+        """Baseline A3>G + A4>C with one record GC->AT@0.4, AC@0.3 links surviving C across AC and residual GC."""
+        from _sequence_oracle import V3_MULTIALLELIC_BASELINE_CASE
+
+        case = V3_MULTIALLELIC_BASELINE_CASE
+        internal = case['internal_coding']
+        supplied = case['supplied_coding']
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='gag', protein='Gag',
+            start=0, end=len(internal), strand='+', codon_start=0, nt_sequence=internal,
+        )
+        # Emit the exact atom representation reconciled from internal vs supplied + GC->AT@0.4, AC@0.3:
+        # pos 3 A>G @ 0.3 linked only to residual (0, -1, 0.3);
+        # pos 4 A>T @ 0.4 linked to alt 0 (0, 0, 0.4);
+        # pos 4 A>C @ 0.6 linked to BOTH surviving alt 1 (0, 1, 0.3) and residual (0, -1, 0.3).
+        atoms = [
+            VariantCall(
+                chrom='c', pos=3, ref='A', alt='G', allele_freq=0.3, depth=0,
+                record_index=0, alt_index=-1, haplotype_links=((0, -1, 0.3),),
+            ),
+            VariantCall(
+                chrom='c', pos=4, ref='A', alt='T', allele_freq=0.4, depth=100,
+                record_index=0, alt_index=0, haplotype_links=((0, 0, 0.4),),
+            ),
+            VariantCall(
+                chrom='c', pos=4, ref='A', alt='C', allele_freq=0.6, depth=0,
+                record_index=0, alt_index=-1, haplotype_links=((0, 1, 0.3), (0, -1, 0.3)),
+            ),
+        ]
+        hap_at = apply_sequence_edits(supplied, [(case['pos'], case['ref'], 'AT')])
+        hap_ac = apply_sequence_edits(supplied, [(case['pos'], case['ref'], 'AC')])
+        oracle_mix = oracle_codon_mixture_frequencies(
+            [
+                OracleHaplotype(coding_seq=hap_at, freq=0.4),
+                OracleHaplotype(coding_seq=hap_ac, freq=0.3),
+                OracleHaplotype(coding_seq=supplied, freq=0.3),
+            ],
+            codon_start=0,
+            codon_idx=case['codon_idx'],
+        )
+        anns = annotate_variants(atoms, [feature])
+        state_lower = {
+            s.alt_codon: s.lower
+            for a in anns
+            for s in a.combined_states
+            if s.accepted
+        }
+        assert state_lower.get('ATA') == pytest.approx(oracle_mix['ATA'][1])
+        assert state_lower.get('ACA') == pytest.approx(oracle_mix['ACA'][1])
+        assert state_lower.get('GCA') == pytest.approx(oracle_mix['GCA'][1])
+        assert all(c not in state_lower for c in ('AAA', 'GTA', 'GAA'))

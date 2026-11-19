@@ -8,6 +8,14 @@ import re
 from pathlib import Path
 
 import pytest
+from _sequence_oracle import (
+    OracleHaplotype,
+    OracleRead,
+    apply_sequence_edits,
+    oracle_bam_codon_frequencies,
+    oracle_codon_mixture_frequencies,
+    reverse_complement_dna,
+)
 from Bio import SeqIO
 from conftest import TINY_REF_NAME, TINY_REF_SEQ
 
@@ -716,3 +724,168 @@ class TestFormulaEpsilonOverride:
         html_empty = _run(empty, 'out_empty')
         assert 'combodrug' in html_plain.lower()
         assert 'combodrug' in html_empty.lower()
+
+
+class TestVcfCliBamCooccurrenceOrientation:
+    """V5/V6: `_build_bam_cooccurrence_by_chrom` populates match_strand_by_feature."""
+
+    def test_build_bam_cooccurrence_populates_match_strand_and_annotates_rc_query(
+        self, tmp_path: Path,
+    ) -> None:
+        import pysam
+
+        from respro.cli.vcf import (
+            _build_bam_cooccurrence_by_chrom,
+            _close_bam_cooccurrence_handles,
+        )
+        from respro.core.vcf_to_reference import reconcile_variants_for_matches
+
+        internal_coding = 'ATGAAATTTGGGCCC'
+        query_seq = reverse_complement_dna(internal_coding)  # codon 1 (AAA) at forward 9..11 (TTT)
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='gag', protein='Gag',
+            start=0, end=len(internal_coding), strand='+', codon_start=0,
+            nt_sequence=internal_coding, aa_sequence='MKFGP',
+        )
+        match = FeatureMatch(
+            feature=feature, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=len(query_seq), strand='-',
+            cigar=f'{len(internal_coding)}M', cds_start=0,
+        )
+
+        # In query_seq = GGGCCCAAATTTCAT:
+        # CDS pos 3 (codon 1 pos 0) = query pos 11 ('T') -> T>A
+        # CDS pos 4 (codon 1 pos 1) = query pos 10 ('T') -> T>A
+        # Spanning reads carry 'AA' at query pos 10..11 (i.e. 'TAA' at 9..11 -> coding 'TTA'/L).
+        read_seq = query_seq[:9] + 'TAA' + query_seq[12:]
+        bam_path = tmp_path / 'rc_query.bam'
+        header = {'HD': {'VN': '1.0'}, 'SQ': [{'SN': 'q', 'LN': len(query_seq)}]}
+        with pysam.AlignmentFile(str(bam_path), 'wb', header=header) as bam:
+            for i in range(10):
+                seg = pysam.AlignedSegment()
+                seg.query_name = f'r{i}'
+                seg.query_sequence = read_seq
+                seg.flag = 0
+                seg.reference_id = 0
+                seg.reference_start = 0
+                seg.mapping_quality = 60
+                seg.cigar = ((0, len(read_seq)),)
+                seg.query_qualities = pysam.qualitystring_to_array('I' * len(read_seq))
+                seg.next_reference_id = -1
+                seg.template_length = 0
+                bam.write(seg)
+        pysam.index(str(bam_path))
+
+        calls = [
+            VariantCall(chrom='q', pos=11, ref='T', alt='A', allele_freq=1.0, depth=10),
+            VariantCall(chrom='q', pos=10, ref='T', alt='A', allele_freq=1.0, depth=10),
+        ]
+        reconciled, warnings = reconcile_variants_for_matches(calls, [match], query_seq)
+        assert warnings == []
+
+        by_chrom = _build_bam_cooccurrence_by_chrom(
+            bam_path=bam_path,
+            per_chrom={'q': ('q', query_seq, [match])},
+            min_mapq=20,
+            min_depth=5,
+        )
+        try:
+            ctx = by_chrom['q']
+            assert ctx.match_strand_by_feature == {'gag': '-'}
+            anns = annotate_variants(reconciled, [feature], bam_cooccurrence=ctx)
+        finally:
+            _close_bam_cooccurrence_handles(by_chrom)
+
+        oracle_freqs = oracle_bam_codon_frequencies(
+            reads=[OracleRead(qname=f'r{i}', seq=read_seq, start=0) for i in range(10)],
+            ref_codon='AAA',
+            codon_query_positions=[(0, 11), (1, 10)],
+            complement_bases=True,
+            min_mapq=20,
+            min_depth=5,
+        )
+        assert oracle_freqs == {'TTA': pytest.approx(1.0)}
+        assert len(anns) == 2
+        assert all(a.alt_codon == 'TTA' and a.alt_aa == 'L' for a in anns)
+        assert all(a.single_exchange_aa_freq == pytest.approx(1.0) for a in anns)
+
+
+class TestVcfBlockSubstitutionEndToEndV3:
+    """V3/V6: parse_vcf -> reconcile_variants_for_matches -> annotate_variants -> JSON/DB round-trip."""
+
+    def test_multiallelic_block_sub_vcf_pipeline_and_persistence(self, tmp_path: Path) -> None:
+        import uuid
+
+        from conftest import make_profiling_result
+
+        from respro.db.results import load_run, load_run_from_json, reconstruct_annotations, save_run
+        from respro.db.schema import create_schema, init_results_db
+        from respro.io.vcf import parse_vcf
+        from respro.report.non_html_exports import write_json
+
+        internal = 'ATGAAATTT'
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='gag', protein='Gag',
+            start=0, end=9, strand='+', codon_start=0, nt_sequence=internal,
+        )
+        match = _make_match(feature, match_strand='+', query=internal, cigar='9M')
+
+        vcf_path = tmp_path / 'block.vcf'
+        vcf_path.write_text(
+            '##fileformat=VCFv4.2\n'
+            '##INFO=<ID=AF,Number=A,Type=Float,Description="AF">\n'
+            '##INFO=<ID=DP,Number=1,Type=Integer,Description="DP">\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'c\t4\t.\tAA\tCG,CT\t100\tPASS\tAF=0.5,0.3;DP=100\n',
+            encoding='utf-8',
+        )
+        parsed = parse_vcf(vcf_path)
+        assert [(v.record_index, v.alt_index) for v in parsed] == [(0, 0), (0, 1)]
+
+        reconciled, warnings = reconcile_variants_for_matches(parsed, [match], internal)
+        assert warnings == []
+        anns = annotate_variants(reconciled, [feature])
+
+        oracle_mix = oracle_codon_mixture_frequencies(
+            [
+                OracleHaplotype(apply_sequence_edits(internal, [(3, 'AA', 'CG')]), 0.5),
+                OracleHaplotype(apply_sequence_edits(internal, [(3, 'AA', 'CT')]), 0.3),
+                OracleHaplotype(internal, 0.2),
+            ],
+            codon_start=0,
+            codon_idx=1,
+        )
+        by_pos_alt = {(a.variant.pos, a.variant.alt): a for a in anns}
+        assert by_pos_alt[(3, 'C')].alt_codon == 'CGA'
+        assert by_pos_alt[(3, 'C')].single_exchange_aa_freq == pytest.approx(oracle_mix['CGA'][1])
+        assert by_pos_alt[(4, 'T')].alt_codon == 'CTA'
+        assert by_pos_alt[(4, 'T')].single_exchange_aa_freq == pytest.approx(oracle_mix['CTA'][1])
+
+        # Persist and reload from SQLite and JSON
+        project_db = tmp_path / 'proj.db'
+        proj_conn = create_schema(project_db)
+        proj_conn.execute(
+            'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+            ('T', 6, str(uuid.uuid4())),
+        )
+        proj_conn.commit()
+        result = make_profiling_result(
+            project_name='T', reference_name='c', reference_length_nt=9,
+            sample_name='S', vcf_name='block.vcf', is_fasta_mode=False,
+            total_variants=len(reconciled), variants_in_cds=len(reconciled), resistance_hits=0,
+            annotations=anns, query_sequence=internal, feature_matches=[match],
+        )
+        results_db = tmp_path / 'res.db'
+        rconn = init_results_db(results_db)
+        run_id = save_run(rconn, project_db, proj_conn, result)
+        _rr, db_rows = load_run(rconn, run_id)
+        db_anns = reconstruct_annotations(db_rows)
+        assert db_anns[0].variant.haplotype_links == anns[0].variant.haplotype_links
+        rconn.close()
+
+        json_path = tmp_path / 'res.results.json'
+        write_json(result, json_path, project_conn=proj_conn, project_db_path=project_db)
+        _jr, jrows, _jg, _jf, _jc = load_run_from_json(json_path)
+        json_anns = reconstruct_annotations(jrows)
+        assert json_anns[0].variant.haplotype_links == anns[0].variant.haplotype_links
+        proj_conn.close()

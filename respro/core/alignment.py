@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+from collections.abc import Sequence
 
 import mappy
 
@@ -26,6 +27,7 @@ __all__ = [
     'IntronInterval',
     'classify_introns',
     'exon_junction_cds_offsets',
+    'full_intron_spans',
     'match_query_to_features',
     'load_features',
     'parse_cigar',
@@ -193,11 +195,9 @@ def _match_with_mappy(
         cigar = _normalize_mappy_cigar(h.cigar_str, strand)
 
         # Classify intron I-ops by exon-junction position for spliced features.
-        # Produces an exon-only CIGAR (intron I ops removed) plus intron
-        # intervals carried on the FeatureMatch. query_start in each interval is
-        # relative to the alignment's coding-orientation query region start
-        # (i.e. relative to the first base the CIGAR consumes in the query);
-        # downstream strand-aware consumers convert to forward-strand coords.
+        # Produces an exon-only CIGAR (intron I ops removed) plus IntronInterval
+        # objects whose query_start is the 0-based exon-only coding-orientation
+        # offset; downstream consumers convert via full_intron_spans().
         junctions = exon_junction_cds_offsets(feature)
         intron_tolerance = align_cfg.intron_junction_tolerance
         cigar, intron_intervals = classify_introns(cigar, junctions, intron_tolerance)
@@ -331,17 +331,20 @@ def exon_junction_cds_offsets(feature: FeatureRecord) -> list[int]:
     """
     Return the 0-based CDS offsets at which each exon junction occurs.
 
-    A junction offset is the cumulative coding length up to the end of an exon;
-    it is the CDS position at which the next exon begins. For a single-segment
-    feature the list is empty.
+    A junction offset is the cumulative exon length up to the end of each segment
+    in :attr:`FeatureRecord.segments` (stored ``segment_index`` order). Called only
+    by :func:`_match_with_mappy` when feeding :func:`classify_introns` (not stored
+    on :class:`FeatureMatch`). For a single-segment feature the list is empty.
 
-    Junctions are derived from :attr:`FeatureRecord.segments` in **genomic
-    5'->3' order** (segment_index order), not from ``_coding_segments``. This
-    matches the normalized CIGAR's walking order: for '+' strand the CIGAR
-    walks genomic order (== coding order), and for '-' strand
-    :func:`_normalize_mappy_cigar` reverses the CIGAR so it also walks genomic
-    5'->3' order. Using ``_coding_segments`` (which reverses for '-' strand)
-    would mismatch the CIGAR and misclassify introns.
+    :func:`_normalize_mappy_cigar` reverses ``'-'``-strand CIGAR operations into
+    coding 5'->3' order. Because Biopython's ``CompoundLocation.parts`` stores
+    GenBank ``complement(join(...))`` exons in coding 5'->3' order, accumulating
+    stored ``segment_index`` order matches the normalized CIGAR for GenBank
+    features on both strands. As a known producer limitation, a synthetic ``'-'``-strand
+    :class:`FeatureRecord` constructed with unequal-length segments in ascending
+    genomic order instead of coding order will yield genomic-order junctions here,
+    whereas downstream V4 consumers operate strictly on
+    :attr:`FeatureMatch.intron_intervals` in exon-only coding-orientation order.
 
     :param feature: feature record with optional ``segments``
     :return: ordered list of exon-junction CDS offsets (one per internal boundary)
@@ -384,6 +387,11 @@ def classify_introns(
 
     Adjacent same-operation runs in the exon-only CIGAR are merged so downstream
     consumers receive a clean CIGAR with no spurious length-1 adjacency.
+
+    Each returned :class:`IntronInterval` stores ``query_start`` as a 0-based
+    **exon-only** coding-orientation offset relative to the CIGAR start
+    (classified introns do not advance ``query_pos``). Consumers mapping against
+    the full unspliced query region accumulate preceding intron lengths.
 
     :param cigar: normalized CIGAR string (CDS=reference, genome=query)
     :param junction_offsets: exon-junction CDS offsets (from
@@ -430,6 +438,27 @@ def classify_introns(
     merged = _merge_adjacent_ops(exon_ops)
     exon_only_cigar = ''.join(f'{length}{op}' for length, op in merged)
     return exon_only_cigar, introns
+
+
+def full_intron_spans(
+    intron_intervals: Sequence[IntronInterval],
+    offset: int = 0,
+) -> list[tuple[int, int]]:
+    """
+    Convert exon-only coding-orientation ``IntronInterval`` entries to full spans.
+
+    Sorts ``intron_intervals`` in coding order (by ``query_start``) and
+    accumulates preceding intron lengths so each returned ``(start, end)``
+    interval marks that intron in the full unspliced coding-orientation region
+    (shifted by ``offset``).
+    """
+    spans: list[tuple[int, int]] = []
+    cumulative_intron = 0
+    for iv in sorted(intron_intervals, key=lambda item: item.query_start):
+        full_start = offset + iv.query_start + cumulative_intron
+        spans.append((full_start, full_start + iv.length))
+        cumulative_intron += iv.length
+    return spans
 
 
 def _merge_adjacent_ops(ops: list[tuple[int, str]]) -> list[tuple[int, str]]:

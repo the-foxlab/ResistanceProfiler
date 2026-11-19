@@ -148,6 +148,7 @@ def compute_coverage_gaps_from_depth(
             match.strand,
             query_len,
             match.cds_start,
+            match.intron_intervals,
         )
         cds_to_query = {cds_pos: query_pos for query_pos, cds_pos in q2c.items()}
 

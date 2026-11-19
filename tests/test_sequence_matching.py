@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from _sequence_oracle import V4_MULTI_INTRON_CASES, build_spliced_oracle_query
 from Bio.Seq import Seq
 
 from respro.core.alignment import (
@@ -378,4 +379,44 @@ class TestMappyBackend:
         coord = cigar_to_coordinate_map(m.cigar, m.query_start)
         # Position 0 in CDS should map to query position 300 (after flanking)
         assert coord[0] == 300
+
+
+class TestMultiIntronCoordinateInvariantsOracle:
+    """V6/V4: CIGAR + intron coordinate invariants match independent sequence oracle."""
+
+    @pytest.mark.parametrize('case', V4_MULTI_INTRON_CASES, ids=lambda c: c['name'])
+    def test_spliced_cigar_map_matches_oracle(self, case: dict) -> None:
+        from respro.core.alignment import classify_introns
+        from respro.core.vcf_to_reference import _build_query_to_cds_map
+
+        exon_seqs = case['exon_seqs']
+        intron_seqs = case['intron_seqs']
+        oracle = build_spliced_oracle_query(
+            exon_seqs_coding=exon_seqs,
+            intron_seqs_coding=intron_seqs,
+            feature_strand=case['feature_strand'],
+            match_strand=case['match_strand'],
+            query_flank_5='AAAA',
+            query_flank_3='TTTT',
+        )
+        raw_cigar = ''.join(
+            f'{len(ex)}M' + (f'{len(intron_seqs[i])}I' if i < len(intron_seqs) else '')
+            for i, ex in enumerate(exon_seqs)
+        )
+        junctions = []
+        cum = 0
+        for ex in exon_seqs[:-1]:
+            cum += len(ex)
+            junctions.append(cum)
+        exon_cigar, introns = classify_introns(raw_cigar, junctions, 0)
+        q2c = _build_query_to_cds_map(
+            exon_cigar,
+            query_start=4,
+            query_end=len(oracle.query_seq) - 4,
+            strand=case['match_strand'],
+            query_len=len(oracle.query_seq),
+            cds_start=0,
+            intron_intervals=tuple(introns),
+        )
+        assert q2c == oracle.expected_q2c
 

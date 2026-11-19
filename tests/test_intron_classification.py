@@ -11,6 +11,11 @@ downstream consumers never see the intron as a coding insertion.
 from __future__ import annotations
 
 import pytest
+from _sequence_oracle import (
+    V4_MULTI_INTRON_CASES,
+    build_spliced_oracle_query,
+    derive_fixed_coding_haplotype_effect,
+)
 
 from respro.core.alignment import (
     classify_introns,
@@ -741,3 +746,176 @@ class TestAlignmentVisualizationSpliced:
         matches = match_query_to_features(query, [feature])
         assert len(matches) == 1
         assert matches[0].identity > 0.99
+
+
+class TestMultiIntronCoordinateConvention:
+    """V4: cumulative exon-only IntronInterval.query_start across 2+ unequal introns."""
+
+    def test_classify_introns_three_exons_6_6_6_and_introns_6_9(self) -> None:
+        """Exact V4 acceptance: classify_introns('6M6I6M9I6M', [6, 12], 0) -> (6,6), (12,9)."""
+        cigar, introns = classify_introns('6M6I6M9I6M', [6, 12], 0)
+        assert cigar == '18M'
+        assert [(iv.query_start, iv.length) for iv in introns] == [(6, 6), (12, 9)]
+        assert [iv.cds_junction_pos for iv in introns] == [6, 12]
+
+    @pytest.mark.parametrize('case', V4_MULTI_INTRON_CASES, ids=lambda c: c['name'])
+    def test_multi_intron_strip_q2c_remap_fasta_and_visualization(self, case: dict) -> None:
+        """V4 oracle check: stripping, q2c, slot_map, VCF remap, FASTA, and alignment visualization."""
+        from respro.core.annotation import annotate_variants
+        from respro.core.fasta_to_vcf import _strip_introns_from_region
+        from respro.core.vcf_to_reference import _build_match_alignment
+        from respro.db.models import FeatureMatch
+        from respro.report.alignment_visualization import build_feature_alignments
+
+        exon_seqs = case['exon_seqs']
+        intron_seqs = case['intron_seqs']
+        feature_strand = case['feature_strand']
+        match_strand = case['match_strand']
+
+        oracle = build_spliced_oracle_query(
+            exon_seqs_coding=exon_seqs,
+            intron_seqs_coding=intron_seqs,
+            feature_strand=feature_strand,
+            match_strand=match_strand,
+        )
+        coding_cds = ''.join(exon_seqs)
+        segments = tuple(
+            FeatureSegment(segment_index=idx, start=s, end=e)
+            for idx, (s, e) in enumerate(oracle.feature_spec.segments)
+        )
+        feature = FeatureRecord(
+            id=10,
+            reference_id=1,
+            name='multi_spl',
+            protein='MultiSpl',
+            start=segments[0].start,
+            end=segments[-1].end,
+            strand=feature_strand,
+            codon_start=0,
+            nt_sequence=coding_cds,
+            segments=segments,
+        )
+
+        # Build exon-only CIGAR + IntronIntervals via classify_introns in coding order.
+        raw_cigar_parts: list[str] = []
+        junctions: list[int] = []
+        cum = 0
+        for idx, exon in enumerate(exon_seqs):
+            raw_cigar_parts.append(f'{len(exon)}M')
+            cum += len(exon)
+            if idx < len(intron_seqs):
+                junctions.append(cum)
+                raw_cigar_parts.append(f'{len(intron_seqs[idx])}I')
+        exon_cigar, introns = classify_introns(''.join(raw_cigar_parts), junctions, 0)
+        assert exon_cigar == f'{len(coding_cds)}M'
+        assert [(iv.cds_junction_pos, iv.query_start, iv.length) for iv in introns] == list(
+            oracle.expected_exon_only_introns
+        )
+
+        match = FeatureMatch(
+            feature=feature,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=len(oracle.query_seq),
+            strand=match_strand,
+            cigar=exon_cigar,
+            cds_start=0,
+            intron_intervals=tuple(introns),
+        )
+
+        # 1) _strip_introns_from_region strips full-region spans [lo, hi) -> exon concatenation.
+        region = oracle.query_seq[match.query_start:match.query_end]
+        if match_strand == '-':
+            from Bio.Seq import Seq
+
+            region = str(Seq(region).reverse_complement())
+        stripped = _strip_introns_from_region(region, match.intron_intervals)
+        assert stripped == oracle.exon_only_region
+
+        # 2) _build_query_to_cds_map maps every exon position and excludes every intron position.
+        q2c = _build_query_to_cds_map(
+            match.cigar,
+            match.query_start,
+            match.query_end,
+            match.strand,
+            len(oracle.query_seq),
+            match.cds_start,
+            match.intron_intervals,
+        )
+        assert q2c == oracle.expected_q2c
+        for lo, hi in oracle.expected_full_intron_spans_forward:
+            for intron_q in range(lo, hi):
+                assert intron_q not in q2c
+
+        # 3) Slot map excludes intron positions and maps all exon positions.
+        ctx = _build_match_alignment(match, oracle.query_seq)
+        assert ctx is not None
+        assert set(ctx.slot_map) == set(oracle.expected_q2c)
+
+        # 4) Variants in exon 1, exon 2, and exon 3 remap & annotate to exact oracle consequences.
+        exon_cds_offsets = [0, len(exon_seqs[0]) + 1, len(exon_seqs[0]) + len(exon_seqs[1]) + 1]
+        c2q = {cds: q for q, cds in oracle.expected_q2c.items()}
+        for cds_off in exon_cds_offsets:
+            qpos = c2q[cds_off]
+            ref_b = oracle.query_seq[qpos]
+            alt_b = 'C' if ref_b != 'C' else 'T'
+            var = VariantCall(chrom='q', pos=qpos, ref=ref_b, alt=alt_b, allele_freq=1.0, depth=50)
+            remapped, warnings = reconcile_variants_for_matches([var], [match], oracle.query_seq)
+            assert warnings == []
+            assert len(remapped) == 1
+            assert remapped[0].pos == oracle.feature_spec.cds_to_genomic(cds_off)
+
+            anns = annotate_variants(remapped, [feature])
+            assert len(anns) == 1
+            # Compare against direct sequence oracle on spliced exons.
+            q_coding_edit_pos = cds_off
+            from _sequence_oracle import complement_dna
+
+            new_coding = (
+                alt_b if match_strand == '+' else complement_dna(alt_b)
+            )
+            exp = derive_fixed_coding_haplotype_effect(
+                internal_coding=coding_cds,
+                supplied_seq=coding_cds,
+                match_strand='+',
+                codon_start=0,
+                query_edits=[(q_coding_edit_pos, coding_cds[q_coding_edit_pos], new_coding)],
+                codon_idx=cds_off // 3,
+            )
+            assert (anns[0].ref_codon, anns[0].alt_codon, anns[0].ref_aa, anns[0].alt_aa, anns[0].consequence) == exp
+
+        # Variants inside full-region intron spans are excluded (never remapped).
+        for lo, hi in oracle.expected_full_intron_spans_forward:
+            mid = (lo + hi) // 2
+            ref_b = oracle.query_seq[mid]
+            alt_b = 'C' if ref_b != 'C' else 'T'
+            intron_var = VariantCall(chrom='q', pos=mid, ref=ref_b, alt=alt_b, allele_freq=1.0, depth=50)
+            out_intron, warn_intron = reconcile_variants_for_matches([intron_var], [match], oracle.query_seq)
+            assert out_intron == []
+            assert warn_intron
+
+        # 5) FASTA emission with exon-2 and exon-3 SNPs emits only those SNPs (no intron insertion).
+        mutated_query = list(oracle.query_seq)
+        mut_cds_positions = [len(exon_seqs[0]) + 1, len(exon_seqs[0]) + len(exon_seqs[1]) + 2]
+        for cds_off in mut_cds_positions:
+            qpos = c2q[cds_off]
+            mutated_query[qpos] = 'G' if mutated_query[qpos] != 'G' else 'A'
+        mutated_query_str = ''.join(mutated_query)
+        fasta_vars, fasta_gaps = fasta_to_vcf(mutated_query_str, [match])
+        assert fasta_gaps == []
+        assert {v.pos for v in fasta_vars} == {
+            oracle.feature_spec.cds_to_genomic(c) for c in mut_cds_positions
+        }
+
+        # 6) Alignment visualization aligns every exon position cleanly with exact match.
+        alns = build_feature_alignments(oracle.query_seq, [match])
+        aln = alns['multi_spl']
+        assert '-' not in aln.aligned_ref
+        assert '-' not in aln.aligned_query
+        assert len(aln.aligned_ref) == len(coding_cds)
+        assert aln.aligned_ref == aln.aligned_query
+        assert aln.coding_to_aln_idx == (
+            list(reversed(range(len(coding_cds)))) if feature_strand == '-' else list(range(len(coding_cds)))
+        )

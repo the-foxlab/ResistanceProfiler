@@ -264,7 +264,8 @@ CREATE TABLE IF NOT EXISTS variant_result (
     rule_effect_aa_freq     TEXT    DEFAULT '{}',
     rule_effect_alt         TEXT    DEFAULT '{}',
     freq_method             TEXT    DEFAULT 'observed',
-    variant_source          TEXT    DEFAULT ''
+    variant_source          TEXT    DEFAULT '',
+    haplotype_links         TEXT    DEFAULT '[]'
 );
 
 CREATE INDEX IF NOT EXISTS idx_vr_run ON variant_result(run_id);
@@ -403,6 +404,7 @@ _OPTIONAL_RESULTS_COLUMN_DEFS = {
         'rule_effect_alt': "TEXT DEFAULT '{}'",
         'freq_method': "TEXT DEFAULT 'observed'",
         'variant_source': "TEXT DEFAULT ''",
+        'haplotype_links': "TEXT DEFAULT '[]'",
     },
     'coverage_gap': {
         'reference_name': "TEXT DEFAULT ''",

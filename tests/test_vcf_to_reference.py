@@ -15,6 +15,17 @@ from dataclasses import replace as dc_replace
 from pathlib import Path
 
 import pytest
+from _sequence_oracle import (
+    V1_FRAME_OFFSET_CASES,
+    V3_BLOCK_SUB_CASES,
+    V3_MULTIALLELIC_BASELINE_CASE,
+    OracleFeatureSpec,
+    OracleHaplotype,
+    apply_sequence_edits,
+    derive_fixed_coding_haplotype_effect,
+    oracle_codon_mixture_frequencies,
+    reverse_complement_dna,
+)
 from Bio.Seq import Seq
 from conftest import TINY_REF_NAME, TINY_REF_SEQ, make_profiling_result
 
@@ -1309,6 +1320,147 @@ class TestFrameOffsetReconciliation:
         assert warnings == []
         assert _tokens(out) == [(9, 'A', 'AT', 1.0, VCF_DERIVED)]
 
+    def test_v1_acceptance_codon_start_1_exact_case(self) -> None:
+        """V1 acceptance: codon_start=1, CDS CAAAGAAAAA, 10M, 0-based query pos 2 A>C."""
+        internal = 'CAAAGAAAAA'
+        supplied = 'CAAAGAAAAA'
+        feature = _feature(internal)
+        feature.codon_start = 1
+        match = _match(feature, supplied, '10M')
+        call = _snp(2, 'A', 'C', af=1.0)
+
+        exp_ref_codon, exp_alt_codon, exp_ref_aa, exp_alt_aa, exp_conseq = (
+            derive_fixed_coding_haplotype_effect(
+                internal_coding=internal,
+                supplied_seq=supplied,
+                match_strand='+',
+                codon_start=1,
+                query_edits=[(2, 'A', 'C')],
+                codon_idx=0,
+            )
+        )
+        assert (exp_ref_codon, exp_alt_codon, exp_ref_aa, exp_alt_aa) == ('AAA', 'ACA', 'K', 'T')
+
+        out, warnings = reconcile_variants_for_matches([call], [match], supplied)
+        assert warnings == []
+        assert len(out) == 1
+        assert out[0].query_ref_codon == exp_ref_codon
+        anns = annotate_variants(out, [feature])
+        assert len(anns) == 1
+        assert (anns[0].ref_codon, anns[0].alt_codon, anns[0].ref_aa, anns[0].alt_aa, anns[0].consequence) == (
+            exp_ref_codon, exp_alt_codon, exp_ref_aa, exp_alt_aa, exp_conseq,
+        )
+
+    @pytest.mark.parametrize(
+        ('codon_start', 'coding_internal', 'coding_idx', 'new_coding_base', 'strand'),
+        V1_FRAME_OFFSET_CASES,
+    )
+    def test_frame_offsets_zero_one_two_both_strands_match_oracle(
+        self,
+        codon_start: int,
+        coding_internal: str,
+        coding_idx: int,
+        new_coding_base: str,
+        strand: str,
+    ) -> None:
+        """Frame offsets 0/1/2 on both '+' and '-' strands match the independent oracle."""
+        spec = OracleFeatureSpec(
+            segments=((0, len(coding_internal)),),
+            strand=strand,
+            codon_start=codon_start,
+        )
+        feature = _feature(coding_internal, strand=strand)
+        feature.codon_start = codon_start
+
+        supplied_seq = (
+            coding_internal if strand == '+' else reverse_complement_dna(coding_internal)
+        )
+        match = _match(feature, supplied_seq, f'{len(coding_internal)}M', strand=strand)
+
+        query_pos = spec.cds_to_genomic(coding_idx)
+        assert query_pos is not None
+        query_ref = supplied_seq[query_pos]
+        query_alt = (
+            new_coding_base if strand == '+' else reverse_complement_dna(new_coding_base)
+        )
+        target_codon_idx = (coding_idx - codon_start) // 3
+        exp = derive_fixed_coding_haplotype_effect(
+            internal_coding=coding_internal,
+            supplied_seq=supplied_seq,
+            match_strand=strand,
+            codon_start=codon_start,
+            query_edits=[(query_pos, query_ref, query_alt)],
+            codon_idx=target_codon_idx,
+        )
+
+        out, warnings = reconcile_variants_for_matches(
+            [_snp(query_pos, query_ref, query_alt)], [match], supplied_seq,
+        )
+        assert warnings == []
+        assert len(out) == 1
+        anns = annotate_variants(out, [feature])
+        assert len(anns) == 1
+        assert (anns[0].ref_codon, anns[0].alt_codon, anns[0].ref_aa, anns[0].alt_aa, anns[0].consequence) == exp
+
+    def test_pre_translation_start_position_has_no_codon_index_or_query_codon(self) -> None:
+        """A nucleotide before codon_start returns None codon_index/offset and empty query_ref_codon."""
+        from respro.core.vcf_to_reference import _attach_supplied_codon, _build_match_alignment
+
+        internal = 'CAAAGAAAAA'
+        for strand in ('+', '-'):
+            feature = _feature(internal, strand=strand)
+            feature.codon_start = 1
+            spec = OracleFeatureSpec(segments=((0, len(internal)),), strand=strand, codon_start=1)
+            pre_start_pos = spec.cds_to_genomic(0)
+            assert pre_start_pos is not None
+            assert spec.codon_index(pre_start_pos) is None
+            assert spec.codon_offset(pre_start_pos) is None
+            assert feature.codon_index(pre_start_pos) is None
+            assert feature.codon_position_in_codon(pre_start_pos) is None
+
+            sup_seq = internal if strand == '+' else reverse_complement_dna(internal)
+            match = _match(feature, sup_seq, '10M', strand=strand)
+            ref_b = sup_seq[pre_start_pos]
+            alt_b = 'T' if ref_b != 'T' else 'G'
+            pre_var = _snp(pre_start_pos, ref_b, alt_b)
+
+            # Reconciliation emits no coding variant for non-coding frame prefix.
+            out, warnings = reconcile_variants_for_matches([pre_var], [match], sup_seq)
+            assert warnings == []
+            assert out == []
+
+            # _attach_supplied_codon and annotate_variants attach no codon context.
+            ctx = _build_match_alignment(match, sup_seq)
+            assert ctx is not None
+            _attach_supplied_codon(ctx, pre_var)
+            assert pre_var.query_ref_codon == ''
+            assert pre_var.query_codon_feature_id == 0
+
+            anns = annotate_variants([pre_var], [feature])
+            assert len(anns) == 1
+            assert anns[0].ref_codon == ''
+            assert anns[0].alt_codon == ''
+            assert anns[0].ref_aa == ''
+            assert anns[0].alt_aa == ''
+
+    def test_unmapped_codon_base_leaves_query_ref_codon_empty(self) -> None:
+        """When any base in a codon is unmapped ('-') in the supplied reference,
+        _attach_supplied_codon leaves query_ref_codon empty."""
+        # Internal AAA TTT GGG; supplied AA- TTT GGG (col 2 deleted in codon 0).
+        # SNP at col 0 (A>C) sits in codon 0 where col 2 has sup == '-'.
+        internal = 'AAATTTGGG'
+        supplied = 'AATTTGGG'
+        feature = _feature(internal)
+        match = _match(feature, supplied, '2M1D6M')
+        call = _snp(0, 'A', 'C', af=1.0)
+
+        out, warnings = reconcile_variants_for_matches([call], [match], supplied)
+        assert warnings == []
+        snp_variants = [v for v in out if len(v.ref) == 1 and len(v.alt) == 1]
+        assert len(snp_variants) == 1
+        assert snp_variants[0].query_ref_codon == ''
+        assert snp_variants[0].query_codon_feature_id == 0
+
 
 class TestPendingEditsAtomic:
     """F2: pending-string edits apply per column in descending char order.
@@ -1669,3 +1821,363 @@ class TestEmptyVcfBaselineCli:
         ])
         assert result.exit_code != 0
         assert 'no variant records' in result.output
+
+
+class TestEqualLengthBlockSubstitutionsV3:
+    """V3: equal-length block substitutions, haplotype linkage, joint frequency, and persistence."""
+
+    @pytest.mark.parametrize('case', V3_BLOCK_SUB_CASES, ids=lambda c: c['name'])
+    def test_block_substitution_oracle_cases(self, case: dict) -> None:
+        internal = case['internal_coding']
+        feature = _feature(internal, strand=case['strand'])
+        match = _match(feature, internal, f'{len(internal)}M', strand=case['match_strand'])
+        call = VariantCall(
+            chrom='ref',
+            pos=case['pos'],
+            ref=case['ref'],
+            alt=case['alt'],
+            allele_freq=case['af'],
+            depth=100,
+        )
+
+        out, warnings = reconcile_variants_for_matches([call], [match], internal)
+        assert warnings == []
+        assert len(out) == case['expected_atom_count']
+        assert all(v.record_index >= 0 and v.alt_index >= 0 for v in out)
+        assert all(v.haplotype_links == ((out[0].record_index, out[0].alt_index, case['af']),) for v in out)
+
+        if 'expected_codon_pos' in case or 'expected_codon_positions' in case:
+            sample_coding = apply_sequence_edits(internal, [(case['pos'], case['ref'], case['alt'])])
+            anns = annotate_variants(out, [feature])
+            assert len(anns) == case['expected_atom_count']
+            codon_positions = case.get(
+                'expected_codon_positions',
+                (case['expected_codon_pos'],) if 'expected_codon_pos' in case else (),
+            )
+            for codon_pos in codon_positions:
+                oracle_mix = oracle_codon_mixture_frequencies(
+                    [
+                        OracleHaplotype(coding_seq=sample_coding, freq=case['af']),
+                        OracleHaplotype(coding_seq=internal, freq=1.0 - case['af']),
+                    ],
+                    codon_start=0,
+                    codon_idx=codon_pos,
+                )
+                exp_codon = sample_coding[codon_pos * 3:codon_pos * 3 + 3]
+                exp_aa, exp_freq = oracle_mix[exp_codon]
+                codon_anns = [a for a in anns if a.codon_pos == codon_pos]
+                assert codon_anns
+                if 'expected_alt_aa' in case:
+                    assert exp_aa == case['expected_alt_aa']
+                if 'expected_ref_aa' in case:
+                    assert any(a.ref_aa == case['expected_ref_aa'] for a in codon_anns)
+                assert any(
+                    a.alt_aa == exp_aa
+                    and a.alt_codon == exp_codon
+                    and a.single_exchange_aa_freq == pytest.approx(exp_freq)
+                    for a in codon_anns
+                )
+                # No impossible solo states may be accepted or carry positive lower.
+                for a in codon_anns:
+                    for state in a.combined_states:
+                        assert state.lower == pytest.approx(
+                            oracle_mix.get(state.alt_codon, ('?', 0.0))[1]
+                        )
+
+    def test_multiallelic_block_over_baseline_divergent_codon_exact_states(
+        self, tmp_path: Path,
+    ) -> None:
+        """Internal ATGAAATTT vs supplied ATGGCATTT + one record GC->AT@0.4,AC@0.3 resolves ATA=0.4, ACA=0.3, GCA=0.3."""
+        from respro.io.vcf import parse_vcf
+
+        case = V3_MULTIALLELIC_BASELINE_CASE
+        internal = case['internal_coding']
+        supplied = case['supplied_coding']
+        vcf_path = tmp_path / 'baseline_multi.vcf'
+        vcf_path.write_text(
+            '##fileformat=VCFv4.2\n'
+            '##INFO=<ID=AF,Number=A,Type=Float,Description="AF">\n'
+            '##INFO=<ID=DP,Number=1,Type=Integer,Description="DP">\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            f"ref\t{case['pos'] + 1}\t.\t{case['ref']}\tAT,AC\t100\tPASS\tAF=0.4,0.3;DP=100\n",
+            encoding='utf-8',
+        )
+        calls = parse_vcf(vcf_path)
+        assert [(c.record_index, c.alt_index) for c in calls] == [(0, 0), (0, 1)]
+
+        feature = _feature(internal)
+        match = _match(feature, supplied, f'{len(internal)}M')
+        out, warnings = reconcile_variants_for_matches(calls, [match], supplied)
+        assert warnings == []
+
+        hap_at = apply_sequence_edits(supplied, [(case['pos'], case['ref'], 'AT')])
+        hap_ac = apply_sequence_edits(supplied, [(case['pos'], case['ref'], 'AC')])
+        oracle_mix = oracle_codon_mixture_frequencies(
+            [
+                OracleHaplotype(coding_seq=hap_at, freq=0.4),
+                OracleHaplotype(coding_seq=hap_ac, freq=0.3),
+                OracleHaplotype(coding_seq=supplied, freq=0.3),
+            ],
+            codon_start=0,
+            codon_idx=case['codon_idx'],
+        )
+        anns = annotate_variants(out, [feature])
+        state_lower = {
+            s.alt_codon: s.lower
+            for a in anns
+            for s in a.combined_states
+            if s.accepted
+        }
+        for promoted in anns:
+            if promoted.single_exchange_aa_freq > 0:
+                state_lower[promoted.alt_codon] = promoted.single_exchange_aa_freq
+
+        assert state_lower.get('ATA') == pytest.approx(oracle_mix['ATA'][1], abs=1e-6)
+        assert state_lower.get('ACA') == pytest.approx(oracle_mix['ACA'][1], abs=1e-6)
+        assert state_lower.get('GCA') == pytest.approx(oracle_mix['GCA'][1], abs=1e-6)
+        assert all(
+            c not in state_lower or state_lower[c] == pytest.approx(0.0, abs=1e-9)
+            for c in ('AAA', 'GTA', 'GAA')
+        )
+
+    def test_unchanged_slot_at_baseline_divergent_position_not_claimed_by_equal_len_block(
+        self,
+    ) -> None:
+        """call_base_cols is gated on alt_len < ref_len: an equal-length block
+        that leaves a baseline-divergent slot unchanged keeps that baseline at 1.0 reference_derived."""
+        internal = 'ATGAAATTT'
+        supplied = 'ATGACATTT'  # baseline A>C at 0-based col 4
+        feature = _feature(internal)
+        match = _match(feature, supplied, '9M')
+        # Call AC>TC at 0-based pos 3 (AF 0.4): changes col 3 (A>T), leaves col 4 (C>C) unchanged.
+        call = _snp(3, 'AC', 'TC', af=0.4)
+
+        out, warnings = reconcile_variants_for_matches([call], [match], supplied)
+        assert warnings == []
+        assert _tokens(out) == [
+            (3, 'A', 'T', 0.4, VCF_DERIVED),
+            (4, 'A', 'C', 1.0, REFERENCE_DERIVED),
+        ]
+
+    def test_reverse_strand_equal_length_block_substitution(self) -> None:
+        """Minus-strand equal-length block substitution at AF 0.6 gives exact coding effect."""
+        internal_coding = 'ATGAAATTT'  # codon 1 = AAA (K)
+        internal_genomic = reverse_complement_dna(internal_coding)  # AAATTTCAT
+        # Mutate genomic pos 3..4 ('TT' -> 'AC') -> genomic AAAACTCAT -> coding ATGAGTTAT (codon 1 = AGT = S).
+        feature = _feature(internal_coding, strand='-')
+        match = _match(feature, internal_genomic, '9M', strand='-')
+        call = VariantCall(chrom='ref', pos=3, ref='TT', alt='AC', allele_freq=0.6, depth=50)
+
+        out, warnings = reconcile_variants_for_matches([call], [match], internal_genomic)
+        assert warnings == []
+        assert len(out) == 2
+
+        sample_coding = reverse_complement_dna(
+            apply_sequence_edits(internal_genomic, [(3, 'TT', 'AC')])
+        )
+        oracle_mix = oracle_codon_mixture_frequencies(
+            [
+                OracleHaplotype(coding_seq=sample_coding, freq=0.6),
+                OracleHaplotype(coding_seq=internal_coding, freq=0.4),
+            ],
+            codon_start=0,
+            codon_idx=1,
+        )
+        anns = annotate_variants(out, [feature])
+        assert len(anns) == 2
+        assert all(
+            a.alt_codon == 'AGT'
+            and a.alt_aa == 'S'
+            and a.single_exchange_aa_freq == pytest.approx(oracle_mix['AGT'][1])
+            for a in anns
+        )
+
+    def test_mutually_exclusive_multi_alt_block_with_shared_atom(self, tmp_path: Path) -> None:
+        """Two ALTs in one record sharing an atom (AA>CG@0.5, AA>CT@0.3) keep both haplotype links."""
+        from respro.io.vcf import parse_vcf
+
+        internal = 'ATGAAATTT'
+        vcf_path = tmp_path / 'multi_block.vcf'
+        vcf_path.write_text(
+            '##fileformat=VCFv4.2\n'
+            '##INFO=<ID=AF,Number=A,Type=Float,Description="AF">\n'
+            '##INFO=<ID=DP,Number=1,Type=Integer,Description="DP">\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'ref\t4\t.\tAA\tCG,CT\t100\tPASS\tAF=0.5,0.3;DP=100\n',
+            encoding='utf-8',
+        )
+        calls = parse_vcf(vcf_path)
+        assert [c.alt_index for c in calls] == [0, 1]
+
+        feature = _feature(internal)
+        match = _match(feature, internal, '9M')
+        out, warnings = reconcile_variants_for_matches(calls, [match], internal)
+        assert warnings == []
+
+        by_pos_alt = {(v.pos, v.alt): v for v in out}
+        shared = by_pos_alt[(3, 'C')]
+        assert shared.allele_freq == pytest.approx(0.8)
+        assert [(r, a) for r, a, _ in shared.haplotype_links] == [(0, 0), (0, 1)]
+        assert [af for _, _, af in shared.haplotype_links] == pytest.approx([0.5, 0.3])
+        assert [(r, a) for r, a, _ in by_pos_alt[(4, 'G')].haplotype_links] == [(0, 0)]
+        assert by_pos_alt[(4, 'G')].haplotype_links[0][2] == pytest.approx(0.5)
+        assert [(r, a) for r, a, _ in by_pos_alt[(4, 'T')].haplotype_links] == [(0, 1)]
+        assert by_pos_alt[(4, 'T')].haplotype_links[0][2] == pytest.approx(0.3)
+
+        hap_cg = apply_sequence_edits(internal, [(3, 'AA', 'CG')])
+        hap_ct = apply_sequence_edits(internal, [(3, 'AA', 'CT')])
+        oracle_mix = oracle_codon_mixture_frequencies(
+            [
+                OracleHaplotype(coding_seq=hap_cg, freq=0.5),
+                OracleHaplotype(coding_seq=hap_ct, freq=0.3),
+                OracleHaplotype(coding_seq=internal, freq=0.2),
+            ],
+            codon_start=0,
+            codon_idx=1,
+        )
+
+        anns = annotate_variants(out, [feature])
+        by_ann = {(a.variant.pos, a.variant.alt): a for a in anns}
+        c_ann = by_ann[(3, 'C')]
+        # CGA (R@0.5) promoted; CTA (L@0.3) in combined_states; impossible solo CAA absent.
+        assert c_ann.alt_codon == 'CGA'
+        assert c_ann.alt_aa == 'R'
+        assert c_ann.single_exchange_aa_freq == pytest.approx(oracle_mix['CGA'][1])
+        cta_states = [s for s in c_ann.combined_states if s.alt_codon == 'CTA']
+        assert len(cta_states) == 1
+        assert cta_states[0].lower == pytest.approx(oracle_mix['CTA'][1])
+        assert cta_states[0].accepted is True
+        assert all(s.alt_codon != 'CAA' for s in c_ann.combined_states)
+
+    def test_baseline_divergent_block_residual_links(self) -> None:
+        """Internal AAA vs supplied GCA, call GC>AT@0.6 -> ATA@0.6 and GCA@0.4."""
+        internal = 'ATGAAATTT'
+        supplied = 'ATGGCATTT'  # baseline col 3 A>G, col 4 A>C
+        feature = _feature(internal)
+        match = _match(feature, supplied, '9M')
+        call = VariantCall(chrom='ref', pos=3, ref='GC', alt='AT', allele_freq=0.6, depth=100)
+
+        out, warnings = reconcile_variants_for_matches([call], [match], supplied)
+        assert warnings == []
+
+        hap_call = apply_sequence_edits(supplied, [(3, 'GC', 'AT')])
+        oracle_mix = oracle_codon_mixture_frequencies(
+            [
+                OracleHaplotype(coding_seq=hap_call, freq=0.6),
+                OracleHaplotype(coding_seq=supplied, freq=0.4),
+            ],
+            codon_start=0,
+            codon_idx=1,
+        )
+        anns = annotate_variants(out, [feature])
+        effects: dict[str, float] = {}
+        for a in anns:
+            if a.single_exchange_aa_freq > 0:
+                effects[a.alt_codon] = a.single_exchange_aa_freq
+            for s in a.combined_states:
+                if s.accepted:
+                    effects[s.alt_codon] = s.lower
+        assert effects['ATA'] == pytest.approx(oracle_mix['ATA'][1])
+        assert effects['GCA'] == pytest.approx(oracle_mix['GCA'][1])
+
+    def test_length_changing_replacement_still_follows_indel_path(self) -> None:
+        """A length change (pos 3 AA>G) still produces a deletion annotation (frameshift)."""
+        internal = 'ATGAAATTT'
+        feature = _feature(internal)
+        match = _match(feature, internal, '9M')
+        call = VariantCall(chrom='ref', pos=3, ref='AA', alt='G', allele_freq=1.0, depth=100)
+
+        out, warnings = reconcile_variants_for_matches([call], [match], internal)
+        assert warnings == []
+        anns = annotate_variants(out, [feature])
+        assert any(a.consequence == 'frameshift' for a in anns)
+
+    def test_haplotype_links_round_trip_results_db_json_and_legacy_migration(
+        self, tmp_path: Path,
+    ) -> None:
+        """haplotype_links survive SQLite save_run/reconstruct_annotations, JSON write/load,
+        and legacy results DB optional-column migration."""
+        import json
+        import uuid
+
+        from respro.db.results import load_run_from_json, save_run
+        from respro.report.non_html_exports import write_json
+
+        links = ((0, 0, 0.5), (0, 1, 0.3))
+        feature = _feature('ATGAAATTT')
+        ann = AnnotatedVariant(
+            variant=VariantCall(
+                chrom='ref', pos=3, ref='A', alt='C', allele_freq=0.8, depth=100,
+                source=VCF_DERIVED, record_index=0, alt_index=0, haplotype_links=links,
+            ),
+            feature_name='gag', codon_pos=1,
+            ref_codon='AAA', alt_codon='CGA', ref_aa='K', alt_aa='R',
+            consequence='missense',
+        )
+        result = make_profiling_result(
+            project_name='T', reference_name='ref', reference_length_nt=9,
+            sample_name='S', vcf_name='s.vcf', is_fasta_mode=False,
+            total_variants=1, variants_in_cds=1, resistance_hits=0,
+            annotations=[ann],
+            query_sequence='ATGAAATTT',
+            feature_matches=[_match(feature, 'ATGAAATTT', '9M')],
+        )
+
+        project_db = tmp_path / 'project.db'
+        proj_conn = create_schema(project_db)
+        proj_conn.execute(
+            'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
+            ('T', 6, str(uuid.uuid4())),
+        )
+        proj_conn.commit()
+
+        # SQLite round-trip
+        results_db = tmp_path / 'results.db'
+        conn = init_results_db(results_db)
+        run_id = save_run(conn, project_db, proj_conn, result)
+        _run_row, variant_rows = load_run(conn, run_id)
+        reconstructed_db = reconstruct_annotations(variant_rows)
+        assert reconstructed_db[0].variant.haplotype_links == links
+        conn.close()
+
+        # JSON round-trip
+        json_path = tmp_path / 'out.results.json'
+        write_json(result, json_path, project_conn=proj_conn, project_db_path=project_db)
+        payload = json.loads(json_path.read_text(encoding='utf-8'))
+        assert 'haplotype_links' in payload['variant_result'][0]
+        _r, json_rows, _g, _f, _c = load_run_from_json(json_path)
+        reconstructed_json = reconstruct_annotations(json_rows)
+        assert reconstructed_json[0].variant.haplotype_links == links
+        proj_conn.close()
+
+        # Legacy results DB migration
+        legacy_db = tmp_path / 'legacy.db'
+        raw = sqlite3.connect(str(legacy_db))
+        raw.executescript(
+            """
+            CREATE TABLE results_meta (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE run (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_name TEXT NOT NULL,
+                project_db_path TEXT DEFAULT '',
+                reference_name TEXT DEFAULT '',
+                vcf_path TEXT DEFAULT ''
+            );
+            CREATE TABLE variant_result (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id INTEGER NOT NULL,
+                chrom TEXT NOT NULL,
+                pos INTEGER NOT NULL,
+                ref TEXT NOT NULL,
+                alt TEXT NOT NULL
+            );
+            """
+        )
+        raw.commit()
+        raw.close()
+        migrated = init_results_db(legacy_db)
+        cols = {
+            row['name'] for row in migrated.execute('PRAGMA table_info(variant_result)').fetchall()
+        }
+        assert 'haplotype_links' in cols
+        migrated.close()

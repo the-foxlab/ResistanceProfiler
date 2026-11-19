@@ -12,6 +12,14 @@ from pathlib import Path
 
 import pysam
 import pytest
+from _sequence_oracle import (
+    V5_BAM_ORIENTATION_CASES,
+    OracleRead,
+    complement_dna,
+    oracle_bam_codon_frequencies,
+    oracle_disjoint_factor_frechet,
+    reverse_complement_dna,
+)
 
 from respro.core.annotation import annotate_variants
 from respro.core.combined_snp import (
@@ -253,7 +261,7 @@ class TestComputeCodonCooccurrence:
                 contig='ref',
                 codon_query_positions=[(0, 0), (1, 1)],
                 candidate_states=candidates,
-                strand='+',
+                complement_bases=False,
                 min_mapq=20,
                 min_depth=5,
             )
@@ -288,7 +296,7 @@ class TestComputeCodonCooccurrence:
             states = compute_codon_cooccurrence(
                 bam=bam, contig='ref',
                 codon_query_positions=[(0, 0), (1, 1)],
-                candidate_states=candidates, strand='+', min_mapq=20, min_depth=2,
+                candidate_states=candidates, complement_bases=False, min_mapq=20, min_depth=2,
             )
         finally:
             bam.close()
@@ -317,7 +325,7 @@ class TestComputeCodonCooccurrence:
             states = compute_codon_cooccurrence(
                 bam=bam, contig='ref',
                 codon_query_positions=[(0, 0), (1, 1)],
-                candidate_states=candidates, strand='+', min_mapq=20, min_depth=10,
+                candidate_states=candidates, complement_bases=False, min_mapq=20, min_depth=10,
             )
         finally:
             bam.close()
@@ -347,7 +355,7 @@ class TestComputeCodonCooccurrence:
             states = compute_codon_cooccurrence(
                 bam=bam, contig='ref',
                 codon_query_positions=[(0, 0), (1, 20)],
-                candidate_states=candidates, strand='+', min_mapq=20, min_depth=1,
+                candidate_states=candidates, complement_bases=False, min_mapq=20, min_depth=1,
             )
         finally:
             bam.close()
@@ -378,7 +386,7 @@ class TestComputeCodonCooccurrence:
             states = compute_codon_cooccurrence(
                 bam=bam, contig='ref',
                 codon_query_positions=[(0, 0), (1, 1)],
-                candidate_states=candidates, strand='+', min_mapq=20, min_depth=3,
+                candidate_states=candidates, complement_bases=False, min_mapq=20, min_depth=3,
             )
         finally:
             bam.close()
@@ -411,7 +419,7 @@ class TestComputeCodonCooccurrence:
             states = compute_codon_cooccurrence(
                 bam=bam, contig='ref',
                 codon_query_positions=[(0, 0), (1, 1)],
-                candidate_states=candidates, strand='+', min_mapq=20, min_depth=3,
+                candidate_states=candidates, complement_bases=False, min_mapq=20, min_depth=3,
             )
         finally:
             bam.close()
@@ -443,7 +451,7 @@ class TestComputeCodonCooccurrence:
             states = compute_codon_cooccurrence(
                 bam=bam, contig='ref',
                 codon_query_positions=[(0, 0), (1, 1)],
-                candidate_states=candidates, strand='+', min_mapq=20, min_depth=5,
+                candidate_states=candidates, complement_bases=False, min_mapq=20, min_depth=5,
             )
         finally:
             bam.close()
@@ -485,7 +493,7 @@ class TestComputeCodonCooccurrence:
             states = compute_codon_cooccurrence(
                 bam=bam, contig='ref',
                 codon_query_positions=[(0, 0), (1, 1)],
-                candidate_states=candidates, strand='+', min_mapq=20, min_depth=2,
+                candidate_states=candidates, complement_bases=False, min_mapq=20, min_depth=2,
             )
         finally:
             bam.close()
@@ -526,7 +534,7 @@ class TestComputeCodonCooccurrence:
             states = compute_codon_cooccurrence(
                 bam=bam, contig='ref',
                 codon_query_positions=[(0, 0), (1, 1)],
-                candidate_states=candidates, strand='+', min_mapq=20, min_depth=2,
+                candidate_states=candidates, complement_bases=False, min_mapq=20, min_depth=2,
             )
         finally:
             bam.close()
@@ -556,7 +564,7 @@ class TestComputeCodonCooccurrence:
             states = compute_codon_cooccurrence(
                 bam=bam, contig='ref',
                 codon_query_positions=[(0, 0), (1, 1)],
-                candidate_states=candidates, strand='+', min_mapq=20, min_depth=2,
+                candidate_states=candidates, complement_bases=False, min_mapq=20, min_depth=2,
             )
         finally:
             bam.close()
@@ -586,7 +594,7 @@ class TestComputeCodonCooccurrence:
             states = compute_codon_cooccurrence(
                 bam=bam, contig='ref',
                 codon_query_positions=[(0, 0), (1, 1)],
-                candidate_states=candidates, strand='+', min_mapq=20, min_depth=2,
+                candidate_states=candidates, complement_bases=False, min_mapq=20, min_depth=2,
             )
         finally:
             bam.close()
@@ -848,3 +856,417 @@ class TestFrechetEpsilonConfig:
             assert len(tta) == 1
             assert tta[0].lower == pytest.approx(0.8)
             assert tta[0].accepted is True
+
+
+class TestBamCooccurrenceOrientationV5:
+    """V5: BAM co-occurrence complements bases according to match.strand (query->coding),
+    never feature.strand (internal genomic->coding)."""
+
+    def test_v5_acceptance_reverse_aligned_query_tta_leucine(self, tmp_path: Path) -> None:
+        """Forward internal AAA, reverse-aligned query TTT, SNPs at query pos 2 and 1 T>A,
+        all spanning reads TAA -> coding effect TTA/L."""
+        from respro.core.vcf_to_reference import (
+            _build_query_to_cds_map,
+            reconcile_variants_for_matches,
+        )
+        from respro.db.models import FeatureMatch
+
+        # Minimal 3-nt exact V5 case: internal AAA, reverse-aligned query TTT.
+        internal_3 = 'AAA'
+        query_3 = 'TTT'
+        feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='gag',
+            protein='Gag',
+            start=0,
+            end=3,
+            strand='+',
+            codon_start=0,
+            nt_sequence=internal_3,
+            aa_sequence='K',
+        )
+        match = FeatureMatch(
+            feature=feature,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=3,
+            strand='-',
+            cigar='3M',
+            cds_start=0,
+        )
+        calls = [
+            VariantCall(chrom='ref', pos=2, ref='T', alt='A', allele_freq=1.0, depth=20),
+            VariantCall(chrom='ref', pos=1, ref='T', alt='A', allele_freq=1.0, depth=20),
+        ]
+        reconciled, warnings = reconcile_variants_for_matches(calls, [match], query_3)
+        assert warnings == []
+
+        reads = [{'qname': f'r{i}', 'seq': 'TAA', 'start': 0} for i in range(10)]
+        bam_path = tmp_path / 'v5_exact.bam'
+        _write_bam(bam_path, contig_len=3, reads=reads)
+
+        q2c = _build_query_to_cds_map(
+            match.cigar, match.query_start, match.query_end, match.strand, len(query_3),
+        )
+        c2q = {cds: q for q, cds in q2c.items()}
+
+        oracle_freqs = oracle_bam_codon_frequencies(
+            reads=[OracleRead(qname=r['qname'], seq=r['seq'], start=0) for r in reads],
+            ref_codon='AAA',
+            codon_query_positions=[(0, c2q[0]), (1, c2q[1])],
+            complement_bases=True,
+            min_mapq=20,
+            min_depth=5,
+        )
+        assert oracle_freqs == {'TTA': pytest.approx(1.0)}
+
+        with pysam.AlignmentFile(str(bam_path), 'rb') as bam:
+            ctx = BamCooccurrence(
+                bam=bam,
+                contig='ref',
+                cds_to_query_by_feature={'gag': c2q},
+                min_mapq=20,
+                min_depth=5,
+                match_strand_by_feature={'gag': match.strand},
+            )
+            anns = annotate_variants(reconciled, [feature], bam_cooccurrence=ctx)
+
+        assert len(anns) == 2
+        assert all(a.freq_method == 'observed' for a in anns)
+        assert all(a.alt_codon == 'TTA' and a.alt_aa == 'L' for a in anns)
+        assert all(a.single_exchange_aa_freq == pytest.approx(1.0) for a in anns)
+
+    @pytest.mark.parametrize(('match_strand', 'feature_strand'), V5_BAM_ORIENTATION_CASES)
+    def test_all_four_match_and_feature_strand_combinations(
+        self,
+        tmp_path: Path,
+        match_strand: str,
+        feature_strand: str,
+    ) -> None:
+        """All 4 (match.strand, feature.strand) combinations yield TTA/L (0.7) and TAA/* (0.3)."""
+        from respro.core.vcf_to_reference import (
+            _build_query_to_cds_map,
+            reconcile_variants_for_matches,
+        )
+        from respro.db.models import FeatureMatch
+
+        internal_coding = 'AAA' + 'ATG' * 9  # 30 nt; codon 0 is AAA
+        query_seq = (
+            internal_coding if match_strand == '+' else reverse_complement_dna(internal_coding)
+        )
+        feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='gag',
+            protein='Gag',
+            start=0,
+            end=len(internal_coding),
+            strand=feature_strand,
+            codon_start=0,
+            nt_sequence=internal_coding,
+            aa_sequence='K' + 'M' * 9,
+        )
+        match = FeatureMatch(
+            feature=feature,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=len(query_seq),
+            strand=match_strand,
+            cigar=f'{len(internal_coding)}M',
+            cds_start=0,
+        )
+        q2c = _build_query_to_cds_map(
+            match.cigar, match.query_start, match.query_end, match_strand, len(query_seq),
+        )
+        c2q = {cds: q for q, cds in q2c.items()}
+
+        # Mutate CDS 0 and CDS 1 from A -> T in coding orientation.
+        calls = []
+        for cds_pos in (0, 1):
+            qpos = c2q[cds_pos]
+            ref_b = query_seq[qpos]
+            alt_b = 'T' if match_strand == '+' else complement_dna('T')
+            calls.append(
+                VariantCall(chrom='ref', pos=qpos, ref=ref_b, alt=alt_b, allele_freq=0.8, depth=20)
+            )
+        reconciled, warnings = reconcile_variants_for_matches(calls, [match], query_seq)
+        assert warnings == []
+
+        # 7 reads carry TTA (coding) and 3 reads carry TAA (coding).
+        def _coding_to_query_read(coding_prefix: str) -> str:
+            full_coding = coding_prefix + internal_coding[len(coding_prefix):]
+            return (
+                full_coding if match_strand == '+' else reverse_complement_dna(full_coding)
+            )
+
+        reads = []
+        for i in range(7):
+            reads.append({'qname': f'd{i}', 'seq': _coding_to_query_read('TTA'), 'start': 0})
+        for i in range(3):
+            reads.append({'qname': f's{i}', 'seq': _coding_to_query_read('TAA'), 'start': 0})
+
+        bam_path = tmp_path / f'm_{match_strand}_f_{feature_strand}.bam'
+        _write_bam(bam_path, contig_len=len(query_seq), reads=reads)
+
+        oracle_freqs = oracle_bam_codon_frequencies(
+            reads=[OracleRead(qname=r['qname'], seq=r['seq'], start=0) for r in reads],
+            ref_codon='AAA',
+            codon_query_positions=[(0, c2q[0]), (1, c2q[1])],
+            complement_bases=(match_strand == '-'),
+            min_mapq=20,
+            min_depth=5,
+        )
+        assert oracle_freqs == {'TTA': pytest.approx(0.7), 'TAA': pytest.approx(0.3)}
+
+        with pysam.AlignmentFile(str(bam_path), 'rb') as bam:
+            ctx = BamCooccurrence(
+                bam=bam,
+                contig='ref',
+                cds_to_query_by_feature={'gag': c2q},
+                min_mapq=20,
+                min_depth=5,
+                match_strand_by_feature={'gag': match.strand},
+            )
+            anns = annotate_variants(reconciled, [feature], bam_cooccurrence=ctx)
+
+        assert len(anns) == 2
+        assert all(a.freq_method == 'observed' for a in anns)
+        # Member 0 (pos 0 A>T): single TAA/* at 0.3, combined TTA/L at 0.7.
+        # Member 1 (pos 1 A>T): solo ATA not observed -> promoted to TTA/L at 0.7.
+        observed_effects: dict[str, float] = {}
+        for a in anns:
+            observed_effects[a.alt_codon] = max(
+                observed_effects.get(a.alt_codon, 0.0), a.single_exchange_aa_freq,
+            )
+            for s in a.combined_states:
+                observed_effects[s.alt_codon] = max(
+                    observed_effects.get(s.alt_codon, 0.0), s.lower,
+                )
+        assert observed_effects['TTA'] == pytest.approx(oracle_freqs['TTA'])
+        assert observed_effects['TAA'] == pytest.approx(oracle_freqs['TAA'])
+
+    def test_reverse_complement_metamorphic_bam_cooccurrence(self, tmp_path: Path) -> None:
+        """Metamorphic check: reverse-complementing query, VCF calls, and BAM reads
+        produces identical coding-orientation CodonStates and frequencies."""
+        from respro.core.vcf_to_reference import (
+            _build_query_to_cds_map,
+            reconcile_variants_for_matches,
+        )
+        from respro.db.models import FeatureMatch
+
+        internal = 'AAATTTGGGCCC'
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='gag', protein='Gag',
+            start=0, end=len(internal), strand='+', codon_start=0, nt_sequence=internal,
+        )
+
+        # Forward setup
+        q_fwd = internal
+        m_fwd = FeatureMatch(
+            feature=feature, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=len(q_fwd), strand='+', cigar='12M',
+        )
+        calls_fwd = [
+            VariantCall(chrom='ref', pos=0, ref='A', alt='T', allele_freq=0.8, depth=20),
+            VariantCall(chrom='ref', pos=1, ref='A', alt='T', allele_freq=0.8, depth=20),
+        ]
+        reads_fwd = (
+            [{'qname': f'd{i}', 'seq': 'TTA' + internal[3:], 'start': 0} for i in range(6)]
+            + [{'qname': f's{i}', 'seq': 'TAA' + internal[3:], 'start': 0} for i in range(4)]
+        )
+        bam_fwd = tmp_path / 'fwd.bam'
+        _write_bam(bam_fwd, contig_len=len(q_fwd), reads=reads_fwd)
+
+        # Reverse-complemented setup
+        q_rev = reverse_complement_dna(q_fwd)
+        m_rev = FeatureMatch(
+            feature=feature, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=len(q_rev), strand='-', cigar='12M',
+        )
+        q2c_rev = _build_query_to_cds_map(m_rev.cigar, 0, len(q_rev), '-', len(q_rev))
+        c2q_rev = {cds: q for q, cds in q2c_rev.items()}
+        calls_rev = [
+            VariantCall(chrom='ref', pos=len(q_rev) - 1 - c.pos,
+                        ref=reverse_complement_dna(c.ref),
+                        alt=reverse_complement_dna(c.alt),
+                        allele_freq=c.allele_freq, depth=c.depth)
+            for c in calls_fwd
+        ]
+        reads_rev = [
+            {'qname': r['qname'], 'seq': reverse_complement_dna(r['seq']), 'start': 0}
+            for r in reads_fwd
+        ]
+        bam_rev = tmp_path / 'rev.bam'
+        _write_bam(bam_rev, contig_len=len(q_rev), reads=reads_rev)
+
+        rec_fwd, _ = reconcile_variants_for_matches(calls_fwd, [m_fwd], q_fwd)
+        rec_rev, _ = reconcile_variants_for_matches(calls_rev, [m_rev], q_rev)
+
+        with pysam.AlignmentFile(str(bam_fwd), 'rb') as bf:
+            ctx_fwd = BamCooccurrence(
+                bam=bf, contig='ref', cds_to_query_by_feature={'gag': {i: i for i in range(12)}},
+                min_mapq=20, min_depth=5, match_strand_by_feature={'gag': '+'},
+            )
+            anns_fwd = annotate_variants(rec_fwd, [feature], bam_cooccurrence=ctx_fwd)
+        with pysam.AlignmentFile(str(bam_rev), 'rb') as br:
+            ctx_rev = BamCooccurrence(
+                bam=br, contig='ref', cds_to_query_by_feature={'gag': c2q_rev},
+                min_mapq=20, min_depth=5, match_strand_by_feature={'gag': '-'},
+            )
+            anns_rev = annotate_variants(rec_rev, [feature], bam_cooccurrence=ctx_rev)
+
+        def _summary(anns):
+            return sorted(
+                (
+                    a.alt_codon,
+                    a.alt_aa,
+                    round(a.single_exchange_aa_freq, 6),
+                    tuple(sorted((s.alt_codon, s.alt_aa, round(s.lower, 6)) for s in a.combined_states)),
+                )
+                for a in anns
+            )
+
+        assert _summary(anns_fwd) == _summary(anns_rev)
+
+
+class TestDisjointPhaseFactorFrechetV3:
+    """V3: disjoint phase-factor Fréchet bounds for linked block-substitution atoms."""
+
+    def test_linked_block_at_partial_af_uses_record_af_not_marginal_frechet(self) -> None:
+        """One block substitution spanning 2 bases at AF 0.4 has joint lower=0.4 and solo lower=0.0."""
+        specs = [
+            {'codon_pos': 0, 'alts': [('C', 0.4)], 'haplotype_links': [((0, 0, 0.4),)]},
+            {'codon_pos': 1, 'alts': [('G', 0.4)], 'haplotype_links': [((0, 0, 0.4),)]},
+        ]
+        oracle = oracle_disjoint_factor_frechet([{'CG': 0.4, 'CA': 0.0, 'AG': 0.0, 'AA': 0.6}])
+        states = _compute_codon_frechet_states(specs, 'AAA', 2.0 / 3.0)
+        by_codon = {s.alt_codon: s for s in states}
+        assert by_codon['CGA'].lower == pytest.approx(oracle['CG'][0])
+        assert by_codon['CGA'].upper == pytest.approx(oracle['CG'][1])
+        assert by_codon['CGA'].forced_fraction == pytest.approx(oracle['CG'][2])
+        assert by_codon['CGA'].accepted is True
+        assert by_codon['CAA'].lower == pytest.approx(0.0)
+        assert by_codon['AGA'].lower == pytest.approx(0.0)
+        assert by_codon['AAA'].lower == pytest.approx(0.6)
+
+    def test_linked_block_plus_independent_third_position_combines_as_two_factors(self) -> None:
+        """Block (pos 0+1 at AF 0.6) + independent SNP (pos 2 at AF 0.8) -> 2 factors."""
+        specs = [
+            {'codon_pos': 0, 'alts': [('C', 0.6)], 'haplotype_links': [((0, 0, 0.6),)]},
+            {'codon_pos': 1, 'alts': [('G', 0.6)], 'haplotype_links': [((0, 0, 0.6),)]},
+            {'codon_pos': 2, 'alts': [('T', 0.8)], 'haplotype_links': [((1, 0, 0.8),)]},
+        ]
+        oracle = oracle_disjoint_factor_frechet([
+            {'CG': 0.6, 'CA': 0.0, 'AG': 0.0, 'AA': 0.4},
+            {'T': 0.8, 'A': 0.2},
+        ])
+        states = _compute_codon_frechet_states(specs, 'AAA', 2.0 / 3.0)
+        for s in states:
+            exp_lower, exp_upper, exp_ff, exp_acc = oracle[s.alt_codon]
+            assert s.lower == pytest.approx(exp_lower)
+            assert s.upper == pytest.approx(exp_upper)
+            assert s.forced_fraction == pytest.approx(exp_ff)
+            assert s.accepted is exp_acc
+
+    def test_mutually_exclusive_multi_alt_haplotypes_with_shared_atom(self) -> None:
+        """Record 0 has (C, G)@0.5 and (C, T)@0.3 sharing C@pos0."""
+        specs = [
+            {
+                'codon_pos': 0,
+                'alts': [('C', 0.8)],
+                'haplotype_links': [((0, 0, 0.5), (0, 1, 0.3))],
+            },
+            {
+                'codon_pos': 1,
+                'alts': [('G', 0.5), ('T', 0.3)],
+                'haplotype_links': [((0, 0, 0.5),), ((0, 1, 0.3),)],
+            },
+        ]
+        oracle = oracle_disjoint_factor_frechet([
+            {'CG': 0.5, 'CT': 0.3, 'CA': 0.0, 'AG': 0.0, 'AT': 0.0, 'AA': 0.2},
+        ])
+        states = _compute_codon_frechet_states(specs, 'AAA', 2.0 / 3.0)
+        for s in states:
+            exp_lower, exp_upper, exp_ff, exp_acc = oracle[s.alt_codon[:2]]
+            assert s.lower == pytest.approx(exp_lower)
+            assert s.upper == pytest.approx(exp_upper)
+            assert s.forced_fraction == pytest.approx(exp_ff)
+            assert s.accepted is exp_acc
+
+    def test_backward_compatibility_without_haplotype_links_key(self) -> None:
+        """Specs without 'haplotype_links' key still use marginal singleton Fréchet bounds."""
+        specs = [
+            {'codon_pos': 0, 'alts': [('T', 0.4)]},
+            {'codon_pos': 1, 'alts': [('T', 0.4)]},
+        ]
+        states = _compute_codon_frechet_states(specs, 'AAA', 2.0 / 3.0)
+        by_codon = {s.alt_codon: s for s in states}
+        assert by_codon['TTA'].lower == pytest.approx(0.0)
+        assert by_codon['AAA'].lower == pytest.approx(0.2)
+
+    def test_partial_overlap_multi_alt_one_reverts_to_ref_at_second_pos(self) -> None:
+        """Record 0 has AA>CG@0.5 and AA>CA@0.3 (second ALT keeps ref A at pos 1)."""
+        specs = [
+            {
+                'codon_pos': 0,
+                'alts': [('C', 0.8)],
+                'haplotype_links': [((0, 0, 0.5), (0, 1, 0.3))],
+            },
+            {
+                'codon_pos': 1,
+                'alts': [('G', 0.5)],
+                'haplotype_links': [((0, 0, 0.5),)],
+            },
+        ]
+        oracle = oracle_disjoint_factor_frechet([
+            {'CG': 0.5, 'CA': 0.3, 'AG': 0.0, 'AA': 0.2},
+        ])
+        states = _compute_codon_frechet_states(specs, 'AAA', 2.0 / 3.0)
+        for s in states:
+            exp_lower, exp_upper, exp_ff, exp_acc = oracle[s.alt_codon[:2]]
+            assert s.lower == pytest.approx(exp_lower)
+            assert s.upper == pytest.approx(exp_upper)
+            assert s.forced_fraction == pytest.approx(exp_ff)
+            assert s.accepted is exp_acc
+
+    def test_inconsistent_haplotype_links_fall_back_to_singleton_frechet(self) -> None:
+        """Corrupted/inconsistent haplotype_links fall back cleanly to singleton bounds with L <= U <= min(q)."""
+        inconsistent_cases = [
+            # Conflicting AF across positions for the same (record_id, alt_id).
+            [
+                {'codon_pos': 0, 'alts': [('C', 0.4)], 'haplotype_links': [((0, 0, 0.4),)]},
+                {'codon_pos': 1, 'alts': [('G', 0.8)], 'haplotype_links': [((0, 0, 0.8),)]},
+            ],
+            # Haplotype link total exceeding 1.0 across alleles of one record.
+            [
+                {'codon_pos': 0, 'alts': [('C', 0.9)], 'haplotype_links': [((0, 0, 0.7), (0, 1, 0.5))]},
+                {'codon_pos': 1, 'alts': [('G', 0.7)], 'haplotype_links': [((0, 0, 0.7),)]},
+            ],
+            # Claimed haplotype AF exceeds position marginal ALT AF.
+            [
+                {'codon_pos': 0, 'alts': [('C', 0.2)], 'haplotype_links': [((0, 0, 0.5),)]},
+                {'codon_pos': 1, 'alts': [('G', 0.5)], 'haplotype_links': [((0, 0, 0.5),)]},
+            ],
+        ]
+        for specs in inconsistent_cases:
+            unlinked = [
+                {'codon_pos': item['codon_pos'], 'alts': item['alts']}
+                for item in specs
+            ]
+            expected = {
+                s.alt_codon: s for s in _compute_codon_frechet_states(unlinked, 'AAA', 2.0 / 3.0)
+            }
+            actual = _compute_codon_frechet_states(specs, 'AAA', 2.0 / 3.0)
+            assert len(actual) == len(expected)
+            for s in actual:
+                exp = expected[s.alt_codon]
+                assert s.lower == pytest.approx(exp.lower)
+                assert s.upper == pytest.approx(exp.upper)
+                assert s.forced_fraction == pytest.approx(exp.forced_fraction)
+                assert s.accepted is exp.accepted
+                assert 0.0 <= s.lower <= s.upper + 1e-12

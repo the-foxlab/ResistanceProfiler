@@ -23,6 +23,7 @@ from collections.abc import Sequence
 
 from Bio.Seq import Seq
 
+from respro.core.alignment import full_intron_spans
 from respro.core.vcf_coverage import _merge_codon_gaps
 from respro.db.models import CoverageGap, FeatureMatch, FeatureRecord, IntronInterval, VariantCall
 
@@ -106,11 +107,12 @@ def _strip_introns_from_region(
     """
     Remove intron spans from the coding-orientation query region.
 
-    ``IntronInterval.query_start`` is relative to the start of the
-    coding-orientation region (the first base the CIGAR consumes), and
-    ``length`` is the intron length in that orientation. This drops those
-    spans so the exon-only CIGAR's ``M`` ops walk exon 1 directly into exon 2
-    without crossing the intron.
+    ``IntronInterval.query_start`` is the 0-based exon-only offset relative to
+    the start of the coding-orientation region (classified introns do not
+    advance the cursor in :func:`classify_introns`). Sorting in coding order and
+    accumulating ``cumulative_intron`` converts each intron to its full-region
+    span ``[query_start + cum, query_start + cum + length)`` so the exon-only
+    CIGAR's ``M`` ops walk concatenated exons without crossing introns.
 
     :param region: coding-orientation query slice (already RC'd for '-' strand)
     :param intron_intervals: intron intervals from the FeatureMatch
@@ -118,11 +120,9 @@ def _strip_introns_from_region(
     """
     if not intron_intervals:
         return region
-    # Sort by start and drop each [start, start+length) span. Build a keep-mask
-    # to avoid index shifts from repeated slicing.
     drop = [False] * len(region)
-    for iv in intron_intervals:
-        for i in range(iv.query_start, min(iv.query_start + iv.length, len(region))):
+    for full_start, full_end in full_intron_spans(intron_intervals):
+        for i in range(max(0, full_start), min(full_end, len(region))):
             drop[i] = True
     return ''.join(base for base, d in zip(region, drop) if not d)
 

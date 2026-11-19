@@ -9,6 +9,11 @@ from unittest.mock import MagicMock
 
 import pysam
 import pytest
+from _sequence_oracle import (
+    V4_MULTI_INTRON_CASES,
+    build_spliced_oracle_query,
+    oracle_coverage_gaps,
+)
 
 from respro.config.cli_settings import CLI_CONFIG
 from respro.core.vcf_coverage import (
@@ -290,3 +295,148 @@ class TestBamBaseQualityThresholdRealBam:
         assert len(gaps_hi) == 1
         assert gaps_hi[0].codon_start == 0
         assert gaps_hi[0].codon_end == 2
+
+
+class TestMultiIntronCoverageProjection:
+    """V4: coverage projection passes match.intron_intervals across 2+ unequal introns."""
+
+    @pytest.mark.parametrize('case', V4_MULTI_INTRON_CASES, ids=lambda c: c['name'])
+    def test_exon_depth_20_intron_depth_0_reports_no_gaps(self, case: dict) -> None:
+        from respro.core.alignment import classify_introns
+        from respro.db.models import FeatureSegment
+
+        exon_seqs = case['exon_seqs']
+        intron_seqs = case['intron_seqs']
+        feature_strand = case['feature_strand']
+        match_strand = case['match_strand']
+
+        oracle = build_spliced_oracle_query(
+            exon_seqs_coding=exon_seqs,
+            intron_seqs_coding=intron_seqs,
+            feature_strand=feature_strand,
+            match_strand=match_strand,
+        )
+        coding_cds = ''.join(exon_seqs)
+        segments = tuple(
+            FeatureSegment(segment_index=idx, start=s, end=e)
+            for idx, (s, e) in enumerate(oracle.feature_spec.segments)
+        )
+        feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='spl3',
+            protein='Spl3',
+            start=segments[0].start,
+            end=segments[-1].end,
+            strand=feature_strand,
+            codon_start=0,
+            nt_sequence=coding_cds,
+            segments=segments,
+        )
+
+        raw_cigar = ''.join(
+            f'{len(ex)}M' + (f'{len(intron_seqs[i])}I' if i < len(intron_seqs) else '')
+            for i, ex in enumerate(exon_seqs)
+        )
+        junctions = []
+        cum = 0
+        for ex in exon_seqs[:-1]:
+            cum += len(ex)
+            junctions.append(cum)
+        exon_cigar, introns = classify_introns(raw_cigar, junctions, 0)
+
+        match = FeatureMatch(
+            feature=feature,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=len(oracle.query_seq),
+            strand=match_strand,
+            cigar=exon_cigar,
+            cds_start=0,
+            intron_intervals=tuple(introns),
+        )
+
+        depths = [20] * len(oracle.query_seq)
+        for lo, hi in oracle.expected_full_intron_spans_forward:
+            for qpos in range(lo, hi):
+                depths[qpos] = 0
+
+        expected_gaps = oracle_coverage_gaps(
+            cds_len=len(coding_cds),
+            codon_start=0,
+            q2c=oracle.expected_q2c,
+            query_depths=depths,
+            min_depth=10,
+        )
+        assert expected_gaps == []
+
+        gaps = compute_coverage_gaps_from_depth(
+            depths, [match], min_depth=10, query_len=len(oracle.query_seq),
+        )
+        assert [(g.codon_start, g.codon_end) for g in gaps] == expected_gaps
+
+    def test_low_depth_in_exon3_matches_oracle_gap(self) -> None:
+        from respro.core.alignment import classify_introns
+        from respro.db.models import FeatureSegment
+
+        exon_seqs = ('ATGAAA', 'TTTGGG', 'CCCTAA')
+        intron_seqs = ('ACACAC', 'GTGTGTGTG')
+        oracle = build_spliced_oracle_query(
+            exon_seqs_coding=exon_seqs,
+            intron_seqs_coding=intron_seqs,
+            feature_strand='+',
+            match_strand='+',
+        )
+        coding_cds = ''.join(exon_seqs)
+        feature = FeatureRecord(
+            id=1,
+            reference_id=1,
+            name='spl3',
+            protein='Spl3',
+            start=0,
+            end=len(oracle.query_seq),
+            strand='+',
+            codon_start=0,
+            nt_sequence=coding_cds,
+            segments=(
+                FeatureSegment(0, 0, 6),
+                FeatureSegment(1, 12, 18),
+                FeatureSegment(2, 27, 33),
+            ),
+        )
+        exon_cigar, introns = classify_introns('6M6I6M9I6M', [6, 12], 0)
+        match = FeatureMatch(
+            feature=feature,
+            identity=1.0,
+            cds_coverage=1.0,
+            query_coverage=1.0,
+            query_start=0,
+            query_end=len(oracle.query_seq),
+            strand='+',
+            cigar=exon_cigar,
+            cds_start=0,
+            intron_intervals=tuple(introns),
+        )
+
+        # Introns depth 0, exons depth 20 except query pos 28 (exon 3, codon 4) depth 3.
+        depths = [20] * len(oracle.query_seq)
+        for lo, hi in oracle.expected_full_intron_spans_forward:
+            for qpos in range(lo, hi):
+                depths[qpos] = 0
+        depths[28] = 3
+
+        expected_gaps = oracle_coverage_gaps(
+            cds_len=len(coding_cds),
+            codon_start=0,
+            q2c=oracle.expected_q2c,
+            query_depths=depths,
+            min_depth=10,
+        )
+        assert expected_gaps == [(4, 4)]
+
+        gaps = compute_coverage_gaps_from_depth(
+            depths, [match], min_depth=10, query_len=len(oracle.query_seq),
+        )
+        assert [(g.codon_start, g.codon_end) for g in gaps] == expected_gaps

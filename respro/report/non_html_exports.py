@@ -27,7 +27,7 @@ from respro.db.models import (
     ResistanceRuleSet,
 )
 from respro.db.phenotype_ranks import label_to_rank
-from respro.db.results import project_fingerprint, project_updated_at
+from respro.db.results import _serialize_haplotype_links, project_fingerprint, project_updated_at
 from respro.report._row_helpers import (
     build_feature_display_names,
     build_reference_name_by_chrom,
@@ -225,6 +225,7 @@ def write_json(
             'rule_effect_aa_freq': json.dumps(ann.rule_effect_aa_freq),
             'rule_effect_alt': json.dumps(ann.rule_effect_alt),
             'freq_method': ann.freq_method,
+            'haplotype_links': _serialize_haplotype_links(v.haplotype_links),
             'combined_states': json.dumps([
                 {
                     'alt_codon': s.alt_codon,

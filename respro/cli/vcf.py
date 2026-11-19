@@ -63,6 +63,7 @@ def _build_bam_cooccurrence_by_chrom(
         if query_len == 0 or not matches:
             continue
         cds_to_query_by_feature: dict[str, dict[int, int]] = {}
+        match_strand_by_feature: dict[str, str] = {}
         for match in matches:
             q2c = _build_query_to_cds_map(
                 match.cigar,
@@ -75,6 +76,7 @@ def _build_bam_cooccurrence_by_chrom(
             )
             cds_to_query = {cds_pos: query_pos for query_pos, cds_pos in q2c.items()}
             cds_to_query_by_feature[match.feature.name] = cds_to_query
+            match_strand_by_feature[match.feature.name] = match.strand
         bam = pysam.AlignmentFile(str(bam_path), 'rb')
         # Resolve the BAM contig name for this query reference.
         references = list(bam.references)
@@ -93,6 +95,7 @@ def _build_bam_cooccurrence_by_chrom(
             cds_to_query_by_feature=cds_to_query_by_feature,
             min_mapq=min_mapq,
             min_depth=min_depth,
+            match_strand_by_feature=match_strand_by_feature,
         )
     return by_chrom
 

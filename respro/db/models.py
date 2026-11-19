@@ -116,25 +116,27 @@ class FeatureRecord:
 
     def codon_index(self, pos: int) -> int | None:
         """
-        Return 0-based codon index for a 0-based genomic position.
+        Return 0-based codon index for a 0-based genomic position, or None
+        when outside the feature or before ``codon_start``.
 
         :param pos: 0-based genomic position
-        :return: 0-based codon index
+        :return: 0-based codon index, or None
         """
         nt_offset = self.genomic_to_cds_position(pos)
-        if nt_offset is None:
+        if nt_offset is None or nt_offset < self.codon_start:
             return None
         return (nt_offset - self.codon_start) // 3
 
     def codon_position_in_codon(self, pos: int) -> int | None:
         """
-        Return 0-based position within the codon (0, 1, or 2).
+        Return 0-based position within the codon (0, 1, or 2), or None when
+        outside the feature or before ``codon_start``.
 
         :param pos: 0-based genomic position
-        :return: 0-based position within codon
+        :return: 0-based position within codon, or None
         """
         nt_offset = self.genomic_to_cds_position(pos)
-        if nt_offset is None:
+        if nt_offset is None or nt_offset < self.codon_start:
             return None
         return (nt_offset - self.codon_start) % 3
 
@@ -162,13 +164,19 @@ class IntronInterval:
     Carried on :class:`FeatureMatch` so downstream consumers (FASTA variant
     emission, VCF remap, cache, visualization) can skip the intron without
     re-deriving its position from the CIGAR.
+
+    ``query_start`` uses the **exon-only** coding-orientation coordinate
+    convention: ``classify_introns`` advances its query cursor only on exon/non-intron
+    operations, so classified introns do not advance ``query_start`` for
+    subsequent introns. Consumers indexing into the full unspliced region
+    accumulate the lengths of all preceding introns (sorted by ``query_start``).
     """
 
     cds_junction_pos: int  # 0-based CDS offset where the intron begins
-    query_start: int       # 0-based query offset relative to the alignment's
-                           # coding-orientation region start (RC-relative for
-                           # '-' strand); downstream consumers add the region's
-                           # absolute start to obtain strand-specific coordinates
+    query_start: int       # 0-based exon-only query offset relative to the
+                           # alignment's coding-orientation region start
+                           # (RC-relative for '-' strand); consumers accumulate
+                           # preceding intron lengths for full-region offsets
     length: int            # intron length in query nt
 
 
@@ -319,6 +327,14 @@ class VariantCall:
     constructed variants). Two separate records at the same position are
     distinct phase-unknown events and must not be merged into one allele set;
     only the ALTs of one record are mutually exclusive states.
+
+    ``alt_index`` is the 0-based ALT index within the VCF record (``-1`` when
+    not parser-produced or for residual baseline states).
+
+    ``haplotype_links`` carries ``(record_id, alt_id, af)`` tuples identifying
+    the sample haplotypes that emitted this atom variant so downstream
+    combined-codon inference preserves physical linkage across multi-position
+    substitutions.
     """
 
     chrom: str
@@ -336,6 +352,8 @@ class VariantCall:
     user_alt: str = ''
     source: str = ''
     record_index: int = -1
+    alt_index: int = -1
+    haplotype_links: tuple[tuple[int, int, float], ...] = ()
 
 
 @dataclass

@@ -102,15 +102,24 @@ Key representation choices made at import time:
 
 ### 1.2 Coordinate spaces
 
-ResPro maintains three coordinate spaces and converts between them:
+ResPro maintains five 0-based coordinate spaces and converts explicitly between them:
 
-1. **Genomic coordinates** — 0-based positions on the internal reference's forward
-   strand. These are what the database stores for feature boundaries.
-2. **CDS coordinates** — 0-based offsets along the coding sequence (concatenated exons
-   in coding orientation). The first coding nucleotide after `codon_start` is CDS
-   position 0.
-3. **Query coordinates** — 0-based positions on the user-supplied input sequence
-   (FASTA consensus or VCF reference).
+1. **Internal genomic coordinates** — 0-based positions on the internal reference's
+   forward (`+`) strand. These are what the database stores for feature boundaries
+   and what emitted internal `VariantCall` positions use.
+2. **Internal CDS coordinates** — 0-based offsets along the concatenated internal
+   coding exons in coding 5'→3' orientation. Offset `0` is the first nucleotide of the
+   feature's concatenated segments (before `codon_start` if `codon_start > 0`);
+   complete reading-frame codons start at CDS offset `codon_start`.
+3. **Forward query coordinates** — 0-based positions on the user-supplied input sequence
+   (FASTA consensus or VCF/BAM reference forward strand).
+4. **Coding-orientation query region coordinates** — 0-based positions within the
+   aligned slice `[match.query_start, match.query_end)` oriented in coding 5'→3'
+   direction (reversed and complemented when `match.strand == '-'`). Introns are
+   still present in this space.
+5. **Exon-only coding-orientation region coordinates** — 0-based positions derived from
+   space 4 after removing classified `IntronInterval` spans in coding order; aligned
+   1:1 with the exon-only `FeatureMatch.cigar` and `IntronInterval.query_start`.
 
 The conversion between genomic and CDS coordinates is governed by the feature's
 strand and segment structure:
@@ -322,12 +331,15 @@ allowing variant positions defined on the user's reference to be projected into
 internal CDS coordinates.
 
 For spliced features, the exon-only CIGAR (introns removed, see below) produces
-a map that ignores intron query spans. Each mapped query position is then
-**shifted past** the cumulative length of all introns whose coding-orientation
-start precedes it, so that exon-2 (and later) CDS positions land at the correct
-offset in the full unspliced query. Positions that fall inside an intron span
-after shifting are excluded (`None`), so variants inside introns are never
-remapped.
+a map in exon-only coding orientation. Because `IntronInterval.query_start` stores
+the 0-based exon-only coding-orientation offset, downstream mappers sort
+`intron_intervals` in coding order and accumulate preceding intron lengths
+$\sum_{r < j} \text{length}_r$ when deriving full-region intron spans
+`[full_start, full_end)`. Each exon-only position is then **shifted past** the
+sum of preceding intron lengths whose exon-only start satisfies `start <= qpos`,
+so exon-2 (and later) CDS positions land at their exact offset in the full
+unspliced query. Shifted positions falling inside any `[full_start, full_end)`
+span are excluded (`None`), so variants inside introns are never remapped.
 
 ### 3.3 Intron classification for spliced genes
 
@@ -344,17 +356,32 @@ ResPro classifies each `I` op as an **intron** when **both** conditions hold:
    exon-junction offset within a tolerance $\tau$ (default 5 nt).
 2. **Length guard**: the `I` op's length is strictly greater than $\tau$.
 
-Exon-junction offsets are derived from `feature.segments` in **genomic 5'→3'
-order** (not coding order), matching the normalised CIGAR's walking direction
-for both strands. The junction offset after exon $j$ is:
+Exon-junction offsets are computed by `respro.core.alignment.exon_junction_cds_offsets(feature)`
+(called only by `_match_with_mappy` → `classify_introns`; there is no attribute
+for these offsets on `FeatureMatch`) by accumulating `feature.segments[:-1]` in
+stored `segment_index` order:
 
 $$J_j = \sum_{i \le j} (e_i - s_i)$$
 
+Because `_normalize_mappy_cigar` reverses `'-'`-strand CIGAR operation order
+into coding 5'→3' order and Biopython's `CompoundLocation.parts` stores GenBank
+`complement(join(...))` exons in coding 5'→3' order, `segment_index` order
+matches the normalised CIGAR for GenBank features on both strands. (Known
+producer limitation: a synthetic `'-'`-strand `FeatureRecord` constructed with
+unequal-length `segments` in ascending genomic order rather than GenBank coding
+order produces genomic-order junction offsets here.)
+
 Classified intron `I` ops are **removed** from the CIGAR (producing an
-exon-only CIGAR) and recorded as `IntronInterval` entries carrying the CDS
-junction position, the query span, and the length. Real coding insertions —
-any `I` op not near a junction within tolerance, or of length $\le \tau$ — are
-kept and emitted as variants.
+exon-only CIGAR) and recorded as `IntronInterval` entries whose `query_start` is
+the **0-based exon-only coding-orientation offset** (cumulative coding exon
+bases preceding that intron) and whose `length` is the intron length. Real coding
+insertions — any `I` op not near a junction within tolerance, or of length
+$\le \tau$ — are kept and emitted as variants. All downstream consumers
+(`_strip_introns_from_region`, `_shift_past_introns`, `_build_slot_map`, and
+`compute_coverage_gaps_from_depth`) rely strictly on `FeatureMatch.intron_intervals`
+and convert exon-only spans to full coding-orientation spans using the shared
+`respro.core.alignment.full_intron_spans` helper (sorting by `query_start` and
+accumulating preceding intron lengths).
 
 The length guard being derived from $\tau$ (rather than a separate parameter)
 ensures that an insertion of length $\le \tau$ can **never** be misclassified as
@@ -499,12 +526,25 @@ example and regression test below:
   AF (e.g. `G2del` at AF 0.5) the substitution is present on both the call and
   residual states (`A2>G` at 1.0, `vcf_derived`) while the insertion survives
   at the residual frequency (`A2>AG` at 0.5, `vcf_derived`).
-- **Record identity.** The ALTs of one VCF record are mutually exclusive
-  states of that record; two **separate** records at the same position are
-  distinct phase-unknown events (distinguished by the parsed record index)
-  and fall under the overlap policy above.
+- **Record identity & block-substitution haplotype linkage.** The ALTs of one VCF
+  record are mutually exclusive states of that record (identified by
+  `(record_index, alt_index)` on `VariantCall`); two **separate** records at the
+  same position are distinct phase-unknown events and fall under the overlap
+  policy above. When a call (such as an equal-length block substitution / MNV)
+  decomposes into multiple atomic internal `VariantCall`s, every call-emitted
+  atom carries `haplotype_links = ((record_id, alt_id, af),)` pointing back to its
+  source allele group. When a baseline variant is covered by a single VCF
+  `record_id`, its surviving residual partitions into `(record_id, alt_id, af)`
+  entries for any sibling ALT spanning that column unchanged plus
+  `(record_id, -1, uncalled_mass)` for any remaining uncalled mass. When multiple
+  mutually exclusive haplotypes emit the same internal atom within a match,
+  `_aggregate_emissions` sums `allele_freq` and merges their `haplotype_links`
+  entries (summing frequencies per distinct `(record_id, alt_id)` pair).
 - **Call-state emission scope.** A call state emits only differences *it*
-  caused (its span plus columns changed by surgery or collapse). Differences
+  caused (its span plus columns changed by surgery or collapse). Trailing REF
+  columns are pre-marked as call-covered only for net deletions
+  (`len(ALT) < len(REF)`): equal-length block substitutions write their columns
+  in place without masking unchanged baseline-divergent positions. Differences
   the call merely sits next to belong to the baseline pass, which emits them
   once at full frequency mass — a baseline variant keeps AF 1.0 unless a
   call's covered columns intersect it (e.g. a reversion or a merged deletion
@@ -572,15 +612,22 @@ representation is identical by design.
 
 For a SNP at CDS position $c$ within a feature:
 
-1. The **codon index** is $i = \lfloor (c - \text{codon_start}) / 3 \rfloor$
-   and the **position within the codon** is $p = (c - \text{codon_start}) \bmod 3$.
-2. The **reference codon** is extracted from the internal CDS. If a valid
-   query codon context is available (from VCF remap), it is used as the
-   reference for amino-acid derivation; otherwise the internal CDS codon is used.
-3. The **alternate codon** is constructed by replacing position $p$ with the
+1. **Frame start guard.** If $c < \text{codon_start}$ (leading partial overhang
+   before the first complete reading frame), `FeatureRecord.codon_index(c)` and
+   `FeatureRecord.codon_position_in_codon(c)` return `None`, and no coding codon
+   or amino-acid change is emitted for that base.
+2. Otherwise ($c \ge \text{codon_start}$), the **codon index** is
+   $i = \lfloor (c - \text{codon_start}) / 3 \rfloor$ and the **position within
+   the codon** is $p = (c - \text{codon_start}) \bmod 3$.
+3. The **reference codon** is extracted from the internal CDS. If a valid
+   non-empty `query_ref_codon` is available (from VCF remap; cleared by
+   `_attach_supplied_codon` whenever any of the 3 codon positions is unmapped
+   `'-'` in the supplied reference), it is used as the reference for amino-acid
+   derivation; otherwise the internal CDS codon is used.
+4. The **alternate codon** is constructed by replacing position $p$ with the
    ALT base (in coding orientation — reverse-complemented for `'-'` strand
    features).
-4. Both codons are translated via the [standard genetic code](https://en.wikipedia.org/wiki/DNA_codon_table)
+5. Both codons are translated via the [standard genetic code](https://en.wikipedia.org/wiki/DNA_codon_table)
    (Biopython's `Seq.translate`), and the consequence is classified:
 
     | Condition | Consequence |
@@ -675,6 +722,36 @@ $$\boxed{U(S) = \min_{i=1}^{k} q_i}$$
 These bounds are **sharp**: there exist joint distributions achieving both
 extremes, so no tighter bounds can be derived from the marginals alone.
 
+#### 5.3.1a Disjoint phase-factor generalisation (block substitutions & haplotype links)
+
+When multiple variants in one codon originate from the same physical haplotype
+(e.g. an equal-length block substitution / MNV decomposed into atomic SNPs, or
+multi-ALT haplotypes on one VCF record), treating their positions as
+unlinked independent marginals would lose their shared phase and assign nonzero
+or split mass to impossible chimeric codons. Instead, `_compute_codon_frechet_states`
+partitions the $k$ variant-bearing positions into $m \le k$ **disjoint phase
+factors** $G_1, \dots, G_m$ using connected components over shared
+`record_id` values in `VariantCall.haplotype_links`:
+
+- **Linked multi-position factor ($|G_j| \ge 2$):** positions sharing a
+  `record_id` are evaluated jointly. For candidate $S$, every explicit
+  haplotype `(record_id, alt_id, af)` within that record contributes `af` iff its
+  alleles agree across every position in $G_j$; uncalled reference-everywhere
+  mass $\max(0, 1 - \sum_{a \ge 0} \text{af}_{r,a})$ accrues to the all-REF
+  state unless explicit residual links `(record_id, -1, residual_af)` govern it.
+- **Singleton factor ($|G_j| = 1$):** an unlinked position retains its marginal
+  probability $q_j(S) = f_{\text{ALT}_a}$ (or $1 - \sum_a f_{\text{ALT}_a}$ for REF).
+
+Sharp Fréchet inequalities are then applied across the $m$ disjoint factors:
+
+$$L(S) = \max\!\left(0,\; \sum_{j=1}^{m} q_j(S) - (m - 1)\right), \qquad U(S) = \min_{j=1}^{m} q_j(S)$$
+
+When all altered positions in a codon come from one block substitution ($m = 1$),
+$L(S) = U(S) = q_1(S)$ and $F(S) = 1.0$: the linked mutant codon keeps exact
+frequency `AF` while impossible solo-exchange chimeras receive $L = 0$. When
+`haplotype_links` is omitted, every position stays a singleton factor ($m = k$),
+reducing exactly to §5.3.1.
+
 #### 5.3.2 State enumeration
 
 ResPro enumerates all $2^k$ candidate codon states (the Cartesian product of
@@ -748,10 +825,10 @@ guaranteed to sit on the same background. The promoted state is dropped from
 
 #### 5.3.6 Fallback
 
-When the Fréchet helper returns no states (multiallelic same-position inputs,
-where two ALTs at the same codon position cannot form valid combined states)
-or no accepted state exists for any member, ResPro falls back to plain
-single-SNP annotation with no `combined_states`.
+When the Fréchet helper returns no states (e.g. only one variant-bearing
+position exists after filtering, or no candidate achieves $L(S) > \varepsilon$
+and $F(S) \ge \mu - \varepsilon$) or no accepted state exists for any member,
+ResPro falls back to plain single-SNP annotation with no `combined_states`.
 
 ### 5.4 BAM-based exact co-occurrence
 
@@ -774,7 +851,16 @@ keeps the two paths numerically comparable.
 #### 5.4.2 Spanning-molecule counting
 
 For each candidate codon state, `compute_codon_cooccurrence` counts reads that
-span all variant-bearing positions of the codon:
+span all variant-bearing positions of the codon. Because BAM reads align to the
+**forward query reference** whereas `CandidateCodon` alleles live in **coding
+orientation**, `_build_bam_cooccurrence_by_chrom` records each feature match's
+alignment strand (`BamCooccurrence.match_strand_by_feature[feature.name] = match.strand`)
+and `_annotate_combined_snp_codon` passes `complement_bases = (match_strand == '-')`
+to `compute_codon_cooccurrence`: when `complement_bases` is `True`, extracted
+read bases are complemented into coding orientation before matching against
+`CandidateCodon` (note: this depends on `match.strand`, **not** `feature.strand`).
+
+Steps for each aligned read overlapping the codon's query span:
 
 1. **Primary-alignment filter.** Only primary alignments are assessed;
    secondary (`0x100`) and supplementary (`0x800`) records are skipped. This
@@ -1134,7 +1220,10 @@ emit expanded IUPAC variants normally.
 
 When a [BAM](https://samtools.github.io/hts-specs/SAMv1.pdf) file is provided
 (aligned against the same query reference as the VCF), per-base depth is
-extracted and projected through the CIGAR map onto internal CDS coordinates.
+extracted and projected through the intron-aware CIGAR map onto internal CDS
+coordinates (`compute_coverage_gaps_from_depth` passes `match.intron_intervals`
+into `_build_query_to_cds_map`, so spliced exons map past intervening introns
+without mistaking 0-depth intron regions for coding coverage gaps).
 A codon is reported as a coverage gap when **any** of its three nucleotides
 has depth below the minimum depth threshold (default 10):
 
@@ -1253,8 +1342,9 @@ distinct from the project database. The results DB stores:
   counts, and FASTA/VCF mode flag.
 - **Variant results**: one row per annotated variant, including the remapped
   internal coordinates, user-reference coordinates (for VCF mode), amino-acid
-  consequence, AF bin, rule match flag, drug hits (JSON), and the full
-  serialised Fréchet combined states.
+  consequence, AF bin, rule match flag, drug hits (JSON), serialised
+  `haplotype_links` (`[[record_id, alt_id, af], ...]`, defaulting to `'[]'` with
+  safe schema migration), and the full serialised Fréchet combined states.
 - **Coverage gaps**: one row per non-covered codon stretch.
 - **Formula rule hits**: one row per matched combination rule (serialised JSON).
 - **Profiled features**: the set of feature names evaluated for this run, so
