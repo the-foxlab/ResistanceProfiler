@@ -111,7 +111,7 @@ respro vcf \
 | `gene` | Feature / gene name (display name applied when configured). |
 | `nt_mut` | Nucleotide change on the internal reference, `ref{pos}alt` (1-based). Combined codon events use `ref_codon{codon_pos}alt_codon`. |
 | `nt_mut_user` | Nucleotide change on the user-supplied reference (VCF coords before remap). VCF mode only; omitted in FASTA mode. |
-| `variant_source` | Provenance of the variant: `VCF derived` when a VCF call influenced the emitted allele or its frequency; `Reference derived` when it was inferred purely from the comparison of the supplied and internal references — its frequency is an assumption from that comparison, not a measured allele fraction. VCF mode only; omitted in FASTA mode. |
+| `variant_source` | Provenance of the variant: `VCF derived` when the variant allele was derived from a VCF variant call; `Reference derived` when the variant allele was inferred from differences between the supplied and internal references (including residual baseline alleles at partially called positions) — its baseline frequency is an assumption from that comparison, not a directly called variant allele. VCF mode only; omitted in FASTA mode. |
 | `strand` | Coding strand of the feature (`+`/`-`), sourced from the feature record. |
 | `af` | Allele frequency (raw float). |
 | `depth` | Read depth at the variant (VCF mode only; omitted in FASTA mode). Empty for combined formula rows. |

@@ -686,7 +686,7 @@
                     Variant source
                     <span class="db-hit-freq-info">
                       <img class="db-hit-info-icon" src="{{ context.all_mutations.info_icon }}" alt="info" width="13" height="13">
-                      <div class="db-hit-info-panel"><strong>VCF derived</strong> = a variant call influenced this variant's allele or frequency. <strong>Reference derived</strong> = inferred from differences between the supplied reference and the stored reference; its frequency is an assumption from that comparison, not a measured allele fraction.</div>
+                      <div class="db-hit-info-panel"><strong>VCF derived</strong> = the variant allele was derived from a VCF variant call. <strong>Reference derived</strong> = the variant allele was inferred from differences between the supplied reference and the stored reference (including residual baseline alleles at partially called positions); its baseline frequency is an assumption from that comparison, not a directly called variant allele.</div>
                     </span>
                   </th>
                   {% endif %}

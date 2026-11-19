@@ -873,11 +873,11 @@ def _annotate_combined_snp_codon(
             if member_index in s.member_indices
             and abs(s.forced_fraction - 1.0) <= eps
         ]
-        # Pick the forced state carrying the most co-members (maximal co-carried
-        # set); break ties by the highest lower bound so a freq-1.0 co-member
-        # promotes to the strongest guaranteed state.
+        # Pick the forced state with the highest lower bound so a freq-1.0
+        # co-member promotes to the strongest guaranteed state; break ties by
+        # the most co-members (maximal co-carried set).
         forced_states[member_index] = max(
-            forced_candidates, key=lambda s: (len(s.member_indices), s.lower),
+            forced_candidates, key=lambda s: (s.lower, len(s.member_indices)),
         ) if forced_candidates else None
 
     annotations: list[AnnotatedVariant] = []
@@ -930,6 +930,20 @@ def _annotate_combined_snp_codon(
             single_exchange_aa_freq = max(0.0, single_state.lower)
         else:
             single_exchange_aa_freq = 0.0
+
+        # When another accepted state carried by this member translates to the
+        # exact same amino acid as single_aa (e.g. TGA and TAA both encoding '*'),
+        # fold its frequency into single_exchange_aa_freq and drop the duplicate
+        # amino-acid entry from combined_states.
+        other_same_aa_lower = sum(
+            s.lower for s in member_states
+            if s.alt_aa == single_aa and s is not single_state
+        )
+        if single_exchange_aa_freq > 0 and other_same_aa_lower > 0:
+            single_exchange_aa_freq += other_same_aa_lower
+            combined_states = [
+                s for s in combined_states if s.alt_aa != single_aa
+            ]
 
         annotations.append(AnnotatedVariant(
             variant=var,

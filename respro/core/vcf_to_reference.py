@@ -22,11 +22,14 @@ complete variant set in internal-reference coordinates:
    alignment-diff walk, carrying the call's allele frequency and the
    ``vcf_derived`` source label. This resolves baseline/call interactions at
    sequence level: a call that reverses a baseline indel cancels it, and a call
-   indel plus a baseline indel merge into the net state.
+   insertion plus a baseline indel resolve into the net state (while a VCF
+   deletion overlapping or touching a baseline deletion is skipped as
+   unverified with a warning, retaining the baseline deletion).
 3. **Residual states** — the residual frequency mass (1 - sum of call AFs) at
    an affected position belongs to the plain supplied reference, so the
    baseline variant at that position is re-emitted at the residual frequency
-   with the ``vcf_derived`` label (its frequency derives from caller AFs).
+   with the ``reference_derived`` label (the allele itself comes from the
+   reference comparison, not from a VCF call).
 
 The comparison is tiered for performance: the supplied-internal alignment
 is computed once per feature match; calls are located by coordinate lookup and
@@ -651,6 +654,27 @@ def _plan_calls(
             ))
             slots_by_key[key] = None
             continue
+        # Gate 2b: a VCF deletion overlapping or directly bordering a baseline
+        # (supplied-vs-internal) deletion — or a multi-base REF block spanning
+        # across a baseline deletion — cannot be resolved unambiguously without
+        # full haplotype phase; skip the call with a warning and retain the
+        # baseline deletion.
+        col_lo = min(s.column for s in slots)
+        col_hi = max(s.column for s in slots)
+        is_deletion = any(len(c.alt) < ref_len for c in groups[key])
+        check_lo = max(0, col_lo - 1) if is_deletion else col_lo
+        check_hi = min(len(ctx.ref_positions) - 1, col_hi + 1) if is_deletion else col_hi
+        if (is_deletion or ref_len > 1) and any(
+            ctx.ref_positions[c][1] == '-' for c in range(check_lo, check_hi + 1)
+        ):
+            label = 'VCF deletion' if is_deletion else 'VCF'
+            rejections.append(_Rejection(
+                kind='overlapping_deletion', pos=var.pos + 1,
+                message=f'pos {var.pos + 1}: {label} {var.ref}>{var.alt} overlaps a '
+                        'reference deletion — variant skipped',
+            ))
+            slots_by_key[key] = None
+            continue
         # Gate 3: one record's ALTs are mutually exclusive — their frequencies
         # must not exceed the position's total frequency mass.
         total_af = sum(call.allele_freq for call in groups[key])
@@ -901,7 +925,7 @@ def _emit_call_state(
         call_base_cols = {
             s.column - off for s in slots
             if s.kind == 'base' and 0 <= s.column - off < len(coding)
-        } if alt_len < ref_len else set()
+        } if (alt_len < ref_len and any(s.kind == 'pending' for s in slots)) else set()
         changed_base = {
             j for j, entry in saved_coding.items()
             if 0 <= j < len(coding) and ref_positions[j + off][1] != entry[1]
@@ -1249,9 +1273,9 @@ def _baseline_residual(
     occupied columns) — a call whose span merely sits next to the baseline
     variant leaves the baseline allele intact on its molecules. The residual
     mass is therefore the baseline frequency minus the total frequency of the
-    calls covering it; the source is ``vcf_derived`` when any call covers it
-    (the frequency decomposition derives from caller AFs), else
-    ``reference_derived``.
+    calls covering it; the source remains ``reference_derived`` because the
+    allele itself is inferred from the supplied-vs-internal reference
+    difference rather than from a VCF call.
 
     :param var: baseline variant (its allele_freq is the baseline frequency)
     :param occupied: coding columns the variant occupies
@@ -1262,8 +1286,7 @@ def _baseline_residual(
         af for covered, af in covered_sets if occupied and covered & occupied
     )
     residual = var.allele_freq - overlapping
-    source = VCF_DERIVED if overlapping > _RESIDUAL_EPS else REFERENCE_DERIVED
-    return max(residual, 0.0), source
+    return max(residual, 0.0), REFERENCE_DERIVED
 
 
 def _variant_occupied_columns(ctx: _MatchAlignment, var: VariantCall) -> set[int]:

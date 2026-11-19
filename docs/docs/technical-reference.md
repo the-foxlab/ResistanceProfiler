@@ -463,11 +463,11 @@ frequency.
 Every emitted variant carries a `source` label, shown in the All Mutations
 table (VCF mode only) and the TSV/JSON exports:
 
-- **`vcf_derived`** — a VCF call influenced the emitted allele or its frequency
-  (including residual frequencies).
-- **`reference_derived`** — inferred purely from the supplied-vs-internal
-  reference comparison. Its frequency is an **assumption** from that comparison
-  (AF 1.0), not a measured allele fraction.
+- **`vcf_derived`** — the emitted allele was derived from a VCF variant call state.
+- **`reference_derived`** — the emitted allele was inferred from the supplied-vs-internal
+  reference comparison (including residual baseline emissions at $1 - \sum \text{AF}_{\text{alt}}$
+  when a partial-AF call touches the position). Its baseline frequency is an
+  **assumption** from that comparison, not a directly called variant allele.
 
 #### Cutoffs and filtered calls
 
@@ -492,6 +492,9 @@ The following are skipped with a warning instead of producing a false result:
   probably called against a different reference.
 - A REF span that is outside the aligned region (alignment gap, intron, or
   past the region's edge).
+- A VCF deletion that overlaps or touches a baseline (supplied-vs-internal)
+  deletion, or a multi-base REF span crossing a baseline deletion (call skipped
+  with a warning, baseline deletion retained at AF 1.0).
 - Baseline stretches containing `N` (no emission, one warning per stretch).
 
 #### Conventions
@@ -525,7 +528,7 @@ example and regression test below:
   component and retains the substitution `A2>G` as `vcf_derived`; at partial
   AF (e.g. `G2del` at AF 0.5) the substitution is present on both the call and
   residual states (`A2>G` at 1.0, `vcf_derived`) while the insertion survives
-  at the residual frequency (`A2>AG` at 0.5, `vcf_derived`).
+  at the residual frequency (`A2>AG` at 0.5, `reference_derived`).
 - **Record identity & block-substitution haplotype linkage.** The ALTs of one VCF
   record are mutually exclusive states of that record (identified by
   `(record_index, alt_index)` on `VariantCall`); two **separate** records at the
@@ -559,27 +562,27 @@ readability; the regression tests state zero-based positions explicitly.
 | --- | --- | --- | --- |
 | A | G | none | A→G at 1.0 (baseline assumption, `reference_derived`) |
 | A | G | G→A at 1.0 | no variant |
-| A | G | G→A at 0.5 | A→G at 0.5 (`vcf_derived`) |
-| A | G | G→C at 0.3 | A→G at 0.7 and A→C at 0.3 (both `vcf_derived`) |
+| A | G | G→A at 0.5 | A→G at 0.5 (residual baseline, `reference_derived`) |
+| A | G | G→C at 0.3 | A→G at 0.7 (`reference_derived`) and A→C at 0.3 (`vcf_derived`) |
 | A | G | G→A at 0.1, min-AF 0.5 | A→G at 1.0 (call below cutoff removed; `reference_derived`) |
 | A | GG | none | A→GG at 1.0 (decomposed as `A>G`@1.0 + `A>AG`@1.0, `reference_derived`) |
 | A | GG | G2del at 1.0 | A→G at 1.0 (insertion component countered by the deletion; `vcf_derived`) |
-| A | GG | G2del at 0.5 | A→G at 0.5 and residual A→GG at 0.5 (emitted as `A>G`@1.0 + `A>AG`@0.5, both `vcf_derived`) |
+| A | GG | G2del at 0.5 | A→G at 0.5 and residual A→GG at 0.5 (emitted as `A>G`@1.0 `vcf_derived` + `A>AG`@0.5 `reference_derived`) |
 
 Non-canceling indel interactions (Tier 2 local windows; anchored REF/ALT
 notation, 1-based positions):
 
 | Internal | Supplied ref | Baseline vs internal | VCF call (supplied coords) | Expected result vs internal |
 | --- | --- | --- | --- | --- |
-| ACGT | ACT | `G3del`@1.0 | `T3del`@1.0 | `GT3del`@1.0 — two deletions merge into one larger deletion (`vcf_derived`) |
-| ACGTT | ACTT | `G3del`@1.0 | `T4del`@1.0 | sample `ACT`; net `GT3del`@1.0 — two single-base deletions separated by repeat `T` merge into one larger deletion (`vcf_derived`) |
+| ACGT | ACT | `G3del`@1.0 | `T3del`@1.0 | unverified: VCF deletion overlaps/touches baseline deletion → call skipped with warning, baseline `G3del`@1.0 (`reference_derived`) retained |
+| ACGTT | ACTT | `G3del`@1.0 | `T4del`@1.0 | unverified: VCF deletion touches baseline deletion → call skipped with warning, baseline `G3del`@1.0 (`reference_derived`) retained |
 | AT | ACGT | `A1>ACG`@1.0 (insertion) | `C2>CG`@1.0 | sample `ACGGT`; net `A1>ACGG`@1.0 — two insertions merge into one insertion (`vcf_derived`) |
 | ACGT | ACT | `G3del`@1.0 | `C2>CGG`@1.0 | sample `ACGGT`; net `C2>CG`@1.0 (left-aligned) — baseline deletion fully countered, net new insertion (`vcf_derived`) |
-| ACGT | ACT | `G3del`@1.0 | `C2>CGG`@0.4 | per-allele: `C2>CG`@0.4 (left-aligned) and residual `G3del`@0.6 (both `vcf_derived`) |
+| ACGT | ACT | `G3del`@1.0 | `C2>CGG`@0.4 | per-allele: `C2>CG`@0.4 (`vcf_derived`, left-aligned) and residual `G3del`@0.6 (`reference_derived`) |
 | ACGTACGT | ACGTACGT (identical) | none | separate records `C2del`@1.0 and `C6del`@1.0 | each emitted independently, no merge (`vcf_derived`) |
 | ACGT | ACGT (identical) | none | separate records `C2>G`@1.0 and `C2>A`@1.0 | unverified: no variants for the span + warning |
 | ACGT | ACGT (identical) | none | separate records `C2>CA`@1.0 and `C2del`@1.0 | unverified by policy: baseline-only + warning (insertion anchor overlaps the deletion without phase) |
-| ACGT | ACT | `G3del`@1.0 | `C2del`@1.0 | sample `AT`; net `CG2del`@1.0 — baseline deletion plus call merge (`vcf_derived`) |
+| ACGT | ACT | `G3del`@1.0 | `C2del`@1.0 | unverified: VCF deletion touches baseline deletion → call skipped with warning, baseline `G3del`@1.0 (`reference_derived`) retained |
 
 Reverse-complement orientation: the supplied reference maps reverse complement
 against the feature at these loci. For every minus-strand case the emitted

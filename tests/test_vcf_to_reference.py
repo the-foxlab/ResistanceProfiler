@@ -132,14 +132,46 @@ class TestMainReconciliationTable:
         assert warnings == []
 
     def test_partial_reversion_keeps_call_frequency(self) -> None:
-        # internal A, supplied G, G>A at 0.5 -> A>G at 0.5
+        # internal A, supplied G, G>A at 0.5 -> residual baseline A>G at 0.5 (reference_derived)
         out, _ = _run_plus('ACGT', 'GCGT', '4M', [_snp(0, 'G', 'A', af=0.5)])
-        assert out == [(0, 'A', 'G', 0.5, VCF_DERIVED)]
+        assert out == [(0, 'A', 'G', 0.5, REFERENCE_DERIVED)]
 
     def test_multi_allelic_residual_frequencies(self) -> None:
-        # internal A, supplied G, G>C at 0.3 -> A>G at 0.7 and A>C at 0.3
+        # internal A, supplied G, G>C at 0.3 -> A>G at 0.7 (reference_derived) and A>C at 0.3 (vcf_derived)
         out, _ = _run_plus('ACGT', 'GCGT', '4M', [_snp(0, 'G', 'C', af=0.3)])
-        assert out == [(0, 'A', 'C', 0.3, VCF_DERIVED), (0, 'A', 'G', 0.7, VCF_DERIVED)]
+        assert out == [(0, 'A', 'C', 0.3, VCF_DERIVED), (0, 'A', 'G', 0.7, REFERENCE_DERIVED)]
+
+    def test_residual_baseline_snp_at_called_position_is_reference_derived(self) -> None:
+        # Minus-strand UL23-like case: internal coding codon AAC (N, genomic GTT),
+        # supplied coding codon ACC (T, genomic GGT -> baseline T>G at genomic pos 1),
+        # VCF call G>C at genomic pos 1 with AF = 0.157 (coding C>G -> AGC = S).
+        # The called allele T>C@0.157 is VCF_DERIVED (with user_ref='G', user_alt='C'),
+        # while the residual baseline allele T>G@0.843 is REFERENCE_DERIVED (user_ref='').
+        feat = _feature('AAC', strand='-')
+        supplied = 'GGT'  # RC('ACC')
+        call = _snp(1, 'G', 'C', af=0.157)
+        out, warnings = reconcile_variants_for_matches(
+            [call], [_match(feat, supplied, '3M', strand='-')], supplied,
+        )
+        assert warnings == []
+        assert _tokens(out) == [
+            (1, 'T', 'C', 0.157, VCF_DERIVED),
+            (1, 'T', 'G', 0.843, REFERENCE_DERIVED),
+        ]
+        by_alt = {v.alt: v for v in out}
+        assert by_alt['C'].user_ref == 'G'
+        assert by_alt['C'].user_alt == 'C'
+        assert by_alt['G'].user_ref == ''
+        assert by_alt['G'].user_alt == ''
+
+        anns = annotate_variants(out, [feat])
+        ann_by_alt = {a.variant.alt: a for a in anns}
+        assert (ann_by_alt['C'].ref_aa, ann_by_alt['C'].alt_aa, ann_by_alt['C'].variant.source) == (
+            'N', 'S', VCF_DERIVED,
+        )
+        assert (ann_by_alt['G'].ref_aa, ann_by_alt['G'].alt_aa, ann_by_alt['G'].variant.source) == (
+            'N', 'T', REFERENCE_DERIVED,
+        )
 
     def test_below_cutoff_call_reverts_to_pure_baseline(self) -> None:
         # The CLI removes calls below min-AF before reconciliation; the position
@@ -177,14 +209,14 @@ class TestMainReconciliationTable:
 
     def test_length_changing_replacement_partial_deletion_counter(self) -> None:
         # Table 1 Row 8: internal A vs supplied GG, call G2del at 0.5 ->
-        # A>G at 0.5 (call state) + residual A->GG at 0.5 (A>G@0.5 + A>AG@0.5),
-        # aggregated to A>G@1.0 and A>AG@0.5, both vcf_derived.
+        # A>G at 0.5 (call state, vcf_derived) + residual A->GG at 0.5 (A>G@0.5 + A>AG@0.5),
+        # aggregated to A>G@1.0 (vcf_derived) and residual insertion A>AG@0.5 (reference_derived).
         out, warnings = _run_plus(
             'CATT', 'CGGTT', '2M1I2M', [_snp(1, 'GG', 'G', af=0.5)],
         )
         assert warnings == []
         assert out == [
-            (1, 'A', 'AG', 0.5, VCF_DERIVED),
+            (1, 'A', 'AG', 0.5, REFERENCE_DERIVED),
             (1, 'A', 'G', 1.0, VCF_DERIVED),
         ]
 
@@ -201,24 +233,25 @@ class TestIndelInteractions:
         assert warnings == []
 
     def test_partial_cancellation_emits_residual_state(self) -> None:
-        # same at AF 0.5: per-allele state cancels, residual keeps the insertion
+        # same at AF 0.5: per-allele state cancels, residual keeps the baseline insertion
         out, _ = _run_plus('ACGT', 'ACGGT', '3M1I1M', [_snp(2, 'GG', 'G', af=0.5)])
-        assert out == [(2, 'G', 'GG', 0.5, VCF_DERIVED)]
+        assert out == [(2, 'G', 'GG', 0.5, REFERENCE_DERIVED)]
 
     def test_adjacent_deletions_merge(self) -> None:
         # internal ACGT, supplied ACT (G deleted), call deletes supplied T:
-        # sample ACT - T = AC -> net deletion of internal GT (anchored C2>CGT)
-        out, _ = _run_plus('ACGT', 'ACT', '2M1D1M', [_snp(1, 'CT', 'C')])
-        assert out == [(1, 'CGT', 'C', 1.0, VCF_DERIVED)]
+        # VCF deletion overlaps/touches baseline deletion -> unverified, call skipped
+        # with warning and baseline G3del@1.0 (reference_derived) is retained.
+        out, warnings = _run_plus('ACGT', 'ACT', '2M1D1M', [_snp(1, 'CT', 'C')])
+        assert out == [(1, 'CG', 'C', 1.0, REFERENCE_DERIVED)]
+        assert any('overlaps a reference deletion' in w for w in warnings)
 
     def test_repeat_separated_deletions_merge(self) -> None:
-        # Table 2 Row 2: internal ACGTT, supplied ACTT (G3del), call T4del@1.0
-        # (0-based pos 2 TT>T in ACTT): sample ACT -> net GT3del@1.0 (0-based pos 1 CGT>C).
+        # internal ACGTT, supplied ACTT (G3del), call T4del@1.0 (0-based pos 2 TT>T):
+        # VCF deletion in the adjacent repeat touches the baseline deletion ->
+        # unverified, call skipped with warning and baseline G3del@1.0 retained.
         out, warnings = _run_plus('ACGTT', 'ACTT', '2M1D2M', [_snp(2, 'TT', 'T', af=1.0)])
-        assert warnings == []
-        assert out == [(1, 'CGT', 'C', 1.0, VCF_DERIVED)]
-        applied = 'ACGTT'[:1] + 'C' + 'ACGTT'[4:]
-        assert applied == 'ACT'
+        assert out == [(1, 'CG', 'C', 1.0, REFERENCE_DERIVED)]
+        assert any('overlaps a reference deletion' in w for w in warnings)
 
     def test_insertion_counters_baseline_deletion_with_net_insertion(self) -> None:
         # Table 2 Row 4: internal ACGT, supplied ACT (G3del), call C2>CGG@1.0
@@ -231,12 +264,12 @@ class TestIndelInteractions:
 
     def test_partial_af_insertion_countering_baseline_deletion(self) -> None:
         # Table 2 Row 5: internal ACGT, supplied ACT (G3del), call C2>CGG@0.4 ->
-        # per-allele C2>CG@0.4 and residual G3del@0.6, both vcf_derived.
+        # per-allele C2>CG@0.4 (vcf_derived) and residual G3del@0.6 (reference_derived).
         out, warnings = _run_plus('ACGT', 'ACT', '2M1D1M', [_snp(1, 'C', 'CGG', af=0.4)])
         assert warnings == []
         assert out == [
             (1, 'C', 'CG', 0.4, VCF_DERIVED),
-            (1, 'CG', 'C', 0.6, VCF_DERIVED),
+            (1, 'CG', 'C', 0.6, REFERENCE_DERIVED),
         ]
 
     def test_multi_base_insertion_filling_deleted_column_preserves_sequence_order(self) -> None:
@@ -283,9 +316,11 @@ class TestIndelInteractions:
 
     def test_baseline_deletion_plus_call_deletion_merge(self) -> None:
         # internal ACGT, supplied ACT (G deleted), call deletes supplied C:
-        # sample AT -> net deletion of internal CG (anchored A1>ACG)
-        out, _ = _run_plus('ACGT', 'ACT', '2M1D1M', [_snp(0, 'AC', 'A')])
-        assert out == [(0, 'ACG', 'A', 1.0, VCF_DERIVED)]
+        # VCF deletion touches baseline deletion -> unverified, call skipped
+        # with warning and baseline G3del@1.0 (reference_derived) is retained.
+        out, warnings = _run_plus('ACGT', 'ACT', '2M1D1M', [_snp(0, 'AC', 'A')])
+        assert out == [(1, 'CG', 'C', 1.0, REFERENCE_DERIVED)]
+        assert any('overlaps a reference deletion' in w for w in warnings)
 
     def test_non_overlapping_separate_records_emit_independently(self) -> None:
         # identical references, C2del and C6del: two independent events
@@ -397,7 +432,7 @@ class TestReverseStrandOrientation:
             [call], [_match(self._minus_feature(internal), supplied, '8M', strand='-')],
             supplied,
         )
-        assert _tokens(out) == [(2, genomic[2], supplied[2], 0.5, VCF_DERIVED)]
+        assert _tokens(out) == [(2, genomic[2], supplied[2], 0.5, REFERENCE_DERIVED)]
 
     def test_minus_feature_terminal_deletion_lands_at_coding_start(self) -> None:
         # deleting the forward-LAST supplied base deletes the coding-FIRST base;
@@ -440,7 +475,7 @@ class TestReverseStrandOrientation:
         assert _tokens(out) == []
 
     def test_minus_feature_partial_reversion_of_deletion(self) -> None:
-        # same at AF 0.5: the deletion survives at residual 0.5
+        # same at AF 0.5: the baseline deletion survives at residual 0.5 (reference_derived)
         internal = 'ACGGTACG'
         genomic = str(Seq(internal).reverse_complement())
         supplied = genomic[:4] + genomic[5:]
@@ -449,7 +484,40 @@ class TestReverseStrandOrientation:
             [call], [_match(self._minus_feature(internal), supplied, '3M1D4M', strand='-')],
             supplied,
         )
-        assert _tokens(out) == [(3, 'AC', 'A', 0.5, VCF_DERIVED)]
+        assert _tokens(out) == [(3, 'AC', 'A', 0.5, REFERENCE_DERIVED)]
+
+    def test_minus_feature_vcf_deletion_overlapping_baseline_deletion_is_unverified(self) -> None:
+        # UL23 vcf_reference_2 scenario: minus-strand feature with internal coding
+        # CGC GGC CAT AAC AAC (R G H N N; genomic forward GTTGTTATGGCCGCG).
+        # Supplied reference deletes the 3-bp CAT (H) codon (genomic ATG at cols 6..8):
+        # supplied genomic GTTGTTGCCGCG (indices 0..5 = GTTGTT, 6..11 = GCCGCG), CIGAR 6M3D6M.
+        # A 2-bp VCF deletion straddling the baseline deletion (_snp(5, 'TGC', 'T', af=0.8)
+        # or _snp(4, 'TTG', 'T', af=0.8)) alongside a non-overlapping SNP
+        # (_snp(4, 'T', 'C', af=0.957)) must skip the overlapping VCF deletion with a
+        # warning, keep the SNP as VCF_DERIVED, and retain the baseline 3-bp deletion
+        # at AF 1.0 as REFERENCE_DERIVED.
+        internal = 'CGCGGCCATAACAAC'
+        supplied = 'GTTGTTGCCGCG'
+        feat = self._minus_feature(internal)
+        match = _match(feat, supplied, '6M3D6M', strand='-')
+        calls = [
+            _snp(4, 'T', 'C', af=0.957),
+            _snp(5, 'TGC', 'T', af=0.8),
+        ]
+        out, warnings = reconcile_variants_for_matches(calls, [match], supplied)
+        assert any('overlaps a reference deletion' in w for w in warnings)
+        assert _tokens(out) == [
+            (4, 'T', 'C', 0.957, VCF_DERIVED),
+            (5, 'TATG', 'T', 1.0, REFERENCE_DERIVED),
+        ]
+
+        out_ttg, warnings_ttg = reconcile_variants_for_matches(
+            [_snp(4, 'TTG', 'T', af=0.8)], [match], supplied,
+        )
+        assert any('overlaps a reference deletion' in w for w in warnings_ttg)
+        assert _tokens(out_ttg) == [
+            (5, 'TATG', 'T', 1.0, REFERENCE_DERIVED),
+        ]
 
     def test_table3_row1_exact_rc_pair_yields_zero_events(self) -> None:
         # Table 3 Row 1: coding internal AAA, supplied TTT (RC-mapped), no call -> none
@@ -1003,7 +1071,7 @@ class TestCodonContextThroughBaseline:
         assert warnings == []
         assert _tokens(out) == [
             (0, 'A', 'T', 0.3, VCF_DERIVED),
-            (1, 'A', 'C', 0.3, VCF_DERIVED),
+            (1, 'A', 'C', 0.3, REFERENCE_DERIVED),
         ]
 
         anns = annotate_variants(out, [feature])
@@ -1113,6 +1181,47 @@ class TestCodonContextThroughBaseline:
         match_rules(anns, [rule_s, rule_a])
         matched_drugs = {r.drug_name for a in anns for r in a.rule_matches}
         assert matched_drugs == {'DrugS', 'DrugA'}
+
+    def test_same_aa_combined_codon_states_sum_into_single_exchange_aa_freq(self) -> None:
+        """When two fixed baseline SNPs (AF 1.0, reference_derived) turn codon AGC (S)
+        into TGA (*) and a partial-AF VCF SNP at the middle base (AF 0.364, vcf_derived)
+        turns TGA (*) into TAA (*), both codon states (TGA at 0.636 and TAA at 0.364)
+        encode the exact same amino acid '*' (stop_gained): the two reference-derived
+        rows must sum their amino-acid frequency to 1.0, while the VCF-derived row
+        reports 0.364."""
+        # Minus-strand feature: coding ATG AGC TAA (M S *); genomic TTA GCT CAT.
+        # Codon 1 (0-based) is AGC (S), occupying genomic positions 3..5 (GCT).
+        # Supplied coding codon 1 is TGA (*), so supplied genomic is TTA TCA CAT:
+        # genomic pos 3 G>T (coding pos 2 C>A) and genomic pos 5 T>A (coding pos 0 A>T).
+        internal_coding = 'ATGAGCTAA'
+        supplied_genomic = str(Seq('ATGTGATAA').reverse_complement())  # TTATCACAT
+        feature = _feature(internal_coding, strand='-')
+        match = _match(feature, supplied_genomic, '9M', strand='-')
+
+        # VCF SNP at middle base of codon 1 (genomic pos 4 C>T, coding pos 1 G>A) at AF 0.364 -> TAA (*)
+        calls = [_snp(4, 'C', 'T', af=0.364)]
+        out, warnings = reconcile_variants_for_matches(calls, [match], supplied_genomic)
+        assert warnings == []
+
+        anns = annotate_variants(out, [feature])
+        assert len(anns) == 3
+        by_pos = {a.variant.pos: a for a in anns}
+        assert set(by_pos) == {3, 4, 5}
+
+        for pos in (3, 5):
+            ann_ref = by_pos[pos]
+            assert ann_ref.variant.source == REFERENCE_DERIVED
+            assert ann_ref.variant.allele_freq == pytest.approx(1.0)
+            assert (ann_ref.ref_aa, ann_ref.alt_aa, ann_ref.consequence) == ('S', '*', 'stop_gained')
+            assert ann_ref.single_exchange_aa_freq == pytest.approx(1.0)
+            assert not any(s.alt_aa == '*' for s in ann_ref.combined_states)
+
+        ann_vcf = by_pos[4]
+        assert ann_vcf.variant.source == VCF_DERIVED
+        assert ann_vcf.variant.allele_freq == pytest.approx(0.364)
+        assert (ann_vcf.ref_aa, ann_vcf.alt_aa, ann_vcf.consequence) == ('S', '*', 'stop_gained')
+        assert ann_vcf.single_exchange_aa_freq == pytest.approx(0.364)
+        assert not any(s.alt_aa == '*' for s in ann_vcf.combined_states)
 
 
 class TestBamMaskCombinedStateExclusion:
@@ -1303,7 +1412,7 @@ class TestFrameOffsetReconciliation:
         out, warnings = reconcile_variants_for_matches(calls, [match], supplied)
 
         assert warnings == []
-        assert _tokens(out) == [(1, 'A', 'G', 0.5, VCF_DERIVED)]
+        assert _tokens(out) == [(1, 'A', 'G', 0.5, REFERENCE_DERIVED)]
 
     def test_frame_offset_trailing_insertion(self) -> None:
         """An insertion past the last coding base does not crash with a frame
@@ -1591,16 +1700,16 @@ class TestIndelRepresentation:
         )
         assert out == []
 
-        # Merged deletions: internal ACGT, supplied ACT, call deletes T.
-        feature2 = _feature('ACGT')
-        match2 = _match(feature2, 'ACT', '2M1D1M')
+        # Merged insertions: internal AT, supplied ACGT (CG inserted), call inserts G after C.
+        feature2 = _feature('AT')
+        match2 = _match(feature2, 'ACGT', '1M2I1M')
         out2, _ = reconcile_variants_for_matches(
-            [_snp(1, 'CT', 'C')], [match2], 'ACT',
+            [_snp(1, 'C', 'CG')], [match2], 'ACGT',
         )
         assert len(out2) == 1
         var = out2[0]
-        applied = 'ACGT'[:var.pos] + var.alt + 'ACGT'[var.pos + len(var.ref):]
-        assert applied == 'AC'  # sample: both T and G deleted
+        applied = 'AT'[:var.pos] + var.alt + 'AT'[var.pos + len(var.ref):]
+        assert applied == 'ACGGT'
 
 
 class TestRecordIdentity:
@@ -1687,7 +1796,7 @@ class TestNonOverlappingRecordsInSharedWindow:
         assert warnings == []
         assert _tokens(out) == [
             (0, 'A', 'AAG', 0.7, VCF_DERIVED),
-            (0, 'A', 'ACG', 0.3, VCF_DERIVED),
+            (0, 'A', 'ACG', 0.3, REFERENCE_DERIVED),
             (1, 'T', 'C', 0.7, VCF_DERIVED),
         ]
 
