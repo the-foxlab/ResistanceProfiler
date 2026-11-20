@@ -8,7 +8,7 @@ import pytest
 from conftest import TINY_REF_SEQ, write_genbank
 
 from respro.cli.init import init_project
-from respro.db.phenotype_ranks import label_to_rank
+from respro.core.phenotype_ranks import label_to_rank
 from respro.db.schema import open_project_db
 
 

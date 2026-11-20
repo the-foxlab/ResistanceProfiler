@@ -13,12 +13,20 @@ from __future__ import annotations
 
 import pytest
 
-from respro.db._rules_formula import (
-    _canonicalize_formula_ast,
-    _formula_ast_to_string,
-    _formula_sort_key,
-    _parse_formula_expression,
-    _tokenize_formula_expression,
+from respro.core.formula import (
+    canonicalize_formula_ast as _canonicalize_formula_ast,
+)
+from respro.core.formula import (
+    formula_ast_to_string as _formula_ast_to_string,
+)
+from respro.core.formula import (
+    formula_sort_key as _formula_sort_key,
+)
+from respro.core.formula import (
+    parse_formula_expression as _parse_formula_expression,
+)
+from respro.core.formula import (
+    tokenize_formula_expression as _tokenize_formula_expression,
 )
 
 

@@ -29,8 +29,8 @@ Every key below corresponds to an entry in `respro/config/defaults.toml`, where 
 | `pubchem` | int | `7` | Per-request timeout for PubChem lookups. |
 | `pubmed` | int | `7` | Per-request timeout for PubMed esummary. |
 | `crossref` | int | `7` | Per-request timeout for Crossref. |
-| `genbank_timeout` | int | `30` | `urlopen` timeout (seconds) for a single NCBI nuccore efetch attempt. |
-| `genbank_max_retries` | int | `3` | Max efetch attempts before raising `RuntimeError`. |
+| `genbank_timeout` | int | `30` | Per-attempt HTTP timeout (seconds) when downloading a GenBank record from NCBI. |
+| `genbank_max_retries` | int | `3` | Maximum download attempts per GenBank accession before failing. |
 | `genbank_backoff_base` | float | `1.0` | Exponential backoff base (seconds); doubled each retry (1, 2, 4). |
 | `genbank_request_interval` | float | `0.5` | Minimum pause (seconds) between successive GenBank efetch requests during a bulk download. Keeps `databases --download` under NCBI eutils' limit of 3 requests/second (without an API key), preventing HTTP 429 rate-limit errors. |
 
@@ -75,7 +75,7 @@ These are URL templates containing `{placeholder}` segments. Override only if yo
 |---|---|---|---|
 | `min_cooccurrence_codon_fraction` | float | `0.6666666666666666` | Conservative Fréchet-intersection policy: a candidate codon state is emitted only when the minimum guaranteed co-occurrence fraction reaches this value. |
 | `min_read_mapping_quality` | int | `20` | Minimum MAPQ for a read to count toward BAM-based same-codon SNP co-occurrence (VCF mode with `--bam` only). |
-| `bam_base_quality_threshold` | int | `0` | Minimum base quality for a read to contribute to BAM per-position depth (`count_coverage`). `0` accepts all bases. |
+| `bam_base_quality_threshold` | int | `0` | Minimum base quality for a read to contribute to BAM per-position depth. `0` accepts all bases. |
 | `frechet_epsilon` | float | `1e-9` | Numerical tolerance for Fréchet-bound acceptance (`lower > eps`). Loosen in noisy regimes; tightening below `1e-12` risks float instability. |
 
 ### `[similarity]` — amino-acid similarity classification

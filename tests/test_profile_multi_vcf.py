@@ -24,7 +24,7 @@ from respro.core.query import (
     resolve_fasta_query_multi,
 )
 from respro.core.vcf_coverage import compute_coverage_gaps_from_bam_multi
-from respro.core.vcf_to_reference import reconcile_variants
+from respro.core.vcf_to_reference.main import map_vcf_to_references as reconcile_variants
 from respro.db.models import ProfilingResult, ReferenceGroup, VariantCall
 from respro.db.results import load_run, save_run
 from respro.db.schema import create_schema, init_results_db, open_project_db
@@ -2396,66 +2396,6 @@ class TestResultsDbMultiReference:
         assert len(variant_rows) == 2
         assert all('reference_name' in row for row in variant_rows)
         assert {row['reference_name'] for row in variant_rows} == {'refA', 'refB'}
-
-    def test_v1_results_db_auto_migrates_reference_name_column(
-        self, multi_ref_db: Path, tmp_path: Path,
-    ) -> None:
-        """Opening a v1 results DB (no reference_name column) auto-adds it without data loss."""
-        results_db = tmp_path / 'v1_results.db'
-        conn = sqlite3.connect(str(results_db))
-        conn.execute('CREATE TABLE results_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
-        conn.execute(
-            "INSERT INTO results_meta (key, value) VALUES ('results_schema_version', '1')"
-        )
-        conn.execute(
-            'CREATE TABLE run ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'project_name TEXT NOT NULL, '
-            'project_db_path TEXT NOT NULL, '
-            'reference_name TEXT NOT NULL, '
-            'vcf_path TEXT NOT NULL'
-            ')'
-        )
-        conn.execute(
-            'CREATE TABLE variant_result ('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-            'run_id INTEGER NOT NULL, '
-            'chrom TEXT NOT NULL, '
-            'pos INTEGER NOT NULL, '
-            'ref TEXT NOT NULL, '
-            'alt TEXT NOT NULL, '
-            'feature_name TEXT DEFAULT ""'
-            ')'
-        )
-        conn.execute(
-            'INSERT INTO run (project_name, project_db_path, reference_name, vcf_path) '
-            'VALUES (?, ?, ?, ?)',
-            ('p', str(results_db), 'refA', '/tmp/sample.vcf'),
-        )
-        conn.execute(
-            'INSERT INTO variant_result (run_id, chrom, pos, ref, alt, feature_name) '
-            'VALUES (?, ?, ?, ?, ?, ?)',
-            (1, 'chrom_a', 4, 'A', 'G', 'gagA'),
-        )
-        conn.commit()
-        conn.close()
-
-        migrated = init_results_db(results_db)
-        try:
-            columns = {
-                row['name']
-                for row in migrated.execute('PRAGMA table_info(variant_result)').fetchall()
-            }
-            row = migrated.execute(
-                'SELECT feature_name, reference_name FROM variant_result WHERE id = 1'
-            ).fetchone()
-        finally:
-            migrated.close()
-
-        assert 'reference_name' in columns
-        assert row is not None
-        assert row['feature_name'] == 'gagA'  # data preserved
-        assert row['reference_name'] == ''  # default for migrated rows
 
     def test_results_schema_version_is_one(self, tmp_path: Path) -> None:
         """A freshly initialised results DB records schema version 1."""

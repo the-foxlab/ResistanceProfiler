@@ -20,7 +20,7 @@ from Bio import SeqIO
 from conftest import TINY_REF_NAME, TINY_REF_SEQ
 
 from respro.core.annotation import annotate_variants, reverse_complement
-from respro.core.vcf_to_reference import reconcile_variants_for_matches
+from respro.core.vcf_to_reference.main import map_vcf_to_matches as reconcile_variants_for_matches
 from respro.db.models import FeatureMatch, FeatureRecord, FeatureSegment, VariantCall
 
 
@@ -518,7 +518,7 @@ class TestUserRefCoordsPreserved:
 
 def test_fasta_emitted_variant_has_empty_user_ref_coords() -> None:
     """FASTA-emitted variants leave user-ref coords empty (no supplied user reference)."""
-    from respro.core.fasta_to_vcf import _make_variant_from_coding_nt
+    from respro.core.fasta_to_vcf import make_coding_variant as _make_variant_from_coding_nt
 
     feature = _make_feature(strand='+')
     var = _make_variant_from_coding_nt(feature, coding_nt_idx=3, ref='A', alt='G')
@@ -734,11 +734,15 @@ class TestVcfCliBamCooccurrenceOrientation:
     ) -> None:
         import pysam
 
-        from respro.cli.vcf import (
-            _build_bam_cooccurrence_by_chrom,
-            _close_bam_cooccurrence_handles,
+        from respro.core.vcf_coverage import (
+            build_bam_cooccurrence_by_chrom as _build_bam_cooccurrence_by_chrom,
         )
-        from respro.core.vcf_to_reference import reconcile_variants_for_matches
+        from respro.core.vcf_coverage import (
+            close_bam_cooccurrence_handles as _close_bam_cooccurrence_handles,
+        )
+        from respro.core.vcf_to_reference.main import (
+            map_vcf_to_matches as reconcile_variants_for_matches,
+        )
 
         internal_coding = 'ATGAAATTTGGGCCC'
         query_seq = reverse_complement_dna(internal_coding)  # codon 1 (AAA) at forward 9..11 (TTT)
@@ -818,7 +822,12 @@ class TestVcfBlockSubstitutionEndToEndV3:
 
         from conftest import make_profiling_result
 
-        from respro.db.results import load_run, load_run_from_json, reconstruct_annotations, save_run
+        from respro.db.results import (
+            load_run,
+            load_run_from_json,
+            reconstruct_annotations,
+            save_run,
+        )
         from respro.db.schema import create_schema, init_results_db
         from respro.io.vcf import parse_vcf
         from respro.report.non_html_exports import write_json

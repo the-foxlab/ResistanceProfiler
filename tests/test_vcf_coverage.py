@@ -302,7 +302,7 @@ class TestMultiIntronCoverageProjection:
 
     @pytest.mark.parametrize('case', V4_MULTI_INTRON_CASES, ids=lambda c: c['name'])
     def test_exon_depth_20_intron_depth_0_reports_no_gaps(self, case: dict) -> None:
-        from respro.core.alignment import classify_introns
+        from respro.core.coordinates import classify_introns
         from respro.db.models import FeatureSegment
 
         exon_seqs = case['exon_seqs']
@@ -378,7 +378,7 @@ class TestMultiIntronCoverageProjection:
         assert [(g.codon_start, g.codon_end) for g in gaps] == expected_gaps
 
     def test_low_depth_in_exon3_matches_oracle_gap(self) -> None:
-        from respro.core.alignment import classify_introns
+        from respro.core.coordinates import classify_introns
         from respro.db.models import FeatureSegment
 
         exon_seqs = ('ATGAAA', 'TTTGGG', 'CCCTAA')

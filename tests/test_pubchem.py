@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 from conftest import make_profiling_result
 
-from respro.db.drugs import _get_drugs_from_pubchem
+from respro.db.drugs import enrich_drugs_from_pubchem as _get_drugs_from_pubchem
 from respro.db.models import (
     AnnotatedVariant,
     FeatureMatch,
@@ -21,7 +21,7 @@ from respro.db.models import (
     ResistanceRule,
     VariantCall,
 )
-from respro.io.lookup import LookupResult, LookupStatus
+from respro.io.http import LookupResult, LookupStatus
 from respro.io.pubchem import (
     PubChemRecord,
     _fetch_cid,
@@ -30,7 +30,7 @@ from respro.io.pubchem import (
     _fetch_substance_synonyms,
     lookup_drug,
 )
-from respro.report.html import render_html
+from respro.report.html.main import render_html
 
 
 def _mock_response(payload: object) -> MagicMock:

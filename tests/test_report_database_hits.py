@@ -16,7 +16,7 @@ from respro.db.models import (
     ResistanceRuleSet,
     VariantCall,
 )
-from respro.report.html import _build_database_hits_rows
+from respro.report.html.tables import build_database_hits_rows as _build_database_hits_rows
 from respro.report.plots import render_lollipop_plot_bytes
 
 

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from respro.db._rules_normalize import normalize_phenotype_label
-from respro.db.phenotype_ranks import (
+from respro.core.phenotype_ranks import (
     RANK_CONTRADICTORY,
     RANK_UNKNOWN,
     RANK_VOCABULARY,
     allowed_ranks_for_labels,
     label_to_rank,
+    normalize_phenotype_label,
     rank_to_colour,
     rank_to_label,
 )

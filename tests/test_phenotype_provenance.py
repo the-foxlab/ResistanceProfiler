@@ -16,15 +16,15 @@ import sqlite3
 import pytest
 from conftest import make_profiling_result
 
-from respro.db.algorithms import compute_drug_assessment
+from respro.core.algorithms import compute_drug_assessment
+from respro.core.phenotype_ranks import most_frequent_label
 from respro.db.models import (
     AnnotatedVariant,
     ProfilingResult,
     ResistanceRule,
     VariantCall,
 )
-from respro.db.phenotype_ranks import most_frequent_label
-from respro.report.html import build_report_context
+from respro.report.html.main import build_report_context
 
 # ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -538,7 +538,7 @@ class TestNarrativeProvenanceLists:
         text = ctx['summary']['narrative']
         assert 'Drugs assessed as contradictory:' in text
         assert 'DrugA' in text
-        from respro.db.phenotype_ranks import RANK_CONTRADICTORY, rank_to_colour
+        from respro.core.phenotype_ranks import RANK_CONTRADICTORY, rank_to_colour
         assert rank_to_colour(RANK_CONTRADICTORY) in text
 
 

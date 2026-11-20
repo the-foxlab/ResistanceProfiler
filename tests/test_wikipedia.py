@@ -9,7 +9,7 @@ import logging
 import urllib.error
 from unittest.mock import MagicMock, patch
 
-from respro.io.lookup import LookupStatus
+from respro.io.http import LookupStatus
 from respro.io.wikipedia import lookup_summary
 
 

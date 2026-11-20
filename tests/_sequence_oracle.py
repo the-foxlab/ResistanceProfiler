@@ -99,7 +99,7 @@ def classify_consequence_independent(ref_aa: str, alt_aa: str, codon_idx: int) -
     if alt_aa == '*' and ref_aa != '*':
         return 'stop_gained'
     if ref_aa == '*':
-        return 'stop_loss'
+        return 'stop_lost'
     return 'missense'
 
 

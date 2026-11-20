@@ -16,18 +16,21 @@ from conftest import TINY_REF_NAME, TINY_REF_SEQ
 from typer.testing import CliRunner
 
 from respro.cli.main import app
-from respro.cli.profile_helpers import _load_reference_data
+from respro.cli.profile_helpers import load_reference_data as _load_reference_data
 from respro.core.alignment import match_query_to_features
 from respro.core.annotation import annotate_variants
+from respro.core.coordinates import build_query_to_cds_map as _build_query_to_cds_map
 from respro.core.fasta_to_vcf import (
-    _make_variant_from_coding_nt,
     _variants_from_alignment,
     fasta_to_vcf,
+)
+from respro.core.fasta_to_vcf import (
+    make_coding_variant as _make_variant_from_coding_nt,
 )
 from respro.core.query import (
     resolve_fasta_query,
 )
-from respro.core.vcf_to_reference import _build_query_to_cds_map, reconcile_variants_for_matches
+from respro.core.vcf_to_reference.main import map_vcf_to_matches as reconcile_variants_for_matches
 from respro.db.cache import load_cached_mappings, sequence_checksum, store_mappings
 from respro.db.models import FeatureMatch, FeatureRecord, FeatureSegment, VariantCall
 from respro.db.schema import create_schema, open_project_db

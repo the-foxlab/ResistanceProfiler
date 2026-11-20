@@ -11,8 +11,8 @@ from typer.testing import CliRunner
 
 from respro.cli.init import init_project
 from respro.cli.main import app
+from respro.core.frechet import frechet_and_bound as _frechet_and_bound
 from respro.core.rules import (
-    _frechet_and_bound,
     match_formula_rules,
     match_rules,
 )
@@ -20,9 +20,9 @@ from respro.db.models import (
     AnnotatedVariant,
     CodonState,
     FormulaRuleHit,
-    FormulaRuleRuntime,
     ResistanceRule,
     ResistanceRuleSet,
+    ResistanceRuleSetMember,
     VariantCall,
 )
 from respro.db.rules_queries import load_rules
@@ -658,12 +658,9 @@ class TestMatchFormulaRules:
             is_internal_formula_component=True,
         )
 
-    def _formula(self, expression: str, members: list[ResistanceRule]) -> FormulaRuleRuntime:
-        return FormulaRuleRuntime(
+    def _formula(self, expression: str, members: list[ResistanceRule]) -> ResistanceRuleSet:
+        return ResistanceRuleSet(
             id=1,
-            formula_id='formula_1',
-            label='Formula 1',
-            normalized_expression=expression,
             drug_name='DrugA',
             drug_id=1,
             phenotype='resistant',
@@ -672,8 +669,24 @@ class TestMatchFormulaRules:
             fold_ic50='',
             score='',
             source='',
+            group_name='Formula 1',
             comment='',
-            member_rules={rule.external_id: rule for rule in members if rule.external_id},
+            logic_expression=expression,
+            members=[
+                ResistanceRuleSetMember(
+                    id=idx,
+                    rule_set_id=1,
+                    feature_name=rule.feature_name,
+                    feature_id=rule.feature_id,
+                    reference_identifier=rule.reference_identifier,
+                    position=rule.position,
+                    reference=rule.reference,
+                    mutation=rule.mutation,
+                    external_id=rule.external_id,
+                )
+                for idx, rule in enumerate(members, start=1)
+                if rule.external_id
+            ],
         )
 
     def test_formula_and_matches_when_all_members_pass_af_gate(self) -> None:
@@ -1162,7 +1175,7 @@ class TestFrechetAndBound:
     EPS = 1e-9
 
     def _bound(self, q_values):
-        from respro.core.rules import _frechet_and_bound
+        from respro.core.frechet import frechet_and_bound as _frechet_and_bound
         return _frechet_and_bound(q_values, self.MIN_FRACTION)
 
     # ── worked-example table (TODO.md) ────────────────────────────────────
@@ -1363,14 +1376,23 @@ class TestFrechetEpsilonParameter:
             is_internal_formula_component=True,
         )
 
-    def _formula(self, expression: str, members: list[ResistanceRule]) -> FormulaRuleRuntime:
-        return FormulaRuleRuntime(
-            id=1, formula_id='formula_1', label='Formula 1',
-            normalized_expression=expression,
-            drug_name='DrugA', drug_id=1,
+    def _formula(self, expression: str, members: list[ResistanceRule]) -> ResistanceRuleSet:
+        return ResistanceRuleSet(
+            id=1, drug_name='DrugA', drug_id=1,
             phenotype='resistant', clinical_phenotype='unknown',
-            ic50='', fold_ic50='', score='', source='', comment='',
-            member_rules={r.external_id: r for r in members if r.external_id},
+            ic50='', fold_ic50='', score='', source='', group_name='Formula 1', comment='',
+            logic_expression=expression,
+            members=[
+                ResistanceRuleSetMember(
+                    id=idx, rule_set_id=1,
+                    feature_name=r.feature_name, feature_id=r.feature_id,
+                    reference_identifier=r.reference_identifier,
+                    position=r.position, reference=r.reference, mutation=r.mutation,
+                    external_id=r.external_id,
+                )
+                for idx, r in enumerate(members, start=1)
+                if r.external_id
+            ],
         )
 
     def test_member_gate_uses_passed_eps(self) -> None:
@@ -1460,14 +1482,23 @@ class TestFrechetFormulaMatching:
             is_internal_formula_component=True,
         )
 
-    def _formula(self, expression: str, members: list[ResistanceRule]) -> FormulaRuleRuntime:
-        return FormulaRuleRuntime(
-            id=1, formula_id='formula_1', label='Formula 1',
-            normalized_expression=expression,
-            drug_name='DrugA', drug_id=1,
+    def _formula(self, expression: str, members: list[ResistanceRule]) -> ResistanceRuleSet:
+        return ResistanceRuleSet(
+            id=1, drug_name='DrugA', drug_id=1,
             phenotype='resistant', clinical_phenotype='unknown',
-            ic50='', fold_ic50='', score='', source='', comment='',
-            member_rules={r.external_id: r for r in members if r.external_id},
+            ic50='', fold_ic50='', score='', source='', group_name='Formula 1', comment='',
+            logic_expression=expression,
+            members=[
+                ResistanceRuleSetMember(
+                    id=idx, rule_set_id=1,
+                    feature_name=r.feature_name, feature_id=r.feature_id,
+                    reference_identifier=r.reference_identifier,
+                    position=r.position, reference=r.reference, mutation=r.mutation,
+                    external_id=r.external_id,
+                )
+                for idx, r in enumerate(members, start=1)
+                if r.external_id
+            ],
         )
 
     def test_and_with_members_below_old_gate_fires(self) -> None:

@@ -42,7 +42,7 @@ These principles guide development and code review:
 - `respro/cli` — CLI command registration and orchestration
 - `respro/core` — reference-normalized profiling, amino-acid interpretation, and rule matching
 - `respro/io` — format-specific parsing (GenBank, VCF, FASTA, TSV) and external data retrieval
-- `respro/db` — schema, migrations, and persistence/query helpers
+- `respro/db` — schema, models, rule import, and persistence/query helpers
 - `respro/report` — HTML/JSON/TSV/PDF export and plotting
 - `web/backend` — FastAPI API, job queue, and startup config
 - `web/frontend` — React frontend

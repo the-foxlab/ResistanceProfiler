@@ -34,7 +34,7 @@ See [Rules TSV Format](rules-format.md) for the full mutation normalisation refe
 
 Combination rules allow interpretation based on boolean logic across multiple mutation members. They are defined separately from single rules (in the `--formula-rules` TSV) and evaluated with operators AND, OR, NOT, and XOR.
 
-Combination members are evaluated based on a fixed member allele-frequency threshold (AF > 0.75 by default).
+Combination members must first match individually (amino-acid frequency lower bound > 0). An `AND` clause fires only when the joint Fréchet lower bound's forced fraction reaches the configured co-occurrence threshold (`2/3` by default; see `[matching] min_cooccurrence_combination_fraction` in [Configuration](configuration.md)). For two members, two mutations each at AF 0.75 sit right at this boundary; three-way `AND` combinations require higher individual frequencies. The reported hit frequency is the joint lower bound rather than any individual member's AF.
 
 <div class="respro-operator-row" markdown>
 <span class="respro-operator-pill respro-operator-pill-and">AND</span>
@@ -143,7 +143,7 @@ Resolution precedence (most specific wins):
 
 Duplicate `(reference, drug)` or `(drug)`-only keys are rejected. Two overrides whose `reference` values differ only by accession version (e.g. `NC_001345` and `NC_001345.1`) are treated as the same key and rejected as duplicates. Overrides with no matching drug or reference fall back to the next precedence level. The Database Dashboard condenses overrides for display: entries sharing the same `reference` (shown as `(all)` when absent) and the same threshold values collapse into one row with a sorted drug set, mirroring the `effect_as_resistant` condensing.
 
-When a drug has hits under multiple references in a single report (e.g. a multi-species run), the reference used to resolve per-(reference, drug) overrides is selected deterministically as the alphabetically first reference name. This keeps the report output stable across process invocations (set iteration order is otherwise hash-seed dependent).
+When a drug has hits under multiple references in a single report (e.g. a multi-species run), ResPro evaluates the drug against each observed reference in deterministic alphabetical order and keeps the **strongest** (most resistant) assessment.
 
 Example — `drug_interpretation` with a per-reference override:
 
@@ -151,9 +151,9 @@ Example — `drug_interpretation` with a per-reference override:
 {
   "name": "drug_interpretation",
   "method": "by_score",
-  "thresholds": {"resistant": 1, "intermediate": 1},
+  "thresholds": {"intermediate": 2, "resistant": 5},
   "drug_thresholds": [
-    {"reference": "ref", "drug": "ACV", "thresholds": {"resistant": 1, "intermediate": 1}}
+    {"reference": "NC_001806", "drug": "ACV", "thresholds": {"intermediate": 1, "resistant": 3}}
   ]
 }
 ```

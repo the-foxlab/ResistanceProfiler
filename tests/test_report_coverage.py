@@ -32,7 +32,7 @@ from respro.db.models import (
     VariantCall,
 )
 from respro.db.schema import create_schema
-from respro.report.html import build_report_context, render_html
+from respro.report.html.main import build_report_context, render_html
 from respro.report.non_html_exports import (
     _build_pdf_summary_context,
     _load_pdf_template_text,

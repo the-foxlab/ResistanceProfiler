@@ -22,12 +22,12 @@ from respro.db.models import (
     ResistanceRuleSetMember,
     VariantCall,
 )
-from respro.report._row_helpers import (
+from respro.report.non_html_exports import export_results, write_tsv
+from respro.report.row_helpers import (
     build_reference_name_by_chrom,
     nt_change_stored,
     nt_change_user,
 )
-from respro.report.non_html_exports import export_results, write_tsv
 
 # Canonical 20-column header, in order.
 TSV_COLUMNS = [

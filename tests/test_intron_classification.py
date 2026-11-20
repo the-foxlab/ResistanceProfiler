@@ -17,13 +17,16 @@ from _sequence_oracle import (
     derive_fixed_coding_haplotype_effect,
 )
 
-from respro.core.alignment import (
+from respro.core.alignment import match_query_to_features
+from respro.core.coordinates import (
+    build_query_to_cds_map as _build_query_to_cds_map,
+)
+from respro.core.coordinates import (
     classify_introns,
     exon_junction_cds_offsets,
-    match_query_to_features,
 )
 from respro.core.fasta_to_vcf import fasta_to_vcf
-from respro.core.vcf_to_reference import _build_query_to_cds_map, reconcile_variants_for_matches
+from respro.core.vcf_to_reference.main import map_vcf_to_matches as reconcile_variants_for_matches
 from respro.db.models import FeatureRecord, FeatureSegment, IntronInterval, VariantCall
 
 # ──────────────────────────────────────────────────────────────────────
@@ -762,8 +765,10 @@ class TestMultiIntronCoordinateConvention:
     def test_multi_intron_strip_q2c_remap_fasta_and_visualization(self, case: dict) -> None:
         """V4 oracle check: stripping, q2c, slot_map, VCF remap, FASTA, and alignment visualization."""
         from respro.core.annotation import annotate_variants
-        from respro.core.fasta_to_vcf import _strip_introns_from_region
-        from respro.core.vcf_to_reference import _build_match_alignment
+        from respro.core.coordinates import strip_introns_from_region as _strip_introns_from_region
+        from respro.core.vcf_to_reference.reference_alignment import (
+            align_supplied_to_feature as _build_match_alignment,
+        )
         from respro.db.models import FeatureMatch
         from respro.report.alignment_visualization import build_feature_alignments
 
@@ -852,7 +857,7 @@ class TestMultiIntronCoordinateConvention:
         # 3) Slot map excludes intron positions and maps all exon positions.
         ctx = _build_match_alignment(match, oracle.query_seq)
         assert ctx is not None
-        assert set(ctx.slot_map) == set(oracle.expected_q2c)
+        assert set(ctx.position_map) == set(oracle.expected_q2c)
 
         # 4) Variants in exon 1, exon 2, and exon 3 remap & annotate to exact oracle consequences.
         exon_cds_offsets = [0, len(exon_seqs[0]) + 1, len(exon_seqs[0]) + len(exon_seqs[1]) + 1]

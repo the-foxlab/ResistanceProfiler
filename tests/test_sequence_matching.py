@@ -14,12 +14,14 @@ from respro.core.alignment import (
     _normalize_mappy_cigar,
     _reverse_cigar_operations,
     _swap_cigar_indels,
-    cigar_to_coordinate_map,
-    load_features,
     match_query_to_features,
+)
+from respro.core.coordinates import (
+    cigar_to_coordinate_map,
     parse_cigar,
 )
 from respro.db.cache import load_cached_mappings, sequence_checksum, store_mappings
+from respro.db.features import load_features
 from respro.db.models import FeatureMatch, FeatureRecord
 from respro.db.schema import create_schema
 
@@ -386,8 +388,12 @@ class TestMultiIntronCoordinateInvariantsOracle:
 
     @pytest.mark.parametrize('case', V4_MULTI_INTRON_CASES, ids=lambda c: c['name'])
     def test_spliced_cigar_map_matches_oracle(self, case: dict) -> None:
-        from respro.core.alignment import classify_introns
-        from respro.core.vcf_to_reference import _build_query_to_cds_map
+        from respro.core.coordinates import (
+            build_query_to_cds_map as _build_query_to_cds_map,
+        )
+        from respro.core.coordinates import (
+            classify_introns,
+        )
 
         exon_seqs = case['exon_seqs']
         intron_seqs = case['intron_seqs']

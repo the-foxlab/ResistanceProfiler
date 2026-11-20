@@ -32,10 +32,12 @@ from respro.report.alignment_visualization import (
     build_alignment_html,
     build_feature_alignments,
 )
-from respro.report.html import (
-    _build_potential_effects_rows,
+from respro.report.html.main import (
     build_report_context,
     render_html,
+)
+from respro.report.html.tables import (
+    build_potential_effects_rows as _build_potential_effects_rows,
 )
 from respro.report.non_html_exports import _build_pdf_drug_rows, export_results
 
@@ -3400,7 +3402,7 @@ class TestPdfExports:
         assert 'Drugs assessed as contradictory:' in text
         assert 'DrugA' in text
         # The contradictory list line must use the contradictory rank colour.
-        from respro.db.phenotype_ranks import RANK_CONTRADICTORY, rank_to_colour
+        from respro.core.phenotype_ranks import RANK_CONTRADICTORY, rank_to_colour
         assert rank_to_colour(RANK_CONTRADICTORY) in text
 
     def test_contradictory_loses_to_higher_tier_in_narrative(self) -> None:
@@ -5152,7 +5154,7 @@ class TestReportHardening:
         """
         from jinja2 import BaseLoader, Environment
 
-        from respro.report.html import build_report_context
+        from respro.report.html.main import build_report_context
         from respro.report.non_html_exports import _load_pdf_template_text
 
         malicious = '<script>alert(1)</script>'
@@ -5197,7 +5199,7 @@ class TestReportHardening:
         """The trusted bundled PDF CSS must stay raw under autoescape (SEC-002)."""
         from jinja2 import BaseLoader, Environment
 
-        from respro.report.html import build_report_context
+        from respro.report.html.main import build_report_context
         from respro.report.non_html_exports import _load_pdf_template_text
 
         result = _make_result()

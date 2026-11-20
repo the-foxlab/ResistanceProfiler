@@ -53,14 +53,14 @@ _ESUMMARY_NO_DOI = {
 
 class TestFetchPubmedMetadata:
     def test_returns_title_and_doi_when_both_present(self) -> None:
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(_ESUMMARY_WITH_DOI)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(_ESUMMARY_WITH_DOI)):
             result = fetch_pubmed_metadata('12345678')
         assert result is not None
         assert result['title'] == 'Some antiviral resistance study.'
         assert result['doi'] == '10.1234/xyz'
 
     def test_returns_title_with_empty_doi_when_no_doi_in_response(self) -> None:
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(_ESUMMARY_NO_DOI)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(_ESUMMARY_NO_DOI)):
             result = fetch_pubmed_metadata('99999999')
         assert result is not None
         assert result['title'] == 'Old paper without a DOI.'
@@ -68,14 +68,14 @@ class TestFetchPubmedMetadata:
 
     def test_returns_empty_title_when_field_absent(self) -> None:
         payload = {'result': {'1': {'articleids': []}}}
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_pubmed_metadata('1')
         assert result is not None
         assert result['title'] == ''
         assert result['doi'] == ''
 
     def test_returns_none_on_http_error(self) -> None:
-        with patch('respro.io.publications.urlopen', side_effect=urllib.error.HTTPError(
+        with patch('urllib.request.urlopen', side_effect=urllib.error.HTTPError(
             url='', code=500, msg='Server Error', hdrs=None, fp=None,  # type: ignore[arg-type]
         )):
             assert fetch_pubmed_metadata('12345678') is None
@@ -87,8 +87,8 @@ class TestFetchPubmedMetadata:
             url='', code=429, msg='Too Many Requests', hdrs=headers, fp=None,  # type: ignore[arg-type]
         )
         with (
-            patch('respro.io.publications.urlopen', side_effect=[rate_limited, _mock_response(_ESUMMARY_WITH_DOI)]),
-            patch('respro.io.publications.sleep') as mock_sleep,
+            patch('urllib.request.urlopen', side_effect=[rate_limited, _mock_response(_ESUMMARY_WITH_DOI)]),
+            patch('time.sleep') as mock_sleep,
         ):
             result = fetch_pubmed_metadata('12345678')
         assert result is not None
@@ -103,25 +103,25 @@ class TestFetchPubmedMetadata:
             url='', code=429, msg='Too Many Requests', hdrs=headers, fp=None,  # type: ignore[arg-type]
         )
         with (
-            patch('respro.io.publications.urlopen', side_effect=[rate_limited] * 4),
-            patch('respro.io.publications.sleep') as mock_sleep,
+            patch('urllib.request.urlopen', side_effect=[rate_limited] * 4),
+            patch('time.sleep') as mock_sleep,
         ):
             result = fetch_pubmed_metadata('12345678')
         assert result is None
         assert mock_sleep.call_count == 3
 
     def test_returns_none_on_network_error(self) -> None:
-        with patch('respro.io.publications.urlopen', side_effect=OSError('no network')):
+        with patch('urllib.request.urlopen', side_effect=OSError('no network')):
             assert fetch_pubmed_metadata('12345678') is None
 
     def test_returns_none_on_unexpected_json(self) -> None:
-        with patch('respro.io.publications.urlopen', return_value=_mock_response({'foo': 'bar'})):
+        with patch('urllib.request.urlopen', return_value=_mock_response({'foo': 'bar'})):
             result = fetch_pubmed_metadata('12345678')
         assert result is None
 
     def test_returns_none_when_articleids_is_not_list(self) -> None:
         payload = {'result': {'12345678': {'title': 'x', 'articleids': {}}}}
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             assert fetch_pubmed_metadata('12345678') is None
 
     def test_strips_markup_tags_from_title(self) -> None:
@@ -135,7 +135,7 @@ class TestFetchPubmedMetadata:
                 },
             },
         }
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_pubmed_metadata('33055248')
         assert result is not None
         assert result['title'] == 'In Vitro Profiling of Laninamivir-Resistant Substitutions'
@@ -146,7 +146,7 @@ class TestFetchPubmedMetadata:
 class TestFetchPublicationMetadata:
     def test_returns_title_on_success(self) -> None:
         payload = {'message': {'title': ['A CrossRef Title']}}
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_publication_metadata('10.1234/xyz')
         assert result == {
             'title': 'A CrossRef Title',
@@ -157,7 +157,7 @@ class TestFetchPublicationMetadata:
 
     def test_strips_whitespace_from_title(self) -> None:
         payload = {'message': {'title': ['  Trimmed Title  ']}}
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_publication_metadata('10.1234/xyz')
         assert result == {
             'title': 'Trimmed Title',
@@ -177,7 +177,7 @@ class TestFetchPublicationMetadata:
                 ],
             },
         }
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_publication_metadata('10.1111/irv.12215')
         assert result is not None
         assert result['title'] == (
@@ -197,7 +197,7 @@ class TestFetchPublicationMetadata:
                 ],
             },
         }
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_publication_metadata('10.1111/irv.12113')
         assert result is not None
         assert result['title'] == '... during the 2011 Southern Hemisphere season'
@@ -213,7 +213,7 @@ class TestFetchPublicationMetadata:
                 ],
             },
         }
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_publication_metadata('10.1111/irv.12108')
         assert result is not None
         assert result['title'] == (
@@ -229,7 +229,7 @@ class TestFetchPublicationMetadata:
                 ],
             },
         }
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_publication_metadata('10.1128/aac.03313-14')
         assert result is not None
         assert result['title'] == 'Variants Selected In Vitro with Laninamivir'
@@ -242,24 +242,24 @@ class TestFetchPublicationMetadata:
                 'title': ['application of the <scp>WHO</scp> antiviral criteria'],
             },
         }
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_publication_metadata('10.1111/irv.12215')
         assert result is not None
         assert result['title'] == 'application of the WHO antiviral criteria'
 
     def test_returns_none_on_404(self) -> None:
-        with patch('respro.io.publications.urlopen', side_effect=urllib.error.HTTPError(
+        with patch('urllib.request.urlopen', side_effect=urllib.error.HTTPError(
             url='', code=404, msg='Not Found', hdrs=None, fp=None,  # type: ignore[arg-type]
         )):
             assert fetch_publication_metadata('10.1234/bad') is None
 
     def test_returns_none_on_network_error(self) -> None:
-        with patch('respro.io.publications.urlopen', side_effect=OSError('no network')):
+        with patch('urllib.request.urlopen', side_effect=OSError('no network')):
             assert fetch_publication_metadata('10.1234/xyz') is None
 
     def test_returns_none_when_title_list_empty(self) -> None:
         payload = {'message': {'title': []}}
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             assert fetch_publication_metadata('10.1234/xyz') is None
 
     def test_retries_on_429_and_eventually_succeeds(self) -> None:
@@ -270,8 +270,8 @@ class TestFetchPublicationMetadata:
         )
         payload = {'message': {'title': ['A CrossRef Title']}}
         with (
-            patch('respro.io.publications.urlopen', side_effect=[rate_limited, _mock_response(payload)]),
-            patch('respro.io.publications.sleep') as mock_sleep,
+            patch('urllib.request.urlopen', side_effect=[rate_limited, _mock_response(payload)]),
+            patch('time.sleep') as mock_sleep,
         ):
             result = fetch_publication_metadata('10.1234/xyz')
         assert result == {
@@ -284,7 +284,7 @@ class TestFetchPublicationMetadata:
 
     def test_returns_none_when_title_field_is_not_list(self) -> None:
         payload = {'message': {'title': 'A CrossRef Title'}}
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             assert fetch_publication_metadata('10.1234/xyz') is None
 
 
@@ -293,44 +293,44 @@ class TestFetchPublicationMetadata:
 class TestFetchPubmedIdForDoi:
     def test_returns_pmid_on_success(self) -> None:
         payload = {'records': [{'doi': '10.1234/xyz', 'pmid': '12345678'}]}
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_pubmed_id_for_doi('10.1234/xyz')
         assert result == '12345678'
 
     def test_returns_none_when_record_has_no_pmid(self) -> None:
         payload = {'records': [{'doi': '10.1234/xyz'}]}
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
 
     def test_returns_none_when_records_empty(self) -> None:
         payload = {'records': []}
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
 
     def test_returns_none_on_http_error(self) -> None:
-        with patch('respro.io.publications.urlopen', side_effect=urllib.error.HTTPError(
+        with patch('urllib.request.urlopen', side_effect=urllib.error.HTTPError(
             url='', code=500, msg='Server Error', hdrs=None, fp=None,  # type: ignore[arg-type]
         )):
             assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
 
     def test_returns_none_on_network_error(self) -> None:
-        with patch('respro.io.publications.urlopen', side_effect=OSError('no network')):
+        with patch('urllib.request.urlopen', side_effect=OSError('no network')):
             assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
 
     def test_skips_non_doi_tokens_without_http_call(self) -> None:
-        with patch('respro.io.publications.urlopen') as mock_urlopen:
+        with patch('urllib.request.urlopen') as mock_urlopen:
             assert fetch_pubmed_id_for_doi('PMID:12345678') is None
         mock_urlopen.assert_not_called()
 
     def test_returns_none_on_http_400_without_raising(self) -> None:
-        with patch('respro.io.publications.urlopen', side_effect=urllib.error.HTTPError(
+        with patch('urllib.request.urlopen', side_effect=urllib.error.HTTPError(
             url='', code=400, msg='Bad Request', hdrs=None, fp=None,  # type: ignore[arg-type]
         )):
             assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
 
     def test_accepts_doi_org_prefixed_input(self) -> None:
         payload = {'records': [{'doi': '10.1234/xyz', 'pmid': '12345678'}]}
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_pubmed_id_for_doi('doi.org/10.1234/xyz')
         assert result == '12345678'
 
@@ -342,8 +342,8 @@ class TestFetchPubmedIdForDoi:
         )
         payload = {'records': [{'doi': '10.1234/xyz', 'pmid': '12345678'}]}
         with (
-            patch('respro.io.publications.urlopen', side_effect=[rate_limited, _mock_response(payload)]),
-            patch('respro.io.publications.sleep') as mock_sleep,
+            patch('urllib.request.urlopen', side_effect=[rate_limited, _mock_response(payload)]),
+            patch('time.sleep') as mock_sleep,
         ):
             result = fetch_pubmed_id_for_doi('10.1234/xyz')
         assert result == '12345678'
@@ -351,7 +351,7 @@ class TestFetchPubmedIdForDoi:
 
     def test_returns_none_when_records_field_is_not_list(self) -> None:
         payload = {'records': {'pmid': '12345678'}}
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             assert fetch_pubmed_id_for_doi('10.1234/xyz') is None
 
 
@@ -392,7 +392,7 @@ _CROSSREF_WITH_AUTHORS = {
 
 class TestFetchPubmedMetadataRichFields:
     def test_returns_first_author_year_and_journal_when_present(self) -> None:
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(_ESUMMARY_WITH_AUTHORS)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(_ESUMMARY_WITH_AUTHORS)):
             result = fetch_pubmed_metadata('12345678')
         assert result is not None
         assert result['title'] == 'Some antiviral resistance study.'
@@ -402,7 +402,7 @@ class TestFetchPubmedMetadataRichFields:
         assert result['journal'] == 'Journal of Virology'
 
     def test_returns_empty_rich_fields_when_absent(self) -> None:
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(_ESUMMARY_WITH_DOI)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(_ESUMMARY_WITH_DOI)):
             result = fetch_pubmed_metadata('12345678')
         assert result is not None
         assert result['first_author'] == ''
@@ -420,7 +420,7 @@ class TestFetchPubmedMetadataRichFields:
                 }
             }
         }
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_pubmed_metadata('1')
         assert result is not None
         assert result['year'] == '1998'
@@ -429,7 +429,7 @@ class TestFetchPubmedMetadataRichFields:
 
 class TestFetchPublicationMetadataRichFields:
     def test_returns_first_author_year_and_journal_when_present(self) -> None:
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(_CROSSREF_WITH_AUTHORS)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(_CROSSREF_WITH_AUTHORS)):
             result = fetch_publication_metadata('10.1234/xyz')
         assert result is not None
         assert result['title'] == 'A CrossRef Title'
@@ -439,7 +439,7 @@ class TestFetchPublicationMetadataRichFields:
 
     def test_returns_empty_rich_fields_when_absent(self) -> None:
         payload = {'message': {'title': ['A CrossRef Title']}}
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_publication_metadata('10.1234/xyz')
         assert result is not None
         assert result['first_author'] == ''
@@ -455,7 +455,7 @@ class TestFetchPublicationMetadataRichFields:
                 'issued': {'date-parts': [[2019, 6]]},
             }
         }
-        with patch('respro.io.publications.urlopen', return_value=_mock_response(payload)):
+        with patch('urllib.request.urlopen', return_value=_mock_response(payload)):
             result = fetch_publication_metadata('10.1234/xyz')
         assert result is not None
         assert result['year'] == '2019'

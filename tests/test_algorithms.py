@@ -10,12 +10,14 @@ from pathlib import Path
 
 import pytest
 
+from respro.core.algorithms import (
+    compute_drug_assessment,
+    validate_interpretation_algorithms,
+)
 from respro.db.algorithms import (
     apply_drug_alias_mappings,
-    compute_drug_assessment,
     load_interpretation_algorithms,
     store_interpretation_algorithms,
-    validate_interpretation_algorithms,
 )
 from respro.db.project_metadata import load_metadata_json
 from respro.db.schema import create_schema

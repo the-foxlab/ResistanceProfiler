@@ -11,12 +11,20 @@ Covers: respro/db/_rules_alleles.py
 
 from __future__ import annotations
 
-from respro.db._rules_alleles import (
-    _RE_ANCHORLESS_DEL,
-    _RE_REWRITE_TOKEN,
-    _is_noop_mutation,
-    _is_supported_mutation_token,
-    _normalize_rule_alleles_for_storage,
+from respro.db.rules.alleles import (
+    RE_ANCHORLESS_DEL as _RE_ANCHORLESS_DEL,
+)
+from respro.db.rules.alleles import (
+    RE_REWRITE_TOKEN as _RE_REWRITE_TOKEN,
+)
+from respro.db.rules.alleles import (
+    is_noop_mutation as _is_noop_mutation,
+)
+from respro.db.rules.alleles import (
+    is_supported_mutation_token as _is_supported_mutation_token,
+)
+from respro.db.rules.alleles import (
+    normalize_rule_alleles_for_storage as _normalize_rule_alleles_for_storage,
 )
 
 

@@ -1,49 +1,46 @@
-"""
-FASTA consensus profiling — nucleotide-level variant emission from aligned sequence.
-
-Converts FASTA consensus differences into nucleotide-level VariantCall records
-that mirror VCF format and feed into the shared annotation pipeline for amino acid
-consequence interpretation.
-
-Handles:
-- SNPs (with IUPAC expansion to multiple ALTs, adjusted AF)
-- Insertions (ref gaps accumulated into single variant)
-- Deletions (query gaps accumulated into single variant)
-- Coverage gaps (N-run codons reported as CoverageGap)
-
-All variant interpretation (codon translation, amino acid consequences, etc.)
-delegates to the shared `annotate_variants()` pipeline.
-"""
+"""FASTA consensus profiling — nucleotide-level variant emission from aligned sequence."""
 
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Sequence
 
 from Bio.Seq import Seq
 
-from respro.core.alignment import full_intron_spans
-from respro.core.vcf_coverage import _merge_codon_gaps
-from respro.db.models import CoverageGap, FeatureMatch, FeatureRecord, IntronInterval, VariantCall
+from respro.core.coordinates import (
+    aligned_cds_length,
+    build_ref_positions,
+    gapped_strings_from_cigar,
+    strip_introns_from_region,
+)
+from respro.db.models import CoverageGap, FeatureMatch, FeatureRecord, VariantCall
 
 logger = logging.getLogger(__name__)
+
+_IUPAC_OPTIONS: dict[str, frozenset[str]] = {
+    'A': frozenset('A'),
+    'C': frozenset('C'),
+    'G': frozenset('G'),
+    'T': frozenset('T'),
+    'R': frozenset('AG'),
+    'Y': frozenset('CT'),
+    'S': frozenset('GC'),
+    'W': frozenset('AT'),
+    'K': frozenset('GT'),
+    'M': frozenset('AC'),
+    'B': frozenset('CGT'),
+    'D': frozenset('AGT'),
+    'H': frozenset('ACT'),
+    'V': frozenset('ACG'),
+    'N': frozenset('ACGT'),
+}
 
 
 def fasta_to_vcf(
     query_seq: str,
     matches: list[FeatureMatch],
 ) -> tuple[list[VariantCall], list[CoverageGap]]:
-    """
-    Convert FASTA consensus differences into a VCF-like VariantCall stream.
-
-    This path emits nucleotide-level VariantCall records and leaves amino-acid
-    consequence interpretation to the shared annotation pipeline.
-
-    :param query_seq: full query FASTA sequence (forward strand, upper case)
-    :param matches: feature matches from sequence alignment
-    :return: (variant calls, coverage gaps)
-    """
+    """Convert aligned FASTA consensus differences into VariantCall records and coverage gaps."""
     variants: list[VariantCall] = []
     coverage_gaps: list[CoverageGap] = []
     for match in matches:
@@ -73,19 +70,9 @@ def _profile_feature_to_variants(
     region = query_seq[match.query_start:match.query_end].upper()
     if match.strand == '-':
         region = str(Seq(region).reverse_complement())
+    region = strip_introns_from_region(region, match.intron_intervals)
 
-    # Spliced features aligned against an unspliced query carry intron intervals
-    # (in coding-orientation, relative to the region start). The exon-only CIGAR
-    # already excludes the intron I ops, so the region must also drop the intron
-    # spans — otherwise the CIGAR's M ops would walk exon1 straight into the
-    # intron bases, misaligning exon 2 and emitting spurious variants.
-    region = _strip_introns_from_region(region, match.intron_intervals)
-
-    aligned_cds_len = sum(int(n) for n, op in re.findall(r'(\d+)([MD])', match.cigar))
-    covered_cds_start = match.cds_start
-    covered_cds_end = match.cds_start + aligned_cds_len
-
-    aligned_ref, aligned_query = _gapped_strings_from_cigar(
+    aligned_ref, aligned_query = gapped_strings_from_cigar(
         feature.nt_sequence.upper(),
         region,
         match.cigar,
@@ -95,36 +82,9 @@ def _profile_feature_to_variants(
         aligned_ref,
         aligned_query,
         feature,
-        covered_cds_start=covered_cds_start,
-        covered_cds_end=covered_cds_end,
+        covered_cds_start=match.cds_start,
+        covered_cds_end=match.cds_start + aligned_cds_length(match.cigar),
     )
-
-
-def _strip_introns_from_region(
-    region: str,
-    intron_intervals: tuple[IntronInterval, ...],
-) -> str:
-    """
-    Remove intron spans from the coding-orientation query region.
-
-    ``IntronInterval.query_start`` is the 0-based exon-only offset relative to
-    the start of the coding-orientation region (classified introns do not
-    advance the cursor in :func:`classify_introns`). Sorting in coding order and
-    accumulating ``cumulative_intron`` converts each intron to its full-region
-    span ``[query_start + cum, query_start + cum + length)`` so the exon-only
-    CIGAR's ``M`` ops walk concatenated exons without crossing introns.
-
-    :param region: coding-orientation query slice (already RC'd for '-' strand)
-    :param intron_intervals: intron intervals from the FeatureMatch
-    :return: region with intron spans removed
-    """
-    if not intron_intervals:
-        return region
-    drop = [False] * len(region)
-    for full_start, full_end in full_intron_spans(intron_intervals):
-        for i in range(max(0, full_start), min(full_end, len(region))):
-            drop[i] = True
-    return ''.join(base for base, d in zip(region, drop) if not d)
 
 
 def _variants_from_alignment(
@@ -133,151 +93,110 @@ def _variants_from_alignment(
     feature: FeatureRecord,
     covered_cds_start: int | None = None,
     covered_cds_end: int | None = None,
-    ref_positions: Sequence[Sequence[str]] | None = None,
+    ref_positions: Sequence[tuple[str, str, str]] | None = None,
 ) -> tuple[list[VariantCall], list[CoverageGap]]:
-    """
-    Emit nucleotide-level VariantCall records from aligned CDS vs query.
+    """Emit nucleotide-level VariantCall records and coverage gaps from gapped CDS strings."""
+    positions = build_ref_positions(aligned_ref, aligned_query) if ref_positions is None else ref_positions
+    return variants_from_columns(
+        positions,
+        feature,
+        covered_cds_start=covered_cds_start,
+        covered_cds_end=covered_cds_end,
+    )
 
-    Finds three types of differences:
-    - SNPs: ref_base != query_base (neither is a gap)
-    - Insertions: ref_base is '-' (query has bases)
-    - Deletions: query_base is '-' (ref has bases)
 
-    IUPAC bases in the query are expanded to multiple ALTs with adjusted frequency.
-    N-runs ('NNN') in codons are reported as CoverageGaps.
-
-    :param aligned_ref: reference CDS with gap characters
-    :param aligned_query: query CDS with gap characters
-    :param feature: feature record with stored nt_sequence
-    :param covered_cds_start: CDS nt start of aligned region (for gap detection)
-    :param covered_cds_end: CDS nt end of aligned region (for gap detection)
-    :param ref_positions: optional precomputed per-ref-position tuples from
-        :func:`_build_ref_positions` (avoids rebuilding for repeated walks over
-        the same alignment, e.g. VCF reference reconciliation)
-    :return: (variant calls, coverage gaps)
-    """
+def variants_from_columns(
+    ref_positions: Sequence[tuple[str, str, str]],
+    feature: FeatureRecord,
+    covered_cds_start: int | None = None,
+    covered_cds_end: int | None = None,
+) -> tuple[list[VariantCall], list[CoverageGap]]:
+    """Walk per-reference-base ``(ref, query, pending_ins)`` columns to emit variants and gaps."""
     frame = feature.codon_start
-    variants: list[VariantCall] = []
-    gap_codon_indices: list[int] = []
+    coding = ref_positions[frame:]
+    ref_bases = ''.join(ref_base for ref_base, _, _ in coding)
 
-    if ref_positions is None:
-        ref_positions = _build_ref_positions(aligned_ref, aligned_query)
-
-    coding = ref_positions[frame:]  # Skip non-coding frame offset
-
-    # Detect non-assessable codons for coverage gaps
-    gap_codon_indices = _nnn_and_uncovered_codon_indices(
+    gap_codon_indices = _non_assessable_codon_indices(
         coding, frame, covered_cds_start, covered_cds_end,
     )
-    non_assessable_codons = set(gap_codon_indices)
+    non_assessable = set(gap_codon_indices)
 
-    # Emit variants by iterating ungapped ref positions
+    variants: list[VariantCall] = []
     ref_idx = 0
     while ref_idx < len(coding):
         ref_base, query_base, ins_before = coding[ref_idx]
-        codon_idx = ref_idx // 3
 
-        if codon_idx in non_assessable_codons:
-            if query_base == '-':
-                del_end = ref_idx
-                while del_end + 1 < len(coding) and coding[del_end + 1][1] == '-':
-                    del_end += 1
-                ref_idx = del_end + 1
-                continue
-            ref_idx += 1
+        if ref_idx // 3 in non_assessable:
+            ref_idx = _advance_past_deletion(coding, ref_idx) if query_base == '-' else ref_idx + 1
             continue
 
-        # Handle insertion before this reference position
         if ins_before:
-            variant = _make_fasta_insertion_from_alignment(feature, coding, ref_idx, ins_before)
-            if variant:
+            variant = make_coding_insertion(feature, ref_bases, ref_idx, ins_before)
+            if variant is not None:
                 variants.append(variant)
 
-        # Handle SNPs (including IUPAC expansion)
-        if query_base != '-' and ref_base != query_base:
-            query_codon = _get_query_codon(coding, ref_idx)
-            for alt_base, af in _iupac_alt_bases(ref_base, query_base):
-                var = _make_variant_from_coding_nt(feature, ref_idx, ref_base, alt_base, af=af)
-                var.query_ref_codon = query_codon if '-' not in query_codon else ''
-                var.query_codon_feature_id = feature.id
-                variants.append(var)
-
-        # Handle deletion at this position (accumulate run of deletions)
         if query_base == '-':
-            del_end = ref_idx
-            while del_end + 1 < len(coding) and coding[del_end + 1][1] == '-':
-                del_end += 1
-            if _deletion_run_within_coverage(
-                start_idx=ref_idx,
-                end_idx=del_end,
-                frame=frame,
-                covered_cds_start=covered_cds_start,
-                covered_cds_end=covered_cds_end,
-            ):
-                variant = _make_fasta_deletion_from_alignment(feature, coding, ref_idx, del_end)
-                if variant:
+            del_end = _deletion_run_end(coding, ref_idx)
+            if _deletion_within_coverage(ref_idx, del_end, frame, covered_cds_start, covered_cds_end):
+                variant = make_coding_deletion(feature, ref_bases, ref_idx, del_end)
+                if variant is not None:
                     variants.append(variant)
             ref_idx = del_end + 1
             continue
 
+        if ref_base != query_base:
+            query_codon = _query_codon_at(coding, ref_idx)
+            clean_codon = query_codon if '-' not in query_codon else ''
+            for alt_base, af in _iupac_alt_bases(ref_base, query_base):
+                var = make_coding_variant(feature, ref_idx, ref_base, alt_base, af=af)
+                var.query_ref_codon = clean_codon
+                var.query_codon_feature_id = feature.id
+                variants.append(var)
+
         ref_idx += 1
 
-    return variants, _merge_codon_gaps(feature.name, gap_codon_indices)
+    return variants, CoverageGap.merge(feature.name, gap_codon_indices)
 
 
-def _build_ref_positions(
-    aligned_ref: str,
-    aligned_query: str,
-) -> list[tuple[str, str, str]]:
-    """
-    Parse a gapped alignment into per-ref-position tuples.
-
-    :param aligned_ref: reference CDS with gap characters
-    :param aligned_query: query CDS with gap characters (same length)
-    :return: list of ``(ref_base, query_base, insertions_before_this_ref)`` per
-        ungapped reference position, in alignment order
-    """
-    ref_positions: list[tuple[str, str, str]] = []
-    pending_ins = ''
-    for ref_base, query_base in zip(aligned_ref, aligned_query):
-        if ref_base == '-':
-            pending_ins += query_base
-        else:
-            ref_positions.append((ref_base.upper(), query_base.upper(), pending_ins.upper()))
-            pending_ins = ''
-    return ref_positions
+def _deletion_run_end(coding: Sequence[tuple[str, str, str]], start_idx: int) -> int:
+    """Return the inclusive end index of consecutive query-gap positions starting at ``start_idx``."""
+    end_idx = start_idx
+    while end_idx + 1 < len(coding) and coding[end_idx + 1][1] == '-':
+        end_idx += 1
+    return end_idx
 
 
-def _nnn_and_uncovered_codon_indices(
-    coding: Sequence[Sequence[str]],
+def _advance_past_deletion(coding: Sequence[tuple[str, str, str]], start_idx: int) -> int:
+    """Return the first index after a deletion run starting at ``start_idx``."""
+    return _deletion_run_end(coding, start_idx) + 1
+
+
+def _non_assessable_codon_indices(
+    coding: Sequence[tuple[str, str, str]],
     frame: int,
     covered_cds_start: int | None,
     covered_cds_end: int | None,
 ) -> list[int]:
-    """Return codon indices that are outside the covered span or an NNN query codon."""
-    gap_codon_indices: list[int] = []
-    codon_count = len(coding) // 3
-    for codon_idx in range(codon_count):
-        codon_start = codon_idx * 3
-        codon_slice = coding[codon_start:codon_start + 3]
-
-        if _codon_outside_coverage(
-            codon_idx=codon_idx,
-            frame=frame,
-            covered_cds_start=covered_cds_start,
-            covered_cds_end=covered_cds_end,
-        ):
-            gap_codon_indices.append(codon_idx)
+    """Return codon indices outside the aligned span or consisting entirely of ``NNN``."""
+    gaps: list[int] = []
+    for codon_idx in range(len(coding) // 3):
+        nt_start = frame + codon_idx * 3
+        outside = (
+            covered_cds_start is not None
+            and covered_cds_end is not None
+            and (nt_start < covered_cds_start or nt_start + 3 > covered_cds_end)
+        )
+        if outside:
+            gaps.append(codon_idx)
             continue
+        codon_slice = coding[codon_idx * 3:codon_idx * 3 + 3]
+        if ''.join(q for _, q, _ in codon_slice).upper() == 'NNN':
+            gaps.append(codon_idx)
+    return gaps
 
-        query_codon = ''.join(q for _, q, _ in codon_slice)
-        if query_codon.upper() == 'NNN':
-            gap_codon_indices.append(codon_idx)
-    return gap_codon_indices
 
-
-def _get_query_codon(coding: Sequence[Sequence[str]], coding_nt_idx: int) -> str:
-    """Return the query codon string for one coding-nt index when available."""
+def _query_codon_at(coding: Sequence[tuple[str, str, str]], coding_nt_idx: int) -> str:
+    """Return the 3-base query codon covering ``coding_nt_idx``, or empty if incomplete."""
     codon_start = (coding_nt_idx // 3) * 3
     if codon_start + 3 > len(coding):
         return ''
@@ -285,151 +204,32 @@ def _get_query_codon(coding: Sequence[Sequence[str]], coding_nt_idx: int) -> str
 
 
 def _iupac_alt_bases(ref_base: str, query_base: str) -> list[tuple[str, float]]:
-    """Expand an IUPAC query base into ALT alleles with fractional frequencies.
-
-    IUPAC ambiguity means "any of the listed bases equally likely". The reference base
-    is one of those possibilities (= no mutation), so the probability mass is split over
-    the **full option set** (``len(options)``), not just the non-reference ALTs. Each
-    mutation ALT therefore receives ``1 / len(options)``. For example ``ref=A, query=R``
-    (R={A,G}) yields ``G`` at AF 0.5, and ``ref=A, query=N`` (N={A,C,G,T}) yields
-    ``C``, ``G``, ``T`` each at AF 0.25.
-    """
-    iupac_options = {
-        'A': {'A'},
-        'C': {'C'},
-        'G': {'G'},
-        'T': {'T'},
-        'R': {'A', 'G'},
-        'Y': {'C', 'T'},
-        'S': {'G', 'C'},
-        'W': {'A', 'T'},
-        'K': {'G', 'T'},
-        'M': {'A', 'C'},
-        'B': {'C', 'G', 'T'},
-        'D': {'A', 'G', 'T'},
-        'H': {'A', 'C', 'T'},
-        'V': {'A', 'C', 'G'},
-        'N': {'A', 'C', 'G', 'T'},
-    }
-    ref_base_upper = ref_base.upper()
-    options = iupac_options.get(query_base.upper(), {query_base.upper()})
-    non_ref_alts = sorted(base for base in options if base != ref_base_upper)
+    """Expand an IUPAC query base into ``(alt_base, af)`` pairs with fractional frequencies."""
+    ref_upper = ref_base.upper()
+    options = _IUPAC_OPTIONS.get(query_base.upper(), frozenset((query_base.upper(),)))
+    non_ref_alts = sorted(base for base in options if base != ref_upper)
     if not non_ref_alts:
         return []
-    # Denominator is the full option set: the reference base is one of the equally-likely
-    # possibilities, so each mutation ALT gets 1/len(options), not 1/len(non_ref_alts).
+    # Probability mass splits across the full option set (ref included), not just non-ref ALTs.
     af_each = 1.0 / len(options)
     return [(alt, af_each) for alt in non_ref_alts]
 
 
-def _gapped_strings_from_cigar(
-    cds: str,
-    region: str,
-    cigar: str,
-    cds_start: int,
-) -> tuple[str, str]:
-    """
-    Reconstruct gapped alignment strings from a CIGAR string without re-aligning.
-
-    Leading and trailing unaligned CDS bases (when coverage < 100%) are represented
-    as query gaps so nucleotide-level difference walking covers the full CDS.
-
-    CIGAR operations are CDS-relative: M=match/mismatch, I=insertion in query, D=deletion in query.
-
-    :param cds: full internal CDS nucleotide sequence
-    :param region: extracted query region (query[query_start:query_end], coding strand)
-    :param cigar: CIGAR string from sequence matching
-    :param cds_start: 0-based CDS position where the alignment begins
-    :return: (aligned_ref, aligned_query) of equal length
-    """
-    aligned_ref: list[str] = []
-    aligned_query: list[str] = []
-
-    # Unaligned CDS bases before alignment start
-    if cds_start > 0:
-        aligned_ref.append(cds[:cds_start])
-        aligned_query.append('-' * cds_start)
-
-    ref_pos = cds_start
-    query_pos = 0
-    for n_str, op in re.findall(r'(\d+)([MID])', cigar):
-        n = int(n_str)
-        if op == 'M':
-            aligned_ref.append(cds[ref_pos:ref_pos + n])
-            aligned_query.append(region[query_pos:query_pos + n])
-            ref_pos += n
-            query_pos += n
-        elif op == 'I':  # insertion in query
-            aligned_ref.append('-' * n)
-            aligned_query.append(region[query_pos:query_pos + n])
-            query_pos += n
-        elif op == 'D':  # deletion in query
-            aligned_ref.append(cds[ref_pos:ref_pos + n])
-            aligned_query.append('-' * n)
-            ref_pos += n
-
-    # Trailing unaligned CDS bases
-    if ref_pos < len(cds):
-        aligned_ref.append(cds[ref_pos:])
-        aligned_query.append('-' * (len(cds) - ref_pos))
-
-    return ''.join(aligned_ref), ''.join(aligned_query)
-
-
-def _codon_outside_coverage(
-    *,
-    codon_idx: int,
-    frame: int,
-    covered_cds_start: int | None,
-    covered_cds_end: int | None,
-) -> bool:
-    """Return whether one codon falls outside the aligned/assessable CDS span."""
-    if covered_cds_start is None or covered_cds_end is None:
-        return False
-    codon_nt_start = frame + codon_idx * 3
-    codon_nt_end = codon_nt_start + 3
-    return codon_nt_start < covered_cds_start or codon_nt_end > covered_cds_end
-
-
-def _deletion_run_within_coverage(
-    *,
+def _deletion_within_coverage(
     start_idx: int,
     end_idx: int,
     frame: int,
     covered_cds_start: int | None,
     covered_cds_end: int | None,
 ) -> bool:
-    """Return whether an entire deletion run is inside the aligned/assessable CDS span."""
+    """Return whether an entire deletion run lies inside the aligned CDS span."""
     if covered_cds_start is None or covered_cds_end is None:
         return True
-    deletion_nt_start = frame + start_idx
-    deletion_nt_end = frame + end_idx + 1
-    return deletion_nt_start >= covered_cds_start and deletion_nt_end <= covered_cds_end
-
-
-
-def _codon_genomic_pos(feature: FeatureRecord, codon_idx: int) -> int:
-    """
-    Return the 0-based internal genomic position of the first NT in a codon.
-
-    :param feature: feature record
-    :param codon_idx: 0-based codon index in the protein
-    :return: 0-based genomic position on the internal reference
-    """
-    genomic_pos = feature.cds_to_genomic_position(feature.codon_start + codon_idx * 3)
-    if genomic_pos is None:
-        raise ValueError(f'Codon index {codon_idx} is outside CDS for feature {feature.name!r}')
-    return genomic_pos
+    return (frame + start_idx) >= covered_cds_start and (frame + end_idx + 1) <= covered_cds_end
 
 
 def _coding_nt_genomic_pos(feature: FeatureRecord, coding_nt_idx: int) -> int:
-    """
-    Return the 0-based internal genomic position of one coding nucleotide index.
-
-    :param feature: feature record
-    :param coding_nt_idx: 0-based nucleotide index in coding orientation (after codon_start)
-    :return: 0-based genomic position on the internal reference
-    """
+    """Return the 0-based internal genomic position of one coding nucleotide index."""
     genomic_pos = feature.cds_to_genomic_position(feature.codon_start + coding_nt_idx)
     if genomic_pos is None:
         raise ValueError(
@@ -438,124 +238,63 @@ def _coding_nt_genomic_pos(feature: FeatureRecord, coding_nt_idx: int) -> int:
     return genomic_pos
 
 
-def _make_variant_from_coding_nt(
+def make_coding_variant(
     feature: FeatureRecord,
     coding_nt_idx: int,
     ref: str,
     alt: str,
     af: float = 1.0,
 ) -> VariantCall:
-    """
-    Build a synthetic VariantCall anchored at one coding nucleotide position.
-
-    For minus-strand features, reverse-complements ref/alt to match genomic orientation.
-    """
-    ref_out = ref
-    alt_out = alt
-
-    # For minus-strand features, nucleotides are in coding orientation but positions
-    # will be reversed by cds_to_genomic_position. Apply reverse-complement to
-    # nucleotides to maintain the invariant that ref=genomic_ref, alt=genomic_alt.
+    """Build a synthetic VariantCall anchored at one coding nucleotide index (genomic orientation)."""
     if feature.strand == '-':
-        ref_out = str(Seq(ref).reverse_complement())
-        alt_out = str(Seq(alt).reverse_complement())
-
+        ref = str(Seq(ref).reverse_complement())
+        alt = str(Seq(alt).reverse_complement())
     return VariantCall(
         chrom=feature.name,
         pos=_coding_nt_genomic_pos(feature, coding_nt_idx),
-        ref=ref_out,
-        alt=alt_out,
+        ref=ref,
+        alt=alt,
         allele_freq=af,
         depth=0,
         filter_status='PASS',
     )
 
 
-def _make_fasta_insertion_from_alignment(
+def make_coding_insertion(
     feature: FeatureRecord,
-    coding: Sequence[Sequence[str]],
+    ref_bases: Sequence[str],
     idx: int,
     inserted_bases: str,
 ) -> VariantCall | None:
-    """
-    Build an insertion variant from position where ref is non-gap.
-
-    The anchor is the base immediately before the insertion in the codon walk.
-    For plus-strand, use the previous position; for minus, use current position.
-    """
-    if feature.strand == '+':
-        anchor_idx = idx - 1
-        if anchor_idx < 0:
-            return None
-        anchor_ref_nt = coding[anchor_idx][0]
-    else:
-        anchor_idx = idx
-        anchor_ref_nt = coding[anchor_idx][0]
-
+    """Build a VCF-anchored insertion call placed immediately before coding index ``idx``."""
+    # Plus-strand VCF anchors on the preceding coding base; minus-strand genomic left-anchoring
+    # sits on the current coding base (which becomes the genomic base preceding the RC insertion).
+    anchor_idx = idx - 1 if feature.strand == '+' else idx
+    if anchor_idx < 0:
+        return None
+    anchor_nt = ref_bases[anchor_idx]
     if feature.strand == '-':
-        anchor_genomic = str(Seq(anchor_ref_nt).reverse_complement())
-        inserted_genomic = str(Seq(inserted_bases).reverse_complement())
-        return VariantCall(
-            chrom=feature.name,
-            pos=_coding_nt_genomic_pos(feature, anchor_idx),
-            ref=anchor_genomic,
-            alt=anchor_genomic + inserted_genomic,
-            allele_freq=1.0,
-            depth=0,
-            filter_status='PASS',
-        )
-
-    return _make_variant_from_coding_nt(
-        feature,
-        anchor_idx,
-        anchor_ref_nt,
-        anchor_ref_nt + inserted_bases,
-    )
+        # RC(inserted + anchor) == RC(anchor) + RC(inserted), preserving VCF left-anchor order.
+        return make_coding_variant(feature, anchor_idx, anchor_nt, inserted_bases + anchor_nt)
+    return make_coding_variant(feature, anchor_idx, anchor_nt, anchor_nt + inserted_bases)
 
 
-def _make_fasta_deletion_from_alignment(
+def make_coding_deletion(
     feature: FeatureRecord,
-    coding: Sequence[Sequence[str]],
+    ref_bases: Sequence[str],
     start_idx: int,
     end_idx: int,
 ) -> VariantCall | None:
-    """
-    Build a deletion variant from a run of consecutive query gaps.
-
-    Collects all deleted ref bases from start_idx to end_idx (inclusive).
-    Anchors to the base immediately before (plus-strand) or after (minus-strand).
-    """
-    deleted_bases = ''.join(coding[i][0] for i in range(start_idx, end_idx + 1))
+    """Build a VCF-anchored deletion call spanning coding indices ``start_idx..end_idx`` (inclusive)."""
+    deleted_bases = ''.join(ref_bases[start_idx:end_idx + 1])
     if not deleted_bases:
         return None
-
-    if feature.strand == '+':
-        anchor_idx = start_idx - 1
-        if anchor_idx < 0:
-            return None
-        anchor_ref_nt = coding[anchor_idx][0]
-    else:
-        anchor_idx = end_idx + 1
-        if anchor_idx >= len(coding):
-            return None
-        anchor_ref_nt = coding[anchor_idx][0]
-
+    # Plus-strand anchors before start_idx; minus-strand genomic left-anchor is after end_idx.
+    anchor_idx = start_idx - 1 if feature.strand == '+' else end_idx + 1
+    if anchor_idx < 0 or anchor_idx >= len(ref_bases):
+        return None
+    anchor_nt = ref_bases[anchor_idx]
     if feature.strand == '-':
-        anchor_genomic = str(Seq(anchor_ref_nt).reverse_complement())
-        deleted_genomic = str(Seq(deleted_bases).reverse_complement())
-        return VariantCall(
-            chrom=feature.name,
-            pos=_coding_nt_genomic_pos(feature, anchor_idx),
-            ref=anchor_genomic + deleted_genomic,
-            alt=anchor_genomic,
-            allele_freq=1.0,
-            depth=0,
-            filter_status='PASS',
-        )
-
-    return _make_variant_from_coding_nt(
-        feature,
-        anchor_idx,
-        anchor_ref_nt + deleted_bases,
-        anchor_ref_nt,
-    )
+        # RC(deleted + anchor) == RC(anchor) + RC(deleted), preserving VCF left-anchor order.
+        return make_coding_variant(feature, anchor_idx, deleted_bases + anchor_nt, anchor_nt)
+    return make_coding_variant(feature, anchor_idx, anchor_nt + deleted_bases, anchor_nt)

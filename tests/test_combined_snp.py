@@ -865,9 +865,9 @@ class TestBamCooccurrenceOrientationV5:
     def test_v5_acceptance_reverse_aligned_query_tta_leucine(self, tmp_path: Path) -> None:
         """Forward internal AAA, reverse-aligned query TTT, SNPs at query pos 2 and 1 T>A,
         all spanning reads TAA -> coding effect TTA/L."""
-        from respro.core.vcf_to_reference import (
-            _build_query_to_cds_map,
-            reconcile_variants_for_matches,
+        from respro.core.coordinates import build_query_to_cds_map as _build_query_to_cds_map
+        from respro.core.vcf_to_reference.main import (
+            map_vcf_to_matches as reconcile_variants_for_matches,
         )
         from respro.db.models import FeatureMatch
 
@@ -947,9 +947,9 @@ class TestBamCooccurrenceOrientationV5:
         feature_strand: str,
     ) -> None:
         """All 4 (match.strand, feature.strand) combinations yield TTA/L (0.7) and TAA/* (0.3)."""
-        from respro.core.vcf_to_reference import (
-            _build_query_to_cds_map,
-            reconcile_variants_for_matches,
+        from respro.core.coordinates import build_query_to_cds_map as _build_query_to_cds_map
+        from respro.core.vcf_to_reference.main import (
+            map_vcf_to_matches as reconcile_variants_for_matches,
         )
         from respro.db.models import FeatureMatch
 
@@ -1053,9 +1053,9 @@ class TestBamCooccurrenceOrientationV5:
     def test_reverse_complement_metamorphic_bam_cooccurrence(self, tmp_path: Path) -> None:
         """Metamorphic check: reverse-complementing query, VCF calls, and BAM reads
         produces identical coding-orientation CodonStates and frequencies."""
-        from respro.core.vcf_to_reference import (
-            _build_query_to_cds_map,
-            reconcile_variants_for_matches,
+        from respro.core.coordinates import build_query_to_cds_map as _build_query_to_cds_map
+        from respro.core.vcf_to_reference.main import (
+            map_vcf_to_matches as reconcile_variants_for_matches,
         )
         from respro.db.models import FeatureMatch
 

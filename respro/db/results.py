@@ -1,6 +1,4 @@
-"""
-Persistence helpers for profiling results.
-"""
+"""Persistence and reconstruction helpers for profiling results and JSON exports."""
 
 from __future__ import annotations
 
@@ -23,8 +21,8 @@ from respro.db.models import (
 )
 
 
-def _serialize_combined_states(states: list[CodonState]) -> str:
-    """Serialize Fréchet combined codon states to a JSON blob for storage."""
+def serialize_combined_states(states: list[CodonState]) -> str:
+    """Serialize Fréchet combined codon states to a JSON string."""
     return json.dumps([
         {
             'alt_codon': s.alt_codon,
@@ -39,11 +37,10 @@ def _serialize_combined_states(states: list[CodonState]) -> str:
     ])
 
 
-def _deserialize_combined_states(blob: str) -> list[CodonState]:
-    """Deserialize a combined_states JSON blob back to CodonState objects."""
+def deserialize_combined_states(blob: str) -> list[CodonState]:
+    """Deserialize a ``combined_states`` JSON string into ``CodonState`` objects."""
     if not blob:
         return []
-    raw = json.loads(blob)
     return [
         CodonState(
             alt_codon=item['alt_codon'],
@@ -54,21 +51,107 @@ def _deserialize_combined_states(blob: str) -> list[CodonState]:
             accepted=bool(item['accepted']),
             member_indices=tuple(item.get('member_indices', [])),
         )
-        for item in raw
+        for item in json.loads(blob)
     ]
 
 
-def _serialize_haplotype_links(links: tuple[tuple[int, int, float], ...]) -> str:
-    """Serialize variant haplotype links to a JSON blob for storage."""
+def serialize_haplotype_links(links: tuple[tuple[int, int, float], ...]) -> str:
+    """Serialize variant haplotype links to a JSON string."""
     return json.dumps([[int(rec_id), int(alt_id), float(af)] for rec_id, alt_id, af in links])
 
 
-def _deserialize_haplotype_links(blob: str | list | None) -> tuple[tuple[int, int, float], ...]:
-    """Deserialize a haplotype_links JSON blob or list back to normalized tuples."""
+def deserialize_haplotype_links(blob: str | list | None) -> tuple[tuple[int, int, float], ...]:
+    """Deserialize a ``haplotype_links`` JSON string or list into normalized tuples."""
     if not blob:
         return ()
     raw = json.loads(blob) if isinstance(blob, str) else blob
     return tuple((int(item[0]), int(item[1]), float(item[2])) for item in raw)
+
+
+def _insert_variant_and_formula_rows(
+    results_conn: sqlite3.Connection,
+    run_id: int,
+    result: ProfilingResult,
+) -> None:
+    """Insert all 27-column ``variant_result`` rows and ``formula_rule_hit`` rows for *run_id*."""
+    # Key by chrom (== ReferenceGroup.query_name) so shared feature names across references never collide.
+    ref_name_by_chrom = {rg.query_name: rg.reference_name for rg in result.references}
+    fallback_ref = result.references[0].reference_name if len(result.references) == 1 else ''
+
+    def _ref_for(chrom: str) -> str:
+        return ref_name_by_chrom.get(chrom, fallback_ref)
+
+    results_conn.executemany(
+        'INSERT INTO variant_result '
+        '(run_id, chrom, pos, ref, alt, allele_freq, depth, '
+        'feature_name, reference_name, codon_pos, ref_codon, alt_codon, ref_aa, alt_aa, '
+        'consequence, af_bin, rule_match, drug_hits, '
+        'is_combined_codon_event, combined_member_count, combined_states, '
+        'single_exchange_aa_freq, rule_effect_aa_freq, rule_effect_alt, freq_method, '
+        'variant_source, haplotype_links) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+            (
+                run_id,
+                ann.variant.chrom,
+                ann.variant.pos,
+                ann.variant.ref,
+                ann.variant.alt,
+                ann.variant.allele_freq,
+                ann.variant.depth,
+                ann.feature_name,
+                _ref_for(ann.variant.chrom),
+                ann.codon_pos,
+                ann.ref_codon,
+                ann.alt_codon,
+                ann.ref_aa,
+                ann.alt_aa,
+                ann.consequence,
+                ann.af_bin,
+                int(ann.is_resistance_hit),
+                json.dumps(ann.drug_hits_json()),
+                int(ann.is_combined_codon_event),
+                ann.combined_member_count,
+                serialize_combined_states(ann.combined_states),
+                ann.single_exchange_aa_freq,
+                json.dumps(ann.rule_effect_aa_freq),
+                json.dumps(ann.rule_effect_alt),
+                ann.freq_method,
+                ann.variant.source,
+                serialize_haplotype_links(ann.variant.haplotype_links),
+            )
+            for ann in result.annotations
+        ],
+    )
+
+    results_conn.executemany(
+        'INSERT INTO formula_rule_hit (run_id, reference_name, hit_json) VALUES (?, ?, ?)',
+        [
+            (
+                run_id,
+                _ref_for(fh.matched_variants[0].variant.chrom if fh.matched_variants else ''),
+                json.dumps(fh.to_dict()),
+            )
+            for fh in result.formula_hits
+        ],
+    )
+
+
+def replace_run_results(
+    results_conn: sqlite3.Connection,
+    run_id: int,
+    result: ProfilingResult,
+    project_conn: sqlite3.Connection,
+) -> None:
+    """Replace variant/formula rows and refresh summary counters for a synced run."""
+    results_conn.execute('DELETE FROM variant_result WHERE run_id = ?', (run_id,))
+    results_conn.execute('DELETE FROM formula_rule_hit WHERE run_id = ?', (run_id,))
+    _insert_variant_and_formula_rows(results_conn, run_id, result)
+    results_conn.execute(
+        'UPDATE run SET resistance_hits = ?, formula_hits = ?, project_updated_at = ? WHERE id = ?',
+        (result.resistance_hits, len(result.formula_hits), project_updated_at(project_conn), run_id),
+    )
+    results_conn.commit()
 
 
 def save_run(
@@ -77,29 +160,10 @@ def save_run(
     project_conn: sqlite3.Connection,
     result: ProfilingResult,
 ) -> int:
-    """
-    Persist a profiling run and its variant annotations to the results database.
-
-    :param results_conn: open results DB connection
-    :param project_db_path: resolved path to the project DB used for this run
-    :param project_conn: open project DB connection (used to compute fingerprint)
-    :param result: ProfilingResult to store
-    :return: the new run id
-    """
+    """Persist one ``ProfilingResult`` and all dependent rows to the results DB; return run id."""
     fingerprint = project_fingerprint(project_conn)
     updated_at = project_updated_at(project_conn)
-
-    # Map each chrom (== ReferenceGroup.query_name, unique per ReferenceGroup) to its
-    # reference_name so per-row reference_name can be persisted (results DB schema v2).
-    # Keying by chrom (not feature_name) is unambiguous even when two references in the same
-    # project DB share a feature name (e.g. both pathogens have a "pol" CDS): each ReferenceGroup
-    # has a distinct query_name, so the lookup cannot collapse colliding features.
-    reference_name_by_chrom: dict[str, str] = {
-        rg.query_name: rg.reference_name for rg in result.references
-    }
-
-    def _reference_name_for_chrom(chrom: str) -> str:
-        return reference_name_by_chrom.get(chrom, '')
+    ref_name_by_chrom = {rg.query_name: rg.reference_name for rg in result.references}
 
     cursor = results_conn.execute(
         'INSERT INTO run '
@@ -124,90 +188,41 @@ def save_run(
             int(result.coverage_assessed),
         ),
     )
-    run_id = cursor.lastrowid
-    if run_id is None:
-        run_id = results_conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+    assert cursor.lastrowid is not None
+    run_id = int(cursor.lastrowid)
 
-    for ann in result.annotations:
-        v = ann.variant
-        results_conn.execute(
-            'INSERT INTO variant_result '
-            '(run_id, chrom, pos, ref, alt, allele_freq, depth, '
-            'feature_name, reference_name, codon_pos, ref_codon, alt_codon, ref_aa, alt_aa, '
-            'consequence, af_bin, rule_match, drug_hits, '
-            'is_combined_codon_event, combined_member_count, combined_states, '
-            'single_exchange_aa_freq, rule_effect_aa_freq, rule_effect_alt, freq_method, '
-            'variant_source, haplotype_links) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            (
-                run_id,
-                v.chrom,
-                v.pos,
-                v.ref,
-                v.alt,
-                v.allele_freq,
-                v.depth,
-                ann.feature_name,
-                _reference_name_for_chrom(v.chrom),
-                ann.codon_pos,
-                ann.ref_codon,
-                ann.alt_codon,
-                ann.ref_aa,
-                ann.alt_aa,
-                ann.consequence,
-                ann.af_bin,
-                int(ann.is_resistance_hit),
-                json.dumps(ann.drug_hits_json()),
-                int(ann.is_combined_codon_event),
-                ann.combined_member_count,
-                _serialize_combined_states(ann.combined_states),
-                ann.single_exchange_aa_freq,
-                json.dumps(ann.rule_effect_aa_freq),
-                json.dumps(ann.rule_effect_alt),
-                ann.freq_method,
-                v.source,
-                _serialize_haplotype_links(v.haplotype_links),
-            ),
+    _insert_variant_and_formula_rows(results_conn, run_id, result)
+
+    results_conn.executemany(
+        'INSERT INTO coverage_gap (run_id, feature_name, reference_name, chrom, codon_start, codon_end) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        [
+            (run_id, gap.feature_name, ref_name_by_chrom.get(gap.chrom, ''),
+             gap.chrom, gap.codon_start, gap.codon_end)
+            for gap in result.coverage_gaps
+        ],
+    )
+
+    profiled_rows: list[tuple[int, str, str]] = []
+    for rg in result.references:
+        seen: set[str] = set()
+        for match in rg.feature_matches:
+            name = (match.feature.name or '').strip()
+            if name and name not in seen:
+                seen.add(name)
+                profiled_rows.append((run_id, rg.reference_name, name))
+    if profiled_rows:
+        results_conn.executemany(
+            'INSERT INTO profiled_feature (run_id, reference_name, feature_name) VALUES (?, ?, ?)',
+            profiled_rows,
         )
-
-    for gap in result.coverage_gaps:
-        results_conn.execute(
-            'INSERT INTO coverage_gap (run_id, feature_name, reference_name, chrom, codon_start, codon_end) '
-            'VALUES (?, ?, ?, ?, ?, ?)',
-            (run_id, gap.feature_name, _reference_name_for_chrom(gap.chrom),
-             gap.chrom, gap.codon_start, gap.codon_end),
-        )
-
-    for formula_hit in result.formula_hits:
-        hit_chrom = ''
-        if formula_hit.matched_variants:
-            hit_chrom = formula_hit.matched_variants[0].variant.chrom
-        results_conn.execute(
-            'INSERT INTO formula_rule_hit (run_id, reference_name, hit_json) VALUES (?, ?, ?)',
-            (run_id, _reference_name_for_chrom(hit_chrom), json.dumps(formula_hit.to_dict())),
-        )
-
-    # Persist the per-reference profiled feature names so regenerate can
-    # reconstruct the summary drug interpretation table's in-scope drug set
-    # (including zero-hit/susceptible drugs) without the project DB feature-
-    # mapping cache. The table is optional (created by schema migration); guard
-    # with a table-existence check so older results DBs without it still save.
-    _save_profiled_features(results_conn, run_id, result)
 
     results_conn.commit()
     return run_id
 
 
 def project_fingerprint(project_conn: sqlite3.Connection) -> str:
-    """
-    Return the stable UUID that identifies a project database.
-
-    The UUID is assigned once at project creation and never changes, so it
-    remains valid even after rules are added via ``respro init-add``.
-
-    :param project_conn: open project DB connection
-    :return: UUID string
-    """
+    """Return the immutable UUID identifying the project database."""
     row = project_conn.execute('SELECT uuid FROM project LIMIT 1').fetchone()
     if row is None:
         raise ValueError('No project found in the database')
@@ -215,23 +230,21 @@ def project_fingerprint(project_conn: sqlite3.Connection) -> str:
 
 
 def project_updated_at(project_conn: sqlite3.Connection) -> str:
-    """
-    Return the last-updated timestamp of the project database.
-
-    :param project_conn: open project DB connection
-    :return: ISO timestamp string or empty string
-    """
+    """Return the last-updated ISO timestamp of the project database, or ``''``."""
     row = project_conn.execute('SELECT updated_at FROM project LIMIT 1').fetchone()
     return row['updated_at'] or '' if row else ''
 
 
-def list_runs(results_conn: sqlite3.Connection) -> list[dict]:
-    """
-    Return a summary list of all stored runs ordered by id.
+def load_existing_run_project_fingerprint(results_conn: sqlite3.Connection) -> str | None:
+    """Return one stored non-empty project fingerprint from the results DB, or ``None``."""
+    row = results_conn.execute(
+        "SELECT project_fingerprint FROM run WHERE project_fingerprint != '' LIMIT 1"
+    ).fetchone()
+    return str(row['project_fingerprint']) if row is not None else None
 
-    :param results_conn: open results DB connection
-    :return: list of run summary dicts
-    """
+
+def list_runs(results_conn: sqlite3.Connection) -> list[dict]:
+    """Return summary dicts for all stored runs ordered by id."""
     rows = results_conn.execute(
         'SELECT id, sample_name, reference_name, vcf_path, '
         'total_variants, variants_in_cds, resistance_hits, formula_hits, created_at '
@@ -241,14 +254,7 @@ def list_runs(results_conn: sqlite3.Connection) -> list[dict]:
 
 
 def delete_run(results_conn: sqlite3.Connection, run_identifier: str | int) -> dict[str, str | int]:
-    """
-    Delete one stored run and all dependent rows.
-
-    :param results_conn: open results DB connection
-    :param run_identifier: numeric run id (or string form)
-    :return: summary dict with deleted id and sample name
-    :raises ValueError: when run id is missing or ambiguous
-    """
+    """Delete one stored run and all its dependent rows; return ``{'id', 'sample_name'}``."""
     run_id = _resolve_run_id(results_conn, run_identifier)
     run_row = results_conn.execute(
         'SELECT id, sample_name FROM run WHERE id = ?',
@@ -257,47 +263,24 @@ def delete_run(results_conn: sqlite3.Connection, run_identifier: str | int) -> d
     if run_row is None:
         raise ValueError(f'No run found for identifier {run_identifier!r}')
 
-    results_conn.execute('DELETE FROM variant_result WHERE run_id = ?', (run_id,))
-    results_conn.execute('DELETE FROM coverage_gap WHERE run_id = ?', (run_id,))
-    results_conn.execute('DELETE FROM formula_rule_hit WHERE run_id = ?', (run_id,))
-    results_conn.execute('DELETE FROM sample_classification WHERE run_id = ?', (run_id,))
-    # profiled_feature is optional (legacy DBs may lack the table); guard so
-    # delete_run works on older results databases created before the table existed.
-    tables = {
-        row['name']
-        for row in results_conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
-    }
-    if 'profiled_feature' in tables:
-        results_conn.execute('DELETE FROM profiled_feature WHERE run_id = ?', (run_id,))
+    for table in (
+        'variant_result',
+        'coverage_gap',
+        'formula_rule_hit',
+        'sample_classification',
+        'profiled_feature',
+    ):
+        results_conn.execute(f'DELETE FROM {table} WHERE run_id = ?', (run_id,))
     results_conn.execute('DELETE FROM run WHERE id = ?', (run_id,))
     results_conn.commit()
-
-    return {
-        'id': int(run_row['id']),
-        'sample_name': run_row['sample_name'] or '',
-    }
+    return {'id': int(run_row['id']), 'sample_name': run_row['sample_name'] or ''}
 
 
-def load_run(
-    results_conn: sqlite3.Connection,
-    run_id: int,
-) -> tuple[dict, list[dict]]:
-    """
-    Load a run and its variant results from the results database.
-
-    :param results_conn: open results DB connection
-    :param run_id: id of the run to load
-    :return: (run_dict, list of variant_result dicts)
-    :raises ValueError: if no run with that id exists
-    """
-    run_row = results_conn.execute(
-        'SELECT * FROM run WHERE id = ?', (run_id,)
-    ).fetchone()
+def load_run(results_conn: sqlite3.Connection, run_id: int) -> tuple[dict, list[dict]]:
+    """Load one run row and its ordered ``variant_result`` rows."""
+    run_row = results_conn.execute('SELECT * FROM run WHERE id = ?', (run_id,)).fetchone()
     if run_row is None:
         raise ValueError(f'No run found with id {run_id}')
-
     variant_rows = results_conn.execute(
         'SELECT * FROM variant_result WHERE run_id = ? ORDER BY id',
         (run_id,),
@@ -305,26 +288,8 @@ def load_run(
     return dict(run_row), [dict(row) for row in variant_rows]
 
 
-def load_coverage_gaps(
-    results_conn: sqlite3.Connection,
-    run_id: int,
-) -> list[CoverageGap]:
-    """
-    Load persisted coverage gaps for a run.
-
-    :param results_conn: open results DB connection
-    :param run_id: id of the run to load gaps for
-    :return: list of CoverageGap objects ordered by feature_name, codon_start
-    """
-    tables = {
-        row['name']
-        for row in results_conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
-    }
-    if 'coverage_gap' not in tables:
-        return []
-
+def load_coverage_gaps(results_conn: sqlite3.Connection, run_id: int) -> list[CoverageGap]:
+    """Load persisted ``CoverageGap`` records for *run_id*."""
     rows = results_conn.execute(
         'SELECT feature_name, reference_name, chrom, codon_start, codon_end FROM coverage_gap '
         'WHERE run_id = ? ORDER BY feature_name, codon_start',
@@ -335,29 +300,14 @@ def load_coverage_gaps(
             feature_name=row['feature_name'],
             codon_start=row['codon_start'],
             codon_end=row['codon_end'],
-            chrom=row['chrom'] if 'chrom' in row.keys() else '',
+            chrom=row['chrom'] or '',
         )
         for row in rows
     ]
 
 
 def load_formula_rule_hits(results_conn: sqlite3.Connection, run_id: int) -> list[dict]:
-    """
-    Load persisted formula-rule hits for a run.
-
-    :param results_conn: open results DB connection
-    :param run_id: id of the run to load formula hits for
-    :return: list of formula_rule_hit row dicts ordered by insertion
-    """
-    tables = {
-        row['name']
-        for row in results_conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
-    }
-    if 'formula_rule_hit' not in tables:
-        return []
-
+    """Load persisted formula-rule hit rows for *run_id*."""
     rows = results_conn.execute(
         'SELECT id, run_id, reference_name, hit_json FROM formula_rule_hit WHERE run_id = ? ORDER BY id',
         (run_id,),
@@ -365,87 +315,24 @@ def load_formula_rule_hits(results_conn: sqlite3.Connection, run_id: int) -> lis
     return [dict(row) for row in rows]
 
 
-def load_profiled_features(
-    results_conn: sqlite3.Connection,
-    run_id: int,
-) -> dict[str, list[str]]:
-    """
-    Load persisted profiled feature names for a run, grouped by reference_name.
-
-    Returns an empty dict when the ``profiled_feature`` table does not exist
-    (legacy results DBs) or has no rows for the run.
-
-    :param results_conn: open results DB connection
-    :param run_id: id of the run to load profiled features for
-    :return: dict mapping reference_name -> list of feature names
-    """
-    tables = {
-        row['name']
-        for row in results_conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
-    }
-    if 'profiled_feature' not in tables:
-        return {}
-
+def load_profiled_features(results_conn: sqlite3.Connection, run_id: int) -> dict[str, list[str]]:
+    """Load persisted profiled feature names for *run_id*, grouped by ``reference_name``."""
     rows = results_conn.execute(
         'SELECT reference_name, feature_name FROM profiled_feature WHERE run_id = ? ORDER BY id',
         (run_id,),
     ).fetchall()
     by_ref: dict[str, list[str]] = {}
     for row in rows:
-        ref = row['reference_name'] or ''
-        by_ref.setdefault(ref, []).append(row['feature_name'])
+        by_ref.setdefault(row['reference_name'] or '', []).append(row['feature_name'])
     return by_ref
 
 
-def _save_profiled_features(
-    results_conn: sqlite3.Connection,
-    run_id: int,
-    result: ProfilingResult,
-) -> None:
-    """Persist per-reference profiled feature names to the ``profiled_feature`` table.
-
-    The table is created by the schema's optional-tables migration; if it does
-    not exist yet (very old results DB opened without migration), the save is
-    silently skipped so ``save_run`` remains backward-compatible.
-    """
-    tables = {
-        row['name']
-        for row in results_conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
-    }
-    if 'profiled_feature' not in tables:
-        return
-
-    for rg in result.references:
-        seen: set[str] = set()
-        for match in rg.feature_matches:
-            name = (match.feature.name or '').strip()
-            if name and name not in seen:
-                seen.add(name)
-                results_conn.execute(
-                    'INSERT INTO profiled_feature (run_id, reference_name, feature_name) '
-                    'VALUES (?, ?, ?)',
-                    (run_id, rg.reference_name, name),
-                )
-
-
 def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
-    """
-    Reconstruct AnnotatedVariant objects from stored variant_result rows.
-
-    Rule matches are rebuilt from the stored drug_hits JSON, which contains
-    enough information to regenerate the report display without re-running rule matching.
-
-    :param variant_rows: list of variant_result row dicts from the results DB
-    :return: list of AnnotatedVariant objects
-    """
-    annotations = []
+    """Reconstruct ``AnnotatedVariant`` objects from stored ``variant_result`` row dicts."""
+    annotations: list[AnnotatedVariant] = []
     for row in variant_rows:
         drug_hits = json.loads(row.get('drug_hits') or '[]')
-        v = VariantCall(
+        variant = VariantCall(
             chrom=row['chrom'],
             pos=row['pos'],
             ref=row['ref'],
@@ -453,11 +340,11 @@ def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
             allele_freq=row.get('allele_freq') or 0.0,
             depth=row.get('depth') or 0,
             source=row.get('variant_source') or '',
-            haplotype_links=_deserialize_haplotype_links(row.get('haplotype_links')),
+            haplotype_links=deserialize_haplotype_links(row.get('haplotype_links')),
         )
         rule_matches = [_rule_from_hit(hit, row.get('feature_name', '')) for hit in drug_hits]
-        ann = AnnotatedVariant(
-            variant=v,
+        annotations.append(AnnotatedVariant(
+            variant=variant,
             feature_name=row.get('feature_name', ''),
             codon_pos=row.get('codon_pos') or 0,
             ref_codon=row.get('ref_codon', ''),
@@ -468,16 +355,19 @@ def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
             af_bin=row.get('af_bin', ''),
             is_combined_codon_event=bool(row.get('is_combined_codon_event', 0)),
             combined_member_count=row.get('combined_member_count', 1) or 1,
-            combined_states=_deserialize_combined_states(row.get('combined_states', '[]')),
+            combined_states=deserialize_combined_states(row.get('combined_states', '[]')),
             single_exchange_aa_freq=row.get('single_exchange_aa_freq', 0.0) or 0.0,
-            rule_effect_aa_freq={int(k): float(val) for k, val in json.loads(
-                row.get('rule_effect_aa_freq') or '{}').items()},
-            rule_effect_alt={int(k): str(val) for k, val in json.loads(
-                row.get('rule_effect_alt') or '{}').items()},
+            rule_effect_aa_freq={
+                int(k): float(v)
+                for k, v in json.loads(row.get('rule_effect_aa_freq') or '{}').items()
+            },
+            rule_effect_alt={
+                int(k): str(v)
+                for k, v in json.loads(row.get('rule_effect_alt') or '{}').items()
+            },
             freq_method=row.get('freq_method', 'observed') or 'observed',
             rule_matches=rule_matches,
-        )
-        annotations.append(ann)
+        ))
     return annotations
 
 
@@ -485,37 +375,23 @@ def reconstruct_formula_rule_hits(
     formula_rows: list[dict],
     annotations: list[AnnotatedVariant],
 ) -> list[FormulaRuleHit]:
-    """
-    Reconstruct FormulaRuleHit objects from persisted formula-hit payload rows.
-
-    :param formula_rows: list of formula-hit row dicts
-    :param annotations: reconstructed annotations for the same run
-    :return: list of FormulaRuleHit objects
-    """
-    if not formula_rows:
-        return []
-
+    """Reconstruct ``FormulaRuleHit`` objects from persisted formula-hit rows."""
     hits: list[FormulaRuleHit] = []
     for row in formula_rows:
         payload = json.loads(row.get('hit_json') or '{}')
-        rule_set = _rule_set_from_formula_hit(payload)
-        matched_variants = _match_formula_variants(payload.get('matched_variants', []), annotations)
-        hits.append(
-            FormulaRuleHit(
-                rule_set=rule_set,
-                matched_variants=matched_variants,
-                matched_member_ids=list(payload.get('matched_member_ids', [])),
-                frechet_lower=float(payload.get('frechet_lower', 0.0)),
-                forced_fraction=float(payload.get('forced_fraction', 0.0)),
-                member_count=int(payload.get('member_count', 1)),
-            )
-        )
+        hits.append(FormulaRuleHit(
+            rule_set=_rule_set_from_formula_hit(payload),
+            matched_variants=_match_formula_variants(payload.get('matched_variants', []), annotations),
+            matched_member_ids=list(payload.get('matched_member_ids', [])),
+            frechet_lower=float(payload.get('frechet_lower', 0.0)),
+            forced_fraction=float(payload.get('forced_fraction', 0.0)),
+            member_count=int(payload.get('member_count', 1)),
+        ))
     return hits
 
 
-def _rule_from_hit(hit: dict, feature_name: str) -> ResistanceRule:
-    """Reconstruct a ResistanceRule shell from a stored drug_hits JSON entry."""
-    publications = [
+def _publications_from_payload(items: list[dict]) -> list[Publication]:
+    return [
         Publication(
             id=0,
             doi=p.get('doi', ''),
@@ -526,14 +402,18 @@ def _rule_from_hit(hit: dict, feature_name: str) -> ResistanceRule:
             year=p.get('year', ''),
             journal=p.get('journal', ''),
         )
-        for p in hit.get('publications', [])
+        for p in items
     ]
+
+
+def _rule_from_hit(hit: dict, feature_name: str) -> ResistanceRule:
     return ResistanceRule(
-        id=0,
+        id=int(hit.get('rule_id', 0) or 0),
         feature_name=feature_name,
         feature_id=0,
         drug_name=hit.get('drug', ''),
         drug_id=0,
+        external_id=hit.get('external_id', ''),
         reference_identifier=hit.get('reference_identifier', ''),
         position=0,
         reference=hit.get('reference', ''),
@@ -543,28 +423,28 @@ def _rule_from_hit(hit: dict, feature_name: str) -> ResistanceRule:
         ic50=hit.get('ic50', ''),
         fold_ic50=hit.get('fold_ic50', ''),
         score=hit.get('score', ''),
-        publications=publications,
+        publications=_publications_from_payload(hit.get('publications', [])),
         pubchem_url=hit.get('pubchem_url', ''),
         is_internal_formula_component=is_internal_formula_component_drug_name(hit.get('drug', '')),
     )
 
 
 def _rule_set_from_formula_hit(payload: dict) -> ResistanceRuleSet:
-    """Build a ResistanceRuleSet shell from a persisted formula hit payload."""
-    publications = [
-        Publication(
-            id=0,
-            doi=p.get('doi', ''),
-            title=p.get('title', ''),
-            pubmed_id=p.get('pubmed_id', ''),
-            raw_input=p.get('raw_input', ''),
-            first_author=p.get('first_author', ''),
-            year=p.get('year', ''),
-            journal=p.get('journal', ''),
+    members = [
+        ResistanceRuleSetMember(
+            id=idx,
+            rule_set_id=0,
+            feature_name=m.get('feature', ''),
+            feature_id=0,
+            reference_identifier='',
+            position=max(0, int(m.get('position', 1) or 1) - 1),
+            reference=m.get('reference', ''),
+            mutation=m.get('mutation', ''),
+            external_id=m.get('member_id', ''),
         )
-        for p in payload.get('publications', [])
+        for idx, m in enumerate(payload.get('members', []), start=1)
     ]
-    rule_set = ResistanceRuleSet(
+    return ResistanceRuleSet(
         id=0,
         drug_name=payload.get('drug', ''),
         drug_id=0,
@@ -577,78 +457,40 @@ def _rule_set_from_formula_hit(payload: dict) -> ResistanceRuleSet:
         group_name=payload.get('rule_group', ''),
         pubchem_url=payload.get('pubchem_url', ''),
         logic_expression=payload.get('logic_expression', ''),
-        publications=publications,
+        publications=_publications_from_payload(payload.get('publications', [])),
+        members=members,
     )
-    for idx, member in enumerate(payload.get('members', []), start=1):
-        position_1based = int(member.get('position', 1) or 1)
-        rule_set.members.append(
-            ResistanceRuleSetMember(
-                id=idx,
-                rule_set_id=0,
-                feature_name=member.get('feature', ''),
-                feature_id=0,
-                reference_identifier='',
-                position=max(0, position_1based - 1),
-                reference=member.get('reference', ''),
-                mutation=member.get('mutation', ''),
-                external_id=member.get('member_id', ''),
-            )
-        )
-    return rule_set
 
 
 def _match_formula_variants(
     variant_payloads: list[dict],
     annotations: list[AnnotatedVariant],
 ) -> list[AnnotatedVariant]:
-    """Match persisted formula-variant summaries back to reconstructed annotations."""
-    by_key: dict[tuple, AnnotatedVariant] = {}
-    by_key_weak: dict[tuple, AnnotatedVariant] = {}
-    for source_ann in annotations:
-        key = (
-            source_ann.feature_name,
-            source_ann.codon_pos + 1,
-            source_ann.ref_aa,
-            source_ann.alt_aa,
-            round(source_ann.variant.allele_freq, 6),
-        )
-        weak_key = (source_ann.feature_name, source_ann.codon_pos + 1, source_ann.ref_aa, source_ann.alt_aa)
-        by_key.setdefault(key, source_ann)
-        by_key_weak.setdefault(weak_key, source_ann)
+    """Pair persisted formula-variant summaries back to reconstructed ``AnnotatedVariant`` rows."""
+    by_exact: dict[tuple, AnnotatedVariant] = {}
+    by_weak: dict[tuple, AnnotatedVariant] = {}
+    for ann in annotations:
+        weak = (ann.feature_name, ann.codon_pos + 1, ann.ref_aa, ann.alt_aa)
+        by_exact.setdefault((*weak, round(ann.variant.allele_freq, 6)), ann)
+        by_weak.setdefault(weak, ann)
 
     matched: list[AnnotatedVariant] = []
     for item in variant_payloads:
         af = float(item.get('allele_freq', 0.0) or 0.0)
-        codon_pos_1based = int(item.get('codon_pos', 1) or 1)
-        key = (
-            item.get('feature', ''),
-            codon_pos_1based,
-            item.get('ref_aa', ''),
-            item.get('alt_aa', ''),
-            round(af, 6),
-        )
-        weak_key = (
-            item.get('feature', ''),
-            codon_pos_1based,
-            item.get('ref_aa', ''),
-            item.get('alt_aa', ''),
-        )
-        ann: AnnotatedVariant | None = by_key.get(key) or by_key_weak.get(weak_key)
-        if ann is not None:
-            matched.append(ann)
+        codon_1based = int(item.get('codon_pos', 1) or 1)
+        weak = (item.get('feature', ''), codon_1based, item.get('ref_aa', ''), item.get('alt_aa', ''))
+        found = by_exact.get((*weak, round(af, 6))) or by_weak.get(weak)
+        if found is not None:
+            matched.append(found)
             continue
-
-        # Fall back to a synthetic shell if exact annotation matching is unavailable.
-        matched.append(
-            AnnotatedVariant(
-                variant=VariantCall(chrom='', pos=0, ref='', alt='', allele_freq=af, depth=0),
-                feature_name=item.get('feature', ''),
-                codon_pos=max(0, codon_pos_1based - 1),
-                ref_aa=item.get('ref_aa', ''),
-                alt_aa=item.get('alt_aa', ''),
-                consequence='',
-            )
-        )
+        matched.append(AnnotatedVariant(
+            variant=VariantCall(chrom='', pos=0, ref='', alt='', allele_freq=af, depth=0),
+            feature_name=item.get('feature', ''),
+            codon_pos=max(0, codon_1based - 1),
+            ref_aa=item.get('ref_aa', ''),
+            alt_aa=item.get('alt_aa', ''),
+            consequence='',
+        ))
     return matched
 
 
@@ -664,23 +506,7 @@ def save_classification(
     note: str = '',
     source: str = '',
 ) -> int:
-    """
-    Save one manual sample classification row per stored run.
-
-    If a classification already exists for the run, it is updated in place and
-    any legacy duplicate rows are removed.
-
-    :param results_conn: open results DB connection
-    :param run_id: id of the run to classify
-    :param drug: optional drug name this classification applies to
-    :param phenotype: clinical resistance phenotype
-    :param clinical_phenotype: externally verified clinical phenotype
-    :param ic50: IC50 value string
-    :param fold_ic50: fold-IC50 value string
-    :param note: free-text note
-    :param source: source or reference for this classification
-    :return: id of the stored classification row
-    """
+    """Upsert the manual sample classification row for *run_id*."""
     existing = results_conn.execute(
         'SELECT id FROM sample_classification WHERE run_id = ? ORDER BY id LIMIT 1',
         (run_id,),
@@ -692,16 +518,14 @@ def save_classification(
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             (run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source),
         )
-        row_id = cursor.lastrowid
-        if row_id is None:
-            row_id = results_conn.execute('SELECT last_insert_rowid()').fetchone()[0]
+        assert cursor.lastrowid is not None
+        row_id = int(cursor.lastrowid)
     else:
         row_id = int(existing['id'])
         results_conn.execute(
             'UPDATE sample_classification '
             'SET drug = ?, phenotype = ?, clinical_phenotype = ?, ic50 = ?, fold_ic50 = ?, '
-            'note = ?, source = ?, created_at = datetime(\'now\') '
-            'WHERE id = ?',
+            "note = ?, source = ?, created_at = datetime('now') WHERE id = ?",
             (drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source, row_id),
         )
         results_conn.execute(
@@ -709,33 +533,14 @@ def save_classification(
             (run_id, row_id),
         )
     results_conn.commit()
-    return int(row_id)
+    return row_id
 
 
-def load_classifications(
-    results_conn: sqlite3.Connection,
-    run_id: int,
-) -> list[dict]:
-    """
-    Load all manual sample classifications for a run.
-
-    :param results_conn: open results DB connection
-    :param run_id: id of the run
-    :return: list of classification row dicts ordered by id
-    """
-    tables = {
-        row['name']
-        for row in results_conn.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
-        ).fetchall()
-    }
-    if 'sample_classification' not in tables:
-        return []
-
+def load_classifications(results_conn: sqlite3.Connection, run_id: int) -> list[dict]:
+    """Load all manual sample classifications for *run_id*."""
     rows = results_conn.execute(
         'SELECT id, run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, '
-        'note, source, created_at '
-        'FROM sample_classification WHERE run_id = ? ORDER BY id',
+        'note, source, created_at FROM sample_classification WHERE run_id = ? ORDER BY id',
         (run_id,),
     ).fetchall()
     return [dict(row) for row in rows]
@@ -744,15 +549,9 @@ def load_classifications(
 def load_run_from_json(
     json_path: Path,
 ) -> tuple[dict, list[dict], list[CoverageGap], list[dict], list[dict]]:
-    """
-    Load a stored run payload from a JSON export.
-
-    :param json_path: path to one `*.results.json` export file
-    :return: run metadata, variant rows, coverage gaps, formula rows, classification rows
-    :raises ValueError: if JSON is malformed or misses required keys
-    """
+    """Load and validate a stored run payload from a ``*.results.json`` export."""
     payload = _read_json_payload(json_path)
-    run_dict = _require_dict(payload, 'run')
+    run_dict = dict(_require_dict(payload, 'run'))
     variant_rows = _require_list_of_dicts(payload, 'variant_result')
     coverage_rows = _require_list_of_dicts(payload, 'coverage_gap')
     if 'formula_rule_hit' not in payload:
@@ -761,28 +560,17 @@ def load_run_from_json(
     classification_rows = _require_list_of_dicts(payload, 'sample_classification')
 
     required_run_keys = {
-        'project_name',
-        'reference_name',
-        'sample_name',
-        'vcf_path',
-        'total_variants',
-        'variants_in_cds',
-        'resistance_hits',
-        'created_at',
+        'project_name', 'reference_name', 'sample_name', 'vcf_path',
+        'total_variants', 'variants_in_cds', 'resistance_hits', 'created_at',
     }
-    missing_run_keys = sorted(key for key in required_run_keys if key not in run_dict)
-    if missing_run_keys:
-        raise ValueError(
-            f'Invalid results JSON: missing run field(s): {", ".join(missing_run_keys)}'
-        )
+    missing = sorted(key for key in required_run_keys if key not in run_dict)
+    if missing:
+        raise ValueError(f'Invalid results JSON: missing run field(s): {", ".join(missing)}')
 
-    run_dict = dict(run_dict)
     run_dict.setdefault('project_db_path', '')
     run_dict.setdefault('project_fingerprint', '')
     run_dict.setdefault('formula_hits', len(formula_rows))
     run_dict.setdefault('status', 'complete')
-    # Optional references list (multi-reference JSON exports). Single-reference and
-    # legacy JSON exports omit it; regenerate falls back to run_dict['reference_name'].
     run_dict['references'] = payload.get('references', [])
 
     coverage_gaps: list[CoverageGap] = []
@@ -790,22 +578,19 @@ def load_run_from_json(
         for key in ('feature_name', 'codon_start', 'codon_end'):
             if key not in row:
                 raise ValueError(f'Invalid results JSON: coverage_gap[{idx}] missing {key!r}')
-        coverage_gaps.append(
-            CoverageGap(
-                feature_name=str(row.get('feature_name', '')),
-                codon_start=int(row.get('codon_start', 0)),
-                codon_end=int(row.get('codon_end', 0)),
-                chrom=str(row.get('chrom', '')),
-            )
-        )
+        coverage_gaps.append(CoverageGap(
+            feature_name=str(row.get('feature_name', '')),
+            codon_start=int(row.get('codon_start', 0)),
+            codon_end=int(row.get('codon_end', 0)),
+            chrom=str(row.get('chrom', '')),
+        ))
 
     for idx, row in enumerate(variant_rows, start=1):
         if 'drug_hits' not in row:
-            raise ValueError(f'Invalid results JSON: variant_result[{idx}] missing \'drug_hits\'')
-
+            raise ValueError(f"Invalid results JSON: variant_result[{idx}] missing 'drug_hits'")
     for idx, row in enumerate(formula_rows, start=1):
         if 'hit_json' not in row:
-            raise ValueError(f'Invalid results JSON: formula_rule_hit[{idx}] missing \'hit_json\'')
+            raise ValueError(f"Invalid results JSON: formula_rule_hit[{idx}] missing 'hit_json'")
 
     return run_dict, variant_rows, coverage_gaps, formula_rows, classification_rows
 
@@ -816,19 +601,9 @@ def validate_project_fingerprint_match(
     current_fingerprint: str,
     source_label: str,
 ) -> None:
-    """
-    Validate that stored and active project UUID fingerprints match.
-
-    :param stored_fingerprint: UUID persisted with run/json payload
-    :param current_fingerprint: UUID of the active project database
-    :param source_label: short label for error context
-    :raises ValueError: if fingerprints do not match
-    """
-    if not stored_fingerprint:
+    """Raise ``ValueError`` when a stored project UUID does not match the active project DB."""
+    if not stored_fingerprint or stored_fingerprint == current_fingerprint:
         return
-    if stored_fingerprint == current_fingerprint:
-        return
-
     raise ValueError(
         f'Project database UUID mismatch for {source_label}. '
         'The provided project database does not match the database used to create this result JSON/run. '
@@ -837,25 +612,21 @@ def validate_project_fingerprint_match(
 
 
 def _read_json_payload(json_path: Path) -> dict:
-    """Load and validate a result JSON payload root object."""
     path = Path(json_path)
     try:
         raw = path.read_text(encoding='utf-8')
     except FileNotFoundError as exc:
         raise ValueError(f'Results JSON file not found: {path}') from exc
-
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ValueError(f'Invalid results JSON: {exc.msg}') from exc
-
     if not isinstance(payload, dict):
         raise ValueError('Invalid results JSON: top-level payload must be an object')
     return payload
 
 
 def _require_dict(payload: dict, key: str) -> dict:
-    """Return one required object field from a JSON payload."""
     value = payload.get(key)
     if not isinstance(value, dict):
         raise ValueError(f'Invalid results JSON: key {key!r} must be an object')
@@ -863,7 +634,6 @@ def _require_dict(payload: dict, key: str) -> dict:
 
 
 def _require_list_of_dicts(payload: dict, key: str) -> list[dict]:
-    """Return one required list[object] field from a JSON payload."""
     value = payload.get(key)
     if not isinstance(value, list):
         raise ValueError(f'Invalid results JSON: key {key!r} must be an array')
@@ -874,19 +644,17 @@ def _require_list_of_dicts(payload: dict, key: str) -> list[dict]:
 
 
 def _resolve_run_id(results_conn: sqlite3.Connection, run_identifier: str | int) -> int:
-    """Resolve an id-like run identifier to one run row id."""
+    """Resolve a numeric run ID (or unique prefix) to one stored ``run.id``."""
     token = str(run_identifier).strip().lstrip('#')
-    if token == '':
+    if not token:
         raise ValueError('Run identifier must not be empty')
 
     if token.isdigit():
         run_id = int(token)
-        exists = results_conn.execute('SELECT 1 FROM run WHERE id = ?', (run_id,)).fetchone()
-        if exists is None:
+        if results_conn.execute('SELECT 1 FROM run WHERE id = ?', (run_id,)).fetchone() is None:
             raise ValueError(f'No run found with id {token}')
         return run_id
 
-    # Fallback: allow string-prefix matching on textual run ids for interactive workflows.
     rows = results_conn.execute(
         'SELECT id FROM run WHERE CAST(id AS TEXT) LIKE ? ORDER BY id',
         (f'{token}%',),

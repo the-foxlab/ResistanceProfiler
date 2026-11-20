@@ -1,6 +1,4 @@
-"""
-`respro maintained.db` command — browse and download databases from the companion repository.
-"""
+"""``respro databases`` command — browse and download curated databases from the companion repo."""
 
 from __future__ import annotations
 
@@ -23,30 +21,28 @@ from respro.utils.cli_errors import cli_error
 from respro.utils.files import resolve_output_file
 from respro.utils.logging import err_console
 
+_META_FIELDS = (
+    ('description', 'Description'),
+    ('maintainers', 'Maintainers'),
+    ('contact', 'Contact'),
+    ('website', 'Website'),
+    ('license', 'License'),
+    ('maintainer_update', 'Last updated'),
+    ('publication_pmid', 'Publication PMID'),
+)
+
 
 def _maintained_db_command(
     list_mode: Annotated[
-        bool,
-        typer.Option(
-            '--list', '-l',
-            help='List available maintained databases and their metadata.',
-        ),
+        bool, typer.Option('--list', '-l', help='List available maintained databases and their metadata.')
     ] = False,
     download: Annotated[
         str | None,
-        typer.Option(
-            '--download', '-d',
-            help='Database name to download (use value from --list output).',
-            metavar='NAME',
-        ),
+        typer.Option('--download', '-d', help='Database name to download (use value from --list output).', metavar='NAME'),
     ] = None,
     output: Annotated[
         Path | None,
-        typer.Option(
-            '--output',
-            '-o',
-            help='Output SQLite database path (directory or file). Defaults to <database_name>.db.',
-        ),
+        typer.Option('--output', '-o', help='Output SQLite database path (directory or file). Defaults to <database_name>.db.'),
     ] = None,
     additional_info: Annotated[
         bool,
@@ -56,11 +52,7 @@ def _maintained_db_command(
         ),
     ] = True,
 ) -> None:
-    """
-    List maintained project databases or download one and initialize a local project DB.
-
-    These databases are stored in a companion repository and are monthly checked for maintainer updates and formatted to be respro compatible.
-    """
+    """List maintained project databases or download one and initialise a local project DB."""
     if list_mode and download:
         cli_error('Use either --list or --download, not both.')
     if not list_mode and not download:
@@ -79,7 +71,6 @@ def _maintained_db_command(
 
 
 def _list_command() -> None:
-    """List all databases available in the respro companion repository."""
     console = Console(highlight=False)
     try:
         with err_console.status('[dim]Fetching database listing…[/dim]'):
@@ -101,51 +92,22 @@ def _list_command() -> None:
         lines = Text()
         lines.append('database_name: ', style='bold cyan')
         lines.append(f'{db_name}\n', style='bold white')
-
-        _meta_fields = [
-            ('description', 'Description'),
-            ('maintainers', 'Maintainers'),
-            ('contact', 'Contact'),
-            ('website', 'Website'),
-            ('license', 'License'),
-            ('maintainer_update', 'Last updated'),
-            ('publication_pmid', 'Publication PMID'),
-        ]
-        for key, label in _meta_fields:
+        for key, label in _META_FIELDS:
             value = meta.get(key)
             if not value:
                 continue
-            if isinstance(value, list):
-                value = ', '.join(str(v) for v in value)
+            text_val = ', '.join(str(v) for v in value) if isinstance(value, list) else str(value)
             lines.append(f'{label}: ', style='dim')
-            if key == 'publication_pmid':
-                lines.append(f'{value}')
-            else:
-                lines.append(f'{value}\n')
+            lines.append(text_val if key == 'publication_pmid' else f'{text_val}\n')
         console.print(Panel(lines, expand=False))
 
 
-def _download_command(
-    database_name: Annotated[
-        str,
-        typer.Option(
-            '--download',
-            '-d',
-            help='Name of the database to download (from --list).',
-            metavar='NAME',
-        ),
-    ],
-    db_path: Path,
-    additional_info: bool,
-) -> None:
-    """Download a maintained database and initialise a project database from it."""
+def _download_command(database_name: str, db_path: Path, additional_info: bool) -> None:
     console = Console(highlight=False)
-
     with tempfile.TemporaryDirectory() as tmp:
-        tmp_dir = Path(tmp)
         try:
             with err_console.status(f'[dim]Downloading {database_name}…[/dim]'):
-                files = download_database_files(database_name, tmp_dir)
+                files = download_database_files(database_name, Path(tmp))
         except RuntimeError as exc:
             cli_error(str(exc))
 
@@ -157,7 +119,6 @@ def _download_command(
             )
 
         db_path.parent.mkdir(parents=True, exist_ok=True)
-
         try:
             with err_console.status('[dim]Initialising project database…[/dim]'):
                 init_project(
@@ -178,5 +139,5 @@ def _download_command(
 
 
 def register(app: typer.Typer) -> None:
-    """Register maintained.db command on the given Typer app."""
+    """Register the ``databases`` command on *app*."""
     app.command('databases')(_maintained_db_command)

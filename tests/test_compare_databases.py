@@ -249,24 +249,6 @@ class TestCompareDatabases:
         # Assert
         assert result['rows'][0]['per_db']['a.db']['publication'] == 'PMID:12345'
 
-    def test_metadata_fields_exclude_columns_missing_from_all_databases(
-        self, db_dir: Path,
-    ) -> None:
-        # Arrange
-        for database_id in ('a.db', 'b.db'):
-            _build_db(db_dir / database_id, name=database_id, accession='ACC1', rules=[_rule()])
-            conn = sqlite3.connect(db_dir / database_id)
-            conn.execute('ALTER TABLE resistance_rule DROP COLUMN score')
-            conn.commit()
-            conn.close()
-
-        # Act
-        result = compare_databases(db_dir, ['a.db', 'b.db'], 'ACC1')
-
-        # Assert
-        assert 'score' not in result['metadata_fields']
-        assert result['metadata_fields'] == ['drug', 'phenotype']
-
     def test_ref_aa_distinguishes_keys(self, db_dir: Path) -> None:
         # Arrange: same feature/position/mutation but different reference AA.
         _build_db(db_dir / 'a.db', name='A', accession='ACC1', rules=[

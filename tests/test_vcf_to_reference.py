@@ -10,7 +10,6 @@ Positions in comments are 1-based VCF-style; VariantCall positions are 0-based.
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import replace as dc_replace
 from pathlib import Path
 
@@ -30,11 +29,15 @@ from Bio.Seq import Seq
 from conftest import TINY_REF_NAME, TINY_REF_SEQ, make_profiling_result
 
 from respro.core.annotation import annotate_variants
-from respro.core.vcf_to_reference import (
+from respro.core.vcf_to_reference.main import (
     REFERENCE_DERIVED,
     VCF_DERIVED,
-    reconcile_variants,
-    reconcile_variants_for_matches,
+)
+from respro.core.vcf_to_reference.main import (
+    map_vcf_to_matches as reconcile_variants_for_matches,
+)
+from respro.core.vcf_to_reference.main import (
+    map_vcf_to_references as reconcile_variants,
 )
 from respro.db.models import (
     AnnotatedVariant,
@@ -773,51 +776,12 @@ class TestSourcePersistence:
         conn.close()
         proj_conn.close()
 
-    def test_legacy_results_db_gains_variant_source_column(self, tmp_path: Path) -> None:
-        db_path = tmp_path / 'legacy.db'
-        # Create a results DB without the variant_source column, then reopen it:
-        # the optional-column migration must add it.
-        conn = create_schema(db_path)  # project schema, not results — build manually
-        conn.close()
-
-        raw = sqlite3.connect(str(db_path))
-        raw.executescript(
-            """
-            CREATE TABLE results_meta (key TEXT PRIMARY KEY, value TEXT);
-            CREATE TABLE run (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_name TEXT NOT NULL,
-                project_db_path TEXT DEFAULT '',
-                reference_name TEXT DEFAULT '',
-                vcf_path TEXT DEFAULT ''
-            );
-            CREATE TABLE variant_result (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_id INTEGER NOT NULL,
-                chrom TEXT NOT NULL,
-                pos INTEGER NOT NULL,
-                ref TEXT NOT NULL,
-                alt TEXT NOT NULL
-            );
-            """
-        )
-        raw.commit()
-        raw.close()
-
-        conn = init_results_db(db_path)
-        columns = {
-            row['name']
-            for row in conn.execute('PRAGMA table_info(variant_result)').fetchall()
-        }
-        assert 'variant_source' in columns
-        conn.close()
-
 
 class TestVariantSourceSurfacing:
     """The source label surfaces in report rows (R5)."""
 
     def test_source_label_mapping(self) -> None:
-        from respro.report._row_helpers import variant_source_label
+        from respro.report.row_helpers import variant_source_label
 
         def ann_with(source: str) -> AnnotatedVariant:
             return AnnotatedVariant(
@@ -829,7 +793,7 @@ class TestVariantSourceSurfacing:
         assert variant_source_label(ann_with('')) == ''
 
     def test_all_mutations_rows_carry_source_and_flag(self) -> None:
-        from respro.report.html import build_report_context
+        from respro.report.html.main import build_report_context
 
         feature = _feature('ATGAAGAAA')
         ann = AnnotatedVariant(
@@ -854,7 +818,7 @@ class TestVariantSourceSurfacing:
         assert ctx['all_mutations']['rows'][0]['variant_source'] == 'Reference derived'
 
     def test_fasta_mode_hides_variant_source(self) -> None:
-        from respro.report.html import build_report_context
+        from respro.report.html.main import build_report_context
 
         feature = _feature('ATGAAGAAA')
         ann = AnnotatedVariant(
@@ -880,7 +844,7 @@ class TestBamAssessabilityMask:
     """Deferred BAM coverage gate (R4): annotate everything, mask, then match."""
 
     def test_excluded_positions_cover_gap_codons(self) -> None:
-        from respro.cli.profile_helpers import _bam_excluded_positions
+        from respro.cli.profile_helpers import bam_excluded_positions as _bam_excluded_positions
         from respro.db.models import CoverageGap, ReferenceGroup
 
         feature = _feature('ATGAAGAAA')
@@ -1513,7 +1477,12 @@ class TestFrameOffsetReconciliation:
 
     def test_pre_translation_start_position_has_no_codon_index_or_query_codon(self) -> None:
         """A nucleotide before codon_start returns None codon_index/offset and empty query_ref_codon."""
-        from respro.core.vcf_to_reference import _attach_supplied_codon, _build_match_alignment
+        from respro.core.vcf_to_reference.reference_alignment import (
+            align_supplied_to_feature as _build_match_alignment,
+        )
+        from respro.core.vcf_to_reference.reference_alignment import (
+            attach_internal_codon as _attach_supplied_codon,
+        )
 
         internal = 'CAAAGAAAAA'
         for strand in ('+', '-'):
@@ -1807,7 +1776,9 @@ class TestBamGateEventSpan:
     def test_deletion_whose_payload_is_excluded_is_dropped(self) -> None:
         """A deletion anchored at a covered position but deleting excluded
         bases is removed from final annotations."""
-        from respro.cli.profile_helpers import _variant_touches_excluded_positions
+        from respro.cli.profile_helpers import (
+            variant_touches_excluded_positions as _variant_touches_excluded_positions,
+        )
 
         deletion = VariantCall(chrom='ref', pos=2, ref='ACCC', alt='A', allele_freq=1.0)
         excluded = {('ref', 3), ('ref', 4), ('ref', 5)}
@@ -2258,35 +2229,3 @@ class TestEqualLengthBlockSubstitutionsV3:
         reconstructed_json = reconstruct_annotations(json_rows)
         assert reconstructed_json[0].variant.haplotype_links == links
         proj_conn.close()
-
-        # Legacy results DB migration
-        legacy_db = tmp_path / 'legacy.db'
-        raw = sqlite3.connect(str(legacy_db))
-        raw.executescript(
-            """
-            CREATE TABLE results_meta (key TEXT PRIMARY KEY, value TEXT);
-            CREATE TABLE run (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_name TEXT NOT NULL,
-                project_db_path TEXT DEFAULT '',
-                reference_name TEXT DEFAULT '',
-                vcf_path TEXT DEFAULT ''
-            );
-            CREATE TABLE variant_result (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_id INTEGER NOT NULL,
-                chrom TEXT NOT NULL,
-                pos INTEGER NOT NULL,
-                ref TEXT NOT NULL,
-                alt TEXT NOT NULL
-            );
-            """
-        )
-        raw.commit()
-        raw.close()
-        migrated = init_results_db(legacy_db)
-        cols = {
-            row['name'] for row in migrated.execute('PRAGMA table_info(variant_result)').fetchall()
-        }
-        assert 'haplotype_links' in cols
-        migrated.close()

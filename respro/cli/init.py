@@ -1,6 +1,4 @@
-"""
-Project initialisation commands and orchestration — respro init, respro add.
-"""
+"""Project initialization and incremental update commands — ``respro init`` and ``respro add``."""
 
 from __future__ import annotations
 
@@ -13,18 +11,15 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
-from respro.core.rules import import_rules_with_summary, validate_rules_tsv
 from respro.db.algorithms import (
     apply_drug_alias_mappings,
     load_interpretation_algorithms,
     store_interpretation_algorithms,
 )
-from respro.db.drugs import _consolidate_drug_names_to_lowercase, _get_drugs_from_pubchem
-from respro.db.features import _load_genbank_records
-from respro.db.project_metadata import (
-    load_metadata_json,
-    store_project_metadata,
-)
+from respro.db.drugs import consolidate_drug_names_to_lowercase, enrich_drugs_from_pubchem
+from respro.db.features import load_genbank_records
+from respro.db.project_metadata import load_metadata_json, store_project_metadata
+from respro.db.rules.main import import_rules_with_summary, validate_rules_tsv
 from respro.db.schema import PROJECT_SCHEMA_VERSION, create_schema, open_project_db
 from respro.io.genbank import ParsedGenBankReference, parse_genbank_sources
 from respro.io.reference import read_fasta
@@ -36,21 +31,12 @@ logger = logging.getLogger(__name__)
 
 
 def _read_example_fasta_text(example_fasta: Path) -> str:
-    """
-    Read and validate a per-database example consensus FASTA file.
-
-    The example must contain exactly one record. Returns the original file text so the stored
-    blob round-trips to the same file the curator provided.
-
-    :param example_fasta: path to the example FASTA file
-    :return: the raw file text
-    :raises ValueError: if the file is empty, unparseable, or contains more than one record
-    """
+    """Read and validate a single-record example consensus FASTA, returning its original text."""
     require_file(example_fasta, 'Example FASTA')
     text = example_fasta.read_text()
     try:
         records = read_fasta(example_fasta)
-    except Exception as exc:  # Biopython raises various errors for malformed FASTA
+    except Exception as exc:
         raise ValueError(f'Example FASTA could not be parsed: {exc}') from exc
     if len(records) != 1:
         raise ValueError(
@@ -60,9 +46,31 @@ def _read_example_fasta_text(example_fasta: Path) -> str:
     return text
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Orchestration
-# ──────────────────────────────────────────────────────────────────────
+def _finalize_algorithms_and_enrichment(
+    conn: sqlite3.Connection,
+    project_id: int,
+    algorithms: list[dict],
+    *,
+    force_store: bool,
+    additional_info: bool,
+    example_text: str,
+    clear_example: bool = False,
+) -> None:
+    """Sanitize algorithms, apply drug aliases, optionally enrich drugs, and update example FASTA."""
+    sanitized = _sanitize_effect_as_resistant_algorithms(conn, project_id, algorithms)
+    if (force_store and sanitized) or (not force_store and sanitized != algorithms):
+        store_interpretation_algorithms(conn, project_id, sanitized)
+
+    alias_config = next((a for a in sanitized if a['name'] == 'drug_alias'), None)
+    if alias_config:
+        apply_drug_alias_mappings(conn, project_id, alias_config)
+    if additional_info:
+        enrich_drugs_from_pubchem(conn, project_id)
+    if example_text:
+        conn.execute('UPDATE project SET example_fasta = ? WHERE id = ?', (example_text, project_id))
+    elif clear_example:
+        conn.execute('UPDATE project SET example_fasta = ? WHERE id = ?', ('', project_id))
+
 
 def init_project(
     *,
@@ -76,31 +84,17 @@ def init_project(
     additional_info: bool = True,
     example_fasta: Path | None = None,
 ) -> Path:
-    """
-    Create and populate a new project database.
-
-    :param db_path: where to write the SQLite file
-    :param name: project name
-    :param genbank_paths: one or more GenBank file paths
-    :param rules_tsv: tab-separated resistance rules file
-    :param metadata_json: optional metadata JSON file with curated database metadata
-    :param overwrite: if True, delete an existing database at db_path before creating a fresh one
-    :param additional_info: if True (default), query PubChem for drug metadata and resolve
-        publication DOIs/titles via NCBI and CrossRef; failures are non-fatal
-    :param example_fasta: optional single-record consensus FASTA stored with the database as an example
-    :return: path to the created database
-    """
+    """Create and populate a new SQLite project database from GenBank records and rule TSVs."""
     if not genbank_paths:
         raise ValueError('At least one GenBank file must be provided')
-
     for genbank_path in genbank_paths:
         require_file(genbank_path, 'GenBank file')
     require_file(rules_tsv, 'Rules TSV')
     if formula_rules_tsv is not None:
         require_file(formula_rules_tsv, 'Formula rules TSV')
+
     example_text = _read_example_fasta_text(example_fasta) if example_fasta else ''
     metadata_payload, algorithms = load_metadata_json(metadata_json) if metadata_json else ({}, [])
-
     genbank_records = parse_genbank_sources(genbank_paths)
 
     if db_path.exists():
@@ -112,29 +106,16 @@ def init_project(
     conn = create_schema(db_path)
     try:
         project_id = _insert_project(conn, name)
-        _load_genbank_records(conn, project_id, genbank_records)
+        load_genbank_records(conn, project_id, genbank_records)
         import_rules_with_summary(
-            conn,
-            project_id,
-            rules_tsv,
-            formula_rules_tsv=formula_rules_tsv,
-            additional_info=additional_info,
+            conn, project_id, rules_tsv,
+            formula_rules_tsv=formula_rules_tsv, additional_info=additional_info,
         )
         store_project_metadata(conn, project_id, metadata_payload)
-        if example_text:
-            conn.execute(
-                'UPDATE project SET example_fasta = ? WHERE id = ?',
-                (example_text, project_id),
-            )
-        if algorithms:
-            algorithms = _sanitize_effect_as_resistant_algorithms(conn, project_id, algorithms)
-            if algorithms:
-                store_interpretation_algorithms(conn, project_id, algorithms)
-        alias_config = next((a for a in algorithms if a['name'] == 'drug_alias'), None)
-        if alias_config:
-            apply_drug_alias_mappings(conn, project_id, alias_config)
-        if additional_info:
-            _get_drugs_from_pubchem(conn, project_id)
+        _finalize_algorithms_and_enrichment(
+            conn, project_id, algorithms,
+            force_store=True, additional_info=additional_info, example_text=example_text,
+        )
         conn.commit()
         logger.info('Project initialized: %s (%s)', name, db_path)
     except Exception:
@@ -142,7 +123,6 @@ def init_project(
         raise
     finally:
         conn.close()
-
     return db_path
 
 
@@ -157,18 +137,7 @@ def add_to_project(
     example_fasta: Path | None = None,
     clear_example: bool = False,
 ) -> Path:
-    """
-    Add curated rules and optional GenBank annotations to an existing project.
-
-    :param db_path: existing project database path
-    :param rules_tsv: tab-separated rules file to add
-    :param genbank_paths: optional GenBank files with additional references/features
-    :param additional_info: if True, query PubChem for new drugs and resolve publication metadata
-    :param validate_only: if True, run full rules validation/import path and roll back all DB changes
-    :param example_fasta: optional single-record consensus FASTA replacing the stored example
-    :param clear_example: if True, clear any stored example FASTA
-    :return: path to the updated database
-    """
+    """Add curated rules and optional GenBank annotations to an existing project database."""
     require_file(db_path, 'Project database')
     require_file(rules_tsv, 'Rules TSV')
     if formula_rules_tsv is not None:
@@ -186,10 +155,12 @@ def add_to_project(
     conn = open_project_db(db_path)
     try:
         project_id = _get_existing_project_id(conn)
-        _ensure_project_has_reference_annotations(conn)
-        _consolidate_drug_names_to_lowercase(conn, project_id)
+        consolidate_drug_names_to_lowercase(conn, project_id)
+        # Load supplied GenBank files before verifying reference presence so --genbank can recover empty DBs.
         if records:
-            _load_genbank_records(conn, project_id, records)
+            load_genbank_records(conn, project_id, records)
+        _ensure_project_has_reference_annotations(conn)
+
         if validate_only:
             validate_rules_tsv(conn, project_id, rules_tsv, formula_rules_tsv=formula_rules_tsv)
             conn.rollback()
@@ -197,37 +168,16 @@ def add_to_project(
             return db_path
 
         import_rules_with_summary(
-            conn,
-            project_id,
-            rules_tsv,
-            formula_rules_tsv=formula_rules_tsv,
-            additional_info=additional_info,
+            conn, project_id, rules_tsv,
+            formula_rules_tsv=formula_rules_tsv, additional_info=additional_info,
         )
         stored_algorithms = load_interpretation_algorithms(conn, project_id)
-        sanitized_algorithms = _sanitize_effect_as_resistant_algorithms(
-            conn,
-            project_id,
-            stored_algorithms,
+        _finalize_algorithms_and_enrichment(
+            conn, project_id, stored_algorithms,
+            force_store=False, additional_info=additional_info,
+            example_text=example_text, clear_example=clear_example,
         )
-        if sanitized_algorithms != stored_algorithms:
-            store_interpretation_algorithms(conn, project_id, sanitized_algorithms)
-        stored_algorithms = sanitized_algorithms
-        alias_config = next((a for a in stored_algorithms if a['name'] == 'drug_alias'), None)
-        if alias_config:
-            apply_drug_alias_mappings(conn, project_id, alias_config)
-        if additional_info:
-            _get_drugs_from_pubchem(conn, project_id)
-        if example_text:
-            conn.execute(
-                'UPDATE project SET example_fasta = ? WHERE id = ?',
-                (example_text, project_id),
-            )
-        elif clear_example:
-            conn.execute('UPDATE project SET example_fasta = ? WHERE id = ?', ('', project_id))
-        conn.execute(
-            "UPDATE project SET updated_at = datetime('now') WHERE id = ?",
-            (project_id,),
-        )
+        conn.execute("UPDATE project SET updated_at = datetime('now') WHERE id = ?", (project_id,))
         conn.commit()
         logger.info('Project updated: %s', db_path)
     except Exception:
@@ -235,7 +185,6 @@ def add_to_project(
         raise
     finally:
         conn.close()
-
     return db_path
 
 
@@ -244,7 +193,8 @@ def _insert_project(conn: sqlite3.Connection, name: str) -> int:
         'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
         (name, PROJECT_SCHEMA_VERSION, str(uuid.uuid4())),
     )
-    return cur.lastrowid  # type: ignore[return-value]
+    assert cur.lastrowid is not None
+    return int(cur.lastrowid)
 
 
 def _sanitize_effect_as_resistant_algorithms(
@@ -252,14 +202,7 @@ def _sanitize_effect_as_resistant_algorithms(
     project_id: int,
     algorithms: list[dict],
 ) -> list[dict]:
-    """
-    Remove effect_as_resistant rules that reference drugs absent from the project.
-
-    :param conn: project DB connection
-    :param project_id: project id
-    :param algorithms: interpretation algorithm configs
-    :return: sanitized algorithm list with unknown-drug effect rules removed
-    """
+    """Drop ``effect_as_resistant`` rules whose drug is absent from the project."""
     project_drugs = {
         row[0]
         for row in conn.execute('SELECT name FROM drug WHERE project_id = ?', (project_id,)).fetchall()
@@ -277,26 +220,18 @@ def _sanitize_effect_as_resistant_algorithms(
                 continue
             logger.warning(
                 'effect_as_resistant: ignoring rule for unknown drug %r (feature=%r, reference=%r)',
-                rule['drug'],
-                rule['feature'],
-                rule['reference'],
+                rule['drug'], rule['feature'], rule['reference'],
             )
-
         if kept_rules:
-            sanitized_config = dict(config)
-            sanitized_config['rules'] = kept_rules
-            sanitized.append(sanitized_config)
-            continue
-
-        logger.warning(
-            'effect_as_resistant: removed algorithm because no rules reference known project drugs'
-        )
-
+            sanitized.append({**config, 'rules': kept_rules})
+        else:
+            logger.warning(
+                'effect_as_resistant: removed algorithm because no rules reference known project drugs'
+            )
     return sanitized
 
 
 def _get_existing_project_id(conn: sqlite3.Connection) -> int:
-    """Return the existing project id from an initialized database."""
     conn.row_factory = sqlite3.Row
     row = conn.execute('SELECT id FROM project ORDER BY id LIMIT 1').fetchone()
     if row is None:
@@ -305,35 +240,24 @@ def _get_existing_project_id(conn: sqlite3.Connection) -> int:
 
 
 def _ensure_project_has_reference_annotations(conn: sqlite3.Connection) -> None:
-    """Fail early when an existing DB lacks the stored references/features needed for rule loading."""
-    reference_count = conn.execute('SELECT COUNT(*) FROM reference').fetchone()[0]
-    feature_count = conn.execute('SELECT COUNT(*) FROM feature').fetchone()[0]
-    if reference_count == 0 or feature_count == 0:
+    ref_count = conn.execute('SELECT COUNT(*) FROM reference').fetchone()[0]
+    feat_count = conn.execute('SELECT COUNT(*) FROM feature').fetchone()[0]
+    if ref_count == 0 or feat_count == 0:
         raise ValueError(
             'Existing database has no stored references/features. '
             'Provide --genbank or rebuild the project with respro init.'
         )
 
 
-# ──────────────────────────────────────────────────────────────────────
-# CLI commands
-# ──────────────────────────────────────────────────────────────────────
-
 def _init_command(
-    name: Annotated[
-        str, typer.Option('--name', '-n', help='Project name.')
-    ],
-    rules: Annotated[
-        Path, typer.Option('--rules', '-r', help='Resistance rules TSV.')
-    ],
+    name: Annotated[str, typer.Option('--name', '-n', help='Project name.')],
+    rules: Annotated[Path, typer.Option('--rules', '-r', help='Resistance rules TSV.')],
     formula_rules: Annotated[
         Path | None, typer.Option('--formula-rules', '-f', help='Optional formula rules TSV.')
     ] = None,
     genbank_paths: Annotated[
-        list[Path] | None, typer.Option(
-            '--genbank', '-g', exists=True,
-            help='GenBank file(s). Repeat for multiple files.',
-        )
+        list[Path] | None,
+        typer.Option('--genbank', '-g', exists=True, help='GenBank file(s). Repeat for multiple files.'),
     ] = None,
     output: Annotated[
         Path, typer.Option('--output', '-o', help='Output SQLite database path.')
@@ -345,33 +269,32 @@ def _init_command(
         bool, typer.Option('--overwrite', '-w', help='Overwrite existing database.')
     ] = False,
     additional_info: Annotated[
-        bool, typer.Option(
+        bool,
+        typer.Option(
             '--additional-info/--no-additional-info',
             help='Query PubChem for drug metadata and resolve publications via NCBI/CrossRef.',
-        )
+        ),
     ] = True,
     example: Annotated[
-        Path | None, typer.Option(
+        Path | None,
+        typer.Option(
             '--example', '-ex', exists=True,
             help='Optional single-record consensus FASTA stored with the database as an example.',
-        )
+        ),
     ] = None,
 ) -> None:
-    """
-    Initialise a project database from one or more GenBank reference records and resistance rules provided in TSV.
-    """
+    """Initialise a project database from one or more GenBank records and resistance rules TSV."""
     if not genbank_paths:
         cli_error('At least one --genbank file is required.')
 
     output_path = resolve_output_file(output, 'project.db')
-
     console = Console(highlight=False)
     try:
         with err_console.status('[dim]Initialising project database…[/dim]'):
             db_path = init_project(
                 db_path=output_path,
                 name=name,
-                genbank_paths=list(genbank_paths or []),
+                genbank_paths=list(genbank_paths),
                 rules_tsv=rules,
                 formula_rules_tsv=formula_rules,
                 metadata_json=metadata,
@@ -381,7 +304,6 @@ def _init_command(
             )
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
         cli_error(str(exc))
-
     console.print(f'[green]✓[/green] Project initialised: [cyan]{db_path}[/cyan]')
 
 
@@ -396,33 +318,31 @@ def _init_add_command(
         Path | None, typer.Option('--formula-rules', '-f', exists=True, help='Optional formula rules TSV.')
     ] = None,
     genbank_paths: Annotated[
-        list[Path] | None, typer.Option(
-            '--genbank', '-g', exists=True,
-            help='Optional GenBank file(s) with additional references/features.',
-        )
+        list[Path] | None,
+        typer.Option('--genbank', '-g', exists=True, help='Optional GenBank file(s) with additional references/features.'),
     ] = None,
     additional_info: Annotated[
-        bool, typer.Option(
+        bool,
+        typer.Option(
             '--additional-info/--no-additional-info',
             help='Query PubChem for drug metadata and resolve publications via NCBI/CrossRef.',
-        )
+        ),
     ] = True,
     validate: Annotated[
         bool, typer.Option('--validate', '-v', help='Validate rules and exit without writing DB changes.')
     ] = False,
     example: Annotated[
-        Path | None, typer.Option(
+        Path | None,
+        typer.Option(
             '--example', '-ex', exists=True,
             help='Replace the stored example consensus FASTA with this single-record file.',
-        )
+        ),
     ] = None,
     clear_example: Annotated[
         bool, typer.Option('--no-example', help='Clear any stored example consensus FASTA.')
     ] = False,
 ) -> None:
-    """
-    Add curated rules and optional GenBank annotations to an existing project database.
-    """
+    """Add curated rules and optional GenBank annotations to an existing project database."""
     console = Console(highlight=False)
     try:
         with err_console.status('[dim]Updating project database…[/dim]'):
@@ -442,11 +362,10 @@ def _init_add_command(
     if validate:
         console.print(f'[green]✓[/green] Rules validation passed: [cyan]{db_path}[/cyan]')
         return
-
     console.print(f'[green]✓[/green] Project updated: [cyan]{db_path}[/cyan]')
 
 
 def register(app: typer.Typer) -> None:
-    """Register init and add commands on the given Typer app."""
+    """Register ``init`` and ``add`` commands on *app*."""
     app.command('init')(_init_command)
     app.command('add')(_init_add_command)

@@ -10,7 +10,6 @@ timestamp is written, and legacy databases are purged of those columns.
 from __future__ import annotations
 
 import sqlite3
-import uuid
 from pathlib import Path
 
 import pytest
@@ -55,56 +54,6 @@ def _make_match(feature_id: int = 1) -> FeatureMatch:
     )
 
 
-def _make_legacy_db(db_path: Path) -> None:
-    """Create a project DB carrying the pre-migration query_reference shape.
-
-    Starts from the current schema and re-adds the legacy columns with data,
-    which is equivalent to a database created by an older release.
-    """
-    conn = create_schema(db_path)
-    conn.execute(
-        'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
-        ('Legacy Project', 3, str(uuid.uuid4())),
-    )
-    conn.execute(
-        'INSERT INTO reference (project_id, name, length) VALUES (?, ?, ?)',
-        (1, 'tiny_ref', len(QUERY_SEQ)),
-    )
-    conn.execute(
-        'INSERT INTO feature (reference_id, name, start, end, strand, has_rules) '
-        'VALUES (?, ?, ?, ?, ?, 1)',
-        (1, 'gag', 0, len(QUERY_SEQ), '+'),
-    )
-    conn.execute(
-        "ALTER TABLE query_reference ADD COLUMN name TEXT NOT NULL DEFAULT ''"
-    )
-    conn.execute(
-        "ALTER TABLE query_reference ADD COLUMN sequence TEXT NOT NULL DEFAULT ''"
-    )
-    conn.execute(
-        'ALTER TABLE query_reference ADD COLUMN length INTEGER NOT NULL DEFAULT 0'
-    )
-    conn.execute(
-        "ALTER TABLE query_reference ADD COLUMN created_at TEXT NOT NULL DEFAULT ''"
-    )
-    checksum = sequence_checksum(QUERY_SEQ)
-    conn.execute(
-        'INSERT INTO query_reference (checksum, name, sequence, length) VALUES (?, ?, ?, ?)',
-        (checksum, 'patient_42|sample_1', QUERY_SEQ, len(QUERY_SEQ)),
-    )
-    qref_id = conn.execute(
-        'SELECT id FROM query_reference WHERE checksum = ?', (checksum,),
-    ).fetchone()['id']
-    conn.execute(
-        'INSERT INTO query_feature_mapping '
-        '(query_ref_id, feature_id, identity, cds_coverage, query_start, query_end, '
-        "strand, cigar) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (qref_id, 1, 0.99, 1.0, 0, len(QUERY_SEQ), '+', f'{len(QUERY_SEQ)}M'),
-    )
-    conn.commit()
-    conn.close()
-
-
 class TestMinimalQueryReferenceSchema:
     def test_fresh_db_query_reference_has_only_id_and_checksum(self, tmp_path: Path) -> None:
         db_path = tmp_path / 'fresh.db'
@@ -127,59 +76,6 @@ class TestMinimalQueryReferenceSchema:
                 ('patient_42', sequence_checksum(QUERY_SEQ)),
             )
         conn.close()
-
-
-class TestLegacyQueryReferenceMigration:
-    def test_open_project_db_drops_legacy_pii_columns(self, tmp_path: Path) -> None:
-        db_path = tmp_path / 'legacy.db'
-        _make_legacy_db(db_path)
-
-        conn = open_project_db(db_path)
-        cols = _query_reference_columns(conn)
-        conn.close()
-
-        assert cols == {'id', 'checksum'}
-
-    def test_migration_preserves_checksum_and_mapping_rows(self, tmp_path: Path) -> None:
-        db_path = tmp_path / 'legacy.db'
-        _make_legacy_db(db_path)
-        checksum = sequence_checksum(QUERY_SEQ)
-
-        conn = open_project_db(db_path)
-        qref_rows = conn.execute('SELECT id, checksum FROM query_reference').fetchall()
-        mapping_rows = conn.execute(
-            'SELECT qgm.identity, qgm.cigar FROM query_feature_mapping qgm '
-            'JOIN query_reference qr ON qr.id = qgm.query_ref_id '
-            'WHERE qr.checksum = ?',
-            (checksum,),
-        ).fetchall()
-        conn.close()
-
-        assert [(row['checksum'],) for row in qref_rows] == [(checksum,)]
-        assert [(row['identity'], row['cigar']) for row in mapping_rows] == [(0.99, f'{len(QUERY_SEQ)}M')]
-
-    def test_migrated_cache_loads_mappings_by_checksum(self, tmp_path: Path) -> None:
-        db_path = tmp_path / 'legacy.db'
-        _make_legacy_db(db_path)
-        checksum = sequence_checksum(QUERY_SEQ)
-
-        conn = open_project_db(db_path)
-        matches = load_cached_mappings(conn, checksum)
-        conn.close()
-
-        assert matches is not None
-        assert len(matches) == 1
-        assert matches[0].cigar == f'{len(QUERY_SEQ)}M'
-
-    def test_open_project_db_fails_fast_on_sqlite_without_drop_column(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        db_path = tmp_path / 'legacy.db'
-        _make_legacy_db(db_path)
-        monkeypatch.setattr(sqlite3, 'sqlite_version', '3.31.0')
-
-        with pytest.raises(ValueError, match='SQLite'):
-            open_project_db(db_path)
 
 
 class TestChecksumOnlyStoreLoad:

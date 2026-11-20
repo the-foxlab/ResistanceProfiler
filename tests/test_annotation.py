@@ -78,7 +78,7 @@ class TestClassifyConsequence:
         assert _classify_snp_consequence('K', '*', 10) == 'stop_gained'
 
     def test_stop_loss(self):
-        assert _classify_snp_consequence('*', 'K', 10) == 'stop_loss'
+        assert _classify_snp_consequence('*', 'K', 10) == 'stop_lost'
     def test_start_loss(self):
         assert _classify_snp_consequence('M', 'G', 0) == 'start_lost'
 

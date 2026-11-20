@@ -1,6 +1,4 @@
-"""
-Drug resolution — get-or-create drug records, deduplication, and PubChem enrichment.
-"""
+"""Drug resolution — get-or-create rows, lowercase consolidation, and PubChem/Wikipedia enrichment."""
 
 from __future__ import annotations
 
@@ -8,93 +6,76 @@ import logging
 import sqlite3
 
 from respro.db.models import is_internal_formula_component_drug_name
-from respro.io.lookup import LookupStatus
+from respro.io.http import LookupStatus
 from respro.io.pubchem import lookup_drug
 from respro.io.wikipedia import lookup_summary
 
 logger = logging.getLogger(__name__)
 
 
-def _get_or_create_drug_id(
+def get_or_create_drug_id(
     conn: sqlite3.Connection,
     project_id: int,
     drug_name: str,
     drug_cache: dict[str, int],
 ) -> int:
-    """
-    Get the drug ID for a given drug name, creating a new drug record if needed.
-
-    :param conn: SQLite database connection
-    :param project_id: ID of the project
-    :param drug_name: name of the drug
-    :param drug_cache: cache of drug names to drug IDs
-    :return: drug ID
-    """
-    normalized_name = drug_name.strip().lower()
-    if normalized_name in drug_cache:
-        return drug_cache[normalized_name]
+    """Return the drug ID for *drug_name* (lowercased), creating a row if absent."""
+    normalized = drug_name.strip().lower()
+    if normalized in drug_cache:
+        return drug_cache[normalized]
 
     conn.row_factory = sqlite3.Row
-
     row = conn.execute(
         'SELECT id, name FROM drug WHERE project_id = ? AND LOWER(name) = ? ORDER BY id LIMIT 1',
-        (project_id, normalized_name),
+        (project_id, normalized),
     ).fetchone()
     if row is not None:
-        if row['name'] != normalized_name:
-            conn.execute(
-                'UPDATE drug SET name = ? WHERE id = ?',
-                (normalized_name, row['id']),
-            )
-        drug_cache[normalized_name] = int(row['id'])
-        return int(row['id'])
+        if row['name'] != normalized:
+            conn.execute('UPDATE drug SET name = ? WHERE id = ?', (normalized, row['id']))
+        drug_id = int(row['id'])
+        drug_cache[normalized] = drug_id
+        return drug_id
 
     cur = conn.execute(
         'INSERT OR IGNORE INTO drug (project_id, name) VALUES (?, ?)',
-        (project_id, normalized_name),
+        (project_id, normalized),
     )
-    drug_id = cur.lastrowid
-    if drug_id:
-        drug_cache[normalized_name] = drug_id
+    if cur.lastrowid:
+        drug_id = int(cur.lastrowid)
+        drug_cache[normalized] = drug_id
         return drug_id
 
     row = conn.execute(
         'SELECT id FROM drug WHERE project_id = ? AND LOWER(name) = ? ORDER BY id LIMIT 1',
-        (project_id, normalized_name),
+        (project_id, normalized),
     ).fetchone()
-    drug_cache[normalized_name] = int(row[0])
-    return int(row[0])
+    drug_id = int(row[0])
+    drug_cache[normalized] = drug_id
+    return drug_id
 
 
-def _consolidate_drug_names_to_lowercase(conn: sqlite3.Connection, project_id: int) -> None:
-    """Collapse case-only duplicate drug rows and keep lowercase canonical names."""
+def consolidate_drug_names_to_lowercase(conn: sqlite3.Connection, project_id: int) -> None:
+    """Merge case-only duplicate drug rows and normalize all names to lowercase."""
     conn.row_factory = sqlite3.Row
     groups = conn.execute(
-        'SELECT LOWER(name) AS normalized_name, COUNT(*) AS cnt '
-        'FROM drug WHERE project_id = ? GROUP BY LOWER(name) HAVING COUNT(*) > 1',
+        'SELECT LOWER(name) AS normalized_name FROM drug WHERE project_id = ? '
+        'GROUP BY LOWER(name) HAVING COUNT(*) > 1',
         (project_id,),
     ).fetchall()
 
     for group in groups:
-        normalized_name = group['normalized_name']
+        normalized = group['normalized_name']
         rows = conn.execute(
             'SELECT id FROM drug WHERE project_id = ? AND LOWER(name) = ? ORDER BY id',
-            (project_id, normalized_name),
+            (project_id, normalized),
         ).fetchall()
         keep_id = int(rows[0]['id'])
-        duplicate_ids = [int(row['id']) for row in rows[1:]]
-
-        for duplicate_id in duplicate_ids:
-            conn.execute(
-                'UPDATE resistance_rule SET drug_id = ? WHERE drug_id = ?',
-                (keep_id, duplicate_id),
-            )
-            conn.execute('DELETE FROM drug WHERE id = ?', (duplicate_id,))
-
-        conn.execute(
-            'UPDATE drug SET name = ? WHERE id = ?',
-            (normalized_name, keep_id),
-        )
+        for row in rows[1:]:
+            dup_id = int(row['id'])
+            conn.execute('UPDATE resistance_rule SET drug_id = ? WHERE drug_id = ?', (keep_id, dup_id))
+            conn.execute('UPDATE resistance_formula_rule SET drug_id = ? WHERE drug_id = ?', (keep_id, dup_id))
+            conn.execute('DELETE FROM drug WHERE id = ?', (dup_id,))
+        conn.execute('UPDATE drug SET name = ? WHERE id = ?', (normalized, keep_id))
 
     conn.execute(
         'UPDATE drug SET name = LOWER(name) WHERE project_id = ? AND name != LOWER(name)',
@@ -102,44 +83,17 @@ def _consolidate_drug_names_to_lowercase(conn: sqlite3.Connection, project_id: i
     )
 
 
-def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
-    """
-    Add missing enrichment metadata to drug records.
-
-    For each unresolved drug a fallback chain is tried: PubChem compound
-    (CID) → PubChem substance (SID, typical for monoclonal antibodies) →
-    Wikipedia summary. Whichever fields the chain yields are stored — a
-    substance hit contributes a substance URL plus synonym text (no CID, no
-    structure image), a Wikipedia hit contributes a description only.
-    Drugs that already have stored data (including substance-url-only
-    antibody drugs) are not queried again. Drugs where the whole chain
-    *definitively* found nothing (404 at every stage) are flagged
-    (``pubchem_lookup_failed``) and skipped on subsequent runs so doomed
-    network calls are not repeated; transient failures (no network access,
-    unexpected API responses) leave the flag cleared so the next run
-    retries. All failures are logged and skipped so the database is always
-    built successfully.
-
-    :param conn: SQLite database connection (row_factory must be sqlite3.Row)
-    :param project_id: project ID used to scope the drug lookup
-    """
-
+def enrich_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
+    """Backfill drug metadata via PubChem compound/substance -> Wikipedia fallback chain."""
     conn.row_factory = sqlite3.Row
     drug_rows = conn.execute(
         'SELECT id, name, pubchem_cid, pubchem_url, description, structure_url, pubchem_lookup_failed '
         'FROM drug WHERE project_id = ?',
         (project_id,),
     ).fetchall()
-
     if not drug_rows:
         return
 
-    # Query unresolved drugs and entries missing a description so we can
-    # backfill title-based text for compounds where PubChem has no description.
-    # A non-empty description means the chain already produced text (compound,
-    # substance synonyms, or Wikipedia) — the drug counts as complete. Drugs
-    # flagged pubchem_lookup_failed are skipped: the whole chain definitively
-    # found nothing for them on a previous run.
     drugs_to_query = [
         drug for drug in drug_rows
         if (
@@ -148,7 +102,6 @@ def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
             and not is_internal_formula_component_drug_name(drug['name'] or '')
         )
     ]
-
     already_present = len(drug_rows) - len(drugs_to_query)
     if not drugs_to_query:
         logger.info('PubChem: all %d drug(s) already have stored data', len(drug_rows))
@@ -159,7 +112,6 @@ def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
         logger.info('PubChem: skipped %d drug(s) with stored data', already_present)
 
     info_added = 0
-
     for drug in drugs_to_query:
         drug_name = drug['name']
         drug_result = lookup_drug(drug_name)
@@ -179,8 +131,6 @@ def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
             continue
 
         if drug_result.status is LookupStatus.ERROR:
-            # Transient failure — the chain outcome is unknown, so leave the
-            # flag cleared and let the next run retry the whole drug.
             logger.warning(
                 'PubChem lookup for %r failed (transient error) — will retry on the next run',
                 drug_name,
@@ -204,10 +154,8 @@ def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
             )
             continue
 
-        conn.execute(
-            'UPDATE drug SET pubchem_lookup_failed = 1 WHERE id = ?',
-            (drug['id'],),
-        )
+        # Flag definitive 404 misses so future runs skip doomed lookups.
+        conn.execute('UPDATE drug SET pubchem_lookup_failed = 1 WHERE id = ?', (drug['id'],))
         logger.warning(
             'PubChem/Wikipedia: no record found for %r — stored without enrichment data '
             '(flagged, will not be re-queried)',
@@ -215,4 +163,3 @@ def _get_drugs_from_pubchem(conn: sqlite3.Connection, project_id: int) -> None:
         )
 
     logger.info('PubChem: added data for %d/%d queried drug(s)', info_added, len(drugs_to_query))
-

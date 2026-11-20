@@ -146,66 +146,19 @@ Example metadata file:
 
 ## Interpretation algorithms
 
-The metadata JSON may include an `interpretation_algorithms` array. Each entry configures one algorithm by name. Each algorithm type may appear **at most once**, and all four types can coexist in the same database.
+The metadata JSON may include an `interpretation_algorithms` array configuring any combination of the four algorithm types below. All algorithms are validated at `respro init` time and stored in the project database.
 
-Algorithms are validated at `respro init` time and stored in the project database. Full descriptions live on the [Interpretation Algorithms](algorithms.md) page; below is a concise reference for each type and its keys.
-
-### `drug_interpretation` — turn rule hits into a per-drug assessment
-
-Combines the matched rules for a drug into one overall call. You can configure multiple entries with different `method` values — useful when a database mixes evidence types (for example, phenotype labels from one source and numeric scores from another).
-
-**Methods:**
-
-| Method | How it decides | Needs `thresholds`? |
+| Algorithm | Purpose | Repeatable? |
 |---|---|---|
-| `by_phenotype` | The highest-rank phenotype label among the drug's hits wins. `contradictory` wins over `susceptible` (rank 1) but loses to any higher-tier severity (ranks 2–5). Hits with no label yield `susceptible`. | **No** — labels come from the rules, not the config. |
-| `by_score` | Sums the `score` values per drug and compares the total against thresholds. | Yes |
-| `by_ic50` | Checks each hit's IC50; the highest-rank label whose breakpoint is met wins, otherwise the rank-1 label. | Yes |
-| `by_fold_ic50` | Same logic as `by_ic50`, using fold-IC50 values. | Yes |
+| `drug_interpretation` | Combines matched rules per drug into an overall assessment (`by_phenotype`, `by_score`, `by_ic50`, or `by_fold_ic50`), with optional per-drug / per-reference `drug_thresholds` overrides. | Once per `method` |
+| `drug_groups` | Groups drugs into named classes (e.g. *Nucleoside Analogues*) for report display. | At most once |
+| `drug_alias` | Maps canonical drug names to short aliases shown in reports (e.g. `Aciclovir (ACV)`). | At most once |
+| `effect_as_resistant` | Adds report-only `resistant` metadata rows when selected high-impact consequences occur in a configured feature/reference pair. | At most once |
 
-**Keys:**
-
-- `method` — required; one of `"by_phenotype"`, `"by_score"`, `"by_ic50"`, `"by_fold_ic50"`.
-- `thresholds` — required for `by_score`, `by_ic50`, and `by_fold_ic50`; **not accepted** for `by_phenotype`. An object mapping phenotype labels (or bare ranks `1`–`5`) to threshold values. Must include at least one severity label (a phenotype label with rank 1-5). Labels resolve via the [rank vocabulary](rules-format.md#phenotype-normalization), so multi-tier vocabularies like `{1, 3, 5}` work.
-    - `by_score`: threshold values are positive integers.
-    - `by_ic50` / `by_fold_ic50`: threshold values are positive numbers. The config must include at least one rank-1 label (e.g. `susceptible`), which is returned when the value falls below all higher-rank breakpoints.
-- `drug_thresholds` — optional list of per-drug overrides (see [Per-drug / per-reference overrides](algorithms.md#per-drug--per-reference-overrides)). Not accepted for `by_phenotype`.
-
-Each `method` may appear at most once; two entries with the same `method` are rejected.
-
-When multiple methods are configured, the report shows one assessment column per method plus a final **Assessment** column. The final call is strongest-wins by inferred rank: rank 5 > … > rank 2 > `contradictory` (-1) > rank 1, with `unknown` (0) weakest. `contradictory` thus wins over susceptible but loses to any higher-tier severity.
+See [Interpretation Algorithms](algorithms.md) for the complete schema, threshold rules, and resolution precedence for each algorithm.
 
 !!! note "Label mismatches are warned, not fatal"
-    If a config uses a label that is not present in the rules sheet (for example `"sensitive"` instead of the sheet's `"susceptible"` — same rank, different wording), `respro init` logs a non-fatal warning and continues. Fix the vocabulary if the mismatch is unintended.
-
-### `drug_groups` — group drugs in the report
-
-Assigns drugs to named groups (for example, drug classes) for display in the final report.
-
-- `groups` — required non-empty object. Each key is a group name; each value is a non-empty list of drug name strings. A drug may not appear in more than one group.
-
-### `drug_alias` — short drug names in the report
-
-Maps canonical drug names to short aliases shown in the report (for example, `Aciclovir (ACV)`).
-
-- `groups` — required non-empty object. Keys are canonical drug names; values are aliases. Each key and value must be a non-empty string, and aliases must be unique across drugs.
-
-These mappings are written to the `drug.alias` column during `respro init`.
-
-### `effect_as_resistant` — treat high-impact effects as resistant
-
-Produces report-only metadata hits when a variant has a high-impact consequence in a given feature and reference. This does **not** create curated rule hits — it only adds a resistant metadata row for the configured drug.
-
-- `rules` — required non-empty list. Each rule must include:
-    - `feature` — case-sensitive exact feature name.
-    - `reference` — case-sensitive exact reference name.
-    - `drug` — case-sensitive exact drug name.
-    - `effect` — a non-empty list of strings, each one of: `frameshift`, `stop_gained`, `stop_lost`, `start_lost`, `insertion`, `deletion`.
-- Each (`feature`, `reference`, `drug`) tuple must be unique across the list.
-
-Each rule states: if a variant in the given feature/reference has a consequence matching **any** of the listed effects, a metadata hit row with phenotype `resistant` is produced for that drug. The `clinical_phenotype` field is left empty.
-
-This output is only produced when the database already contains at least one curated rule with a known phenotype or clinical phenotype.
+    If a `drug_interpretation` config uses a label that is not present in the rules sheet (for example `"sensitive"` instead of the sheet's `"susceptible"` — same rank, different wording), `respro init` logs a non-fatal warning and continues. Fix the vocabulary if the mismatch is unintended.
 
 ### Example
 
@@ -254,4 +207,4 @@ This output is only produced when the database already contains at least one cur
 }
 ```
 
-Algorithms are validated at `respro init` time and stored in the `interpretation_algorithm` table of the project database. If you open an older database that predates this table, ResPro adds it automatically.
+Algorithms are validated at `respro init` time and stored in the project database. If a database was created with an older incompatible schema, rebuild it with `respro init`.
