@@ -224,15 +224,14 @@ run.
   shared gene names are always allowed.
 - **Reference comparison and variant provenance.** Resistance rules are defined
   against the stored internal project reference, while VCF variants are called
-  against `--ref-fasta`. ResPro reconciles both at sequence level: differences
-  between `--ref-fasta` and the internal reference are emitted as baseline
-  variants (`Reference derived`, assumed AF `1.0`, or residual AF `1 − Σ AF_vcf`
-  at partially called positions) and overlaid with the in-cutoff VCF calls
-  (`VCF derived`). Calls failing `--min-af` or `--min-depth` are removed before
-  reconciliation, reverting the position to the pure baseline
-  (`Reference derived`, AF `1.0`). VCF deletions overlapping or touching a
-  baseline reference deletion are skipped with a warning, keeping the baseline
-  deletion. When `--bam` is provided, one deferred
+  against `--ref-fasta`. ResPro aligns the supplied reference against the internal
+  reference: any mismatch between the two is emitted as `Reference derived`
+  (assumed AF `1.0`, or the remaining uncalled fraction `1 − Σ AF_vcf` when a
+  sub-1.0 VCF call overlaps that position), while in-cutoff VCF calls are mapped
+  onto the internal reference as `VCF derived`. Calls failing `--min-af` or
+  `--min-depth` are removed first, leaving any underlying reference mismatch at AF
+  `1.0`. VCF deletions overlapping or touching a reference deletion are skipped
+  with a warning, retaining the reference deletion. When `--bam` is provided, one deferred
   coverage gate removes any candidate (whether `VCF derived` or
   `Reference derived`) whose codon/span fails the coverage threshold before
   rule matching. For best results, call variants against a reference FASTA

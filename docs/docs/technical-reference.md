@@ -448,11 +448,12 @@ frequency.
 Every emitted variant carries a `source` label, shown in the All Mutations
 table (VCF mode only) and the TSV/JSON exports:
 
-- **`vcf_derived`** — the emitted allele was derived from a VCF variant call state.
-- **`reference_derived`** — the emitted allele was inferred from the supplied-vs-internal
-  reference comparison (including residual baseline emissions at $1 - \sum \text{AF}_{\text{alt}}$
-  when a partial-AF call touches the position). Its baseline frequency is an
-  **assumption** from that comparison, not a directly called variant allele.
+- **`vcf_derived`** — the variant was called in the VCF and mapped onto the
+  internal reference.
+- **`reference_derived`** — the variant is a mismatch between the supplied
+  reference and the internal reference (assumed frequency $1.0$, or the remaining
+  uncalled fraction $1 - \sum \text{AF}_{\text{alt}}$ when a partial-AF VCF call
+  overlaps that position).
 
 #### Cutoffs and filtered calls
 

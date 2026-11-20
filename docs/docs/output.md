@@ -45,11 +45,11 @@ The HTML report is a single, portable file you can open in any browser. It is al
 </figure>
 
 In VCF mode the All Mutations table carries a **Variant source** column:
-`VCF derived` means a variant call influenced the variant's allele or frequency;
-`Reference derived` means the variant was inferred purely from the comparison of
-the supplied reference against the stored internal reference — its frequency is
-an assumption from that comparison, not a measured allele fraction. The column
-is omitted in FASTA mode.
+`VCF derived` means the variant was called in the VCF (and mapped onto the stored
+reference); `Reference derived` means the variant is a mismatch between the
+supplied reference FASTA and the stored database reference (assumed frequency
+`1.0`, or the remaining uncalled fraction `1 − VCF AF` when a sub-1.0 VCF call
+overlaps that position). The column is omitted in FASTA mode.
 
 
 
@@ -112,7 +112,7 @@ respro vcf \
 | `gene` | Feature / gene name (display name applied when configured). |
 | `nt_mut` | Nucleotide change on the internal reference, `ref{pos}alt` (1-based). Combined-codon outcomes are surfaced in `aa_effects`. |
 | `nt_mut_user` | Nucleotide change on the user-supplied reference (VCF coords before remap). VCF mode only; omitted in FASTA mode. |
-| `variant_source` | Provenance of the variant: `VCF derived` when the variant allele was derived from a VCF variant call; `Reference derived` when the variant allele was inferred from differences between the supplied and internal references (including residual baseline alleles at partially called positions) — its baseline frequency is an assumption from that comparison, not a directly called variant allele. VCF mode only; omitted in FASTA mode. |
+| `variant_source` | Provenance of the variant: `VCF derived` when the variant was called in the VCF (mapped onto the stored reference); `Reference derived` when the variant is a mismatch between the supplied reference FASTA and the stored database reference (assumed frequency `1.0`, or the remaining uncalled fraction `1 − VCF AF` when a sub-1.0 VCF call overlaps that position). VCF mode only; omitted in FASTA mode. |
 | `strand` | Coding strand of the feature (`+`/`-`), sourced from the feature record. |
 | `aa_frequency` | Variant allele frequency (rounded to 3 decimal places); for `formula` rows, reports the combination's Fréchet lower bound. |
 | `depth` | Read depth at the variant (VCF mode only; omitted in FASTA mode). Empty for combined formula rows. |
