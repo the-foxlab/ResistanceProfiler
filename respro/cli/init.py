@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+import stat
 import tempfile
 import uuid
 from pathlib import Path
@@ -104,12 +105,14 @@ def init_project(
         raise FileExistsError(f'Database already exists: {db_path}')
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    target_mode = _target_db_mode(db_path)
     tmp_fd, tmp_name = tempfile.mkstemp(prefix=f'.{db_path.name}.', suffix='.tmp', dir=db_path.parent)
     os.close(tmp_fd)
     tmp_path = Path(tmp_name)
 
-    conn = create_schema(tmp_path)
+    conn: sqlite3.Connection | None = None
     try:
+        conn = create_schema(tmp_path)
         project_id = _insert_project(conn, name)
         load_genbank_records(conn, project_id, genbank_records)
         import_rules_with_summary(
@@ -122,17 +125,19 @@ def init_project(
             force_store=True, additional_info=additional_info, example_text=example_text,
         )
         conn.commit()
-    except Exception:
         conn.close()
+        conn = None
+        os.chmod(tmp_path, target_mode)
+        for suffix in ('-wal', '-shm'):
+            Path(f'{db_path}{suffix}').unlink(missing_ok=True)
+        os.replace(tmp_path, db_path)
+    except Exception:
+        if conn is not None:
+            conn.close()
         for suffix in ('', '-wal', '-shm'):
             Path(f'{tmp_path}{suffix}').unlink(missing_ok=True)
         raise
-    else:
-        conn.close()
 
-    for suffix in ('-wal', '-shm'):
-        Path(f'{db_path}{suffix}').unlink(missing_ok=True)
-    os.replace(tmp_path, db_path)
     logger.info('Project initialized: %s (%s)', name, db_path)
     return db_path
 
@@ -200,6 +205,15 @@ def add_to_project(
     return db_path
 
 
+def _target_db_mode(db_path: Path) -> int:
+    """Return existing file mode when overwriting, else the umask-respecting default ``0o666`` mode."""
+    if db_path.exists():
+        return stat.S_IMODE(db_path.stat().st_mode)
+    umask = os.umask(0o022)
+    os.umask(umask)
+    return 0o666 & ~umask
+
+
 def _insert_project(conn: sqlite3.Connection, name: str) -> int:
     cur = conn.execute(
         'INSERT INTO project (name, schema_version, uuid) VALUES (?, ?, ?)',
@@ -216,8 +230,9 @@ def _sanitize_effect_as_resistant_algorithms(
 ) -> list[dict]:
     """Drop ``effect_as_resistant`` rules whose drug is absent from the project."""
     project_drugs = {
-        row[0]
+        row[0].strip().lower()
         for row in conn.execute('SELECT name FROM drug WHERE project_id = ?', (project_id,)).fetchall()
+        if row[0]
     }
     sanitized: list[dict] = []
     for config in algorithms:
@@ -227,7 +242,7 @@ def _sanitize_effect_as_resistant_algorithms(
 
         kept_rules: list[dict] = []
         for rule in config['rules']:
-            if rule['drug'] in project_drugs:
+            if rule['drug'].strip().lower() in project_drugs:
                 kept_rules.append(rule)
                 continue
             logger.warning(

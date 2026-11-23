@@ -171,7 +171,7 @@ body {
 
 .feature-name {
   font-weight: 400;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .feature-cov {

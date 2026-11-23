@@ -11,6 +11,8 @@ Covers: respro/db/_rules_alleles.py
 
 from __future__ import annotations
 
+import pytest
+
 from respro.db.rules.alleles import (
     RE_ANCHORLESS_DEL as _RE_ANCHORLESS_DEL,
 )
@@ -326,3 +328,40 @@ class TestNormalizeRuleAllelesForStorage:
             reference_aa='K', mutation_raw='K99*', position_0based=1, context='r', errors=errors2,
         ) is None
         assert any('conflicts' in e for e in errors2)
+
+        for ref_aa, mut_raw in (
+            ('KG', 'K2delA'),
+            ('KGA', 'K2delG'),
+            ('KG', 'K2insT'),
+        ):
+            conflict_errors: list[str] = []
+            assert _normalize_rule_alleles_for_storage(
+                reference_aa=ref_aa, mutation_raw=mut_raw, position_0based=1, context='r', errors=conflict_errors,
+            ) is None
+            assert any('conflicts' in e for e in conflict_errors)
+
+        ok_errors: list[str] = []
+        assert _normalize_rule_alleles_for_storage(
+            reference_aa='K', mutation_raw='K2delA', position_0based=1, context='r', errors=ok_errors,
+        ) == (1, 'KA', 'K')
+        assert _normalize_rule_alleles_for_storage(
+            reference_aa='KA', mutation_raw='K2delA', position_0based=1, context='r', errors=ok_errors,
+        ) == (1, 'KA', 'K')
+        assert _normalize_rule_alleles_for_storage(
+            reference_aa='K', mutation_raw='K2insT', position_0based=1, context='r', errors=ok_errors,
+        ) == (1, 'K', 'KT')
+        assert ok_errors == []
+
+    @pytest.mark.parametrize('token', ['fs*12', 'fs*23', 'fsTer12', 'fsX10'])
+    def test_accepts_bare_hgvs_frameshift_tokens_with_stop_distance(self, token: str):
+        """Bare HGVS frameshift tokens with multi-digit stop distances must normalize without conflict."""
+        errors: list[str] = []
+        result = _normalize_rule_alleles_for_storage(
+            reference_aa='R',
+            mutation_raw=token,
+            position_0based=99,
+            context='test',
+            errors=errors,
+        )
+        assert errors == []
+        assert result == (99, 'R', 'RfsX')

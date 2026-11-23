@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from pathlib import Path
 from typing import TypeVar
@@ -39,28 +40,44 @@ def serialize_combined_states(states: list[CodonState]) -> str:
     ])
 
 
-def deserialize_combined_states(blob: str | None) -> list[CodonState]:
+def deserialize_combined_states(blob: object) -> list[CodonState]:
     """Deserialize a ``combined_states`` JSON string into ``CodonState`` objects."""
-    if not blob:
+    if blob is None or blob == '':
         return []
+    if not isinstance(blob, str):
+        raise ValueError('Invalid combined_states payload: expected a JSON string')
     try:
         items = json.loads(blob)
-        if not isinstance(items, list):
-            raise ValueError('combined_states must be a JSON array')
-        return [
-            CodonState(
-                alt_codon=item['alt_codon'],
-                alt_aa=item['alt_aa'],
-                lower=float(item['lower']),
-                upper=float(item['upper']),
-                forced_fraction=float(item['forced_fraction']),
-                accepted=bool(item['accepted']),
-                member_indices=tuple(item.get('member_indices', [])),
-            )
-            for item in items
-        ]
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f'Invalid combined_states payload: {exc}') from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f'Invalid combined_states payload: {exc.msg}') from exc
+    if not isinstance(items, list):
+        raise ValueError('Invalid combined_states payload: expected a JSON array')
+
+    states: list[CodonState] = []
+    for idx, item in enumerate(items, start=1):
+        ctx = f'combined_states[{idx}]'
+        if not isinstance(item, dict):
+            raise ValueError(f'Invalid results JSON: {ctx} must be an object')
+        raw_members = item.get('member_indices', [])
+        if not isinstance(raw_members, list):
+            raise ValueError(f'Invalid results JSON: {ctx}.member_indices must be an array')
+        if 'accepted' not in item or not isinstance(item['accepted'], (bool, int)):
+            raise ValueError(f'Invalid results JSON: {ctx}.accepted must be a boolean')
+        for key in ('lower', 'upper', 'forced_fraction'):
+            if key not in item:
+                raise ValueError(f'Invalid results JSON: {ctx} missing {key!r}')
+        states.append(CodonState(
+            alt_codon=_require_str_field(item, 'alt_codon', ctx),
+            alt_aa=_require_str_field(item, 'alt_aa', ctx),
+            lower=_require_finite_float(item['lower'], f'{ctx}.lower'),
+            upper=_require_finite_float(item['upper'], f'{ctx}.upper'),
+            forced_fraction=_require_finite_float(item['forced_fraction'], f'{ctx}.forced_fraction'),
+            accepted=bool(item['accepted']),
+            member_indices=tuple(
+                _require_int_value(m, f'{ctx}.member_indices') for m in raw_members
+            ),
+        ))
+    return states
 
 
 def serialize_haplotype_links(links: tuple[tuple[int, int, float], ...]) -> str:
@@ -68,17 +85,33 @@ def serialize_haplotype_links(links: tuple[tuple[int, int, float], ...]) -> str:
     return json.dumps([[int(rec_id), int(alt_id), float(af)] for rec_id, alt_id, af in links])
 
 
-def deserialize_haplotype_links(blob: str | list | None) -> tuple[tuple[int, int, float], ...]:
+def deserialize_haplotype_links(blob: object) -> tuple[tuple[int, int, float], ...]:
     """Deserialize a ``haplotype_links`` JSON string or list into normalized tuples."""
-    if not blob:
+    if blob is None or blob == '' or (isinstance(blob, list) and not blob):
         return ()
-    try:
-        raw = json.loads(blob) if isinstance(blob, str) else blob
-        if not isinstance(raw, list):
-            raise ValueError('haplotype_links must be a JSON array')
-        return tuple((int(item[0]), int(item[1]), float(item[2])) for item in raw)
-    except (json.JSONDecodeError, IndexError, TypeError, ValueError) as exc:
-        raise ValueError(f'Invalid haplotype_links payload: {exc}') from exc
+    if isinstance(blob, str):
+        try:
+            raw = json.loads(blob)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f'Invalid haplotype_links payload: {exc.msg}') from exc
+    elif isinstance(blob, list):
+        raw = blob
+    else:
+        raise ValueError('Invalid haplotype_links payload: expected a JSON string or array')
+    if not isinstance(raw, list):
+        raise ValueError('Invalid haplotype_links payload: expected a JSON array')
+
+    links: list[tuple[int, int, float]] = []
+    for idx, item in enumerate(raw, start=1):
+        ctx = f'haplotype_links[{idx}]'
+        if not isinstance(item, (list, tuple)) or len(item) != 3:
+            raise ValueError(f'Invalid results JSON: {ctx} must be a 3-element array')
+        links.append((
+            _require_int_value(item[0], f'{ctx}[0]'),
+            _require_int_value(item[1], f'{ctx}[1]'),
+            _require_finite_float(item[2], f'{ctx}[2]'),
+        ))
+    return tuple(links)
 
 
 def _insert_variant_and_formula_rows(
@@ -349,45 +382,64 @@ def load_profiled_features(results_conn: sqlite3.Connection, run_id: int) -> dic
 def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
     """Reconstruct ``AnnotatedVariant`` objects from stored ``variant_result`` row dicts."""
     annotations: list[AnnotatedVariant] = []
-    for row in variant_rows:
-        drug_hits = json.loads(row.get('drug_hits') or '[]')
+    for idx, row in enumerate(variant_rows, start=1):
+        ctx = f'variant_result[{idx}]'
+        drug_hits = _parse_json_field(row.get('drug_hits') or '[]', list, f'{ctx}.drug_hits')
+        if any(not isinstance(item, dict) for item in drug_hits):
+            raise ValueError(f'Invalid results JSON: {ctx}.drug_hits entries must be objects')
+        chrom = _require_str_field(row, 'chrom', ctx)
+        ref = _require_str_field(row, 'ref', ctx)
+        alt = _require_str_field(row, 'alt', ctx)
+        pos = _require_int_field(row, 'pos', ctx)
+        allele_freq = _optional_float(row.get('allele_freq'), 0.0, f'{ctx}.allele_freq')
+        depth = _optional_int(row.get('depth'), 0, f'{ctx}.depth')
         variant = VariantCall(
-            chrom=row['chrom'],
-            pos=row['pos'],
-            ref=row['ref'],
-            alt=row['alt'],
-            allele_freq=row.get('allele_freq') or 0.0,
-            depth=row.get('depth') or 0,
-            source=row.get('variant_source') or '',
+            chrom=chrom,
+            pos=pos,
+            ref=ref,
+            alt=alt,
+            allele_freq=allele_freq,
+            depth=depth,
+            source=str(row.get('variant_source') or ''),
             haplotype_links=deserialize_haplotype_links(row.get('haplotype_links')),
         )
-        feature_name = row.get('feature_name') or ''
-        rule_matches = [_rule_from_hit(hit, feature_name) for hit in drug_hits]
+        feature_name = str(row.get('feature_name') or '')
+        rule_matches = [_rule_from_hit(hit, feature_name, f'{ctx}.drug_hits') for hit in drug_hits]
         raw_single_af = row.get('single_exchange_aa_freq')
-        single_af = float(raw_single_af) if raw_single_af is not None else _SINGLE_EXCHANGE_AA_FREQ_UNSET
+        single_af = (
+            _optional_float(raw_single_af, 0.0, f'{ctx}.single_exchange_aa_freq')
+            if raw_single_af is not None
+            else _SINGLE_EXCHANGE_AA_FREQ_UNSET
+        )
+        raw_freq_map = _parse_json_field(
+            row.get('rule_effect_aa_freq') or '{}', dict, f'{ctx}.rule_effect_aa_freq',
+        )
+        raw_alt_map = _parse_json_field(
+            row.get('rule_effect_alt') or '{}', dict, f'{ctx}.rule_effect_alt',
+        )
+        try:
+            rule_effect_aa_freq = {int(k): _optional_float(v, 0.0, f'{ctx}.rule_effect_aa_freq[{k}]') for k, v in raw_freq_map.items()}
+            rule_effect_alt = {int(k): str(v) for k, v in raw_alt_map.items()}
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'Invalid results JSON: {ctx} has invalid rule_effect map entry') from exc
+
         annotations.append(AnnotatedVariant(
             variant=variant,
             feature_name=feature_name,
-            codon_pos=row.get('codon_pos') or 0,
-            ref_codon=row.get('ref_codon') or '',
-            alt_codon=row.get('alt_codon') or '',
-            ref_aa=row.get('ref_aa') or '',
-            alt_aa=row.get('alt_aa') or '',
-            consequence=row.get('consequence') or '',
-            af_bin=row.get('af_bin') or '',
+            codon_pos=_optional_int(row.get('codon_pos'), 0, f'{ctx}.codon_pos'),
+            ref_codon=str(row.get('ref_codon') or ''),
+            alt_codon=str(row.get('alt_codon') or ''),
+            ref_aa=str(row.get('ref_aa') or ''),
+            alt_aa=str(row.get('alt_aa') or ''),
+            consequence=str(row.get('consequence') or ''),
+            af_bin=str(row.get('af_bin') or ''),
             is_combined_codon_event=bool(row.get('is_combined_codon_event', 0)),
-            combined_member_count=row.get('combined_member_count', 1) or 1,
-            combined_states=deserialize_combined_states(row.get('combined_states') or '[]'),
+            combined_member_count=_optional_int(row.get('combined_member_count'), 1, f'{ctx}.combined_member_count') or 1,
+            combined_states=deserialize_combined_states(row.get('combined_states')),
             single_exchange_aa_freq=single_af,
-            rule_effect_aa_freq={
-                int(k): float(v)
-                for k, v in json.loads(row.get('rule_effect_aa_freq') or '{}').items()
-            },
-            rule_effect_alt={
-                int(k): str(v)
-                for k, v in json.loads(row.get('rule_effect_alt') or '{}').items()
-            },
-            freq_method=row.get('freq_method') or 'observed',
+            rule_effect_aa_freq=rule_effect_aa_freq,
+            rule_effect_alt=rule_effect_alt,
+            freq_method=str(row.get('freq_method') or 'observed'),
             rule_matches=rule_matches,
         ))
     return annotations
@@ -399,97 +451,119 @@ def reconstruct_formula_rule_hits(
 ) -> list[FormulaRuleHit]:
     """Reconstruct ``FormulaRuleHit`` objects from persisted formula-hit rows."""
     hits: list[FormulaRuleHit] = []
-    for row in formula_rows:
-        payload = json.loads(row.get('hit_json') or '{}')
+    for idx, row in enumerate(formula_rows, start=1):
+        ctx = f'formula_rule_hit[{idx}].hit_json'
+        payload = _parse_json_field(row.get('hit_json') or '{}', dict, ctx)
+        raw_member_ids = payload.get('matched_member_ids', [])
+        if raw_member_ids is None:
+            raw_member_ids = []
+        if not isinstance(raw_member_ids, list) or any(not isinstance(m, str) for m in raw_member_ids):
+            raise ValueError(f'Invalid results JSON: {ctx}.matched_member_ids must be an array of strings')
+        matched_variants_raw = payload.get('matched_variants', [])
+        if matched_variants_raw is None:
+            matched_variants_raw = []
         hits.append(FormulaRuleHit(
-            rule_set=_rule_set_from_formula_hit(payload),
-            matched_variants=_match_formula_variants(payload.get('matched_variants', []), annotations),
-            matched_member_ids=list(payload.get('matched_member_ids', [])),
-            frechet_lower=float(payload.get('frechet_lower', 0.0)),
-            forced_fraction=float(payload.get('forced_fraction', 0.0)),
-            member_count=int(payload.get('member_count', 1)),
+            rule_set=_rule_set_from_formula_hit(payload, ctx),
+            matched_variants=_match_formula_variants(matched_variants_raw, annotations, f'{ctx}.matched_variants'),
+            matched_member_ids=list(raw_member_ids),
+            frechet_lower=_optional_float(payload.get('frechet_lower'), 0.0, f'{ctx}.frechet_lower'),
+            forced_fraction=_optional_float(payload.get('forced_fraction'), 0.0, f'{ctx}.forced_fraction'),
+            member_count=_optional_int(payload.get('member_count'), 1, f'{ctx}.member_count'),
         ))
     return hits
 
 
-def _publications_from_payload(items: list[dict]) -> list[Publication]:
+def _publications_from_payload(items: object, context: str = 'publications') -> list[Publication]:
+    if items is None:
+        return []
+    if not isinstance(items, list) or any(not isinstance(p, dict) for p in items):
+        raise ValueError(f'Invalid results JSON: {context} must be an array of objects')
     return [
         Publication(
             id=0,
-            doi=p.get('doi', ''),
-            title=p.get('title', ''),
-            pubmed_id=p.get('pubmed_id', ''),
-            raw_input=p.get('raw_input', ''),
-            first_author=p.get('first_author', ''),
-            year=p.get('year', ''),
-            journal=p.get('journal', ''),
+            doi=str(p.get('doi') or ''),
+            title=str(p.get('title') or ''),
+            pubmed_id=str(p.get('pubmed_id') or ''),
+            raw_input=str(p.get('raw_input') or ''),
+            first_author=str(p.get('first_author') or ''),
+            year=str(p.get('year') or ''),
+            journal=str(p.get('journal') or ''),
         )
         for p in items
     ]
 
 
-def _rule_from_hit(hit: dict, feature_name: str) -> ResistanceRule:
+def _rule_from_hit(hit: dict, feature_name: str, context: str = 'drug_hits') -> ResistanceRule:
+    drug_name = str(hit.get('drug') or '')
     return ResistanceRule(
-        id=int(hit.get('rule_id', 0) or 0),
+        id=_optional_int(hit.get('rule_id'), 0, f'{context}.rule_id'),
         feature_name=feature_name,
         feature_id=0,
-        drug_name=hit.get('drug', ''),
+        drug_name=drug_name,
         drug_id=0,
-        external_id=hit.get('external_id', ''),
-        reference_identifier=hit.get('reference_identifier', ''),
+        external_id=str(hit.get('external_id') or ''),
+        reference_identifier=str(hit.get('reference_identifier') or ''),
         position=0,
-        reference=hit.get('reference', ''),
-        mutation=hit.get('mutation', ''),
-        phenotype=hit.get('phenotype', ''),
-        clinical_phenotype=hit.get('clinical_phenotype', ''),
-        ic50=hit.get('ic50', ''),
-        fold_ic50=hit.get('fold_ic50', ''),
-        score=hit.get('score', ''),
-        source=hit.get('source', ''),
-        publications=_publications_from_payload(hit.get('publications', [])),
-        pubchem_url=hit.get('pubchem_url', ''),
-        is_internal_formula_component=is_internal_formula_component_drug_name(hit.get('drug', '')),
+        reference=str(hit.get('reference') or ''),
+        mutation=str(hit.get('mutation') or ''),
+        phenotype=str(hit.get('phenotype') or ''),
+        clinical_phenotype=str(hit.get('clinical_phenotype') or ''),
+        ic50=str(hit.get('ic50') or ''),
+        fold_ic50=str(hit.get('fold_ic50') or ''),
+        score=str(hit.get('score') or ''),
+        source=str(hit.get('source') or ''),
+        publications=_publications_from_payload(hit.get('publications', []), f'{context}.publications'),
+        pubchem_url=str(hit.get('pubchem_url') or ''),
+        is_internal_formula_component=is_internal_formula_component_drug_name(drug_name),
     )
 
 
-def _rule_set_from_formula_hit(payload: dict) -> ResistanceRuleSet:
+def _rule_set_from_formula_hit(payload: dict, context: str = 'hit_json') -> ResistanceRuleSet:
+    raw_members = payload.get('members', [])
+    if raw_members is None:
+        raw_members = []
+    if not isinstance(raw_members, list) or any(not isinstance(m, dict) for m in raw_members):
+        raise ValueError(f'Invalid results JSON: {context}.members must be an array of objects')
     members = [
         ResistanceRuleSetMember(
             id=idx,
             rule_set_id=0,
-            feature_name=m.get('feature', ''),
+            feature_name=str(m.get('feature') or ''),
             feature_id=0,
             reference_identifier='',
-            position=max(0, int(m.get('position', 1) or 1) - 1),
-            reference=m.get('reference', ''),
-            mutation=m.get('mutation', ''),
-            external_id=m.get('member_id', ''),
+            position=max(0, _optional_int(m.get('position'), 1, f'{context}.members[{idx}].position') - 1),
+            reference=str(m.get('reference') or ''),
+            mutation=str(m.get('mutation') or ''),
+            external_id=str(m.get('member_id') or ''),
         )
-        for idx, m in enumerate(payload.get('members', []), start=1)
+        for idx, m in enumerate(raw_members, start=1)
     ]
     return ResistanceRuleSet(
         id=0,
-        drug_name=payload.get('drug', ''),
+        drug_name=str(payload.get('drug') or ''),
         drug_id=0,
-        phenotype=payload.get('phenotype', ''),
-        clinical_phenotype=payload.get('clinical_phenotype', ''),
-        ic50=payload.get('ic50', ''),
-        fold_ic50=payload.get('fold_ic50', ''),
-        score=payload.get('score', ''),
-        source=payload.get('source', ''),
-        group_name=payload.get('rule_group', ''),
-        pubchem_url=payload.get('pubchem_url', ''),
-        logic_expression=payload.get('logic_expression', ''),
-        publications=_publications_from_payload(payload.get('publications', [])),
+        phenotype=str(payload.get('phenotype') or ''),
+        clinical_phenotype=str(payload.get('clinical_phenotype') or ''),
+        ic50=str(payload.get('ic50') or ''),
+        fold_ic50=str(payload.get('fold_ic50') or ''),
+        score=str(payload.get('score') or ''),
+        source=str(payload.get('source') or ''),
+        group_name=str(payload.get('rule_group') or ''),
+        pubchem_url=str(payload.get('pubchem_url') or ''),
+        logic_expression=str(payload.get('logic_expression') or ''),
+        publications=_publications_from_payload(payload.get('publications', []), f'{context}.publications'),
         members=members,
     )
 
 
 def _match_formula_variants(
-    variant_payloads: list[dict],
+    variant_payloads: object,
     annotations: list[AnnotatedVariant],
+    context: str = 'matched_variants',
 ) -> list[AnnotatedVariant]:
     """Pair persisted formula-variant summaries back to reconstructed ``AnnotatedVariant`` rows."""
+    if not isinstance(variant_payloads, list) or any(not isinstance(item, dict) for item in variant_payloads):
+        raise ValueError(f'Invalid results JSON: {context} must be an array of objects')
     by_exact: dict[tuple, AnnotatedVariant] = {}
     by_weak: dict[tuple, AnnotatedVariant] = {}
     for ann in annotations:
@@ -498,20 +572,23 @@ def _match_formula_variants(
         by_weak.setdefault(weak, ann)
 
     matched: list[AnnotatedVariant] = []
-    for item in variant_payloads:
-        af = float(item.get('allele_freq', 0.0) or 0.0)
-        codon_1based = int(item.get('codon_pos', 1) or 1)
-        weak = (item.get('feature', ''), codon_1based, item.get('ref_aa', ''), item.get('alt_aa', ''))
+    for idx, item in enumerate(variant_payloads, start=1):
+        af = _optional_float(item.get('allele_freq'), 0.0, f'{context}[{idx}].allele_freq')
+        codon_1based = _optional_int(item.get('codon_pos'), 1, f'{context}[{idx}].codon_pos')
+        feature = str(item.get('feature') or '')
+        ref_aa = str(item.get('ref_aa') or '')
+        alt_aa = str(item.get('alt_aa') or '')
+        weak = (feature, codon_1based, ref_aa, alt_aa)
         found = by_exact.get((*weak, round(af, 6))) or by_weak.get(weak)
         if found is not None:
             matched.append(found)
             continue
         matched.append(AnnotatedVariant(
             variant=VariantCall(chrom='', pos=0, ref='', alt='', allele_freq=af, depth=0),
-            feature_name=item.get('feature', ''),
+            feature_name=feature,
             codon_pos=max(0, codon_1based - 1),
-            ref_aa=item.get('ref_aa', ''),
-            alt_aa=item.get('alt_aa', ''),
+            ref_aa=ref_aa,
+            alt_aa=alt_aa,
             consequence='',
         ))
     return matched
@@ -590,12 +667,27 @@ def load_run_from_json(
     missing = sorted(key for key in required_run_keys if key not in run_dict)
     if missing:
         raise ValueError(f'Invalid results JSON: missing run field(s): {", ".join(missing)}')
+    for key in ('project_name', 'reference_name', 'sample_name', 'vcf_path', 'created_at'):
+        _require_str_field(run_dict, key, 'run')
+    for key in ('total_variants', 'variants_in_cds', 'resistance_hits'):
+        run_dict[key] = _require_int_field(run_dict, key, 'run')
 
     run_dict.setdefault('project_db_path', '')
     run_dict.setdefault('project_fingerprint', '')
     run_dict.setdefault('formula_hits', len(formula_rows))
     run_dict.setdefault('status', 'complete')
-    run_dict['references'] = _require_list_of_dicts(payload, 'references') if 'references' in payload else []
+    references = _require_list_of_dicts(payload, 'references') if 'references' in payload else []
+    for idx, ref in enumerate(references, start=1):
+        for field in ('reference_name', 'query_name'):
+            val = ref.get(field)
+            if val is not None and not isinstance(val, str):
+                raise ValueError(f'Invalid results JSON: references[{idx}].{field} must be a string')
+        pfn = ref.get('profiled_feature_names')
+        if pfn is not None and (not isinstance(pfn, list) or any(not isinstance(f, str) for f in pfn)):
+            raise ValueError(
+                f'Invalid results JSON: references[{idx}].profiled_feature_names must be an array of strings'
+            )
+    run_dict['references'] = references
 
     coverage_gaps: list[CoverageGap] = []
     for idx, row in enumerate(coverage_rows, start=1):
@@ -613,12 +705,17 @@ def load_run_from_json(
         for key in ('chrom', 'pos', 'ref', 'alt', 'drug_hits'):
             if key not in row:
                 raise ValueError(f'Invalid results JSON: variant_result[{idx}] missing {key!r}')
-        _require_int_field(row, 'pos', f'variant_result[{idx}]')
-        _validate_variant_json_fields(row, idx)
+        ref_name = row.get('reference_name')
+        if ref_name is not None and not isinstance(ref_name, str):
+            raise ValueError(f'Invalid results JSON: variant_result[{idx}].reference_name must be a string')
+        row['pos'] = _require_int_field(row, 'pos', f'variant_result[{idx}]')
     for idx, row in enumerate(formula_rows, start=1):
         if 'hit_json' not in row:
             raise ValueError(f"Invalid results JSON: formula_rule_hit[{idx}] missing 'hit_json'")
-        _parse_json_field(row.get('hit_json') or '{}', dict, f'formula_rule_hit[{idx}].hit_json')
+
+    # Exercise the actual reconstruction helpers so upload validation and regenerate share one contract.
+    reconstructed = reconstruct_annotations(variant_rows)
+    reconstruct_formula_rule_hits(formula_rows, reconstructed)
 
     return run_dict, variant_rows, coverage_gaps, formula_rows, classification_rows
 
@@ -671,14 +768,48 @@ def _require_list_of_dicts(payload: dict, key: str) -> list[dict]:
     return value
 
 
-def _require_int_field(row: dict, key: str, context: str) -> int:
+def _require_str_field(row: dict, key: str, context: str) -> str:
     val = row.get(key)
-    if isinstance(val, bool) or val is None:
-        raise ValueError(f'Invalid results JSON: {context}.{key} must be an integer')
+    if not isinstance(val, str):
+        raise ValueError(f'Invalid results JSON: {context}.{key} must be a string')
+    return val
+
+
+def _require_int_value(val: object, context: str) -> int:
+    if isinstance(val, bool) or not isinstance(val, (int, float, str)):
+        raise ValueError(f'Invalid results JSON: {context} must be an integer')
     try:
         return int(val)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f'Invalid results JSON: {context} must be an integer') from exc
+
+
+def _require_finite_float(val: object, context: str) -> float:
+    if isinstance(val, bool) or not isinstance(val, (int, float, str)):
+        raise ValueError(f'Invalid results JSON: {context} must be a number')
+    try:
+        parsed = float(val)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f'Invalid results JSON: {context}.{key} must be an integer') from exc
+        raise ValueError(f'Invalid results JSON: {context} must be a number') from exc
+    if not math.isfinite(parsed):
+        raise ValueError(f'Invalid results JSON: {context} must be finite')
+    return parsed
+
+
+def _require_int_field(row: dict, key: str, context: str) -> int:
+    return _require_int_value(row.get(key), f'{context}.{key}')
+
+
+def _optional_int(val: object, default: int, context: str) -> int:
+    if val is None or val == '':
+        return default
+    return _require_int_value(val, context)
+
+
+def _optional_float(val: object, default: float, context: str) -> float:
+    if val is None or val == '':
+        return default
+    return _require_finite_float(val, context)
 
 
 _T = TypeVar('_T')
@@ -694,27 +825,6 @@ def _parse_json_field(raw: object, expected_type: type[_T], context: str) -> _T:
     if not isinstance(parsed, expected_type):
         raise ValueError(f'Invalid results JSON: {context} must decode to {expected_type.__name__}')
     return parsed
-
-
-def _validate_variant_json_fields(row: dict, idx: int) -> None:
-    ctx = f'variant_result[{idx}]'
-    hits = _parse_json_field(row.get('drug_hits') or '[]', list, f'{ctx}.drug_hits')
-    if any(not isinstance(item, dict) for item in hits):
-        raise ValueError(f'Invalid results JSON: {ctx}.drug_hits entries must be objects')
-    if row.get('combined_states'):
-        deserialize_combined_states(row['combined_states'])
-    if row.get('haplotype_links'):
-        deserialize_haplotype_links(row['haplotype_links'])
-    for map_field in ('rule_effect_aa_freq', 'rule_effect_alt'):
-        if row.get(map_field):
-            mapping = _parse_json_field(row[map_field], dict, f'{ctx}.{map_field}')
-            try:
-                for k, v in mapping.items():
-                    int(k)
-                    if map_field == 'rule_effect_aa_freq':
-                        float(v)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f'Invalid results JSON: {ctx}.{map_field} has invalid entry') from exc
 
 
 def _resolve_run_id(results_conn: sqlite3.Connection, run_identifier: str | int) -> int:

@@ -85,9 +85,10 @@ def _fetch_cid(name: str, timeout: int) -> LookupResult[int]:
     if not res.value:
         return LookupResult.not_found()
     first = res.value[0]
-    if isinstance(first, bool) or not isinstance(first, (int, str)) or not str(first).isdigit():
+    first_str = str(first)
+    if isinstance(first, bool) or not isinstance(first, (int, str)) or not (first_str.isascii() and first_str.isdigit()):
         return LookupResult.error()
-    return LookupResult.found(int(first))
+    return LookupResult.found(int(first_str))
 
 
 def _fetch_substance_sids(name: str, timeout: int) -> LookupResult[list[int]]:
@@ -100,8 +101,11 @@ def _fetch_substance_sids(name: str, timeout: int) -> LookupResult[list[int]]:
     if res.status is not LookupStatus.FOUND or res.value is None:
         return LookupResult(status=res.status)
     sids = [
-        int(s) for s in res.value
-        if not isinstance(s, bool) and isinstance(s, (int, str)) and str(s).isdigit()
+        int(s_str) for s in res.value
+        if not isinstance(s, bool)
+        and isinstance(s, (int, str))
+        and (s_str := str(s)).isascii()
+        and s_str.isdigit()
     ]
     return LookupResult.found(sids) if sids else LookupResult.not_found()
 

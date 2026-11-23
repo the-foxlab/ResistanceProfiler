@@ -53,12 +53,16 @@ def compute_coverage_gaps_from_bam_multi(
                 continue
             contig = _try_resolve_bam_contig(bam, query_name, allow_sole_fallback=allow_sole_fallback)
             if contig is None:
-                logger.warning('BAM has no contig %r; skipping coverage for this CHROM', chrom)
-                continue
-            depths = _depth_array_from_bam(
-                bam, contig, query_len,
-                bam_base_quality_threshold=bam_base_quality_threshold,
-            )
+                logger.warning(
+                    'BAM has no contig %r; marking %d feature(s) on this CHROM as uncovered',
+                    chrom, len(matches),
+                )
+                depths: list[int] = []
+            else:
+                depths = _depth_array_from_bam(
+                    bam, contig, query_len,
+                    bam_base_quality_threshold=bam_base_quality_threshold,
+                )
             all_gaps.extend(
                 compute_coverage_gaps_from_depth(
                     depths, matches, min_depth=min_depth, query_len=query_len, chrom=chrom,
@@ -157,7 +161,11 @@ def _depth_array_from_bam(
         quality_threshold=bam_base_quality_threshold,
         read_callback='all',
     )
-    return [int(counts[0][i] + counts[1][i] + counts[2][i] + counts[3][i]) for i in range(query_len)]
+    covered_len = min(query_len, len(counts[0])) if counts else 0
+    depths = [int(counts[0][i] + counts[1][i] + counts[2][i] + counts[3][i]) for i in range(covered_len)]
+    if covered_len < query_len:
+        depths.extend([0] * (query_len - covered_len))
+    return depths
 
 
 def _codon_is_non_covered(

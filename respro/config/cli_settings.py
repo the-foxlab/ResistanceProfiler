@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import tomllib
 from dataclasses import dataclass
 from importlib.resources import files
@@ -165,7 +166,7 @@ def _is_valid_scalar(value: Any, expected: Any) -> bool:
     if isinstance(value, bool) and expected in (int, float):
         return False
     if expected is float:
-        return isinstance(value, (int, float))
+        return isinstance(value, (int, float)) and math.isfinite(value)
     return isinstance(value, expected)
 
 

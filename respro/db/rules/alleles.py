@@ -9,7 +9,10 @@ from respro.core.codons import normalize_mutation
 # Anchor-less deletion tokens (e.g. 'Q35del', 'DD676del') resolved against feature aa_sequence.
 RE_ANCHORLESS_DEL = re.compile(r'^([A-Za-z]+)\d+del$', re.IGNORECASE)
 RE_REWRITE_TOKEN = re.compile(r'^([A-Z*]+)(\d+)([A-Z*]+)$')
-_RE_EMBEDDED_COORD = re.compile(r'^([A-Za-z*]+)(\d+)(.+)$')
+# Group 3 must begin with a non-digit so bare HGVS frameshifts like 'fs*12' or 'fsTer12'
+# cannot backtrack digits into group 3 and trip the embedded-coordinate check.
+_RE_EMBEDDED_COORD = re.compile(r'^([A-Za-z*]+)(\d+)([^\d].*)$')
+_RE_BARE_FRAMESHIFT = re.compile(r'^(?:fs|frameshift)(?:\*|ter|x)', re.IGNORECASE)
 
 _STANDARD_AA_LETTERS = frozenset('ACDEFGHIKLMNPQRSTVWY')
 
@@ -64,7 +67,7 @@ def normalize_rule_alleles_for_storage(
         else:
             mutation = token_upper
     else:
-        embedded = _RE_EMBEDDED_COORD.fullmatch(mutation_input)
+        embedded = None if _RE_BARE_FRAMESHIFT.match(mutation_input) else _RE_EMBEDDED_COORD.fullmatch(mutation_input)
         if embedded is not None:
             emb_left, emb_pos_text, _ = embedded.groups()
             emb_pos_0based = int(emb_pos_text) - 1
@@ -105,6 +108,12 @@ def normalize_rule_alleles_for_storage(
         errors.append(
             f'{context}: position {position_0based + 1} conflicts with mutation token '
             f'{mutation!r} (anchor position is {anchor_pos_0based + 1})'
+        )
+        return None
+    if not left.startswith(reference):
+        errors.append(
+            f'{context}: reference AA {reference!r} conflicts with normalized mutation '
+            f'{mutation!r} (anchor reference is {left!r})'
         )
         return None
     return anchor_pos_0based, left, right

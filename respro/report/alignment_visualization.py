@@ -194,6 +194,46 @@ def _variant_native_pos(ann: AnnotatedVariant, alignment: FeatureAlignment) -> i
     return ann.variant.pos - alignment.feature_start
 
 
+@dataclass(frozen=True)
+class _VariantSpan:
+    """Native-direction allele span shared across overlay, detection, and highlight helpers."""
+
+    anchor_pos: int
+    ref_allele: str
+    alt_allele: str
+    common_len: int
+    ins_anchor: int
+    changed_common: frozenset[int]
+
+    def matches_insertion_cell(self, cell_anchor: int, strand: str) -> bool:
+        """Return True when an insertion gap column is anchored within this variant's common span."""
+        return (
+            self.anchor_pos <= cell_anchor <= self.ins_anchor
+            or (strand == '-' and self.anchor_pos <= cell_anchor - 1 <= self.ins_anchor)
+        )
+
+
+def _variant_span(ann: AnnotatedVariant, alignment: FeatureAlignment) -> _VariantSpan:
+    anchor_pos = _variant_native_pos(ann, alignment)
+    ref_allele = ann.variant.ref.upper()
+    alt_allele = ann.variant.alt.upper()
+    common_len = min(len(ref_allele), len(alt_allele))
+    ins_anchor = anchor_pos + common_len - 1 if common_len > 0 else anchor_pos
+    changed_common = frozenset(
+        anchor_pos + offset
+        for offset in range(common_len)
+        if ref_allele[offset] != alt_allele[offset]
+    )
+    return _VariantSpan(
+        anchor_pos=anchor_pos,
+        ref_allele=ref_allele,
+        alt_allele=alt_allele,
+        common_len=common_len,
+        ins_anchor=ins_anchor,
+        changed_common=changed_common,
+    )
+
+
 def _apply_vcf_overlay(
     ann: AnnotatedVariant,
     alignment: FeatureAlignment,
@@ -210,42 +250,32 @@ def _apply_vcf_overlay(
     native_pos = list(native_positions)
     native_anchor_pos = list(native_anchor_positions)
 
-    anchor_pos = _variant_native_pos(ann, alignment)
-    anchor_idx = next((i for i, pos in enumerate(native_pos) if pos == anchor_pos), None)
+    span = _variant_span(ann, alignment)
+    anchor_idx = next((i for i, pos in enumerate(native_pos) if pos == span.anchor_pos), None)
     if anchor_idx is None:
         return ref_window, query_window, coding_positions, native_positions, native_anchor_positions
 
-    ref_allele = ann.variant.ref.upper()
-    alt_allele = ann.variant.alt.upper()
-    common_len = min(len(ref_allele), len(alt_allele))
-    replace_positions = set(range(anchor_pos, anchor_pos + common_len))
-    replace_idxs = [
-        i
-        for _pos, i in sorted(
-            (pos, i) for i, pos in enumerate(native_pos) if pos is not None and pos in replace_positions
-        )
-    ]
-    for offset, idx in enumerate(replace_idxs[:common_len]):
-        query_chars[idx] = alt_allele[offset]
+    ins_anchor_idx: int | None = None
+    for i, pos in enumerate(native_pos):
+        if pos is not None and span.anchor_pos <= pos < span.anchor_pos + span.common_len:
+            query_chars[i] = span.alt_allele[pos - span.anchor_pos]
+            if pos == span.ins_anchor:
+                ins_anchor_idx = i
 
-    if len(alt_allele) > len(ref_allele):
-        insert_after = replace_idxs[common_len - 1] if len(replace_idxs) >= common_len else anchor_idx
-        for offset, base in enumerate(alt_allele[common_len:]):
-            idx = insert_after + 1 + offset
-            ref_chars.insert(idx, '-')
-            query_chars.insert(idx, base)
-            coding_pos.insert(idx, None)
-            native_pos.insert(idx, None)
-            native_anchor_pos.insert(idx, anchor_pos + common_len - 1)
-    elif len(ref_allele) > len(alt_allele):
-        deleted_len = len(ref_allele) - common_len
-        deleted_positions = set(range(anchor_pos + common_len, anchor_pos + len(ref_allele)))
-        deleted_idxs = [i for i, pos in enumerate(native_pos) if pos is not None and pos in deleted_positions]
-        if len(deleted_idxs) < deleted_len:
-            tail_start = (replace_idxs[common_len - 1] if len(replace_idxs) >= common_len else anchor_idx) + 1
-            deleted_idxs = [i for i in range(tail_start, len(native_pos)) if native_pos[i] is not None][:deleted_len]
-        for idx in deleted_idxs:
-            query_chars[idx] = '-'
+    if len(span.alt_allele) > len(span.ref_allele):
+        if ins_anchor_idx is not None:
+            for offset, base in enumerate(span.alt_allele[span.common_len:]):
+                idx = ins_anchor_idx + 1 + offset
+                ref_chars.insert(idx, '-')
+                query_chars.insert(idx, base)
+                coding_pos.insert(idx, None)
+                native_pos.insert(idx, None)
+                native_anchor_pos.insert(idx, span.ins_anchor)
+    elif len(span.ref_allele) > len(span.alt_allele):
+        deleted_positions = set(range(span.anchor_pos + span.common_len, span.anchor_pos + len(span.ref_allele)))
+        for idx, pos in enumerate(native_pos):
+            if pos is not None and pos in deleted_positions:
+                query_chars[idx] = '-'
 
     return ''.join(ref_chars), ''.join(query_chars), coding_pos, native_pos, native_anchor_pos
 
@@ -260,27 +290,22 @@ def _window_displays_variant(
     codon_nt_start: int,
 ) -> bool:
     """Return True when the aligned window already displays the variant event."""
-    anchor_pos = _variant_native_pos(ann, alignment)
-    ref_allele = ann.variant.ref.upper()
-    alt_allele = ann.variant.alt.upper()
+    span = _variant_span(ann, alignment)
 
-    if len(alt_allele) > len(ref_allele):
-        inserted_len = len(alt_allele) - len(ref_allele)
+    if len(span.alt_allele) > len(span.ref_allele):
+        inserted_len = len(span.alt_allele) - len(span.ref_allele)
         insertion_idxs = [
             idx
             for idx, (ref_pos, cell_anchor) in enumerate(zip(native_positions, native_anchor_positions))
-            if ref_pos is None and (
-                cell_anchor == anchor_pos
-                or (alignment.strand == '-' and cell_anchor - 1 == anchor_pos)
-            )
+            if ref_pos is None and span.matches_insertion_cell(cell_anchor, alignment.strand)
         ]
         return len(insertion_idxs) >= inserted_len and any(
             query_window[idx] != '-' for idx in insertion_idxs[:inserted_len]
         )
 
-    if len(ref_allele) > len(alt_allele):
-        deleted_len = len(ref_allele) - len(alt_allele)
-        deleted_positions = set(range(anchor_pos + 1, anchor_pos + 1 + deleted_len))
+    if len(span.ref_allele) > len(span.alt_allele):
+        deleted_len = len(span.ref_allele) - len(span.alt_allele)
+        deleted_positions = set(range(span.anchor_pos + span.common_len, span.anchor_pos + len(span.ref_allele)))
         deleted_idxs = [i for i, pos in enumerate(native_positions) if pos is not None and pos in deleted_positions]
         return len(deleted_idxs) >= deleted_len and all(
             query_window[idx] == '-' for idx in deleted_idxs[:deleted_len]
@@ -300,21 +325,22 @@ def _build_affected_mask(
 ) -> list[bool]:
     """Return a per-column boolean mask marking cells directly affected by *ann*."""
     affected_ref_positions = _affected_nt_positions(ann, alignment, codon_nt_start)
+    span = _variant_span(ann, alignment)
     is_indel_like = (
         ann.consequence in {'insertion', 'deletion', 'frameshift'}
-        or len(ann.variant.ref) != len(ann.variant.alt)
+        or len(span.ref_allele) != len(span.alt_allele)
     )
-    is_insertion_like = len(ann.variant.alt) > len(ann.variant.ref)
-    variant_anchor_pos = _variant_native_pos(ann, alignment)
+    is_insertion_like = len(span.alt_allele) > len(span.ref_allele)
 
     mask: list[bool] = []
     for ref_pos, cell_anchor in zip(native_positions, native_anchor_positions):
         if ref_pos is None:
-            hit = cell_anchor in affected_ref_positions or (
-                is_insertion_like and alignment.strand == '-' and (cell_anchor - 1) in affected_ref_positions
-            )
+            if span.ref_allele or span.alt_allele:
+                hit = is_insertion_like and span.matches_insertion_cell(cell_anchor, alignment.strand)
+            else:
+                hit = cell_anchor in affected_ref_positions
             mask.append(hit)
-        elif is_indel_like and ref_pos == variant_anchor_pos:
+        elif is_indel_like and ref_pos == span.ins_anchor and ref_pos not in span.changed_common:
             mask.append(False)
         else:
             mask.append(ref_pos in affected_ref_positions)
@@ -327,16 +353,16 @@ def _affected_nt_positions(
     codon_nt_start: int,
 ) -> set[int]:
     """Return native-direction positions to highlight as directly affected by *ann*."""
-    anchor_pos = _variant_native_pos(ann, alignment)
-    ref_len = len(ann.variant.ref)
-    alt_len = len(ann.variant.alt)
+    span = _variant_span(ann, alignment)
+    ref_len = len(span.ref_allele)
+    alt_len = len(span.alt_allele)
 
     if alt_len > ref_len:
-        return {anchor_pos}
+        return set(span.changed_common) | {span.ins_anchor}
     if ref_len > alt_len:
-        return set(range(anchor_pos + 1, anchor_pos + 1 + (ref_len - alt_len)))
+        return set(span.changed_common) | set(range(span.anchor_pos + span.common_len, span.anchor_pos + ref_len))
     if ref_len == alt_len and ref_len > 0:
-        return set(range(anchor_pos, anchor_pos + ref_len))
+        return set(range(span.anchor_pos, span.anchor_pos + ref_len))
 
     if len(ann.ref_codon) == 3 and len(ann.alt_codon) == 3:
         affected: set[int] = set()
@@ -346,7 +372,7 @@ def _affected_nt_positions(
             coding_pos = codon_nt_start + idx
             affected.add(alignment.feature_length - 1 - coding_pos if alignment.strand == '-' else coding_pos)
         return affected
-    return {anchor_pos}
+    return {span.anchor_pos}
 
 
 def build_alignment_html(
@@ -377,9 +403,9 @@ def build_alignment_html(
 
     left_context = context_codons
     right_context = context_codons
-    deleted_nt = max(0, len(ann.variant.ref) - len(ann.variant.alt))
-    if deleted_nt > 0:
-        extra = (deleted_nt + 2) // 3
+    span_nt = max(0, len(ann.variant.ref) - 1)
+    if span_nt > 0:
+        extra = (span_nt + 2) // 3
         if alignment.strand == '-':
             left_context += extra
         else:

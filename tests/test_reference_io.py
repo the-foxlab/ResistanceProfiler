@@ -352,3 +352,37 @@ class TestParseVcfFilterStatus:
         fa.write_text('>seq1\nATGAAA\n>seq1\nATGCCC\n', encoding='utf-8')
         with pytest.raises(ValueError, match='Duplicate FASTA'):
             read_fasta(fa)
+
+    def test_vcf_numeric_coercion_and_string_or_negative_af(self, tmp_path: Path) -> None:
+        from respro.io.vcf import _to_float, _to_int
+
+        assert _to_int('inf') is None
+        assert _to_int('1e309') is None
+        assert _to_float('1e309') is None
+        assert _to_float('nan') is None
+
+        vcf_str_af = tmp_path / 'string_af.vcf'
+        vcf_str_af.write_text(
+            '##fileformat=VCFv4.3\n'
+            '##INFO=<ID=AF,Number=1,Type=String,Description="String AF">\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'seq1\t10\t.\tA\tC,G\t.\t.\tAF=0.25,0.75\n'
+        )
+        variants = parse_vcf(vcf_str_af)
+        assert [(v.alt, v.allele_freq) for v in variants] == [
+            ('C', pytest.approx(0.25)),
+            ('G', pytest.approx(0.75)),
+        ]
+
+        vcf_neg_af = tmp_path / 'neg_af.vcf'
+        vcf_neg_af.write_text(
+            '##fileformat=VCFv4.3\n'
+            '##INFO=<ID=AF,Number=A,Type=Float,Description="Alt allele freq">\n'
+            '#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n'
+            'seq1\t10\t.\tA\tC,G\t.\t.\tAF=-0.5,0.4\n'
+        )
+        neg_variants = parse_vcf(vcf_neg_af)
+        assert [(v.alt, v.allele_freq) for v in neg_variants] == [
+            ('C', pytest.approx(0.6)),
+            ('G', pytest.approx(0.4)),
+        ]

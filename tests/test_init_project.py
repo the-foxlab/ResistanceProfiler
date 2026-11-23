@@ -2891,4 +2891,79 @@ class TestGenbankSplicedAndAtomicInit:
         ).fetchone()[0] == 1
         conn.close()
 
+    def test_init_project_respects_umask_cleans_replace_failure_and_keeps_mixed_case_effect_as_resistant(
+        self, tmp_path: Path,
+    ) -> None:
+        import json
+        import os
+        import stat
+
+        gb = tmp_path / 'ref1.gb'
+        rec = SeqRecord(Seq('ATGAAAGCTTTTTAA'), id='ref1', name='ref1', description='Ref 1')
+        rec.annotations['molecule_type'] = 'DNA'
+        rec.features = [
+            SeqFeature(
+                FeatureLocation(0, 15, strand=1),
+                type='CDS',
+                qualifiers={'gene': ['gag'], 'product': ['Gag'], 'codon_start': ['1']},
+            ),
+        ]
+        with gb.open('w', encoding='utf-8') as fh:
+            SeqIO.write([rec], fh, 'genbank')
+
+        rules = tmp_path / 'rules.tsv'
+        rules.write_text(
+            'feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\n'
+            'gag\tref1\t2\tK\tE\tAciclovir\tresistant\n',
+            encoding='utf-8',
+        )
+        meta = tmp_path / 'meta.json'
+        meta.write_text(json.dumps({
+            'interpretation_algorithms': [
+                {
+                    'name': 'effect_as_resistant',
+                    'rules': [
+                        {
+                            'feature': 'gag',
+                            'reference': 'ref1',
+                            'drug': 'Aciclovir',
+                            'effect': ['frameshift'],
+                        },
+                    ],
+                },
+            ],
+        }), encoding='utf-8')
+
+        db = tmp_path / 'proj.db'
+        umask = os.umask(0o022)
+        os.umask(umask)
+        init_project(
+            db_path=db,
+            name='UmaskTest',
+            genbank_paths=[gb],
+            rules_tsv=rules,
+            metadata_json=meta,
+            additional_info=False,
+        )
+        assert stat.S_IMODE(db.stat().st_mode) == (0o666 & ~umask)
+
+        conn = open_project_db(db)
+        algos = load_interpretation_algorithms(conn, 1)
+        conn.close()
+        ear = [a for a in algos if a.get('name') == 'effect_as_resistant']
+        assert len(ear) == 1
+        assert ear[0]['rules'][0]['drug'] == 'Aciclovir'
+
+        with patch('respro.cli.init.os.replace', side_effect=OSError('disk full')):
+            with pytest.raises(OSError, match='disk full'):
+                init_project(
+                    db_path=db,
+                    name='UmaskTest',
+                    genbank_paths=[gb],
+                    rules_tsv=rules,
+                    overwrite=True,
+                    additional_info=False,
+                )
+        assert list(tmp_path.glob('*.tmp*')) == []
+
 

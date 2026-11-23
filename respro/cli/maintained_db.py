@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Annotated
@@ -118,8 +119,8 @@ def _download_command(database_name: str, db_path: Path, additional_info: bool) 
                 'Check that the rules.tsv contains valid reference_identifier values.'
             )
 
-        db_path.parent.mkdir(parents=True, exist_ok=True)
         try:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
             with err_console.status('[dim]Initialising project database…[/dim]'):
                 init_project(
                     db_path=db_path,
@@ -132,7 +133,7 @@ def _download_command(database_name: str, db_path: Path, additional_info: bool) 
                     overwrite=True,
                     additional_info=additional_info,
                 )
-        except (FileNotFoundError, ValueError) as exc:
+        except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
             cli_error(str(exc))
 
     console.print(f'[green]✓[/green] Database initialised: [cyan]{db_path}[/cyan]')

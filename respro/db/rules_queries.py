@@ -191,7 +191,7 @@ def list_rules_for_display(
         'JOIN feature g ON g.id = rr.feature_id '
         'JOIN reference r ON r.id = g.reference_id '
         'JOIN drug d ON d.id = rr.drug_id '
-        f'{where_sql}ORDER BY r.name, feature, rr.position, d.name',
+        f'{where_sql}ORDER BY r.name, feature, rr.position, d.name, rr.id',
         params,
     ).fetchall()
 

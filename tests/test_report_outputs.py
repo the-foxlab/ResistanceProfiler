@@ -5,6 +5,7 @@ Tests for report output generation.
 import json
 import re
 import sqlite3
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 from Bio.Seq import Seq
@@ -6074,31 +6075,96 @@ class TestReportDeterminismAndMultiRefEdgeCases:
         assert out1 == out2
         assert b'<dc:date>' not in out1
 
-    def test_case_insensitive_effect_as_resistant_and_multi_ref_feature_cards(self) -> None:
+    def test_case_insensitive_effect_as_resistant_and_multi_ref_feature_cards(self, tmp_path: Path) -> None:
         from respro.db.models import ReferenceGroup
+        from respro.db.report_queries import load_in_scope_drug_names
+        from respro.db.schema import create_schema
 
-        rule = ResistanceRule(
-            id=1, feature_name='gag', feature_id=1, drug_name='DrugA', drug_id=1,
-            reference_identifier='r1', position=1, reference='K', mutation='E',
-            phenotype='resistant',
-        )
-        ann = AnnotatedVariant(
-            variant=VariantCall(chrom='r1', pos=3, ref='A', alt='G', allele_freq=0.9),
-            feature_name='gag', codon_pos=1, ref_aa='K', alt_aa='E', consequence='missense',
-            rule_matches=[rule],
-        )
-        conn = sqlite3.connect(':memory:')
-        conn.row_factory = sqlite3.Row
-        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
+        # Real schema DB: drug stored lowercased ('aciclovir'), effect_as_resistant uses 'Aciclovir',
+        # plus an internal '__formula_component__' row that must stay excluded from in-scope drugs.
+        conn = create_schema(tmp_path / 'ear.db')
+        conn.execute("INSERT INTO project (name, schema_version) VALUES ('p', 15)")
+        conn.execute("INSERT INTO reference (project_id, name, length) VALUES (1, 'r1', 30)")
         conn.execute(
-            "INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES ('drug_interpretation', ?)",
-            (json.dumps({'name': 'drug_interpretation', 'method': 'by_phenotype', 'effect_as_resistant': ['DRUGA']}),),
+            "INSERT INTO feature (reference_id, name, protein, protein_id, start, end, strand, nt_sequence) "
+            "VALUES (1, 'gag', 'Gag', 'NP_0001.1', 0, 30, '+', ?)",
+            ('ATG' * 10,),
+        )
+        conn.execute("INSERT INTO drug (project_id, name) VALUES (1, 'aciclovir')")
+        conn.execute("INSERT INTO drug (project_id, name) VALUES (1, '__formula_component__')")
+        conn.execute("INSERT INTO drug (project_id, name) VALUES (1, 'foscarnet')")
+        conn.execute(
+            "INSERT INTO resistance_rule (feature_id, drug_id, position, reference, mutation, phenotype) "
+            "VALUES (1, 1, 1, 'K', 'E', 'resistant')"
+        )
+        conn.execute(
+            "INSERT INTO resistance_rule (feature_id, drug_id, position, reference, mutation, phenotype) "
+            "VALUES (1, 2, 2, 'A', 'V', 'resistant')"
+        )
+        conn.execute(
+            "INSERT INTO resistance_formula_rule (drug_id, formula_id, normalized_expression, phenotype) "
+            "VALUES (3, 'F1', 'M1', 'resistant')"
+        )
+        conn.execute(
+            "INSERT INTO resistance_formula_rule_member (formula_rule_id, rule_id) VALUES (1, 2)"
+        )
+        conn.execute(
+            "INSERT INTO interpretation_algorithm (project_id, algorithm_name, config_json) "
+            "VALUES (1, 'drug_interpretation', ?)",
+            (json.dumps({'name': 'drug_interpretation', 'method': 'by_phenotype'}),),
+        )
+        conn.execute(
+            "INSERT INTO interpretation_algorithm (project_id, algorithm_name, config_json) "
+            "VALUES (1, 'effect_as_resistant', ?)",
+            (json.dumps({
+                'name': 'effect_as_resistant',
+                'rules': [{
+                    'feature': 'gag',
+                    'reference': 'r1',
+                    'drug': 'Aciclovir',
+                    'effect': ['frameshift'],
+                }],
+            }),),
         )
         conn.commit()
-        res = ProfilingResult(project_name='p', sample_name='s', vcf_name='s.vcf', annotations=[ann])
-        table = build_report_context(res, similarity_high=1, similarity_moderate=0, project_conn=conn)['summary']['drug_table']
-        assert table['rows'][0]['assessment'] == 'resistant'
+
+        in_scope = load_in_scope_drug_names(conn, {1})
+        assert 'aciclovir' in in_scope
+        assert 'foscarnet' in in_scope
+        assert '__formula_component__' not in in_scope
+
+        gag = FeatureRecord(id=1, reference_id=1, name='gag', protein='Gag', start=0, end=30, strand='+', nt_sequence='ATG' * 10)
+        fs_ann = AnnotatedVariant(
+            variant=VariantCall(chrom='r1', pos=3, ref='A', alt='AT', allele_freq=0.9),
+            feature_name='gag', codon_pos=1, ref_aa='K', alt_aa='KfsX', consequence='frameshift',
+            af_bin='high',
+        )
+        res = ProfilingResult(
+            project_name='p', sample_name='s', vcf_name='s.vcf',
+            annotations=[fs_ann],
+            references=[ReferenceGroup(
+                reference_id=1, reference_name='r1', organism='Virus', reference_length_nt=30,
+                query_name='r1', query_sequence='ATG' * 10, features=[gag],
+                feature_matches=[FeatureMatch(feature=gag, identity=1.0, cds_coverage=1.0, query_coverage=1.0, query_start=0, query_end=30, strand='+', cigar='30M')],
+            )],
+        )
+        ear_ctx = build_report_context(res, features=[gag], similarity_high=1, similarity_moderate=0, project_conn=conn)
+        assert any(r['source'] == 'Metadata algorithm' and r['drug_key'] == 'Aciclovir' for r in ear_ctx['database_hits']['rows'])
+        by_drug = {r['name'].lower(): r for r in ear_ctx['summary']['drug_table']['rows']}
+        assert by_drug['aciclovir']['assessment'] == 'resistant'
         conn.close()
+
+        # Multi-ref same-species: ref1 has DB metadata for 'pol', ref2 does NOT; unmapped chrom must not spawn phantom card.
+        mconn = create_schema(tmp_path / 'multiref.db')
+        mconn.execute("INSERT INTO project (name, schema_version) VALUES ('p', 15)")
+        mconn.execute("INSERT INTO reference (project_id, name, length) VALUES (1, 'ref1', 30)")
+        mconn.execute("INSERT INTO reference (project_id, name, length) VALUES (1, 'ref2', 30)")
+        mconn.execute(
+            "INSERT INTO feature (reference_id, name, protein, protein_id, start, end, strand, nt_sequence) "
+            "VALUES (1, 'pol', 'Pol1', 'NP_1111.1', 0, 30, '+', ?)",
+            ('ATG' * 10,),
+        )
+        mconn.commit()
 
         f1 = FeatureRecord(id=1, reference_id=1, name='pol', protein='Pol1', start=0, end=30, strand='+', nt_sequence='ATG' * 10)
         f2 = FeatureRecord(id=2, reference_id=2, name='pol', protein='Pol2', start=0, end=30, strand='+', nt_sequence='ATG' * 10)
@@ -6112,6 +6178,10 @@ class TestReportDeterminismAndMultiRefEdgeCases:
                 AnnotatedVariant(
                     variant=VariantCall(chrom='q2', pos=6, ref='G', alt='A', allele_freq=1.0),
                     feature_name='pol', codon_pos=2, ref_aa='A', alt_aa='T', consequence='missense',
+                ),
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='unmapped_chrom', pos=9, ref='A', alt='G', allele_freq=1.0),
+                    feature_name='pol', codon_pos=3, ref_aa='M', alt_aa='V', consequence='missense',
                 ),
             ],
             references=[
@@ -6127,36 +6197,138 @@ class TestReportDeterminismAndMultiRefEdgeCases:
                 ),
             ],
         )
-        ctx = build_report_context(mres, features=[f1, f2], similarity_high=1, similarity_moderate=0)
-        assert len(ctx['sequence_features']['cards']) == 2
-        assert {c['reference_name'] for c in ctx['sequence_features']['cards']} == {'ref1', 'ref2'}
-        assert all(c['observed_variants'] == 1 for c in ctx['sequence_features']['cards'])
+        ctx = build_report_context(mres, features=[f1, f2], similarity_high=1, similarity_moderate=0, project_conn=mconn)
+        cards = ctx['sequence_features']['cards']
+        assert len(cards) == 2
+        by_ref = {c['reference_name']: c for c in cards}
+        assert set(by_ref) == {'ref1', 'ref2'}
+        assert all(c['observed_variants'] == 1 for c in cards)
+        assert by_ref['ref1']['protein_id'] == 'NP_1111.1'
+        assert by_ref['ref2']['protein_id'] == ''
+        assert by_ref['ref2']['ncbi_protein_url'] == ''
+        assert ctx['sequence_features']['show_reference'] is True
+        html = render_html(mres, features=[f1, f2], similarity_high=1, similarity_moderate=0, project_conn=mconn)
+        assert '<strong>Reference:</strong> ref1' in html
+        assert '<strong>Reference:</strong> ref2' in html
+        mconn.close()
 
-    def test_vcf_overlay_complex_indel_and_pdf_narrative_helpers(self) -> None:
-        from respro.report.alignment_visualization import FeatureAlignment, _apply_vcf_overlay
+    def test_vcf_overlay_complex_indel_highlighting_and_pdf_narrative_helpers(self) -> None:
+        from respro.report.alignment_visualization import (
+            FeatureAlignment,
+            _apply_vcf_overlay,
+            build_alignment_html,
+        )
         from respro.report.non_html_exports import (
             _build_pdf_summary_context,
             _condense_pdf_narrative,
         )
 
         feat = FeatureRecord(
-            id=1, reference_id=1, name='g', protein='', start=0, end=6, strand='+', nt_sequence='ATGCCC',
+            id=1, reference_id=1, name='g', protein='', start=0, end=9, strand='+', nt_sequence='ATGCCCAAA',
         )
         aln = FeatureAlignment(
-            feature_name='g', feature_start=0, feature_end=6, feature_length=6,
-            strand='+', codon_start=0, aligned_ref='ATGCCC', aligned_query='ATGCCC',
-            aln_coding_pos=list(range(6)), aln_coding_anchor_pos=list(range(6)),
-            aln_native_pos=list(range(6)), aln_native_anchor_pos=list(range(6)),
-            coding_to_aln_idx=list(range(6)), feature=feat,
+            feature_name='g', feature_start=0, feature_end=9, feature_length=9,
+            strand='+', codon_start=0, aligned_ref='ATGCCCAAA', aligned_query='ATGCCCAAA',
+            aln_coding_pos=list(range(9)), aln_coding_anchor_pos=list(range(9)),
+            aln_native_pos=list(range(9)), aln_native_anchor_pos=list(range(9)),
+            coding_to_aln_idx=list(range(9)), feature=feat,
         )
-        ann = AnnotatedVariant(
+
+        # Complex anchor-changed deletion ATG>C: C replaces A and T,G become gaps; all 3 affected.
+        ann_del = AnnotatedVariant(
             variant=VariantCall(chrom='r', pos=0, ref='ATG', alt='C', allele_freq=1.0),
-            feature_name='g', codon_pos=0,
+            feature_name='g', codon_pos=0, consequence='deletion',
         )
         _ref_w, query_w, *_ = _apply_vcf_overlay(
-            ann, aln, 'ATGCCC', 'ATGCCC', list(range(6)), list(range(6)), list(range(6)),
+            ann_del, aln, 'ATGCCCAAA', 'ATGCCCAAA', list(range(9)), list(range(9)), list(range(9)),
         )
-        assert query_w == 'C--CCC'
+        assert query_w == 'C--CCCAAA'
+        html_del = str(build_alignment_html(ann_del, aln))
+        assert html_del.count('aln-affected') == 3  # C + 2 deleted bases highlighted on query row
+
+        # Complex deletion CATG>CG at pos 3 (GCCCA -> GCG--A): changed base + 2 deleted bases highlighted.
+        feat_catg = FeatureRecord(
+            id=2, reference_id=1, name='g', protein='', start=0, end=9, strand='+', nt_sequence='AAACATGAA',
+        )
+        aln_catg = FeatureAlignment(
+            feature_name='g', feature_start=0, feature_end=9, feature_length=9,
+            strand='+', codon_start=0, aligned_ref='AAACATGAA', aligned_query='AAACATGAA',
+            aln_coding_pos=list(range(9)), aln_coding_anchor_pos=list(range(9)),
+            aln_native_pos=list(range(9)), aln_native_anchor_pos=list(range(9)),
+            coding_to_aln_idx=list(range(9)), feature=feat_catg,
+        )
+        ann_catg = AnnotatedVariant(
+            variant=VariantCall(chrom='r', pos=3, ref='CATG', alt='CG', allele_freq=1.0),
+            feature_name='g', codon_pos=1, consequence='frameshift',
+        )
+        html_catg = str(build_alignment_html(ann_catg, aln_catg))
+        assert html_catg.count('aln-affected') == 3  # changed A->G plus deleted T,G
+
+        # Complex insertion AT>AGGG: fresh overlay highlights T->G and 2 inserted Gs; pre-applied does not double-insert.
+        ann_ins = AnnotatedVariant(
+            variant=VariantCall(chrom='r', pos=0, ref='AT', alt='AGGG', allele_freq=1.0),
+            feature_name='g', codon_pos=0, consequence='frameshift',
+        )
+        html_ins = str(build_alignment_html(ann_ins, aln))
+        assert html_ins.count('aln-affected') == 3  # changed T->G + 2 inserted Gs
+
+        aln_pre = FeatureAlignment(
+            feature_name='g', feature_start=0, feature_end=9, feature_length=9,
+            strand='+', codon_start=0, aligned_ref='AT--GCCCAAA', aligned_query='AGGGGCCCAAA',
+            aln_coding_pos=[0, 1, None, None, 2, 3, 4, 5, 6, 7, 8],
+            aln_coding_anchor_pos=[0, 1, 1, 1, 2, 3, 4, 5, 6, 7, 8],
+            aln_native_pos=[0, 1, None, None, 2, 3, 4, 5, 6, 7, 8],
+            aln_native_anchor_pos=[0, 1, 1, 1, 2, 3, 4, 5, 6, 7, 8],
+            coding_to_aln_idx=[0, 1, 4, 5, 6, 7, 8, 9, 10], feature=feat,
+        )
+        html_pre = str(build_alignment_html(ann_ins, aln_pre))
+        assert html_pre.count('aln-affected') == 3
+        assert html_pre.count('>-<') == 2  # only the 2 pre-existing insertion gaps, no double-insertion
+
+        # Left-aligned mappy CIGAR (1M2I7M) for AT>AGGG: insertion anchored at anchor_pos (0), not ins_anchor (1).
+        aln_left = FeatureAlignment(
+            feature_name='g', feature_start=0, feature_end=9, feature_length=9,
+            strand='+', codon_start=0, aligned_ref='A--TGCCCAAA', aligned_query='AGGGGCCCAAA',
+            aln_coding_pos=[0, None, None, 1, 2, 3, 4, 5, 6, 7, 8],
+            aln_coding_anchor_pos=[0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8],
+            aln_native_pos=[0, None, None, 1, 2, 3, 4, 5, 6, 7, 8],
+            aln_native_anchor_pos=[0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8],
+            coding_to_aln_idx=[0, 3, 4, 5, 6, 7, 8, 9, 10], feature=feat,
+        )
+        html_left = str(build_alignment_html(ann_ins, aln_left))
+        assert html_left.count('aln-affected') == 3
+        assert html_left.count('>-<') == 2
+
+        # 3'-boundary complex deletion (ins_anchor truncated past CDS end) must not overwrite kept prefix bases.
+        ann_trunc = AnnotatedVariant(
+            variant=VariantCall(chrom='r', pos=7, ref='AAGGGG', alt='ACG', allele_freq=1.0),
+            feature_name='g', codon_pos=2, consequence='frameshift',
+        )
+        _ref_t, query_t, *_ = _apply_vcf_overlay(
+            ann_trunc, aln, 'ATGCCCAAA', 'ATGCCCAAA', list(range(9)), list(range(9)), list(range(9)),
+        )
+        assert query_t == 'ATGCCCAAC'
+
+        # Long multi-codon complex deletion expands window to cover full ref span without corrupting kept prefix.
+        long_seq = 'ATGCCCAAAGTTTGCCAA'
+        feat_long = FeatureRecord(
+            id=3, reference_id=1, name='g', protein='', start=0, end=18, strand='+', nt_sequence=long_seq,
+        )
+        aln_long = FeatureAlignment(
+            feature_name='g', feature_start=0, feature_end=18, feature_length=18,
+            strand='+', codon_start=0, aligned_ref=long_seq, aligned_query=long_seq,
+            aln_coding_pos=list(range(18)), aln_coding_anchor_pos=list(range(18)),
+            aln_native_pos=list(range(18)), aln_native_anchor_pos=list(range(18)),
+            coding_to_aln_idx=list(range(18)), feature=feat_long,
+        )
+        ann_long_del = AnnotatedVariant(
+            variant=VariantCall(chrom='r', pos=2, ref='GCCCAAAGTTTGCC', alt='GTTCAAAGTTTG', allele_freq=1.0),
+            feature_name='g', codon_pos=0, consequence='frameshift',
+        )
+        html_long = str(build_alignment_html(ann_long_del, aln_long, context_codons=2))
+        assert html_long.count('>-<') == 2  # only the 2 deleted tail bases, kept prefix 'TT' intact
+        assert html_long.count('aln-affected') == 4  # 2 changed prefix bases (CC->TT) + 2 deleted tail bases
+
         assert _condense_pdf_narrative('Para one.<br><br>Drugs assessed as resistant: DrugA.') == 'Para one.'
         empty_res = ProfilingResult(project_name='p', sample_name='s', vcf_name='s.vcf')
         pdf_ctx = _build_pdf_summary_context(
@@ -6165,3 +6337,109 @@ class TestReportDeterminismAndMultiRefEdgeCases:
             None, None, None,
         )
         assert pdf_ctx['summary']['has_narrative'] is False
+
+    def test_formula_hit_member_alt_resolution_partial_coverage_bar_and_publication_url(self) -> None:
+        from respro.report.html.formatting import _publication_url
+        from respro.report.html.tables import build_database_hits_rows
+
+        # (a) Reconstructed internal __formula_component__ combined-codon hit: rule_matches omitted,
+        # accepted combined state carries 'Q' while single-SNP alt_aa is 'K'.
+        ann_regen = AnnotatedVariant(
+            variant=VariantCall(chrom='r', pos=30, ref='G', alt='A', allele_freq=0.9),
+            feature_name='pol', codon_pos=10, ref_aa='E', alt_aa='K', consequence='missense',
+            combined_states=[CodonState(alt_codon='CAA', alt_aa='Q', lower=0.85, upper=0.9, forced_fraction=0.94, accepted=True, member_indices=(0,))],
+        )
+        rs_regen = ResistanceRuleSet(
+            id=1, drug_name='DrugCombo', drug_id=1, phenotype='resistant',
+            members=[
+                ResistanceRuleSetMember(
+                    id=1, rule_set_id=1, feature_name='pol', feature_id=1,
+                    reference_identifier='r', position=10, reference='E', mutation='Q', external_id='M1',
+                ),
+            ],
+        )
+        hit_regen = FormulaRuleHit(
+            rule_set=rs_regen, matched_variants=[ann_regen], matched_member_ids=['M1'], frechet_lower=0.85,
+        )
+
+        # (b) Two formula members on the same annotation resolve to their distinct alleles.
+        rule_m1 = ResistanceRule(
+            id=11, feature_name='pol', feature_id=1, drug_name='__formula_component__', drug_id=2,
+            external_id='M1', reference_identifier='r', position=10, reference='E', mutation='K',
+            phenotype='resistant', is_internal_formula_component=True,
+        )
+        rule_m2 = ResistanceRule(
+            id=12, feature_name='pol', feature_id=1, drug_name='__formula_component__', drug_id=2,
+            external_id='M2', reference_identifier='r', position=10, reference='E', mutation='Q',
+            phenotype='resistant', is_internal_formula_component=True,
+        )
+        ann_shared = AnnotatedVariant(
+            variant=VariantCall(chrom='r', pos=30, ref='G', alt='A', allele_freq=0.9),
+            feature_name='pol', codon_pos=10, ref_aa='E', alt_aa='K', consequence='missense',
+            rule_matches=[rule_m1, rule_m2],
+            rule_effect_alt={11: 'K', 12: 'Q'},
+        )
+        rs_shared = ResistanceRuleSet(
+            id=2, drug_name='DrugPair', drug_id=2, phenotype='resistant',
+            members=[
+                ResistanceRuleSetMember(
+                    id=1, rule_set_id=2, feature_name='pol', feature_id=1,
+                    reference_identifier='r', position=10, reference='E', mutation='K', external_id='M1',
+                ),
+                ResistanceRuleSetMember(
+                    id=2, rule_set_id=2, feature_name='pol', feature_id=1,
+                    reference_identifier='r', position=10, reference='E', mutation='Q', external_id='M2',
+                ),
+            ],
+        )
+        hit_shared = FormulaRuleHit(
+            rule_set=rs_shared,
+            matched_variants=[ann_shared, ann_shared],
+            matched_member_ids=['M1', 'M2'],
+            frechet_lower=0.8,
+        )
+
+        res = ProfilingResult(
+            project_name='p', sample_name='s', vcf_name='s.vcf',
+            annotations=[ann_regen, ann_shared],
+            formula_hits=[hit_regen, hit_shared],
+        )
+        db_hits = build_database_hits_rows(res)
+        by_drug = {r['drug_key']: r['mutation_groups'][0]['muts'] for r in db_hits['rows']}
+        assert by_drug['DrugCombo'] == ['E11Q']
+        assert by_drug['DrugPair'] == ['E11K', 'E11Q']
+
+        # Partial coverage renders transparent placeholder bar rather than a solid 0% bar.
+        f_cov = FeatureRecord(id=1, reference_id=1, name='cov_gene', protein='', start=0, end=9, strand='+', nt_sequence='ATGAAATTT')
+        f_unmapped = FeatureRecord(id=2, reference_id=1, name='unmapped_gene', protein='', start=10, end=19, strand='+', nt_sequence='ATGAAATTT')
+        partial_res = make_profiling_result(
+            project_name='p', reference_name='ref', sample_name='s', vcf_name='s.vcf',
+            coverage_assessed=True,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=3, ref='A', alt='G', allele_freq=0.9),
+                    feature_name='cov_gene', codon_pos=1, ref_aa='K', alt_aa='E', consequence='missense',
+                ),
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='ref', pos=13, ref='A', alt='G', allele_freq=0.9),
+                    feature_name='unmapped_gene', codon_pos=1, ref_aa='K', alt_aa='E', consequence='missense',
+                ),
+            ],
+            feature_matches=[
+                FeatureMatch(
+                    feature=f_cov, identity=1.0, cds_coverage=1.0, query_coverage=1.0,
+                    query_start=0, query_end=9, strand='+', cigar='9M',
+                ),
+            ],
+        )
+        html = render_html(
+            partial_res,
+            features=[f_cov, f_unmapped],
+            similarity_high=1,
+            similarity_moderate=0,
+        )
+        assert 'feature-coverage-bar--empty' in html
+
+        # Whitespace-only DOI falls back to PubMed ID; special characters are percent-encoded.
+        assert _publication_url(Publication(id=0, doi='   ', title='', pubmed_id=' 12345 ', raw_input='')) == 'https://pubmed.ncbi.nlm.nih.gov/12345/'
+        assert _publication_url(Publication(id=0, doi='10.1000/a b#c', title='', pubmed_id='', raw_input='')) == 'https://doi.org/10.1000/a%20b%23c'

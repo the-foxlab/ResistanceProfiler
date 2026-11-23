@@ -7,7 +7,12 @@ from collections.abc import Mapping
 
 from respro.config.cli_settings import CLI_CONFIG, CliConfig
 from respro.core.annotation import CONSEQUENCE_LABELS, classify_similarity
-from respro.db.models import ProfilingResult, ResistanceRule
+from respro.db.models import (
+    AnnotatedVariant,
+    ProfilingResult,
+    ResistanceRule,
+    ResistanceRuleSetMember,
+)
 from respro.report.alignment_visualization import FeatureAlignment, build_alignment_html
 from respro.report.html.formatting import (
     attach_citations,
@@ -125,19 +130,17 @@ def build_database_hits_rows(
 
     for formula_hit in result.formula_hits:
         rs = formula_hit.rule_set
-        member_ids = set(formula_hit.matched_member_ids)
+        members_by_ext = {m.external_id: m for m in rs.members if m.external_id}
         feature_to_muts: dict[str, list[str]] = {}
         first_chrom = formula_hit.matched_variants[0].variant.chrom if formula_hit.matched_variants else ''
-        for ann in formula_hit.matched_variants:
+        paired: list[tuple[str | None, AnnotatedVariant]] = (
+            list(zip(formula_hit.matched_member_ids, formula_hit.matched_variants))
+            if len(formula_hit.matched_member_ids) == len(formula_hit.matched_variants)
+            else [(None, ann) for ann in formula_hit.matched_variants]
+        )
+        for mid, ann in paired:
             feature = names.get(ann.feature_name, ann.feature_name)
-            eff_alt = next(
-                (
-                    ann.rule_effect_alt[r.id]
-                    for r in ann.rule_matches
-                    if r.external_id in member_ids and r.id in ann.rule_effect_alt
-                ),
-                ann.alt_aa,
-            )
+            eff_alt = _resolve_formula_member_alt(ann, mid, members_by_ext)
             aa_change = (
                 f'{ann.ref_aa}{ann.codon_pos + 1}{eff_alt}'
                 if ann.ref_aa and eff_alt
@@ -182,6 +185,38 @@ def build_database_hits_rows(
         'search_icon': load_svg_data_url('search.svg'),
         'reset_icon': load_svg_data_url('reset_filter.svg'),
     }
+
+
+def _resolve_formula_member_alt(
+    ann: AnnotatedVariant,
+    member_id: str | None,
+    members_by_ext: Mapping[str, ResistanceRuleSetMember],
+) -> str:
+    """Resolve the triggering AA allele for one formula member, both live and after regenerate."""
+    if member_id is not None:
+        direct = next(
+            (
+                ann.rule_effect_alt[r.id]
+                for r in ann.rule_matches
+                if r.external_id == member_id and r.id in ann.rule_effect_alt
+            ),
+            None,
+        )
+        if direct is not None:
+            return direct
+        member = members_by_ext.get(member_id)
+        mut = member.mutation if member is not None else ''
+        if mut:
+            accepted_alts = set(ann.rule_effect_alt.values()) | {
+                s.alt_aa for s in ann.combined_states if s.accepted
+            }
+            if mut in accepted_alts:
+                return mut
+        return ann.alt_aa
+    return next(
+        (ann.rule_effect_alt[r.id] for r in ann.rule_matches if r.id in ann.rule_effect_alt),
+        ann.alt_aa,
+    )
 
 
 def _build_effect_as_resistant_rows(

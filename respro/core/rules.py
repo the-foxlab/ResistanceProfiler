@@ -270,7 +270,7 @@ def _suppress_ins_any_when_specific_fires(rule_matches: list[ResistanceRule]) ->
     specific_keys = {
         (rule.position, rule.drug_id)
         for rule in rule_matches
-        if rule.mutation != 'INS_any' and len(rule.mutation) > len(rule.reference)
+        if rule.mutation not in {'INS_any', 'del'} and len(rule.mutation) > len(rule.reference)
     }
     if specific_keys:
         rule_matches[:] = [
@@ -293,12 +293,15 @@ def _matches_rule_alleles(
     if mutation == 'INS_any':
         return ann_consequence == 'insertion'
     if ann_consequence == 'insertion':
-        if len(mutation) > len(reference) and not _is_frameshift_token(mutation):
+        if mutation != 'del' and len(mutation) > len(reference) and not _is_frameshift_token(mutation):
             return _indel_payload(reference, mutation) == _indel_payload(ann_ref, ann_alt)
         return False
     if ann_consequence == 'deletion':
+        ann_deleted = ann_ref if ann_alt == 'del' else _indel_payload(ann_alt, ann_ref)
+        if mutation == 'del':
+            return bool(ann_deleted) and reference == ann_deleted
         if len(reference) > len(mutation):
-            return _indel_payload(mutation, reference) == _indel_payload(ann_alt, ann_ref)
+            return _indel_payload(mutation, reference) == ann_deleted
         return False
     if len(reference) == 1 and len(mutation) == 1:
         return ann_alt == mutation
@@ -338,7 +341,7 @@ def _indel_anchor_mismatch_warning(
     """Return a warning message when a matched-position indel has a different anchor AA."""
     if (
         ann_consequence == 'insertion'
-        and rule_mutation != 'INS_any'
+        and rule_mutation not in {'INS_any', 'del'}
         and not _is_frameshift_token(rule_mutation)
         and len(rule_mutation) > len(rule_reference)
         and ann_ref != rule_reference
@@ -348,7 +351,13 @@ def _indel_anchor_mismatch_warning(
             f'rule anchor {rule_reference!r} vs observed anchor {ann_ref!r}. '
             'Matching by inserted payload only.'
         )
-    if ann_consequence == 'deletion' and len(rule_reference) > len(rule_mutation) and ann_alt != rule_mutation:
+    if (
+        ann_consequence == 'deletion'
+        and rule_mutation != 'del'
+        and ann_alt != 'del'
+        and len(rule_reference) > len(rule_mutation)
+        and ann_alt != rule_mutation
+    ):
         return (
             f'Indel anchor mismatch at {feature_name}:{codon_pos + 1} (deletion): '
             f'rule anchor {rule_mutation!r} vs observed anchor {ann_alt!r}. '

@@ -2842,6 +2842,9 @@ class TestCodonAndAfBinEdgeCases:
 
     def test_minus_strand_deletion_to_base_zero_and_x_consequence(self) -> None:
         from respro.core.codons import annotate_variant_in_feature, classify_snp_consequence
+        from respro.core.rules import match_rules
+        from respro.db.models import ResistanceRule
+        from respro.report.row_helpers import format_aa_effects
 
         assert classify_snp_consequence('K', 'X', 1) == 'unknown'
         rev_feat = FeatureRecord(
@@ -2854,6 +2857,40 @@ class TestCodonAndAfBinEdgeCases:
         assert len(anns) == 1
         assert anns[0].consequence == 'deletion'
         assert anns[0].codon_pos == 0
+        assert anns[0].ref_aa == 'M'
+        assert anns[0].alt_aa == 'del'
+        assert format_aa_effects(anns[0]).startswith('M1del |')
+
+        del_rule = ResistanceRule(
+            id=1, feature_name='rev', feature_id=1, drug_name='DrugA', drug_id=1,
+            reference_identifier='rev', position=0, reference='M', mutation='del',
+            phenotype='resistant',
+        )
+        match_rules(anns, [del_rule])
+        assert [r.id for r in anns[0].rule_matches] == [1]
+
+    def test_anchor_changed_single_base_indels_not_misannotated(self) -> None:
+        from respro.core.codons import annotate_variant_in_feature
+
+        fwd_feat = FeatureRecord(
+            id=1, reference_id=1, name='fwd', protein='',
+            start=0, end=12, strand='+', codon_start=0,
+            nt_sequence='ATGAAAGCTTTT',
+        )
+        rev_feat = FeatureRecord(
+            id=2, reference_id=1, name='rev', protein='',
+            start=0, end=9, strand='-', codon_start=0,
+            nt_sequence='ATGAAAGCT',
+        )
+        for feat, var in (
+            (fwd_feat, VariantCall(chrom='c', pos=2, ref='GAAA', alt='C', allele_freq=1.0)),
+            (fwd_feat, VariantCall(chrom='c', pos=2, ref='G', alt='CGGG', allele_freq=1.0)),
+            (rev_feat, VariantCall(chrom='c', pos=5, ref='TCAT', alt='G', allele_freq=1.0)),
+        ):
+            anns = annotate_variant_in_feature(var, feat)
+            assert len(anns) == 1
+            assert anns[0].consequence == ''
+            assert anns[0].alt_aa == ''
 
     def test_assign_af_bins_resets_stale_and_picks_highest_threshold(self) -> None:
         ann = AnnotatedVariant(

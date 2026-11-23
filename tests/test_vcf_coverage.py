@@ -449,3 +449,51 @@ class TestMultiIntronCoverageProjection:
         fake_bam = SimpleNamespace(references=('bam_only',))
         assert _try_resolve_bam_contig(fake_bam, 'vcf_chr', allow_sole_fallback=True) == 'bam_only'  # type: ignore[arg-type]
         assert _try_resolve_bam_contig(fake_bam, 'vcf_chr', allow_sole_fallback=False) is None  # type: ignore[arg-type]
+
+    def test_unmatched_chrom_in_multi_contig_bam_marks_feature_uncovered(self, tmp_path: Path) -> None:
+        from respro.core.vcf_coverage import compute_coverage_gaps_from_bam_multi
+
+        bam_path = tmp_path / 'two_contigs.bam'
+        header = {'HD': {'VN': '1.0'}, 'SQ': [{'SN': 'chrA', 'LN': 9}, {'SN': 'chrB', 'LN': 9}]}
+        with pysam.AlignmentFile(str(bam_path), 'wb', header=header) as bam:
+            a = pysam.AlignedSegment()
+            a.query_name = 'r1'
+            a.query_sequence = 'A' * 9
+            a.flag = 0
+            a.reference_id = 0
+            a.reference_start = 0
+            a.mapping_quality = 60
+            a.cigar = ((0, 9),)
+            a.query_qualities = pysam.qualitystring_to_array('I' * 9)
+            a.next_reference_id = -1
+            a.next_reference_start = -1
+            a.template_length = 0
+            bam.write(a)
+        pysam.index(str(bam_path))
+
+        feature = _make_feature()
+        match = _make_match(feature, cigar='9M', query_len=9)
+        gaps = compute_coverage_gaps_from_bam_multi(
+            bam_path=bam_path,
+            per_chrom={'missing_chrom': ('missing_chrom', 'ATGAAATTT', [match])},
+            min_depth=1,
+        )
+        assert len(gaps) == 1
+        assert gaps[0].feature_name == 'gag'
+        assert (gaps[0].codon_start, gaps[0].codon_end) == (0, 2)
+        assert gaps[0].chrom == 'missing_chrom'
+
+    def test_bam_contig_shorter_than_query_sequence_marks_tail_uncovered(self, tmp_path: Path) -> None:
+        bam_path = tmp_path / 'short_contig.bam'
+        _write_mixed_quality_bam(bam_path, n=6)
+        feature = _make_feature()
+        match = _make_match(feature, cigar='9M', query_len=9)
+        gaps = compute_coverage_gaps_from_bam(
+            bam_path=bam_path,
+            query_name='ref',
+            query_sequence='ATGAAATTT',
+            matches=[match],
+            min_depth=1,
+        )
+        assert len(gaps) == 1
+        assert (gaps[0].codon_start, gaps[0].codon_end) == (2, 2)

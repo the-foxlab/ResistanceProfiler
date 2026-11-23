@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from respro.db.models import FeatureRecord, ProfilingResult
+from respro.db.models import AnnotatedVariant, FeatureRecord, ProfilingResult
 from respro.report.html.formatting import format_drug_name_with_alias
 
 
@@ -61,9 +61,32 @@ def build_feature_stats(
     distinct_ref_ids = {rg.reference_id for rg in result.references}
     multi_ref = len(distinct_ref_ids) > 1
     default_ref_id = next(iter(distinct_ref_ids), 0) if len(distinct_ref_ids) == 1 else 0
+    features_by_name: dict[str, list[FeatureRecord]] = {}
+    ref_id_by_feature_id: dict[int, int] = {}
+    for feat in features or []:
+        features_by_name.setdefault(feat.name, []).append(feat)
+        ref_id_by_feature_id[feat.id] = feat.reference_id
 
     def _key(ref_id: int | None, feature_name: str) -> tuple[int, str]:
         return (ref_id if (multi_ref and ref_id is not None) else default_ref_id, feature_name)
+
+    def _ann_ref_id(ann: AnnotatedVariant) -> int | None:
+        if not multi_ref:
+            return default_ref_id
+        if ann.variant.chrom in ref_id_by_chrom:
+            return ref_id_by_chrom[ann.variant.chrom]
+        rule_refs = {
+            ref_id_by_feature_id[r.feature_id]
+            for r in ann.rule_matches
+            if r.feature_id in ref_id_by_feature_id
+        }
+        if len(rule_refs) == 1:
+            return next(iter(rule_refs))
+        candidates = [
+            f for f in features_by_name.get((ann.feature_name or '').strip(), [])
+            if f.contains(ann.variant.pos)
+        ]
+        return candidates[0].reference_id if len(candidates) == 1 else None
 
     observed_counter: Counter[tuple[int, str]] = Counter()
     direct_counter: Counter[tuple[int, str]] = Counter()
@@ -74,12 +97,12 @@ def build_feature_stats(
             _key(f.reference_id, f.name): set() for f in features
         }
         for ann in result.annotations:
-            ann_ref_id = ref_id_by_chrom.get(ann.variant.chrom)
+            ann_ref_id = _ann_ref_id(ann)
+            if multi_ref and ann_ref_id is None:
+                continue
             variant_key = (ann.variant.chrom, ann.variant.pos, ann.variant.ref, ann.variant.alt)
             for feature in features:
-                # Scope containment checks by reference_id in multi-reference runs so
-                # coordinates on one genome never increment features on another.
-                if multi_ref and ann_ref_id is not None and feature.reference_id != ann_ref_id:
+                if multi_ref and feature.reference_id != ann_ref_id:
                     continue
                 if not feature.contains(ann.variant.pos):
                     continue
@@ -90,19 +113,28 @@ def build_feature_stats(
                     observed_counter[fkey] += 1
     else:
         for ann in result.cds_annotations:
+            ann_ref_id = _ann_ref_id(ann)
+            if multi_ref and ann_ref_id is None:
+                continue
             if feature_name := (ann.feature_name or '').strip():
-                observed_counter[_key(ref_id_by_chrom.get(ann.variant.chrom), feature_name)] += 1
+                observed_counter[_key(ann_ref_id, feature_name)] += 1
 
     for ann in result.cds_annotations:
+        ann_ref_id = _ann_ref_id(ann)
+        if multi_ref and ann_ref_id is None:
+            continue
         feature_name = (ann.feature_name or '').strip() or unassigned
-        fkey = _key(ref_id_by_chrom.get(ann.variant.chrom), feature_name)
+        fkey = _key(ann_ref_id, feature_name)
         direct_counter[fkey] += len(ann.non_formula_component_rule_matches)
 
     for formula_hit in result.formula_hits:
-        for fkey in {
-            _key(ref_id_by_chrom.get(ann.variant.chrom), (ann.feature_name or '').strip() or unassigned)
-            for ann in formula_hit.matched_variants
-        }:
+        formula_keys: set[tuple[int, str]] = set()
+        for ann in formula_hit.matched_variants:
+            ann_ref_id = _ann_ref_id(ann)
+            if multi_ref and ann_ref_id is None:
+                continue
+            formula_keys.add(_key(ann_ref_id, (ann.feature_name or '').strip() or unassigned))
+        for fkey in formula_keys:
             formula_counter[fkey] += 1
 
     all_keys = set(observed_counter) | set(direct_counter) | set(formula_counter)
@@ -151,14 +183,21 @@ def build_feature_cards(
     fallback_feature_by_name = {name: feat for (_rid, name), feat in feature_lookup.items()}
     fallback_card_by_name = {name: card for (_ref_name, name), card in db_feature_cards_by_key.items()}
     cards: list[dict] = []
-    for ref_id, feature_name in sorted(
-        feature_stats,
-        key=lambda item: (str(display_names.get(item[1], item[1])).lower(), ref_by_id.get(item[0], '').lower()),
-    ):
+    for ref_id, feature_name in feature_stats:
         stats = dict(feature_stats[(ref_id, feature_name)])
-        feature = feature_lookup.get((ref_id, feature_name)) or fallback_feature_by_name.get(feature_name)
+        # Only fall back to bare-name lookup for unscoped entries so metadata cannot leak across references.
+        feature = (
+            feature_lookup.get((ref_id, feature_name))
+            if ref_id
+            else fallback_feature_by_name.get(feature_name)
+        )
         ref_name = ref_by_id.get(ref_id, '') or (ref_by_id.get(feature.reference_id, '') if feature is not None else '')
-        metadata = db_feature_cards_by_key.get((ref_name, feature_name)) or fallback_card_by_name.get(feature_name)
+        metadata = (
+            db_feature_cards_by_key.get((ref_name, feature_name))
+            or db_feature_cards_by_key.get(('', feature_name))
+            if ref_name
+            else fallback_card_by_name.get(feature_name)
+        )
         stats['name'] = feature.display_name if feature is not None else display_names.get(feature_name, feature_name)
         nt_seq = feature.nt_sequence or '' if feature is not None else ''
         aa_seq = feature.aa_sequence or '' if feature is not None else ''
@@ -188,4 +227,5 @@ def build_feature_cards(
             })
         stats['has_sequence'] = bool(stats['nt_sequence'] or stats['aa_sequence'])
         cards.append(stats)
+    cards.sort(key=lambda card: (str(card['name']).lower(), str(card['reference_name']).lower()))
     return cards

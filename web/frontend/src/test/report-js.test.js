@@ -15,9 +15,14 @@ describe('standalone HTML report.js regressions', () => {
         <table class="drug-interp-table">
           <thead><tr><th>Drug</th><th>Assessment</th></tr></thead>
           <tbody>
-            <tr>
+            <tr class="drug-group-header-row"><td colspan="2">NRTI</td></tr>
+            <tr data-drug-class="NRTI">
               <td>DrugA</td>
               <td>Resistant <span class="db-hit-freq-info"><div class="db-hit-info-panel">Thresholds applied: x=1</div></span></td>
+            </tr>
+            <tr data-drug-class="">
+              <td>DrugUngrouped</td>
+              <td>Susceptible</td>
             </tr>
           </tbody>
         </table>
@@ -99,7 +104,9 @@ describe('standalone HTML report.js regressions', () => {
       expect(texts['database_hits.tsv']).toContain('Ref1');
       expect(texts['database_hits.tsv']).toContain('Ref2');
       expect(texts['drug_interpretation.tsv']).not.toContain('Thresholds applied');
-      expect(texts['drug_interpretation.tsv']).toContain('DrugA\tResistant');
+      expect(texts['drug_interpretation.tsv']).toContain('NRTI\tDrugA\tResistant');
+      expect(texts['drug_interpretation.tsv']).toContain('\n\tDrugUngrouped\tSusceptible');
+      expect(texts['drug_interpretation.tsv']).not.toContain('NRTI\tDrugUngrouped');
     } finally {
       clickSpy.mockRestore();
       URL.createObjectURL = origCreateObjectURL;

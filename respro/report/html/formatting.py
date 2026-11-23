@@ -129,10 +129,10 @@ def _publication_key(pub: Publication) -> tuple:
 
 def _publication_url(pub: Publication) -> str:
     """Return DOI or PubMed URL for a publication, or ``''`` when unavailable."""
-    if pub.doi:
-        return f"https://doi.org/{quote(pub.doi.strip(), safe='/:')}"
-    if pub.pubmed_id:
-        return f"https://pubmed.ncbi.nlm.nih.gov/{quote(pub.pubmed_id.strip(), safe='')}/"
+    if doi := (pub.doi or '').strip():
+        return f"https://doi.org/{quote(doi, safe='/:')}"
+    if pmid := (pub.pubmed_id or '').strip():
+        return f"https://pubmed.ncbi.nlm.nih.gov/{quote(pmid, safe='')}/"
     return ''
 
 

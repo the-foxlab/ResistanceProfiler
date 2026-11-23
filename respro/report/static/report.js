@@ -1101,6 +1101,9 @@ document.addEventListener('DOMContentLoaded', function () {
           currentGroup = (row.textContent || '').replace(/\s+/g, ' ').trim();
           return;
         }
+        const rowGroup = row.hasAttribute('data-drug-class')
+          ? (row.getAttribute('data-drug-class') || '').trim()
+          : currentGroup;
         const values = Array.from(row.querySelectorAll('td')).map(function (cell) {
           const cellClone = cell.cloneNode(true);
           cellClone.querySelectorAll('.db-hit-freq-info').forEach(function (tooltip) {
@@ -1111,7 +1114,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!values.length) {
           return;
         }
-        const fields = hasGroupHeaders ? [currentGroup].concat(values) : values;
+        const fields = hasGroupHeaders ? [rowGroup].concat(values) : values;
         lines.push(fields.map(sanitizeTsvCell).join('\t'));
       });
 

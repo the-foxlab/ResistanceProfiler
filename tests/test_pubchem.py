@@ -718,8 +718,8 @@ class TestSubstanceOnlyDrugReportCard:
         assert 'data-structure-url="' not in html
         conn.close()
 
-    def test_fetch_cid_url_encodes_slashes_and_rejects_bool_cid(self) -> None:
-        from respro.io.pubchem import _fetch_cid
+    def test_fetch_cid_url_encodes_slashes_and_rejects_bool_or_non_ascii_digits(self) -> None:
+        from respro.io.pubchem import _fetch_cid, _fetch_substance_sids
 
         captured_urls: list[str] = []
 
@@ -731,5 +731,17 @@ class TestSubstanceOnlyDrugReportCard:
             res = _fetch_cid('Lopinavir/Ritonavir', timeout=5)
         assert res.status is LookupStatus.ERROR
         assert any('Lopinavir%2FRitonavir' in u for u in captured_urls)
+
+        with patch(
+            'respro.io.pubchem.fetch_json_lookup',
+            return_value=LookupResult.found({'IdentifierList': {'CID': ['²']}}),
+        ):
+            assert _fetch_cid('DrugX', timeout=5).status is LookupStatus.ERROR
+
+        with patch(
+            'respro.io.pubchem.fetch_json_lookup',
+            return_value=LookupResult.found({'IdentifierList': {'SID': ['²']}}),
+        ):
+            assert _fetch_substance_sids('DrugX', timeout=5).status is LookupStatus.NOT_FOUND
 
 

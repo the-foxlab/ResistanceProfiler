@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from pathlib import Path
 
@@ -270,7 +271,7 @@ def _to_int(value: object) -> int | None:
         return None
     try:
         parsed = int(float(token))
-    except ValueError:
+    except (ValueError, OverflowError):
         return None
     return parsed if parsed >= 0 else None
 
@@ -288,6 +289,6 @@ def _to_float(value: object) -> float | None:
     if match is None:
         return None
     parsed = float(match.group(0))
-    if parsed < 0.0:
+    if not math.isfinite(parsed) or parsed < 0.0:
         return None
     return parsed / 100.0 if percent else parsed

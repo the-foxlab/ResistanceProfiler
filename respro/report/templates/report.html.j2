@@ -131,9 +131,13 @@
                     <div class="feature-mutation-row">
                       <span class="feature-mutation-badge"><span class="feature-mutation-name">{{ entry.feature }}{% if context.is_multi_species and entry.reference_name %} <span class="feature-mutation-reference">({{ entry.reference_name }})</span>{% endif %}</span>{% if context.summary.has_coverage and entry.covered_pct is not none %}<span class="feature-mutation-coverage">{{ entry.covered_pct }}%</span>{% elif context.summary.coverage_not_assessed %}<span class="feature-mutation-coverage">n.d.</span>{% endif %}</span>
                       {% if context.summary.has_coverage %}
-                        <div class="feature-coverage-bar">
-                          {% if entry.covered_pct is not none %}<div class="feature-coverage-bar__fill" style="width: {{ entry.covered_pct }}%"></div>{% endif %}
-                        </div>
+                        {% if entry.covered_pct is not none %}
+                          <div class="feature-coverage-bar">
+                            <div class="feature-coverage-bar__fill" style="width: {{ entry.covered_pct }}%"></div>
+                          </div>
+                        {% else %}
+                          <div class="feature-coverage-bar feature-coverage-bar--empty" aria-hidden="true"></div>
+                        {% endif %}
                       {% endif %}
                       <div class="feature-mutations">
                         {% for m in entry.mutations %}<span class="mut-text{% if m.is_high_impact %} mut-text--high-impact{% elif m.is_db_hit %} mut-text--db-hit{% endif %}">{{ m.label }}</span>{% if not loop.last %}<span class="mut-sep">,</span> {% endif %}{% endfor %}
@@ -232,7 +236,7 @@
                         </tr>
                       {% endif %}
                       {% for drug in drugs %}
-                        <tr>
+                        <tr data-drug-class="{{ class_name | e }}">
                           <td><span class="drug-name-badge {{ drug.assessment_badge_class }}">{{ drug.name }}</span></td>
                           <td class="drug-table-count">{{ drug.hit_count }}</td>
                           {% if context.summary.drug_table.has_phenotypes %}
@@ -827,7 +831,7 @@
                   </div>
                 </dl>
                 {% set has_protein_meta = card.protein or card.note or card.protein_id or card.locus_tag %}
-                {% set show_reference = context.sequence_features.is_multi_species and card.reference_name %}
+                {% set show_reference = (context.sequence_features.show_reference or context.sequence_features.is_multi_species) and card.reference_name %}
                 {% if has_protein_meta %}
                   <div class="info-card-meta">
                     {% if show_reference %}<p><strong>Reference:</strong> {{ card.reference_name }}</p>{% endif %}

@@ -969,6 +969,207 @@ class TestFormulaHitFrechetPersistence:
         with pytest.raises(ValueError, match='drug_hits'):
             load_run_from_json(bad_hits)
 
+        # String integer pos is coerced in place so downstream regenerate receives int.
+        str_pos = tmp_path / 'str_pos.results.json'
+        str_pos.write_text(json.dumps({
+            'format_version': 1,
+            'run': base_run,
+            'variant_result': [{'chrom': 'c', 'pos': '12', 'ref': 'A', 'alt': 'G', 'drug_hits': '[]'}],
+            'coverage_gap': [],
+            'formula_rule_hit': [],
+            'sample_classification': [],
+        }), encoding='utf-8')
+        _, loaded_variants, _, _, _ = load_run_from_json(str_pos)
+        assert loaded_variants[0]['pos'] == 12
+        assert isinstance(loaded_variants[0]['pos'], int)
+
+        # Malformed nested structures must raise ValueError at the upload boundary.
+        malformed_payloads = [
+            {
+                'format_version': 1,
+                'run': {**base_run, 'vcf_path': None},
+                'variant_result': [],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'references': [{'reference_name': 'r', 'profiled_feature_names': 123}],
+                'variant_result': [],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'references': [{'reference_name': ['bad'], 'profiled_feature_names': ['f']}],
+                'variant_result': [],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'drug_hits': json.dumps([{'rule_id': 1, 'drug': 'D', 'publications': 'bad'}]),
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'single_exchange_aa_freq': {},
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [],
+                'coverage_gap': [],
+                'formula_rule_hit': [{'hit_json': json.dumps({'members': 'bad'})}],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [],
+                'coverage_gap': [],
+                'formula_rule_hit': [{'hit_json': json.dumps({'matched_variants': 123})}],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'references': [{'reference_name': 'r', 'query_name': ['bad']}],
+                'variant_result': [],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'reference_name': ['bad'],
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'haplotype_links': '[{}]',
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'haplotype_links': '[[Infinity, 1, 0.5]]',
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'haplotype_links': '[[1, 2, NaN]]',
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'haplotype_links': '[[true, false, true]]',
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'haplotype_links': '["123"]',
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'combined_states': json.dumps([{
+                        'alt_codon': ['bad'], 'alt_aa': {'bad': 1},
+                        'lower': 0.5, 'upper': 0.6, 'forced_fraction': 0.5,
+                        'accepted': True, 'member_indices': [0],
+                    }]),
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+            {
+                'format_version': 1,
+                'run': base_run,
+                'variant_result': [{
+                    'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G',
+                    'combined_states': json.dumps([{
+                        'alt_codon': 'GAA', 'alt_aa': 'E',
+                        'lower': 'NaN', 'upper': 0.6, 'forced_fraction': 0.5,
+                        'accepted': True, 'member_indices': [0],
+                    }]),
+                    'drug_hits': '[]',
+                }],
+                'coverage_gap': [],
+                'formula_rule_hit': [],
+                'sample_classification': [],
+            },
+        ]
+        for idx, payload in enumerate(malformed_payloads):
+            p = tmp_path / f'malformed_{idx}.results.json'
+            p.write_text(json.dumps(payload), encoding='utf-8')
+            with pytest.raises(ValueError):
+                load_run_from_json(p)
+
         anns = reconstruct_annotations([
             {
                 'chrom': 'c', 'pos': 3, 'ref': 'A', 'alt': 'G', 'allele_freq': 0.5,

@@ -194,7 +194,7 @@ def annotate_variant_in_feature(
             if is_deletion(eff_ref, eff_alt) and anchor_pos == -1:
                 if abs(len(eff_alt) - len(eff_ref)) % 3 != 0:
                     return [_annotate_frameshift(var, feature, coding_nt, 0)]
-                if len(eff_alt) == 1:
+                if len(eff_alt) == 1 and eff_ref[0] == eff_alt[0]:
                     codon_0 = coding_nt[:3]
                     deleted_aas = _translate_indel_bases(eff_ref[1:], feature.strand)
                     return [AnnotatedVariant(
@@ -204,7 +204,7 @@ def annotate_variant_in_feature(
                         ref_codon=codon_0,
                         alt_codon='',
                         ref_aa=deleted_aas,
-                        alt_aa='',
+                        alt_aa='del',
                         consequence='deletion',
                     )]
             return [AnnotatedVariant(variant=var, feature_name=feature.name)]
@@ -212,7 +212,7 @@ def annotate_variant_in_feature(
         codon_idx, frame_offset = divmod(anchor_pos, 3)
         if abs(len(eff_alt) - len(eff_ref)) % 3 != 0:
             return [_annotate_frameshift(var, feature, coding_nt, codon_idx)]
-        if len(eff_ref) > 1 and len(eff_alt) > 1:
+        if (len(eff_ref) > 1 and len(eff_alt) > 1) or eff_ref[0] != eff_alt[0]:
             return [AnnotatedVariant(variant=var, feature_name=feature.name)]
         if is_insertion(eff_ref, eff_alt):
             return _annotate_insertion(var, feature, coding_nt, codon_idx, frame_offset, eff_alt)

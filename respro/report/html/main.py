@@ -233,6 +233,7 @@ def build_report_context(
             'cards': feature_cards,
             'count': len(feature_cards),
             'is_multi_species': is_multi_species,
+            'show_reference': is_multi_species or len({rg.reference_id for rg in result.references}) > 1,
             'sequence_icon': load_svg_data_url('dna.svg'),
             'link_icon': load_svg_data_url('link.svg'),
         },

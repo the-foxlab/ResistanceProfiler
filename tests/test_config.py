@@ -586,3 +586,18 @@ class TestMatchingCombinationFraction:
         int_as_float = self._write_override(tmp_path, '[af_bins]\nhigh = [1, 1]\n')
         cfg = load_config_with_overrides(int_as_float)
         assert cfg.af_bins.high == (1.0, 1.0)
+
+    @pytest.mark.parametrize(
+        'toml_body',
+        [
+            '[matching]\nfrechet_epsilon = nan\n',
+            '[timeouts]\ngenbank_backoff_base = inf\n',
+            '[af_bins]\nhigh = [nan, 1.0]\n',
+        ],
+    )
+    def test_non_finite_float_overrides_rejected(self, tmp_path, toml_body: str):
+        from respro.config.cli_settings import load_config_with_overrides
+
+        p = self._write_override(tmp_path, toml_body)
+        with pytest.raises(ValueError):
+            load_config_with_overrides(p)

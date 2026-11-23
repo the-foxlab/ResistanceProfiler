@@ -1788,17 +1788,23 @@ class TestFrechetFormulaMatching:
     def test_or_expression_selects_highest_lower_bound_branch(self) -> None:
         mut_a = self._atomic_rule('M1', 'E', rule_id=10)
         mut_b = self._atomic_rule('M2', 'V', rule_id=11)
-        formula = self._formula('M1 OR M2', [mut_a, mut_b])
-        ann_a = self._make_ann('gag', 1, 'K', 'E', effect_lower=0.2, allele_freq=0.2)
-        ann_b = self._make_ann('gag', 2, 'A', 'V', effect_lower=0.9, allele_freq=0.9)
+        mut_c = self._atomic_rule('M3', 'D', rule_id=12)
+        formula = self._formula('(M1 AND M2) OR M3', [mut_a, mut_b, mut_c])
+        ann_a = self._make_ann('gag', 1, 'K', 'E', effect_lower=0.9, allele_freq=0.9)
+        ann_b = self._make_ann('gag', 2, 'A', 'V', effect_lower=0.8, allele_freq=0.8)
+        ann_c = self._make_ann('gag', 3, 'G', 'D', effect_lower=0.85, allele_freq=0.85)
         ann_a.rule_matches = [mut_a]
-        ann_a.rule_effect_aa_freq[mut_a.id] = 0.2
+        ann_a.rule_effect_aa_freq[mut_a.id] = 0.9
         ann_b.rule_matches = [mut_b]
-        ann_b.rule_effect_aa_freq[mut_b.id] = 0.9
+        ann_b.rule_effect_aa_freq[mut_b.id] = 0.8
+        ann_c.rule_matches = [mut_c]
+        ann_c.rule_effect_aa_freq[mut_c.id] = 0.85
 
-        hits = match_formula_rules([ann_a, ann_b], [formula], min_fraction=self.MIN_FRACTION)
+        # (M1 AND M2) has Fréchet lower 0.70 (max member 0.90), while M3 has lower 0.85.
+        hits = match_formula_rules([ann_a, ann_b, ann_c], [formula], min_fraction=self.MIN_FRACTION)
         assert len(hits) == 1
-        assert hits[0].frechet_lower == pytest.approx(0.9)
+        assert hits[0].matched_member_ids == ['M3']
+        assert hits[0].frechet_lower == pytest.approx(0.85)
 
     def test_match_rules_combined_dedup_keeps_max_freq_and_rejects_indel_mismatch(self) -> None:
         rule = ResistanceRule(
@@ -1827,3 +1833,40 @@ class TestFrechetFormulaMatching:
         )
         match_rules([del_ann], [rule])
         assert del_ann.rule_matches == []
+
+    def test_canonical_del_aa_insertion_rule_does_not_match_deletions_and_del_sentinel_is_isolated(self) -> None:
+        from respro.core.rules import _indel_anchor_mismatch_warning, _matches_rule_alleles
+
+        # Uppercase 'DEL' is the 3-AA insertion Asp-Glu-Leu (e.g. D50DEL), NOT a deletion sentinel.
+        assert not _matches_rule_alleles(
+            reference='D', mutation='DEL', ann_ref='KD', ann_alt='K', ann_consequence='deletion',
+        )
+        assert not _matches_rule_alleles(
+            reference='D', mutation='DEL', ann_ref='D', ann_alt='del', ann_consequence='deletion',
+        )
+        assert _matches_rule_alleles(
+            reference='D', mutation='DEL', ann_ref='D', ann_alt='DEL', ann_consequence='insertion',
+        )
+
+        # Lowercase 'del' sentinel matches deletions only and never emits anchor-mismatch warnings.
+        assert _matches_rule_alleles(
+            reference='M', mutation='del', ann_ref='M', ann_alt='del', ann_consequence='deletion',
+        )
+        assert not _matches_rule_alleles(
+            reference='M', mutation='del', ann_ref='M', ann_alt='MEL', ann_consequence='insertion',
+        )
+        assert not _matches_rule_alleles(
+            reference='', mutation='del', ann_ref='?', ann_alt='?', ann_consequence='deletion',
+        )
+        assert _indel_anchor_mismatch_warning(
+            rule_reference='M', rule_mutation='del', ann_ref='K', ann_alt='KGG',
+            ann_consequence='insertion', feature_name='g', codon_pos=0,
+        ) is None
+        assert _indel_anchor_mismatch_warning(
+            rule_reference='MKAL', rule_mutation='del', ann_ref='AMKAL', ann_alt='A',
+            ann_consequence='deletion', feature_name='g', codon_pos=0,
+        ) is None
+        assert _indel_anchor_mismatch_warning(
+            rule_reference='AM', rule_mutation='A', ann_ref='M', ann_alt='del',
+            ann_consequence='deletion', feature_name='g', codon_pos=0,
+        ) is None

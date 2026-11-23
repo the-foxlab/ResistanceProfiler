@@ -1368,7 +1368,15 @@ class TestApplyDrugAliasMappings:
         for bad in (
             {'name': 'drug_interpretation', 'method': 'by_ic50', 'thresholds': {'susceptible': float('nan'), 'resistant': 5.0}},
             {'name': 'drug_interpretation', 'method': 'by_ic50', 'thresholds': {'susceptible': -1.0, 'resistant': 5.0}},
-            {'name': 'drug_interpretation', 'method': 'by_score', 'thresholds': {'susceptible': 0.0, 'intermediate': 20.0, 'resistant': 10.0}},
         ):
             with pytest.raises(ValueError):
                 validate_interpretation_algorithms([bad])
+
+        non_mono_score = {
+            'name': 'drug_interpretation',
+            'method': 'by_score',
+            'thresholds': {'susceptible': 0, 'intermediate': 20, 'resistant': 10},
+        }
+        with pytest.raises(ValueError) as exc_info:
+            validate_interpretation_algorithms([non_mono_score])
+        assert 'integer' not in str(exc_info.value).lower()
