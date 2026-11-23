@@ -4680,6 +4680,244 @@ class TestCoverageGapPlotBounds:
         html = str(build_alignment_html(ann, alignment, context_codons=1))
         assert html.count("<span class='aln-cell aln-affected'>-</span>") == 9
 
+
+class TestRefMismatchOverlappingVcfAlignment:
+    """Mini-alignment overlay when a VCF call overlaps an internal-vs-supplied reference mismatch."""
+
+    @staticmethod
+    def _extract_query_seq(html: str) -> str:
+        import re
+
+        m = re.search(
+            r"<span class='aln-label'>(?:Query|FASTA)</span><span class='aln-seq'>(.*?)</span></div>",
+            html,
+        )
+        assert m is not None
+        return ''.join(re.findall(r"<span class='aln-cell[^']*'>([^<]+)</span>", m.group(1)))
+
+    def test_substitution_at_ref_mismatch_displays_distinct_alleles_plus_strand(self) -> None:
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='SUB', protein='S',
+            start=0, end=9, strand='+', codon_start=0, nt_sequence='AAACCCGGG',
+        )
+        match = FeatureMatch(
+            feature=feature, identity=8 / 9, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=9, strand='+', cigar='9M', cds_start=0,
+        )
+        # Supplied VCF reference differs from internal ref at pos 3 (C -> T).
+        alignment = build_feature_alignments('AAATCCGGG', [match])['SUB']
+
+        ref_derived = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='C', alt='T', allele_freq=0.6, source='reference_derived'),
+            feature_name='SUB', codon_pos=1, consequence='missense', is_fasta_mode=False,
+        )
+        vcf_derived = AnnotatedVariant(
+            variant=VariantCall(
+                chrom='ref', pos=3, ref='C', alt='G', allele_freq=0.4, source='vcf_derived',
+                user_chrom='ref', user_pos=3, user_ref='T', user_alt='G',
+            ),
+            feature_name='SUB', codon_pos=1, consequence='missense', is_fasta_mode=False,
+        )
+
+        html_ref = str(build_alignment_html(ref_derived, alignment, context_codons=1))
+        html_vcf = str(build_alignment_html(vcf_derived, alignment, context_codons=1))
+
+        assert self._extract_query_seq(html_ref) == 'AAATCCGGG'
+        assert "<span class='aln-cell aln-affected'>T</span>" in html_ref
+        assert self._extract_query_seq(html_vcf) == 'AAAGCCGGG'
+        assert "<span class='aln-cell aln-affected'>G</span>" in html_vcf
+
+    def test_substitution_at_ref_mismatch_displays_distinct_alleles_minus_strand(self) -> None:
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='SUBREV', protein='S',
+            start=0, end=9, strand='-', codon_start=0, nt_sequence='AAACCCGGG',
+        )
+        # Coding supplied ref has C->T at coding pos 3 (native pos 5: G->A).
+        coding_supplied = 'AAATCCGGG'
+        supplied = str(Seq(coding_supplied).reverse_complement())  # CCCGGATTT
+        match = FeatureMatch(
+            feature=feature, identity=8 / 9, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=9, strand='-', cigar='9M', cds_start=0,
+        )
+        alignment = build_feature_alignments(supplied, [match])['SUBREV']
+
+        ref_derived = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=5, ref='G', alt='A', allele_freq=0.6, source='reference_derived'),
+            feature_name='SUBREV', codon_pos=1, consequence='missense', is_fasta_mode=False,
+        )
+        vcf_derived = AnnotatedVariant(
+            variant=VariantCall(
+                chrom='ref', pos=5, ref='G', alt='C', allele_freq=0.4, source='vcf_derived',
+                user_chrom='ref', user_pos=5, user_ref='A', user_alt='C',
+            ),
+            feature_name='SUBREV', codon_pos=1, consequence='missense', is_fasta_mode=False,
+        )
+
+        html_ref = str(build_alignment_html(ref_derived, alignment, context_codons=1))
+        html_vcf = str(build_alignment_html(vcf_derived, alignment, context_codons=1))
+
+        assert self._extract_query_seq(html_ref) == 'CCCGGATTT'
+        assert "<span class='aln-cell aln-affected'>A</span>" in html_ref
+        assert self._extract_query_seq(html_vcf) == 'CCCGGCTTT'
+        assert "<span class='aln-cell aln-affected'>C</span>" in html_vcf
+
+    def test_substitution_over_ref_deletion_displays_vcf_base(self) -> None:
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='SUBDEL', protein='S',
+            start=0, end=9, strand='+', codon_start=0, nt_sequence='AAACCCGGG',
+        )
+        match = FeatureMatch(
+            feature=feature, identity=8 / 9, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=8, strand='+', cigar='3M1D5M', cds_start=0,
+        )
+        # Supplied ref deletes pos 3 (C).
+        alignment = build_feature_alignments('AAACCGGG', [match])['SUBDEL']
+        vcf_snp = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='C', alt='G', allele_freq=0.5, source='vcf_derived'),
+            feature_name='SUBDEL', codon_pos=1, consequence='missense', is_fasta_mode=False,
+        )
+        html = str(build_alignment_html(vcf_snp, alignment, context_codons=1))
+        assert self._extract_query_seq(html) == 'AAAGCCGGG'
+        assert "<span class='aln-cell aln-affected'>G</span>" in html
+
+    def test_insertion_at_ref_insertion_replaces_instead_of_reusing_or_duplicating(self) -> None:
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='INSOVR', protein='I',
+            start=0, end=12, strand='+', codon_start=0, nt_sequence='ATGCCCAAAGGG',
+        )
+        match = FeatureMatch(
+            feature=feature, identity=12 / 15, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=15, strand='+', cigar='4M3I8M', cds_start=0,
+        )
+        # Supplied ref has a 3-bp insertion TTT after pos 3 (C).
+        alignment = build_feature_alignments('ATGCTTTCCAAAGGG', [match])['INSOVR']
+
+        ref_ins = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='C', alt='CTTT', allele_freq=0.5, source='reference_derived'),
+            feature_name='INSOVR', codon_pos=1, consequence='insertion', is_fasta_mode=False,
+        )
+        vcf_same_len = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='C', alt='CGGG', allele_freq=0.3, source='vcf_derived'),
+            feature_name='INSOVR', codon_pos=1, consequence='insertion', is_fasta_mode=False,
+        )
+        vcf_shorter = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='C', alt='CA', allele_freq=0.2, source='vcf_derived'),
+            feature_name='INSOVR', codon_pos=1, consequence='frameshift', is_fasta_mode=False,
+        )
+
+        html_ref = str(build_alignment_html(ref_ins, alignment, context_codons=1))
+        html_same = str(build_alignment_html(vcf_same_len, alignment, context_codons=1))
+        html_short = str(build_alignment_html(vcf_shorter, alignment, context_codons=1))
+
+        assert self._extract_query_seq(html_ref) == 'ATGCTTTCCAAA'
+        assert self._extract_query_seq(html_same) == 'ATGCGGGCCAAA'
+        assert html_same.count("<span class='aln-cell aln-affected'>G</span>") == 3
+        assert self._extract_query_seq(html_short) == 'ATGCACCAAA'
+        assert html_short.count('aln-cell aln-affected') == 1
+        assert "<span class='aln-cell aln-affected'>A</span>" in html_short
+
+    def test_insertion_at_ref_insertion_minus_strand(self) -> None:
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='INSREV', protein='I',
+            start=0, end=9, strand='-', codon_start=0, nt_sequence='ATGGGGTTT',
+        )
+        # Coding supplied ref inserts CCC before coding idx 3 -> native AAACCCGGGCAT (anchor native pos 5).
+        supplied = str(Seq('ATGCCCGGGTTT').reverse_complement())
+        match = FeatureMatch(
+            feature=feature, identity=9 / 12, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=len(supplied), strand='-', cigar='3M3I6M', cds_start=0,
+        )
+        alignment = build_feature_alignments(supplied, [match])['INSREV']
+
+        ref_ins = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=5, ref='C', alt='CGGG', allele_freq=0.6, source='reference_derived'),
+            feature_name='INSREV', codon_pos=1, consequence='insertion', is_fasta_mode=False,
+        )
+        vcf_ins = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=5, ref='C', alt='CTTT', allele_freq=0.4, source='vcf_derived'),
+            feature_name='INSREV', codon_pos=1, consequence='insertion', is_fasta_mode=False,
+        )
+
+        html_ref = str(build_alignment_html(ref_ins, alignment, context_codons=1))
+        html_vcf = str(build_alignment_html(vcf_ins, alignment, context_codons=1))
+
+        assert self._extract_query_seq(html_ref) == 'AAACCCGGGCAT'
+        assert self._extract_query_seq(html_vcf) == 'AAACCCTTTCAT'
+        assert html_vcf.count("<span class='aln-cell aln-affected'>T</span>") == 3
+
+    def test_shorter_vcf_deletion_inside_longer_ref_deletion_restores_flanks(self) -> None:
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='DELOVR', protein='D',
+            start=0, end=15, strand='+', codon_start=0, nt_sequence='ATGAAACCCGGGTTT',
+        )
+        match = FeatureMatch(
+            feature=feature, identity=9 / 15, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=9, strand='+', cigar='3M6D6M', cds_start=0,
+        )
+        # Supplied ref has a 6-bp deletion (pos 3..8: AAACCC deleted).
+        alignment = build_feature_alignments('ATGGGGTTT', [match])['DELOVR']
+
+        ref_del = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=2, ref='GAAACCC', alt='G', allele_freq=0.5, source='reference_derived'),
+            feature_name='DELOVR', codon_pos=0, consequence='deletion', is_fasta_mode=False,
+        )
+        vcf_left_del = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=2, ref='GAAA', alt='G', allele_freq=0.3, source='vcf_derived'),
+            feature_name='DELOVR', codon_pos=0, consequence='deletion', is_fasta_mode=False,
+        )
+        vcf_right_del = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=5, ref='ACCC', alt='A', allele_freq=0.2, source='vcf_derived'),
+            feature_name='DELOVR', codon_pos=1, consequence='deletion', is_fasta_mode=False,
+        )
+
+        html_ref = str(build_alignment_html(ref_del, alignment, context_codons=3))
+        html_left = str(build_alignment_html(vcf_left_del, alignment, context_codons=3))
+        html_right = str(build_alignment_html(vcf_right_del, alignment, context_codons=3))
+
+        assert self._extract_query_seq(html_ref) == 'ATG------GGGTTT'
+        assert self._extract_query_seq(html_left) == 'ATG---CCCGGGTTT'
+        assert html_left.count("<span class='aln-cell aln-affected'>-</span>") == 3
+        assert self._extract_query_seq(html_right) == 'ATGAAA---GGGTTT'
+        assert html_right.count("<span class='aln-cell aln-affected'>-</span>") == 3
+
+    def test_complex_deletion_over_ref_deletion_updates_anchor_and_strips_embedded_ins(self) -> None:
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='DELCMP', protein='D',
+            start=0, end=12, strand='+', codon_start=0, nt_sequence='ATGCCCAAAGGG',
+        )
+        # Supplied ref has a 1-bp insertion T between pos 2 (G) and pos 3 (C).
+        match_ins = FeatureMatch(
+            feature=feature, identity=12 / 13, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=13, strand='+', cigar='3M1I9M', cds_start=0,
+        )
+        aln_ins = build_feature_alignments('ATGTCCCAAAGGG', [match_ins])['DELCMP']
+        vcf_del = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=2, ref='GCCC', alt='A', allele_freq=0.5, source='vcf_derived'),
+            feature_name='DELCMP', codon_pos=0, consequence='deletion', is_fasta_mode=False,
+        )
+        html = str(build_alignment_html(vcf_del, aln_ins, context_codons=2))
+        assert self._extract_query_seq(html) == 'ATA---AAAGGG'
+        assert html.count("<span class='aln-cell aln-affected'>-</span>") == 3
+
+    def test_fasta_mode_iupac_base_is_not_overwritten(self) -> None:
+        feature = FeatureRecord(
+            id=1, reference_id=1, name='IUPAC', protein='I',
+            start=0, end=9, strand='+', codon_start=0, nt_sequence='AAACCCGGG',
+        )
+        match = FeatureMatch(
+            feature=feature, identity=8 / 9, cds_coverage=1.0, query_coverage=1.0,
+            query_start=0, query_end=9, strand='+', cigar='9M', cds_start=0,
+        )
+        alignment = build_feature_alignments('AAAYCCGGG', [match])['IUPAC']
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='ref', pos=3, ref='C', alt='T', allele_freq=0.5),
+            feature_name='IUPAC', codon_pos=1, consequence='missense', is_fasta_mode=True,
+        )
+        html = str(build_alignment_html(ann, alignment, context_codons=1))
+        assert self._extract_query_seq(html) == 'AAAYCCGGG'
+        assert "<span class='aln-cell aln-affected'>Y</span>" in html
+
+
 class TestAssignFeatureTracks:
     def test_while_loop_uses_plotted_segment_span(self) -> None:
         """_assign_feature_tracks uses plotted segment bounds, not full feature.end."""

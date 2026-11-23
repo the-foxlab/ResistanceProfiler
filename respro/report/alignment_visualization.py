@@ -234,6 +234,19 @@ def _variant_span(ann: AnnotatedVariant, alignment: FeatureAlignment) -> _Varian
     )
 
 
+def _contiguous_insertion_indices(
+    native_positions: list[int | None],
+    insert_after: int,
+) -> list[int]:
+    """Return contiguous insertion-column indices (``None`` in *native_positions*) after *insert_after*."""
+    indices: list[int] = []
+    idx = insert_after + 1
+    while idx < len(native_positions) and native_positions[idx] is None:
+        indices.append(idx)
+        idx += 1
+    return indices
+
+
 def _apply_vcf_overlay(
     ann: AnnotatedVariant,
     alignment: FeatureAlignment,
@@ -264,6 +277,17 @@ def _apply_vcf_overlay(
 
     if len(span.alt_allele) > len(span.ref_allele):
         if ins_anchor_idx is not None:
+            ins_tail = _contiguous_insertion_indices(native_pos, ins_anchor_idx)
+            span_end = (ins_tail[-1] if ins_tail else ins_anchor_idx) + 1
+            for idx in range(span_end - 1, anchor_idx, -1):
+                if native_pos[idx] is None:
+                    del ref_chars[idx]
+                    del query_chars[idx]
+                    del coding_pos[idx]
+                    del native_pos[idx]
+                    del native_anchor_pos[idx]
+                    if idx < ins_anchor_idx:
+                        ins_anchor_idx -= 1
             for offset, base in enumerate(span.alt_allele[span.common_len:]):
                 idx = ins_anchor_idx + 1 + offset
                 ref_chars.insert(idx, '-')
@@ -273,9 +297,28 @@ def _apply_vcf_overlay(
                 native_anchor_pos.insert(idx, span.ins_anchor)
     elif len(span.ref_allele) > len(span.alt_allele):
         deleted_positions = set(range(span.anchor_pos + span.common_len, span.anchor_pos + len(span.ref_allele)))
-        for idx, pos in enumerate(native_pos):
-            if pos is not None and pos in deleted_positions:
-                query_chars[idx] = '-'
+        deleted_idxs = [idx for idx, pos in enumerate(native_pos) if pos is not None and pos in deleted_positions]
+        for idx in deleted_idxs:
+            query_chars[idx] = '-'
+        # Restore flanking gap cells from a longer supplied-ref deletion overlapping this call.
+        left = anchor_idx - 1
+        while left >= 0 and native_pos[left] is not None and query_chars[left] == '-':
+            query_chars[left] = ref_chars[left]
+            left -= 1
+        if deleted_idxs:
+            right = deleted_idxs[-1] + 1
+            while right < len(native_pos) and native_pos[right] is not None and query_chars[right] == '-':
+                query_chars[right] = ref_chars[right]
+                right += 1
+            tail_start = (ins_anchor_idx if ins_anchor_idx is not None else anchor_idx) + 1
+            # Remove any supplied-ref insertion columns embedded inside the deleted span.
+            for idx in range(deleted_idxs[-1] - 1, tail_start - 1, -1):
+                if native_pos[idx] is None:
+                    del ref_chars[idx]
+                    del query_chars[idx]
+                    del coding_pos[idx]
+                    del native_pos[idx]
+                    del native_anchor_pos[idx]
 
     return ''.join(ref_chars), ''.join(query_chars), coding_pos, native_pos, native_anchor_pos
 
@@ -286,30 +329,56 @@ def _window_displays_variant(
     ref_window: str,
     query_window: str,
     native_positions: list[int | None],
-    native_anchor_positions: list[int],
     codon_nt_start: int,
 ) -> bool:
     """Return True when the aligned window already displays the variant event."""
+    if ann.is_fasta_mode:
+        return True
+
     span = _variant_span(ann, alignment)
+    if span.common_len > 0:
+        pos_to_idx = {pos: i for i, pos in enumerate(native_positions) if pos is not None}
 
-    if len(span.alt_allele) > len(span.ref_allele):
-        inserted_len = len(span.alt_allele) - len(span.ref_allele)
-        insertion_idxs = [
-            idx
-            for idx, (ref_pos, cell_anchor) in enumerate(zip(native_positions, native_anchor_positions))
-            if ref_pos is None and span.matches_insertion_cell(cell_anchor, alignment.strand)
-        ]
-        return len(insertion_idxs) >= inserted_len and any(
-            query_window[idx] != '-' for idx in insertion_idxs[:inserted_len]
-        )
+        def _prefix_matches() -> bool:
+            return all(
+                (idx := pos_to_idx.get(span.anchor_pos + offset)) is not None
+                and query_window[idx].upper() == span.alt_allele[offset]
+                for offset in range(span.common_len)
+            )
 
-    if len(span.ref_allele) > len(span.alt_allele):
-        deleted_len = len(span.ref_allele) - len(span.alt_allele)
-        deleted_positions = set(range(span.anchor_pos + span.common_len, span.anchor_pos + len(span.ref_allele)))
-        deleted_idxs = [i for i, pos in enumerate(native_positions) if pos is not None and pos in deleted_positions]
-        return len(deleted_idxs) >= deleted_len and all(
-            query_window[idx] == '-' for idx in deleted_idxs[:deleted_len]
-        )
+        if len(span.alt_allele) > len(span.ref_allele):
+            start_idx = pos_to_idx.get(span.anchor_pos)
+            end_idx = pos_to_idx.get(span.ins_anchor)
+            if start_idx is None or end_idx is None:
+                return False
+            ins_tail = _contiguous_insertion_indices(native_positions, end_idx)
+            span_end = (ins_tail[-1] if ins_tail else end_idx) + 1
+            return query_window[start_idx:span_end].upper() == span.alt_allele
+
+        if len(span.ref_allele) > len(span.alt_allele):
+            if not _prefix_matches():
+                return False
+            deleted_len = len(span.ref_allele) - span.common_len
+            deleted_idxs = [
+                idx
+                for pos in range(span.anchor_pos + span.common_len, span.anchor_pos + len(span.ref_allele))
+                if (idx := pos_to_idx.get(pos)) is not None
+            ]
+            if len(deleted_idxs) < deleted_len or not all(query_window[idx] == '-' for idx in deleted_idxs):
+                return False
+            tail_start = pos_to_idx[span.ins_anchor] + 1
+            if any(native_positions[i] is None for i in range(tail_start, deleted_idxs[-1])):
+                return False
+            next_idx = deleted_idxs[-1] + 1
+            if (
+                next_idx < len(native_positions)
+                and native_positions[next_idx] is not None
+                and query_window[next_idx] == '-'
+            ):
+                return False
+            return True
+
+        return _prefix_matches()
 
     affected_positions = _affected_nt_positions(ann, alignment, codon_nt_start)
     visible_affected = [i for i, pos in enumerate(native_positions) if pos is not None and pos in affected_positions]
@@ -432,7 +501,7 @@ def build_alignment_html(
     native_anchor_positions = alignment.aln_native_anchor_pos[aln_start:aln_end]
 
     if not _window_displays_variant(
-        ann, alignment, ref_window, query_window, native_positions, native_anchor_positions, codon_nt_start,
+        ann, alignment, ref_window, query_window, native_positions, codon_nt_start,
     ):
         ref_window, query_window, coding_positions, native_positions, native_anchor_positions = _apply_vcf_overlay(
             ann, alignment, ref_window, query_window, coding_positions, native_positions, native_anchor_positions,
