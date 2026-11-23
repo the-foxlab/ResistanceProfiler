@@ -45,16 +45,16 @@ def compute_coverage_gaps_from_bam_multi(
 
     _ensure_bam_index(bam_path)
     all_gaps: list[CoverageGap] = []
+    allow_sole_fallback = len(per_chrom) == 1
     with pysam.AlignmentFile(str(bam_path), 'rb') as bam:
-        bam_references = set(bam.references)
         for chrom, (query_name, query_sequence, matches) in per_chrom.items():
             query_len = len(query_sequence)
             if query_len == 0 or not matches:
                 continue
-            if chrom not in bam_references:
+            contig = _try_resolve_bam_contig(bam, query_name, allow_sole_fallback=allow_sole_fallback)
+            if contig is None:
                 logger.warning('BAM has no contig %r; skipping coverage for this CHROM', chrom)
                 continue
-            contig = _resolve_bam_contig(bam, query_name)
             depths = _depth_array_from_bam(
                 bam, contig, query_len,
                 bam_base_quality_threshold=bam_base_quality_threshold,
@@ -123,21 +123,24 @@ def compute_coverage_gaps_from_depth(
     return gaps
 
 
-def _resolve_bam_contig(bam: pysam.AlignmentFile, query_name: str) -> str:
-    """Resolve the BAM contig matching ``query_name``, falling back to a sole contig."""
+def _try_resolve_bam_contig(
+    bam: pysam.AlignmentFile,
+    query_name: str,
+    *,
+    allow_sole_fallback: bool,
+) -> str | None:
+    """Resolve the BAM contig matching ``query_name``, optionally falling back to a sole contig."""
     references = list(bam.references)
     if query_name in references:
         return query_name
-    if len(references) == 1:
+    if allow_sole_fallback and len(references) == 1:
         only_ref = references[0]
         logger.warning(
             'BAM does not contain query reference %r; using sole BAM reference %r',
             query_name, only_ref,
         )
         return only_ref
-    raise ValueError(
-        f'BAM reference {query_name!r} not found and BAM contains multiple references: {references}'
-    )
+    return None
 
 
 def _depth_array_from_bam(
@@ -180,12 +183,25 @@ def build_bam_cooccurrence_by_chrom(
     min_depth: int,
 ) -> dict[str, BamCooccurrence]:
     """Build per-CHROM ``BamCooccurrence`` contexts; closes all handles if any CHROM fails."""
+    if not per_chrom:
+        return {}
+    _ensure_bam_index(bam_path)
+    allow_sole_fallback = len(per_chrom) == 1
     by_chrom: dict[str, BamCooccurrence] = {}
     with ExitStack() as stack:
         for chrom, (query_name, query_sequence, matches) in per_chrom.items():
             query_len = len(query_sequence)
             if query_len == 0 or not matches:
                 continue
+
+            bam = pysam.AlignmentFile(str(bam_path), 'rb')
+            contig = _try_resolve_bam_contig(bam, query_name, allow_sole_fallback=allow_sole_fallback)
+            if contig is None:
+                bam.close()
+                logger.warning('BAM has no contig %r; skipping BAM co-occurrence for this CHROM', chrom)
+                continue
+            stack.enter_context(bam)
+
             cds_to_query_by_feature: dict[str, dict[int, int]] = {}
             match_strand_by_feature: dict[str, str] = {}
             for match in matches:
@@ -203,8 +219,6 @@ def build_bam_cooccurrence_by_chrom(
                 }
                 match_strand_by_feature[match.feature.name] = match.strand
 
-            bam = stack.enter_context(pysam.AlignmentFile(str(bam_path), 'rb'))
-            contig = _resolve_bam_contig(bam, query_name)
             by_chrom[chrom] = BamCooccurrence(
                 bam=bam,
                 contig=contig,

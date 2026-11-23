@@ -11,7 +11,6 @@ from rich.console import Console
 from rich.panel import Panel
 
 from respro.cli.profile_helpers import (
-    export_and_persist_result,
     match_rules_across_references,
     reconstruct_reference_groups,
 )
@@ -59,7 +58,6 @@ def sync_results_database(
             try:
                 hits, formula_hits = _sync_single_run(
                     run_id=current_run_id,
-                    project_path=project_db_path,
                     project_conn=project_conn,
                     results_conn=results_conn,
                     log=log,
@@ -78,7 +76,7 @@ def sync_results_database(
             title='[green]✓ Sync complete[/green]',
             border_style='green',
         ))
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
         cli_error(str(exc))
     finally:
         if results_conn is not None:
@@ -90,7 +88,6 @@ def sync_results_database(
 def _sync_single_run(
     *,
     run_id: int,
-    project_path: Path,
     project_conn: sqlite3.Connection,
     results_conn: sqlite3.Connection,
     log: logging.Logger,
@@ -153,15 +150,6 @@ def _sync_single_run(
             formula_hits=formula_hits,
             coverage_gaps=coverage_gaps,
             references=references,
-        )
-        export_and_persist_result(
-            result,
-            project_conn=project_conn,
-            input_basename=run_dict['vcf_path'],
-            output_target=Path('.'),
-            results_conn=None,
-            project_path=project_path,
-            log=log,
         )
 
     replace_run_results(results_conn, run_id, result, project_conn)

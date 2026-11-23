@@ -45,8 +45,8 @@
         <ul class="feature-list">
           {% for entry in context.summary.mutation_profile %}
           <li class="feature-row">
-            <span class="feature-name">{{ entry.feature }}</span>
-            {% if context.summary.has_coverage and entry.covered_pct is not none %}<span class="feature-cov">({{ entry.covered_pct }}% covered)</span>{% elif context.summary.coverage_not_assessed %}<span class="feature-cov feature-cov--na">(coverage not assessed)</span>{% endif %}
+            <span class="feature-name">{{ entry.feature }}{% if context.is_multi_species and entry.reference_name %} ({{ entry.reference_name }}){% endif %}</span>
+            {% if context.summary.has_coverage and entry.covered_pct is not none %}<span class="feature-cov">({{ entry.covered_pct }}% covered)</span>{% elif context.summary.coverage_not_assessed %}<span class="feature-cov feature-cov--na">(coverage not assessed)</span>{% else %}<span class="feature-cov"></span>{% endif %}
             <span class="feature-muts">
               {% for m in entry.mutations %}
               <span class="mut-chip{% if m.is_high_impact %} mut-chip--high{% elif m.is_db_hit %} mut-chip--hit{% endif %}">{{ m.label }}</span>{% if not loop.last %}, {% endif %}
@@ -63,7 +63,7 @@
 
     <section class="section section-drug-summary">
       <div class="section-title">Drug Summary</div>
-      <p class="drug-summary-text">{{ context.summary.narrative | safe }}</p>
+      {% if context.summary.has_narrative and context.summary.narrative %}<p class="drug-summary-text">{{ context.summary.narrative | safe }}</p>{% endif %}
       <article class="panel">
         {% if context.summary.drug_rows %}
         <table class="drug-table">

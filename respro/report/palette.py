@@ -26,18 +26,6 @@ FEATURE_HIGHLIGHTED_EDGE = 'black'
 FEATURE_DEFAULT_EDGE = '#a2a2a2'
 FEATURE_BASELINE_COLOUR = 'dimgrey'
 
-AF_BIN_COLOURS = {
-    'high': '#e74c3c',
-    'intermediate': '#f39c12',
-    'low': '#bdc3c7',
-}
-
-SIMILARITY_COLOURS = {
-    'high': '#e74c3c',
-    'moderate': '#f39c12',
-    'low': '#bdc3c7',
-}
-
 
 def mutation_legend_patches(effects: set[str] | None = None) -> list[mpatches.Patch]:
     """Build matplotlib Patch legend handles for the selected consequence colours."""

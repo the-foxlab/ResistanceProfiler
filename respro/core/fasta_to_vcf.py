@@ -93,12 +93,10 @@ def _variants_from_alignment(
     feature: FeatureRecord,
     covered_cds_start: int | None = None,
     covered_cds_end: int | None = None,
-    ref_positions: Sequence[tuple[str, str, str]] | None = None,
 ) -> tuple[list[VariantCall], list[CoverageGap]]:
     """Emit nucleotide-level VariantCall records and coverage gaps from gapped CDS strings."""
-    positions = build_ref_positions(aligned_ref, aligned_query) if ref_positions is None else ref_positions
     return variants_from_columns(
-        positions,
+        build_ref_positions(aligned_ref, aligned_query),
         feature,
         covered_cds_start=covered_cds_start,
         covered_cds_end=covered_cds_end,
@@ -127,7 +125,7 @@ def variants_from_columns(
         ref_base, query_base, ins_before = coding[ref_idx]
 
         if ref_idx // 3 in non_assessable:
-            ref_idx = _advance_past_deletion(coding, ref_idx) if query_base == '-' else ref_idx + 1
+            ref_idx = _deletion_run_end(coding, ref_idx) + 1 if query_base == '-' else ref_idx + 1
             continue
 
         if ins_before:
@@ -145,8 +143,8 @@ def variants_from_columns(
             continue
 
         if ref_base != query_base:
-            query_codon = _query_codon_at(coding, ref_idx)
-            clean_codon = query_codon if '-' not in query_codon else ''
+            query_codon = _query_codon_at(coding, ref_idx).upper()
+            clean_codon = query_codon if len(query_codon) == 3 and '-' not in query_codon else ''
             for alt_base, af in _iupac_alt_bases(ref_base, query_base):
                 var = make_coding_variant(feature, ref_idx, ref_base, alt_base, af=af)
                 var.query_ref_codon = clean_codon
@@ -164,11 +162,6 @@ def _deletion_run_end(coding: Sequence[tuple[str, str, str]], start_idx: int) ->
     while end_idx + 1 < len(coding) and coding[end_idx + 1][1] == '-':
         end_idx += 1
     return end_idx
-
-
-def _advance_past_deletion(coding: Sequence[tuple[str, str, str]], start_idx: int) -> int:
-    """Return the first index after a deletion run starting at ``start_idx``."""
-    return _deletion_run_end(coding, start_idx) + 1
 
 
 def _non_assessable_codon_indices(
@@ -270,7 +263,7 @@ def make_coding_insertion(
     # Plus-strand VCF anchors on the preceding coding base; minus-strand genomic left-anchoring
     # sits on the current coding base (which becomes the genomic base preceding the RC insertion).
     anchor_idx = idx - 1 if feature.strand == '+' else idx
-    if anchor_idx < 0:
+    if idx <= 0 or anchor_idx < 0 or anchor_idx >= len(ref_bases):
         return None
     anchor_nt = ref_bases[anchor_idx]
     if feature.strand == '-':

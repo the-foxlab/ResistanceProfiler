@@ -235,25 +235,22 @@ def build_summary_narrative(
                 if count > 0:
                     _register_label(label, name)
 
-    all_feature_matches = (
-        [match for rg in result.references for match in rg.feature_matches]
-        if is_multi_species
-        else result.feature_matches
-    )
+    all_feature_matches = [match for rg in result.references for match in rg.feature_matches]
     profiled_features = sorted({display_names.get(m.feature.name, m.feature.name) for m in all_feature_matches})
     organism_by_ref_id = {rg.reference_id: rg.organism for rg in result.references if rg.organism}
-    # Key by display name (matching profiled_features) so mat_peptide names resolve their organism.
-    ref_id_by_display = {
-        display_names.get(m.feature.name, m.feature.name): m.feature.reference_id
-        for m in all_feature_matches
-    }
 
     if is_multi_species and profiled_features:
         features_by_org: dict[str, list[str]] = {}
-        for feature in profiled_features:
-            ref_id = ref_id_by_display.get(feature)
-            org = (organism_by_ref_id.get(ref_id) if ref_id is not None else None) or result.organism or 'Unknown organism'
-            features_by_org.setdefault(org, []).append(feature)
+        seen_org_feature: set[tuple[str, str]] = set()
+        for match in sorted(
+            all_feature_matches,
+            key=lambda m: (display_names.get(m.feature.name, m.feature.name), m.feature.reference_id),
+        ):
+            feat_label = display_names.get(match.feature.name, match.feature.name)
+            org = organism_by_ref_id.get(match.feature.reference_id) or result.organism or 'Unknown organism'
+            if (org, feat_label) not in seen_org_feature:
+                seen_org_feature.add((org, feat_label))
+                features_by_org.setdefault(org, []).append(feat_label)
         clauses = [
             f'{join_english_list([escape(f) for f in feats])} of <strong>{escape(org)}</strong>'
             for org, feats in features_by_org.items()

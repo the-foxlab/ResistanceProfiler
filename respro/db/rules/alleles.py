@@ -9,6 +9,7 @@ from respro.core.codons import normalize_mutation
 # Anchor-less deletion tokens (e.g. 'Q35del', 'DD676del') resolved against feature aa_sequence.
 RE_ANCHORLESS_DEL = re.compile(r'^([A-Za-z]+)\d+del$', re.IGNORECASE)
 RE_REWRITE_TOKEN = re.compile(r'^([A-Z*]+)(\d+)([A-Z*]+)$')
+_RE_EMBEDDED_COORD = re.compile(r'^([A-Za-z*]+)(\d+)(.+)$')
 
 _STANDARD_AA_LETTERS = frozenset('ACDEFGHIKLMNPQRSTVWY')
 
@@ -63,6 +64,24 @@ def normalize_rule_alleles_for_storage(
         else:
             mutation = token_upper
     else:
+        embedded = _RE_EMBEDDED_COORD.fullmatch(mutation_input)
+        if embedded is not None:
+            emb_left, emb_pos_text, _ = embedded.groups()
+            emb_pos_0based = int(emb_pos_text) - 1
+            if emb_pos_0based != position_0based:
+                errors.append(
+                    f'{context}: position {position_0based + 1} conflicts with mutation token '
+                    f'{mutation_raw!r} (embedded position is {emb_pos_0based + 1})'
+                )
+                return None
+            emb_left_u = emb_left.upper()
+            if not (emb_left_u.startswith(reference) or reference.startswith(emb_left_u)):
+                errors.append(
+                    f'{context}: reference AA {reference!r} conflicts with mutation token '
+                    f'{mutation_raw!r} (embedded reference is {emb_left_u!r})'
+                )
+                return None
+
         normalized = normalize_mutation(
             mutation_input,
             reference=reference,
@@ -81,9 +100,6 @@ def normalize_rule_alleles_for_storage(
         return position_0based, reference, mutation
 
     left, pos_text, right = rewrite_match.groups()
-    if len(left) == 1 and len(right) == 1:
-        return position_0based, reference, right
-
     anchor_pos_0based = int(pos_text) - 1
     if anchor_pos_0based != position_0based:
         errors.append(

@@ -135,7 +135,7 @@ def _coerce_field(value: Any, field_type: Any) -> Any:
         if len(args) == 2 and args[1] is Ellipsis:
             elem_type = args[0]
             return tuple(elem_type(item) for item in value)
-        return tuple(t(item) for t, item in zip(args, value))
+        return tuple(t(item) for t, item in zip(args, value, strict=True))
     return field_type(value)
 
 
@@ -161,10 +161,45 @@ def _load_cli_config() -> CliConfig:
     return _build_cli_config(_read_bundled_defaults())
 
 
-def _expected_toml_type(section: str, key: str) -> Any:
-    """Return the TOML-level type expected for ``[section] key`` (tuples map to ``list``)."""
-    field_type = _SECTION_FIELD_HINTS[section][key]
-    return list if get_origin(field_type) in (tuple, list) else field_type
+def _is_valid_scalar(value: Any, expected: Any) -> bool:
+    if isinstance(value, bool) and expected in (int, float):
+        return False
+    if expected is float:
+        return isinstance(value, (int, float))
+    return isinstance(value, expected)
+
+
+def _validate_override_value(section: str, key: str, value: Any, field_type: Any) -> None:
+    """Validate *value* against the declared dataclass type hint for ``[section] key``."""
+    if get_origin(field_type) is tuple:
+        if not isinstance(value, list):
+            raise ValueError(
+                f'Type mismatch for config key {key!r} in section [{section}]: '
+                f'expected list, got {type(value).__name__}.'
+            )
+        args = get_args(field_type)
+        if len(args) == 2 and args[1] is Ellipsis:
+            elem_types = [args[0]] * len(value)
+        else:
+            if len(value) != len(args):
+                raise ValueError(
+                    f'Invalid length for config key {key!r} in section [{section}]: '
+                    f'expected {len(args)} item(s), got {len(value)}.'
+                )
+            elem_types = list(args)
+        for idx, (item, elem_type) in enumerate(zip(value, elem_types, strict=True)):
+            if not _is_valid_scalar(item, elem_type):
+                raise ValueError(
+                    f'Type mismatch for config key {key!r}[{idx}] in section [{section}]: '
+                    f'expected {elem_type.__name__}, got {type(item).__name__}.'
+                )
+        return
+
+    if not _is_valid_scalar(value, field_type):
+        raise ValueError(
+            f'Type mismatch for config key {key!r} in section [{section}]: '
+            f'expected {field_type.__name__}, got {type(value).__name__}.'
+        )
 
 
 def _merge_section(base: dict[str, Any], override: dict[str, Any], section: str) -> dict[str, Any]:
@@ -174,18 +209,7 @@ def _merge_section(base: dict[str, Any], override: dict[str, Any], section: str)
         if key not in base:
             allowed = ', '.join(sorted(base))
             raise ValueError(f'Unknown config key {key!r} in section [{section}]. Allowed keys: {allowed}.')
-        expected = _expected_toml_type(section, key)
-        # bool subclasses int in Python; reject booleans where numeric values are expected.
-        if isinstance(value, bool) and expected in (int, float):
-            raise ValueError(
-                f'Type mismatch for config key {key!r} in section [{section}]: '
-                f'expected {expected.__name__}, got bool.'
-            )
-        if not isinstance(value, expected):
-            raise ValueError(
-                f'Type mismatch for config key {key!r} in section [{section}]: '
-                f'expected {expected.__name__}, got {type(value).__name__}.'
-            )
+        _validate_override_value(section, key, value, _SECTION_FIELD_HINTS[section][key])
         merged[key] = value
     return merged
 

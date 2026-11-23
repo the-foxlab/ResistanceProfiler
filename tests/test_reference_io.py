@@ -344,3 +344,11 @@ class TestParseVcfFilterStatus:
         )
         variants = parse_vcf(vcf)
         assert variants[0].filter_status == 'q10;LowQual'
+
+    def test_read_fasta_rejects_duplicate_ids(self, tmp_path: Path) -> None:
+        from respro.io.reference import read_fasta
+
+        fa = tmp_path / 'dup.fasta'
+        fa.write_text('>seq1\nATGAAA\n>seq1\nATGCCC\n', encoding='utf-8')
+        with pytest.raises(ValueError, match='Duplicate FASTA'):
+            read_fasta(fa)

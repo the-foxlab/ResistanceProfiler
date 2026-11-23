@@ -931,3 +931,77 @@ class TestFormulaHitFrechetPersistence:
         assert restored[0].frechet_lower == 0.0
         assert restored[0].forced_fraction == 0.0
         assert restored[0].member_count == 1
+
+    def test_load_run_from_json_validation_and_reconstruct_unset_freq(self, tmp_path: Path) -> None:
+        from respro.db.results import load_run_from_json
+
+        base_run = {
+            'sample_name': 's',
+            'created_at': '2026-01-01T00:00:00',
+            'project_name': 'p',
+            'reference_name': 'r',
+            'resistance_hits': 0,
+            'total_variants': 1,
+            'variants_in_cds': 1,
+            'vcf_path': 's.vcf',
+        }
+        bad = tmp_path / 'bad.results.json'
+        bad.write_text(json.dumps({
+            'format_version': 1,
+            'run': base_run,
+            'variant_result': [{'chrom': 'c', 'pos': 'not-int', 'ref': 'A', 'alt': 'G', 'drug_hits': '[]'}],
+            'coverage_gap': [],
+            'formula_rule_hit': [],
+            'sample_classification': [],
+        }), encoding='utf-8')
+        with pytest.raises(ValueError, match='pos'):
+            load_run_from_json(bad)
+
+        bad_hits = tmp_path / 'bad_hits.results.json'
+        bad_hits.write_text(json.dumps({
+            'format_version': 1,
+            'run': base_run,
+            'variant_result': [{'chrom': 'c', 'pos': 1, 'ref': 'A', 'alt': 'G', 'drug_hits': '{bad'}],
+            'coverage_gap': [],
+            'formula_rule_hit': [],
+            'sample_classification': [],
+        }), encoding='utf-8')
+        with pytest.raises(ValueError, match='drug_hits'):
+            load_run_from_json(bad_hits)
+
+        anns = reconstruct_annotations([
+            {
+                'chrom': 'c', 'pos': 3, 'ref': 'A', 'alt': 'G', 'allele_freq': 0.5,
+                'single_exchange_aa_freq': None,
+                'drug_hits': json.dumps([{'rule_id': 1, 'drug': 'D', 'source': 'CuratedDB'}]),
+            },
+            {
+                'chrom': 'c', 'pos': 6, 'ref': 'G', 'alt': 'A', 'allele_freq': 0.5,
+                'single_exchange_aa_freq': 0.0,
+                'drug_hits': '[]',
+            },
+        ])
+        assert anns[0].single_exchange_aa_freq == pytest.approx(0.5)
+        assert anns[0].rule_matches[0].source == 'CuratedDB'
+        assert anns[1].single_exchange_aa_freq == 0.0
+
+    def test_resolve_run_id_rejects_wildcards_and_classify_supports_multiple_drugs(
+        self, _persist_results_conn, _persist_project_conn, tmp_path: Path,
+    ) -> None:
+        from respro.db.results import delete_run, load_classifications, save_classification
+
+        res = ProfilingResult(project_name='p', sample_name='s', vcf_name='s.vcf')
+        run_id = save_run(_persist_results_conn, tmp_path / 'project.db', _persist_project_conn, res)
+
+        with pytest.raises(ValueError, match='numeric'):
+            delete_run(_persist_results_conn, '%')
+
+        save_classification(_persist_results_conn, run_id, drug='Acyclovir', phenotype='resistant', note='n1')
+        save_classification(_persist_results_conn, run_id, drug='Foscarnet', phenotype='sensitive', note='n2')
+        save_classification(_persist_results_conn, run_id, drug='acyclovir', phenotype='intermediate', note='n3')
+        rows = load_classifications(_persist_results_conn, run_id)
+
+        assert len(rows) == 2
+        by_drug = {r['drug'].lower(): r for r in rows}
+        assert by_drug['acyclovir']['phenotype'] == 'intermediate'
+        assert by_drug['foscarnet']['phenotype'] == 'sensitive'

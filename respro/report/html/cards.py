@@ -21,24 +21,6 @@ def collect_detected_drug_names(result: ProfilingResult) -> set[str]:
     return detected
 
 
-def collect_formula_hit_annotation_ids(result: ProfilingResult) -> set[int]:
-    """Collect annotation object IDs participating in any formula hit, including co-codon siblings."""
-    direct_ids = {id(ann) for hit in result.formula_hits for ann in hit.matched_variants}
-    combined_sibling_keys = {
-        (ann.feature_name, ann.codon_pos, ann.variant.chrom)
-        for ann in result.cds_annotations
-        if id(ann) in direct_ids and ann.is_combined_codon_event
-    }
-    if not combined_sibling_keys:
-        return direct_ids
-    return direct_ids | {
-        id(ann)
-        for ann in result.cds_annotations
-        if ann.is_combined_codon_event
-        and (ann.feature_name, ann.codon_pos, ann.variant.chrom) in combined_sibling_keys
-    }
-
-
 def build_drug_stats(result: ProfilingResult) -> dict[str, dict]:
     """Build per-drug single-rule and formula hit counts."""
     direct_counter: Counter[str] = Counter()
@@ -72,17 +54,25 @@ def build_drug_stats(result: ProfilingResult) -> dict[str, dict]:
 def build_feature_stats(
     result: ProfilingResult,
     features: list[FeatureRecord] | None = None,
-) -> dict[str, dict]:
-    """Build observed-variant and database-hit counts per detected feature."""
+) -> dict[tuple[int, str], dict]:
+    """Build observed-variant and database-hit counts per detected ``(reference_id, feature)``."""
     unassigned = 'Unassigned'
-    observed_counter: Counter[str] = Counter()
-    direct_counter: Counter[str] = Counter()
-    formula_counter: Counter[str] = Counter()
+    ref_id_by_chrom = {rg.query_name: rg.reference_id for rg in result.references if rg.query_name}
+    distinct_ref_ids = {rg.reference_id for rg in result.references}
+    multi_ref = len(distinct_ref_ids) > 1
+    default_ref_id = next(iter(distinct_ref_ids), 0) if len(distinct_ref_ids) == 1 else 0
+
+    def _key(ref_id: int | None, feature_name: str) -> tuple[int, str]:
+        return (ref_id if (multi_ref and ref_id is not None) else default_ref_id, feature_name)
+
+    observed_counter: Counter[tuple[int, str]] = Counter()
+    direct_counter: Counter[tuple[int, str]] = Counter()
+    formula_counter: Counter[tuple[int, str]] = Counter()
 
     if features:
-        ref_id_by_chrom = {rg.query_name: rg.reference_id for rg in result.references if rg.query_name}
-        multi_ref = len({rg.reference_id for rg in result.references}) > 1
-        seen_keys_by_feature: dict[str, set[tuple[str, int, str, str]]] = {f.name: set() for f in features}
+        seen_keys_by_feature: dict[tuple[int, str], set[tuple[str, int, str, str]]] = {
+            _key(f.reference_id, f.name): set() for f in features
+        }
         for ann in result.annotations:
             ann_ref_id = ref_id_by_chrom.get(ann.variant.chrom)
             variant_key = (ann.variant.chrom, ann.variant.pos, ann.variant.ref, ann.variant.alt)
@@ -93,31 +83,37 @@ def build_feature_stats(
                     continue
                 if not feature.contains(ann.variant.pos):
                     continue
-                seen_keys = seen_keys_by_feature.setdefault(feature.name, set())
+                fkey = _key(feature.reference_id, feature.name)
+                seen_keys = seen_keys_by_feature.setdefault(fkey, set())
                 if variant_key not in seen_keys:
                     seen_keys.add(variant_key)
-                    observed_counter[feature.name] += 1
+                    observed_counter[fkey] += 1
     else:
         for ann in result.cds_annotations:
             if feature_name := (ann.feature_name or '').strip():
-                observed_counter[feature_name] += 1
+                observed_counter[_key(ref_id_by_chrom.get(ann.variant.chrom), feature_name)] += 1
 
     for ann in result.cds_annotations:
         feature_name = (ann.feature_name or '').strip() or unassigned
-        direct_counter[feature_name] += len(ann.non_formula_component_rule_matches)
+        fkey = _key(ref_id_by_chrom.get(ann.variant.chrom), feature_name)
+        direct_counter[fkey] += len(ann.non_formula_component_rule_matches)
 
     for formula_hit in result.formula_hits:
-        for feature_name in {(ann.feature_name or '').strip() or unassigned for ann in formula_hit.matched_variants}:
-            formula_counter[feature_name] += 1
+        for fkey in {
+            _key(ref_id_by_chrom.get(ann.variant.chrom), (ann.feature_name or '').strip() or unassigned)
+            for ann in formula_hit.matched_variants
+        }:
+            formula_counter[fkey] += 1
 
-    all_names = set(observed_counter) | set(direct_counter) | set(formula_counter)
+    all_keys = set(observed_counter) | set(direct_counter) | set(formula_counter)
     return {
-        feature_name: {
-            'name': feature_name,
-            'observed_variants': observed_counter.get(feature_name, 0),
-            'database_hits': direct_counter.get(feature_name, 0) + formula_counter.get(feature_name, 0),
+        fkey: {
+            'name': fkey[1],
+            'reference_id': fkey[0],
+            'observed_variants': observed_counter.get(fkey, 0),
+            'database_hits': direct_counter.get(fkey, 0) + formula_counter.get(fkey, 0),
         }
-        for feature_name in sorted(all_names, key=str.lower)
+        for fkey in sorted(all_keys, key=lambda item: (item[1].lower(), item[0]))
     }
 
 
@@ -144,23 +140,29 @@ def build_drug_cards(
 
 
 def build_feature_cards(
-    feature_stats: dict[str, dict],
-    db_feature_cards_by_name: dict[str, dict],
+    feature_stats: dict[tuple[int, str], dict],
+    db_feature_cards_by_key: dict[tuple[str, str], dict],
     display_names: dict[str, str],
-    feature_lookup: dict[str, FeatureRecord],
+    feature_lookup: dict[tuple[int, str], FeatureRecord],
     reference_name_by_ref_id: dict[int, str] | None = None,
 ) -> list[dict]:
     """Merge per-feature stats with optional DB metadata into card payloads."""
     ref_by_id = reference_name_by_ref_id or {}
+    fallback_feature_by_name = {name: feat for (_rid, name), feat in feature_lookup.items()}
+    fallback_card_by_name = {name: card for (_ref_name, name), card in db_feature_cards_by_key.items()}
     cards: list[dict] = []
-    for feature_name in sorted(feature_stats, key=lambda item: str(display_names.get(item, item)).lower()):
-        stats = dict(feature_stats[feature_name])
-        metadata = db_feature_cards_by_name.get(feature_name)
-        feature = feature_lookup.get(feature_name)
-        stats['name'] = display_names.get(feature_name, feature_name)
+    for ref_id, feature_name in sorted(
+        feature_stats,
+        key=lambda item: (str(display_names.get(item[1], item[1])).lower(), ref_by_id.get(item[0], '').lower()),
+    ):
+        stats = dict(feature_stats[(ref_id, feature_name)])
+        feature = feature_lookup.get((ref_id, feature_name)) or fallback_feature_by_name.get(feature_name)
+        ref_name = ref_by_id.get(ref_id, '') or (ref_by_id.get(feature.reference_id, '') if feature is not None else '')
+        metadata = db_feature_cards_by_key.get((ref_name, feature_name)) or fallback_card_by_name.get(feature_name)
+        stats['name'] = feature.display_name if feature is not None else display_names.get(feature_name, feature_name)
         nt_seq = feature.nt_sequence or '' if feature is not None else ''
         aa_seq = feature.aa_sequence or '' if feature is not None else ''
-        stats['reference_name'] = ref_by_id.get(feature.reference_id, '') if feature is not None else ''
+        stats['reference_name'] = ref_name
 
         if metadata:
             stats.update({

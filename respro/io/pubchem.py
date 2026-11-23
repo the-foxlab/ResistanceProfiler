@@ -78,23 +78,31 @@ def _fetch_identifier_list(url: str, key: str, label: str, timeout: int) -> Look
 
 def _fetch_cid(name: str, timeout: int) -> LookupResult[int]:
     """Resolve a drug name to its primary PubChem CID."""
-    url = CLI_CONFIG.urls.pubchem_cid_lookup.format(name=urllib.parse.quote(name))
+    url = CLI_CONFIG.urls.pubchem_cid_lookup.format(name=urllib.parse.quote(name, safe=''))
     res = _fetch_identifier_list(url, 'CID', f'PubChem CID lookup for {name!r}', timeout)
     if res.status is not LookupStatus.FOUND or res.value is None:
         return LookupResult(status=res.status)
-    return LookupResult.found(int(res.value[0])) if res.value else LookupResult.not_found()
+    if not res.value:
+        return LookupResult.not_found()
+    first = res.value[0]
+    if isinstance(first, bool) or not isinstance(first, (int, str)) or not str(first).isdigit():
+        return LookupResult.error()
+    return LookupResult.found(int(first))
 
 
 def _fetch_substance_sids(name: str, timeout: int) -> LookupResult[list[int]]:
     """Resolve a drug name to its PubChem substance IDs (SIDs)."""
-    url = CLI_CONFIG.urls.pubchem_substance_sids.format(name=urllib.parse.quote(name))
+    url = CLI_CONFIG.urls.pubchem_substance_sids.format(name=urllib.parse.quote(name, safe=''))
     res = _fetch_identifier_list(url, 'SID', f'PubChem SID lookup for {name!r}', timeout)
     if res.status is LookupStatus.NOT_FOUND:
         logger.debug('PubChem: no substance found for %r', name)
         return LookupResult.not_found()
     if res.status is not LookupStatus.FOUND or res.value is None:
         return LookupResult(status=res.status)
-    sids = [int(s) for s in res.value if isinstance(s, (int, str)) and str(s).isdigit()]
+    sids = [
+        int(s) for s in res.value
+        if not isinstance(s, bool) and isinstance(s, (int, str)) and str(s).isdigit()
+    ]
     return LookupResult.found(sids) if sids else LookupResult.not_found()
 
 

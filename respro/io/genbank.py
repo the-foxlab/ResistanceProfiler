@@ -62,23 +62,24 @@ def parse_genbank_sources(genbank_paths: list[Path]) -> list[ParsedGenBankRefere
 def parse_genbank_records(genbank_path: Path) -> list[ParsedGenBankReference]:
     """Parse all GenBank records and their CDS/mat_peptide features from one ``.gb`` file."""
     records: list[ParsedGenBankReference] = []
-    for record in SeqIO.parse(str(genbank_path), 'genbank'):
-        reference_name = record.id.strip() or record.name.strip()
-        sequence = str(record.seq).upper()
-        if not reference_name:
-            raise ValueError('Encountered a GenBank record without a usable identifier')
-        if not sequence:
-            raise ValueError(f'GenBank record {reference_name!r} has no sequence')
+    with genbank_path.open(encoding='utf-8') as fh:
+        for record in SeqIO.parse(fh, 'genbank'):
+            reference_name = record.id.strip() or record.name.strip()
+            sequence = str(record.seq).upper()
+            if not reference_name:
+                raise ValueError('Encountered a GenBank record without a usable identifier')
+            if not sequence:
+                raise ValueError(f'GenBank record {reference_name!r} has no sequence')
 
-        accession = _extract_accession(record)
-        records.append(ParsedGenBankReference(
-            name=reference_name,
-            accession=accession,
-            length=len(sequence),
-            organism=_extract_organism(record),
-            taxonomy=_extract_taxonomy(record),
-            features=tuple(_parse_coding_features(record, reference_name, accession)),
-        ))
+            accession = _extract_accession(record)
+            records.append(ParsedGenBankReference(
+                name=reference_name,
+                accession=accession,
+                length=len(sequence),
+                organism=_extract_organism(record),
+                taxonomy=_extract_taxonomy(record),
+                features=tuple(_parse_coding_features(record, reference_name, accession)),
+            ))
 
     if not records:
         raise ValueError(f'No GenBank records found in {genbank_path}')
@@ -123,6 +124,36 @@ def _extract_taxonomy(record: SeqRecord) -> str:
     return ''
 
 
+def _validate_feature_location(feature: SeqFeature, *, reference_name: str, feature_name: str) -> None:
+    """Validate that a GenBank feature has a concrete, single-strand location."""
+    location = feature.location
+    if location is None:
+        raise ValueError(f'Feature {feature_name!r} in {reference_name!r} has no valid genomic location')
+    if isinstance(location, CompoundLocation):
+        part_strands = {part.strand for part in location.parts}
+        if len(part_strands) > 1:
+            raise ValueError(
+                f'Feature {feature_name!r} in {reference_name!r} has mixed-strand compound location '
+                'which is not supported'
+            )
+
+
+def _parse_codon_start(feature: SeqFeature, *, reference_name: str, feature_name: str) -> int:
+    """Parse GenBank 1-based ``/codon_start`` (1, 2, or 3) into a 0-based frame offset."""
+    raw = _first_qualifier(feature, 'codon_start', default='1')
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f'Invalid /codon_start {raw!r} for feature {feature_name!r} in {reference_name!r}; expected 1, 2, or 3'
+        ) from exc
+    if value not in (1, 2, 3):
+        raise ValueError(
+            f'Invalid /codon_start {value} for feature {feature_name!r} in {reference_name!r}; expected 1, 2, or 3'
+        )
+    return value - 1
+
+
 def _build_parsed_feature(
     record: SeqRecord,
     feature: SeqFeature,
@@ -134,7 +165,9 @@ def _build_parsed_feature(
     parent_feature_name: str = '',
 ) -> ParsedGenBankFeature:
     """Construct one ``ParsedGenBankFeature`` for either a ``CDS`` or ``mat_peptide``."""
-    codon_start = int(_first_qualifier(feature, 'codon_start', default='1')) - 1
+    _validate_feature_location(feature, reference_name=reference_name, feature_name=feature_name)
+    assert feature.location is not None
+    codon_start = _parse_codon_start(feature, reference_name=reference_name, feature_name=feature_name)
     nt_sequence = str(feature.extract(record.seq)).upper().replace('U', 'T')
     aa_sequence = _translate_feature(
         feature,
@@ -198,6 +231,10 @@ def _parse_coding_features(
         if feature.type != 'mat_peptide':
             continue
         mat_peptide_index += 1
+        _validate_feature_location(
+            feature, reference_name=reference_name, feature_name=f'mat_peptide_{mat_peptide_index}',
+        )
+        assert feature.location is not None
         strand = '+' if feature.location.strand != -1 else '-'
         parent_name = _find_parent_cds(
             cds_features, int(feature.location.start), int(feature.location.end), strand,
@@ -247,12 +284,13 @@ def _build_mat_peptide_name(
 
 
 def _extract_segments(feature: SeqFeature) -> tuple[tuple[int, int], ...]:
-    """Return 0-based ``[start, end)`` exon segments in canonical ascending genomic order."""
+    """Return 0-based ``[start, end)`` exon segments in 5'->3' coding order."""
     location = feature.location
+    assert location is not None
     if isinstance(location, CompoundLocation):
-        # BioPython returns complement(join(...)) parts in descending order and join(complement(...))
-        # in ascending order; normalize to ascending genomic order so downstream code is order-invariant.
-        return tuple(sorted((int(part.start), int(part.end)) for part in location.parts))
+        # Preserve BioPython's location.parts order, which always matches 5'->3' coding
+        # concatenation (including complement(join(...)) and circular origin-wrapping CDSs).
+        return tuple((int(part.start), int(part.end)) for part in location.parts)
     return ((int(location.start), int(location.end)),)
 
 

@@ -354,6 +354,7 @@ def _validate_schema(
 
     missing_tables: list[str] = []
     missing_columns: list[str] = []
+    unexpected_columns: list[str] = []
     for table_name, expected_columns in expected.items():
         if table_name not in existing_tables:
             missing_tables.append(table_name)
@@ -363,8 +364,12 @@ def _validate_schema(
         missing = sorted(expected_columns - available)
         if missing:
             missing_columns.append(f'{table_name}: {", ".join(missing)}')
+        if table_name == 'query_reference':
+            extra = sorted(available - expected_columns)
+            if extra:
+                unexpected_columns.append(f'{table_name}: {", ".join(extra)}')
 
-    if not missing_tables and not missing_columns:
+    if not missing_tables and not missing_columns and not unexpected_columns:
         return
 
     errors: list[str] = []
@@ -372,6 +377,8 @@ def _validate_schema(
         errors.append('missing tables: ' + ', '.join(sorted(missing_tables)))
     if missing_columns:
         errors.append('missing columns: ' + '; '.join(missing_columns))
+    if unexpected_columns:
+        errors.append('unexpected legacy columns: ' + '; '.join(unexpected_columns))
     raise ValueError(f'{label} schema mismatch for {db_path}:\n- ' + '\n- '.join(errors))
 
 

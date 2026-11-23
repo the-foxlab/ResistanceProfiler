@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 import urllib.error
 import urllib.request
@@ -44,6 +45,9 @@ class LookupResult(Generic[T]):
         return cls(status=LookupStatus.ERROR)
 
 
+_MAX_RETRY_AFTER_SECONDS = 60.0
+
+
 def parse_retry_after(exc: urllib.error.HTTPError, default: float | None = None) -> float | None:
     """Return numeric ``Retry-After`` seconds from an HTTP error header, or *default*."""
     headers = getattr(exc, 'headers', None)
@@ -51,7 +55,9 @@ def parse_retry_after(exc: urllib.error.HTTPError, default: float | None = None)
         raw = (headers.get('Retry-After') or '').strip()
         if raw:
             try:
-                return max(float(raw), 0.0)
+                parsed = float(raw)
+                if math.isfinite(parsed):
+                    return min(max(parsed, 0.0), _MAX_RETRY_AFTER_SECONDS)
             except ValueError:
                 pass
     return default
@@ -90,6 +96,4 @@ def fetch_json_lookup(
         except Exception as exc:
             logger.warning('%s failed: %s', label, exc)
             return LookupResult.error()
-
-    logger.warning('%s failed: all %d retries exhausted', label, max_retries + 1)
-    return LookupResult.error()
+    return LookupResult.error()  # pragma: no cover

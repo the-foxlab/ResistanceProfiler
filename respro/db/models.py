@@ -105,23 +105,21 @@ class FeatureRecord:
     segments: tuple[FeatureSegment, ...] = field(default_factory=tuple)
 
     @property
-    def _coding_segments(self) -> tuple[FeatureSegment, ...]:
-        """Return CDS exon segments ordered 5'->3' in coding orientation."""
+    def coding_segments(self) -> tuple[FeatureSegment, ...]:
+        """Return CDS exon segments in canonical 5'->3' coding order."""
         if not self.segments:
             return (FeatureSegment(segment_index=0, start=self.start, end=self.end),)
-        # Sort by genomic start so both ascending (join(complement(...))) and
-        # descending (complement(join(...))) BioPython parts map consistently to 5'->3'.
-        return tuple(sorted(self.segments, key=lambda seg: seg.start, reverse=(self.strand == '-')))
+        return self.segments
 
     @property
     def length_nt(self) -> int:
         """Total coding nucleotide length across all exon segments."""
-        return sum(seg.end - seg.start for seg in self._coding_segments)
+        return sum(seg.end - seg.start for seg in self.coding_segments)
 
     def genomic_to_cds_position(self, pos: int) -> int | None:
         """Map a 0-based genomic position to its 0-based CDS offset, or None outside exons."""
         cds_offset = 0
-        for segment in self._coding_segments:
+        for segment in self.coding_segments:
             segment_length = segment.end - segment.start
             if segment.start <= pos < segment.end:
                 if self.strand == '+':
@@ -135,7 +133,7 @@ class FeatureRecord:
         if cds_pos < 0:
             return None
         remaining = cds_pos
-        for segment in self._coding_segments:
+        for segment in self.coding_segments:
             segment_length = segment.end - segment.start
             if remaining < segment_length:
                 if self.strand == '+':
@@ -360,6 +358,7 @@ class AnnotatedVariant:
                 'ic50': r.ic50,
                 'fold_ic50': r.fold_ic50,
                 'score': r.score,
+                'source': r.source,
                 'publications': [p.to_dict() for p in r.publications],
                 'pubchem_url': r.pubchem_url,
             }

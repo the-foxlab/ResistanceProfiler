@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
+from typing import TypeVar
 
 from respro.db.models import (
+    _SINGLE_EXCHANGE_AA_FREQ_UNSET,
     AnnotatedVariant,
     CodonState,
     CoverageGap,
@@ -37,22 +39,28 @@ def serialize_combined_states(states: list[CodonState]) -> str:
     ])
 
 
-def deserialize_combined_states(blob: str) -> list[CodonState]:
+def deserialize_combined_states(blob: str | None) -> list[CodonState]:
     """Deserialize a ``combined_states`` JSON string into ``CodonState`` objects."""
     if not blob:
         return []
-    return [
-        CodonState(
-            alt_codon=item['alt_codon'],
-            alt_aa=item['alt_aa'],
-            lower=item['lower'],
-            upper=item['upper'],
-            forced_fraction=item['forced_fraction'],
-            accepted=bool(item['accepted']),
-            member_indices=tuple(item.get('member_indices', [])),
-        )
-        for item in json.loads(blob)
-    ]
+    try:
+        items = json.loads(blob)
+        if not isinstance(items, list):
+            raise ValueError('combined_states must be a JSON array')
+        return [
+            CodonState(
+                alt_codon=item['alt_codon'],
+                alt_aa=item['alt_aa'],
+                lower=float(item['lower']),
+                upper=float(item['upper']),
+                forced_fraction=float(item['forced_fraction']),
+                accepted=bool(item['accepted']),
+                member_indices=tuple(item.get('member_indices', [])),
+            )
+            for item in items
+        ]
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f'Invalid combined_states payload: {exc}') from exc
 
 
 def serialize_haplotype_links(links: tuple[tuple[int, int, float], ...]) -> str:
@@ -64,8 +72,13 @@ def deserialize_haplotype_links(blob: str | list | None) -> tuple[tuple[int, int
     """Deserialize a ``haplotype_links`` JSON string or list into normalized tuples."""
     if not blob:
         return ()
-    raw = json.loads(blob) if isinstance(blob, str) else blob
-    return tuple((int(item[0]), int(item[1]), float(item[2])) for item in raw)
+    try:
+        raw = json.loads(blob) if isinstance(blob, str) else blob
+        if not isinstance(raw, list):
+            raise ValueError('haplotype_links must be a JSON array')
+        return tuple((int(item[0]), int(item[1]), float(item[2])) for item in raw)
+    except (json.JSONDecodeError, IndexError, TypeError, ValueError) as exc:
+        raise ValueError(f'Invalid haplotype_links payload: {exc}') from exc
 
 
 def _insert_variant_and_formula_rows(
@@ -144,14 +157,14 @@ def replace_run_results(
     project_conn: sqlite3.Connection,
 ) -> None:
     """Replace variant/formula rows and refresh summary counters for a synced run."""
-    results_conn.execute('DELETE FROM variant_result WHERE run_id = ?', (run_id,))
-    results_conn.execute('DELETE FROM formula_rule_hit WHERE run_id = ?', (run_id,))
-    _insert_variant_and_formula_rows(results_conn, run_id, result)
-    results_conn.execute(
-        'UPDATE run SET resistance_hits = ?, formula_hits = ?, project_updated_at = ? WHERE id = ?',
-        (result.resistance_hits, len(result.formula_hits), project_updated_at(project_conn), run_id),
-    )
-    results_conn.commit()
+    with results_conn:
+        results_conn.execute('DELETE FROM variant_result WHERE run_id = ?', (run_id,))
+        results_conn.execute('DELETE FROM formula_rule_hit WHERE run_id = ?', (run_id,))
+        _insert_variant_and_formula_rows(results_conn, run_id, result)
+        results_conn.execute(
+            'UPDATE run SET resistance_hits = ?, formula_hits = ?, project_updated_at = ? WHERE id = ?',
+            (result.resistance_hits, len(result.formula_hits), project_updated_at(project_conn), run_id),
+        )
 
 
 def save_run(
@@ -165,59 +178,59 @@ def save_run(
     updated_at = project_updated_at(project_conn)
     ref_name_by_chrom = {rg.query_name: rg.reference_name for rg in result.references}
 
-    cursor = results_conn.execute(
-        'INSERT INTO run '
-        '(project_name, project_db_path, project_fingerprint, project_updated_at, reference_name, '
-        'sample_name, vcf_path, total_variants, variants_in_cds, '
-        'resistance_hits, formula_hits, status, is_fasta_mode, coverage_assessed) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        (
-            result.project_name,
-            str(project_db_path),
-            fingerprint,
-            updated_at,
-            result.reference_name,
-            result.sample_name,
-            result.vcf_name,
-            result.total_variants,
-            result.variants_in_cds,
-            result.resistance_hits,
-            len(result.formula_hits),
-            'complete',
-            int(result.is_fasta_mode),
-            int(result.coverage_assessed),
-        ),
-    )
-    assert cursor.lastrowid is not None
-    run_id = int(cursor.lastrowid)
+    with results_conn:
+        cursor = results_conn.execute(
+            'INSERT INTO run '
+            '(project_name, project_db_path, project_fingerprint, project_updated_at, reference_name, '
+            'sample_name, vcf_path, total_variants, variants_in_cds, '
+            'resistance_hits, formula_hits, status, is_fasta_mode, coverage_assessed) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            (
+                result.project_name,
+                str(project_db_path),
+                fingerprint,
+                updated_at,
+                result.reference_name,
+                result.sample_name,
+                result.vcf_name,
+                result.total_variants,
+                result.variants_in_cds,
+                result.resistance_hits,
+                len(result.formula_hits),
+                'complete',
+                int(result.is_fasta_mode),
+                int(result.coverage_assessed),
+            ),
+        )
+        assert cursor.lastrowid is not None
+        run_id = int(cursor.lastrowid)
 
-    _insert_variant_and_formula_rows(results_conn, run_id, result)
+        _insert_variant_and_formula_rows(results_conn, run_id, result)
 
-    results_conn.executemany(
-        'INSERT INTO coverage_gap (run_id, feature_name, reference_name, chrom, codon_start, codon_end) '
-        'VALUES (?, ?, ?, ?, ?, ?)',
-        [
-            (run_id, gap.feature_name, ref_name_by_chrom.get(gap.chrom, ''),
-             gap.chrom, gap.codon_start, gap.codon_end)
-            for gap in result.coverage_gaps
-        ],
-    )
-
-    profiled_rows: list[tuple[int, str, str]] = []
-    for rg in result.references:
-        seen: set[str] = set()
-        for match in rg.feature_matches:
-            name = (match.feature.name or '').strip()
-            if name and name not in seen:
-                seen.add(name)
-                profiled_rows.append((run_id, rg.reference_name, name))
-    if profiled_rows:
         results_conn.executemany(
-            'INSERT INTO profiled_feature (run_id, reference_name, feature_name) VALUES (?, ?, ?)',
-            profiled_rows,
+            'INSERT INTO coverage_gap (run_id, feature_name, reference_name, chrom, codon_start, codon_end) '
+            'VALUES (?, ?, ?, ?, ?, ?)',
+            [
+                (run_id, gap.feature_name, ref_name_by_chrom.get(gap.chrom, ''),
+                 gap.chrom, gap.codon_start, gap.codon_end)
+                for gap in result.coverage_gaps
+            ],
         )
 
-    results_conn.commit()
+        profiled_rows: list[tuple[int, str, str]] = []
+        for rg in result.references:
+            seen: set[str] = set()
+            for match in rg.feature_matches:
+                name = (match.feature.name or '').strip()
+                if name and name not in seen:
+                    seen.add(name)
+                    profiled_rows.append((run_id, rg.reference_name, name))
+        if profiled_rows:
+            results_conn.executemany(
+                'INSERT INTO profiled_feature (run_id, reference_name, feature_name) VALUES (?, ?, ?)',
+                profiled_rows,
+            )
+
     return run_id
 
 
@@ -253,8 +266,8 @@ def list_runs(results_conn: sqlite3.Connection) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def delete_run(results_conn: sqlite3.Connection, run_identifier: str | int) -> dict[str, str | int]:
-    """Delete one stored run and all its dependent rows; return ``{'id', 'sample_name'}``."""
+def find_run_summary(results_conn: sqlite3.Connection, run_identifier: str | int) -> dict[str, str | int]:
+    """Resolve *run_identifier* and return ``{'id', 'sample_name'}`` or raise ``ValueError``."""
     run_id = _resolve_run_id(results_conn, run_identifier)
     run_row = results_conn.execute(
         'SELECT id, sample_name FROM run WHERE id = ?',
@@ -262,18 +275,24 @@ def delete_run(results_conn: sqlite3.Connection, run_identifier: str | int) -> d
     ).fetchone()
     if run_row is None:
         raise ValueError(f'No run found for identifier {run_identifier!r}')
-
-    for table in (
-        'variant_result',
-        'coverage_gap',
-        'formula_rule_hit',
-        'sample_classification',
-        'profiled_feature',
-    ):
-        results_conn.execute(f'DELETE FROM {table} WHERE run_id = ?', (run_id,))
-    results_conn.execute('DELETE FROM run WHERE id = ?', (run_id,))
-    results_conn.commit()
     return {'id': int(run_row['id']), 'sample_name': run_row['sample_name'] or ''}
+
+
+def delete_run(results_conn: sqlite3.Connection, run_identifier: str | int) -> dict[str, str | int]:
+    """Delete one stored run and all its dependent rows; return ``{'id', 'sample_name'}``."""
+    summary = find_run_summary(results_conn, run_identifier)
+    run_id = int(summary['id'])
+    with results_conn:
+        for table in (
+            'variant_result',
+            'coverage_gap',
+            'formula_rule_hit',
+            'sample_classification',
+            'profiled_feature',
+        ):
+            results_conn.execute(f'DELETE FROM {table} WHERE run_id = ?', (run_id,))
+        results_conn.execute('DELETE FROM run WHERE id = ?', (run_id,))
+    return summary
 
 
 def load_run(results_conn: sqlite3.Connection, run_id: int) -> tuple[dict, list[dict]]:
@@ -292,7 +311,7 @@ def load_coverage_gaps(results_conn: sqlite3.Connection, run_id: int) -> list[Co
     """Load persisted ``CoverageGap`` records for *run_id*."""
     rows = results_conn.execute(
         'SELECT feature_name, reference_name, chrom, codon_start, codon_end FROM coverage_gap '
-        'WHERE run_id = ? ORDER BY feature_name, codon_start',
+        'WHERE run_id = ? ORDER BY feature_name, chrom, codon_start, codon_end, id',
         (run_id,),
     ).fetchall()
     return [
@@ -342,21 +361,24 @@ def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
             source=row.get('variant_source') or '',
             haplotype_links=deserialize_haplotype_links(row.get('haplotype_links')),
         )
-        rule_matches = [_rule_from_hit(hit, row.get('feature_name', '')) for hit in drug_hits]
+        feature_name = row.get('feature_name') or ''
+        rule_matches = [_rule_from_hit(hit, feature_name) for hit in drug_hits]
+        raw_single_af = row.get('single_exchange_aa_freq')
+        single_af = float(raw_single_af) if raw_single_af is not None else _SINGLE_EXCHANGE_AA_FREQ_UNSET
         annotations.append(AnnotatedVariant(
             variant=variant,
-            feature_name=row.get('feature_name', ''),
+            feature_name=feature_name,
             codon_pos=row.get('codon_pos') or 0,
-            ref_codon=row.get('ref_codon', ''),
-            alt_codon=row.get('alt_codon', ''),
-            ref_aa=row.get('ref_aa', ''),
-            alt_aa=row.get('alt_aa', ''),
-            consequence=row.get('consequence', ''),
-            af_bin=row.get('af_bin', ''),
+            ref_codon=row.get('ref_codon') or '',
+            alt_codon=row.get('alt_codon') or '',
+            ref_aa=row.get('ref_aa') or '',
+            alt_aa=row.get('alt_aa') or '',
+            consequence=row.get('consequence') or '',
+            af_bin=row.get('af_bin') or '',
             is_combined_codon_event=bool(row.get('is_combined_codon_event', 0)),
             combined_member_count=row.get('combined_member_count', 1) or 1,
-            combined_states=deserialize_combined_states(row.get('combined_states', '[]')),
-            single_exchange_aa_freq=row.get('single_exchange_aa_freq', 0.0) or 0.0,
+            combined_states=deserialize_combined_states(row.get('combined_states') or '[]'),
+            single_exchange_aa_freq=single_af,
             rule_effect_aa_freq={
                 int(k): float(v)
                 for k, v in json.loads(row.get('rule_effect_aa_freq') or '{}').items()
@@ -365,7 +387,7 @@ def reconstruct_annotations(variant_rows: list[dict]) -> list[AnnotatedVariant]:
                 int(k): str(v)
                 for k, v in json.loads(row.get('rule_effect_alt') or '{}').items()
             },
-            freq_method=row.get('freq_method', 'observed') or 'observed',
+            freq_method=row.get('freq_method') or 'observed',
             rule_matches=rule_matches,
         ))
     return annotations
@@ -423,6 +445,7 @@ def _rule_from_hit(hit: dict, feature_name: str) -> ResistanceRule:
         ic50=hit.get('ic50', ''),
         fold_ic50=hit.get('fold_ic50', ''),
         score=hit.get('score', ''),
+        source=hit.get('source', ''),
         publications=_publications_from_payload(hit.get('publications', [])),
         pubchem_url=hit.get('pubchem_url', ''),
         is_internal_formula_component=is_internal_formula_component_drug_name(hit.get('drug', '')),
@@ -506,33 +529,34 @@ def save_classification(
     note: str = '',
     source: str = '',
 ) -> int:
-    """Upsert the manual sample classification row for *run_id*."""
-    existing = results_conn.execute(
-        'SELECT id FROM sample_classification WHERE run_id = ? ORDER BY id LIMIT 1',
-        (run_id,),
-    ).fetchone()
-    if existing is None:
-        cursor = results_conn.execute(
-            'INSERT INTO sample_classification '
-            '(run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source) '
-            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            (run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source),
-        )
-        assert cursor.lastrowid is not None
-        row_id = int(cursor.lastrowid)
-    else:
-        row_id = int(existing['id'])
-        results_conn.execute(
-            'UPDATE sample_classification '
-            'SET drug = ?, phenotype = ?, clinical_phenotype = ?, ic50 = ?, fold_ic50 = ?, '
-            "note = ?, source = ?, created_at = datetime('now') WHERE id = ?",
-            (drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source, row_id),
-        )
-        results_conn.execute(
-            'DELETE FROM sample_classification WHERE run_id = ? AND id != ?',
-            (run_id, row_id),
-        )
-    results_conn.commit()
+    """Upsert the manual sample classification row for ``(run_id, drug)``."""
+    with results_conn:
+        existing = results_conn.execute(
+            'SELECT id FROM sample_classification '
+            'WHERE run_id = ? AND LOWER(drug) = LOWER(?) ORDER BY id LIMIT 1',
+            (run_id, drug),
+        ).fetchone()
+        if existing is None:
+            cursor = results_conn.execute(
+                'INSERT INTO sample_classification '
+                '(run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source) '
+                'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                (run_id, drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source),
+            )
+            assert cursor.lastrowid is not None
+            row_id = int(cursor.lastrowid)
+        else:
+            row_id = int(existing['id'])
+            results_conn.execute(
+                'UPDATE sample_classification '
+                'SET drug = ?, phenotype = ?, clinical_phenotype = ?, ic50 = ?, fold_ic50 = ?, '
+                "note = ?, source = ?, created_at = datetime('now') WHERE id = ?",
+                (drug, phenotype, clinical_phenotype, ic50, fold_ic50, note, source, row_id),
+            )
+            results_conn.execute(
+                'DELETE FROM sample_classification WHERE run_id = ? AND LOWER(drug) = LOWER(?) AND id != ?',
+                (run_id, drug, row_id),
+            )
     return row_id
 
 
@@ -571,7 +595,7 @@ def load_run_from_json(
     run_dict.setdefault('project_fingerprint', '')
     run_dict.setdefault('formula_hits', len(formula_rows))
     run_dict.setdefault('status', 'complete')
-    run_dict['references'] = payload.get('references', [])
+    run_dict['references'] = _require_list_of_dicts(payload, 'references') if 'references' in payload else []
 
     coverage_gaps: list[CoverageGap] = []
     for idx, row in enumerate(coverage_rows, start=1):
@@ -579,18 +603,22 @@ def load_run_from_json(
             if key not in row:
                 raise ValueError(f'Invalid results JSON: coverage_gap[{idx}] missing {key!r}')
         coverage_gaps.append(CoverageGap(
-            feature_name=str(row.get('feature_name', '')),
-            codon_start=int(row.get('codon_start', 0)),
-            codon_end=int(row.get('codon_end', 0)),
-            chrom=str(row.get('chrom', '')),
+            feature_name=str(row.get('feature_name') or ''),
+            codon_start=_require_int_field(row, 'codon_start', f'coverage_gap[{idx}]'),
+            codon_end=_require_int_field(row, 'codon_end', f'coverage_gap[{idx}]'),
+            chrom=str(row.get('chrom') or ''),
         ))
 
     for idx, row in enumerate(variant_rows, start=1):
-        if 'drug_hits' not in row:
-            raise ValueError(f"Invalid results JSON: variant_result[{idx}] missing 'drug_hits'")
+        for key in ('chrom', 'pos', 'ref', 'alt', 'drug_hits'):
+            if key not in row:
+                raise ValueError(f'Invalid results JSON: variant_result[{idx}] missing {key!r}')
+        _require_int_field(row, 'pos', f'variant_result[{idx}]')
+        _validate_variant_json_fields(row, idx)
     for idx, row in enumerate(formula_rows, start=1):
         if 'hit_json' not in row:
             raise ValueError(f"Invalid results JSON: formula_rule_hit[{idx}] missing 'hit_json'")
+        _parse_json_field(row.get('hit_json') or '{}', dict, f'formula_rule_hit[{idx}].hit_json')
 
     return run_dict, variant_rows, coverage_gaps, formula_rows, classification_rows
 
@@ -643,24 +671,61 @@ def _require_list_of_dicts(payload: dict, key: str) -> list[dict]:
     return value
 
 
+def _require_int_field(row: dict, key: str, context: str) -> int:
+    val = row.get(key)
+    if isinstance(val, bool) or val is None:
+        raise ValueError(f'Invalid results JSON: {context}.{key} must be an integer')
+    try:
+        return int(val)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'Invalid results JSON: {context}.{key} must be an integer') from exc
+
+
+_T = TypeVar('_T')
+
+
+def _parse_json_field(raw: object, expected_type: type[_T], context: str) -> _T:
+    if not isinstance(raw, str):
+        raise ValueError(f'Invalid results JSON: {context} must be a JSON string')
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f'Invalid results JSON: {context} is not valid JSON: {exc.msg}') from exc
+    if not isinstance(parsed, expected_type):
+        raise ValueError(f'Invalid results JSON: {context} must decode to {expected_type.__name__}')
+    return parsed
+
+
+def _validate_variant_json_fields(row: dict, idx: int) -> None:
+    ctx = f'variant_result[{idx}]'
+    hits = _parse_json_field(row.get('drug_hits') or '[]', list, f'{ctx}.drug_hits')
+    if any(not isinstance(item, dict) for item in hits):
+        raise ValueError(f'Invalid results JSON: {ctx}.drug_hits entries must be objects')
+    if row.get('combined_states'):
+        deserialize_combined_states(row['combined_states'])
+    if row.get('haplotype_links'):
+        deserialize_haplotype_links(row['haplotype_links'])
+    for map_field in ('rule_effect_aa_freq', 'rule_effect_alt'):
+        if row.get(map_field):
+            mapping = _parse_json_field(row[map_field], dict, f'{ctx}.{map_field}')
+            try:
+                for k, v in mapping.items():
+                    int(k)
+                    if map_field == 'rule_effect_aa_freq':
+                        float(v)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f'Invalid results JSON: {ctx}.{map_field} has invalid entry') from exc
+
+
 def _resolve_run_id(results_conn: sqlite3.Connection, run_identifier: str | int) -> int:
-    """Resolve a numeric run ID (or unique prefix) to one stored ``run.id``."""
+    """Resolve a numeric run ID (with optional leading ``#``) to one stored ``run.id``."""
     token = str(run_identifier).strip().lstrip('#')
     if not token:
         raise ValueError('Run identifier must not be empty')
+    if not token.isdigit():
+        raise ValueError(f'Invalid run identifier {run_identifier!r}: expected a numeric run id')
 
-    if token.isdigit():
-        run_id = int(token)
-        if results_conn.execute('SELECT 1 FROM run WHERE id = ?', (run_id,)).fetchone() is None:
-            raise ValueError(f'No run found with id {token}')
-        return run_id
-
-    rows = results_conn.execute(
-        'SELECT id FROM run WHERE CAST(id AS TEXT) LIKE ? ORDER BY id',
-        (f'{token}%',),
-    ).fetchall()
-    if not rows:
-        raise ValueError(f'No run found for identifier {run_identifier!r}')
-    if len(rows) > 1:
-        raise ValueError(f'Ambiguous run identifier {run_identifier!r} matched {len(rows)} runs')
-    return int(rows[0]['id'])
+    run_id = int(token)
+    if results_conn.execute('SELECT 1 FROM run WHERE id = ?', (run_id,)).fetchone() is None:
+        raise ValueError(f'No run found with id {token}')
+    return run_id

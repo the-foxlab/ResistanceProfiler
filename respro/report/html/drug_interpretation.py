@@ -45,7 +45,7 @@ def _resolve_tier1_labels(
                 break
         if label_to_rank(chosen) != 1:
             continue
-        bucket = counts.setdefault((name or '').strip(), {})
+        bucket = counts.setdefault((name or '').strip().lower(), {})
         bucket[chosen] = bucket.get(chosen, 0) + count
         scope_totals[chosen] = scope_totals.get(chosen, 0) + count
     per_drug = {
@@ -121,8 +121,10 @@ def _init_drug_entry(name: str, drug_class: str, alias_map: dict[str, str]) -> d
 def _accumulate_drug_hits(by_drug: dict[str, dict], hit_rows: list[dict]) -> None:
     """Accumulate hit counts, phenotype ranks, scores, and IC50 metrics per drug."""
     for row in hit_rows:
-        drug = (row.get('drug_key') or row.get('drug') or 'Unknown').strip()
-        entry = by_drug[drug]
+        drug = (row.get('drug_key') or row.get('drug') or 'Unknown').strip().lower()
+        entry = by_drug.get(drug)
+        if entry is None:
+            continue
         entry['hit_count'] += 1
         if ref_name := (row.get('reference_name') or '').strip():
             entry['reference_names'].add(ref_name)
@@ -250,13 +252,16 @@ def build_drug_interpretation_table(
 
     by_drug: dict[str, dict] = {}
     for name in load_in_scope_drug_names(project_conn, profiled_feature_ids):
-        by_drug[name] = _init_drug_entry(name, drug_class_map.get(name.lower(), ''), alias_map)
+        key = name.strip().lower()
+        if key not in by_drug:
+            by_drug[key] = _init_drug_entry(name, drug_class_map.get(key, ''), alias_map)
 
     for row in hit_rows:
         drug = (row.get('drug_key') or row.get('drug') or 'Unknown').strip()
-        if drug not in by_drug and drug != '__formula_component__':
-            dc = row.get('drug_class') or drug_class_map.get(drug.lower(), '')
-            by_drug[drug] = _init_drug_entry(drug, dc, alias_map)
+        key = drug.lower()
+        if key not in by_drug and key != '__formula_component__':
+            dc = row.get('drug_class') or drug_class_map.get(key, '')
+            by_drug[key] = _init_drug_entry(drug, dc, alias_map)
 
     if not by_drug:
         return {

@@ -50,9 +50,8 @@ def load_metadata_json(metadata_path: Path) -> tuple[dict[str, str], list[dict]]
     if not isinstance(payload, dict):
         raise ValueError('Invalid metadata JSON: top-level value must be an object.')
 
-    raw_algorithms = payload.pop('interpretation_algorithms', None)
-    algorithms = validate_interpretation_algorithms(raw_algorithms) if raw_algorithms is not None else []
-
+    raw_algorithms: object = None
+    has_algorithms = False
     normalized: dict[str, str] = {}
     invalid_keys: list[str] = []
     for raw_key, raw_value in payload.items():
@@ -63,9 +62,15 @@ def load_metadata_json(metadata_path: Path) -> tuple[dict[str, str], list[dict]]
         if canonical is None:
             invalid_keys.append(raw_key)
             continue
+        if canonical == 'interpretation_algorithms':
+            raw_algorithms = raw_value
+            has_algorithms = True
+            continue
         value = _normalize_metadata_value(canonical, raw_value)
         if value:
             normalized[canonical] = value
+
+    algorithms = validate_interpretation_algorithms(raw_algorithms) if has_algorithms and raw_algorithms is not None else []
 
     if invalid_keys:
         allowed = ', '.join(sorted(_ALLOWED_METADATA_KEYS))

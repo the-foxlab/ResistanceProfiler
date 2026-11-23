@@ -612,7 +612,6 @@ def _annotate_combined_snp_codon(
 
 # Public alias used by respro.core.annotation (keeps private name available for direct unit tests).
 annotate_combined_snp_codon = _annotate_combined_snp_codon
-_plan_combined_snp_groups = plan_combined_snp_groups
 
 
 def _dedupe_states_by_aa(states: list[CodonState]) -> list[CodonState]:
@@ -640,16 +639,19 @@ def _combined_fallback_single_snp(
     feature: FeatureRecord,
 ) -> list[AnnotatedVariant]:
     """Fall back to independent single-SNP annotations when no combined state is accepted."""
-    seq_cds = feature.nt_sequence.upper()
-    cds_codons = [list(seq_cds[i:i + 3]) for i in range(feature.codon_start, len(seq_cds), 3)]
+    coding_nt = feature.nt_sequence.upper()[feature.codon_start:]
     annotations: list[AnnotatedVariant] = []
     for var in sorted(variants, key=lambda v: v.pos):
         cds_pos = feature.genomic_to_cds_position(var.pos)
         coding_pos = None if cds_pos is None else cds_pos - feature.codon_start
-        if coding_pos is None or coding_pos < 0 or (coding_pos // 3) >= len(cds_codons):
+        if coding_pos is None or coding_pos < 0:
             annotations.append(AnnotatedVariant(variant=var, feature_name=feature.name))
             continue
         codon_idx, pos_in_codon = divmod(coding_pos, 3)
-        coding_alt = reverse_complement(var.alt) if feature.strand == '-' else var.alt
-        annotations.append(annotate_snp(var, feature, cds_codons, codon_idx, pos_in_codon, coding_alt))
+        internal_codon = coding_nt[codon_idx * 3:codon_idx * 3 + 3]
+        if not internal_codon:
+            annotations.append(AnnotatedVariant(variant=var, feature_name=feature.name))
+            continue
+        coding_alt = reverse_complement(var.alt) if feature.strand == '-' else var.alt.upper()
+        annotations.append(annotate_snp(var, feature, internal_codon, codon_idx, pos_in_codon, coding_alt))
     return annotations

@@ -135,7 +135,18 @@ def feature_fwd() -> FeatureRecord:
     )
 
 def _split_feature(*, strand: str) -> FeatureRecord:
-    """Build a two-segment CDS with a non-coding envelope gap."""
+    """Build a two-segment CDS with a non-coding envelope gap (coding 5'->3' order)."""
+    segments = (
+        (
+            FeatureSegment(segment_index=0, start=0, end=6),
+            FeatureSegment(segment_index=1, start=12, end=18),
+        )
+        if strand == '+'
+        else (
+            FeatureSegment(segment_index=0, start=12, end=18),
+            FeatureSegment(segment_index=1, start=0, end=6),
+        )
+    )
     return FeatureRecord(
         id=99,
         reference_id=1,
@@ -146,10 +157,7 @@ def _split_feature(*, strand: str) -> FeatureRecord:
         strand=strand,
         codon_start=0,
         nt_sequence='ATGAAAGGGTCC',
-        segments=(
-            FeatureSegment(segment_index=0, start=0, end=6),
-            FeatureSegment(segment_index=1, start=12, end=18),
-        ),
+        segments=segments,
     )
 
 # ──────────────────────────────────────────────────────────────────────

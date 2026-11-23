@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Annotated
@@ -16,6 +18,7 @@ from respro.db.algorithms import (
     load_interpretation_algorithms,
     store_interpretation_algorithms,
 )
+from respro.db.cache import clear_cached_mappings
 from respro.db.drugs import consolidate_drug_names_to_lowercase, enrich_drugs_from_pubchem
 from respro.db.features import load_genbank_records
 from respro.db.project_metadata import load_metadata_json, store_project_metadata
@@ -97,13 +100,15 @@ def init_project(
     metadata_payload, algorithms = load_metadata_json(metadata_json) if metadata_json else ({}, [])
     genbank_records = parse_genbank_sources(genbank_paths)
 
-    if db_path.exists():
-        if not overwrite:
-            raise FileExistsError(f'Database already exists: {db_path}')
-        db_path.unlink()
-        logger.info('Removed existing database: %s', db_path)
+    if db_path.exists() and not overwrite:
+        raise FileExistsError(f'Database already exists: {db_path}')
 
-    conn = create_schema(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_fd, tmp_name = tempfile.mkstemp(prefix=f'.{db_path.name}.', suffix='.tmp', dir=db_path.parent)
+    os.close(tmp_fd)
+    tmp_path = Path(tmp_name)
+
+    conn = create_schema(tmp_path)
     try:
         project_id = _insert_project(conn, name)
         load_genbank_records(conn, project_id, genbank_records)
@@ -117,12 +122,18 @@ def init_project(
             force_store=True, additional_info=additional_info, example_text=example_text,
         )
         conn.commit()
-        logger.info('Project initialized: %s (%s)', name, db_path)
     except Exception:
-        db_path.unlink(missing_ok=True)
-        raise
-    finally:
         conn.close()
+        for suffix in ('', '-wal', '-shm'):
+            Path(f'{tmp_path}{suffix}').unlink(missing_ok=True)
+        raise
+    else:
+        conn.close()
+
+    for suffix in ('-wal', '-shm'):
+        Path(f'{db_path}{suffix}').unlink(missing_ok=True)
+    os.replace(tmp_path, db_path)
+    logger.info('Project initialized: %s (%s)', name, db_path)
     return db_path
 
 
@@ -177,6 +188,7 @@ def add_to_project(
             force_store=False, additional_info=additional_info,
             example_text=example_text, clear_example=clear_example,
         )
+        clear_cached_mappings(conn)
         conn.execute("UPDATE project SET updated_at = datetime('now') WHERE id = ?", (project_id,))
         conn.commit()
         logger.info('Project updated: %s', db_path)
@@ -302,7 +314,7 @@ def _init_command(
                 additional_info=additional_info,
                 example_fasta=example,
             )
-    except (FileExistsError, FileNotFoundError, ValueError) as exc:
+    except (FileExistsError, FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
         cli_error(str(exc))
     console.print(f'[green]✓[/green] Project initialised: [cyan]{db_path}[/cyan]')
 
@@ -356,7 +368,7 @@ def _init_add_command(
                 example_fasta=example,
                 clear_example=clear_example,
             )
-    except (FileExistsError, FileNotFoundError, ValueError) as exc:
+    except (FileExistsError, FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
         cli_error(str(exc))
 
     if validate:

@@ -121,3 +121,7 @@ class TestLookupSummary:
             lookup_summary('Nirsevimab alfa')
 
         assert captured['url'] == 'https://en.wikipedia.org/api/rest_v1/page/summary/Nirsevimab%20alfa'
+
+    def test_blank_name_returns_not_found(self) -> None:
+        res = lookup_summary('   ')
+        assert res.status is LookupStatus.NOT_FOUND

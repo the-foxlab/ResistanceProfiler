@@ -206,12 +206,8 @@ def load_resistance_rules(
     return count, declared_external_ids, state.skipped_external_ids
 
 
-def _validate_rules_header_and_collect_ids(
-    conn: sqlite3.Connection,
-    all_rows: list[dict[str, str]],
-    fieldnames: Sequence[str] | None,
-) -> set[str]:
-    """Validate TSV header columns and required per-row identifiers; return declared external IDs."""
+def _validate_ic50_alias_headers(fieldnames: Sequence[str] | None) -> None:
+    """Reject TSVs declaring both ``ic50``/``ic_50`` or ``fold_ic50``/``fold_ic_50``."""
     header_columns = {col.strip() for col in (fieldnames or []) if col}
     for label, candidates in (
         ('IC50', {'ic50', 'ic_50'}),
@@ -223,6 +219,15 @@ def _validate_rules_header_and_collect_ids(
                 f'Rules validation failed:\n- only one {label} column is allowed; found '
                 + ', '.join(repr(col) for col in present)
             )
+
+
+def _validate_rules_header_and_collect_ids(
+    conn: sqlite3.Connection,
+    all_rows: list[dict[str, str]],
+    fieldnames: Sequence[str] | None,
+) -> set[str]:
+    """Validate TSV header columns and required per-row identifiers; return declared external IDs."""
+    _validate_ic50_alias_headers(fieldnames)
 
     errors: list[str] = []
     declared_external_ids: set[str] = set()
@@ -544,7 +549,9 @@ def load_formula_rules(
     """Validate and import boolean formula resistance rules from *formula_rules_tsv*."""
     conn.row_factory = sqlite3.Row
     with open(formula_rules_tsv, newline='') as fh:
-        rows = list(csv.DictReader(fh, delimiter='\t'))
+        reader = csv.DictReader(fh, delimiter='\t')
+        _validate_ic50_alias_headers(reader.fieldnames)
+        rows = list(reader)
 
     errors: list[str] = []
     parsed_rows, skipped_validation = _parse_formula_rows(rows, errors)

@@ -136,6 +136,8 @@ class TestExploreRuns:
         assert result.exit_code == 0, result.output
         assert '1' in result.output
         assert 'tiny_ref' in result.output
+        assert 'Status' not in result.output
+        assert 'stale' not in result.output.lower()
 
     def test_explore_empty_db_reports_no_results(self, tmp_path: Path) -> None:
         results_db = tmp_path / 'empty.db'

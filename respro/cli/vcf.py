@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from pathlib import Path
 from typing import Annotated
 
@@ -71,7 +72,7 @@ def _profile_vcf_command(
         Path, typer.Option('--vcf', '-f', exists=True, help='Input VCF file.')
     ],
     ref_fasta: Annotated[
-        Path | None,
+        Path,
         typer.Option('--ref-fasta', '-r', exists=True, help='Reference FASTA the VCF was called against.')
     ],
     sample: Annotated[
@@ -136,9 +137,6 @@ def _profile_vcf_command(
     results_conn = None
 
     try:
-        if ref_fasta is None:
-            cli_error('Missing option --ref-fasta.')
-
         export_formats = parse_export_formats(export)
         cfg = load_config_with_overrides(config)
         if config is not None:
@@ -248,7 +246,7 @@ def _profile_vcf_command(
 
     except click.ClickException as exc:
         render_click_exception(exc)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
         cli_error(str(exc))
     finally:
         if project_conn is not None:

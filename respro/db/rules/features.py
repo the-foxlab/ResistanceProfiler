@@ -16,7 +16,7 @@ def build_feature_lookup(conn: sqlite3.Connection) -> dict[str, list[dict[str, A
     rows = conn.execute(
         'SELECT g.id AS feature_id, g.name AS feature_name, g.protein, g.protein_id, '
         'g.locus_tag, g.aa_sequence, r.name AS reference_name, r.accession AS reference_accession '
-        'FROM feature g JOIN reference r ON r.id = g.reference_id'
+        'FROM feature g JOIN reference r ON r.id = g.reference_id ORDER BY g.id'
     ).fetchall()
 
     features_by_name: dict[str, list[dict[str, Any]]] = {}
@@ -78,10 +78,11 @@ def get_feature_aa_sequence(
     """Return the stored ``aa_sequence`` for the unambiguously matching feature candidate."""
     narrowed = _narrow_candidates(candidates)
     if reference_identifier:
-        for candidate in narrowed:
-            if reference_identifier in {candidate['reference_name'], candidate['reference_accession']}:
-                return str(candidate['aa_sequence'] or '')
-        return ''
+        matched = [
+            c for c in narrowed
+            if reference_identifier in {c['reference_name'], c['reference_accession']}
+        ]
+        return str(matched[0]['aa_sequence'] or '') if len(matched) == 1 else ''
     if len(narrowed) == 1:
         return str(narrowed[0]['aa_sequence'] or '')
     return ''

@@ -2825,3 +2825,45 @@ class TestBlockSubstitutionAnnotationOracleV3:
         assert state_lower.get('ACA') == pytest.approx(oracle_mix['ACA'][1])
         assert state_lower.get('GCA') == pytest.approx(oracle_mix['GCA'][1])
         assert all(c not in state_lower for c in ('AAA', 'GTA', 'GAA'))
+
+
+class TestCodonAndAfBinEdgeCases:
+    def test_normalize_mutation_fs_indels_and_unknown_x(self) -> None:
+        from respro.core.codons import normalize_mutation
+
+        assert normalize_mutation('F50FS') == 'F50FS'
+        assert normalize_mutation('F50FSV') == 'F50FSV'
+        assert normalize_mutation('FS50F') == 'FS50F'
+        assert normalize_mutation('FSG50F') == 'FSG50F'
+        assert normalize_mutation('F50X') is None
+        assert normalize_mutation('F50fs') == 'fsX'
+        assert normalize_mutation('F50FSX') == 'fsX'
+        assert normalize_mutation('A50FS') == 'fsX'
+
+    def test_minus_strand_deletion_to_base_zero_and_x_consequence(self) -> None:
+        from respro.core.codons import annotate_variant_in_feature, classify_snp_consequence
+
+        assert classify_snp_consequence('K', 'X', 1) == 'unknown'
+        rev_feat = FeatureRecord(
+            id=1, reference_id=1, name='rev', protein='',
+            start=0, end=9, strand='-', codon_start=0,
+            nt_sequence='ATGAAAGCT',
+        )
+        del_var = VariantCall(chrom='rev', pos=5, ref='TCAT', alt='T', allele_freq=1.0, depth=50)
+        anns = annotate_variant_in_feature(del_var, rev_feat)
+        assert len(anns) == 1
+        assert anns[0].consequence == 'deletion'
+        assert anns[0].codon_pos == 0
+
+    def test_assign_af_bins_resets_stale_and_picks_highest_threshold(self) -> None:
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='g', pos=3, ref='A', alt='G', allele_freq=0.01),
+            feature_name='g', codon_pos=1, ref_aa='K', alt_aa='E', consequence='missense',
+            af_bin='high',
+        )
+        assign_af_bins([ann], {'high': (0.5, 1.0), 'low': (0.05, 0.5)})
+        assert ann.af_bin == ''
+
+        ann.variant = VariantCall(chrom='g', pos=3, ref='A', alt='G', allele_freq=0.5)
+        assign_af_bins([ann], {'low': (0.0, 0.6), 'high': (0.4, 1.0)})
+        assert ann.af_bin == 'high'

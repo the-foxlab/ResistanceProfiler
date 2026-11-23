@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 from respro.core.codons import HIGH_IMPACT_CONSEQUENCES
@@ -231,13 +232,14 @@ def _validate_threshold_values(
     type_label = 'positive number' if is_numeric else 'positive integer'
     for key, val in thresholds.items():
         rank = label_to_rank(key)
+        if rank is None or rank <= 0:
+            raise ValueError(f'{prefix}[{key!r}] is not a valid positive-rank phenotype label.')
         valid_type = (
             isinstance(val, (int, float)) if is_numeric else isinstance(val, int)
         ) and not isinstance(val, bool)
-        if not valid_type or (rank != 1 and val <= 0):
+        if not valid_type or not math.isfinite(val) or (val < 0 if rank == 1 else val <= 0):
             raise ValueError(f'{prefix}[{key!r}] must be a {type_label}, got {val!r}.')
-    if is_numeric:
-        _require_monotonic_thresholds(thresholds, prefix=prefix)
+    _require_monotonic_thresholds(thresholds, prefix=prefix)
 
 
 def _require_monotonic_thresholds(thresholds: dict, *, prefix: str) -> None:

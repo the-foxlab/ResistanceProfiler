@@ -775,7 +775,7 @@ class TestInitCli:
         rules_tsv = tmp_path / 'rules_norm.tsv'
         rules_tsv.write_text(
             'reference_identifier\tfeature\tposition\treference\tmutation\tantiviral\tphenotype\n'
-            'NC_000001\tgag\t2\tK\tF2STOP\tDrugStop\tresistant\n'
+            'NC_000001\tgag\t2\tK\tK2STOP\tDrugStop\tresistant\n'
             'NC_000001\tgag\t2\tK\tK2frameshift\tDrugFs\tresistant\n'
             'NC_000001\tgag\t2\tK\tK2delQ\tDrugDel\tresistant\n'
         )

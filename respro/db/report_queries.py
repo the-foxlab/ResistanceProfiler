@@ -9,6 +9,8 @@ import sqlite3
 import statistics
 from collections.abc import Sequence
 
+from respro.db.models import is_internal_formula_component_drug_name
+
 logger = logging.getLogger(__name__)
 
 _RE_LEADING_NUM = re.compile(r'^[><=~≥≤≈\s]*(-?\d+(?:\.\d+)?)')
@@ -100,10 +102,19 @@ def load_drug_interpretation_configs(project_conn: sqlite3.Connection | None) ->
             "SELECT config_json FROM interpretation_algorithm "
             "WHERE algorithm_name = 'drug_interpretation' ORDER BY id"
         ).fetchall()
-        return [json.loads(row['config_json']) for row in rows]
     except sqlite3.Error as exc:
         logger.debug('Failed to load drug_interpretation algorithm: %s', exc)
         return []
+    configs: list[dict] = []
+    for row in rows:
+        try:
+            cfg = json.loads(row['config_json'])
+        except (TypeError, json.JSONDecodeError) as exc:
+            logger.debug('Skipping malformed drug_interpretation config: %s', exc)
+            continue
+        if isinstance(cfg, dict):
+            configs.append(cfg)
+    return configs
 
 
 def has_any_phenotype_association(project_conn: sqlite3.Connection | None) -> bool:
@@ -129,20 +140,44 @@ def load_in_scope_drug_names(
     if project_conn is None or not profiled_feature_ids:
         return []
     placeholders = ','.join('?' * len(profiled_feature_ids))
+    params = tuple(profiled_feature_ids)
     try:
-        rows = project_conn.execute(
-            f'SELECT DISTINCT d.name FROM drug d '
-            f'JOIN resistance_rule r ON r.drug_id = d.id '
-            f'WHERE r.feature_id IN ({placeholders})',
-            tuple(profiled_feature_ids),
-        ).fetchall()
+        table_names = {
+            row[0]
+            for row in project_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if {'resistance_formula_rule', 'resistance_formula_rule_member'}.issubset(table_names):
+            rows = project_conn.execute(
+                f'SELECT name FROM ('
+                f'  SELECT d.name AS name FROM drug d '
+                f'  JOIN resistance_rule r ON r.drug_id = d.id '
+                f'  WHERE r.feature_id IN ({placeholders}) '
+                f'  UNION '
+                f'  SELECT d.name AS name FROM drug d '
+                f'  JOIN resistance_formula_rule fr ON fr.drug_id = d.id '
+                f'  JOIN resistance_formula_rule_member m ON m.formula_rule_id = fr.id '
+                f'  JOIN resistance_rule r ON r.id = m.rule_id '
+                f'  WHERE r.feature_id IN ({placeholders})'
+                f') ORDER BY name',
+                params + params,
+            ).fetchall()
+        else:
+            rows = project_conn.execute(
+                f'SELECT DISTINCT d.name FROM drug d '
+                f'JOIN resistance_rule r ON r.drug_id = d.id '
+                f'WHERE r.feature_id IN ({placeholders}) '
+                f'ORDER BY d.name',
+                params,
+            ).fetchall()
     except sqlite3.Error as exc:
         logger.debug('Failed to load in-scope drugs from DB: %s', exc)
         return []
     return [
         name
         for row in rows
-        if (name := (row[0] or '').strip()) and name != '__formula_component__'
+        if (name := (row[0] or '').strip()) and not is_internal_formula_component_drug_name(name)
     ]
 
 
@@ -167,15 +202,40 @@ def load_tier1_phenotype_rows(
         logger.debug('Project DB lacks core rule schema; no tier-1 labels resolved.')
         return []
     placeholders = ','.join('?' * len(reference_ids))
-    rows = project_conn.execute(
-        f'SELECT d.name, r.phenotype, r.clinical_phenotype, COUNT(*) AS n '
-        f'FROM drug d '
-        f'JOIN resistance_rule r ON r.drug_id = d.id '
-        f'JOIN feature f ON r.feature_id = f.id '
-        f'WHERE f.reference_id IN ({placeholders}) '
-        f'GROUP BY d.name, r.phenotype, r.clinical_phenotype',
-        tuple(reference_ids),
-    ).fetchall()
+    params = tuple(reference_ids)
+    if {'resistance_formula_rule', 'resistance_formula_rule_member'}.issubset(table_names):
+        rows = project_conn.execute(
+            f'SELECT name, phenotype, clinical_phenotype, COUNT(*) AS n FROM ('
+            f'  SELECT d.name, r.phenotype, r.clinical_phenotype '
+            f'  FROM drug d '
+            f'  JOIN resistance_rule r ON r.drug_id = d.id '
+            f'  JOIN feature f ON r.feature_id = f.id '
+            f'  WHERE f.reference_id IN ({placeholders}) '
+            f'  UNION ALL '
+            f'  SELECT name, phenotype, clinical_phenotype FROM ('
+            f'    SELECT DISTINCT fr.id, d.name, fr.phenotype, fr.clinical_phenotype '
+            f'    FROM drug d '
+            f'    JOIN resistance_formula_rule fr ON fr.drug_id = d.id '
+            f'    JOIN resistance_formula_rule_member m ON m.formula_rule_id = fr.id '
+            f'    JOIN resistance_rule r ON r.id = m.rule_id '
+            f'    JOIN feature f ON r.feature_id = f.id '
+            f'    WHERE f.reference_id IN ({placeholders})'
+            f'  )'
+            f') GROUP BY name, phenotype, clinical_phenotype '
+            f'ORDER BY name, phenotype, clinical_phenotype',
+            params + params,
+        ).fetchall()
+    else:
+        rows = project_conn.execute(
+            f'SELECT d.name, r.phenotype, r.clinical_phenotype, COUNT(*) AS n '
+            f'FROM drug d '
+            f'JOIN resistance_rule r ON r.drug_id = d.id '
+            f'JOIN feature f ON r.feature_id = f.id '
+            f'WHERE f.reference_id IN ({placeholders}) '
+            f'GROUP BY d.name, r.phenotype, r.clinical_phenotype '
+            f'ORDER BY d.name, r.phenotype, r.clinical_phenotype',
+            params,
+        ).fetchall()
     return [(row[0], row[1], row[2], int(row[3])) for row in rows]
 
 
@@ -242,6 +302,7 @@ def load_drug_cards(
         logger.debug('Failed to load drug cards from project DB: %s', exc)
         return []
 
+    normalized_names = {n.strip().lower() for n in detected_drug_names if n}
     cards = [
         {
             'name': name,
@@ -250,7 +311,7 @@ def load_drug_cards(
             'structure_url': row['structure_url'] or '',
         }
         for row in rows
-        if (name := (row['name'] or '').strip()) and name.lower() in detected_drug_names
+        if (name := (row['name'] or '').strip()) and name.lower() in normalized_names
     ]
     cards.sort(key=lambda card: card['name'].lower())
     return cards

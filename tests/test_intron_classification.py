@@ -60,25 +60,21 @@ class TestExonJunctionCdsOffsets:
         assert exon_junction_cds_offsets(feature) == [6]
 
     def test_two_segment_reverse_strand(self) -> None:
-        """Reverse strand: junction offsets use genomic (segment_index) order,
-        NOT _coding_segments reversed order, because the normalized CIGAR for
-        '-' strand is reversed and walks genomic 5'->3' order. With unequal
-        segment lengths the two orderings yield different junction offsets, so
-        this test discriminates the chosen convention."""
+        """Reverse strand: segments are stored in canonical 5'->3' coding order
+        (segment_index=0 is coding exon 1), matching the coding-oriented CIGAR.
+        With unequal segment lengths (8 nt vs 6 nt) this discriminates coding
+        order (junction 8) from ascending genomic order (junction 6)."""
         from respro.db.models import FeatureRecord, FeatureSegment
 
         feature = FeatureRecord(
             id=1, reference_id=1, name='g', protein='',
             start=0, end=26, strand='-', codon_start=0,
             segments=(
-                FeatureSegment(segment_index=0, start=0, end=6),    # 6 nt (genomic 5')
-                FeatureSegment(segment_index=1, start=18, end=26),  # 8 nt (genomic 3')
+                FeatureSegment(segment_index=0, start=18, end=26),  # 8 nt (coding exon 1)
+                FeatureSegment(segment_index=1, start=0, end=6),    # 6 nt (coding exon 2)
             ),
         )
-        # Genomic order (segment_index): first exon 6 nt → junction at CDS offset 6.
-        # Coding order (_coding_segments reversed): first exon 8 nt → junction 8.
-        # The normalized '-' CIGAR walks genomic order, so junction must be 6.
-        assert exon_junction_cds_offsets(feature) == [6]
+        assert exon_junction_cds_offsets(feature) == [8]
 
     def test_three_segment_forward_strand(self) -> None:
         """Three exons of lengths 4, 5, 6 → junctions at 4 and 9."""
@@ -176,6 +172,15 @@ class TestClassifyIntrons:
         )
         assert cigar == '20M50I10M'
         assert introns == []
+
+    def test_classify_introns_respects_nonzero_cds_start(self) -> None:
+        """A partial alignment starting at cds_start=30 matches a junction at CDS offset 42."""
+        cigar, introns = classify_introns('12M20I15M', [42], tolerance=2, cds_start=30)
+        assert cigar == '27M'
+        assert len(introns) == 1
+        assert introns[0].cds_junction_pos == 42
+        assert introns[0].query_start == 12
+        assert introns[0].length == 20
 
     def test_deletion_ops_advance_cds_position(self) -> None:
         """D ops consume CDS positions; an intron I op after a D must still be
@@ -294,42 +299,37 @@ class TestMatchQueryToFeaturesSpliced:
         assert m.identity > 0.95
 
     def test_reverse_strand_spliced_feature_classifies_intron(self) -> None:
-        """A '-' strand two-exon CDS aligned against an unspliced query must
-        classify the intron at the correct exon junction. This is the HCMV
-        UL89 scenario: the normalized CIGAR is reversed for '-' strand, so
-        junction offsets must be in genomic (segment_index) order, not coding
-        order, to match the CIGAR's walking order."""
+        """A '-' strand two-exon CDS with unequal exons aligned against an unspliced
+        query must classify the intron at the coding 5'->3' exon junction."""
         from Bio.Seq import Seq
 
-        exon1 = 'ATGAAAGCTTTTGGCCCCAAATTTGGGCCC'  # 30 nt, genomic 5' segment
-        exon2 = 'AAGCTTTTGGCCCCAAATTTGGGCCCAAT'[:30]
-        exon2 = (exon2 + 'A' * 30)[:30]
-        # '-' strand: the spliced CDS is revcomp(exon1+exon2) read 5'->3'.
-        spliced_cds = str(Seq(exon1 + exon2).reverse_complement())
+        genomic_exon_a = 'ATGCGTACGTAGCTAGCTAGCATGCGTACGTAGCTA'  # 36 nt (coding exon 2, genomic 0..36)
+        genomic_exon_b = (
+            'GCTAGCTTGACCTGACCGTACGTACGTTAGCTAACGTTCGATCGGATCCTAGCA'
+        )  # 54 nt (coding exon 1, genomic 66..120)
+        # '-' strand: the spliced CDS is revcomp(genomic_exon_a + genomic_exon_b) read 5'->3'.
+        spliced_cds = str(Seq(genomic_exon_a + genomic_exon_b).reverse_complement())
         feature = FeatureRecord(
             id=2, reference_id=1, name='spl_minus', protein='SplM',
-            start=0, end=90, strand='-', codon_start=0,
+            start=0, end=120, strand='-', codon_start=0,
             nt_sequence=spliced_cds,
             segments=(
-                FeatureSegment(segment_index=0, start=0, end=30),
-                FeatureSegment(segment_index=1, start=60, end=90),
+                FeatureSegment(segment_index=0, start=66, end=120),  # coding exon 1 (54 nt)
+                FeatureSegment(segment_index=1, start=0, end=36),    # coding exon 2 (36 nt)
             ),
         )
-        # Unspliced query: exon1 + intron + exon2 (genomic 5'->3').
         intron = 'N' * 30
-        query = exon1 + intron + exon2
+        query = genomic_exon_a + intron + genomic_exon_b
 
         matches = match_query_to_features(query, [feature])
         assert len(matches) == 1
         m = matches[0]
-        # The intron must be classified (one interval), not left as a giant I op.
         assert len(m.intron_intervals) == 1, (
             f'expected 1 intron interval for - strand spliced feature, got {m.intron_intervals}'
         )
+        assert m.intron_intervals[0].cds_junction_pos == 54
         assert m.intron_intervals[0].length == 30
-        # Exon-only CIGAR must not contain the 30I intron op.
         assert '30I' not in m.cigar
-        # Identity reflects exons only.
         assert m.identity > 0.95
         assert m.cds_coverage == 1.0
 
@@ -519,8 +519,8 @@ class TestVcfRemapIntron:
             start=0, end=90, strand='-', codon_start=0,
             nt_sequence=spliced_cds,
             segments=(
-                FeatureSegment(segment_index=0, start=0, end=30),
-                FeatureSegment(segment_index=1, start=60, end=90),
+                FeatureSegment(segment_index=0, start=60, end=90),
+                FeatureSegment(segment_index=1, start=0, end=30),
             ),
         )
         intron = 'N' * 30
@@ -784,17 +784,22 @@ class TestMultiIntronCoordinateConvention:
             match_strand=match_strand,
         )
         coding_cds = ''.join(exon_seqs)
+        ordered_segments = (
+            oracle.feature_spec.segments
+            if feature_strand == '+'
+            else tuple(reversed(oracle.feature_spec.segments))
+        )
         segments = tuple(
             FeatureSegment(segment_index=idx, start=s, end=e)
-            for idx, (s, e) in enumerate(oracle.feature_spec.segments)
+            for idx, (s, e) in enumerate(ordered_segments)
         )
         feature = FeatureRecord(
             id=10,
             reference_id=1,
             name='multi_spl',
             protein='MultiSpl',
-            start=segments[0].start,
-            end=segments[-1].end,
+            start=min(s.start for s in segments),
+            end=max(s.end for s in segments),
             strand=feature_strand,
             codon_start=0,
             nt_sequence=coding_cds,

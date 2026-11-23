@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -11,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from respro.cli.sync import sync_results_database
-from respro.db.results import delete_run, list_runs
+from respro.db.results import delete_run, find_run_summary, list_runs
 from respro.db.rules_queries import (
     get_project_summary_for_display,
     list_formula_rules_for_display,
@@ -124,21 +125,14 @@ def manage_results(
     results_conn = None
     try:
         results_conn = open_results_db(results_db)
-        run_row = results_conn.execute(
-            'SELECT id, sample_name FROM run WHERE id = ? OR CAST(id AS TEXT) = ?',
-            (delete_run_id, delete_run_id),
-        ).fetchone()
-        label = (
-            delete_run_id
-            if run_row is None
-            else f"{run_row['id']} ({run_row['sample_name'] or 'sample: n/a'})"
-        )
+        target = find_run_summary(results_conn, delete_run_id or '')
+        label = f"{target['id']} ({target['sample_name'] or 'sample: n/a'})"
         if not force and not typer.confirm(f'Delete run {label}?', default=False):
             cli_error('Deletion cancelled.')
 
-        deleted = delete_run(results_conn, delete_run_id or '')
+        deleted = delete_run(results_conn, int(target['id']))
         typer.echo(f"Deleted run {deleted['id']} (sample: {deleted['sample_name'] or 'n/a'})")
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
         cli_error(str(exc))
     finally:
         if results_conn is not None:
@@ -187,7 +181,7 @@ def _show_rules(
                 console.print('')
             console.print('[bold]Combination rules[/bold]')
             _render_rule_table(console, combi_rows, FORMULA_RULE_COLUMN_LABELS)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
         cli_error(str(exc))
     finally:
         if project_conn is not None:
@@ -222,12 +216,8 @@ def _show_runs(results_db: Path) -> None:
         table.add_column('Input')
         table.add_column('Hits', justify='right')
         table.add_column('Created', style='dim')
-        table.add_column('Status')
 
         for run in runs:
-            run_project_ts = run.get('project_updated_at') or ''
-            run_created_ts = run.get('created_at') or ''
-            stale = '[yellow]stale[/yellow]' if (run_project_ts and run_created_ts and run_project_ts > run_created_ts) else ''
             table.add_row(
                 str(run['id']),
                 run['sample_name'] or '',
@@ -235,10 +225,9 @@ def _show_runs(results_db: Path) -> None:
                 Path(run['vcf_path']).name,
                 str(run['resistance_hits']),
                 run['created_at'],
-                stale,
             )
         console.print(table)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
         cli_error(str(exc))
     finally:
         if results_conn is not None:
@@ -265,7 +254,7 @@ def _show_project_info(project_db: Path) -> None:
         for label, value in rows_to_show:
             table.add_row(label, value)
         console.print(table)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
         cli_error(str(exc))
     finally:
         if project_conn is not None:

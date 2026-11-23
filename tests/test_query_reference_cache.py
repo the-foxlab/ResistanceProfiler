@@ -321,3 +321,55 @@ class TestPrivacyRegression:
             raw += wal.read_bytes()
 
         assert b'patient_42|sample_1' not in raw
+
+    def test_nondefault_alignment_skips_cache_and_add_to_project_invalidates(self, tmp_path: Path) -> None:
+        from dataclasses import replace
+        from unittest.mock import patch
+
+        from conftest import TINY_REF_NAME, TINY_REF_SEQ, write_genbank
+
+        from respro.cli.init import add_to_project, init_project
+        from respro.config.cli_settings import CLI_CONFIG
+        from respro.core.query import resolve_fasta_query_multi
+
+        gb = write_genbank(
+            tmp_path / 'ref.gb',
+            [{
+                'id': TINY_REF_NAME,
+                'accession': TINY_REF_NAME,
+                'sequence': TINY_REF_SEQ,
+                'features': [{'feature': 'gag', 'protein': 'Gag', 'start': 1, 'end': len(TINY_REF_SEQ), 'strand': '+'}],
+            }],
+        )
+        tsv = tmp_path / 'rules.tsv'
+        tsv.write_text(
+            'feature\treference_identifier\tposition\treference\tmutation\tantiviral\tphenotype\n'
+            f'gag\t{TINY_REF_NAME}\t2\tK\tE\tDrugA\tresistant\n',
+            encoding='utf-8',
+        )
+        db = tmp_path / 'proj.db'
+        init_project(db_path=db, name='CacheTest', genbank_paths=[gb], rules_tsv=tsv, additional_info=False)
+
+        conn = open_project_db(db)
+        try:
+            qref = tmp_path / 'q.fasta'
+            qref.write_text(f'>{TINY_REF_NAME}\n{TINY_REF_SEQ}\n', encoding='utf-8')
+            recs1 = resolve_fasta_query_multi(conn, qref)
+            assert len(recs1) == 1
+            assert conn.execute('SELECT COUNT(*) FROM query_feature_mapping').fetchone()[0] == 1
+
+            custom_cfg = replace(CLI_CONFIG, alignment=replace(CLI_CONFIG.alignment, k=11))
+            with patch('respro.core.query.load_cached_mappings') as mock_load:
+                recs2 = resolve_fasta_query_multi(conn, qref, cfg=custom_cfg)
+                assert len(recs2) == 1
+                mock_load.assert_not_called()
+        finally:
+            conn.close()
+
+        add_to_project(db_path=db, rules_tsv=tsv, additional_info=False)
+        conn2 = open_project_db(db)
+        try:
+            assert conn2.execute('SELECT COUNT(*) FROM query_feature_mapping').fetchone()[0] == 0
+            assert conn2.execute('SELECT COUNT(*) FROM query_reference').fetchone()[0] == 0
+        finally:
+            conn2.close()

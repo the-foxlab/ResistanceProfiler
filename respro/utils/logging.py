@@ -27,7 +27,7 @@ err_console = Console(stderr=True, theme=_LOG_THEME)
 
 def setup_logging(verbosity: int = 0) -> logging.Logger:
     """Configure and return the ``respro`` package logger (0=WARNING, 1=INFO, 2+=DEBUG)."""
-    level = {0: logging.WARNING, 1: logging.INFO}.get(verbosity, logging.DEBUG)
+    level = {0: logging.WARNING, 1: logging.INFO}.get(max(0, verbosity), logging.DEBUG)
 
     logger = logging.getLogger('respro')
     logger.setLevel(level)
@@ -43,5 +43,8 @@ def setup_logging(verbosity: int = 0) -> logging.Logger:
         )
         handler.setFormatter(logging.Formatter('%(name)s — %(message)s'))
         logger.addHandler(handler)
+    else:
+        for existing in logger.handlers:
+            existing.setLevel(level)
 
     return logger

@@ -113,7 +113,10 @@ def fetch_pubmed_id_for_doi(doi: str, timeout: int = CLI_CONFIG.timeouts.pubmed)
     records = res.value.get('records')
     if not isinstance(records, list) or not records or not isinstance(records[0], dict):
         return None
-    pmid = str(records[0].get('pmid', '')).strip()
+    raw_pmid = records[0].get('pmid')
+    if isinstance(raw_pmid, bool) or not isinstance(raw_pmid, (str, int)):
+        return None
+    pmid = str(raw_pmid).strip()
     return pmid or None
 
 
@@ -196,8 +199,8 @@ def normalize_doi_token(token: str) -> str:
     if not value:
         return ''
     lower = value.lower()
-    for prefix in CLI_CONFIG.parsing.doi_prefixes:
-        if lower.startswith(prefix):
+    for prefix in (*CLI_CONFIG.parsing.doi_prefixes, 'https://dx.doi.org/', 'http://dx.doi.org/'):
+        if lower.startswith(prefix.lower()):
             value = value[len(prefix):].strip()
             lower = value.lower()
             break

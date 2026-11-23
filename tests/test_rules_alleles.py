@@ -312,3 +312,17 @@ class TestNormalizeRuleAllelesForStorage:
             )
             assert result is not None
             assert result[0] == pos
+
+    def test_rejects_embedded_position_or_reference_conflict(self):
+        """Should reject mutation tokens whose embedded position or ref AA disagrees with columns."""
+        errors: list[str] = []
+        assert _normalize_rule_alleles_for_storage(
+            reference_aa='K', mutation_raw='F2STOP', position_0based=1, context='r', errors=errors,
+        ) is None
+        assert any('conflicts' in e for e in errors)
+
+        errors2: list[str] = []
+        assert _normalize_rule_alleles_for_storage(
+            reference_aa='K', mutation_raw='K99*', position_0based=1, context='r', errors=errors2,
+        ) is None
+        assert any('conflicts' in e for e in errors2)

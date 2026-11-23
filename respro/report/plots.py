@@ -8,8 +8,10 @@ from io import BytesIO
 
 import matplotlib
 import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 
 from respro.db.models import (
     AnnotatedVariant,
@@ -45,12 +47,11 @@ def render_lollipop_plot_bytes(
     fig = _build_lollipop_figure(result, features, rule_feature_names=rule_feature_names)
     if fig is None:
         return None
-    try:
-        buf = BytesIO()
-        fig.savefig(buf, format=fmt, dpi=150)
-        return buf.getvalue()
-    finally:
-        plt.close(fig)
+    buf = BytesIO()
+    metadata = {'Date': None} if fmt == 'svg' else None
+    with matplotlib.rc_context({'svg.hashsalt': 'respro'}):
+        fig.savefig(buf, format=fmt, dpi=150, metadata=metadata)
+    return buf.getvalue()
 
 
 def _plan_all_references(
@@ -115,8 +116,9 @@ def _plan_all_references(
             continue
         rows = _plan_reference_rows(ref_cds, ref_coverage, plot_features, ref_features)
         if rows:
+            selected_names = {f.name for f in plot_features}
             plans.append((rg, rows, plot_features, ref_features))
-            multi_plotted_cds.extend(ref_cds)
+            multi_plotted_cds.extend(a for a in ref_cds if a.feature_name in selected_names)
 
     if not plans:
         logger.warning('No reference groups produced plottable features')
@@ -139,11 +141,9 @@ def _build_lollipop_figure(
             subplot_rows.append({**row, 'reference_group': rg, 'ref_features': ref_features})
 
     height_ratios = [2.0 if row['kind'] == 'lollipop' else 0.5 for row in subplot_rows]
-    fig, axes = plt.subplots(
-        len(height_ratios), 1,
-        figsize=(16, 2 + 1.7 * (len(height_ratios) - 1)),
-        height_ratios=height_ratios,
-    )
+    fig = Figure(figsize=(16, 2 + 1.7 * (len(height_ratios) - 1)))
+    FigureCanvasAgg(fig)
+    axes = fig.subplots(len(height_ratios), 1, height_ratios=height_ratios)
     axes_list = list(axes if isinstance(axes, (list, tuple)) else axes.flat)
     row_axes = list(zip(subplot_rows, axes_list))
 
@@ -199,8 +199,8 @@ def _build_lollipop_figure(
         )
 
     legend_handles: list[object] = [
-        plt.Line2D([0], [0], marker='s', color='w', markerfacecolor='white',
-                   markeredgecolor='black', markersize=8, label='Database hit'),
+        Line2D([0], [0], marker='s', color='w', markerfacecolor='white',
+               markeredgecolor='black', markersize=8, label='Database hit'),
     ]
     has_coverage_overlay = any(
         row.get('coverage_gaps') for row in subplot_rows if row['kind'] == 'lollipop'
@@ -220,7 +220,7 @@ def _build_lollipop_figure(
             ncol=len(legend_handles), frameon=False,
             bbox_to_anchor=(1, 1.25), borderaxespad=0.0,
         )
-    plt.tight_layout()
+    fig.tight_layout()
     return fig
 
 

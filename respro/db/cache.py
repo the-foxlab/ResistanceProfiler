@@ -68,7 +68,8 @@ def load_cached_mappings(
         'FROM query_feature_mapping qgm '
         'JOIN feature g ON g.id = qgm.feature_id '
         'JOIN reference r ON r.id = g.reference_id '
-        'WHERE qgm.query_ref_id = ? AND g.has_rules = 1',
+        'WHERE qgm.query_ref_id = ? AND g.has_rules = 1 '
+        'ORDER BY g.reference_id, g.start, g.id',
         (qref['id'],),
     ).fetchall()
 
@@ -99,38 +100,48 @@ def load_cached_mappings(
     return matches
 
 
+def clear_cached_mappings(conn: sqlite3.Connection) -> None:
+    """Invalidate all cached query-to-feature alignments (e.g. after ``respro add``)."""
+    conn.execute('DELETE FROM query_feature_mapping')
+    conn.execute('DELETE FROM query_reference')
+
+
 def store_mappings(
     conn: sqlite3.Connection,
     checksum: str,
     matches: list[FeatureMatch],
 ) -> None:
     """Persist sequence checksum and CIGAR feature mappings (never headers or raw sequence)."""
-    conn.execute('INSERT OR IGNORE INTO query_reference (checksum) VALUES (?)', (checksum,))
-    qref_id = conn.execute(
-        'SELECT id FROM query_reference WHERE checksum = ?', (checksum,),
-    ).fetchone()['id']
+    with conn:
+        conn.execute('INSERT OR IGNORE INTO query_reference (checksum) VALUES (?)', (checksum,))
+        qref_row = conn.execute(
+            'SELECT id FROM query_reference WHERE checksum = ?', (checksum,),
+        ).fetchone()
+        if qref_row is None:
+            raise ValueError(f'Failed to persist query_reference row for checksum {checksum[:12]}')
+        qref_id = qref_row['id']
 
-    conn.executemany(
-        'INSERT OR REPLACE INTO query_feature_mapping '
-        '(query_ref_id, feature_id, identity, cds_coverage, query_coverage, '
-        'cds_start, query_start, query_end, strand, cigar, intron_intervals) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [
-            (
-                qref_id,
-                m.feature.id,
-                m.identity,
-                m.cds_coverage,
-                m.query_coverage,
-                m.cds_start,
-                m.query_start,
-                m.query_end,
-                m.strand,
-                m.cigar,
-                _serialize_intron_intervals(m.intron_intervals),
-            )
-            for m in matches
-        ],
-    )
-    conn.commit()
+        conn.execute('DELETE FROM query_feature_mapping WHERE query_ref_id = ?', (qref_id,))
+        conn.executemany(
+            'INSERT OR REPLACE INTO query_feature_mapping '
+            '(query_ref_id, feature_id, identity, cds_coverage, query_coverage, '
+            'cds_start, query_start, query_end, strand, cigar, intron_intervals) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [
+                (
+                    qref_id,
+                    m.feature.id,
+                    m.identity,
+                    m.cds_coverage,
+                    m.query_coverage,
+                    m.cds_start,
+                    m.query_start,
+                    m.query_end,
+                    m.strand,
+                    m.cigar,
+                    _serialize_intron_intervals(m.intron_intervals),
+                )
+                for m in matches
+            ],
+        )
     logger.info('Cached %d mapping(s) for checksum %s…', len(matches), checksum[:12])

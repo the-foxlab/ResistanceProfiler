@@ -61,6 +61,24 @@ def format_aa_effects(ann: AnnotatedVariant) -> str:
     return '; '.join(parts)
 
 
+def collect_formula_hit_annotation_ids(result: ProfilingResult) -> set[int]:
+    """Collect annotation object IDs participating in any formula hit, including co-codon siblings."""
+    direct_ids = {id(ann) for hit in result.formula_hits for ann in hit.matched_variants}
+    combined_sibling_keys = {
+        (ann.feature_name, ann.codon_pos, ann.variant.chrom)
+        for ann in result.cds_annotations
+        if id(ann) in direct_ids and ann.is_combined_codon_event
+    }
+    if not combined_sibling_keys:
+        return direct_ids
+    return direct_ids | {
+        id(ann)
+        for ann in result.cds_annotations
+        if ann.is_combined_codon_event
+        and (ann.feature_name, ann.codon_pos, ann.variant.chrom) in combined_sibling_keys
+    }
+
+
 def build_reference_name_by_chrom(result: ProfilingResult) -> dict[str, str]:
     """Map each annotation chrom (``ReferenceGroup.query_name``) to its ``reference_name``."""
     return {rg.query_name: rg.reference_name for rg in result.references}

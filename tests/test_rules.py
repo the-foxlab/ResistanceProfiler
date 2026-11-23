@@ -1784,3 +1784,46 @@ class TestFrechetFormulaMatching:
         assert len(hits1) == len(hits2) == 1
         assert hits1[0].matched_member_ids == hits2[0].matched_member_ids
         assert hits1[0].frechet_lower == hits2[0].frechet_lower
+
+    def test_or_expression_selects_highest_lower_bound_branch(self) -> None:
+        mut_a = self._atomic_rule('M1', 'E', rule_id=10)
+        mut_b = self._atomic_rule('M2', 'V', rule_id=11)
+        formula = self._formula('M1 OR M2', [mut_a, mut_b])
+        ann_a = self._make_ann('gag', 1, 'K', 'E', effect_lower=0.2, allele_freq=0.2)
+        ann_b = self._make_ann('gag', 2, 'A', 'V', effect_lower=0.9, allele_freq=0.9)
+        ann_a.rule_matches = [mut_a]
+        ann_a.rule_effect_aa_freq[mut_a.id] = 0.2
+        ann_b.rule_matches = [mut_b]
+        ann_b.rule_effect_aa_freq[mut_b.id] = 0.9
+
+        hits = match_formula_rules([ann_a, ann_b], [formula], min_fraction=self.MIN_FRACTION)
+        assert len(hits) == 1
+        assert hits[0].frechet_lower == pytest.approx(0.9)
+
+    def test_match_rules_combined_dedup_keeps_max_freq_and_rejects_indel_mismatch(self) -> None:
+        rule = ResistanceRule(
+            id=1, feature_name='g', feature_id=1, drug_name='DrugA', drug_id=1,
+            reference_identifier='ref', position=1, reference='K', mutation='E',
+            phenotype='resistant',
+        )
+        a_low = AnnotatedVariant(
+            variant=VariantCall(chrom='g', pos=3, ref='A', alt='G', allele_freq=0.2),
+            feature_name='g', codon_pos=1, ref_aa='K', alt_aa='E', consequence='missense',
+            is_combined_codon_event=True,
+        )
+        a_high = AnnotatedVariant(
+            variant=VariantCall(chrom='g', pos=4, ref='A', alt='G', allele_freq=0.8),
+            feature_name='g', codon_pos=1, ref_aa='K', alt_aa='E', consequence='missense',
+            is_combined_codon_event=True,
+        )
+        match_rules([a_low, a_high], [rule])
+        assert len(a_low.rule_matches) == 0
+        assert len(a_high.rule_matches) == 1
+
+        del_ann = AnnotatedVariant(
+            variant=VariantCall(chrom='g', pos=3, ref='AAA', alt='A', allele_freq=1.0),
+            feature_name='g', codon_pos=1, ref_aa='KE', alt_aa='E',
+            consequence='deletion',
+        )
+        match_rules([del_ann], [rule])
+        assert del_ann.rule_matches == []

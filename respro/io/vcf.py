@@ -106,6 +106,8 @@ def _resolve_record_afs(record: pysam.VariantRecord, n_alts: int) -> list[float 
         if value is None:
             continue
         _apply_af_source(record, key, value, n_alts, resolved)
+        if all(v is not None for v in resolved):
+            return resolved
 
     sample = _first_sample(record)
     if sample is None:
@@ -114,6 +116,8 @@ def _resolve_record_afs(record: pysam.VariantRecord, n_alts: int) -> list[float 
     sample_af = sample.get('AF')
     if sample_af is not None:
         _apply_af_source(record, 'FORMAT/AF', sample_af, n_alts, resolved)
+        if all(v is not None for v in resolved):
+            return resolved
 
     ad_freqs = _extract_ad_afs(record, sample, n_alts)
     if ad_freqs is not None:
@@ -251,7 +255,11 @@ def _normalize_to_int_sequence(value: object) -> list[int | None]:
 
 
 def _normalize_to_raw_sequence(value: object) -> list[object]:
-    return list(value) if isinstance(value, (tuple, list)) else [value]
+    if isinstance(value, (tuple, list)):
+        return list(value)
+    if isinstance(value, str) and ',' in value:
+        return [item.strip() for item in value.split(',')]
+    return [value]
 
 
 def _to_int(value: object) -> int | None:
@@ -261,9 +269,10 @@ def _to_int(value: object) -> int | None:
     if not token or token == '.':
         return None
     try:
-        return int(float(token))
+        parsed = int(float(token))
     except ValueError:
         return None
+    return parsed if parsed >= 0 else None
 
 
 def _to_float(value: object) -> float | None:
@@ -279,4 +288,6 @@ def _to_float(value: object) -> float | None:
     if match is None:
         return None
     parsed = float(match.group(0))
+    if parsed < 0.0:
+        return None
     return parsed / 100.0 if percent else parsed

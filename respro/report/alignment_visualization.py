@@ -217,34 +217,35 @@ def _apply_vcf_overlay(
 
     ref_allele = ann.variant.ref.upper()
     alt_allele = ann.variant.alt.upper()
-    if len(ref_allele) == 1 and len(alt_allele) == 1:
-        query_chars[anchor_idx] = alt_allele
-    elif len(alt_allele) > len(ref_allele):
-        for offset, base in enumerate(alt_allele[1:]):
-            idx = anchor_idx + 1 + offset
+    common_len = min(len(ref_allele), len(alt_allele))
+    replace_positions = set(range(anchor_pos, anchor_pos + common_len))
+    replace_idxs = [
+        i
+        for _pos, i in sorted(
+            (pos, i) for i, pos in enumerate(native_pos) if pos is not None and pos in replace_positions
+        )
+    ]
+    for offset, idx in enumerate(replace_idxs[:common_len]):
+        query_chars[idx] = alt_allele[offset]
+
+    if len(alt_allele) > len(ref_allele):
+        insert_after = replace_idxs[common_len - 1] if len(replace_idxs) >= common_len else anchor_idx
+        for offset, base in enumerate(alt_allele[common_len:]):
+            idx = insert_after + 1 + offset
             ref_chars.insert(idx, '-')
             query_chars.insert(idx, base)
             coding_pos.insert(idx, None)
             native_pos.insert(idx, None)
-            native_anchor_pos.insert(idx, anchor_pos)
+            native_anchor_pos.insert(idx, anchor_pos + common_len - 1)
     elif len(ref_allele) > len(alt_allele):
-        deleted_len = len(ref_allele) - len(alt_allele)
-        deleted_positions = set(range(anchor_pos + 1, anchor_pos + 1 + deleted_len))
+        deleted_len = len(ref_allele) - common_len
+        deleted_positions = set(range(anchor_pos + common_len, anchor_pos + len(ref_allele)))
         deleted_idxs = [i for i, pos in enumerate(native_pos) if pos is not None and pos in deleted_positions]
         if len(deleted_idxs) < deleted_len:
-            deleted_idxs = [i for i in range(anchor_idx + 1, len(native_pos)) if native_pos[i] is not None][:deleted_len]
+            tail_start = (replace_idxs[common_len - 1] if len(replace_idxs) >= common_len else anchor_idx) + 1
+            deleted_idxs = [i for i in range(tail_start, len(native_pos)) if native_pos[i] is not None][:deleted_len]
         for idx in deleted_idxs:
             query_chars[idx] = '-'
-    else:
-        replace_positions = set(range(anchor_pos, anchor_pos + len(ref_allele)))
-        replace_idxs = [
-            i
-            for _pos, i in sorted(
-                (pos, i) for i, pos in enumerate(native_pos) if pos is not None and pos in replace_positions
-            )
-        ]
-        for offset, idx in enumerate(replace_idxs[:len(alt_allele)]):
-            query_chars[idx] = alt_allele[offset]
 
     return ''.join(ref_chars), ''.join(query_chars), coding_pos, native_pos, native_anchor_pos
 

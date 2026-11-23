@@ -125,13 +125,22 @@ def build_database_hits_rows(
 
     for formula_hit in result.formula_hits:
         rs = formula_hit.rule_set
+        member_ids = set(formula_hit.matched_member_ids)
         feature_to_muts: dict[str, list[str]] = {}
         first_chrom = formula_hit.matched_variants[0].variant.chrom if formula_hit.matched_variants else ''
         for ann in formula_hit.matched_variants:
             feature = names.get(ann.feature_name, ann.feature_name)
+            eff_alt = next(
+                (
+                    ann.rule_effect_alt[r.id]
+                    for r in ann.rule_matches
+                    if r.external_id in member_ids and r.id in ann.rule_effect_alt
+                ),
+                ann.alt_aa,
+            )
             aa_change = (
-                f'{ann.ref_aa}{ann.codon_pos + 1}{ann.alt_aa}'
-                if ann.ref_aa and ann.alt_aa
+                f'{ann.ref_aa}{ann.codon_pos + 1}{eff_alt}'
+                if ann.ref_aa and eff_alt
                 else ann.feature_name
             )
             feature_to_muts.setdefault(feature, []).append(aa_change)
@@ -165,7 +174,7 @@ def build_database_hits_rows(
         'rows': rows,
         'count': len(rows),
         'has_publications': any(row['pub_citations'] for row in rows),
-        'has_drug_class': bool(drug_class_map),
+        'has_drug_class': bool(drug_class_map) and any(row.get('drug_class') for row in rows),
         'has_comments': any(row.get('comment') for row in rows),
         **metric_flags_for_rows(rows),
         'bibliography': bibliography,
@@ -229,6 +238,7 @@ def build_potential_effects_rows(
             'count': 0,
             'has_drug_class': False,
             'has_publications': False,
+            **metric_flags_for_rows([]),
             'bibliography': [],
             'info_icon': load_svg_data_url('info.svg'),
             'search_icon': load_svg_data_url('search.svg'),

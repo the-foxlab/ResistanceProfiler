@@ -25,7 +25,6 @@ from respro.report.html.cards import (
     build_feature_cards,
     build_feature_stats,
     collect_detected_drug_names,
-    collect_formula_hit_annotation_ids,
 )
 from respro.report.html.formatting import (
     load_html_css_text,
@@ -42,6 +41,7 @@ from respro.report.html.tables import (
 from respro.report.row_helpers import (
     build_feature_display_names,
     build_reference_name_by_chrom,
+    collect_formula_hit_annotation_ids,
 )
 
 
@@ -122,7 +122,7 @@ def build_report_context(
     secondary_parts = [f'File: {vcf}' if vcf else '', f'Generated {timestamp}' if timestamp else '']
 
     display_names = build_feature_display_names(features)
-    feature_lookup = {f.name: f for f in features} if features else {}
+    feature_lookup = {(f.reference_id, f.name): f for f in features} if features else {}
     detected_drug_names = collect_detected_drug_names(result)
     drug_stats = build_drug_stats(result)
     feature_stats = build_feature_stats(result, features)
@@ -173,13 +173,14 @@ def build_report_context(
     all_ref_names = list(dict.fromkeys(rg.reference_name for rg in result.references if rg.reference_name))
     if not all_ref_names and reference:
         all_ref_names = [reference]
-    db_feature_cards_by_name = {
-        name: card
-        for card in load_feature_cards(project_conn, all_ref_names, set(feature_stats))
+    detected_feature_names = {fname for _rid, fname in feature_stats}
+    db_feature_cards_by_key = {
+        (card.get('reference_name') or '', name): card
+        for card in load_feature_cards(project_conn, all_ref_names, detected_feature_names)
         if (name := (card.get('name') or '').strip())
     }
     feature_cards = build_feature_cards(
-        feature_stats, db_feature_cards_by_name, display_names, feature_lookup,
+        feature_stats, db_feature_cards_by_key, display_names, feature_lookup,
         reference_name_by_ref_id=reference_name_by_ref_id,
     )
     has_database_hit = database_hits['count'] > 0

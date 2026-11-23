@@ -18,6 +18,7 @@ from respro.cli.profile_helpers import (
     safe_report_stem,
 )
 from respro.config.cli_settings import load_config_with_overrides
+from respro.core.annotation import assign_af_bins
 from respro.db.models import CoverageGap, ProfilingResult
 from respro.db.results import (
     load_classifications,
@@ -163,13 +164,14 @@ def regenerate(
         else:
             log.warning('%s has no stored fingerprint — skipping project validation.', run_label)
 
-        annotations = reconstruct_annotations(variant_rows)
+        is_fasta_mode = bool(run_dict.get('is_fasta_mode', 0))
+        af_bins = (cfg.af_bins_fasta if is_fasta_mode else cfg.af_bins).as_dict()
+        annotations = assign_af_bins(reconstruct_annotations(variant_rows), bins=af_bins)
         formula_hits = reconstruct_formula_rule_hits(formula_rows, annotations)
         references, all_features, all_rules, all_rule_feature_names, primary_organism = (
             reconstruct_reference_groups(project_conn, run_dict, variant_rows, profiled_by_ref)
         )
 
-        is_fasta_mode = bool(run_dict.get('is_fasta_mode', 0))
         result = ProfilingResult(
             project_name=run_dict['project_name'],
             organism=primary_organism,
@@ -197,6 +199,7 @@ def regenerate(
                 rule_feature_names=all_rule_feature_names,
                 project_conn=project_conn,
                 rules=all_rules,
+                project_db_path=project.resolve(),
                 extra_export_formats=extra_export_formats,
                 output_html_path=html_output_path,
                 similarity_high=cfg.similarity.high,
@@ -214,7 +217,7 @@ def regenerate(
 
     except click.ClickException as exc:
         render_click_exception(exc)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
         cli_error(str(exc))
     finally:
         if results_conn is not None:

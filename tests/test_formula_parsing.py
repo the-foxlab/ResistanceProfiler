@@ -422,3 +422,11 @@ class TestFormulaSortKey:
         a_key = _formula_sort_key(('ATOM', 'A'))
         b_key = _formula_sort_key(('ATOM', 'B'))
         assert a_key < b_key
+
+    def test_tokenize_preserves_operator_prefixed_identifiers(self):
+        """Identifiers like NOT-1 or OR.2 must stay single tokens."""
+        from respro.core.formula import tokenize_formula_expression
+
+        assert tokenize_formula_expression('NOT-1 AND (OR.2 OR A1)') == [
+            'NOT-1', 'AND', '(', 'OR.2', 'OR', 'A1', ')',
+        ]

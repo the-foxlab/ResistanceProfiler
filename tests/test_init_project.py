@@ -2729,3 +2729,166 @@ class TestFormulaRuleImport:
         assert formula_count == 0  # Formula rule should be skipped
 
 
+class TestGenbankSplicedAndAtomicInit:
+    def test_genbank_complement_join_and_circular_origin_wrap_order(self, tmp_path: Path) -> None:
+        from respro.core.coordinates import exon_junction_cds_offsets
+        from respro.db.models import FeatureRecord, FeatureSegment
+        from respro.io.genbank import parse_genbank_records
+
+        gb = tmp_path / 'spliced_and_circular.gb'
+        seq = 'A' * 120
+        gb.write_text(
+            textwrap.dedent(f"""\
+                LOCUS       CIRC_TEST                120 bp    DNA     circular VRL 01-JAN-2026
+                DEFINITION  Test record with reverse complement join and circular wrap.
+                ACCESSION   CIRC_TEST
+                VERSION     CIRC_TEST.1
+                FEATURES             Location/Qualifiers
+                     CDS             complement(join(11..34,65..100))
+                                     /gene="rev_spliced"
+                                     /product="Reverse spliced protein"
+                                     /codon_start=1
+                     CDS             join(101..115,1..15)
+                                     /gene="origin_wrap"
+                                     /product="Circular wrap protein"
+                                     /codon_start=1
+                ORIGIN
+                        1 {seq[:60].lower()}
+                       61 {seq[60:].lower()}
+                //
+            """),
+            encoding='utf-8',
+        )
+
+        parsed = parse_genbank_records(gb)
+        by_name = {feat.feature_name: feat for feat in parsed[0].features}
+
+        rev = by_name['rev_spliced']
+        assert rev.strand == '-'
+        assert rev.segments == ((64, 100), (10, 34))
+        rev_rec = FeatureRecord(
+            id=1, reference_id=1, name='rev_spliced', protein='',
+            start=rev.start, end=rev.end, strand='-', codon_start=0,
+            segments=tuple(FeatureSegment(i, s, e) for i, (s, e) in enumerate(rev.segments)),
+        )
+        assert exon_junction_cds_offsets(rev_rec) == [36]
+        assert rev_rec.cds_to_genomic_position(0) == 99
+        assert rev_rec.cds_to_genomic_position(35) == 64
+        assert rev_rec.cds_to_genomic_position(36) == 33
+        assert rev_rec.cds_to_genomic_position(59) == 10
+        for cds in range(60):
+            g = rev_rec.cds_to_genomic_position(cds)
+            assert g is not None and rev_rec.genomic_to_cds_position(g) == cds
+
+        circ = by_name['origin_wrap']
+        assert circ.strand == '+'
+        assert circ.segments == ((100, 115), (0, 15))
+        circ_rec = FeatureRecord(
+            id=2, reference_id=1, name='origin_wrap', protein='',
+            start=circ.start, end=circ.end, strand='+', codon_start=0,
+            segments=tuple(FeatureSegment(i, s, e) for i, (s, e) in enumerate(circ.segments)),
+        )
+        assert exon_junction_cds_offsets(circ_rec) == [15]
+        assert circ_rec.cds_to_genomic_position(0) == 100
+        assert circ_rec.cds_to_genomic_position(14) == 114
+        assert circ_rec.cds_to_genomic_position(15) == 0
+        assert circ_rec.cds_to_genomic_position(29) == 14
+
+    def test_genbank_rejects_mixed_strand_and_invalid_codon_start(self, tmp_path: Path) -> None:
+        from respro.io.genbank import parse_genbank_records
+
+        gb_mixed = tmp_path / 'mixed.gb'
+        rec = SeqRecord(Seq('ATG' * 20), id='m', name='m', description='')
+        rec.annotations['molecule_type'] = 'DNA'
+        rec.features = [
+            SeqFeature(
+                CompoundLocation([FeatureLocation(0, 15, strand=1), FeatureLocation(30, 45, strand=-1)]),
+                type='CDS',
+                qualifiers={'gene': ['bad'], 'codon_start': ['1']},
+            )
+        ]
+        with gb_mixed.open('w', encoding='utf-8') as fh:
+            SeqIO.write([rec], fh, 'genbank')
+        with pytest.raises(ValueError, match='mixed-strand'):
+            parse_genbank_records(gb_mixed)
+
+        gb_cs = tmp_path / 'bad_cs.gb'
+        rec2 = SeqRecord(Seq('ATG' * 20), id='m2', name='m2', description='')
+        rec2.annotations['molecule_type'] = 'DNA'
+        rec2.features = [
+            SeqFeature(
+                FeatureLocation(0, 30, strand=1),
+                type='CDS',
+                qualifiers={'gene': ['badcs'], 'codon_start': ['4']},
+            )
+        ]
+        with gb_cs.open('w', encoding='utf-8') as fh:
+            SeqIO.write([rec2], fh, 'genbank')
+        with pytest.raises(ValueError, match='codon_start'):
+            parse_genbank_records(gb_cs)
+
+    def test_open_project_db_rejects_legacy_pii_column(self, tmp_path: Path) -> None:
+        db = tmp_path / 'legacy.db'
+        conn = create_schema(db)
+        conn.execute('ALTER TABLE query_reference ADD COLUMN file_name TEXT')
+        conn.commit()
+        conn.close()
+
+        with pytest.raises(ValueError, match='unexpected legacy columns'):
+            open_project_db(db)
+
+    def test_init_project_overwrite_preserves_existing_db_on_failure(self, tmp_path: Path) -> None:
+        db = tmp_path / 'existing.db'
+        db.write_bytes(b'ORIGINAL_DB_SENTINEL')
+        bad_gb = tmp_path / 'broken.gb'
+        bad_gb.write_text('not valid genbank', encoding='utf-8')
+        rules = tmp_path / 'r.tsv'
+        rules.write_text('feature\treference_identifier\tposition\treference\tmutation\tantiviral\n', encoding='utf-8')
+
+        with pytest.raises(ValueError):
+            init_project(db_path=db, name='Fail', genbank_paths=[bad_gb], rules_tsv=rules, overwrite=True, additional_info=False)
+        assert db.read_bytes() == b'ORIGINAL_DB_SENTINEL'
+        assert list(tmp_path.glob('*.tmp*')) == []
+
+    def test_consolidate_drug_names_merges_colliding_formula_rules(self, tmp_path: Path) -> None:
+        from respro.db.drugs import consolidate_drug_names_to_lowercase
+
+        db = tmp_path / 'drugs.db'
+        conn = create_schema(db)
+        conn.execute("INSERT INTO project (name, schema_version) VALUES ('p', 15)")
+        conn.execute("INSERT INTO reference (project_id, name, length) VALUES (1, 'r', 30)")
+        conn.execute(
+            "INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) VALUES (1, 'f', 'F', 0, 30, '+', ?)",
+            ('ATG' * 10,),
+        )
+        conn.execute("INSERT INTO drug (project_id, name, description) VALUES (1, 'DrugX', '')")
+        conn.execute("INSERT INTO drug (project_id, name, description) VALUES (1, 'drugx', 'Antiviral desc')")
+        conn.execute("INSERT INTO resistance_rule (feature_id, drug_id, position, reference, mutation) VALUES (1, 1, 1, 'M', 'V')")
+        conn.execute(
+            "INSERT INTO resistance_formula_rule (drug_id, formula_id, normalized_expression, phenotype) VALUES (1, 'F1', 'A', 'resistant')"
+        )
+        conn.execute(
+            "INSERT INTO resistance_formula_rule (drug_id, formula_id, normalized_expression, phenotype) VALUES (2, 'F2', 'A', 'resistant')"
+        )
+        conn.execute("INSERT INTO publication (doi) VALUES ('10.1000/test')")
+        conn.execute("INSERT INTO resistance_formula_rule_publication (formula_rule_id, publication_id) VALUES (2, 1)")
+        conn.execute("INSERT INTO resistance_formula_rule_member (formula_rule_id, rule_id) VALUES (2, 1)")
+        conn.commit()
+
+        consolidate_drug_names_to_lowercase(conn, 1)
+        conn.commit()
+        kept = conn.execute("SELECT name, description FROM drug WHERE name = 'drugx'").fetchall()
+        assert len(kept) == 1
+        assert kept[0]['description'] == 'Antiviral desc'
+        assert conn.execute(
+            "SELECT COUNT(*) FROM resistance_formula_rule WHERE drug_id = (SELECT id FROM drug WHERE name = 'drugx')"
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            'SELECT COUNT(*) FROM resistance_formula_rule_publication WHERE formula_rule_id = 1'
+        ).fetchone()[0] == 1
+        assert conn.execute(
+            'SELECT COUNT(*) FROM resistance_formula_rule_member WHERE formula_rule_id = 1'
+        ).fetchone()[0] == 1
+        conn.close()
+
+

@@ -128,6 +128,16 @@ class TestSetupLogging:
         logger2 = setup_logging()
         assert len(logger2.handlers) == handler_count
 
+    def test_updates_existing_handler_levels_and_clamps_negative(self):
+        """Re-calling setup_logging updates existing handlers and clamps negative verbosity."""
+        logger = setup_logging(0)
+        assert all(h.level == logging.WARNING for h in logger.handlers)
+        setup_logging(2)
+        assert all(h.level == logging.DEBUG for h in logger.handlers)
+        setup_logging(-5)
+        assert logger.level == logging.WARNING
+        assert all(h.level == logging.WARNING for h in logger.handlers)
+
 
 class TestLogHighlighter:
     """Tests for _LogHighlighter."""

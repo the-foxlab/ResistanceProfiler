@@ -130,9 +130,9 @@
                   {% for entry in context.summary.mutation_profile %}
                     <div class="feature-mutation-row">
                       <span class="feature-mutation-badge"><span class="feature-mutation-name">{{ entry.feature }}{% if context.is_multi_species and entry.reference_name %} <span class="feature-mutation-reference">({{ entry.reference_name }})</span>{% endif %}</span>{% if context.summary.has_coverage and entry.covered_pct is not none %}<span class="feature-mutation-coverage">{{ entry.covered_pct }}%</span>{% elif context.summary.coverage_not_assessed %}<span class="feature-mutation-coverage">n.d.</span>{% endif %}</span>
-                      {% if context.summary.has_coverage and entry.covered_pct is not none %}
+                      {% if context.summary.has_coverage %}
                         <div class="feature-coverage-bar">
-                          <div class="feature-coverage-bar__fill" style="width: {{ entry.covered_pct }}%"></div>
+                          {% if entry.covered_pct is not none %}<div class="feature-coverage-bar__fill" style="width: {{ entry.covered_pct }}%"></div>{% endif %}
                         </div>
                       {% endif %}
                       <div class="feature-mutations">

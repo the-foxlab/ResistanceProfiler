@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 from respro.core.phenotype_ranks import normalize_phenotype_label
@@ -49,7 +50,8 @@ def parse_ic50_value(raw: str) -> float | None:
     if match is None:
         return None
     try:
-        return float(match.group(0))
+        parsed = float(match.group(0))
+        return parsed if math.isfinite(parsed) else None
     except ValueError:
         return None
 
@@ -82,7 +84,10 @@ def normalize_score_from_row(row: dict[str, str], *, errors: list[str], context:
     if not value or value.lower() == 'none':
         return ''
     try:
-        return f'{float(value):g}'
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise ValueError('non-finite score')
+        return f'{parsed:g}'
     except ValueError:
         errors.append(f'{context}: invalid score value {value!r}')
         return ''

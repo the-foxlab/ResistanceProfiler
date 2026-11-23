@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 
-from respro.db.models import FeatureMatch, FeatureRecord, FeatureSegment, IntronInterval
+from respro.db.models import FeatureMatch, FeatureRecord, IntronInterval
 
 _RE_CIGAR = re.compile(r'(\d+)([MIDNSHP=X])')
 
@@ -26,13 +26,10 @@ def match_rank(match: FeatureMatch) -> tuple[float, float, float, str]:
 
 
 def exon_junction_cds_offsets(feature: FeatureRecord) -> list[int]:
-    """Return 0-based CDS offsets of internal exon junctions in stored ``segments`` order."""
-    segments = feature.segments or (
-        FeatureSegment(segment_index=0, start=feature.start, end=feature.end),
-    )
+    """Return 0-based CDS offsets of internal exon junctions in 5'->3' coding order."""
     offsets: list[int] = []
     cumulative = 0
-    for segment in segments[:-1]:
+    for segment in feature.coding_segments[:-1]:
         cumulative += segment.end - segment.start
         offsets.append(cumulative)
     return offsets
@@ -56,6 +53,7 @@ def classify_introns(
     cigar: str,
     junction_offsets: list[int],
     tolerance: int,
+    cds_start: int = 0,
 ) -> tuple[str, list[IntronInterval]]:
     """Strip intron ``I`` ops near known exon junctions into ``IntronInterval`` entries.
 
@@ -70,7 +68,7 @@ def classify_introns(
     introns: list[IntronInterval] = []
     exon_ops: list[tuple[int, str]] = []
 
-    cds_pos = 0
+    cds_pos = cds_start
     query_pos = 0
     for length, op in parse_cigar(cigar):
         if op == 'I':

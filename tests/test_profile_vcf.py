@@ -680,7 +680,7 @@ class TestFormulaEpsilonOverride:
             encoding='utf-8',
         )
         html_strict = _run(boundary, 'out_strict')
-        assert 'combodrug' not in html_strict.lower()
+        assert 'No database hits found for this sample.' in html_strict
 
         loosened = tmp_path / 'loosened.toml'
         loosened.write_text(
@@ -690,6 +690,7 @@ class TestFormulaEpsilonOverride:
             encoding='utf-8',
         )
         html_loose = _run(loosened, 'out_loose')
+        assert 'No database hits found for this sample.' not in html_loose
         assert 'combodrug' in html_loose.lower()
 
     def test_default_run_matches_no_config_run(self, tmp_path: Path) -> None:

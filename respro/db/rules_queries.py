@@ -53,7 +53,7 @@ def load_rules(conn: sqlite3.Connection, reference_id: int) -> list[ResistanceRu
         'JOIN feature g ON g.id = rr.feature_id '
         'JOIN drug d ON d.id = rr.drug_id '
         'WHERE g.reference_id = ? '
-        'ORDER BY g.name, rr.position',
+        'ORDER BY g.name, rr.position, rr.id',
         (reference_id,),
     ).fetchall()
 
@@ -316,7 +316,8 @@ def _fetch_publications_by_owner(
         f'SELECT lp.{owner_column} AS owner_id, p.id, p.doi, p.title, p.pubmed_id, '
         'p.raw_input, p.first_author, p.year, p.journal '
         f'FROM {link_table} lp JOIN publication p ON p.id = lp.publication_id '
-        f'WHERE lp.{owner_column} IN ({placeholders})',
+        f'WHERE lp.{owner_column} IN ({placeholders}) '
+        f'ORDER BY lp.{owner_column}, p.id',
         owner_ids,
     ).fetchall()
     grouped: dict[int, list[Publication]] = {}

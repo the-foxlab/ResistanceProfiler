@@ -90,6 +90,7 @@ def _match_with_mappy(
             cigar,
             exon_junction_cds_offsets(feature),
             align_cfg.intron_junction_tolerance,
+            cds_start=hit.q_st,
         )
         identity, cds_coverage = _recompute_exon_metrics(
             hit, cds, feature, bool(intron_intervals), cigar,

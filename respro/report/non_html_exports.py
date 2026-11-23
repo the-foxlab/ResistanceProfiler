@@ -39,6 +39,7 @@ from respro.report.plots import render_lollipop_plot_bytes
 from respro.report.row_helpers import (
     build_feature_display_names,
     build_reference_name_by_chrom,
+    collect_formula_hit_annotation_ids,
     display_consequence,
     format_aa_effects,
     nt_change_stored,
@@ -225,12 +226,12 @@ def write_json(
             'consequence': ann.consequence,
             'af_bin': ann.af_bin,
             'rule_match': int(ann.is_resistance_hit),
-            'drug_hits': json.dumps(ann.drug_hits_json()),
+            'drug_hits': json.dumps(ann.drug_hits_json(), sort_keys=True),
             'is_combined_codon_event': ann.is_combined_codon_event,
             'combined_member_count': ann.combined_member_count,
             'single_exchange_aa_freq': ann.single_exchange_aa_freq,
-            'rule_effect_aa_freq': json.dumps(ann.rule_effect_aa_freq),
-            'rule_effect_alt': json.dumps(ann.rule_effect_alt),
+            'rule_effect_aa_freq': json.dumps(ann.rule_effect_aa_freq, sort_keys=True),
+            'rule_effect_alt': json.dumps(ann.rule_effect_alt, sort_keys=True),
             'freq_method': ann.freq_method,
             'haplotype_links': serialize_haplotype_links(v.haplotype_links),
             'combined_states': serialize_combined_states(ann.combined_states),
@@ -256,7 +257,7 @@ def write_json(
             'reference_name': ref_by_chrom.get(
                 hit.matched_variants[0].variant.chrom if hit.matched_variants else '', ''
             ),
-            'hit_json': json.dumps(hit.to_dict()),
+            'hit_json': json.dumps(hit.to_dict(), sort_keys=True),
         }
         for hit in result.formula_hits
     ]
@@ -324,19 +325,25 @@ def _format_publications_tsv(publications: list[Publication]) -> str:
     return '|'.join(pub.doi or pub.pubmed_id for pub in publications if pub.doi or pub.pubmed_id)
 
 
-def _build_strand_by_feature(result: ProfilingResult) -> dict[str, str]:
-    """Map feature_name -> strand from all ReferenceGroup features."""
-    strand_by_feature: dict[str, str] = {}
+def _build_strand_by_feature(result: ProfilingResult) -> dict[tuple[str, str], str]:
+    """Map ``(chrom, feature_name)`` (and fallback ``('', feature_name)``) to strand."""
+    strand_by_key: dict[tuple[str, str], str] = {}
     for rg in result.references:
         for feature in rg.features:
-            strand_by_feature.setdefault(feature.name, feature.strand)
-    return strand_by_feature
+            if rg.query_name:
+                strand_by_key.setdefault((rg.query_name, feature.name), feature.strand)
+            strand_by_key.setdefault(('', feature.name), feature.strand)
+    return strand_by_key
+
+
+def _lookup_strand(strand_by_key: dict[tuple[str, str], str], ann: AnnotatedVariant) -> str:
+    return strand_by_key.get((ann.variant.chrom, ann.feature_name)) or strand_by_key.get(('', ann.feature_name), '')
 
 
 def _base_tsv_row(
     ann: AnnotatedVariant,
     ref_by_chrom: dict[str, str],
-    strand_by_feature: dict[str, str],
+    strand_by_key: dict[tuple[str, str], str],
     display_names: dict[str, str],
 ) -> dict[str, str]:
     """Build the per-annotation structural columns shared by all TSV row types."""
@@ -345,7 +352,7 @@ def _base_tsv_row(
         'gene': display_names.get(ann.feature_name, ann.feature_name),
         'nt_mut': nt_change_stored(ann),
         'nt_mut_user': nt_change_user(ann),
-        'strand': strand_by_feature.get(ann.feature_name, ''),
+        'strand': _lookup_strand(strand_by_key, ann),
         'variant_source': variant_source_label(ann),
         'aa_frequency': repr(round(ann.variant.allele_freq, 3)),
         'depth': str(ann.variant.depth),
@@ -381,7 +388,7 @@ def write_tsv(
     names = display_names or {}
     ref_by_chrom = reference_name_by_chrom or build_reference_name_by_chrom(result)
     strand_by_feature = _build_strand_by_feature(result)
-    formula_member_ids = {id(ann) for hit in result.formula_hits for ann in hit.matched_variants}
+    formula_member_ids = collect_formula_hit_annotation_ids(result)
 
     rows: list[dict[str, str]] = []
     for ann in result.cds_annotations:
@@ -389,8 +396,10 @@ def write_tsv(
         matches = ann.non_formula_component_rule_matches
         if matches:
             for rule in matches:
+                eff_af = ann.rule_effect_aa_freq.get(rule.id, ann.variant.allele_freq)
                 rows.append({
                     **base,
+                    'aa_frequency': repr(round(eff_af, 3)),
                     'in_database': 'yes',
                     'rule_type': 'single',
                     'drug': rule.drug_name,
@@ -417,11 +426,11 @@ def write_tsv(
             'gene': ';'.join(names.get(a.feature_name, a.feature_name) for a in members),
             'nt_mut': ';'.join(nt_change_stored(a) for a in members),
             'nt_mut_user': ';'.join(nt_change_user(a) for a in members),
-            'strand': ';'.join(strand_by_feature.get(a.feature_name, '') for a in members),
+            'strand': ';'.join(_lookup_strand(strand_by_feature, a) for a in members),
             'variant_source': ';'.join(variant_source_label(a) for a in members),
             'aa_frequency': repr(round(hit.frechet_lower, 3)),
             'depth': '',
-            'consequence': ';'.join(a.consequence for a in members),
+            'consequence': ';'.join(display_consequence(a) for a in members),
             'aa_effects': ';'.join(format_aa_effects(a) for a in members),
             'in_database': 'yes',
             'rule_type': 'formula',
@@ -542,6 +551,7 @@ def _build_pdf_summary_context(
 
     return {
         'title': context.get('title', 'Resistance profile summary'),
+        'is_multi_species': bool(context.get('is_multi_species')),
         'header': {
             'title': header.get('title', 'Resistance profile summary'),
             'meta_primary': header.get('meta_primary', ''),
@@ -556,6 +566,7 @@ def _build_pdf_summary_context(
             'mutation_profile': summary.get('mutation_profile', []),
             'has_coverage': bool(summary.get('has_coverage')),
             'coverage_not_assessed': bool(summary.get('coverage_not_assessed')),
+            'has_narrative': bool(summary.get('has_narrative')),
             'drug_rows': drug_rows,
             'has_drug_class': any((row.get('drug_class', '') or '').strip() for row in drug_rows),
             'has_assessment': bool(drug_table.get('has_assessment')),
@@ -632,8 +643,8 @@ def _normalize_assessment_badge_class(existing_class: str, assessment: str) -> s
 
 
 def _condense_pdf_narrative(narrative: str) -> str:
-    """Strip per-drug list sentences from the HTML narrative for compact PDF output."""
-    text = str(narrative or '')
+    """Strip per-drug list sections from the HTML narrative for compact PDF output."""
+    text = str(narrative or '').split('<br><br>', 1)[0]
     text = re.sub(r'\s*List of drugs with[^.]*\.', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\s*List of drugs without[^.]*\.', '', text, flags=re.IGNORECASE)
     return re.sub(r'\s{2,}', ' ', text).strip()

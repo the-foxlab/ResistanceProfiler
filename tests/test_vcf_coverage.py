@@ -440,3 +440,12 @@ class TestMultiIntronCoverageProjection:
             depths, [match], min_depth=10, query_len=len(oracle.query_seq),
         )
         assert [(g.codon_start, g.codon_end) for g in gaps] == expected_gaps
+
+    def test_sole_contig_fallback_respects_allow_flag(self) -> None:
+        from types import SimpleNamespace
+
+        from respro.core.vcf_coverage import _try_resolve_bam_contig
+
+        fake_bam = SimpleNamespace(references=('bam_only',))
+        assert _try_resolve_bam_contig(fake_bam, 'vcf_chr', allow_sole_fallback=True) == 'bam_only'  # type: ignore[arg-type]
+        assert _try_resolve_bam_contig(fake_bam, 'vcf_chr', allow_sole_fallback=False) is None  # type: ignore[arg-type]

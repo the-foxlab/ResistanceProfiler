@@ -1363,3 +1363,12 @@ class TestApplyDrugAliasMappings:
         ).fetchone()
         assert row_a['alias'] == 'ACV'
         assert row_b['alias'] == ''
+
+    def test_validate_threshold_values_rejects_nan_negative_and_non_monotonic_score(self) -> None:
+        for bad in (
+            {'name': 'drug_interpretation', 'method': 'by_ic50', 'thresholds': {'susceptible': float('nan'), 'resistant': 5.0}},
+            {'name': 'drug_interpretation', 'method': 'by_ic50', 'thresholds': {'susceptible': -1.0, 'resistant': 5.0}},
+            {'name': 'drug_interpretation', 'method': 'by_score', 'thresholds': {'susceptible': 0.0, 'intermediate': 20.0, 'resistant': 10.0}},
+        ):
+            with pytest.raises(ValueError):
+                validate_interpretation_algorithms([bad])

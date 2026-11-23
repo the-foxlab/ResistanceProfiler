@@ -571,3 +571,18 @@ class TestMatchingCombinationFraction:
         )
         cfg = load_config_with_overrides(p)
         assert cfg.codon.min_cooccurrence_codon_fraction == pytest.approx(2 / 3)
+
+    def test_tuple_validation_rejects_wrong_length_or_bool_and_accepts_int_for_float(self, tmp_path):
+        from respro.config.cli_settings import load_config_with_overrides
+
+        bad_len = self._write_override(tmp_path, '[af_bins]\nhigh = [0.5]\n')
+        with pytest.raises(ValueError, match='expected 2'):
+            load_config_with_overrides(bad_len)
+
+        bad_bool = self._write_override(tmp_path, '[af_bins]\nhigh = [true, 1.0]\n')
+        with pytest.raises(ValueError):
+            load_config_with_overrides(bad_bool)
+
+        int_as_float = self._write_override(tmp_path, '[af_bins]\nhigh = [1, 1]\n')
+        cfg = load_config_with_overrides(int_as_float)
+        assert cfg.af_bins.high == (1.0, 1.0)

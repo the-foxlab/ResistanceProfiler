@@ -461,3 +461,26 @@ class TestFetchPublicationMetadataRichFields:
         assert result['year'] == '2019'
         assert result['first_author'] == 'Ng'
 
+    def test_retry_after_clamps_and_rejects_nonfinite_and_null_pmid_handled(self) -> None:
+        import urllib.error
+        from email.message import Message
+
+        from respro.io.http import LookupResult, parse_retry_after
+        from respro.io.publications import fetch_pubmed_id_for_doi, normalize_doi_token
+
+        def _http_err(retry_after: str) -> urllib.error.HTTPError:
+            hdrs = Message()
+            hdrs['Retry-After'] = retry_after
+            return urllib.error.HTTPError('https://example.org', 429, 'Too Many', hdrs, None)
+
+        assert parse_retry_after(_http_err('inf')) is None
+        assert parse_retry_after(_http_err('nan')) is None
+        assert parse_retry_after(_http_err('9999')) == 60.0
+        assert normalize_doi_token('HTTPS://DX.DOI.ORG/10.1000/ABC') == '10.1000/ABC'
+
+        with patch(
+            'respro.io.publications.fetch_json_lookup',
+            return_value=LookupResult.found({'records': [{'pmid': None}]}),
+        ):
+            assert fetch_pubmed_id_for_doi('10.1000/abc') is None
+

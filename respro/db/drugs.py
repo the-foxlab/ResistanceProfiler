@@ -66,14 +66,59 @@ def consolidate_drug_names_to_lowercase(conn: sqlite3.Connection, project_id: in
     for group in groups:
         normalized = group['normalized_name']
         rows = conn.execute(
-            'SELECT id FROM drug WHERE project_id = ? AND LOWER(name) = ? ORDER BY id',
+            'SELECT id, alias, pubchem_cid, pubchem_url, description, structure_url '
+            'FROM drug WHERE project_id = ? AND LOWER(name) = ? ORDER BY id',
             (project_id, normalized),
         ).fetchall()
-        keep_id = int(rows[0]['id'])
+        keep_row = dict(rows[0])
+        keep_id = int(keep_row['id'])
         for row in rows[1:]:
             dup_id = int(row['id'])
+            for col in ('alias', 'pubchem_cid', 'pubchem_url', 'description', 'structure_url'):
+                if not (keep_row[col] or '').strip() and (row[col] or '').strip():
+                    conn.execute(f'UPDATE drug SET {col} = ? WHERE id = ?', (row[col], keep_id))
+                    keep_row[col] = row[col]
             conn.execute('UPDATE resistance_rule SET drug_id = ? WHERE drug_id = ?', (keep_id, dup_id))
-            conn.execute('UPDATE resistance_formula_rule SET drug_id = ? WHERE drug_id = ?', (keep_id, dup_id))
+            dup_formulas = conn.execute(
+                'SELECT id, normalized_expression FROM resistance_formula_rule WHERE drug_id = ?',
+                (dup_id,),
+            ).fetchall()
+            for frow in dup_formulas:
+                existing_f = conn.execute(
+                    'SELECT id FROM resistance_formula_rule WHERE drug_id = ? AND normalized_expression = ?',
+                    (keep_id, frow['normalized_expression']),
+                ).fetchone()
+                if existing_f is not None:
+                    dup_fid = int(frow['id'])
+                    keep_fid = int(existing_f['id'])
+                    conn.execute(
+                        'INSERT OR IGNORE INTO resistance_formula_rule_publication '
+                        '(formula_rule_id, publication_id) '
+                        'SELECT ?, publication_id FROM resistance_formula_rule_publication '
+                        'WHERE formula_rule_id = ?',
+                        (keep_fid, dup_fid),
+                    )
+                    conn.execute(
+                        'DELETE FROM resistance_formula_rule_publication WHERE formula_rule_id = ?',
+                        (dup_fid,),
+                    )
+                    conn.execute(
+                        'INSERT OR IGNORE INTO resistance_formula_rule_member '
+                        '(formula_rule_id, rule_id) '
+                        'SELECT ?, rule_id FROM resistance_formula_rule_member '
+                        'WHERE formula_rule_id = ?',
+                        (keep_fid, dup_fid),
+                    )
+                    conn.execute(
+                        'DELETE FROM resistance_formula_rule_member WHERE formula_rule_id = ?',
+                        (dup_fid,),
+                    )
+                    conn.execute('DELETE FROM resistance_formula_rule WHERE id = ?', (dup_fid,))
+                else:
+                    conn.execute(
+                        'UPDATE resistance_formula_rule SET drug_id = ? WHERE id = ?',
+                        (keep_id, int(frow['id'])),
+                    )
             conn.execute('DELETE FROM drug WHERE id = ?', (dup_id,))
         conn.execute('UPDATE drug SET name = ? WHERE id = ?', (normalized, keep_id))
 

@@ -103,11 +103,11 @@ def load_features(
     """Load rule-backed features (``has_rules = 1``), optionally filtered to one reference."""
     if reference_id is None:
         rows = conn.execute(
-            f'{_FEATURE_SELECT_SQL} WHERE g.has_rules = 1 ORDER BY g.reference_id, g.start'
+            f'{_FEATURE_SELECT_SQL} WHERE g.has_rules = 1 ORDER BY g.reference_id, g.start, g.id'
         ).fetchall()
     else:
         rows = conn.execute(
-            f'{_FEATURE_SELECT_SQL} WHERE g.has_rules = 1 AND g.reference_id = ? ORDER BY g.start',
+            f'{_FEATURE_SELECT_SQL} WHERE g.has_rules = 1 AND g.reference_id = ? ORDER BY g.start, g.id',
             (reference_id,),
         ).fetchall()
     return _hydrate_features(conn, rows)
@@ -123,7 +123,7 @@ def load_features_for_reference(conn: sqlite3.Connection, reference_id: int) -> 
 def load_all_features_for_reference(conn: sqlite3.Connection, reference_id: int) -> list[FeatureRecord]:
     """Load every feature of one reference regardless of ``has_rules`` (reporting/overview scope)."""
     rows = conn.execute(
-        f'{_FEATURE_SELECT_SQL} WHERE g.reference_id = ? ORDER BY g.start',
+        f'{_FEATURE_SELECT_SQL} WHERE g.reference_id = ? ORDER BY g.start, g.id',
         (reference_id,),
     ).fetchall()
     features = _hydrate_features(conn, rows)

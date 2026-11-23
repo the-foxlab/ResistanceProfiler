@@ -63,8 +63,8 @@ def match_rules(
 
     hit_count = 0
     warned_anchors: set[str] = set()
-    # Deduplicate combined-codon hits across sibling member-SNP rows that share one AA effect.
-    matched_combined_effects: set[tuple[str, str, int, str, int]] = set()
+    # Deduplicate combined-codon hits across sibling member-SNP rows, retaining highest AA frequency.
+    best_combined_hit: dict[tuple[str, str, int, str, int], tuple[AnnotatedVariant, float]] = {}
 
     for ann in annotations:
         candidates = rule_index.get((ann.feature_name, ann.codon_pos))
@@ -94,14 +94,20 @@ def match_rules(
 
             matched_alt, matched_lower = matched
             combined_key = (ann.variant.chrom, ann.feature_name, ann.codon_pos, matched_alt, rule.id)
-            if ann.is_combined_codon_event and combined_key in matched_combined_effects:
-                continue
+            if ann.is_combined_codon_event and combined_key in best_combined_hit:
+                prev_ann, prev_lower = best_combined_hit[combined_key]
+                if matched_lower <= prev_lower:
+                    continue
+                prev_ann.rule_matches = [r for r in prev_ann.rule_matches if r.id != rule.id]
+                prev_ann.rule_effect_aa_freq.pop(rule.id, None)
+                prev_ann.rule_effect_alt.pop(rule.id, None)
+                hit_count -= 1
 
             ann.rule_matches.append(rule)
             ann.rule_effect_aa_freq[rule.id] = matched_lower
             ann.rule_effect_alt[rule.id] = matched_alt
             if ann.is_combined_codon_event:
-                matched_combined_effects.add(combined_key)
+                best_combined_hit[combined_key] = (ann, matched_lower)
             hit_count += 1
 
         _suppress_ins_any_when_specific_fires(ann.rule_matches)
@@ -207,12 +213,6 @@ def _evaluate_formula_expression(
     """
     ast_node, _ = parse_formula_ast(expression)
 
-    def _branch_rank(contributors: set[str]) -> tuple[float, tuple[str, ...]]:
-        if not contributors:
-            return (0.0, ())
-        max_lower = max(member_lower.get(mid, 0.0) for mid in contributors)
-        return (max_lower, tuple(sorted(contributors)))
-
     def _eval(node: tuple) -> tuple[bool, set[str], float, float]:
         kind = node[0]
         if kind == 'ATOM':
@@ -251,15 +251,15 @@ def _evaluate_formula_expression(
             lower, _upper, ff, accepted = frechet_and_bound(q_values, min_fraction, eps)
             return (True, union, lower, ff) if accepted else (False, set(), 0.0, 0.0)
 
-        # OR: deterministic winner by highest contributor lower bound, then lexical tie-break.
+        # OR: deterministic winner by highest evaluated branch lower bound, then lexical tie-break.
         if not accepted_nodes:
             return False, set(), 0.0, 0.0
         best_c, best_lo, best_ff = accepted_nodes[0]
-        best_rank = _branch_rank(best_c)
+        best_key = tuple(sorted(best_c))
         for c, lo, ff in accepted_nodes[1:]:
-            rank = _branch_rank(c)
-            if rank[0] > best_rank[0] or (rank[0] == best_rank[0] and rank[1] < best_rank[1]):
-                best_c, best_lo, best_ff, best_rank = c, lo, ff, rank
+            key = tuple(sorted(c))
+            if lo > best_lo or (lo == best_lo and key < best_key):
+                best_c, best_lo, best_ff, best_key = c, lo, ff, key
         return True, best_c, best_lo, best_ff
 
     return _eval(ast_node)
@@ -292,10 +292,14 @@ def _matches_rule_alleles(
         return _is_frameshift_token(mutation) and _is_frameshift_token(ann_alt)
     if mutation == 'INS_any':
         return ann_consequence == 'insertion'
-    if ann_consequence == 'insertion' and len(mutation) > len(reference):
-        return _indel_payload(reference, mutation) == _indel_payload(ann_ref, ann_alt)
-    if ann_consequence == 'deletion' and len(reference) > len(mutation):
-        return _indel_payload(mutation, reference) == _indel_payload(ann_alt, ann_ref)
+    if ann_consequence == 'insertion':
+        if len(mutation) > len(reference) and not _is_frameshift_token(mutation):
+            return _indel_payload(reference, mutation) == _indel_payload(ann_ref, ann_alt)
+        return False
+    if ann_consequence == 'deletion':
+        if len(reference) > len(mutation):
+            return _indel_payload(mutation, reference) == _indel_payload(ann_alt, ann_ref)
+        return False
     if len(reference) == 1 and len(mutation) == 1:
         return ann_alt == mutation
     if len(mutation) > len(reference):
@@ -332,7 +336,13 @@ def _indel_anchor_mismatch_warning(
     codon_pos: int,
 ) -> str | None:
     """Return a warning message when a matched-position indel has a different anchor AA."""
-    if ann_consequence == 'insertion' and len(rule_mutation) > len(rule_reference) and ann_ref != rule_reference:
+    if (
+        ann_consequence == 'insertion'
+        and rule_mutation != 'INS_any'
+        and not _is_frameshift_token(rule_mutation)
+        and len(rule_mutation) > len(rule_reference)
+        and ann_ref != rule_reference
+    ):
         return (
             f'Indel anchor mismatch at {feature_name}:{codon_pos + 1} (insertion): '
             f'rule anchor {rule_reference!r} vs observed anchor {ann_ref!r}. '

@@ -13,10 +13,12 @@ logger = logging.getLogger(__name__)
 
 def lookup_summary(name: str, timeout: int | None = None) -> LookupResult[str]:
     """Look up a one-paragraph Wikipedia summary for *name*; never raises."""
+    if not name.strip():
+        return LookupResult.not_found()
     if timeout is None:
         timeout = CLI_CONFIG.timeouts.pubchem
 
-    url = CLI_CONFIG.urls.wikipedia_summary.format(name=urllib.parse.quote(name))
+    url = CLI_CONFIG.urls.wikipedia_summary.format(name=urllib.parse.quote(name, safe=''))
     result = fetch_json_lookup(url, timeout=timeout, label=f'Wikipedia summary lookup for {name!r}')
     if result.status is LookupStatus.NOT_FOUND:
         logger.debug('Wikipedia: no page found for %r', name)

@@ -288,21 +288,34 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
-  const mutationTab = document.getElementById('tab-all-mutations');
-  const mutationTable = mutationTab && mutationTab.querySelector('.mutation-table');
-  if (!mutationTable) {
-    return;
+  // ── Utility: TSV file download ────────────────────────────────────────────
+  function sanitizeTsvCell(value) {
+    return String(value || '').replace(/\r\n|[\t\r\n]/g, ' ');
   }
 
-  const mutationTbody = mutationTable.querySelector('tbody');
-  const mutationSortButton = mutationTable.querySelector('.mutation-sort-button');
-  const mutationSearchInput = document.getElementById('mutation-search-input');
-  const mutationToolbar = mutationTab.querySelector('.mutation-toolbar');
-  const mutationFilterMenus = Array.from(mutationTab.querySelectorAll('.mutation-filter-menu'));
-  const mutationResetButton = mutationTab.querySelector('.mutation-reset-button');
-  const mutationDownloadButton = mutationTab.querySelector('.mutation-download-button');
+  function downloadTsv(lines, filename) {
+    const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/tab-separated-values;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
-  if (mutationTbody) {
+  const mutationTab = document.getElementById('tab-all-mutations');
+  const mutationTable = mutationTab && mutationTab.querySelector('.mutation-table');
+  const mutationTbody = mutationTable && mutationTable.querySelector('tbody');
+
+  if (mutationTable && mutationTbody) {
+    const mutationSortButton = mutationTable.querySelector('.mutation-sort-button');
+    const mutationSearchInput = document.getElementById('mutation-search-input');
+    const mutationToolbar = mutationTab.querySelector('.mutation-toolbar');
+    const mutationFilterMenus = Array.from(mutationTab.querySelectorAll('.mutation-filter-menu'));
+    const mutationResetButton = mutationTab.querySelector('.mutation-reset-button');
+    const mutationDownloadButton = mutationTab.querySelector('.mutation-download-button');
     mutationTbody.querySelectorAll('.mutation-row--expandable').forEach(function (row) {
       const toggleRowAlignment = function (event) {
         if (event && event.target && event.target.closest('a, button')) {
@@ -368,7 +381,7 @@ document.addEventListener('DOMContentLoaded', function () {
       ];
 
       fieldConfigs.forEach(function (config) {
-        const menu = document.querySelector(`.mutation-filter-menu[data-filter-group="${config.field}"]`);
+        const menu = mutationTab.querySelector(`.mutation-filter-menu[data-filter-group="${config.field}"]`);
         const optionsContainer = menu?.querySelector('.mutation-filter-options');
         if (!optionsContainer) {
           return;
@@ -568,7 +581,7 @@ document.addEventListener('DOMContentLoaded', function () {
       });
     }
 
-    document.querySelectorAll('.mutation-filter-option').forEach(function (field) {
+    mutationTab.querySelectorAll('.mutation-filter-option').forEach(function (field) {
       field.addEventListener('change', applyMutationFilter);
     });
 
@@ -578,7 +591,7 @@ document.addEventListener('DOMContentLoaded', function () {
         if (mutationSearchInput) {
           mutationSearchInput.value = '';
         }
-        document.querySelectorAll('.mutation-filter-option').forEach(function (field) {
+        mutationTab.querySelectorAll('.mutation-filter-option').forEach(function (field) {
           field.checked = true;
         });
         mutationTab.querySelectorAll('.mutation-filter-toggle-all').forEach(function (btn) {
@@ -598,15 +611,26 @@ document.addEventListener('DOMContentLoaded', function () {
           mutationTab.querySelectorAll('thead th'),
           function (th) { return th.textContent.trim(); }
         );
+        const hasReferenceCol = headerTexts.indexOf('Reference') !== -1;
         const hasUserRefCol = headerTexts.indexOf('NT change user reference') !== -1;
+        const hasVariantSourceCol = headerTexts.some(function (t) {
+          return t.indexOf('Variant source') === 0;
+        });
         // The "Combined SNP codon" header carries a nested info span, so its
         // textContent is not the bare label — match by prefix instead.
         const hasCombiCol = headerTexts.some(function (t) {
           return t.indexOf('Combined SNP codon') === 0;
         });
-        const headers = ['Feature', 'NT change stored reference'];
+        const headers = ['Feature'];
+        if (hasReferenceCol) {
+          headers.push('Reference');
+        }
+        headers.push('NT change stored reference');
         if (hasUserRefCol) {
           headers.push('NT change user reference');
+        }
+        if (hasVariantSourceCol) {
+          headers.push('Variant source');
         }
         headers.push('AA change', 'Consequence');
         if (hasCombiCol) {
@@ -625,9 +649,15 @@ document.addEventListener('DOMContentLoaded', function () {
           }
 
           const feature = (row.querySelector('.mutation-feature-cell, td:first-child')?.textContent || '').trim();
+          const reference = hasReferenceCol
+            ? (row.querySelector('.mutation-reference-cell')?.textContent || '').trim()
+            : '';
           const ntChangeStored = (row.querySelector('.mutation-nt')?.textContent || '').trim();
           const ntChangeUser = hasUserRefCol
             ? (row.querySelector('.mutation-nt-user')?.textContent || '').trim()
+            : '';
+          const variantSource = hasVariantSourceCol
+            ? (row.querySelector('.mutation-variant-source')?.textContent || '').trim()
             : '';
           const aaChange = (row.querySelector('.mutation-aa')?.textContent || '').trim();
           const consequence = (row.querySelector('.mutation-consequence')?.textContent || '').trim();
@@ -637,9 +667,16 @@ document.addEventListener('DOMContentLoaded', function () {
             : '';
           const alleleFreq = (row.querySelector('.mutation-freq')?.textContent || '').trim();
 
-          const fields = [feature, ntChangeStored];
+          const fields = [feature];
+          if (hasReferenceCol) {
+            fields.push(reference);
+          }
+          fields.push(ntChangeStored);
           if (hasUserRefCol) {
             fields.push(ntChangeUser);
+          }
+          if (hasVariantSourceCol) {
+            fields.push(variantSource);
           }
           fields.push(aaChange, consequence);
           if (hasCombiCol) {
@@ -656,9 +693,7 @@ document.addEventListener('DOMContentLoaded', function () {
               .join('; '));
             fields.push(inDatabase);
           }
-          lines.push(fields.map(function (value) {
-            return value.replace(/\t/g, ' ').replace(/\n/g, ' ');
-          }).join('\t'));
+          lines.push(fields.map(sanitizeTsvCell).join('\t'));
         });
 
         downloadTsv(lines, 'variant_profile.tsv');
@@ -666,19 +701,6 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     applyMutationFilter();
-  }
-
-  // ── Utility: TSV file download ────────────────────────────────────────────
-  function downloadTsv(lines, filename) {
-    const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/tab-separated-values;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   }
 
   // ── Generic faceted-cascade table filter ─────────────────────────────────
@@ -705,6 +727,21 @@ document.addEventListener('DOMContentLoaded', function () {
       return Array.from(tbody.querySelectorAll(opts.rowSelector));
     };
 
+    const getFacetState = function (config) {
+      const menu = document.querySelector(`.mutation-filter-menu[data-filter-group="${config.field}"]`);
+      if (!menu) {
+        return { active: false, selected: new Set() };
+      }
+      const enabled = Array.from(menu.querySelectorAll('.mutation-filter-option:not([disabled])'));
+      if (enabled.length === 0) {
+        return { active: false, selected: new Set() };
+      }
+      const selected = new Set(
+        enabled.filter(function (cb) { return cb.checked; }).map(function (cb) { return cb.value; }),
+      );
+      return { active: true, selected: selected };
+    };
+
     // Build or rebuild the checkbox list for one filter.
     // checkedValues: Set of values to keep checked; null = check all.
     const buildOptions = function (config, rawValues, checkedValues) {
@@ -714,8 +751,10 @@ document.addEventListener('DOMContentLoaded', function () {
       const container = menu && menu.querySelector('.mutation-filter-options');
       if (!container) { return; }
 
-      const values = Array.from(new Set(rawValues.filter(Boolean)))
+      const nonEmpty = Array.from(new Set(rawValues.filter(Boolean)))
         .sort(function (a, b) { return a.localeCompare(b); });
+      const hasEmpty = rawValues.some(function (v) { return !v; });
+      const values = nonEmpty.length > 0 && hasEmpty ? nonEmpty.concat(['']) : nonEmpty;
 
       container.textContent = '';
 
@@ -726,6 +765,7 @@ document.addEventListener('DOMContentLoaded', function () {
         toggleAll.textContent = 'Uncheck all';
         toggleAll.addEventListener('click', function () {
           const boxes = Array.from(container.querySelectorAll('.mutation-filter-option:not([disabled])'));
+          if (boxes.length === 0) { return; }
           const allChecked = boxes.every(function (cb) { return cb.checked; });
           boxes.forEach(function (cb) { cb.checked = !allChecked; });
           toggleAll.textContent = allChecked ? 'Check all' : 'Uncheck all';
@@ -744,13 +784,13 @@ document.addEventListener('DOMContentLoaded', function () {
         input.dataset.field = config.field;
         input.addEventListener('change', function () {
           const boxes = Array.from(container.querySelectorAll('.mutation-filter-option:not([disabled])'));
-          const allChecked = boxes.every(function (cb) { return cb.checked; });
+          const allChecked = boxes.length > 0 && boxes.every(function (cb) { return cb.checked; });
           const btn = container.querySelector('.mutation-filter-toggle-all');
           if (btn) { btn.textContent = allChecked ? 'Uncheck all' : 'Check all'; }
           refreshCascade(config.field);
         });
         label.appendChild(input);
-        label.appendChild(document.createTextNode(value));
+        label.appendChild(document.createTextNode(value || 'Unassigned'));
         container.appendChild(label);
       });
 
@@ -774,15 +814,9 @@ document.addEventListener('DOMContentLoaded', function () {
     // When one filter changes, enable/disable options in the other filters to
     // reflect what is still reachable — without rebuilding menus from scratch.
     const refreshCascade = function (changedField) {
-      const selections = {};
+      const states = {};
       fieldConfigs.forEach(function (config) {
-        selections[config.field] = new Set(
-          Array.from(
-            document.querySelectorAll(
-              `.mutation-filter-menu[data-filter-group="${config.field}"] .mutation-filter-option:checked:not([disabled])`,
-            ),
-          ).map(function (cb) { return cb.value; }),
-        );
+        states[config.field] = getFacetState(config);
       });
 
       fieldConfigs.forEach(function (config) {
@@ -794,16 +828,14 @@ document.addEventListener('DOMContentLoaded', function () {
         const candidateRows = collectRows().filter(function (row) {
           return fieldConfigs.every(function (c) {
             if (c.field === config.field) { return true; }
-            const sel = selections[c.field];
-            if (!sel || sel.size === 0) { return true; }
-            return sel.has((row.getAttribute(c.attr) || '').trim());
+            const state = states[c.field];
+            if (!state || !state.active) { return true; }
+            return state.selected.has((row.getAttribute(c.attr) || '').trim());
           });
         });
 
         const available = new Set(
-          candidateRows
-            .map(function (row) { return (row.getAttribute(config.attr) || '').trim(); })
-            .filter(Boolean),
+          candidateRows.map(function (row) { return (row.getAttribute(config.attr) || '').trim(); }),
         );
 
         Array.from(container.querySelectorAll('label')).forEach(function (label) {
@@ -838,20 +870,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const applyFilter = function () {
       const query = (searchInput ? searchInput.value : '').trim().toLowerCase();
-      const selections = {};
+      const states = {};
       fieldConfigs.forEach(function (config) {
-        selections[config.field] = Array.from(
-          document.querySelectorAll(
-            `.mutation-filter-menu[data-filter-group="${config.field}"] .mutation-filter-option:checked:not([disabled])`,
-          ),
-        ).map(function (input) { return input.value; });
+        states[config.field] = getFacetState(config);
       });
 
       collectRows().forEach(function (row) {
         const queryMatch = query.length === 0 || (row.textContent || '').toLowerCase().includes(query);
         const fieldMatch = fieldConfigs.every(function (config) {
-          const selected = selections[config.field] || [];
-          return selected.length === 0 || selected.includes((row.getAttribute(config.attr) || '').trim());
+          const state = states[config.field];
+          if (!state || !state.active) { return true; }
+          return state.selected.has((row.getAttribute(config.attr) || '').trim());
         });
         row.hidden = !(queryMatch && fieldMatch);
         if (row.hidden && opts.onRowHidden) { opts.onRowHidden(row); }
@@ -959,9 +988,14 @@ document.addEventListener('DOMContentLoaded', function () {
       onDownload: function (collectRows, table) {
         const hasPubs = (table.querySelector('thead th:last-child')?.textContent || '').trim() === 'References';
         const hasDrugClass = !!table.querySelector('thead th.db-hit-drug-class-th');
+        const hasReference = Array.from(table.querySelectorAll('thead th')).some(function (th) {
+          return th.textContent.trim() === 'Reference';
+        });
         const headers = [];
         if (hasDrugClass) { headers.push('Drug class'); }
-        headers.push('Drug', 'Mutations', 'Drug sensitivity data', 'Amino acid frequency', 'Source');
+        headers.push('Drug', 'Mutations');
+        if (hasReference) { headers.push('Reference'); }
+        headers.push('Drug sensitivity data', 'Amino acid frequency', 'Source');
         if (hasPubs) { headers.push('References'); }
         const lines = [headers.join('\t')];
 
@@ -972,6 +1006,7 @@ document.addEventListener('DOMContentLoaded', function () {
           const mutGroups = Array.from(row.querySelectorAll('.db-hit-mut-group')).map(function (g) {
             return g.textContent.replace(/\s+/g, ' ').trim();
           }).join('; ');
+          const reference = hasReference ? (row.querySelector('.db-hit-reference-cell')?.textContent || '').trim() : '';
           const metrics = Array.from(row.querySelectorAll('.db-hit-metric')).map(function (m) {
             return m.textContent.replace(/\s+/g, ' ').trim();
           }).join('; ');
@@ -979,9 +1014,11 @@ document.addEventListener('DOMContentLoaded', function () {
           const source = (row.querySelector('.db-hit-source-cell')?.textContent || '').trim();
           const fields = [];
           if (hasDrugClass) { fields.push(drugClass); }
-          fields.push(drug, mutGroups, metrics, freq, source);
+          fields.push(drug, mutGroups);
+          if (hasReference) { fields.push(reference); }
+          fields.push(metrics, freq, source);
           if (hasPubs) { fields.push((row.getAttribute('data-pub-urls') || '').trim()); }
-          lines.push(fields.map(function (v) { return v.replace(/\t/g, ' ').replace(/\n/g, ' '); }).join('\t'));
+          lines.push(fields.map(sanitizeTsvCell).join('\t'));
         });
 
         downloadTsv(lines, 'database_hits.tsv');
@@ -1031,7 +1068,7 @@ document.addEventListener('DOMContentLoaded', function () {
           if (hasDrugClass) { fields.push(drugClass); }
           fields.push(drug, mutation, knownRule, similarity, metrics, freq, source);
           if (hasPubs) { fields.push((row.getAttribute('data-pub-urls') || '').trim()); }
-          lines.push(fields.map(function (v) { return v.replace(/\t/g, ' ').replace(/\n/g, ' '); }).join('\t'));
+          lines.push(fields.map(sanitizeTsvCell).join('\t'));
         });
 
         downloadTsv(lines, 'similarity_entries.tsv');
@@ -1056,7 +1093,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (hasGroupHeaders) {
         headers.unshift('Drug class');
       }
-      lines.push(headers.join('\t'));
+      lines.push(headers.map(sanitizeTsvCell).join('\t'));
 
       let currentGroup = '';
       Array.from(summaryDrugTable.querySelectorAll('tbody tr')).forEach(function (row) {
@@ -1065,15 +1102,17 @@ document.addEventListener('DOMContentLoaded', function () {
           return;
         }
         const values = Array.from(row.querySelectorAll('td')).map(function (cell) {
-          return (cell.textContent || '').replace(/\s+/g, ' ').trim();
+          const cellClone = cell.cloneNode(true);
+          cellClone.querySelectorAll('.db-hit-freq-info').forEach(function (tooltip) {
+            tooltip.remove();
+          });
+          return (cellClone.textContent || '').replace(/\s+/g, ' ').trim();
         });
         if (!values.length) {
           return;
         }
         const fields = hasGroupHeaders ? [currentGroup].concat(values) : values;
-        lines.push(fields.map(function (value) {
-          return value.replace(/\t/g, ' ').replace(/\n/g, ' ');
-        }).join('\t'));
+        lines.push(fields.map(sanitizeTsvCell).join('\t'));
       });
 
       downloadTsv(lines, 'drug_interpretation.tsv');

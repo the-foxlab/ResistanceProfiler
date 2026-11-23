@@ -6046,3 +6046,122 @@ class TestFormulaHitFrechetReporting:
         assert 'guaranteed minimum' in html
         assert 'combined-codon' in html
         assert 'variant allele frequency' in html
+
+
+class TestReportDeterminismAndMultiRefEdgeCases:
+    def test_svg_plot_deterministic_across_subprocesses(self) -> None:
+        import os
+        import subprocess
+        import sys
+        import textwrap
+
+        script = textwrap.dedent("""\
+            import sys
+            from respro.db.models import AnnotatedVariant, FeatureRecord, ProfilingResult, VariantCall
+            from respro.report.plots import render_lollipop_plot_bytes
+            feat = FeatureRecord(id=1, reference_id=1, name='gag', protein='Gag', start=0, end=90, strand='+', nt_sequence='ATG' * 30)
+            ann = AnnotatedVariant(
+                variant=VariantCall(chrom='r', pos=3, ref='A', alt='G', allele_freq=0.9),
+                feature_name='gag', codon_pos=1, ref_aa='K', alt_aa='E', consequence='missense',
+            )
+            res = ProfilingResult(project_name='p', sample_name='s', vcf_name='s.vcf', annotations=[ann])
+            data = render_lollipop_plot_bytes(res, [feat], fmt='svg')
+            assert data is not None
+            sys.stdout.buffer.write(data)
+        """)
+        out1 = subprocess.check_output([sys.executable, '-c', script], env={**os.environ, 'PYTHONHASHSEED': '1'})
+        out2 = subprocess.check_output([sys.executable, '-c', script], env={**os.environ, 'PYTHONHASHSEED': '42'})
+        assert out1 == out2
+        assert b'<dc:date>' not in out1
+
+    def test_case_insensitive_effect_as_resistant_and_multi_ref_feature_cards(self) -> None:
+        from respro.db.models import ReferenceGroup
+
+        rule = ResistanceRule(
+            id=1, feature_name='gag', feature_id=1, drug_name='DrugA', drug_id=1,
+            reference_identifier='r1', position=1, reference='K', mutation='E',
+            phenotype='resistant',
+        )
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='r1', pos=3, ref='A', alt='G', allele_freq=0.9),
+            feature_name='gag', codon_pos=1, ref_aa='K', alt_aa='E', consequence='missense',
+            rule_matches=[rule],
+        )
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE interpretation_algorithm (id INTEGER PRIMARY KEY AUTOINCREMENT, algorithm_name TEXT, config_json TEXT)')
+        conn.execute(
+            "INSERT INTO interpretation_algorithm (algorithm_name, config_json) VALUES ('drug_interpretation', ?)",
+            (json.dumps({'name': 'drug_interpretation', 'method': 'by_phenotype', 'effect_as_resistant': ['DRUGA']}),),
+        )
+        conn.commit()
+        res = ProfilingResult(project_name='p', sample_name='s', vcf_name='s.vcf', annotations=[ann])
+        table = build_report_context(res, similarity_high=1, similarity_moderate=0, project_conn=conn)['summary']['drug_table']
+        assert table['rows'][0]['assessment'] == 'resistant'
+        conn.close()
+
+        f1 = FeatureRecord(id=1, reference_id=1, name='pol', protein='Pol1', start=0, end=30, strand='+', nt_sequence='ATG' * 10)
+        f2 = FeatureRecord(id=2, reference_id=2, name='pol', protein='Pol2', start=0, end=30, strand='+', nt_sequence='ATG' * 10)
+        mres = ProfilingResult(
+            project_name='p', sample_name='s', is_fasta_mode=True,
+            annotations=[
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='q1', pos=3, ref='A', alt='G', allele_freq=1.0),
+                    feature_name='pol', codon_pos=1, ref_aa='K', alt_aa='E', consequence='missense',
+                ),
+                AnnotatedVariant(
+                    variant=VariantCall(chrom='q2', pos=6, ref='G', alt='A', allele_freq=1.0),
+                    feature_name='pol', codon_pos=2, ref_aa='A', alt_aa='T', consequence='missense',
+                ),
+            ],
+            references=[
+                ReferenceGroup(
+                    reference_id=1, reference_name='ref1', organism='Virus', reference_length_nt=30,
+                    query_name='q1', query_sequence='ATG' * 10, features=[f1],
+                    feature_matches=[FeatureMatch(feature=f1, identity=1.0, cds_coverage=1.0, query_coverage=1.0, query_start=0, query_end=30, strand='+', cigar='30M')],
+                ),
+                ReferenceGroup(
+                    reference_id=2, reference_name='ref2', organism='Virus', reference_length_nt=30,
+                    query_name='q2', query_sequence='ATG' * 10, features=[f2],
+                    feature_matches=[FeatureMatch(feature=f2, identity=1.0, cds_coverage=1.0, query_coverage=1.0, query_start=0, query_end=30, strand='+', cigar='30M')],
+                ),
+            ],
+        )
+        ctx = build_report_context(mres, features=[f1, f2], similarity_high=1, similarity_moderate=0)
+        assert len(ctx['sequence_features']['cards']) == 2
+        assert {c['reference_name'] for c in ctx['sequence_features']['cards']} == {'ref1', 'ref2'}
+        assert all(c['observed_variants'] == 1 for c in ctx['sequence_features']['cards'])
+
+    def test_vcf_overlay_complex_indel_and_pdf_narrative_helpers(self) -> None:
+        from respro.report.alignment_visualization import FeatureAlignment, _apply_vcf_overlay
+        from respro.report.non_html_exports import (
+            _build_pdf_summary_context,
+            _condense_pdf_narrative,
+        )
+
+        feat = FeatureRecord(
+            id=1, reference_id=1, name='g', protein='', start=0, end=6, strand='+', nt_sequence='ATGCCC',
+        )
+        aln = FeatureAlignment(
+            feature_name='g', feature_start=0, feature_end=6, feature_length=6,
+            strand='+', codon_start=0, aligned_ref='ATGCCC', aligned_query='ATGCCC',
+            aln_coding_pos=list(range(6)), aln_coding_anchor_pos=list(range(6)),
+            aln_native_pos=list(range(6)), aln_native_anchor_pos=list(range(6)),
+            coding_to_aln_idx=list(range(6)), feature=feat,
+        )
+        ann = AnnotatedVariant(
+            variant=VariantCall(chrom='r', pos=0, ref='ATG', alt='C', allele_freq=1.0),
+            feature_name='g', codon_pos=0,
+        )
+        _ref_w, query_w, *_ = _apply_vcf_overlay(
+            ann, aln, 'ATGCCC', 'ATGCCC', list(range(6)), list(range(6)), list(range(6)),
+        )
+        assert query_w == 'C--CCC'
+        assert _condense_pdf_narrative('Para one.<br><br>Drugs assessed as resistant: DrugA.') == 'Para one.'
+        empty_res = ProfilingResult(project_name='p', sample_name='s', vcf_name='s.vcf')
+        pdf_ctx = _build_pdf_summary_context(
+            empty_res,
+            {'summary': {'narrative': '', 'has_narrative': False, 'drug_table': {'rows': []}}, 'is_multi_species': False},
+            None, None, None,
+        )
+        assert pdf_ctx['summary']['has_narrative'] is False

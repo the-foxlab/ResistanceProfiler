@@ -115,9 +115,20 @@ class TestSyncWithoutQueryCache:
             '--sync', str(project_db),
         ])
         assert sync_result.exit_code == 0, _strip_ansi(sync_result.output)
+        assert list(tmp_path.glob('*.html')) == [], 'sync must not write stray HTML into CWD'
 
-        html_files = list(tmp_path.glob('*.html'))
-        assert html_files, 'sync must write an HTML report'
+        regen_dir = tmp_path / 'regen'
+        regen_result = CliRunner().invoke(app, [
+            'regenerate',
+            '--results-db', str(results_db),
+            '--run-id', '1',
+            '--project', str(project_db),
+            '--output', str(regen_dir),
+        ])
+        assert regen_result.exit_code == 0, _strip_ansi(regen_result.output)
+
+        html_files = list(regen_dir.glob('*.html'))
+        assert html_files, 'regenerate must write an HTML report'
         html = html_files[0].read_text()
         assert 'TestDrug' in html
         assert 'OtherDrug' in html

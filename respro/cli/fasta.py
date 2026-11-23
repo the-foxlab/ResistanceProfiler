@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 import tempfile
 from pathlib import Path
 from typing import Annotated
@@ -44,7 +45,11 @@ def _materialize_example_fasta(project_conn, project_path: Path) -> Path:
     temp_fd, temp_name = tempfile.mkstemp(prefix='respro_example_', suffix='.fasta')
     temp_path = Path(temp_name)
     os.close(temp_fd)
-    temp_path.write_text(example_text)
+    try:
+        temp_path.write_text(example_text)
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
     return temp_path
 
 
@@ -149,6 +154,7 @@ def _profile_fasta_command(
                 total_non_covered, len(coverage_gaps),
             )
 
+        effective_input_name = input_display_name or ('example.fasta' if use_example else consensus_fasta.name)
         result = assemble_multi_reference_result(
             project_conn=project_conn,
             query_records=[QueryRecord(query_name, query_seq, narrowed_matches)],
@@ -156,7 +162,7 @@ def _profile_fasta_command(
             coverage_gaps=coverage_gaps,
             project_name=project_row['name'],
             sample=sample,
-            vcf_name=input_display_name or consensus_fasta.name,
+            vcf_name=effective_input_name,
             total_variants=None,
             af_bins=cfg.af_bins_fasta.as_dict(),
             is_fasta_mode=True,
@@ -166,7 +172,7 @@ def _profile_fasta_command(
         result, outputs = export_and_persist_result(
             result,
             project_conn=project_conn,
-            input_basename=input_display_name or consensus_fasta.name,
+            input_basename=effective_input_name,
             output_target=output,
             results_conn=results_conn,
             project_path=project,
@@ -178,7 +184,7 @@ def _profile_fasta_command(
 
     except click.ClickException as exc:
         render_click_exception(exc)
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
         cli_error(str(exc))
     finally:
         if project_conn is not None:

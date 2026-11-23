@@ -54,6 +54,7 @@ def resolve_fasta_query_multi(
     if not features:
         raise ValueError('No features with resistance rules in project database')
 
+    cache_allowed = use_cache and cfg.alignment == CLI_CONFIG.alignment
     records: list[QueryRecord] = []
     for query_name, query_seq in seqs.items():
         if not query_seq:
@@ -62,9 +63,10 @@ def resolve_fasta_query_multi(
         checksum = sequence_checksum(query_seq)
 
         matches: list[FeatureMatch] | None = None
-        if use_cache:
-            matches = load_cached_mappings(conn, checksum)
-            if matches is not None:
+        if cache_allowed:
+            cached = load_cached_mappings(conn, checksum)
+            if cached:
+                matches = cached
                 logger.info('Using cached feature mappings for %r', query_name)
 
         if matches is None:
@@ -75,7 +77,7 @@ def resolve_fasta_query_multi(
                     query_name, fasta_path.name,
                 )
                 continue
-            if use_cache:
+            if cache_allowed:
                 store_mappings(conn, checksum, matches)
 
         records.append(QueryRecord(

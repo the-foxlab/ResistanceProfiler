@@ -175,3 +175,25 @@ class TestLoadDrugAliasMap:
         result = load_drug_alias_map(memory_db)
         assert 'tenofovir' in result
         assert result['tenofovir'] == 'TDF'
+
+    def test_load_in_scope_drug_names_includes_formula_only_drugs(self, tmp_path) -> None:
+        from respro.db.report_queries import load_in_scope_drug_names
+        from respro.db.schema import create_schema
+
+        conn = create_schema(tmp_path / 'scope.db')
+        conn.execute("INSERT INTO project (name, schema_version) VALUES ('p', 15)")
+        conn.execute("INSERT INTO reference (project_id, name, length) VALUES (1, 'r', 30)")
+        conn.execute(
+            "INSERT INTO feature (reference_id, name, protein, start, end, strand, nt_sequence) VALUES (1, 'f', 'F', 0, 30, '+', ?)",
+            ('ATG' * 10,),
+        )
+        conn.execute("INSERT INTO drug (project_id, name) VALUES (1, 'single')")
+        conn.execute("INSERT INTO drug (project_id, name) VALUES (1, 'formulaonly')")
+        conn.execute("INSERT INTO resistance_rule (feature_id, drug_id, position, reference, mutation) VALUES (1, 1, 1, 'M', 'V')")
+        conn.execute(
+            "INSERT INTO resistance_formula_rule (drug_id, formula_id, normalized_expression, phenotype) VALUES (2, 'F1', 'A', 'resistant')"
+        )
+        conn.execute("INSERT INTO resistance_formula_rule_member (formula_rule_id, rule_id) VALUES (1, 1)")
+        conn.commit()
+        assert 'formulaonly' in load_in_scope_drug_names(conn, {1})
+        conn.close()

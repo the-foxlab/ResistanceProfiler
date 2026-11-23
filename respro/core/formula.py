@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import re
 
-RE_FORMULA_TOKEN = re.compile(
-    r'\(|\)|\bAND\b|\bOR\b|\bNOT\b|\bXOR\b|[A-Za-z0-9_.:-]+',
-    re.IGNORECASE,
-)
+RE_FORMULA_TOKEN = re.compile(r'\(|\)|[A-Za-z0-9_.:-]+')
 FORMULA_OPERATORS = frozenset({'AND', 'OR', 'NOT', 'XOR'})
 
 _SORT_RANK = {'ATOM': 0, 'AND': 1, 'OR': 1, 'XOR': 1, 'NOT': 2}

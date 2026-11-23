@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import Annotated
 
@@ -59,7 +60,7 @@ def classify(
             ic50=ic50, fold_ic50=fold_ic50, note=note, source=source,
         )
         console.print(f'[green]✓[/green] Classification saved for run #{run_id}.')
-    except (FileNotFoundError, ValueError) as exc:
+    except (FileNotFoundError, ValueError, sqlite3.Error, OSError) as exc:
         cli_error(str(exc))
     finally:
         if results_conn is not None:
